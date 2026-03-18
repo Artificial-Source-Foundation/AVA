@@ -64,11 +64,11 @@ export const TeamMetrics: Component<{
   })
 
   return (
-    <div class="px-4 py-3" style={{ 'border-top': '1px solid #27272A' }}>
+    <div class="px-4 py-3" style={{ 'border-top': '1px solid var(--border-subtle)' }}>
       {/* Section header */}
       <div
         class="text-[9px] font-semibold mb-2"
-        style={{ color: '#3F3F46', 'letter-spacing': '0.8px' }}
+        style={{ color: 'var(--gray-6)', 'letter-spacing': '0.8px' }}
       >
         TEAM METRICS
       </div>
@@ -77,37 +77,37 @@ export const TeamMetrics: Component<{
       <div class="flex gap-4">
         {/* Tokens */}
         <div class="flex flex-col gap-0.5">
-          <span class="text-[9px]" style={{ color: '#52525B' }}>
+          <span class="text-[9px]" style={{ color: 'var(--gray-7)' }}>
             Tokens
           </span>
-          <span class="text-[12px] font-semibold text-[#FAFAFA] font-['JetBrains_Mono',monospace]">
+          <span class="text-[12px] font-semibold text-[var(--text-primary)] font-['JetBrains_Mono',monospace]">
             {formatTokens(totalTokens().total)}
           </span>
         </div>
 
         {/* Files */}
         <div class="flex flex-col gap-0.5">
-          <span class="text-[9px]" style={{ color: '#52525B' }}>
+          <span class="text-[9px]" style={{ color: 'var(--gray-7)' }}>
             Files
           </span>
-          <span class="text-[12px] font-semibold text-[#FAFAFA] font-['JetBrains_Mono',monospace]">
+          <span class="text-[12px] font-semibold text-[var(--text-primary)] font-['JetBrains_Mono',monospace]">
             {totalFiles()}
           </span>
         </div>
 
         {/* Cost */}
         <div class="flex flex-col gap-0.5">
-          <span class="text-[9px]" style={{ color: '#52525B' }}>
+          <span class="text-[9px]" style={{ color: 'var(--gray-7)' }}>
             Cost
           </span>
-          <span class="text-[12px] font-semibold text-[#FAFAFA] font-['JetBrains_Mono',monospace]">
+          <span class="text-[12px] font-semibold text-[var(--text-primary)] font-['JetBrains_Mono',monospace]">
             {formatCost(totalTokens().total)}
           </span>
         </div>
 
         {/* Success */}
         <div class="flex flex-col gap-0.5">
-          <span class="text-[9px]" style={{ color: '#52525B' }}>
+          <span class="text-[9px]" style={{ color: 'var(--gray-7)' }}>
             Success
           </span>
           <span
@@ -115,7 +115,7 @@ export const TeamMetrics: Component<{
             style={{
               color:
                 successRatio() === null
-                  ? '#52525B'
+                  ? 'var(--gray-7)'
                   : successRatio()! >= 80
                     ? 'var(--success)'
                     : successRatio()! >= 50

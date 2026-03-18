@@ -58,6 +58,7 @@ export const TeamChatInput: Component<TeamChatInputProps> = (props) => {
           onClick={handleSend}
           disabled={!isWorking() || !text().trim()}
           class="p-1.5 rounded-[var(--radius-md)] text-[var(--text-muted)] hover:text-[var(--accent)] hover:bg-[var(--alpha-white-3)] transition-colors duration-[var(--duration-fast)] disabled:opacity-30 disabled:cursor-not-allowed"
+          aria-label="Send message"
         >
           <Send class="w-4 h-4" />
         </button>

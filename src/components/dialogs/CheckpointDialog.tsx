@@ -96,7 +96,7 @@ export const CheckpointDialog: Component<CheckpointDialogProps> = (props) => {
   return (
     <Show when={props.open}>
       <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-        <div class="bg-[#18181B] border border-[var(--border-default)] rounded-[var(--radius-xl)] max-w-md w-full shadow-2xl overflow-hidden">
+        <div class="bg-[var(--surface-raised)] border border-[var(--border-default)] rounded-[var(--radius-xl)] max-w-md w-full shadow-2xl overflow-hidden">
           {/* Tab bar */}
           <div class="flex border-b border-[var(--border-subtle)]">
             <button

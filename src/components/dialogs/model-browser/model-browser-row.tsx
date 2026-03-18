@@ -36,9 +36,9 @@ export const ModelBrowserRow: Component<ModelBrowserRowProps> = (props) => {
         group
       "
       classList={{
-        'bg-[rgba(167,139,250,0.08)] border-l-2 border-l-[#A78BFA]': props.isCurrentModel,
-        'bg-[#18181B]': props.isKeyboardSelected && !props.isCurrentModel,
-        'hover:bg-[#18181B]': !props.isCurrentModel && !props.isKeyboardSelected,
+        'bg-[var(--accent-subtle)] border-l-2 border-l-[var(--accent)]': props.isCurrentModel,
+        'bg-[var(--surface-raised)]': props.isKeyboardSelected && !props.isCurrentModel,
+        'hover:bg-[var(--surface-raised)]': !props.isCurrentModel && !props.isKeyboardSelected,
         'border-l-2 border-l-transparent': !props.isCurrentModel,
       }}
     >
@@ -46,7 +46,9 @@ export const ModelBrowserRow: Component<ModelBrowserRowProps> = (props) => {
       <div class="flex-1 min-w-0">
         <div class="flex items-center gap-2">
           {/* Model name */}
-          <span class="text-[13px] font-medium text-[#FAFAFA] truncate">{props.model.name}</span>
+          <span class="text-[13px] font-medium text-[var(--text-primary)] truncate">
+            {props.model.name}
+          </span>
 
           {/* Context window badge */}
           <Show when={props.model.contextWindow > 0}>
@@ -55,7 +57,7 @@ export const ModelBrowserRow: Component<ModelBrowserRowProps> = (props) => {
                 flex-shrink-0
                 px-1.5 py-[1px]
                 text-[10px] font-medium
-                text-[#71717A] bg-[#52525B]/30
+                text-[var(--text-muted)] bg-[var(--gray-7)]/30
                 rounded-[4px]
               "
             >
@@ -65,7 +67,7 @@ export const ModelBrowserRow: Component<ModelBrowserRowProps> = (props) => {
         </div>
 
         {/* Provider name */}
-        <span class="text-[11px] text-[#71717A] truncate block mt-[1px]">
+        <span class="text-[11px] text-[var(--text-muted)] truncate block mt-[1px]">
           {props.model.providerName}
         </span>
       </div>
@@ -78,7 +80,7 @@ export const ModelBrowserRow: Component<ModelBrowserRowProps> = (props) => {
             class="
               px-1.5 py-[1px]
               text-[10px] font-medium
-              text-[#A78BFA] bg-[rgba(167,139,250,0.08)]
+              text-[var(--accent)] bg-[var(--accent-subtle)]
               rounded-[4px]
             "
           >
@@ -88,7 +90,7 @@ export const ModelBrowserRow: Component<ModelBrowserRowProps> = (props) => {
 
         {/* Current model indicator */}
         <Show when={props.isCurrentModel}>
-          <span class="w-1.5 h-1.5 rounded-full bg-[#A78BFA] flex-shrink-0" />
+          <span class="w-1.5 h-1.5 rounded-full bg-[var(--accent)] flex-shrink-0" />
         </Show>
       </div>
     </button>

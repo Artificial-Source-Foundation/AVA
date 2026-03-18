@@ -45,20 +45,23 @@ export const MessageListEmpty: Component = () => {
       {/* Logo */}
       <div
         class="w-16 h-16 mb-5 rounded-2xl flex items-center justify-center"
-        style={{ background: '#A78BFA15' }}
+        style={{ background: 'var(--accent-subtle)' }}
       >
-        <span class="text-2xl font-bold" style={{ color: '#A78BFA' }}>
+        <span class="text-2xl font-bold" style={{ color: 'var(--accent)' }}>
           A
         </span>
       </div>
 
       {/* Heading */}
-      <h2 class="font-semibold" style={{ 'font-size': '20px', color: '#FAFAFA' }}>
+      <h2 class="font-semibold" style={{ 'font-size': '20px', color: 'var(--text-primary)' }}>
         How can I help?
       </h2>
 
       {/* Subtitle */}
-      <p class="mt-2 text-center max-w-sm" style={{ 'font-size': '13px', color: '#71717A' }}>
+      <p
+        class="mt-2 text-center max-w-sm"
+        style={{ 'font-size': '13px', color: 'var(--text-muted)' }}
+      >
         Ask anything about your codebase, or try one of these:
       </p>
 
@@ -76,28 +79,31 @@ export const MessageListEmpty: Component = () => {
                 group
               "
               style={{
-                background: '#18181B',
-                border: '1px solid #27272A',
+                background: 'var(--gray-3)',
+                border: '1px solid var(--border-subtle)',
                 padding: '12px 16px',
               }}
               onMouseEnter={(e) => {
-                e.currentTarget.style.borderColor = '#3f3f46'
-                e.currentTarget.style.background = '#1c1c1f'
+                e.currentTarget.style.borderColor = 'var(--gray-6)'
+                e.currentTarget.style.background = 'var(--surface-raised)'
               }}
               onMouseLeave={(e) => {
-                e.currentTarget.style.borderColor = '#27272A'
-                e.currentTarget.style.background = '#18181B'
+                e.currentTarget.style.borderColor = 'var(--border-subtle)'
+                e.currentTarget.style.background = 'var(--gray-3)'
               }}
             >
-              <card.icon class="w-4 h-4 flex-shrink-0" style={{ color: '#52525B' }} />
-              <span style={{ 'font-size': '13px', color: '#A1A1AA' }}>{card.label}</span>
+              <card.icon class="w-4 h-4 flex-shrink-0" style={{ color: 'var(--gray-7)' }} />
+              <span style={{ 'font-size': '13px', color: 'var(--gray-9)' }}>{card.label}</span>
             </button>
           )}
         </For>
       </div>
 
       {/* Keyboard shortcut hints */}
-      <div class="mt-6 flex items-center gap-1" style={{ 'font-size': '11px', color: '#3F3F46' }}>
+      <div
+        class="mt-6 flex items-center gap-1"
+        style={{ 'font-size': '11px', color: 'var(--gray-6)' }}
+      >
         <span>
           <kbd class="font-mono">Ctrl+/</kbd> commands
         </span>

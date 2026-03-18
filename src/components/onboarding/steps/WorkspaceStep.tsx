@@ -35,8 +35,8 @@ const WORKSPACE_OPTIONS: WorkspaceOption[] = [
   {
     id: 'import',
     icon: Upload,
-    iconColor: '#A78BFA',
-    iconBg: 'rgba(139, 92, 246, 0.15)',
+    iconColor: 'var(--accent)',
+    iconBg: 'var(--accent-subtle)',
     title: 'Import Existing Config',
     description: 'Load .ava/ folder from another project',
   },

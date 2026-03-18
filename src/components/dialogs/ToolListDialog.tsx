@@ -98,13 +98,13 @@ export const ToolListDialog: Component<ToolListDialogProps> = (props) => {
 
   return (
     <Show when={props.open}>
-      <div class="fixed inset-0 z-50 flex items-center justify-center bg-[#09090B]/80">
-        <div class="bg-[#18181B] border border-[var(--border-default)] rounded-[var(--radius-xl)] max-w-lg w-full shadow-2xl overflow-hidden max-h-[80vh] flex flex-col">
+      <div class="fixed inset-0 z-50 flex items-center justify-center bg-[var(--background)]/80">
+        <div class="bg-[var(--surface-raised)] border border-[var(--border-default)] rounded-[var(--radius-xl)] max-w-lg w-full shadow-2xl overflow-hidden max-h-[80vh] flex flex-col">
           {/* Header */}
           <div class="flex items-center justify-between px-5 py-4 border-b border-[var(--border-subtle)]">
             <div class="flex items-center gap-2.5">
-              <div class="p-1.5 rounded-[var(--radius-md)] bg-[#A78BFA15]">
-                <Wrench class="w-4 h-4 text-[#A78BFA]" />
+              <div class="p-1.5 rounded-[var(--radius-md)] bg-[var(--accent-subtle)]">
+                <Wrench class="w-4 h-4 text-[var(--accent)]" />
               </div>
               <div>
                 <h3 class="text-sm font-semibold text-[var(--text-primary)]">Registered Tools</h3>

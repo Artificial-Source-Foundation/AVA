@@ -50,13 +50,14 @@ const WorkerCard: Component<{ member: TeamMember; domainColor: string; onClick: 
     <button
       type="button"
       onClick={props.onClick}
-      class="flex items-center gap-2 w-full text-left rounded-lg bg-[#18181B] px-2.5 py-1.5 hover:bg-[#1F1F23] transition-colors cursor-pointer"
+      class="flex items-center gap-2 w-full text-left rounded-lg bg-[var(--gray-3)] px-2.5 py-1.5 hover:bg-[var(--surface-raised)] transition-colors cursor-pointer"
+      aria-label={`View ${props.member.name} details`}
     >
       <span
         class="w-1.5 h-1.5 rounded-full flex-shrink-0"
         style={{ background: props.domainColor }}
       />
-      <span class="text-[10px] text-[#A1A1AA] truncate flex-1">{props.member.name}</span>
+      <span class="text-[10px] text-[var(--gray-9)] truncate flex-1">{props.member.name}</span>
       <span class="text-[10px] text-[var(--gray-6)] flex-shrink-0 tabular-nums">
         {props.member.toolCalls.length > 0
           ? `${props.member.toolCalls.filter((tc) => tc.status === 'success').length}/${props.member.toolCalls.length}`
@@ -89,7 +90,7 @@ const TeamGroupCard: Component<{
           class="flex items-center gap-2 min-w-0 text-left hover:opacity-80 transition-opacity"
         >
           <span class="w-2 h-2 rounded-full flex-shrink-0" style={{ background: domainColor() }} />
-          <span class="text-[12px] font-semibold text-[#FAFAFA] truncate">
+          <span class="text-[12px] font-semibold text-[var(--text-primary)] truncate">
             {props.group.lead.name}
           </span>
         </button>
@@ -108,6 +109,7 @@ const TeamGroupCard: Component<{
               class="flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-medium text-[var(--error)] transition-colors"
               style={{ background: '#EF444420' }}
               title={`Stop ${props.group.lead.name}`}
+              aria-label={`Stop ${props.group.lead.name}`}
             >
               <Square class="w-2 h-2" />
               stop
@@ -116,8 +118,8 @@ const TeamGroupCard: Component<{
         </div>
       </div>
 
-      {/* Progress bar: 3px, domain color fill on #18181B track */}
-      <div class="w-full h-[3px] rounded-sm bg-[#18181B]">
+      {/* Progress bar: 3px, domain color fill on var(--gray-3) track */}
+      <div class="w-full h-[3px] rounded-sm bg-[var(--gray-3)]">
         <div
           class="h-full rounded-sm transition-all duration-300"
           style={{
@@ -129,7 +131,7 @@ const TeamGroupCard: Component<{
 
       {/* Task description */}
       <Show when={props.group.lead.task}>
-        <p class="text-[10px] text-[#52525B]">{props.group.lead.task}</p>
+        <p class="text-[10px] text-[var(--gray-7)]">{props.group.lead.task}</p>
       </Show>
 
       {/* Worker sub-cards */}
@@ -177,21 +179,21 @@ export const TeamPanel: Component<TeamPanelProps> = (props) => {
   const hasWorkingAgents = () => team.allMembers().some((m) => m.status === 'working')
 
   return (
-    <div class="flex flex-col h-full" style={{ background: '#0F0F12' }}>
+    <div class="flex flex-col h-full" style={{ background: 'var(--background)' }}>
       {/* Header: "Praxis Team" with users icon + "N working" badge */}
       <div
         class="flex items-center justify-between px-4 py-3.5"
-        style={{ 'border-bottom': '1px solid #27272A' }}
+        style={{ 'border-bottom': '1px solid var(--border-subtle)' }}
       >
         <div class="flex items-center gap-2">
-          <Users class="w-4 h-4" style={{ color: '#A78BFA' }} />
-          <span class="text-[13px] font-semibold text-[#FAFAFA]">Praxis Team</span>
+          <Users class="w-4 h-4" style={{ color: 'var(--accent)' }} />
+          <span class="text-[13px] font-semibold text-[var(--text-primary)]">Praxis Team</span>
         </div>
         <div class="flex items-center gap-2">
           <Show when={workingCount() > 0}>
             <span
               class="text-[10px] font-medium px-2 py-0.5 rounded-md"
-              style={{ color: '#A78BFA', background: '#A78BFA20' }}
+              style={{ color: 'var(--accent)', background: 'var(--accent-subtle)' }}
             >
               {workingCount()} working
             </span>
@@ -203,6 +205,7 @@ export const TeamPanel: Component<TeamPanelProps> = (props) => {
               class="flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-medium text-[var(--error)] hover:opacity-80 transition-opacity"
               style={{ background: '#EF444420' }}
               title="Stop all running agents"
+              aria-label="Stop all running agents"
             >
               <Square class="w-2.5 h-2.5" />
               Stop All
@@ -216,14 +219,14 @@ export const TeamPanel: Component<TeamPanelProps> = (props) => {
         {(dir) => (
           <div
             class="flex flex-col gap-1.5 px-4 py-3"
-            style={{ 'border-bottom': '1px solid #27272A' }}
+            style={{ 'border-bottom': '1px solid var(--border-subtle)' }}
           >
             <div class="flex items-center gap-2">
               <Crown class="w-3.5 h-3.5" style={{ color: '#F59E0B' }} />
-              <span class="text-[12px] font-semibold text-[#FAFAFA]">Director</span>
+              <span class="text-[12px] font-semibold text-[var(--text-primary)]">Director</span>
             </div>
-            <p class="text-[11px] text-[#71717A]">{dir().task ?? 'Orchestrating team'}</p>
-            <span class="text-[10px] font-['JetBrains_Mono',monospace] text-[#52525B]">
+            <p class="text-[11px] text-[var(--text-muted)]">{dir().task ?? 'Orchestrating team'}</p>
+            <span class="text-[10px] font-['JetBrains_Mono',monospace] text-[var(--gray-7)]">
               {dir().model !== 'unknown' ? dir().model : 'claude-opus'} &middot; Budget: $5.00
             </span>
           </div>
@@ -246,7 +249,7 @@ export const TeamPanel: Component<TeamPanelProps> = (props) => {
             {(group, index) => (
               <>
                 <Show when={index() > 0}>
-                  <div class="w-full h-px" style={{ background: '#27272A' }} />
+                  <div class="w-full h-px" style={{ background: 'var(--border-subtle)' }} />
                 </Show>
                 <div class="px-4 py-3">
                   <TeamGroupCard

@@ -145,12 +145,7 @@ export async function switchSession(id: string): Promise<void> {
   setIsLoadingMessages(true)
   try {
     const dbMessages = await getMessages(id)
-    console.log(
-      '[session-lifecycle] switchSession: loaded',
-      dbMessages.length,
-      'messages from DB for',
-      id
-    )
+    log.debug('session', `switchSession: loaded ${dbMessages.length} messages from DB for ${id}`)
     setMessages(dbMessages)
     log.info('session', 'Session loaded', { id, messageCount: dbMessages.length })
     logInfo('session', 'Session switched', {

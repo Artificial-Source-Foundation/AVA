@@ -135,7 +135,7 @@ export const ModelBrowserDialog: Component<ModelBrowserDialogProps> = (props) =>
             top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2
             w-[min(640px,92vw)] max-h-[600px]
             flex flex-col
-            bg-[#09090B] border border-[#27272A]
+            bg-[var(--background)] border border-[var(--border-subtle)]
             rounded-[16px] shadow-2xl
             overflow-hidden
             data-[expanded]:animate-in data-[expanded]:fade-in-0 data-[expanded]:zoom-in-95
@@ -146,12 +146,14 @@ export const ModelBrowserDialog: Component<ModelBrowserDialogProps> = (props) =>
         >
           {/* Title bar */}
           <div class="flex items-center justify-between px-5 pt-4 pb-2">
-            <Dialog.Title class="text-sm font-semibold text-[#FAFAFA]">Model Browser</Dialog.Title>
+            <Dialog.Title class="text-sm font-semibold text-[var(--text-primary)]">
+              Model Browser
+            </Dialog.Title>
             <Dialog.CloseButton
               class="
                 p-1 rounded-[var(--radius-md)]
-                text-[#71717A] hover:text-[#FAFAFA]
-                hover:bg-[#18181B]
+                text-[var(--text-muted)] hover:text-[var(--text-primary)]
+                hover:bg-[var(--surface-raised)]
                 transition-colors
               "
               aria-label="Close"
@@ -163,7 +165,7 @@ export const ModelBrowserDialog: Component<ModelBrowserDialogProps> = (props) =>
           {/* Search input */}
           <div class="px-5 pb-3">
             <div class="relative">
-              <Search class="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#52525B]" />
+              <Search class="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[var(--gray-7)]" />
               <input
                 ref={inputRef}
                 type="text"
@@ -172,11 +174,11 @@ export const ModelBrowserDialog: Component<ModelBrowserDialogProps> = (props) =>
                 placeholder="Search models..."
                 class="
                   w-full pl-9 pr-3 py-2
-                  text-[13px] text-[#FAFAFA]
-                  bg-[#18181B] placeholder:text-[#52525B]
-                  border border-[#27272A]
+                  text-[13px] text-[var(--text-primary)]
+                  bg-[var(--surface-raised)] placeholder:text-[var(--gray-7)]
+                  border border-[var(--border-subtle)]
                   rounded-[10px]
-                  focus:outline-none focus:border-[#A78BFA]
+                  focus:outline-none focus:border-[var(--accent)]
                   transition-colors
                 "
               />
@@ -192,7 +194,7 @@ export const ModelBrowserDialog: Component<ModelBrowserDialogProps> = (props) =>
             <Show
               when={grouped().length > 0}
               fallback={
-                <div class="py-12 text-center text-xs text-[#52525B]">
+                <div class="py-12 text-center text-xs text-[var(--gray-7)]">
                   No models match your search
                 </div>
               }
@@ -204,7 +206,7 @@ export const ModelBrowserDialog: Component<ModelBrowserDialogProps> = (props) =>
                     <div
                       class="
                         px-3 py-1.5
-                        text-[12px] font-semibold text-[#3F3F46]
+                        text-[12px] font-semibold text-[var(--gray-6)]
                         uppercase tracking-wider
                         select-none
                       "
@@ -245,21 +247,21 @@ export const ModelBrowserDialog: Component<ModelBrowserDialogProps> = (props) =>
           <div
             class="
               flex items-center gap-4 px-5 py-2
-              border-t border-[#27272A]
-              text-[10px] text-[#52525B]
+              border-t border-[var(--border-subtle)]
+              text-[10px] text-[var(--gray-7)]
               select-none
             "
           >
             <span>
-              <kbd class="font-mono text-[#71717A]">&uarr;&darr;</kbd> navigate
+              <kbd class="font-mono text-[var(--text-muted)]">&uarr;&darr;</kbd> navigate
             </span>
             <span>
-              <kbd class="font-mono text-[#71717A]">Enter</kbd> select
+              <kbd class="font-mono text-[var(--text-muted)]">Enter</kbd> select
             </span>
             <span>
-              <kbd class="font-mono text-[#71717A]">Esc</kbd> close
+              <kbd class="font-mono text-[var(--text-muted)]">Esc</kbd> close
             </span>
-            <span class="ml-auto text-[#3F3F46]">
+            <span class="ml-auto text-[var(--gray-6)]">
               {filteredModels().length} model{filteredModels().length !== 1 ? 's' : ''}
             </span>
           </div>

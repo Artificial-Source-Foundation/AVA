@@ -67,20 +67,21 @@ export const TeamChatView: Component<TeamChatViewProps> = (props) => {
   onCleanup(() => clearInterval(timer))
 
   return (
-    <div class="flex flex-col h-full min-h-0" style={{ background: '#09090B' }}>
+    <div class="flex flex-col h-full min-h-0" style={{ background: 'var(--background)' }}>
       {/* Header: back arrow + domain dot + name + badge + Stop */}
       <Show when={member()}>
         {(m) => (
           <div
             class="flex items-center justify-between h-11 px-4"
-            style={{ 'border-bottom': '1px solid #27272A' }}
+            style={{ 'border-bottom': '1px solid var(--border-subtle)' }}
           >
             {/* Left: back + dot + name + badge */}
             <div class="flex items-center gap-2.5">
               <button
                 type="button"
                 onClick={() => team.navigateBack()}
-                class="text-[#52525B] hover:text-[#A1A1AA] transition-colors"
+                class="text-[var(--gray-7)] hover:text-[var(--gray-9)] transition-colors"
+                aria-label="Back to team overview"
               >
                 <ArrowLeft class="w-4 h-4" />
               </button>
@@ -88,7 +89,7 @@ export const TeamChatView: Component<TeamChatViewProps> = (props) => {
                 class="w-2.5 h-2.5 rounded-full flex-shrink-0"
                 style={{ background: domainColor() }}
               />
-              <span class="text-[13px] font-semibold text-[#FAFAFA]">{m().name}</span>
+              <span class="text-[13px] font-semibold text-[var(--text-primary)]">{m().name}</span>
               <Show when={headerBadge()}>
                 <span
                   class="text-[9px] font-medium px-1.5 py-0.5 rounded"
@@ -107,6 +108,7 @@ export const TeamChatView: Component<TeamChatViewProps> = (props) => {
                 class="flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-medium text-[var(--error)] transition-colors"
                 style={{ background: '#EF444420' }}
                 title="Stop this agent"
+                aria-label={`Stop ${m().name}`}
               >
                 <Square class="w-2.5 h-2.5" />
                 Stop
@@ -129,14 +131,16 @@ export const TeamChatView: Component<TeamChatViewProps> = (props) => {
         >
           {/* Lead messages */}
           <For each={leadMessages()}>
-            {(msg) => <p class="text-[13px] text-[#D4D4D8] leading-relaxed">{msg.content}</p>}
+            {(msg) => (
+              <p class="text-[13px] text-[var(--gray-10)] leading-relaxed">{msg.content}</p>
+            )}
           </For>
 
           {/* WORKERS section */}
           <Show when={children().length > 0}>
             <div
               class="text-[9px] font-semibold mt-2"
-              style={{ color: '#3F3F46', 'letter-spacing': '0.8px' }}
+              style={{ color: 'var(--gray-6)', 'letter-spacing': '0.8px' }}
             >
               WORKERS
             </div>
@@ -155,14 +159,14 @@ export const TeamChatView: Component<TeamChatViewProps> = (props) => {
 
           {/* LEAD REVIEW section */}
           <Show when={member()?.result}>
-            <div class="w-full h-px" style={{ background: '#27272A' }} />
+            <div class="w-full h-px" style={{ background: 'var(--border-subtle)' }} />
             <div
               class="text-[9px] font-semibold"
-              style={{ color: '#3F3F46', 'letter-spacing': '0.8px' }}
+              style={{ color: 'var(--gray-6)', 'letter-spacing': '0.8px' }}
             >
               LEAD REVIEW
             </div>
-            <p class="text-[13px] text-[#D4D4D8] leading-relaxed">{member()!.result}</p>
+            <p class="text-[13px] text-[var(--gray-10)] leading-relaxed">{member()!.result}</p>
           </Show>
 
           {/* Error state */}
@@ -216,13 +220,15 @@ const WorkerChatCard: Component<{
   return (
     <div
       class="rounded-xl p-3 flex flex-col gap-2"
-      style={{ background: '#18181B', border: '1px solid #27272A' }}
+      style={{ background: 'var(--gray-3)', border: '1px solid var(--border-subtle)' }}
     >
       {/* Header: dot + name + status badge */}
       <div class="flex items-center justify-between">
         <div class="flex items-center gap-2">
           <span class="w-2 h-2 rounded-full flex-shrink-0" style={{ background: domainColor() }} />
-          <span class="text-[12px] font-medium text-[#FAFAFA]">{props.worker.name}</span>
+          <span class="text-[12px] font-medium text-[var(--text-primary)]">
+            {props.worker.name}
+          </span>
         </div>
         <span
           class="text-[9px] font-medium px-1.5 py-0.5 rounded"
@@ -237,7 +243,7 @@ const WorkerChatCard: Component<{
 
       {/* Task */}
       <Show when={props.worker.task}>
-        <p class="text-[11px] text-[#71717A]">{props.worker.task}</p>
+        <p class="text-[11px] text-[var(--text-muted)]">{props.worker.task}</p>
       </Show>
 
       {/* Tool calls */}
@@ -253,7 +259,7 @@ const WorkerChatCard: Component<{
                       when={tc.status === 'running'}
                       fallback={<XCircle class="w-3 h-3 text-[var(--error)]" />}
                     >
-                      <Loader class="w-3 h-3" style={{ color: '#A78BFA' }} />
+                      <Loader class="w-3 h-3" style={{ color: 'var(--accent)' }} />
                     </Show>
                   }
                 >
@@ -262,7 +268,7 @@ const WorkerChatCard: Component<{
                 <span
                   class="text-[10px] font-['JetBrains_Mono',monospace]"
                   style={{
-                    color: tc.status === 'running' ? '#A78BFA' : '#52525B',
+                    color: tc.status === 'running' ? 'var(--accent)' : 'var(--gray-7)',
                   }}
                 >
                   {tc.name}
@@ -281,7 +287,8 @@ const WorkerChatCard: Component<{
         type="button"
         onClick={() => props.onNavigate(props.worker.id)}
         class="text-left text-[10px] font-medium hover:underline transition-colors"
-        style={{ color: '#A78BFA' }}
+        style={{ color: 'var(--accent)' }}
+        aria-label={`View ${props.worker.name}'s chat`}
       >
         View {props.worker.name.split(' ')[0]}'s chat &rarr;
       </button>

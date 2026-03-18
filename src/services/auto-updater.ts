@@ -5,6 +5,7 @@
  */
 
 import { isTauri } from '@tauri-apps/api/core'
+import { log } from '../lib/logger'
 
 export interface UpdateInfo {
   available: boolean
@@ -74,7 +75,7 @@ export async function downloadAndInstallUpdate(): Promise<void> {
       switch (eventType) {
         case 'Started':
           contentLength = (data.contentLength as number) ?? 0
-          console.log(`[auto-updater] Download started, size: ${contentLength}`)
+          log.info('auto-updater', `Download started, size: ${contentLength}`)
           break
         case 'Progress':
           downloaded += (data.chunkLength as number) ?? 0
@@ -86,7 +87,7 @@ export async function downloadAndInstallUpdate(): Promise<void> {
           }
           break
         case 'Finished':
-          console.log('[auto-updater] Download finished')
+          log.info('auto-updater', 'Download finished')
           break
       }
     })
@@ -96,7 +97,7 @@ export async function downloadAndInstallUpdate(): Promise<void> {
       const process = await import(/* @vite-ignore */ PROCESS_PKG)
       await process.relaunch()
     } catch {
-      console.log('[auto-updater] Relaunch not available, manual restart needed')
+      log.info('auto-updater', 'Relaunch not available, manual restart needed')
     }
   } catch (err) {
     if (err instanceof Error && err.message === 'No update available') {

@@ -149,6 +149,14 @@ export function createTeamBridge(
             result: event.result.output,
           })
         }
+        if (event.result.tokensUsed) {
+          teamStore.updateMember(event.agentId, {
+            tokenUsage: {
+              input: event.result.tokensUsed.input,
+              output: event.result.tokensUsed.output,
+            },
+          })
+        }
         delete lastThought[event.agentId]
         delete currentThoughtId[event.agentId]
         delete accumulatedThought[event.agentId]

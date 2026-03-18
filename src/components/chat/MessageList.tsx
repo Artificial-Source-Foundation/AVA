@@ -159,20 +159,8 @@ export const MessageList: Component = () => {
                       isSearchMatch={searchMatchIds().has(msg.id)}
                       isCurrentSearchMatch={currentSearchId() === msg.id}
                       checkpoint={data.checkpointAtIndex(msgIndex()) ?? undefined}
-                      streamingToolCalls={
-                        msg.id === data.lastMessageId() &&
-                        msg.role === 'assistant' &&
-                        (isStreaming() || agent.isRunning())
-                          ? agent.activeToolCalls()
-                          : undefined
-                      }
-                      streamingContent={
-                        msg.id === data.lastMessageId() &&
-                        msg.role === 'assistant' &&
-                        (isStreaming() || agent.isRunning())
-                          ? agent.streamingContent
-                          : undefined
-                      }
+                      streamingToolCalls={undefined}
+                      streamingContent={undefined}
                       onStartEdit={() => startEditing(msg.id)}
                       onCancelEdit={stopEditing}
                       onSaveEdit={(content) => editAndResend(msg.id, content)}

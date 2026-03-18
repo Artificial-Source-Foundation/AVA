@@ -667,6 +667,7 @@ impl AgentLoop {
         let mut repetition_detector = RepetitionDetector::default();
         let mut total_usage = TokenUsage::default();
         let mut total_cost_usd = 0.0;
+        let is_subscription = self.llm.capabilities().is_subscription;
 
         // --- Setup ---
         self.inject_system_prompt();
@@ -764,7 +765,13 @@ impl AgentLoop {
 
             Self::merge_usage(&mut total_usage, &usage);
             if let Some(ref usage) = usage {
-                let cost = usage_cost_usd(&self.config.model, usage);
+                // Subscription providers (Copilot, ChatGPT OAuth) don't bill per-token,
+                // so suppress cost display by emitting 0.0.
+                let cost = if is_subscription {
+                    0.0
+                } else {
+                    usage_cost_usd(&self.config.model, usage)
+                };
                 total_cost_usd += cost;
                 Self::emit(
                     &event_tx,

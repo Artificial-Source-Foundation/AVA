@@ -1,8 +1,9 @@
-//! Dynamic model catalog fetched from models.dev API.
+//! Dynamic model catalog with models.dev as primary source.
 //!
-//! Fetches model metadata from `https://models.dev/api.json`, caches locally,
-//! and filters to models with `tool_call: true` (coding-capable models).
-//! Refreshes every 60 minutes in the background.
+//! On startup: loads from disk cache (`~/.ava/cache/models.json`), then
+//! fetches fresh data from `https://models.dev/api.json` in the background.
+//! Cache is valid for 24 hours. Falls back to a minimal hardcoded registry
+//! (~12 essential models) when both cache and network are unavailable.
 
 mod fallback;
 mod fetch;
@@ -11,7 +12,7 @@ mod types;
 
 use std::time::Duration;
 
-const REFRESH_INTERVAL: Duration = Duration::from_secs(60 * 60); // 1 hour
+const REFRESH_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60); // 24 hours
 
 pub use fallback::fallback_catalog;
 pub use types::{CatalogModel, CatalogState, ModelCatalog};

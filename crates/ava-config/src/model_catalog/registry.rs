@@ -1,7 +1,9 @@
-//! Compiled-in model registry with metadata, pricing, and name normalization.
+//! Minimal compiled-in model registry for offline fallback, pricing, and name normalization.
 //!
-//! The registry is embedded at compile time via `include_str!("registry.json")`.
-//! It provides a single source of truth for model capabilities, pricing, and aliases.
+//! The registry is embedded at compile time via `include_str!("registry.json")` and contains
+//! only ~12 essential models. The primary model catalog comes from models.dev (see `fetch.rs`).
+//! This registry serves as: (1) offline fallback when both cache and network are unavailable,
+//! (2) pricing source for cost estimation, and (3) alias/normalization database.
 
 use serde::Deserialize;
 
@@ -183,29 +185,16 @@ mod tests {
     }
 
     #[test]
-    fn coding_plan_models_are_free() {
+    fn registry_is_minimal() {
         let reg = ModelRegistry::load();
-        for provider in [
-            "zai-coding-plan",
-            "zhipuai-coding-plan",
-            "kimi-for-coding",
-            "minimax-coding-plan",
-            "minimax-cn-coding-plan",
-            "copilot",
-        ] {
-            for m in reg.models_for_provider(provider) {
-                assert_eq!(
-                    m.cost.input_per_million, 0.0,
-                    "Expected free for {}/{}",
-                    provider, m.id
-                );
-                assert_eq!(
-                    m.cost.output_per_million, 0.0,
-                    "Expected free for {}/{}",
-                    provider, m.id
-                );
-            }
-        }
+        // The registry should be a small fallback (~12 essential models),
+        // not the full catalog. Subscription/coding-plan providers are in
+        // fallback.rs instead.
+        assert!(
+            reg.models.len() <= 20,
+            "Registry should be minimal (~12 models), found {}",
+            reg.models.len()
+        );
     }
 
     #[test]

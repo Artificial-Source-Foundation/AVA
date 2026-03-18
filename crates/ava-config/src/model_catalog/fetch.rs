@@ -9,7 +9,7 @@ use super::fallback::CURATED_MODELS;
 use super::types::{CatalogModel, ModelCatalog};
 
 const MODELS_DEV_URL: &str = "https://models.dev/api.json";
-const FETCH_TIMEOUT: Duration = Duration::from_secs(10);
+const FETCH_TIMEOUT: Duration = Duration::from_secs(5);
 /// Maximum allowed catalog response size (5 MB) to prevent resource exhaustion.
 const MAX_CATALOG_SIZE: usize = 5 * 1024 * 1024;
 

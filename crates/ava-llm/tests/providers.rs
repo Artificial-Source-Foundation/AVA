@@ -231,7 +231,7 @@ async fn router_unconfigured_provider_returns_clear_error() {
 
 #[test]
 fn default_model_mapping_is_stable() {
-    assert_eq!(default_model_for_provider("openai"), Some("gpt-4o-mini"));
+    assert_eq!(default_model_for_provider("openai"), Some("gpt-5.3-codex"));
     assert_eq!(
         default_model_for_provider("anthropic"),
         Some("claude-sonnet-4-20250514")

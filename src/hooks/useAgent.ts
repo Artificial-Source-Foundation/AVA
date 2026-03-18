@@ -233,6 +233,7 @@ function createAgentStore() {
       const content = rustAgent.streamingContent()
       if (content) {
         const elapsedMs = Date.now() - runStartedAt
+        const thinking = rustAgent.thinkingContent()
         const assistantMsg: Message = {
           id: `asst-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
           sessionId,
@@ -250,6 +251,7 @@ function createAgentStore() {
             model: selectedModelId,
             mode: isPlanMode() ? 'plan' : 'code',
             elapsedMs,
+            ...(thinking ? { thinking } : {}),
           },
         }
         session.addMessage(assistantMsg)

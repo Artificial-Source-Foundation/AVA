@@ -197,42 +197,61 @@ impl Default for CatalogState {
 }
 
 impl CatalogState {
-    /// Load catalog: try cache first, then fetch from network.
+    /// Load catalog: try cache, then fetch in background, fallback to hardcoded.
+    ///
+    /// Startup order:
+    /// 1. Try loading from disk cache (`~/.ava/cache/models.json`)
+    /// 2. If cache is stale (>24h) or missing, fetch from models.dev in background
+    /// 3. If fetch fails, use cache even if stale
+    /// 4. If no cache at all, use the minimal hardcoded fallback
+    ///
+    /// The fetch is always async and non-blocking -- it never delays startup.
     pub async fn load() -> Self {
         let state = Self::default();
 
         // Try loading from cache
+        let mut have_cache = false;
         if let Ok(cache_path) = ModelCatalog::default_cache_path() {
             if let Ok(cached) = ModelCatalog::load_cached(&cache_path).await {
+                let needs_refresh = cached.needs_refresh();
                 *state.inner.write().await = cached;
+                have_cache = true;
 
-                // If cache is fresh enough, we're done
-                if !state.inner.read().await.needs_refresh() {
+                if !needs_refresh {
                     tracing::debug!("Model catalog loaded from cache (fresh)");
                     return state;
                 }
-                tracing::debug!("Model catalog loaded from cache (stale, will refresh)");
+                tracing::debug!(
+                    "Model catalog loaded from cache (stale, will refresh in background)"
+                );
             }
         }
 
-        // Try fetching fresh data
-        match ModelCatalog::fetch().await {
-            Ok(catalog) => {
-                // Save to cache
-                if let Ok(cache_path) = ModelCatalog::default_cache_path() {
-                    if let Err(e) = catalog.save_cache(&cache_path).await {
-                        tracing::warn!("Failed to save model catalog cache: {e}");
-                    }
-                }
-                *state.inner.write().await = catalog;
-                tracing::debug!("Model catalog fetched from models.dev");
-            }
-            Err(e) => {
-                tracing::warn!("Failed to fetch model catalog: {e}");
-                // If we have cached data (even stale), keep using it
-                // Otherwise we'll fall back to hardcoded in the TUI
-            }
+        // If no cache at all, start with fallback immediately so we don't block
+        if !have_cache {
+            tracing::debug!("No model catalog cache found, using hardcoded fallback");
+            *state.inner.write().await = fallback_catalog();
         }
+
+        // Fetch fresh data in the background (non-blocking)
+        let bg_state = state.clone();
+        tokio::spawn(async move {
+            match ModelCatalog::fetch().await {
+                Ok(catalog) => {
+                    if let Ok(cache_path) = ModelCatalog::default_cache_path() {
+                        if let Err(e) = catalog.save_cache(&cache_path).await {
+                            tracing::warn!("Failed to save model catalog cache: {e}");
+                        }
+                    }
+                    *bg_state.inner.write().await = catalog;
+                    tracing::debug!("Model catalog fetched from models.dev (background)");
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to fetch model catalog from models.dev: {e}");
+                    // Keep whatever we have (stale cache or fallback)
+                }
+            }
+        });
 
         state
     }

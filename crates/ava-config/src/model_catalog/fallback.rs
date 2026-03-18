@@ -115,16 +115,19 @@ pub(crate) const CURATED_MODELS: &[(&str, &[&str])] = &[
 ];
 
 /// Hardcoded fallback models for when fetch + cache both fail.
-/// Generated from the compiled-in model registry (single source of truth).
+///
+/// Combines the compiled-in model registry (for paid models with pricing data)
+/// with hardcoded entries for subscription/coding-plan providers that are not
+/// on models.dev.
 pub fn fallback_catalog() -> ModelCatalog {
     let reg = super::registry::registry();
     let mut providers: HashMap<String, Vec<CatalogModel>> = HashMap::new();
+
+    // 1. Load models from the compiled-in registry (essential paid models)
     for model in &reg.models {
         providers
             .entry(model.provider.clone())
             .or_default()
-            // Subscription providers (0.0/0.0 cost) get None/None so they
-            // don't display "free" — they're subscription-included, not free.
             .push(CatalogModel {
                 id: model.id.clone(),
                 name: model.name.clone(),
@@ -148,8 +151,229 @@ pub fn fallback_catalog() -> ModelCatalog {
                 max_output: model.limits.max_output.map(|v| v as u64),
             });
     }
+
+    // 2. Add subscription/coding-plan providers not in registry.json.
+    //    These are free-tier or subscription-included models that don't need
+    //    pricing data in the registry.
+    add_subscription_models(&mut providers);
+
     ModelCatalog {
         providers,
         fetched_at: 0,
+    }
+}
+
+/// Add subscription and coding-plan provider models that are not in registry.json.
+/// These models have no cost (subscription-included) so they use None for pricing.
+fn add_subscription_models(providers: &mut HashMap<String, Vec<CatalogModel>>) {
+    // Copilot mirrors (free through GitHub subscription)
+    add_models(
+        providers,
+        "copilot",
+        &[
+            (
+                "claude-sonnet-4.5",
+                "Claude Sonnet 4.5",
+                200_000,
+                Some(16_000),
+            ),
+            (
+                "claude-sonnet-4.6",
+                "Claude Sonnet 4.6",
+                1_048_576,
+                Some(64_000),
+            ),
+            ("claude-opus-4.5", "Claude Opus 4.5", 200_000, Some(32_000)),
+            (
+                "claude-opus-4.6",
+                "Claude Opus 4.6",
+                1_048_576,
+                Some(32_000),
+            ),
+            ("claude-haiku-4.5", "Claude Haiku 4.5", 200_000, Some(8_192)),
+            ("gpt-5", "GPT-5", 200_000, Some(100_000)),
+            ("gpt-5-mini", "GPT-5 Mini", 131_072, Some(100_000)),
+            ("gpt-5.1", "GPT-5.1", 200_000, Some(100_000)),
+            ("gpt-5.1-codex", "GPT-5.1 Codex", 200_000, Some(100_000)),
+            (
+                "gpt-5.1-codex-max",
+                "GPT-5.1 Codex Max",
+                200_000,
+                Some(100_000),
+            ),
+            ("gpt-5.2", "GPT-5.2", 200_000, Some(100_000)),
+            ("gemini-2.5-pro", "Gemini 2.5 Pro", 1_000_000, Some(65_536)),
+            ("o3-mini", "o3-mini", 200_000, Some(100_000)),
+        ],
+    );
+
+    // OpenAI models not in the minimal registry (appear in CURATED_MODELS for models.dev)
+    add_models(
+        providers,
+        "openai",
+        &[
+            (
+                "gpt-5.3-codex-spark",
+                "GPT-5.3 Codex Spark",
+                200_000,
+                Some(100_000),
+            ),
+            ("gpt-5.2-pro", "GPT-5.2 Pro", 200_000, Some(100_000)),
+            ("gpt-5.2-codex", "GPT-5.2 Codex", 200_000, Some(100_000)),
+            ("gpt-5.2", "GPT-5.2", 200_000, Some(100_000)),
+            (
+                "gpt-5.1-codex-max",
+                "GPT-5.1 Codex Max",
+                200_000,
+                Some(100_000),
+            ),
+            ("gpt-5.1-codex", "GPT-5.1 Codex", 200_000, Some(100_000)),
+            (
+                "gpt-5.1-codex-mini",
+                "GPT-5.1 Codex Mini",
+                200_000,
+                Some(100_000),
+            ),
+            ("gpt-5.1", "GPT-5.1", 200_000, Some(100_000)),
+            ("gpt-5-codex", "GPT-5 Codex", 200_000, Some(100_000)),
+            ("gpt-5", "GPT-5", 200_000, Some(100_000)),
+            ("codex-mini-latest", "Codex Mini", 200_000, Some(100_000)),
+        ],
+    );
+
+    // Google models not in the minimal registry
+    add_models(
+        providers,
+        "google",
+        &[
+            (
+                "gemini-3-pro-preview",
+                "Gemini 3 Pro Preview",
+                1_000_000,
+                Some(65_536),
+            ),
+            (
+                "gemini-3-flash-preview",
+                "Gemini 3 Flash Preview",
+                1_000_000,
+                Some(65_536),
+            ),
+        ],
+    );
+
+    // ZAI Coding Plan
+    add_models(
+        providers,
+        "zai-coding-plan",
+        &[
+            ("glm-4.7", "GLM-4.7", 204_800, Some(131_072)),
+            ("glm-4.6", "GLM-4.6", 204_800, Some(131_072)),
+            ("glm-4.5", "GLM-4.5", 131_072, Some(98_304)),
+            ("glm-4.5-flash", "GLM-4.5 Flash", 131_072, Some(98_304)),
+            ("glm-4.7-flash", "GLM-4.7 Flash", 204_800, Some(131_072)),
+        ],
+    );
+
+    // ZhipuAI Coding Plan (same models as ZAI)
+    add_models(
+        providers,
+        "zhipuai-coding-plan",
+        &[
+            ("glm-4.7", "GLM-4.7", 204_800, Some(131_072)),
+            ("glm-4.6", "GLM-4.6", 204_800, Some(131_072)),
+            ("glm-4.5", "GLM-4.5", 131_072, Some(98_304)),
+            ("glm-4.5-flash", "GLM-4.5 Flash", 131_072, Some(98_304)),
+            ("glm-4.7-flash", "GLM-4.7 Flash", 204_800, Some(131_072)),
+        ],
+    );
+
+    // Alibaba Coding Plan
+    add_models(
+        providers,
+        "alibaba",
+        &[
+            ("qwen3.5-plus", "Qwen3.5 Plus", 131_072, None),
+            ("qwen3-max-2026-01-23", "Qwen3 Max", 131_072, None),
+            ("qwen3-coder-next", "Qwen3 Coder Next", 131_072, None),
+            ("qwen3-coder-plus", "Qwen3 Coder Plus", 131_072, None),
+            ("MiniMax-M2.5", "MiniMax M2.5", 131_072, None),
+            ("glm-5", "GLM-5", 131_072, None),
+            ("glm-4.7", "GLM-4.7", 131_072, None),
+            ("kimi-k2.5", "Kimi K2.5", 131_072, None),
+        ],
+    );
+
+    // Alibaba CN (same models)
+    add_models(
+        providers,
+        "alibaba-cn",
+        &[
+            ("qwen3.5-plus", "Qwen3.5 Plus", 131_072, None),
+            ("qwen3-max-2026-01-23", "Qwen3 Max", 131_072, None),
+            ("qwen3-coder-next", "Qwen3 Coder Next", 131_072, None),
+            ("qwen3-coder-plus", "Qwen3 Coder Plus", 131_072, None),
+            ("MiniMax-M2.5", "MiniMax M2.5", 131_072, None),
+            ("glm-5", "GLM-5", 131_072, None),
+            ("glm-4.7", "GLM-4.7", 131_072, None),
+            ("kimi-k2.5", "Kimi K2.5", 131_072, None),
+        ],
+    );
+
+    // Kimi for Coding
+    add_models(
+        providers,
+        "kimi-for-coding",
+        &[
+            ("k2p5", "Kimi K2.5", 262_144, Some(32_768)),
+            (
+                "kimi-k2-thinking",
+                "Kimi K2 Thinking",
+                262_144,
+                Some(32_768),
+            ),
+        ],
+    );
+
+    // MiniMax Coding Plan
+    add_models(
+        providers,
+        "minimax-coding-plan",
+        &[
+            ("MiniMax-M2", "MiniMax M2", 196_608, Some(128_000)),
+            ("MiniMax-M2.1", "MiniMax M2.1", 204_800, Some(131_072)),
+        ],
+    );
+
+    // MiniMax CN Coding Plan
+    add_models(
+        providers,
+        "minimax-cn-coding-plan",
+        &[
+            ("MiniMax-M2", "MiniMax M2", 196_608, Some(128_000)),
+            ("MiniMax-M2.1", "MiniMax M2.1", 204_800, Some(131_072)),
+        ],
+    );
+}
+
+/// Helper: add models to a provider, skipping duplicates.
+fn add_models(
+    providers: &mut HashMap<String, Vec<CatalogModel>>,
+    provider_id: &str,
+    models: &[(&str, &str, u64, Option<u64>)],
+) {
+    let existing = providers.entry(provider_id.to_string()).or_default();
+    for &(id, name, context_window, max_output) in models {
+        if !existing.iter().any(|m| m.id == id) {
+            existing.push(CatalogModel {
+                id: id.to_string(),
+                name: name.to_string(),
+                provider_id: provider_id.to_string(),
+                tool_call: true,
+                cost_input: None,
+                cost_output: None,
+                context_window: Some(context_window),
+                max_output,
+            });
+        }
     }
 }

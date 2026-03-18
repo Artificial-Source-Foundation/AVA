@@ -5,6 +5,7 @@
  * PluginInstallDialog, PluginDevMode, and the shared PluginDetailPanel.
  */
 
+import { Package } from 'lucide-solid'
 import { type Component, createMemo, createSignal, For, onCleanup, Show } from 'solid-js'
 import { watchPluginDirectory } from '../../../services/extension-loader'
 import { usePlugins } from '../../../stores/plugins'
@@ -206,7 +207,22 @@ export const PluginsTab: Component = () => {
       <div class="space-y-1.5">
         <Show
           when={sortedPlugins().length > 0}
-          fallback={<p class="text-[11px] text-[var(--text-muted)]">{emptyStateMessage()}</p>}
+          fallback={
+            <div class="flex flex-col items-center justify-center py-10 text-center">
+              <Package class="w-8 h-8 text-[var(--text-muted)] mb-2" />
+              <p class="text-xs text-[var(--text-secondary)] mb-1">No plugins installed</p>
+              <p class="text-[10px] text-[var(--text-muted)] max-w-xs mb-3">
+                {emptyStateMessage()}
+              </p>
+              <button
+                type="button"
+                onClick={() => setShowWizard(true)}
+                class="inline-flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-medium rounded-[var(--radius-md)] bg-[var(--accent)] text-white hover:brightness-110 transition-colors"
+              >
+                Create your first plugin
+              </button>
+            </div>
+          }
         >
           <For each={sortedPlugins()}>
             {(plugin) => (

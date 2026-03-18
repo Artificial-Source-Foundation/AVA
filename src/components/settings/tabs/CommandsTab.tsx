@@ -186,9 +186,16 @@ export const CommandsTab: Component = () => {
               <div class="flex flex-col items-center justify-center py-10 text-center">
                 <FolderOpen class="w-8 h-8 text-[var(--text-muted)] mb-2" />
                 <p class="text-xs text-[var(--text-secondary)] mb-1">No custom commands</p>
-                <p class="text-[10px] text-[var(--text-muted)] max-w-xs">
-                  Commands are stored as TOML files in ~/.config/ava/commands/
+                <p class="text-[10px] text-[var(--text-muted)] max-w-xs mb-3">
+                  Commands are TOML files in ~/.ava/commands/ that define reusable prompts
                 </p>
+                <button
+                  type="button"
+                  onClick={() => setEditing('new')}
+                  class="inline-flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-medium rounded-[var(--radius-md)] bg-[var(--accent)] text-white hover:brightness-110 transition-colors"
+                >
+                  Create Command
+                </button>
               </div>
             }
           >

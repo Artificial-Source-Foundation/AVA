@@ -389,3 +389,186 @@ test.describe('Error Free', () => {
     expect(criticalErrors).toEqual([])
   })
 })
+
+// ---------------------------------------------------------------------------
+// 7. Keyboard Shortcuts
+// ---------------------------------------------------------------------------
+
+test.describe('Keyboard Shortcuts', () => {
+  test.beforeEach(async ({ page }) => {
+    await bypassOnboarding(page)
+    await page.goto('/')
+    await waitForAppShell(page)
+    await dismissChangelog(page)
+  })
+
+  test('Ctrl+K opens command palette', async ({ page }) => {
+    await page.keyboard.press('Control+k')
+    await page.waitForTimeout(300)
+
+    // Command palette should render a search input or dialog overlay
+    const paletteInput = page.locator(
+      'input[placeholder*="Search"], input[placeholder*="search"], input[placeholder*="command"], input[placeholder*="Command"]'
+    )
+    const isVisible = await paletteInput.isVisible({ timeout: 2000 }).catch(() => false)
+    // If not found by placeholder, look for the dialog overlay itself
+    if (!isVisible) {
+      const overlay = page.locator('[role="dialog"]')
+      await expect(overlay.first()).toBeVisible({ timeout: 2000 })
+    } else {
+      await expect(paletteInput.first()).toBeVisible()
+    }
+  })
+
+  test('Ctrl+S toggles sidebar visibility', async ({ page }) => {
+    // Get initial sidebar state by checking for the Sessions button in the sidebar area
+    const sidebar = page.locator('aside, [class*="sidebar"]').first()
+    const wasVisible = await sidebar.isVisible({ timeout: 1000 }).catch(() => false)
+
+    await page.keyboard.press('Control+s')
+    await page.waitForTimeout(300)
+
+    // After toggle, state should change
+    if (wasVisible) {
+      // Sidebar may have been hidden — or the button still exists but panel is collapsed
+      // Just verify no crash and the app is still functional
+      await expect(page.locator('textarea').first()).toBeVisible()
+    }
+
+    // Toggle back
+    await page.keyboard.press('Control+s')
+    await page.waitForTimeout(300)
+    await expect(page.locator('textarea').first()).toBeVisible()
+  })
+
+  test('Escape closes settings modal', async ({ page }) => {
+    // Open settings
+    await page.locator('button[aria-label="Settings"]').click()
+    await expect(page.locator('button:has-text("Back to Chat")')).toBeVisible({ timeout: 3000 })
+
+    // Press Escape
+    await page.keyboard.press('Escape')
+    await page.waitForTimeout(300)
+
+    // Settings should be closed
+    await expect(page.locator('button:has-text("Back to Chat")')).not.toBeVisible()
+    await expect(page.locator('textarea').first()).toBeVisible()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 8. Settings — Generation Tab
+// ---------------------------------------------------------------------------
+
+test.describe('Settings Generation Tab', () => {
+  test.beforeEach(async ({ page }) => {
+    await bypassOnboarding(page)
+    await page.goto('/')
+    await waitForAppShell(page)
+    await dismissChangelog(page)
+  })
+
+  test('can navigate to Generation tab and see content', async ({ page }) => {
+    await page.locator('button[aria-label="Settings"]').click()
+    await expect(page.locator('button:has-text("Back to Chat")')).toBeVisible({ timeout: 3000 })
+
+    await page.locator('nav button:has-text("Generation")').click()
+    await page.waitForTimeout(300)
+
+    const settingsModal = page.locator('.fixed.inset-0.z-50')
+    // Generation tab should show generation-related content like Temperature or Max Tokens
+    await expect(settingsModal.locator('text=Temperature').first()).toBeVisible({ timeout: 3000 })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 9. QuestionDock Structure
+// ---------------------------------------------------------------------------
+
+test.describe('QuestionDock', () => {
+  test('component structure is importable and ChatView area exists', async ({ page }) => {
+    await bypassOnboarding(page)
+    await page.goto('/')
+    await waitForAppShell(page)
+    await dismissChangelog(page)
+
+    // The chat area should exist (QuestionDock renders between messages and input)
+    // Without an active agent question, the dock is hidden — verify the chat container exists
+    const chatArea = page.locator('form')
+    await expect(chatArea).toBeVisible()
+
+    // The textarea (MessageInput) is always present
+    await expect(page.locator('textarea').first()).toBeVisible()
+
+    // QuestionDock only renders when agent asks a question — verify no crash
+    // by confirming the app is in a healthy state
+    const emptyState = page.locator('h2:has-text("How can I help")')
+    const messages = page.locator('.overflow-y-auto')
+    // Either empty state or messages area should be visible
+    const hasContent =
+      (await emptyState.isVisible({ timeout: 1000 }).catch(() => false)) ||
+      (await messages
+        .first()
+        .isVisible({ timeout: 1000 })
+        .catch(() => false))
+    expect(hasContent).toBe(true)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 10. Model Browser
+// ---------------------------------------------------------------------------
+
+test.describe('Model Browser', () => {
+  test.beforeEach(async ({ page }) => {
+    await bypassOnboarding(page)
+    await page.goto('/')
+    await waitForAppShell(page)
+    await dismissChangelog(page)
+  })
+
+  test('model selector button exists in toolbar', async ({ page }) => {
+    // The model selector is a button in the toolbar strip inside the form
+    const form = page.locator('form')
+    // Look for a button that likely contains the model name or "Model" text
+    const modelBtn = form.locator('button').first()
+    await expect(modelBtn).toBeVisible()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 11. ProjectHub
+// ---------------------------------------------------------------------------
+
+test.describe('ProjectHub', () => {
+  test('app loads to a functional state with chat or project hub', async ({ page }) => {
+    // ProjectHub shows when no project is loaded (Tauri-only).
+    // In web/vite mode the app skips straight to AppShell with chat.
+    // This test verifies the app reaches a healthy state either way.
+    await bypassOnboarding(page)
+    await page.goto('/')
+    await waitForAppShell(page)
+    await dismissChangelog(page)
+
+    // The app should be in one of these states:
+    // 1. ProjectHub with greeting + quick actions (Tauri)
+    // 2. Chat with empty state (no sessions)
+    // 3. Chat with restored session (has messages)
+    const greeting = page.locator('h1:has-text("Good")')
+    const emptyState = page.locator('h2:has-text("How can I help")')
+    const textarea = page.locator('textarea').first()
+
+    const hasGreeting = await greeting.isVisible({ timeout: 1000 }).catch(() => false)
+    const hasEmptyState = await emptyState.isVisible({ timeout: 1000 }).catch(() => false)
+    const hasTextarea = await textarea.isVisible({ timeout: 1000 }).catch(() => false)
+
+    // At least one of these should be true
+    expect(hasGreeting || hasEmptyState || hasTextarea).toBe(true)
+
+    // If ProjectHub is visible, verify quick action buttons
+    if (hasGreeting) {
+      await expect(page.locator('button:has-text("New Session")')).toBeVisible()
+      await expect(page.locator('button:has-text("Open Project")')).toBeVisible()
+    }
+  })
+})

@@ -1,0 +1,79 @@
+use ava_agent::trajectory::{
+    TrajectoryConfig, TrajectoryEvent, TrajectoryEventKind, TrajectoryRecorder,
+};
+use serde_json::Value;
+
+#[test]
+fn event_serializes_as_jsonl_shape() {
+    let event = TrajectoryEvent {
+        ts: "2026-01-01T00:00:00Z".to_string(),
+        session_id: "session-123".to_string(),
+        seq: 1,
+        kind: TrajectoryEventKind::TurnStart { turn: 2 },
+    };
+    let json = serde_json::to_string(&event).expect("serialize event");
+    assert!(json.contains("\"type\":\"turn_start\""));
+    assert!(json.contains("\"session_id\":\"session-123\""));
+}
+
+#[tokio::test]
+async fn sanitize_json_redacts_sensitive_keys_and_tokens() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let config = TrajectoryConfig {
+        enabled: true,
+        output_dir: Some(dir.path().to_path_buf()),
+        max_field_bytes: 128,
+        route: None,
+    };
+    let recorder = TrajectoryRecorder::open(&config, "s1")
+        .await
+        .expect("open recorder")
+        .expect("enabled recorder");
+
+    let input = serde_json::json!({
+        "apiKey": "sk-super-secret-key",
+        "nested": {
+            "token": "ghp_abc123",
+            "note": "Authorization: Bearer abcdef"
+        }
+    });
+    let out = recorder.sanitize_json(&input);
+    assert_eq!(out["apiKey"], Value::String("[REDACTED]".to_string()));
+    assert_eq!(
+        out["nested"]["token"],
+        Value::String("[REDACTED]".to_string())
+    );
+    assert!(out["nested"]["note"]
+        .as_str()
+        .expect("note string")
+        .contains("[REDACTED]"));
+}
+
+#[tokio::test]
+async fn deterministic_session_scoped_file_path_and_write() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let config = TrajectoryConfig {
+        enabled: true,
+        output_dir: Some(dir.path().to_path_buf()),
+        max_field_bytes: 1024,
+        route: None,
+    };
+
+    let mut recorder = TrajectoryRecorder::open(&config, "session-abc")
+        .await
+        .expect("open recorder")
+        .expect("enabled recorder");
+    recorder
+        .write_event(TrajectoryEventKind::TurnStart { turn: 1 })
+        .await
+        .expect("write event");
+
+    let expected = dir.path().join("session-abc.jsonl");
+    assert_eq!(recorder.file_path(), expected.as_path());
+
+    let content = tokio::fs::read_to_string(&expected)
+        .await
+        .expect("read trajectory file");
+    assert!(content.contains("\"type\":\"turn_start\""));
+    assert!(content.contains("\"session_id\":\"session-abc\""));
+}

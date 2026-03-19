@@ -561,6 +561,7 @@ async fn run_harness_task(
             as Arc<dyn LLMProvider>,
         domain_providers,
         platform: Some(platform),
+        scout_provider: None,
     });
 
     // Determine task type based on the benchmark task

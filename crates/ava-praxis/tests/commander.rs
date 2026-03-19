@@ -33,6 +33,7 @@ fn director_with_default(provider: Arc<dyn LLMProvider>) -> Director {
         default_provider: provider,
         domain_providers: HashMap::new(),
         platform: None,
+        scout_provider: None,
     })
 }
 
@@ -42,6 +43,7 @@ fn director_with_platform(provider: Arc<dyn LLMProvider>) -> Director {
         default_provider: provider,
         domain_providers: HashMap::new(),
         platform: Some(Arc::new(StandardPlatform)),
+        scout_provider: None,
     })
 }
 
@@ -162,6 +164,7 @@ fn worker_spawning_uses_domain_provider_model_name() {
         default_provider,
         domain_providers: overrides,
         platform: None,
+        scout_provider: None,
     });
 
     let worker = director
@@ -338,6 +341,7 @@ async fn one_worker_failure_isolated_from_successful_worker() {
         default_provider,
         domain_providers: overrides,
         platform: None,
+        scout_provider: None,
     });
 
     let good_worker = director

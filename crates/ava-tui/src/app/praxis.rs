@@ -57,6 +57,7 @@ impl App {
                 default_provider: provider,
                 domain_providers: HashMap::new(),
                 platform: Some(platform),
+                scout_provider: None,
             });
 
             let worker = match director.delegate(Task {

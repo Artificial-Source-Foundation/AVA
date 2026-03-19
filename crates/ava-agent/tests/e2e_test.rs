@@ -159,6 +159,7 @@ async fn director_multi_agent_coordination() {
         default_provider: provider,
         domain_providers: HashMap::new(),
         platform: None,
+        scout_provider: None,
     });
 
     let worker_a = director

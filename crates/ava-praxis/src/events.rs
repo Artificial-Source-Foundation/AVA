@@ -1,8 +1,13 @@
+use crate::plan::PraxisPlan;
 use serde::Serialize;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize)]
 pub enum PraxisEvent {
+    /// Emitted when the Director produces a structured plan via LLM analysis.
+    PlanCreated {
+        plan: PraxisPlan,
+    },
     WorkerStarted {
         worker_id: Uuid,
         lead: String,
@@ -97,5 +102,21 @@ pub enum PraxisEvent {
     AcpRequestHandled {
         method: String,
         success: bool,
+    },
+    // Scout events
+    ScoutStarted {
+        id: Uuid,
+        query: String,
+    },
+    ScoutCompleted {
+        id: Uuid,
+        query: String,
+        files_examined: usize,
+        snippets_found: usize,
+    },
+    ScoutFailed {
+        id: Uuid,
+        query: String,
+        error: String,
     },
 }

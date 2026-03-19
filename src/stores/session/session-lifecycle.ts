@@ -233,6 +233,7 @@ export async function renameSession(id: string, newName: string): Promise<void> 
 }
 
 export async function archiveSession(id: string): Promise<void> {
+  log.info('session', 'Session archived', { id })
   const { currentProject } = useProject()
   const projectId = currentProject()?.id
   await dbArchiveSession(id)
@@ -271,6 +272,7 @@ export async function updateSessionSlug(id: string, slug: string): Promise<void>
 }
 
 export async function deleteSessionPermanently(id: string): Promise<void> {
+  log.info('session', 'Session deleted permanently', { id })
   const { currentProject } = useProject()
   const projectId = currentProject()?.id
   await dbDeleteSession(id)

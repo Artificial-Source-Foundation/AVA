@@ -5,6 +5,7 @@
 
 import { createSignal } from 'solid-js'
 import { STORAGE_KEYS } from '../config/constants'
+import { log } from '../lib/logger'
 import * as dialogs from './layout-dialogs'
 import { loadBool, loadNumber, loadString, save } from './layout-persistence'
 
@@ -51,7 +52,9 @@ function handleActivityClick(id: ActivityId): void {
 }
 
 function toggleSidebar(): void {
-  setSidebarVisible(!sidebarVisible())
+  const next = !sidebarVisible()
+  log.debug('nav', 'Sidebar toggled', { visible: next })
+  setSidebarVisible(next)
 }
 
 const SIDEBAR_WIDTH_KEY = 'ava-sidebar-width'
@@ -96,6 +99,7 @@ function setRightPanelWidth(w: number): void {
 }
 
 function switchRightPanelTab(tab: dialogs.RightPanelTab): void {
+  log.debug('nav', 'Right panel tab changed', { tab })
   dialogs.switchRightPanelTab(tab, () => {
     if (!rightPanelVisible()) setRightPanelVisible(true)
   })
@@ -133,6 +137,7 @@ const [bottomPanelTab, setBottomPanelTab] = createSignal<BottomPanelTab>(
 )
 
 function switchBottomPanelTab(tab: BottomPanelTab): void {
+  log.debug('nav', 'Bottom panel tab changed', { tab })
   setBottomPanelTab(tab)
   save('ava-bottom-panel-tab', tab)
   if (!bottomPanelVisible()) setBottomPanelVisible(true)
@@ -166,10 +171,12 @@ function setProjectHubVisible(visible: boolean): void {
 }
 
 function openProjectHub(): void {
+  log.debug('nav', 'Project hub opened')
   setProjectHubVisible(true)
 }
 
 function closeProjectHub(): void {
+  log.debug('nav', 'Project hub closed')
   setProjectHubVisible(false)
 }
 

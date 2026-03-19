@@ -5,6 +5,7 @@
  */
 
 import { createSignal } from 'solid-js'
+import { log } from '../lib/logger'
 import { loadString, save } from './layout-persistence'
 
 // ============================================================================
@@ -14,10 +15,12 @@ import { loadString, save } from './layout-persistence'
 const [settingsOpen, setSettingsOpen] = createSignal(false)
 
 export function openSettings(): void {
+  log.debug('nav', 'Settings opened')
   setSettingsOpen(true)
 }
 
 export function closeSettings(): void {
+  log.debug('nav', 'Settings closed')
   setSettingsOpen(false)
 }
 

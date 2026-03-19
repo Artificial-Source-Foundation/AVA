@@ -35,6 +35,12 @@ export function useRustAgent() {
   let unlisten: UnlistenFn | null = null
   let eventSocket: WebSocket | null = null
 
+  // Streaming metrics — reset at the start of each run(), read in handleAgentEvent
+  let chunkCount = 0
+  let totalTextLen = 0
+  let runStartTime = 0
+  let firstTokenLogged = false
+
   // In web mode, the HTTP submit returns immediately while the agent runs async.
   // We use this resolver to make run() wait for the complete/error WebSocket event.
   let completionResolve: ((result: SubmitGoalResult | null) => void) | null = null
@@ -51,6 +57,12 @@ export function useRustAgent() {
 
     switch (event.type) {
       case 'token':
+        chunkCount++
+        totalTextLen += (event.content as string)?.length ?? 0
+        if (!firstTokenLogged && runStartTime > 0) {
+          log.info('perf', 'First token latency', { ttftMs: Date.now() - runStartTime })
+          firstTokenLogged = true
+        }
         setStreamingContent((prev) => prev + event.content)
         break
       case 'thinking':
@@ -58,6 +70,7 @@ export function useRustAgent() {
         setThinkingContent((prev) => prev + event.content)
         break
       case 'tool_call':
+        log.info('tools', 'Tool call started', { tool: event.name })
         debugLog(
           'tools',
           'tool_call:',
@@ -91,16 +104,29 @@ export function useRustAgent() {
             first.status = event.is_error ? 'error' : 'success'
             first.output = event.content
             first.completedAt = Date.now()
+            const durationMs = first.completedAt - first.startedAt
+            log.info('tools', 'Tool call completed', {
+              tool: first.name,
+              success: !event.is_error,
+              durationMs,
+            })
+            log.debug('perf', 'Tool execution time', { tool: first.name, durationMs })
           }
           return updated
         })
         break
       }
       case 'progress':
+        log.debug('agent', 'Progress', { message: event.message })
         setProgressMessage(event.message)
         break
       case 'budget_warning': {
         const bw = event as import('../types/rust-ipc').BudgetWarningEvent
+        log.warn('agent', 'Budget warning', {
+          threshold: bw.thresholdPercent,
+          current: bw.currentCostUsd,
+          max: bw.maxBudgetUsd,
+        })
         setBudgetWarning({
           thresholdPercent: bw.thresholdPercent,
           currentCostUsd: bw.currentCostUsd,
@@ -111,15 +137,20 @@ export function useRustAgent() {
       case 'token_usage': {
         // Rust serializes as snake_case (input_tokens), TS types say camelCase
         const tu = event as unknown as Record<string, number>
-        setTokenUsage({
-          input: tu.input_tokens ?? tu.inputTokens ?? 0,
-          output: tu.output_tokens ?? tu.outputTokens ?? 0,
-          cost: tu.cost_usd ?? tu.costUsd ?? 0,
-        })
+        const input = tu.input_tokens ?? tu.inputTokens ?? 0
+        const output = tu.output_tokens ?? tu.outputTokens ?? 0
+        const cost = tu.cost_usd ?? tu.costUsd ?? 0
+        log.debug('perf', 'Token usage update', { input, output, cost })
+        setTokenUsage({ input, output, cost })
         break
       }
       case 'complete':
         debugLog('agent', 'complete event received')
+        log.info('streaming', 'Stream completed', {
+          chunks: chunkCount,
+          totalChars: totalTextLen,
+          elapsedMs: Date.now() - runStartTime,
+        })
         batch(() => {
           setIsRunning(false)
           // Mark any remaining running tool calls as interrupted
@@ -147,6 +178,11 @@ export function useRustAgent() {
         break
       case 'error':
         log.error('agent', 'Agent event error', { message: event.message })
+        log.error('streaming', 'Stream error', {
+          message: event.message,
+          chunks: chunkCount,
+          elapsedMs: Date.now() - runStartTime,
+        })
         batch(() => {
           setError(event.message)
           setIsRunning(false)
@@ -287,6 +323,11 @@ export function useRustAgent() {
   ): Promise<SubmitGoalResult | null> => {
     resetState()
     setIsRunning(true)
+    runStartTime = Date.now()
+    chunkCount = 0
+    totalTextLen = 0
+    firstTokenLogged = false
+    log.info('streaming', 'Stream started', { model: opts?.model, provider: opts?.provider })
     try {
       await attachListener()
       const submitArgs = {
@@ -328,6 +369,7 @@ export function useRustAgent() {
       return finalResult
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
+      log.error('error', 'IPC invoke failed', { command: 'submit_goal', error: message })
       setError(message)
       setIsRunning(false)
       completionResolve = null
@@ -338,6 +380,7 @@ export function useRustAgent() {
   }
 
   const cancel = async (): Promise<void> => {
+    log.info('agent', 'Agent cancel requested')
     try {
       await invoke('cancel_agent')
     } catch {
@@ -375,6 +418,7 @@ export function useRustAgent() {
   /** Inject a steering message (Tier 1). Agent processes it after current tool. */
   const steer = async (message: string): Promise<void> => {
     if (!isRunning()) return
+    log.info('agent', 'Steering message injected', { length: message.length })
     try {
       await invoke('steer_agent', { message })
     } catch (err) {

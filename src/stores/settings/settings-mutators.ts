@@ -10,6 +10,7 @@ import {
   type LLMProviderConfig,
   type ProviderModel,
 } from '../../config/defaults/provider-defaults'
+import { log } from '../../lib/logger'
 import { logInfo, logWarn } from '../../services/logger'
 import { enrichWithCatalog, fetchModels } from '../../services/providers/model-fetcher'
 import { getModelsDevModels } from '../../services/providers/models-dev-catalog'
@@ -22,6 +23,12 @@ import type { AppSettings, MCPServerConfig } from './settings-types'
 // ── Provider ─────────────────────────────────────────────────────────────────
 
 export function updateProvider(id: string, patch: Partial<LLMProviderConfig>): void {
+  if (patch.status)
+    log.info(
+      'settings',
+      `Provider ${patch.status === 'connected' ? 'connected' : 'disconnected'}`,
+      { provider: id }
+    )
   setSettingsRaw((prev) => {
     const next = {
       ...prev,
@@ -321,6 +328,7 @@ export function updateUI(patch: Partial<AppSettings['ui']>): void {
 }
 
 export function updateAppearance(patch: Partial<AppSettings['appearance']>): void {
+  if (patch.darkStyle) log.info('settings', 'Appearance changed', { darkStyle: patch.darkStyle })
   updateSubKey('appearance', patch)
   applyAppearanceToDOM(settings())
 }

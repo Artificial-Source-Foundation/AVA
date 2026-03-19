@@ -10,16 +10,20 @@ import './index.css'
 // Global error handlers — writes to log file via Tauri FS + console
 // Logger must be initialized async (after Tauri is ready), so early errors
 // still get buffered and flushed once initLogger() is called from App.tsx
+import { log } from './lib/logger'
 import { logError as fileLogError, logFatal } from './services/logger'
 
 if (typeof window !== 'undefined') {
   window.addEventListener('error', (e) => {
+    const msg = e.error instanceof Error ? e.error.message : String(e.error)
     const stack = e.error instanceof Error ? e.error.stack : undefined
-    logFatal('Uncaught', e.error instanceof Error ? e.error.message : String(e.error), stack)
+    log.error('error', `Uncaught error: ${msg}`, { stack })
+    logFatal('Uncaught', msg, stack)
   })
   window.addEventListener('unhandledrejection', (e) => {
     const reason = e.reason instanceof Error ? e.reason.message : String(e.reason)
     const stack = e.reason instanceof Error ? e.reason.stack : undefined
+    log.error('error', `Unhandled promise rejection: ${reason}`, { stack })
     fileLogError('UnhandledPromise', reason, stack)
   })
   // Disable Tauri's default context menu globally

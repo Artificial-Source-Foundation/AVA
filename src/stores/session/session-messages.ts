@@ -3,6 +3,7 @@
  * Add, update, delete, and rollback messages within a session.
  */
 
+import { log } from '../../lib/logger'
 import {
   deleteMessageFromDb as dbDeleteMessage,
   deleteMessagesFromTimestamp as dbDeleteMessagesFromTimestamp,
@@ -36,6 +37,11 @@ export async function loadSessionMessages(sessionId: string): Promise<void> {
 }
 
 export function addMessage(message: Message): void {
+  log.debug('session', 'Message added', {
+    id: message.id,
+    role: message.role,
+    sessionId: message.sessionId,
+  })
   setMessages((prev) => [...prev, message])
 
   setSessions((prev) =>
@@ -74,6 +80,7 @@ export function setMessageError(messageId: string, error: MessageError | null): 
 }
 
 export async function deleteMessage(id: string): Promise<void> {
+  log.debug('session', 'Message deleted', { id })
   setMessages((prev) => prev.filter((msg) => msg.id !== id))
   try {
     await dbDeleteMessage(id)
@@ -93,6 +100,7 @@ export async function rollbackToMessage(messageId: string): Promise<void> {
   const msgs = messages()
   const index = msgs.findIndex((m) => m.id === messageId)
   if (index === -1) return
+  log.info('session', 'Rolling back to message', { messageId, removingCount: msgs.length - index })
 
   const target = msgs[index]
   const sessionId = target.sessionId

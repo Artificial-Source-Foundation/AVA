@@ -16,6 +16,7 @@
  */
 
 import { createMemo, createSignal } from 'solid-js'
+import { log } from '../lib/logger'
 import type {
   DelegationEvent,
   TeamGroup,
@@ -202,6 +203,7 @@ function countJuniorDevs(parentId: string): number {
 
 /** Clear entire team (e.g., new session) */
 function clearTeam(): void {
+  log.info('team', 'Team cleared')
   setTeamMembers(new Map())
   _setSelectedMemberId(null)
   setViewStack([])

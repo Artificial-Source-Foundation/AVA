@@ -222,6 +222,8 @@ export async function runAppInit(
       setProjectHubVisible(true)
     }
 
+    const initDuration = Date.now() - splashStart
+    log.info('perf', 'App init completed', { durationMs: initDuration })
     log.info('app', 'App initialized successfully')
     onCleanup(() => {
       void disposeFrontendLogger()
@@ -353,6 +355,8 @@ async function runWebInit(
     await restoreForCurrentProject()
     log.info('app', 'Web sessions restored')
 
+    const initDuration = Date.now() - splashStart
+    log.info('perf', 'Web app init completed', { durationMs: initDuration })
     setSplashStatus('Ready')
     log.info('app', 'Web mode initialized successfully')
     // In web mode, always skip project hub and go straight to the shell

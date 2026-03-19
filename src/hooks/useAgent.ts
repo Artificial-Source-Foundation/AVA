@@ -234,6 +234,10 @@ function createAgentStore() {
           }
         }
         if (event.type === 'approval_request') {
+          log.info('tools', 'Approval requested', {
+            tool: (event as ApprovalRequestEvent).tool_name,
+            risk: (event as ApprovalRequestEvent).risk_level,
+          })
           const approvalEvent = event as ApprovalRequestEvent
           const riskLevel = (
             ['low', 'medium', 'high', 'critical'].includes(approvalEvent.risk_level)
@@ -260,6 +264,9 @@ function createAgentStore() {
           })
         }
         if (event.type === 'question_request') {
+          log.info('agent', 'Question requested', {
+            question: (event as QuestionRequestEvent).question?.slice(0, 80),
+          })
           const questionEvent = event as QuestionRequestEvent
           setPendingQuestion({
             id: questionEvent.id,
@@ -340,7 +347,7 @@ function createAgentStore() {
     }
 
     try {
-      log.info('agent', 'Agent started', { goal: goal.slice(0, 120), sessionId })
+      log.info('agent', 'Run started', { goal: goal.slice(0, 120), sessionId })
       // Resolve the model/provider from the frontend's selection
       const selectedModelId = config?.model || session.selectedModel()
       const selectedProviderId = config?.provider || session.selectedProvider() || undefined
@@ -402,7 +409,7 @@ function createAgentStore() {
 
       // Check if the agent errored (rustAgent.run catches internally, returns null)
       if (errorText) {
-        log.error('agent', 'Agent failed', { error: errorText })
+        log.error('agent', 'Run failed', { error: errorText })
         const errorMsg: Message = {
           id: generateMessageId('err'),
           sessionId,
@@ -448,9 +455,12 @@ function createAgentStore() {
         session.addMessage(assistantMsg)
       }
 
-      log.info('agent', 'Agent completed', {
+      log.info('agent', 'Run completed', {
+        success: true,
         tokens: rustAgent.tokenUsage().output,
         cost: rustAgent.tokenUsage().cost,
+        toolCalls: rustAgent.activeToolCalls().length,
+        contentLength: content?.length ?? 0,
       })
       return result
     } catch (err) {
@@ -482,6 +492,7 @@ function createAgentStore() {
   }
 
   function cancel(): void {
+    log.info('agent', 'Cancel requested by user')
     void rustAgent.cancel()
     batch(() => {
       setMessageQueue([])
@@ -517,7 +528,9 @@ function createAgentStore() {
   }
 
   function togglePlanMode(): void {
-    setIsPlanMode((prev) => !prev)
+    const next = !isPlanMode()
+    log.info('agent', 'Plan mode toggled', { planMode: next })
+    setIsPlanMode(next)
   }
 
   function checkAutoApproval(
@@ -528,16 +541,18 @@ function createAgentStore() {
   }
 
   function resolveApproval(approved: boolean, alwaysAllow?: boolean): void {
+    log.info('tools', 'Approval resolved', { approved, alwaysAllow: alwaysAllow ?? false })
     setPendingApproval(null)
     void rustAgentBridge.resolveApproval(approved, alwaysAllow ?? false).catch((err) => {
-      console.error('Failed to resolve approval:', err)
+      log.error('error', 'Failed to resolve approval', { error: String(err) })
     })
   }
 
   function resolveQuestion(answer: string): void {
+    log.info('agent', 'Question resolved', { answerLength: answer.length })
     setPendingQuestion(null)
     void rustAgentBridge.resolveQuestion(answer).catch((err) => {
-      console.error('Failed to resolve question:', err)
+      log.error('error', 'Failed to resolve question', { error: String(err) })
     })
   }
 
@@ -547,11 +562,12 @@ function createAgentStore() {
     feedback?: string,
     stepComments?: Record<string, string>
   ): void {
+    log.info('agent', 'Plan resolved', { response, hasFeedback: !!feedback })
     setPendingPlan(null)
     void rustAgentBridge
       .resolvePlan(response, modifiedPlan ?? null, feedback ?? null, stepComments ?? null)
       .catch((err) => {
-        console.error('Failed to resolve plan:', err)
+        log.error('error', 'Failed to resolve plan', { error: String(err) })
       })
   }
 
@@ -586,6 +602,7 @@ function createAgentStore() {
   // Message actions — wired through Rust IPC
   async function retryMessage(_assistantMessageId: string): Promise<void> {
     if (rustAgent.isRunning()) return
+    log.info('agent', 'Retrying last message')
     batch(() => {
       setCurrentThought('')
       setDoomLoopDetected(false)
@@ -602,6 +619,7 @@ function createAgentStore() {
 
   async function editAndResend(messageId: string, newContent: string): Promise<void> {
     if (rustAgent.isRunning()) return
+    log.info('agent', 'Edit and resend', { messageId, contentLength: newContent.length })
     batch(() => {
       setCurrentThought('')
       setDoomLoopDetected(false)
@@ -618,6 +636,7 @@ function createAgentStore() {
 
   async function regenerateResponse(_assistantMessageId: string): Promise<void> {
     if (rustAgent.isRunning()) return
+    log.info('agent', 'Regenerating response')
     batch(() => {
       setCurrentThought('')
       setDoomLoopDetected(false)

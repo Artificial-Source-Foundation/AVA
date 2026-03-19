@@ -9,6 +9,7 @@ use tracing::info;
 use crate::bridge::DesktopBridge;
 use super::helpers::{parse_domain, resolve_model_spec};
 
+#[allow(dead_code)] // Fields deserialized from frontend, wired incrementally
 #[derive(Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct LeadConfigPayload {
@@ -26,6 +27,7 @@ fn default_max_workers() -> usize {
     3
 }
 
+#[allow(dead_code)] // Fields deserialized from frontend, wired incrementally
 #[derive(Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct TeamConfigPayload {

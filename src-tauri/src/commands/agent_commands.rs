@@ -416,6 +416,7 @@ pub async fn resolve_question(
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[allow(dead_code)] // Fields deserialized from frontend, used in future plan editing
 pub struct ResolvePlanArgs {
     pub response: String,
     #[serde(default)]

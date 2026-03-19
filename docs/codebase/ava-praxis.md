@@ -174,6 +174,10 @@ User-configurable options:
 | `decomposition.rs` | Task decomposition with heuristic and LLM planner |
 | `synthesis.rs` | Worker result synthesis with LLM merge |
 | `review.rs` | Code review parsing, formatting, agent runner |
+| `plan.rs` | Plan tool with PlanBridge for agent-to-TUI communication, inline plan editing |
+| `prompts.rs` | Structured system prompts for Director, Leads, Workers, Scouts |
+| `scout.rs` | Scout system — lightweight agents for pre-planning codebase intelligence |
+| `board.rs` | Board of Directors — multi-model consensus with distinct analytical personalities |
 | `events.rs` | PraxisEvent enum for all lifecycle events |
 
 ## Dependencies

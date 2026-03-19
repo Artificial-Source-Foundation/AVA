@@ -1,4 +1,4 @@
-<!-- Last verified: 2026-03-19. Run 'just check' to revalidate. -->
+<!-- Last verified: 2026-03-19 (post-session doc update). Run 'just check' to revalidate. -->
 
 # AVA Architecture & Conventions (v3)
 
@@ -44,13 +44,13 @@ AVA uses a **Rust-first architecture**. All agent, CLI, and backend code is Rust
 
 ### Codebase Stats
 
-- **21 Rust crates**, ~40K LOC, 1,692 tests
+- **21 Rust crates**, ~40K LOC, 1,692 tests (0 failures)
 - **8 LLM providers**: Anthropic (with prompt caching), OpenAI-compatible, Gemini, Ollama, OpenRouter, Copilot, Inception, Mock
-- **6 default tools**: `read`, `write`, `edit` (14 strategies), `bash`, `glob`, `grep`
+- **6 default tools**: `read`, `write`, `edit` (14 strategies incl. 3-way merge + diff-match-patch), `bash`, `glob`, `grep`
 - **8 extended tools**: `apply_patch`, `web_fetch`, `web_search`, `multiedit`, `ast_ops`, `lsp_ops`, `code_search`, `git_read`
-- **1 agent tool**: `plan` (Plannotator-style inline plan editing)
+- **1 agent tool**: `plan` (Plannotator-style inline plan editing via PlanBridge)
 - **Dynamic tools**: MCP servers + TOML custom tools (`~/.ava/tools/`, `.ava/tools/`)
-- **Key capabilities**: prompt caching (Anthropic), auto-retry middleware, stream silence timeout, tiktoken BPE token counting, persistent audit log, auto-compaction settings
+- **Key capabilities**: Anthropic prompt caching (`cache_control` on system + tools), auto-retry middleware (2x exponential backoff for read-only tools), stream silence timeout (90s configurable per-chunk reset), tiktoken-rs BPE token counting, tool schema pre-validation, persistent audit log (SQLite, opt-out), auto-compaction settings (toggle + threshold slider)
 
 ### Mid-Stream Messaging
 
@@ -139,7 +139,7 @@ Trust a project: `ava --trust`. Global config (`~/.ava/`) always loads.
 
 ## Praxis (Multi-Agent Orchestration) — v2
 
-Praxis is AVA's multi-agent system in `crates/ava-praxis/`. Uses a **Director → Scouts → Leads → Workers** hierarchy with LLM-powered planning. 91 tests (74 unit + 11 integration + 6 doc-tests). Modules: `plan`, `prompts`, `scout`, `board`, `events`, `lib` (plus `acp`, `artifact`, `conflict`, `decomposition`, `mailbox`, `review`, `spec`, `synthesis`, `workflow`). See [docs/codebase/ava-praxis.md](docs/codebase/ava-praxis.md) for full details.
+Praxis is AVA's multi-agent system in `crates/ava-praxis/`. Uses a **Director -> Scouts -> Leads -> Workers** hierarchy with LLM-powered planning. 91 tests (74 unit + 11 integration + 6 doc-tests). 19 source files: `lib`, `plan`, `prompts`, `scout`, `board`, `events`, `workflow`, `acp`, `acp_handler`, `acp_transport`, `artifact`, `artifact_store`, `conflict`, `decomposition`, `mailbox`, `review`, `spec`, `spec_workflow`, `synthesis`. See [docs/codebase/ava-praxis.md](docs/codebase/ava-praxis.md) for full details.
 
 ### Director Intelligence Levels
 

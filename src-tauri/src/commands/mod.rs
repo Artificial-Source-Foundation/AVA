@@ -20,6 +20,8 @@ mod tool_git;
 
 // --- New: real backend bridge commands ---
 pub mod agent_commands;
+mod helpers;
+pub mod praxis_commands;
 pub mod session_commands;
 pub mod model_commands;
 pub mod provider_commands;
@@ -59,8 +61,8 @@ pub use agent_commands::{
     resolve_approval, resolve_question, resolve_plan,
     steer_agent, follow_up_agent, post_complete_agent, get_message_queue, clear_message_queue,
     retry_last_message, edit_and_resend, regenerate_response, undo_last_edit,
-    start_praxis, get_praxis_status, cancel_praxis, steer_lead,
 };
+pub use praxis_commands::{start_praxis, get_praxis_status, cancel_praxis, steer_lead};
 pub use session_commands::{list_sessions, load_session, create_session, delete_session, rename_session, search_sessions};
 pub use model_commands::{list_models, get_current_model, switch_model};
 pub use provider_commands::list_providers;

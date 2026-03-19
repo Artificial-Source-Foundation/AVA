@@ -18,11 +18,24 @@
 - **Edit reliability cascade: 14 strategies** — added 3-way merge + diff-match-patch (was 12 strategies)
 - **Persistent audit log** — SQLite-backed, opt-out, queryable by session/tool
 
+#### Praxis v2 (Phases 1-6 complete)
+- **Phase 1**: Director brain + structured prompts + scout module
+- **Phase 2**: Board of Directors — multi-model consensus with 3 distinct analytical personalities
+- **Phase 3**: Plan tool with PlanBridge for agent-to-TUI communication, inline plan editing, step management
+- **Phase 4**: Structured Praxis event system + Tauri event forwarding
+- **Phase 5**: Scout implementation — lightweight agents for pre-planning codebase reconnaissance
+- **Phase 6**: Integration + polish — plan tool registered in tool registry, 91 tests
+
+#### Desktop UI
+- **InlinePlanCard** + **PlanCard** + **PlanDock** components for Plannotator-style plan display
+- **Plan persistence** service (`plan-persistence.ts`) for saving/loading plans
+
 ### Changed
 - 1,692 tests passing (0 failures), up from 1,641
 - 91 Praxis tests (74 unit + 11 integration + 6 doc-tests)
 - 3 Playwright e2e tests passing
 - 0 clippy warnings, 0 TypeScript errors
+- Praxis module count: 19 source files (was 15 pre-v2)
 
 ## v2.2.1 (2026-03-18)
 

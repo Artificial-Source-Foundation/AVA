@@ -1,6 +1,6 @@
 # AVA Backlog
 
-> Last updated: 2026-03-18
+> Last updated: 2026-03-19
 > Related: [roadmap.md](roadmap.md), [epics.md](epics.md)
 > SOTA gap research: [sota-gap-analysis.md](sota-gap-analysis.md) (60 items from 12 codebases — reference only, not a todo list)
 
@@ -8,6 +8,7 @@ Tool surface policy: default tools stay capped at 6 (`read`, `write`, `edit`, `b
 
 ## Recently Completed
 
+- **Praxis v2 Phases 1-6** — LLM-powered Director (3 intelligence levels), scout system, Board of Directors (multi-model consensus), plan tool with PlanBridge, structured events + Tauri bridge, 91 tests
 - **Enhancement Batch 3** — edit reliability cascade (14 strategies: 3-way merge + diff-match-patch), persistent audit log (SQLite, opt-out, session/tool queries)
 - **Enhancement Batch 2** — Anthropic prompt caching (cache_control on system + tools, ~25% cost savings), auto-retry middleware for read-only tools (2x, exponential backoff), tiktoken-rs accurate BPE token counting
 - **Enhancement Batch 1** — tool schema pre-validation (catches malformed calls before execution), stream silence timeout (90s configurable, per-chunk reset), auto-compaction toggle + threshold slider in Settings
@@ -43,46 +44,23 @@ Tool surface policy: default tools stay capped at 6 (`read`, `write`, `edit`, `b
 8. **TUI smoke test suite** — automated smoke tests for TUI mode.
 9. **CLI headless regression** — verify all headless flags work.
 
-### Praxis Frontend Wiring
-
-**Sprint D: Tauri IPC + Team Mode Activation**
+### Praxis Frontend Wiring (backend Phases 1-6 complete, frontend wiring remaining)
 
 15. **Wire Tauri IPC commands for Praxis** — `start_delegation`, `get_praxis_status`, `cancel_praxis` commands in `src-tauri/src/commands/`.
 16. **Connect Team button to team mode activation** — status bar Team button triggers `start_delegation`, switches UI to team layout.
-17. **Wire TeamPanel to team store** — currently stub; connect to live PraxisEvent stream via agent-team-bridge.
+17. **Wire TeamPanel to live PraxisEvent stream** — connect to live event stream via agent-team-bridge (store wired, events not flowing yet).
 18. **Wire TeamMetrics/DelegationLog/WorkerDetail into right panel** — populate metrics footer (tokens, files, cost, success rate) and worker detail views.
+19. **Handle 12 currently-dropped Praxis events in TUI** — workflow, spec, artifact, conflict, ACP events.
+20. **Wire worktree creation per lead** — git worktree lifecycle management during team mode.
+21. **Implement Merge Worker** — integration worker that merges lead worktrees, resolves conflicts.
+22. **Lead question relay through Director chat** — leads surface questions as colored border cards in Director chat; user answers relay back.
+23. **Solo/Team mode switching** — full lifecycle: Solo -> Team (plan + spawn), Team -> Solo (stop all + collapse), Resume Team (review + replan).
 
-**Sprint E: Tauri Bridge + Agent Communication**
+### Research Items
 
-19. **Add Tauri IPC commands for Praxis** — `start_delegation`, `get_praxis_status`, `cancel_praxis`, `steer_lead` in `src-tauri/src/commands/`.
-20. **Add PraxisEvent types to `src-tauri/src/events.rs`** — bridge 19 event types from Rust to frontend.
-21. **Add frontend PraxisEvent types to `src/types/rust-ipc.ts`** — TypeScript counterparts for all Praxis events.
-22. **Handle 12 currently-dropped Praxis events in TUI** — workflow, spec, artifact, conflict, ACP events.
-23. **Wire worktree creation per lead** — git worktree lifecycle management during team mode.
-24. **Implement Merge Worker** — integration worker that merges lead worktrees, resolves conflicts.
-25. **Lead question relay through Director chat** — leads surface questions as colored border cards in Director chat; user answers relay back.
-26. **Stop button per lead/worker** — individual stop buttons trigger Director "what went wrong?" flow and replan.
-27. **Solo/Team mode switching** — full lifecycle: Solo → Team (plan + spawn), Team → Solo (stop all + collapse), Resume Team (review + replan).
-
-**Sprint F: LLM-Powered Director + Scout System**
-
-22. **LLM-powered Director planning** — replace `pick_domain()` switch statement with LLM-based task analysis. Director detects complexity (Level 1/2/3) and adapts orchestration.
-23. **Scout system** — lightweight agents (Haiku/Flash/Mercury) that read codebase sections and produce structured summaries for Director. Director spawns scouts before planning.
-24. **Plan UI in chat** — Plannotator-style plan display as structured message in Director chat. Clickable steps, comments, reorder, delete, add. Budget per step + total.
-25. **Budget delegation chain** — Director → Leads → Workers proportional budget splitting, warnings, and escalation when exhausted.
-
-**Sprint G: Board of Directors + Team Configuration**
-
-26. **Board of Directors** — multi-model consensus for Level 3 tasks. 3 SOTA models with distinct personalities vote on approach. Director synthesizes recommendations.
-27. **Team configuration page** — Settings → Agents UI for team presets, per-lead model/tool selection, scout model, board models, execution mode.
-28. **Smart model routing** — automatic model tier selection by role (scouts=cheap, workers=mid, leads=strong, director=strongest, board=top per provider). User overrides in config.
-29. **Worktree per lead + Merge Worker** — git worktree creation/cleanup per lead, Merge Worker for integration, conflict resolution UI.
-
-**Sprint H: Plannotator Integration**
-
-30. **Solo plan mode** — regular AI suggests plan via plan tool, user reviews/edits in chat. Same Plannotator UI as Director mode.
-31. **Director plan mode** — Director creates plan after scout reports, shows in chat with approve/comment/edit buttons.
-32. **Plan persistence** — plans saved to `.ava/plans/` as Markdown, exportable/importable, team-sharable.
+24. **Batch 4: Security & Transport** — seccomp-bpf sandbox profile for Linux, WebSocket transport for remote agent communication.
+25. **Summary chaining research** — explore chaining compaction summaries across sessions for long-running projects.
+26. **Competitor logging research** — analyze Claude Code / Cursor / Devin logging and telemetry approaches for improving debug observability.
 
 ### Later (when users ask for it)
 

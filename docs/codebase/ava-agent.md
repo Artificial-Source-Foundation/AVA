@@ -61,3 +61,8 @@ Used by: ava-tui, src-tauri, ava-praxis
 - **Stuck detection**: 8 scenarios (empty responses, identical responses, tool loops, error loops, cost threshold, alternating patterns, high error rate, stalled progress)
 - **Plan mode**: Restricts write tools to `.ava/plans/*.md` paths only
 - **Trust gating**: Project-local instructions and MCP tools require `--trust` flag
+- **Tool schema pre-validation**: Validates tool call parameters against JSON schema before execution; surfaces actionable errors for malformed calls
+- **Stream silence timeout**: Configurable per-chunk timeout (default 90s) via `AgentConfig.stream_timeout_secs`; cancels hung LLM streams
+- **Prompt caching**: `AgentConfig.prompt_caching` flag (default true); Anthropic provider injects `cache_control` on system prompt and tool definitions for ~25% cost savings on cache hits
+- **tiktoken BPE token counting**: `count_tokens()` in `instructions.rs` uses cl100k_base tokenizer for accurate token counts (replaces character-based heuristic)
+- **Auto-retry for read-only tools**: Middleware retries transient failures on read-only tools (2x with exponential backoff)

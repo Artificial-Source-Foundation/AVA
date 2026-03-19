@@ -46,13 +46,7 @@ impl WebState {
     pub async fn init(data_dir: PathBuf) -> Result<Self> {
         let config = AgentStackConfig {
             data_dir,
-            provider: None,
-            model: None,
-            max_turns: 0,
-            max_budget_usd: 0.0,
-            yolo: false,
-            injected_provider: None,
-            working_dir: None,
+            ..Default::default()
         };
 
         let (stack, question_rx, approval_rx, _plan_rx) = AgentStack::new(config).await?;

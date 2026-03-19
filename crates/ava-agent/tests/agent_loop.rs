@@ -166,6 +166,8 @@ fn build_loop(responses: Vec<String>, token_limit: usize, max_turns: usize) -> A
             extended_tools: false,
             plan_mode: false,
             post_edit_validation: None,
+            auto_compact: true,
+            stream_timeout_secs: 90,
         },
     )
 }
@@ -266,6 +268,8 @@ async fn error_hint_injected_after_tool_failure() {
             extended_tools: false,
             plan_mode: false,
             post_edit_validation: None,
+            auto_compact: true,
+            stream_timeout_secs: 90,
         },
     );
 
@@ -358,6 +362,8 @@ async fn post_edit_validation_runs_opt_in_lint_after_edit() {
                 test_command: None,
                 test_timeout_secs: 60,
             }),
+            auto_compact: true,
+            stream_timeout_secs: 90,
         },
     );
 
@@ -450,6 +456,8 @@ async fn post_edit_validation_keeps_tool_success_distinct_when_tests_fail() {
                 test_command: None,
                 test_timeout_secs: 60,
             }),
+            auto_compact: true,
+            stream_timeout_secs: 90,
         },
     );
 
@@ -552,6 +560,8 @@ async fn post_edit_validation_scopes_lint_for_apply_patch_paths() {
                 test_command: None,
                 test_timeout_secs: 60,
             }),
+            auto_compact: true,
+            stream_timeout_secs: 90,
         },
     );
 

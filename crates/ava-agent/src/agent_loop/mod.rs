@@ -5,7 +5,7 @@ mod tool_execution;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::pin::Pin;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use std::sync::Arc;
 
@@ -40,6 +40,13 @@ fn usage_cost_usd(model: &str, usage: &TokenUsage) -> f64 {
 
 /// Hard cap on total tool calls per agent turn to prevent runaway tool invocations.
 const MAX_TOOLS_PER_TURN: usize = 50;
+
+/// Default timeout in seconds for LLM stream silence. If no tokens arrive within
+/// this window, the stream is cancelled. This is a per-chunk timeout (resets on each
+/// received token), not a total request timeout. Set high enough to accommodate
+/// thinking models (e.g., Opus with extended thinking can take 30-60s before the
+/// first token).
+pub const LLM_STREAM_TIMEOUT_SECS: u64 = 90;
 
 /// Core agent execution loop that orchestrates LLM calls, tool execution, and stuck detection.
 ///
@@ -97,9 +104,16 @@ pub struct AgentConfig {
     /// When true, restrict write/edit tools to `.ava/plans/*.md` paths only (Plan mode).
     #[serde(default)]
     pub plan_mode: bool,
+    /// When true, automatically compact context when usage exceeds the threshold (default true).
+    #[serde(default = "default_auto_compact")]
+    pub auto_compact: bool,
     /// Optional post-edit validation steps run after successful write/edit tools.
     #[serde(default)]
     pub post_edit_validation: Option<PostEditValidationConfig>,
+    /// Timeout in seconds for LLM stream silence. If no chunk arrives within this
+    /// window, the stream is cancelled. Resets on each received chunk. 0 = no timeout.
+    #[serde(default = "default_stream_timeout_secs")]
+    pub stream_timeout_secs: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -135,8 +149,16 @@ fn default_loop_detection() -> bool {
     true
 }
 
+fn default_auto_compact() -> bool {
+    true
+}
+
 fn default_post_edit_test_timeout_secs() -> u64 {
     60
+}
+
+fn default_stream_timeout_secs() -> u64 {
+    LLM_STREAM_TIMEOUT_SECS
 }
 
 /// Events emitted during streaming agent execution for UI consumption.
@@ -415,7 +437,36 @@ impl AgentLoop {
         let mut last_usage: Option<TokenUsage> = None;
         let mut chunk_count: usize = 0;
 
-        while let Some(chunk) = stream.next().await {
+        // Per-chunk silence timeout: if no chunk arrives within this window,
+        // the stream is cancelled. A value of 0 disables the timeout.
+        let timeout_secs = self.config.stream_timeout_secs;
+        let use_timeout = timeout_secs > 0;
+        let timeout_duration = Duration::from_secs(timeout_secs);
+
+        loop {
+            let maybe_chunk = if use_timeout {
+                match tokio::time::timeout(timeout_duration, stream.next()).await {
+                    Ok(chunk) => chunk,
+                    Err(_elapsed) => {
+                        let msg = format!(
+                            "LLM stream timed out after {timeout_secs} seconds of silence. \
+                             The provider may be overloaded."
+                        );
+                        warn!("{msg}");
+                        return Err(ava_types::AvaError::ProviderError {
+                            provider: self.config.model.clone(),
+                            message: msg,
+                        });
+                    }
+                }
+            } else {
+                stream.next().await
+            };
+
+            let Some(chunk) = maybe_chunk else {
+                break;
+            };
+
             chunk_count += 1;
             trace!(
                 chunk_count,
@@ -916,7 +967,7 @@ impl AgentLoop {
                 continue;
             }
 
-            if self.context.should_compact() {
+            if self.config.auto_compact && self.context.should_compact() {
                 // Try lightweight pruning first — much cheaper than LLM compaction.
                 let pruned = self.context.try_prune();
                 if pruned > 0 {
@@ -1079,6 +1130,8 @@ mod tests {
             extended_tools: false,
             plan_mode: false,
             post_edit_validation: None,
+            auto_compact: true,
+            stream_timeout_secs: LLM_STREAM_TIMEOUT_SECS,
         };
         let llm = crate::tests::mock_llm();
 
@@ -1108,6 +1161,8 @@ mod tests {
             extended_tools: false,
             plan_mode: false,
             post_edit_validation: None,
+            auto_compact: true,
+            stream_timeout_secs: LLM_STREAM_TIMEOUT_SECS,
         };
         let llm = crate::tests::mock_llm();
 
@@ -1140,6 +1195,8 @@ mod tests {
             extended_tools: false,
             plan_mode: false,
             post_edit_validation: None,
+            auto_compact: true,
+            stream_timeout_secs: LLM_STREAM_TIMEOUT_SECS,
         };
         let llm = crate::tests::mock_llm();
 
@@ -1189,6 +1246,8 @@ mod tests {
             extended_tools: false,
             plan_mode: false,
             post_edit_validation: None,
+            auto_compact: true,
+            stream_timeout_secs: LLM_STREAM_TIMEOUT_SECS,
         };
         let llm = crate::tests::mock_llm();
 
@@ -1238,6 +1297,8 @@ mod tests {
             extended_tools: false,
             plan_mode: false,
             post_edit_validation: None,
+            auto_compact: true,
+            stream_timeout_secs: LLM_STREAM_TIMEOUT_SECS,
         };
         let llm = crate::tests::mock_llm();
 
@@ -1262,6 +1323,8 @@ mod tests {
             extended_tools: false,
             plan_mode: false,
             post_edit_validation: None,
+            auto_compact: true,
+            stream_timeout_secs: LLM_STREAM_TIMEOUT_SECS,
         };
         let llm = crate::tests::mock_llm();
 
@@ -1426,5 +1489,143 @@ mod tests {
         assert!(!is_plan_path("src/main.rs"));
         assert!(!is_plan_path(".ava/config.toml"));
         assert!(!is_plan_path(".ava/plans/")); // no filename
+    }
+
+    // --- Tool schema pre-validation tests ---
+
+    mod validate_tool_call_tests {
+        use super::*;
+        use ava_tools::registry::{Tool as ToolTrait, ToolRegistry};
+        use tool_execution::validate_tool_call;
+
+        /// Minimal tool for testing schema validation without platform dependencies.
+        struct FakeBashTool;
+
+        #[async_trait::async_trait]
+        impl ToolTrait for FakeBashTool {
+            fn name(&self) -> &str {
+                "bash"
+            }
+            fn description(&self) -> &str {
+                "Run a shell command"
+            }
+            fn parameters(&self) -> serde_json::Value {
+                serde_json::json!({
+                    "type": "object",
+                    "required": ["command"],
+                    "properties": {
+                        "command": { "type": "string" },
+                        "timeout_ms": { "type": "integer", "minimum": 1 },
+                        "cwd": { "type": "string" }
+                    }
+                })
+            }
+            async fn execute(&self, _args: serde_json::Value) -> ava_types::Result<ToolResult> {
+                Ok(ToolResult {
+                    call_id: String::new(),
+                    content: String::new(),
+                    is_error: false,
+                })
+            }
+        }
+
+        fn registry_with_bash() -> ToolRegistry {
+            let mut registry = ToolRegistry::new();
+            registry.register(FakeBashTool);
+            registry
+        }
+
+        #[test]
+        fn valid_tool_call_passes() {
+            let registry = registry_with_bash();
+            let tc = ToolCall {
+                id: "1".to_string(),
+                name: "bash".to_string(),
+                arguments: serde_json::json!({"command": "echo hello"}),
+            };
+            assert!(validate_tool_call(&tc, &registry).is_none());
+        }
+
+        #[test]
+        fn unknown_tool_fails() {
+            let registry = registry_with_bash();
+            let tc = ToolCall {
+                id: "1".to_string(),
+                name: "nonexistent".to_string(),
+                arguments: serde_json::json!({}),
+            };
+            let err = validate_tool_call(&tc, &registry);
+            assert!(err.is_some());
+            assert!(err.unwrap().contains("not found"));
+        }
+
+        #[test]
+        fn missing_required_param_fails() {
+            let registry = registry_with_bash();
+            let tc = ToolCall {
+                id: "1".to_string(),
+                name: "bash".to_string(),
+                arguments: serde_json::json!({}),
+            };
+            let err = validate_tool_call(&tc, &registry);
+            assert!(err.is_some());
+            let msg = err.unwrap();
+            assert!(
+                msg.contains("missing required parameter 'command'"),
+                "got: {msg}"
+            );
+        }
+
+        #[test]
+        fn wrong_type_fails() {
+            let registry = registry_with_bash();
+            let tc = ToolCall {
+                id: "1".to_string(),
+                name: "bash".to_string(),
+                arguments: serde_json::json!({"command": 42}),
+            };
+            let err = validate_tool_call(&tc, &registry);
+            assert!(err.is_some());
+            let msg = err.unwrap();
+            assert!(msg.contains("expected type 'string'"), "got: {msg}");
+        }
+
+        #[test]
+        fn null_args_with_required_params_fails() {
+            let registry = registry_with_bash();
+            let tc = ToolCall {
+                id: "1".to_string(),
+                name: "bash".to_string(),
+                arguments: serde_json::Value::Null,
+            };
+            let err = validate_tool_call(&tc, &registry);
+            assert!(err.is_some());
+            assert!(err.unwrap().contains("Missing required parameter"));
+        }
+
+        #[test]
+        fn optional_params_with_wrong_type_fails() {
+            let registry = registry_with_bash();
+            let tc = ToolCall {
+                id: "1".to_string(),
+                name: "bash".to_string(),
+                arguments: serde_json::json!({"command": "ls", "timeout_ms": "not a number"}),
+            };
+            let err = validate_tool_call(&tc, &registry);
+            assert!(err.is_some());
+            let msg = err.unwrap();
+            assert!(msg.contains("expected type 'integer'"), "got: {msg}");
+        }
+
+        #[test]
+        fn extra_params_are_allowed() {
+            let registry = registry_with_bash();
+            let tc = ToolCall {
+                id: "1".to_string(),
+                name: "bash".to_string(),
+                arguments: serde_json::json!({"command": "ls", "unknown_param": "value"}),
+            };
+            assert!(validate_tool_call(&tc, &registry).is_none());
+        }
     }
 }

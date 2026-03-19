@@ -84,13 +84,7 @@ impl DesktopBridge {
     pub async fn init(data_dir: PathBuf) -> Result<Self, String> {
         let config = AgentStackConfig {
             data_dir,
-            provider: None,
-            model: None,
-            max_turns: 0,
-            max_budget_usd: 0.0,
-            yolo: false,
-            injected_provider: None,
-            working_dir: None,
+            ..Default::default()
         };
 
         let (stack, question_rx, approval_rx, plan_rx) =

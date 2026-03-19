@@ -290,6 +290,11 @@ impl ToolRegistry {
         self.sources.get(name).cloned()
     }
 
+    /// Look up the JSON Schema parameters for a registered tool.
+    pub fn tool_parameters(&self, name: &str) -> Option<Value> {
+        self.tools.get(name).map(|tool| tool.parameters())
+    }
+
     /// Execute a tool call and return both the result and an invocation record
     /// capturing timing and success/failure metadata.
     #[instrument(skip(self), fields(tool = %tool_call.name))]

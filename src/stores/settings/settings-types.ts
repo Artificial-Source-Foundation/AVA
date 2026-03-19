@@ -90,8 +90,9 @@ export interface GenerationSettings {
   editorModel: string // cheaper model for file edits by Junior Devs ('' = use primary)
   thinkingEnabled: boolean // Enable extended thinking / reasoning mode (derived from reasoningEffort)
   reasoningEffort: ReasoningEffort // Reasoning intensity: off, low, medium, high
+  autoCompact: boolean // Automatically compact conversation when context reaches threshold
   compactionThreshold: number // 50–95, default 80
-  delegationEnabled: boolean // Enable team delegation (Praxis hierarchy) — context % to trigger compaction
+  delegationEnabled: boolean // Enable team delegation (Praxis hierarchy)
 }
 
 export interface AgentLimitSettings {

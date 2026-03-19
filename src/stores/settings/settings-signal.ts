@@ -37,6 +37,7 @@ const { settings, setSettingsRaw } = createRoot(() => {
           generation: {
             ...prev.generation,
             maxTokens: (patch.maxTokens as number) ?? prev.generation.maxTokens,
+            autoCompact: (patch.autoCompact as boolean) ?? prev.generation.autoCompact,
             compactionThreshold:
               (patch.compactionThreshold as number) ?? prev.generation.compactionThreshold,
           },

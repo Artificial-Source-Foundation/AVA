@@ -4,6 +4,7 @@ use std::time::Instant;
 use ava_tools::monitor::{hash_arguments, ToolExecution};
 use ava_types::{Message, Role, Session, ToolCall, ToolResult};
 use serde_json::{json, Value};
+use tracing::debug;
 
 use ava_tools::registry::ToolRegistry;
 
@@ -41,6 +42,117 @@ pub(super) fn truncate_tool_result(result: &mut ToolResult) {
     }
 }
 
+/// Pre-validate a tool call's arguments against the tool's JSON Schema parameters.
+///
+/// Checks that the tool exists in the registry, all required parameters are present,
+/// and parameter types match the schema (string, number/integer, boolean, array, object).
+/// Returns `Some(error_message)` if validation fails, `None` if valid.
+pub(super) fn validate_tool_call(tool_call: &ToolCall, registry: &ToolRegistry) -> Option<String> {
+    // Check tool exists
+    if !registry.has_tool(&tool_call.name) {
+        let available = registry.tool_names().join(", ");
+        return Some(format!(
+            "Tool '{}' not found. Available tools: {available}",
+            tool_call.name
+        ));
+    }
+
+    let Some(schema) = registry.tool_parameters(&tool_call.name) else {
+        return None; // No schema to validate against
+    };
+
+    // Arguments must be an object (or null/missing which we treat as empty object)
+    let args = match tool_call.arguments {
+        Value::Object(ref map) => map,
+        Value::Null => {
+            // Check if there are required params — if so, fail
+            if let Some(required) = schema.get("required").and_then(|v| v.as_array()) {
+                if !required.is_empty() {
+                    let names: Vec<&str> = required.iter().filter_map(|v| v.as_str()).collect();
+                    return Some(format!(
+                        "Tool '{}': arguments must be an object. Missing required parameter(s): {}",
+                        tool_call.name,
+                        names.join(", ")
+                    ));
+                }
+            }
+            return None;
+        }
+        _ => {
+            return Some(format!(
+                "Tool '{}': arguments must be a JSON object, got {}",
+                tool_call.name,
+                value_type_name(&tool_call.arguments)
+            ));
+        }
+    };
+
+    let mut errors = Vec::new();
+
+    // Check required parameters
+    if let Some(required) = schema.get("required").and_then(|v| v.as_array()) {
+        for req in required {
+            if let Some(name) = req.as_str() {
+                if !args.contains_key(name) {
+                    errors.push(format!("missing required parameter '{name}'"));
+                }
+            }
+        }
+    }
+
+    // Check parameter types against schema properties
+    if let Some(properties) = schema.get("properties").and_then(|v| v.as_object()) {
+        for (key, value) in args {
+            if let Some(prop_schema) = properties.get(key) {
+                if let Some(expected_type) = prop_schema.get("type").and_then(|v| v.as_str()) {
+                    if !value_matches_type(value, expected_type) {
+                        errors.push(format!(
+                            "parameter '{key}' expected type '{expected_type}', got {}",
+                            value_type_name(value)
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
+    if errors.is_empty() {
+        None
+    } else {
+        Some(format!(
+            "Tool '{}' call invalid: {}",
+            tool_call.name,
+            errors.join("; ")
+        ))
+    }
+}
+
+/// Check if a JSON value matches an expected JSON Schema type.
+fn value_matches_type(value: &Value, expected: &str) -> bool {
+    match expected {
+        "string" => value.is_string(),
+        "number" => value.is_number(),
+        "integer" => value.is_i64() || value.is_u64(),
+        "boolean" => value.is_boolean(),
+        "array" => value.is_array(),
+        "object" => value.is_object(),
+        "null" => value.is_null(),
+        _ => true, // Unknown type — don't reject
+    }
+}
+
+/// Return a human-readable type name for a JSON value.
+fn value_type_name(value: &Value) -> &'static str {
+    match value {
+        Value::Null => "null",
+        Value::Bool(_) => "boolean",
+        Value::Number(_) => "number",
+        Value::String(_) => "string",
+        Value::Array(_) => "array",
+        Value::Object(_) => "object",
+    }
+}
+
 impl AgentLoop {
     /// Execute a tool call and return both the result and a timed execution record.
     /// In plan mode, write/edit tools are restricted to `.ava/plans/*.md` paths.
@@ -55,6 +167,24 @@ impl AgentLoop {
             tool_call.name = repaired;
         }
         let tool_call = &tool_call;
+
+        // Pre-validate tool call schema (required params, types) before execution
+        if let Some(validation_error) = validate_tool_call(tool_call, &self.tools) {
+            debug!(tool = %tool_call.name, error = %validation_error, "tool call pre-validation failed");
+            let result = ToolResult {
+                call_id: tool_call.id.clone(),
+                content: validation_error,
+                is_error: true,
+            };
+            let execution = ToolExecution {
+                tool_name: tool_call.name.clone(),
+                arguments_hash: hash_arguments(&tool_call.arguments),
+                success: false,
+                duration: std::time::Duration::ZERO,
+                timestamp: Instant::now(),
+            };
+            return (result, execution);
+        }
 
         // Plan mode: block write/edit/bash to non-plan paths
         if self.config.plan_mode {

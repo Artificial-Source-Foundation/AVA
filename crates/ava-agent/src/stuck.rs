@@ -233,6 +233,8 @@ mod tests {
             extended_tools: false,
             plan_mode: false,
             post_edit_validation: None,
+            auto_compact: true,
+            stream_timeout_secs: crate::agent_loop::LLM_STREAM_TIMEOUT_SECS,
         }
     }
 

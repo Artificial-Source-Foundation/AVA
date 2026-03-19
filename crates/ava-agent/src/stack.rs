@@ -42,7 +42,7 @@ use tokio_util::sync::CancellationToken;
 
 use tracing::{info, instrument, warn};
 
-use crate::agent_loop::{AgentConfig, AgentEvent, AgentLoop};
+use crate::agent_loop::{AgentConfig, AgentEvent, AgentLoop, LLM_STREAM_TIMEOUT_SECS};
 use crate::budget::BudgetTelemetry;
 use crate::routing::analyze_task;
 
@@ -128,6 +128,11 @@ pub struct AgentStack {
     shared_tool_sources: SharedToolSources,
     /// Sub-agent configuration loaded from agents.toml files.
     agents_config: AgentsConfig,
+    /// Compaction threshold as a percentage (50–95). Stored as integer, converted
+    /// to fraction (0.50–0.95) when building `CondenserConfig`.
+    compaction_threshold_pct: u8,
+    /// When false, automatic context compaction is disabled entirely.
+    auto_compact: bool,
     /// Parent session ID for linking sub-agent sessions back to their parent.
     /// Set by the TUI before calling `run()` so spawned sub-agents record lineage.
     pub parent_session_id: RwLock<Option<String>>,
@@ -148,6 +153,11 @@ pub struct AgentStackConfig {
     /// MCP config lookup, custom tool discovery, and codebase indexing. Useful for
     /// benchmarks and sandboxed runs that should not touch the real project.
     pub working_dir: Option<PathBuf>,
+    /// Compaction threshold as a percentage (50–95, default 80). Converted to a
+    /// fraction (0.50–0.95) when passed to `CondenserConfig`.
+    pub compaction_threshold_pct: u8,
+    /// When false, automatic context compaction is disabled entirely.
+    pub auto_compact: bool,
 }
 
 #[derive(Debug)]
@@ -168,6 +178,8 @@ impl Default for AgentStackConfig {
             yolo: false,
             injected_provider: None,
             working_dir: None,
+            compaction_threshold_pct: 80,
+            auto_compact: true,
         }
     }
 }
@@ -396,6 +408,8 @@ impl AgentStack {
                 permission_inspector,
                 shared_tool_sources,
                 agents_config,
+                compaction_threshold_pct: config.compaction_threshold_pct,
+                auto_compact: config.auto_compact,
                 parent_session_id: RwLock::new(None),
                 plugin_manager,
             },
@@ -871,6 +885,8 @@ impl AgentStack {
             extended_tools: false,
             plan_mode,
             post_edit_validation: None,
+            auto_compact: self.auto_compact,
+            stream_timeout_secs: LLM_STREAM_TIMEOUT_SECS,
         };
 
         let enriched_goal = self.enrich_goal_with_memories(goal).await;
@@ -879,9 +895,11 @@ impl AgentStack {
             guard.as_ref().map(|idx| idx.pagerank.clone())
         };
         let summarizer: Arc<dyn Summarizer> = Arc::new(LlmSummarizer(provider.clone()));
+        let compaction_pct = self.compaction_threshold_pct as f32 / 100.0;
         let condenser_config = CondenserConfig {
             max_tokens: config.token_limit,
             target_tokens: config.token_limit * 3 / 4,
+            compaction_threshold_pct: compaction_pct,
             ..Default::default()
         };
         let condenser = create_hybrid_condenser_with_relevance(
@@ -1315,7 +1333,9 @@ impl TaskSpawner for AgentTaskSpawner {
             ),
             extended_tools: true, // sub-agents get full tool access
             plan_mode: false,
+            auto_compact: true,
             post_edit_validation: None,
+            stream_timeout_secs: LLM_STREAM_TIMEOUT_SECS,
         };
         let mut agent = AgentLoop::new(
             Box::new(SharedProvider::new(provider)),

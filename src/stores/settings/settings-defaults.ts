@@ -55,6 +55,7 @@ export const DEFAULT_GENERATION: GenerationSettings = {
   editorModel: '',
   thinkingEnabled: false,
   reasoningEffort: 'off',
+  autoCompact: true,
   compactionThreshold: 80,
   delegationEnabled: false,
 }

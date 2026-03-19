@@ -1,6 +1,6 @@
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use ava_llm::ThinkingConfig;
 use ava_types::{AvaError, Result, StreamToolCall, ThinkingLevel, TokenUsage, ToolCall};
@@ -138,16 +138,39 @@ impl AgentLoop {
             }
         }
 
+        let timeout_secs = self.config.stream_timeout_secs;
         let result = if self.llm.supports_tools() {
             let tool_defs = self.active_tool_defs();
-            let response = self.llm.generate_with_tools(messages, &tool_defs).await?;
+            let fut = self.llm.generate_with_tools(messages, &tool_defs);
+            let response = if timeout_secs > 0 {
+                tokio::time::timeout(Duration::from_secs(timeout_secs), fut)
+                    .await
+                    .map_err(|_| AvaError::ProviderError {
+                        provider: self.config.model.clone(),
+                        message: format!(
+                            "LLM request timed out after {timeout_secs} seconds. \
+                             The provider may be overloaded."
+                        ),
+                    })??
+            } else {
+                fut.await?
+            };
             Ok((response.content, response.tool_calls, response.usage))
         } else {
-            // Gap: LLMProvider::generate() returns Result<String>, so no token usage
-            // is available when the provider doesn't support native tool calling.
-            // Fixing this requires changing the trait signature to return a struct
-            // with both text and optional usage.
-            let response = self.llm.generate(messages).await?;
+            let fut = self.llm.generate(messages);
+            let response = if timeout_secs > 0 {
+                tokio::time::timeout(Duration::from_secs(timeout_secs), fut)
+                    .await
+                    .map_err(|_| AvaError::ProviderError {
+                        provider: self.config.model.clone(),
+                        message: format!(
+                            "LLM request timed out after {timeout_secs} seconds. \
+                             The provider may be overloaded."
+                        ),
+                    })??
+            } else {
+                fut.await?
+            };
             let tool_calls = parse_tool_calls(&response)?;
             Ok((response, tool_calls, None))
         };
@@ -193,6 +216,7 @@ impl AgentLoop {
             }
         }
 
+        let timeout_secs = self.config.stream_timeout_secs;
         let result = if self.llm.supports_tools() {
             let tool_defs = self.active_tool_defs();
             let thinking = ThinkingConfig::new(
@@ -209,17 +233,38 @@ impl AgentLoop {
                     "provider could not fully honor requested thinking budget"
                 );
             }
-            let response = self
+            let fut = self
                 .llm
-                .generate_with_thinking_config(messages, &tool_defs, thinking)
-                .await?;
+                .generate_with_thinking_config(messages, &tool_defs, thinking);
+            let response = if timeout_secs > 0 {
+                tokio::time::timeout(Duration::from_secs(timeout_secs), fut)
+                    .await
+                    .map_err(|_| AvaError::ProviderError {
+                        provider: self.config.model.clone(),
+                        message: format!(
+                            "LLM request timed out after {timeout_secs} seconds. \
+                             The provider may be overloaded."
+                        ),
+                    })??
+            } else {
+                fut.await?
+            };
             Ok((response.content, response.tool_calls, response.usage))
         } else {
-            // Gap: LLMProvider::generate() returns Result<String>, so no token usage
-            // is available when the provider doesn't support native tool calling.
-            // Fixing this requires changing the trait signature to return a struct
-            // with both text and optional usage.
-            let response = self.llm.generate(messages).await?;
+            let fut = self.llm.generate(messages);
+            let response = if timeout_secs > 0 {
+                tokio::time::timeout(Duration::from_secs(timeout_secs), fut)
+                    .await
+                    .map_err(|_| AvaError::ProviderError {
+                        provider: self.config.model.clone(),
+                        message: format!(
+                            "LLM request timed out after {timeout_secs} seconds. \
+                             The provider may be overloaded."
+                        ),
+                    })??
+            } else {
+                fut.await?
+            };
             let tool_calls = parse_tool_calls(&response)?;
             Ok((response, tool_calls, None))
         };

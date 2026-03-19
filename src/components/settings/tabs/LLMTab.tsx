@@ -7,6 +7,7 @@
 
 import { type Component, createMemo, For, Show } from 'solid-js'
 import { useSettings } from '../../../stores/settings'
+import { ToggleRow } from '../../ui/ToggleRow'
 import {
   EDITOR_MODEL_OPTIONS,
   EDITOR_PAIRS,
@@ -223,25 +224,35 @@ export const LLMTab: Component = () => {
         </Show>
       </div>
 
-      {/* Compaction Threshold */}
+      {/* Context Compaction */}
       <div class="pt-2 border-t border-[var(--border-subtle)]">
         <SectionHeader title="Context Compaction" />
-        <SliderRow
-          label="Compaction threshold"
-          value={settings().generation.compactionThreshold}
-          min={50}
-          max={95}
-          step={5}
-          format={(v) => `${v}%`}
-          onChange={(v) =>
-            updateSettings({
-              generation: { ...settings().generation, compactionThreshold: v },
-            })
-          }
+        <ToggleRow
+          label="Auto-compact conversation"
+          description="Automatically compress old messages when context window usage is high"
+          checked={settings().generation.autoCompact}
+          onChange={(v) => updateGeneration({ autoCompact: v })}
         />
-        <p class="text-[10px] text-[var(--text-muted)] mt-1">
-          Auto-compact conversation when context reaches this percentage of the token limit.
-        </p>
+        <Show when={settings().generation.autoCompact}>
+          <div class="mt-2">
+            <SliderRow
+              label="Compaction threshold"
+              value={settings().generation.compactionThreshold}
+              min={50}
+              max={95}
+              step={5}
+              format={(v) => `${v}%`}
+              onChange={(v) =>
+                updateSettings({
+                  generation: { ...settings().generation, compactionThreshold: v },
+                })
+              }
+            />
+            <p class="text-[10px] text-[var(--text-muted)] mt-1">
+              Compress old messages when context reaches this percentage of the token limit.
+            </p>
+          </div>
+        </Show>
       </div>
 
       {/* Model Aliases */}

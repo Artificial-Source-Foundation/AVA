@@ -9,6 +9,7 @@ use regex::Regex;
 use std::path::{Component, Path, PathBuf};
 
 pub mod audit;
+pub mod audit_store;
 pub mod classifier;
 pub mod glob_rules;
 pub mod inspector;

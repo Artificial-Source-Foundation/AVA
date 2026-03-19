@@ -23,6 +23,9 @@ dirs.workspace = true
 tracing.workspace = true
 async-trait.workspace = true
 tokio = { workspace = true, features = ["time"] }
+sqlx.workspace = true
+thiserror.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt", "time"] }
+tempfile = "3.0"

@@ -1,5 +1,6 @@
 use chrono::{DateTime, Utc};
 
+use crate::audit_store::AuditStore;
 use crate::tags::{RiskLevel, SafetyTag};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -24,6 +25,10 @@ pub struct AuditEntry {
 pub struct AuditLog {
     entries: Vec<AuditEntry>,
     max_entries: usize,
+    /// Optional persistent store. When set, entries are also written to SQLite.
+    store: Option<AuditStore>,
+    /// Session ID to tag persisted entries with.
+    session_id: Option<String>,
 }
 
 impl Default for AuditLog {
@@ -31,6 +36,8 @@ impl Default for AuditLog {
         Self {
             entries: Vec::new(),
             max_entries: 1000,
+            store: None,
+            session_id: None,
         }
     }
 }
@@ -38,6 +45,27 @@ impl Default for AuditLog {
 impl AuditLog {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Create an audit log with persistent SQLite backing.
+    /// When `audit_logging` is true, entries are written to the store on each `record()` call.
+    pub fn with_store(store: AuditStore, session_id: Option<String>) -> Self {
+        Self {
+            entries: Vec::new(),
+            max_entries: 1000,
+            store: Some(store),
+            session_id,
+        }
+    }
+
+    /// Set the session ID for tagging persisted entries.
+    pub fn set_session_id(&mut self, session_id: impl Into<String>) {
+        self.session_id = Some(session_id.into());
+    }
+
+    /// Return a reference to the persistent store, if configured.
+    pub fn store(&self) -> Option<&AuditStore> {
+        self.store.as_ref()
     }
 
     pub fn record(
@@ -48,6 +76,26 @@ impl AuditLog {
         tags: Vec<SafetyTag>,
         decision: AuditDecision,
     ) {
+        self.record_with_source(
+            tool_name,
+            arguments_summary,
+            risk_level,
+            tags,
+            decision,
+            None,
+        );
+    }
+
+    /// Record an audit entry with an optional tool source (e.g. "builtin", "mcp", "custom").
+    pub fn record_with_source(
+        &mut self,
+        tool_name: impl Into<String>,
+        arguments_summary: impl Into<String>,
+        risk_level: RiskLevel,
+        tags: Vec<SafetyTag>,
+        decision: AuditDecision,
+        tool_source: Option<&str>,
+    ) {
         let summary = {
             let s = arguments_summary.into();
             if s.len() > 200 {
@@ -57,14 +105,33 @@ impl AuditLog {
             }
         };
 
-        self.entries.push(AuditEntry {
+        let entry = AuditEntry {
             timestamp: Utc::now(),
             tool_name: tool_name.into(),
             arguments_summary: summary,
             risk_level,
             tags,
             decision,
-        });
+        };
+
+        // Persist to SQLite if a store is configured.
+        // Fire-and-forget: spawn a task so we don't block the caller.
+        if let Some(store) = &self.store {
+            let store = store.clone();
+            let entry_clone = entry.clone();
+            let session_id = self.session_id.clone();
+            let source = tool_source.map(String::from);
+            tokio::spawn(async move {
+                if let Err(e) = store
+                    .insert(&entry_clone, session_id.as_deref(), source.as_deref())
+                    .await
+                {
+                    tracing::warn!("failed to persist audit entry: {e}");
+                }
+            });
+        }
+
+        self.entries.push(entry);
 
         if self.entries.len() > self.max_entries {
             self.entries.remove(0);

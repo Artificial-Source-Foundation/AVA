@@ -2,12 +2,14 @@ use crate::edit::error::EditError;
 use crate::edit::request::EditRequest;
 
 mod advanced;
+mod merge_fallbacks;
 mod relative_indent;
 
 pub use advanced::{
     BlockAnchorStrategy, IndentationAwareStrategy, LineNumberStrategy, MultiOccurrenceStrategy,
     RegexMatchStrategy, TokenBoundaryStrategy,
 };
+pub use merge_fallbacks::{DiffMatchPatchStrategy, ThreeWayMergeStrategy};
 pub use relative_indent::RelativeIndentStrategy;
 
 pub trait EditStrategy: Send + Sync {

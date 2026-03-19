@@ -40,6 +40,8 @@ shell-words = "1"
 chrono.workspace = true
 dirs.workspace = true
 similar = "2"
+diffy = "0.4"
+dmp = "0.2"
 
 [dev-dependencies]
 tempfile.workspace = true

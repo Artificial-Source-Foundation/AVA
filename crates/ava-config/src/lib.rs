@@ -154,6 +154,14 @@ pub struct FeaturesConfig {
     pub enable_git: bool,
     pub enable_lsp: bool,
     pub enable_mcp: bool,
+    /// When true (default), audit log entries are persisted to `~/.ava/audit.db`.
+    /// Set to false to keep audit entries in memory only (lost on app close).
+    #[serde(default = "default_true")]
+    pub audit_logging: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl Default for FeaturesConfig {
@@ -162,6 +170,7 @@ impl Default for FeaturesConfig {
             enable_git: true,
             enable_lsp: true,
             enable_mcp: true,
+            audit_logging: true,
         }
     }
 }

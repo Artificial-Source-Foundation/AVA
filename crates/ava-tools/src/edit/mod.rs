@@ -14,9 +14,9 @@ pub use fuzzy_match::{FuzzyMatchStrategy, StreamMatch, StreamingMatcher};
 pub use recovery::{RecoveryPipeline, RecoveryResult, SelfCorrector};
 pub use request::EditRequest;
 pub use strategies::{
-    BlockAnchorStrategy, EditStrategy, ExactMatchStrategy, FlexibleMatchStrategy,
-    IndentationAwareStrategy, LineNumberStrategy, MultiOccurrenceStrategy, RegexMatchStrategy,
-    RelativeIndentStrategy, TokenBoundaryStrategy,
+    BlockAnchorStrategy, DiffMatchPatchStrategy, EditStrategy, ExactMatchStrategy,
+    FlexibleMatchStrategy, IndentationAwareStrategy, LineNumberStrategy, MultiOccurrenceStrategy,
+    RegexMatchStrategy, RelativeIndentStrategy, ThreeWayMergeStrategy, TokenBoundaryStrategy,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -45,6 +45,8 @@ impl Default for EditEngine {
                 Box::new(TokenBoundaryStrategy),
                 Box::new(IndentationAwareStrategy),
                 Box::new(MultiOccurrenceStrategy),
+                Box::new(ThreeWayMergeStrategy),
+                Box::new(DiffMatchPatchStrategy),
             ],
         }
     }
@@ -77,9 +79,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn engine_has_twelve_strategies() {
+    fn engine_has_fourteen_strategies() {
         let engine = EditEngine::new();
-        assert_eq!(engine.strategy_count(), 12);
+        assert_eq!(engine.strategy_count(), 14);
     }
 
     #[test]

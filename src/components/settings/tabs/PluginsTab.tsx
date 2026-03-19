@@ -212,7 +212,7 @@ export const PluginsTab: Component = () => {
               <Package class="w-8 h-8 text-[var(--text-muted)] mb-2" />
               <p class="text-xs text-[var(--text-secondary)] mb-1">No plugins installed</p>
               <p class="text-[10px] text-[var(--text-muted)] max-w-xs mb-3">
-                {emptyStateMessage()}
+                Plugins add capabilities to AVA. {emptyStateMessage()}
               </p>
               <button
                 type="button"

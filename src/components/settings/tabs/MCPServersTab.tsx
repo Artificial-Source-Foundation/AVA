@@ -119,7 +119,9 @@ export const MCPServersTab: Component<MCPServersTabProps> = (props) => {
       <Show
         when={props.servers.length > 0}
         fallback={
-          <p class="text-xs text-[var(--text-muted)] text-center py-6">No MCP servers configured</p>
+          <p class="text-xs text-[var(--text-muted)] text-center py-6">
+            No MCP servers configured. MCP servers extend AVA with external tools.
+          </p>
         }
       >
         <div class="space-y-0.5">

@@ -2,10 +2,10 @@
  * Toolbar Strip
  *
  * Unified strip below the textarea with model selector, reasoning toggle,
- * plan/act slider, permission badge, sandbox toggle, voice button, and more.
+ * and plan/act slider. Permission badge and sandbox toggle show conditionally.
  */
 
-import { ExternalLink, Layers, Shield } from 'lucide-solid'
+import { Layers, Shield } from 'lucide-solid'
 import { type Accessor, type Component, Show } from 'solid-js'
 import type { useAgent } from '../../../hooks/useAgent'
 import type { useChat } from '../../../hooks/useChat'
@@ -22,7 +22,6 @@ import {
   PlanActSlider,
   ReasoningDropdown,
 } from './toolbar-buttons'
-import { VoiceButton } from './voice-button'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -44,16 +43,12 @@ export interface ToolbarStripProps {
 
   // Input
   isProcessing: Accessor<boolean>
-  autoResize: () => void
-  input: Accessor<string>
-  setInput: (v: string) => void
   stashSize: Accessor<number>
 
   // Store refs
   chat: ReturnType<typeof useChat>
   agent: ReturnType<typeof useAgent>
   sessionStore: ReturnType<typeof useSession>
-  handleExternalEditor: () => Promise<void>
 }
 
 // ---------------------------------------------------------------------------
@@ -101,31 +96,25 @@ export const ToolbarStrip: Component<ToolbarStripProps> = (props) => {
           onToggle={props.toggleDelegation}
         />
 
-        <StripDivider />
+        {/* Permission badge — only when non-default */}
+        <Show when={settings().permissionMode !== 'ask'}>
+          <StripDivider />
+          <PermissionBadge
+            permissionMode={() => settings().permissionMode}
+            onCyclePermission={cyclePermissionMode}
+          />
+        </Show>
 
-        <PermissionBadge
-          permissionMode={() => settings().permissionMode}
-          onCyclePermission={cyclePermissionMode}
-        />
-
-        {/* Sandbox mode toggle */}
-        <StripDivider />
-        <button
-          type="button"
-          onClick={() => sandbox.toggleSandbox()}
-          class={`inline-flex items-center gap-1 p-1 rounded-[var(--radius-md)] transition-colors ${
-            sandbox.sandboxEnabled()
-              ? 'text-[var(--warning)] bg-[var(--warning-subtle)]'
-              : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--surface-raised)]'
-          }`}
-          title={
-            sandbox.sandboxEnabled()
-              ? 'Sandbox mode ON (changes are queued)'
-              : 'Enable sandbox mode'
-          }
-        >
-          <Shield class="w-3 h-3" />
-          <Show when={sandbox.sandboxEnabled()}>
+        {/* Sandbox mode toggle — only when enabled */}
+        <Show when={sandbox.sandboxEnabled()}>
+          <StripDivider />
+          <button
+            type="button"
+            onClick={() => sandbox.toggleSandbox()}
+            class="inline-flex items-center gap-1 p-1 rounded-[var(--radius-md)] transition-colors text-[var(--warning)] bg-[var(--warning-subtle)]"
+            title="Sandbox mode ON (changes are queued)"
+          >
+            <Shield class="w-3 h-3" />
             <span class="text-[10px]">Sandbox</span>
             <Show when={sandbox.pendingCount() > 0}>
               <button
@@ -140,8 +129,8 @@ export const ToolbarStrip: Component<ToolbarStripProps> = (props) => {
                 {sandbox.pendingCount()}
               </button>
             </Show>
-          </Show>
-        </button>
+          </button>
+        </Show>
 
         {/* Run in Background button */}
         <Show
@@ -171,24 +160,6 @@ export const ToolbarStrip: Component<ToolbarStripProps> = (props) => {
             <span class="text-[10px]">Plan running</span>
           </span>
         </Show>
-
-        <StripDivider />
-        <button
-          type="button"
-          onClick={() => props.handleExternalEditor()}
-          class="p-1 rounded-[var(--radius-md)] text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--surface-raised)] transition-colors"
-          title="Edit prompt in external editor ($EDITOR)"
-        >
-          <ExternalLink class="w-3 h-3" />
-        </button>
-
-        <StripDivider />
-        <VoiceButton
-          onTranscript={(text) => {
-            props.setInput(props.input() + text)
-            queueMicrotask(props.autoResize)
-          }}
-        />
       </div>
 
       {/* Right: token info */}

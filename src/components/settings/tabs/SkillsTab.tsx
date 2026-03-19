@@ -158,16 +158,17 @@ export const SkillsTab: Component = () => {
         when={pureCustom().length > 0}
         fallback={
           <div class="flex flex-col items-center justify-center py-6 text-center border border-dashed border-[var(--border-subtle)] rounded-[var(--radius-lg)]">
-            <p class="text-xs text-[var(--text-secondary)] mb-0.5">No custom skills</p>
+            <p class="text-xs text-[var(--text-secondary)] mb-0.5">No custom skills yet</p>
             <p class="text-[10px] text-[var(--text-muted)] max-w-xs mb-2">
-              Skills inject domain-specific guidance into the agent when matching files are detected
+              Skills inject domain-specific guidance into the agent. Create your first skill to get
+              started.
             </p>
             <button
               type="button"
               onClick={handleCreateNew}
               class="inline-flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-medium rounded-[var(--radius-md)] bg-[var(--accent)] text-white hover:brightness-110 transition-colors"
             >
-              Create Skill
+              Create your first skill
             </button>
           </div>
         }

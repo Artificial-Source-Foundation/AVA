@@ -79,14 +79,10 @@ export const MessageInput: Component = () => {
           handleCycleReasoning={state.handleCycleReasoning}
           toggleDelegation={state.toggleDelegation}
           isProcessing={state.isProcessing}
-          autoResize={state.autoResize}
-          input={state.input}
-          setInput={state.setInput}
           stashSize={state.stashSize}
           chat={state.chat}
           agent={state.agent}
           sessionStore={state.sessionStore}
-          handleExternalEditor={state.handleExternalEditor}
         />
       </form>
       <InputDialogs

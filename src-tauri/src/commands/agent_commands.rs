@@ -283,7 +283,6 @@ pub async fn submit_goal(
     }
 
     // Apply thinking level from frontend
-    eprintln!("[AVA DEBUG] thinking_level from frontend: {:?}", args.thinking_level);
     if let Some(ref level_str) = args.thinking_level {
         let level = match level_str.as_str() {
             "low" => ava_types::ThinkingLevel::Low,

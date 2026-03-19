@@ -175,6 +175,48 @@ pub fn map_messages_gemini_parts(messages: &[Message]) -> (Option<Value>, Vec<Va
             continue;
         }
 
+        // Assistant messages with native tool calls -> functionCall parts
+        if message.role == Role::Assistant && !message.tool_calls.is_empty() {
+            let mut parts: Vec<Value> = Vec::new();
+            if !message.content.is_empty() {
+                parts.push(json!({"text": message.content}));
+            }
+            for tc in &message.tool_calls {
+                let mut fc = json!({
+                    "name": tc.name,
+                    "args": tc.arguments,
+                });
+                if !tc.id.is_empty() {
+                    fc["id"] = json!(tc.id);
+                }
+                parts.push(json!({"functionCall": fc}));
+            }
+            mapped.push(json!({
+                "role": "model",
+                "parts": parts,
+            }));
+            continue;
+        }
+
+        // Tool result messages -> functionResponse parts
+        if message.role == Role::Tool {
+            let tool_call_id = message.tool_call_id.as_deref().unwrap_or("");
+            let response_value = serde_json::from_str::<Value>(&message.content)
+                .unwrap_or_else(|_| json!({"result": message.content}));
+            let mut fr = json!({
+                "name": tool_call_id,
+                "response": response_value,
+            });
+            if !tool_call_id.is_empty() {
+                fr["id"] = json!(tool_call_id);
+            }
+            mapped.push(json!({
+                "role": "user",
+                "parts": [{"functionResponse": fr}],
+            }));
+            continue;
+        }
+
         // If user message has images, add image parts
         if message.role == Role::User && !message.images.is_empty() {
             let mut parts: Vec<Value> = Vec::new();

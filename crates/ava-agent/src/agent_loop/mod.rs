@@ -416,17 +416,9 @@ impl AgentLoop {
             "starting LLM stream request"
         );
 
-        eprintln!(
-            "[AVA DEBUG] thinking_level in agent config: {:?}, native_tools: {}",
-            self.config.thinking_level, native_tools
-        );
         let stream_result = if native_tools {
             let tool_defs = self.active_tool_defs();
             if self.config.thinking_level != ThinkingLevel::Off {
-                eprintln!(
-                    "[AVA DEBUG] Using thinking-enabled stream with level: {:?}",
-                    self.config.thinking_level
-                );
                 let thinking = ThinkingConfig::new(
                     self.config.thinking_level,
                     self.config.thinking_budget_tokens,
@@ -511,10 +503,6 @@ impl AgentLoop {
             // Emit thinking
             if let Some(ref thinking) = chunk.thinking {
                 if !thinking.is_empty() {
-                    eprintln!(
-                        "[AVA DEBUG] Thinking chunk received: {} chars",
-                        thinking.len()
-                    );
                     Self::emit(event_tx, AgentEvent::Thinking(thinking.clone()));
                 }
             }

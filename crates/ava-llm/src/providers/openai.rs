@@ -89,9 +89,10 @@ impl OpenAIProvider {
         base_url: impl Into<String>,
     ) -> Self {
         let base_url = base_url.into();
-        // Auto-detect Responses API: only native OpenAI (api.openai.com) supports it.
-        // All other base URLs (Inception, OpenRouter, LiteLLM, etc.) use Chat Completions.
-        let use_responses_api = Self::is_native_openai(&base_url);
+        // Use Responses API only for ChatGPT OAuth (chatgpt.com).
+        // Regular OpenAI (api.openai.com) uses Chat Completions, which returns
+        // `reasoning_content` without requiring organization verification.
+        let use_responses_api = Self::is_chatgpt_oauth(&base_url);
         Self {
             pool,
             api_key: api_key.into(),
@@ -104,11 +105,12 @@ impl OpenAIProvider {
         }
     }
 
-    /// Returns `true` if the base URL points to native OpenAI or ChatGPT Codex endpoints.
-    /// These are the only endpoints that support the Responses API format.
-    fn is_native_openai(base_url: &str) -> bool {
-        let lower = base_url.to_lowercase();
-        lower.contains("api.openai.com") || lower.contains("chatgpt.com")
+    /// Returns `true` if the base URL points to the ChatGPT OAuth endpoint.
+    /// Only ChatGPT OAuth requires the Responses API format; regular
+    /// `api.openai.com` uses Chat Completions (which returns `reasoning_content`
+    /// without organization verification).
+    fn is_chatgpt_oauth(base_url: &str) -> bool {
+        base_url.to_lowercase().contains("chatgpt.com")
     }
 
     /// Returns `true` if using ChatGPT OAuth (subscription-billed, no per-token cost).
@@ -471,7 +473,7 @@ impl LLMProvider for OpenAIProvider {
             .map_err(|error| AvaError::SerializationError(error.to_string()))?;
 
         if self.use_responses_api {
-            let (content, _, _) = common::parse_responses_api_payload(&payload);
+            let (content, _, _, _) = common::parse_responses_api_payload(&payload);
             if content.is_empty() {
                 Err(AvaError::ProviderError {
                     provider: provider_label,
@@ -603,12 +605,13 @@ impl LLMProvider for OpenAIProvider {
             .map_err(|error| AvaError::SerializationError(error.to_string()))?;
 
         if self.use_responses_api {
-            let (content, tool_calls, usage) = common::parse_responses_api_payload(&payload);
+            let (content, tool_calls, usage, thinking) =
+                common::parse_responses_api_payload(&payload);
             Ok(LLMResponse {
                 content,
                 tool_calls,
                 usage,
-                thinking: None,
+                thinking,
             })
         } else {
             let content = Self::parse_response_payload(&payload).unwrap_or_default();
@@ -788,12 +791,13 @@ impl LLMProvider for OpenAIProvider {
             .map_err(|error| AvaError::SerializationError(error.to_string()))?;
 
         if self.use_responses_api {
-            let (content, tool_calls, usage) = common::parse_responses_api_payload(&payload);
+            let (content, tool_calls, usage, thinking) =
+                common::parse_responses_api_payload(&payload);
             Ok(LLMResponse {
                 content,
                 tool_calls,
                 usage,
-                thinking: None, // Responses API returns thinking in stream only
+                thinking,
             })
         } else {
             let content = Self::parse_response_payload(&payload).unwrap_or_default();

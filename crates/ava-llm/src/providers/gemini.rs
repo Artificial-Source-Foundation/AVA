@@ -2,7 +2,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use ava_types::{AvaError, Message, Result, StreamChunk, ThinkingLevel};
+use ava_types::{AvaError, Message, Result, StreamChunk, ThinkingLevel, Tool};
 use futures::{Stream, StreamExt};
 use serde_json::{json, Value};
 
@@ -10,7 +10,7 @@ use tracing::instrument;
 
 use crate::circuit_breaker::CircuitBreaker;
 use crate::pool::ConnectionPool;
-use crate::provider::{LLMProvider, ProviderCapabilities};
+use crate::provider::{LLMProvider, LLMResponse, ProviderCapabilities};
 use crate::providers::common;
 use crate::thinking::{ResolvedThinkingConfig, ThinkingBudgetFallback, ThinkingConfig};
 
@@ -73,21 +73,30 @@ impl GeminiProvider {
         body
     }
 
+    fn build_request_body_with_tools(&self, messages: &[Message], tools: &[Tool]) -> Value {
+        let mut body = self.build_request_body(messages);
+        if !tools.is_empty() {
+            body["tools"] = json!(common::tools_to_gemini_format(tools));
+        }
+        body
+    }
+
     fn build_request_body_with_thinking_config(
         &self,
         messages: &[Message],
+        tools: &[Tool],
         thinking: ThinkingConfig,
     ) -> Value {
-        let mut body = self.build_request_body(messages);
+        let mut body = self.build_request_body_with_tools(messages, tools);
         let resolved = self.resolve_thinking_config(thinking);
 
         if resolved.applied.level != ThinkingLevel::Off && self.supports_thinking_mode() {
             if self.is_gemini3() {
-                // Gemini 3.x uses thinkingLevel: "low" | "high"
-                // Gemini 3.1+ also supports "medium"
+                // Gemini 3.x uses thinkingLevel: "low" | "medium" | "high"
                 let level = match resolved.applied.level {
                     ThinkingLevel::Off => unreachable!(),
-                    ThinkingLevel::Low | ThinkingLevel::Medium => "low",
+                    ThinkingLevel::Low => "low",
+                    ThinkingLevel::Medium => "medium",
                     ThinkingLevel::High | ThinkingLevel::Max => "high",
                 };
 
@@ -190,20 +199,7 @@ impl LLMProvider for GeminiProvider {
                         .feed(&text)
                         .into_iter()
                         .filter_map(|line| serde_json::from_str::<Value>(&line).ok())
-                        .filter_map(|payload| {
-                            let content = common::parse_gemini_completion_payload(&payload).ok();
-                            let usage = common::parse_gemini_usage(&payload);
-
-                            if content.is_some() || usage.is_some() {
-                                Some(StreamChunk {
-                                    content,
-                                    usage,
-                                    ..Default::default()
-                                })
-                            } else {
-                                None
-                            }
-                        })
+                        .filter_map(|payload| common::parse_gemini_stream_chunk(&payload))
                         .collect::<Vec<_>>()
                 })
                 .unwrap_or_default();
@@ -230,7 +226,7 @@ impl LLMProvider for GeminiProvider {
     fn capabilities(&self) -> ProviderCapabilities {
         ProviderCapabilities {
             supports_streaming: true,
-            supports_tool_use: false,
+            supports_tool_use: true,
             supports_thinking: self.supports_thinking_mode(),
             supports_thinking_levels: self.supports_thinking_mode(),
             supports_images: true,
@@ -242,6 +238,78 @@ impl LLMProvider for GeminiProvider {
 
     fn provider_kind(&self) -> crate::message_transform::ProviderKind {
         crate::message_transform::ProviderKind::Gemini
+    }
+
+    fn supports_tools(&self) -> bool {
+        true
+    }
+
+    #[instrument(skip(self, messages, tools), fields(model = %self.model))]
+    async fn generate_with_tools(
+        &self,
+        messages: &[Message],
+        tools: &[Tool],
+    ) -> Result<LLMResponse> {
+        let body = self.build_request_body_with_tools(messages, tools);
+        let client = self.client().await?;
+        let request = client
+            .post(self.generate_url())
+            .header("x-goog-api-key", &self.api_key)
+            .json(&body);
+
+        let response = self.send_request(request).await?;
+        let response = common::validate_status(response, "Gemini").await?;
+        let payload: Value = response
+            .json()
+            .await
+            .map_err(|error| AvaError::SerializationError(error.to_string()))?;
+
+        let content = common::parse_gemini_completion_payload(&payload).unwrap_or_default();
+        let tool_calls = common::parse_gemini_tool_calls(&payload);
+        let usage = common::parse_gemini_usage(&payload);
+
+        Ok(LLMResponse {
+            content,
+            tool_calls,
+            usage,
+            thinking: None,
+        })
+    }
+
+    #[instrument(skip(self, messages, tools), fields(model = %self.model))]
+    async fn generate_stream_with_tools(
+        &self,
+        messages: &[Message],
+        tools: &[Tool],
+    ) -> Result<Pin<Box<dyn Stream<Item = StreamChunk> + Send>>> {
+        let body = self.build_request_body_with_tools(messages, tools);
+        let client = self.client().await?;
+        let request = client
+            .post(self.stream_url())
+            .header("x-goog-api-key", &self.api_key)
+            .json(&body);
+
+        let response = self.send_request(request).await?;
+        let response = common::validate_status(response, "Gemini").await?;
+        let mut sse_parser = common::SseParser::new();
+        let stream = response.bytes_stream().flat_map(move |chunk| {
+            let chunks = chunk
+                .ok()
+                .and_then(|bytes| String::from_utf8(bytes.to_vec()).ok())
+                .map(|text| {
+                    sse_parser
+                        .feed(&text)
+                        .into_iter()
+                        .filter_map(|line| serde_json::from_str::<Value>(&line).ok())
+                        .filter_map(|payload| common::parse_gemini_stream_chunk(&payload))
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+
+            futures::stream::iter(chunks)
+        });
+
+        Ok(Box::pin(stream))
     }
 
     fn supports_thinking(&self) -> bool {
@@ -300,7 +368,7 @@ impl LLMProvider for GeminiProvider {
         messages: &[Message],
         tools: &[ava_types::Tool],
         thinking: ThinkingLevel,
-    ) -> Result<crate::provider::LLMResponse> {
+    ) -> Result<LLMResponse> {
         self.generate_with_thinking_config(messages, tools, ThinkingConfig::new(thinking, None))
             .await
     }
@@ -310,19 +378,12 @@ impl LLMProvider for GeminiProvider {
         messages: &[Message],
         tools: &[ava_types::Tool],
         thinking: ThinkingConfig,
-    ) -> Result<crate::provider::LLMResponse> {
-        let _ = tools;
+    ) -> Result<LLMResponse> {
         if !self.supports_thinking_mode() || !thinking.is_enabled() {
-            let content = self.generate(messages).await?;
-            return Ok(crate::provider::LLMResponse {
-                content,
-                tool_calls: vec![],
-                usage: None,
-                thinking: None,
-            });
+            return self.generate_with_tools(messages, tools).await;
         }
 
-        let body = self.build_request_body_with_thinking_config(messages, thinking);
+        let body = self.build_request_body_with_thinking_config(messages, tools, thinking);
         let client = self.client().await?;
         let request = client
             .post(self.generate_url())
@@ -337,12 +398,13 @@ impl LLMProvider for GeminiProvider {
             .map_err(|error| AvaError::SerializationError(error.to_string()))?;
 
         let content = common::parse_gemini_completion_payload(&payload).unwrap_or_default();
+        let tool_calls = common::parse_gemini_tool_calls(&payload);
         let usage = common::parse_gemini_usage(&payload);
         let thinking_content = self.parse_thinking(&payload);
 
-        Ok(crate::provider::LLMResponse {
+        Ok(LLMResponse {
             content,
-            tool_calls: vec![],
+            tool_calls,
             usage,
             thinking: thinking_content,
         })
@@ -369,23 +431,20 @@ impl LLMProvider for GeminiProvider {
         tools: &[ava_types::Tool],
         thinking: ThinkingConfig,
     ) -> Result<Pin<Box<dyn Stream<Item = StreamChunk> + Send>>> {
-        let _ = tools;
         if !self.supports_thinking_mode() || !thinking.is_enabled() {
-            return self.generate_stream(messages).await;
+            return self.generate_stream_with_tools(messages, tools).await;
         }
 
         let client = self.client().await?;
         let request = client
             .post(self.stream_url())
             .header("x-goog-api-key", &self.api_key)
-            .json(&self.build_request_body_with_thinking_config(messages, thinking));
+            .json(&self.build_request_body_with_thinking_config(messages, tools, thinking));
 
         let response = self.send_request(request).await?;
         let response = common::validate_status(response, "Gemini").await?;
-        let provider = self.clone();
         let mut sse_parser = common::SseParser::new();
         let stream = response.bytes_stream().flat_map(move |chunk| {
-            let provider = provider.clone();
             let chunks = chunk
                 .ok()
                 .and_then(|bytes| String::from_utf8(bytes.to_vec()).ok())
@@ -394,22 +453,7 @@ impl LLMProvider for GeminiProvider {
                         .feed(&text)
                         .into_iter()
                         .filter_map(|line| serde_json::from_str::<Value>(&line).ok())
-                        .filter_map(|payload| {
-                            let content = common::parse_gemini_completion_payload(&payload).ok();
-                            let usage = common::parse_gemini_usage(&payload);
-                            let thinking = provider.parse_thinking(&payload);
-
-                            if content.is_some() || usage.is_some() || thinking.is_some() {
-                                Some(StreamChunk {
-                                    content,
-                                    usage,
-                                    thinking,
-                                    ..Default::default()
-                                })
-                            } else {
-                                None
-                            }
-                        })
+                        .filter_map(|payload| common::parse_gemini_stream_chunk(&payload))
                         .collect::<Vec<_>>()
                 })
                 .unwrap_or_default();
@@ -468,6 +512,27 @@ mod tests {
     }
 
     #[test]
+    fn build_request_body_with_tools_includes_function_declarations() {
+        let p = test_provider("gemini-2.5-pro");
+        let messages = vec![Message::new(ava_types::Role::User, "test")];
+        let tools = vec![ava_types::Tool {
+            name: "read".to_string(),
+            description: "Read a file".to_string(),
+            parameters: json!({"type": "object", "properties": {"path": {"type": "string"}}}),
+        }];
+        let body = p.build_request_body_with_tools(&messages, &tools);
+        let gemini_tools = body.get("tools").and_then(Value::as_array).unwrap();
+        assert_eq!(gemini_tools.len(), 1);
+        let decls = gemini_tools[0]
+            .get("functionDeclarations")
+            .and_then(Value::as_array)
+            .unwrap();
+        assert_eq!(decls.len(), 1);
+        assert_eq!(decls[0]["name"], "read");
+        assert_eq!(decls[0]["description"], "Read a file");
+    }
+
+    #[test]
     fn thinking_config_gemini25() {
         let p = test_provider("gemini-2.5-pro");
         assert!(p.supports_thinking_mode());
@@ -475,6 +540,7 @@ mod tests {
 
         let body = p.build_request_body_with_thinking_config(
             &[Message::new(ava_types::Role::User, "test")],
+            &[],
             ThinkingConfig::new(ThinkingLevel::High, None),
         );
         let config = body
@@ -492,6 +558,7 @@ mod tests {
 
         let body = p.build_request_body_with_thinking_config(
             &[Message::new(ava_types::Role::User, "test")],
+            &[],
             ThinkingConfig::new(ThinkingLevel::High, None),
         );
         let config = body
@@ -502,10 +569,25 @@ mod tests {
     }
 
     #[test]
+    fn thinking_config_gemini3_medium_maps_to_medium() {
+        let p = test_provider("gemini-3-pro-preview");
+        let body = p.build_request_body_with_thinking_config(
+            &[Message::new(ava_types::Role::User, "test")],
+            &[],
+            ThinkingConfig::new(ThinkingLevel::Medium, None),
+        );
+        let config = body
+            .get("thinkingConfig")
+            .expect("should have thinkingConfig");
+        assert_eq!(config["thinkingLevel"], json!("medium"));
+    }
+
+    #[test]
     fn thinking_config_off_no_config() {
         let p = test_provider("gemini-2.5-pro");
         let body = p.build_request_body_with_thinking_config(
             &[Message::new(ava_types::Role::User, "test")],
+            &[],
             ThinkingConfig::new(ThinkingLevel::Off, None),
         );
         assert!(body.get("thinkingConfig").is_none());
@@ -522,6 +604,7 @@ mod tests {
 
         let body = p.build_request_body_with_thinking_config(
             &[Message::new(ava_types::Role::User, "test")],
+            &[],
             config,
         );
         assert_eq!(body["thinkingConfig"]["thinkingBudget"], json!(12_345));
@@ -596,6 +679,13 @@ mod tests {
     }
 
     #[test]
+    fn capabilities_support_tools() {
+        let p = test_provider("gemini-2.5-pro");
+        assert!(p.capabilities().supports_tool_use);
+        assert!(p.supports_tools());
+    }
+
+    #[test]
     fn thinking_budget_values() {
         let p = test_provider("gemini-2.5-pro");
 
@@ -607,6 +697,7 @@ mod tests {
         ] {
             let body = p.build_request_body_with_thinking_config(
                 &[Message::new(ava_types::Role::User, "x")],
+                &[],
                 ThinkingConfig::new(level, None),
             );
             let budget = body["thinkingConfig"]["thinkingBudget"].as_u64().unwrap();

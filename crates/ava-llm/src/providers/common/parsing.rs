@@ -487,6 +487,65 @@ pub fn parse_ollama_completion_payload(payload: &Value) -> Result<String> {
         })
 }
 
+/// Parse tool calls from an Ollama API response payload.
+/// Ollama returns tool calls in `message.tool_calls[]` using an OpenAI-compatible format.
+pub fn parse_ollama_tool_calls(payload: &Value) -> Vec<ToolCall> {
+    let Some(tool_calls) = payload
+        .get("message")
+        .and_then(|m| m.get("tool_calls"))
+        .and_then(Value::as_array)
+    else {
+        return vec![];
+    };
+
+    tool_calls
+        .iter()
+        .filter_map(|tc| {
+            let function = tc.get("function")?;
+            let name = function.get("name").and_then(Value::as_str)?.to_string();
+            let arguments = function.get("arguments").cloned().unwrap_or(json!({}));
+            let id = tc
+                .get("id")
+                .and_then(Value::as_str)
+                .map(String::from)
+                .unwrap_or_else(|| Uuid::new_v4().to_string());
+            Some(ToolCall {
+                id,
+                name,
+                arguments,
+            })
+        })
+        .collect()
+}
+
+/// Parse a streaming tool call from an Ollama response chunk.
+pub fn parse_ollama_stream_tool_call(payload: &Value) -> Option<StreamToolCall> {
+    let tool_calls = payload
+        .get("message")
+        .and_then(|m| m.get("tool_calls"))
+        .and_then(Value::as_array)?;
+
+    let tc = tool_calls.first()?;
+    let function = tc.get("function")?;
+    let name = function
+        .get("name")
+        .and_then(Value::as_str)
+        .map(String::from);
+    let arguments = function.get("arguments").map(|a| a.to_string());
+    let id = tc
+        .get("id")
+        .and_then(Value::as_str)
+        .map(String::from)
+        .or_else(|| Some(Uuid::new_v4().to_string()));
+
+    Some(StreamToolCall {
+        index: 0,
+        id,
+        name,
+        arguments_delta: arguments,
+    })
+}
+
 /// Parse token usage from an Ollama API response payload.
 /// Ollama uses `prompt_eval_count` (input) and `eval_count` (output) at the top level.
 /// These appear in non-streaming responses and in the final streaming chunk (`done: true`).
@@ -511,20 +570,165 @@ pub fn parse_ollama_usage(payload: &Value) -> Option<ava_types::TokenUsage> {
 }
 
 pub fn parse_gemini_completion_payload(payload: &Value) -> Result<String> {
-    payload
+    let parts = payload
         .get("candidates")
         .and_then(Value::as_array)
         .and_then(|candidates| candidates.first())
         .and_then(|candidate| candidate.get("content"))
         .and_then(|content| content.get("parts"))
         .and_then(Value::as_array)
-        .and_then(|parts| parts.first())
-        .and_then(|part| part.get("text"))
-        .and_then(Value::as_str)
-        .map(ToString::to_string)
         .ok_or_else(|| {
             AvaError::SerializationError("missing Gemini completion content".to_string())
+        })?;
+
+    // Collect text from all text parts (skip functionCall and thought parts)
+    let text: String = parts
+        .iter()
+        .filter(|part| part.get("functionCall").is_none())
+        .filter(|part| part.get("thought").and_then(Value::as_bool) != Some(true))
+        .filter_map(|part| part.get("text").and_then(Value::as_str))
+        .collect::<Vec<_>>()
+        .join("");
+
+    if text.is_empty() && parts.iter().any(|p| p.get("functionCall").is_some()) {
+        // Tool call only response — return empty string (not an error)
+        Ok(String::new())
+    } else if text.is_empty() {
+        Err(AvaError::SerializationError(
+            "missing Gemini completion content".to_string(),
+        ))
+    } else {
+        Ok(text)
+    }
+}
+
+/// Parse tool calls from a Gemini API response payload.
+/// Gemini returns tool calls as `functionCall` parts within `candidates[].content.parts[]`.
+pub fn parse_gemini_tool_calls(payload: &Value) -> Vec<ToolCall> {
+    let Some(parts) = payload
+        .get("candidates")
+        .and_then(Value::as_array)
+        .and_then(|candidates| candidates.first())
+        .and_then(|candidate| candidate.get("content"))
+        .and_then(|content| content.get("parts"))
+        .and_then(Value::as_array)
+    else {
+        return vec![];
+    };
+
+    parts
+        .iter()
+        .filter_map(|part| {
+            let fc = part.get("functionCall")?;
+            let name = fc.get("name").and_then(Value::as_str)?.to_string();
+            let arguments = fc.get("args").cloned().unwrap_or(json!({}));
+            let id = fc
+                .get("id")
+                .and_then(Value::as_str)
+                .map(String::from)
+                .unwrap_or_else(|| Uuid::new_v4().to_string());
+            Some(ToolCall {
+                id,
+                name,
+                arguments,
+            })
         })
+        .collect()
+}
+
+/// Convert AVA tool definitions to the Gemini function calling format.
+pub fn tools_to_gemini_format(tools: &[Tool]) -> Vec<Value> {
+    let declarations: Vec<Value> = tools
+        .iter()
+        .map(|tool| {
+            json!({
+                "name": tool.name,
+                "description": tool.description,
+                "parameters": tool.parameters,
+            })
+        })
+        .collect();
+    vec![json!({ "functionDeclarations": declarations })]
+}
+
+/// Parse a rich StreamChunk from a Gemini SSE event payload.
+/// Handles text, thinking, tool calls, and usage.
+pub fn parse_gemini_stream_chunk(payload: &Value) -> Option<StreamChunk> {
+    let candidate = payload
+        .get("candidates")
+        .and_then(Value::as_array)
+        .and_then(|c| c.first());
+
+    let mut chunk = StreamChunk::default();
+    let mut has_data = false;
+
+    if let Some(candidate) = candidate {
+        if let Some(parts) = candidate
+            .get("content")
+            .and_then(|c| c.get("parts"))
+            .and_then(Value::as_array)
+        {
+            for part in parts {
+                // Thinking content
+                if part.get("thought").and_then(Value::as_bool) == Some(true) {
+                    if let Some(text) = part.get("text").and_then(Value::as_str) {
+                        if !text.is_empty() {
+                            chunk.thinking = Some(text.to_string());
+                            has_data = true;
+                        }
+                    }
+                    continue;
+                }
+
+                // Function call
+                if let Some(fc) = part.get("functionCall") {
+                    let id = fc
+                        .get("id")
+                        .and_then(Value::as_str)
+                        .map(String::from)
+                        .unwrap_or_else(|| Uuid::new_v4().to_string());
+                    let name = fc.get("name").and_then(Value::as_str).map(String::from);
+                    let args = fc.get("args").map(|a| a.to_string());
+                    chunk.tool_call = Some(StreamToolCall {
+                        index: 0,
+                        id: Some(id),
+                        name,
+                        arguments_delta: args,
+                    });
+                    has_data = true;
+                    continue;
+                }
+
+                // Text content
+                if let Some(text) = part.get("text").and_then(Value::as_str) {
+                    if !text.is_empty() {
+                        chunk.content = Some(text.to_string());
+                        has_data = true;
+                    }
+                }
+            }
+        }
+
+        // Finish reason
+        if let Some(reason) = candidate.get("finishReason").and_then(Value::as_str) {
+            if reason == "STOP" || reason == "MAX_TOKENS" {
+                chunk.done = true;
+                has_data = true;
+            }
+        }
+    }
+
+    // Usage metadata
+    if let Some(usage) = parse_gemini_usage(payload) {
+        chunk.usage = Some(usage);
+        has_data = true;
+    }
+
+    if has_data {
+        Some(chunk)
+    } else {
+        None
+    }
 }
 
 /// Convert AVA tool definitions to the OpenAI function calling format.
@@ -676,11 +880,27 @@ pub fn tools_to_responses_api_format(tools: &[Tool]) -> Vec<Value> {
 /// The Responses API uses event types like `response.output_text.delta`,
 /// `response.function_call_arguments.delta`, `response.completed`, etc.
 /// instead of the Chat Completions `choices[].delta` format.
+///
+/// ## Reasoning handling
+///
+/// Reasoning content flows through three channels depending on the model and
+/// organization verification status:
+///
+/// 1. **Summary deltas** (`response.reasoning_summary_text.delta`) — streamed
+///    reasoning summaries, available when `reasoning.summary` is set and the
+///    organization is verified.
+/// 2. **Raw reasoning deltas** (`response.reasoning_text.delta`) — full reasoning
+///    content, only available with reasoning content access.
+/// 3. **Reasoning output item** (`response.output_item.added`/`.done` with
+///    `type: "reasoning"`) — emitted for all reasoning models. When no summary
+///    deltas arrive, we emit a placeholder so the UI shows a thinking bubble.
+///
+/// This approach is modelled after OpenAI's Codex CLI reference implementation.
 pub fn parse_responses_api_stream_chunk(payload: &Value) -> Option<StreamChunk> {
     let event_type = payload.get("type").and_then(Value::as_str)?;
 
     match event_type {
-        // Text content deltas
+        // ── Text content deltas ──
         "response.text.delta" | "response.output_text.delta" => {
             let delta = payload.get("delta").and_then(Value::as_str)?;
             if delta.is_empty() {
@@ -689,8 +909,9 @@ pub fn parse_responses_api_stream_chunk(payload: &Value) -> Option<StreamChunk> 
             Some(StreamChunk::text(delta))
         }
 
-        // Reasoning/thinking deltas — covers multiple event names used by
-        // the Responses API across different model families and API versions.
+        // ── Reasoning/thinking deltas ──
+        // Covers multiple event names used by the Responses API across
+        // different model families and API versions.
         "response.reasoning.delta"
         | "response.reasoning_text.delta"
         | "response.reasoning_summary.delta"
@@ -716,7 +937,7 @@ pub fn parse_responses_api_stream_chunk(payload: &Value) -> Option<StreamChunk> 
             })
         }
 
-        // Tool call argument deltas (streamed incrementally)
+        // ── Tool call argument deltas (streamed incrementally) ──
         "response.tool_call_arguments.delta" | "response.function_call_arguments.delta" => {
             let call_id = payload
                 .get("call_id")
@@ -746,18 +967,65 @@ pub fn parse_responses_api_stream_chunk(payload: &Value) -> Option<StreamChunk> 
             })
         }
 
-        // Output item events — only handle tool calls here.
-        // Text and reasoning content is already emitted via delta events
-        // (response.output_text.delta, response.reasoning_summary_text.delta, etc.)
-        // so re-emitting from output_item.done would duplicate content.
-        "response.output_item.added" | "response.output_item.done" => {
+        // ── Output item events ──
+        //
+        // Text content is already emitted via delta events so we skip it.
+        //
+        // For reasoning items:
+        // - `output_item.added` with `type: "reasoning"` emits a thinking
+        //   indicator so the UI shows a thinking bubble even when no summary
+        //   deltas are streamed (e.g., unverified orgs or models without
+        //   streaming summaries).
+        // - `output_item.done` with `type: "reasoning"` extracts any summary
+        //   text bundled in the completed item.
+        "response.output_item.added" => {
             let item = payload.get("item")?;
             let item_type = item.get("type").and_then(Value::as_str)?;
 
             match item_type {
-                // Skip text/reasoning/message — already streamed via delta events.
-                "text" | "output_text" | "reasoning" | "message" => None,
-                "function_call" | "tool_call" if event_type == "response.output_item.done" => {
+                // Reasoning item starting — emit indicator for the UI
+                "reasoning" => Some(StreamChunk {
+                    thinking: Some("Reasoning...".to_string()),
+                    ..Default::default()
+                }),
+                // Skip text/message — already streamed via deltas
+                "text" | "output_text" | "message" => None,
+                _ => None,
+            }
+        }
+
+        "response.output_item.done" => {
+            let item = payload.get("item")?;
+            let item_type = item.get("type").and_then(Value::as_str)?;
+
+            match item_type {
+                // Reasoning item completed — extract any summary text.
+                // The summary array contains objects like {"type":"summary_text","text":"..."}.
+                // Summaries require OpenAI org verification; without it the array is empty.
+                "reasoning" => {
+                    let mut summary_text = String::new();
+                    if let Some(summary) = item.get("summary").and_then(Value::as_array) {
+                        for entry in summary {
+                            if let Some(text) = entry.get("text").and_then(Value::as_str) {
+                                summary_text.push_str(text);
+                            }
+                        }
+                    }
+                    if summary_text.is_empty() {
+                        // No summary text — the indicator was already emitted
+                        // via output_item.added above.
+                        None
+                    } else {
+                        Some(StreamChunk {
+                            thinking: Some(summary_text),
+                            ..Default::default()
+                        })
+                    }
+                }
+                // Skip text/message — already streamed via delta events
+                "text" | "output_text" | "message" => None,
+                // Tool calls — emit the completed call
+                "function_call" | "tool_call" => {
                     let call_id = item
                         .get("call_id")
                         .or_else(|| item.get("tool_call_id"))
@@ -794,7 +1062,7 @@ pub fn parse_responses_api_stream_chunk(payload: &Value) -> Option<StreamChunk> 
             }
         }
 
-        // Completion events — extract usage
+        // ── Completion / lifecycle events ──
         "response.done" | "response.completed" => {
             let usage = payload
                 .get("response")
@@ -833,8 +1101,36 @@ pub fn parse_responses_api_stream_chunk(payload: &Value) -> Option<StreamChunk> 
             Some(StreamChunk::finished())
         }
 
-        // Content part delta — used by some Responses API versions for
-        // streaming both text and reasoning summary content parts.
+        // response.created — acknowledge the stream started (no content to emit)
+        "response.created" => None,
+
+        // response.failed — extract error message and surface it as text
+        "response.failed" => {
+            let error_msg = payload
+                .get("response")
+                .and_then(|r| r.get("error"))
+                .and_then(|e| e.get("message"))
+                .and_then(Value::as_str)
+                .unwrap_or("response failed");
+            Some(StreamChunk::text(format!("[Error] {error_msg}")))
+        }
+
+        // response.incomplete — the response was cut short
+        "response.incomplete" => {
+            let reason = payload
+                .get("response")
+                .and_then(|r| r.get("incomplete_details"))
+                .and_then(|d| d.get("reason"))
+                .and_then(Value::as_str)
+                .unwrap_or("unknown");
+            Some(StreamChunk::text(format!(
+                "[Incomplete response: {reason}]"
+            )))
+        }
+
+        // ── Content part delta ──
+        // Used by some Responses API versions for streaming both text and
+        // reasoning summary content parts.
         "response.content_part.delta" => {
             let part_type = payload
                 .get("part")
@@ -855,12 +1151,15 @@ pub fn parse_responses_api_stream_chunk(payload: &Value) -> Option<StreamChunk> 
             }
         }
 
-        // Reasoning summary part added — may contain initial text
+        // Reasoning summary part added — may contain initial text.
+        // Even without text, reasoning has started; however, we already emit
+        // an indicator via output_item.added, so only emit when text is present.
         "response.reasoning_summary_part.added" => {
             let text = payload
                 .get("part")
                 .and_then(|p| p.get("text"))
-                .and_then(Value::as_str)?;
+                .and_then(Value::as_str)
+                .unwrap_or("");
             if text.is_empty() {
                 return None;
             }
@@ -870,12 +1169,15 @@ pub fn parse_responses_api_stream_chunk(payload: &Value) -> Option<StreamChunk> 
             })
         }
 
-        // Done events for text/reasoning — contain the full completed text.
-        // Skip these to avoid duplicating content already streamed via deltas.
+        // ── Done events for text/reasoning ──
+        // Contain the full completed text. Skip to avoid duplicating
+        // content already streamed via deltas.
         "response.output_text.done"
         | "response.text.done"
         | "response.reasoning_summary_text.done"
         | "response.reasoning_summary_part.done"
+        | "response.reasoning_text.done"
+        | "response.reasoning.done"
         | "response.content_part.done" => None,
 
         // Refusal
@@ -888,12 +1190,23 @@ pub fn parse_responses_api_stream_chunk(payload: &Value) -> Option<StreamChunk> 
     }
 }
 
-/// Parse a non-streaming Responses API response into content + tool calls + usage.
+/// Parse a non-streaming Responses API response into content + tool calls + usage + thinking.
+///
+/// Reasoning summaries are extracted from `"reasoning"` output items whose `summary`
+/// array contains `{"type":"summary_text","text":"..."}` entries.  These summaries are
+/// only populated when the OpenAI organization is verified; unverified orgs receive an
+/// empty array.
 pub fn parse_responses_api_payload(
     payload: &Value,
-) -> (String, Vec<ToolCall>, Option<ava_types::TokenUsage>) {
+) -> (
+    String,
+    Vec<ToolCall>,
+    Option<ava_types::TokenUsage>,
+    Option<String>,
+) {
     let mut content = String::new();
     let mut tool_calls = Vec::new();
+    let mut thinking = String::new();
 
     // Output is an array of items
     if let Some(output) = payload.get("output").and_then(Value::as_array) {
@@ -916,6 +1229,16 @@ pub fn parse_responses_api_payload(
                 "text" | "output_text" => {
                     if let Some(text) = item.get("text").and_then(Value::as_str) {
                         content.push_str(text);
+                    }
+                }
+                // Extract reasoning summary text from reasoning items.
+                "reasoning" => {
+                    if let Some(summary) = item.get("summary").and_then(Value::as_array) {
+                        for entry in summary {
+                            if let Some(text) = entry.get("text").and_then(Value::as_str) {
+                                thinking.push_str(text);
+                            }
+                        }
                     }
                 }
                 "function_call" | "tool_call" => {
@@ -955,8 +1278,13 @@ pub fn parse_responses_api_payload(
     }
 
     let usage = parse_usage(payload);
+    let thinking_opt = if thinking.is_empty() {
+        None
+    } else {
+        Some(thinking)
+    };
 
-    (content, tool_calls, usage)
+    (content, tool_calls, usage, thinking_opt)
 }
 
 pub fn parse_anthropic_tool_calls(payload: &Value) -> Vec<ToolCall> {
@@ -1908,5 +2236,187 @@ mod tests {
         let u = parse_gemini_usage(&payload).unwrap();
         assert_eq!(u.input_tokens, 10);
         assert_eq!(u.output_tokens, 0);
+    }
+
+    // ── Responses API stream chunk: reasoning ──
+
+    #[test]
+    fn responses_reasoning_output_item_added_emits_indicator() {
+        let payload = json!({
+            "type": "response.output_item.added",
+            "item": {"type": "reasoning"}
+        });
+        let chunk = parse_responses_api_stream_chunk(&payload).unwrap();
+        assert_eq!(chunk.thinking.as_deref(), Some("Reasoning..."));
+        assert!(chunk.content.is_none());
+    }
+
+    #[test]
+    fn responses_reasoning_output_item_done_extracts_summary() {
+        let payload = json!({
+            "type": "response.output_item.done",
+            "item": {
+                "type": "reasoning",
+                "summary": [
+                    {"type": "summary_text", "text": "The model considered "},
+                    {"type": "summary_text", "text": "multiple approaches."}
+                ]
+            }
+        });
+        let chunk = parse_responses_api_stream_chunk(&payload).unwrap();
+        assert_eq!(
+            chunk.thinking.as_deref(),
+            Some("The model considered multiple approaches.")
+        );
+    }
+
+    #[test]
+    fn responses_reasoning_output_item_done_empty_summary_returns_none() {
+        let payload = json!({
+            "type": "response.output_item.done",
+            "item": {
+                "type": "reasoning",
+                "summary": []
+            }
+        });
+        assert!(parse_responses_api_stream_chunk(&payload).is_none());
+    }
+
+    #[test]
+    fn responses_reasoning_output_item_done_no_summary_field_returns_none() {
+        let payload = json!({
+            "type": "response.output_item.done",
+            "item": {"type": "reasoning"}
+        });
+        assert!(parse_responses_api_stream_chunk(&payload).is_none());
+    }
+
+    #[test]
+    fn responses_reasoning_summary_text_delta() {
+        let payload = json!({
+            "type": "response.reasoning_summary_text.delta",
+            "delta": "thinking about it"
+        });
+        let chunk = parse_responses_api_stream_chunk(&payload).unwrap();
+        assert_eq!(chunk.thinking.as_deref(), Some("thinking about it"));
+        assert!(chunk.content.is_none());
+    }
+
+    #[test]
+    fn responses_reasoning_text_delta() {
+        let payload = json!({
+            "type": "response.reasoning_text.delta",
+            "delta": "raw reasoning content"
+        });
+        let chunk = parse_responses_api_stream_chunk(&payload).unwrap();
+        assert_eq!(chunk.thinking.as_deref(), Some("raw reasoning content"));
+    }
+
+    #[test]
+    fn responses_created_returns_none() {
+        let payload = json!({"type": "response.created", "response": {}});
+        assert!(parse_responses_api_stream_chunk(&payload).is_none());
+    }
+
+    #[test]
+    fn responses_failed_returns_error_text() {
+        let payload = json!({
+            "type": "response.failed",
+            "response": {
+                "error": {
+                    "code": "context_length_exceeded",
+                    "message": "Input too long"
+                }
+            }
+        });
+        let chunk = parse_responses_api_stream_chunk(&payload).unwrap();
+        assert_eq!(chunk.content.as_deref(), Some("[Error] Input too long"));
+    }
+
+    #[test]
+    fn responses_incomplete_returns_reason() {
+        let payload = json!({
+            "type": "response.incomplete",
+            "response": {
+                "incomplete_details": {"reason": "max_tokens"}
+            }
+        });
+        let chunk = parse_responses_api_stream_chunk(&payload).unwrap();
+        assert_eq!(
+            chunk.content.as_deref(),
+            Some("[Incomplete response: max_tokens]")
+        );
+    }
+
+    #[test]
+    fn responses_done_events_are_skipped() {
+        for event_type in &[
+            "response.output_text.done",
+            "response.reasoning_summary_text.done",
+            "response.reasoning_text.done",
+            "response.reasoning.done",
+            "response.content_part.done",
+        ] {
+            let payload = json!({"type": event_type, "text": "full text"});
+            assert!(
+                parse_responses_api_stream_chunk(&payload).is_none(),
+                "{event_type} should return None"
+            );
+        }
+    }
+
+    #[test]
+    fn responses_tool_call_from_output_item_done() {
+        let payload = json!({
+            "type": "response.output_item.done",
+            "item": {
+                "type": "function_call",
+                "call_id": "call_abc",
+                "name": "read",
+                "arguments": "{\"path\":\"/tmp\"}"
+            }
+        });
+        let chunk = parse_responses_api_stream_chunk(&payload).unwrap();
+        let tc = chunk.tool_call.unwrap();
+        assert_eq!(tc.id.as_deref(), Some("call_abc"));
+        assert_eq!(tc.name.as_deref(), Some("read"));
+        assert_eq!(tc.arguments_delta.as_deref(), Some("{\"path\":\"/tmp\"}"));
+    }
+
+    // ── Responses API non-streaming: reasoning ──
+
+    #[test]
+    fn responses_payload_extracts_reasoning_summary() {
+        let payload = json!({
+            "output": [
+                {
+                    "type": "reasoning",
+                    "summary": [
+                        {"type": "summary_text", "text": "I considered the options."}
+                    ]
+                },
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": "Hello"}]
+                }
+            ]
+        });
+        let (content, tool_calls, _usage, thinking) = parse_responses_api_payload(&payload);
+        assert_eq!(content, "Hello");
+        assert!(tool_calls.is_empty());
+        assert_eq!(thinking.as_deref(), Some("I considered the options."));
+    }
+
+    #[test]
+    fn responses_payload_empty_reasoning_summary() {
+        let payload = json!({
+            "output": [
+                {"type": "reasoning", "summary": []},
+                {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "ok"}]}
+            ]
+        });
+        let (_content, _, _, thinking) = parse_responses_api_payload(&payload);
+        assert!(thinking.is_none());
     }
 }

@@ -563,6 +563,8 @@ async fn run_harness_task(
         platform: Some(platform),
         scout_provider: None,
         board_providers: vec![],
+        worker_names: vec![],
+        enabled_leads: vec![],
     });
 
     // Determine task type based on the benchmark task

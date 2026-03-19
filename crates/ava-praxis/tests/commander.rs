@@ -35,6 +35,8 @@ fn director_with_default(provider: Arc<dyn LLMProvider>) -> Director {
         platform: None,
         scout_provider: None,
         board_providers: vec![],
+        worker_names: vec![],
+        enabled_leads: vec![],
     })
 }
 
@@ -46,6 +48,8 @@ fn director_with_platform(provider: Arc<dyn LLMProvider>) -> Director {
         platform: Some(Arc::new(StandardPlatform)),
         scout_provider: None,
         board_providers: vec![],
+        worker_names: vec![],
+        enabled_leads: vec![],
     })
 }
 
@@ -168,6 +172,8 @@ fn worker_spawning_uses_domain_provider_model_name() {
         platform: None,
         scout_provider: None,
         board_providers: vec![],
+        worker_names: vec![],
+        enabled_leads: vec![],
     });
 
     let worker = director
@@ -346,6 +352,8 @@ async fn one_worker_failure_isolated_from_successful_worker() {
         platform: None,
         scout_provider: None,
         board_providers: vec![],
+        worker_names: vec![],
+        enabled_leads: vec![],
     });
 
     let good_worker = director

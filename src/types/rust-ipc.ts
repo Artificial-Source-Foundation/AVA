@@ -506,9 +506,26 @@ export interface CompactContextResult {
 
 // Praxis multi-agent IPC types
 
+export interface LeadConfigPayload {
+  domain: string
+  enabled: boolean
+  model: string
+  maxWorkers: number
+}
+
+export interface TeamConfigPayload {
+  defaultDirectorModel: string
+  defaultLeadModel: string
+  defaultWorkerModel: string
+  defaultScoutModel: string
+  workerNames: string[]
+  leads: LeadConfigPayload[]
+}
+
 export interface StartPraxisArgs {
   goal: string
   domain?: string
+  teamConfig?: TeamConfigPayload
 }
 
 export interface PraxisStatusResult {

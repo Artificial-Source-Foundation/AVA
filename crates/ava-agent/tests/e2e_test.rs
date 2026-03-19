@@ -161,6 +161,8 @@ async fn director_multi_agent_coordination() {
         platform: None,
         scout_provider: None,
         board_providers: vec![],
+        worker_names: vec![],
+        enabled_leads: vec![],
     });
 
     let worker_a = director

@@ -349,7 +349,21 @@ function createAgentStore() {
           goal: goal.slice(0, 120),
         })
         try {
-          await rustBackend.startPraxis(goal)
+          const teamCfg = settingsRef.settings().team
+          const teamConfigPayload: import('../types/rust-ipc').TeamConfigPayload = {
+            defaultDirectorModel: teamCfg.defaultDirectorModel,
+            defaultLeadModel: teamCfg.defaultLeadModel,
+            defaultWorkerModel: teamCfg.defaultWorkerModel,
+            defaultScoutModel: teamCfg.defaultScoutModel,
+            workerNames: teamCfg.workerNames,
+            leads: teamCfg.leads.map((l) => ({
+              domain: l.domain,
+              enabled: l.enabled,
+              model: l.model,
+              maxWorkers: l.maxWorkers,
+            })),
+          }
+          await rustBackend.startPraxis(goal, undefined, teamConfigPayload)
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err)
           log.error('agent', 'Praxis failed', { error: msg })

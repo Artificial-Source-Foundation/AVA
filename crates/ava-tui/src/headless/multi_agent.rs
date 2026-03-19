@@ -44,6 +44,8 @@ pub(super) async fn run_multi_agent(cli: CliArgs, goal: &str) -> Result<()> {
         platform: Some(platform),
         scout_provider: None,
         board_providers: vec![],
+        worker_names: vec![],
+        enabled_leads: vec![],
     });
 
     let cancel = CancellationToken::new();

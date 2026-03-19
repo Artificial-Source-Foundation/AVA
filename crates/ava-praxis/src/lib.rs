@@ -91,6 +91,10 @@ pub struct DirectorConfig {
     /// (Analytical, Pragmatic, Creative). Typically 3 providers from different vendors.
     #[allow(clippy::doc_markdown)]
     pub board_providers: Vec<Arc<dyn LLMProvider>>,
+    /// Custom worker names. Falls back to the built-in pool when empty.
+    pub worker_names: Vec<String>,
+    /// Which lead domains are enabled. When empty, all domains are enabled.
+    pub enabled_leads: Vec<Domain>,
 }
 
 impl DirectorConfig {
@@ -127,6 +131,8 @@ pub struct Lead {
     workers: Vec<Worker>,
     provider: Arc<dyn LLMProvider>,
     platform: Option<Arc<StandardPlatform>>,
+    /// Custom worker names pool (empty = use built-in default).
+    worker_names: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -199,50 +205,34 @@ pub enum TaskType {
 impl Director {
     pub fn new(config: DirectorConfig) -> Self {
         let platform = config.platform.clone();
-        let leads = vec![
-            Lead::new(
-                "frontend-lead",
-                Domain::Frontend,
-                config.provider_for(Domain::Frontend),
-                platform.clone(),
-            ),
-            Lead::new(
-                "backend-lead",
-                Domain::Backend,
-                config.provider_for(Domain::Backend),
-                platform.clone(),
-            ),
-            Lead::new(
-                "qa-lead",
-                Domain::QA,
-                config.provider_for(Domain::QA),
-                platform.clone(),
-            ),
-            Lead::new(
-                "research-lead",
-                Domain::Research,
-                config.provider_for(Domain::Research),
-                platform.clone(),
-            ),
-            Lead::new(
-                "debug-lead",
-                Domain::Debug,
-                config.provider_for(Domain::Debug),
-                platform.clone(),
-            ),
-            Lead::new(
-                "fullstack-lead",
-                Domain::Fullstack,
-                config.provider_for(Domain::Fullstack),
-                platform.clone(),
-            ),
-            Lead::new(
-                "devops-lead",
-                Domain::DevOps,
-                config.provider_for(Domain::DevOps),
-                platform.clone(),
-            ),
+
+        let all_domains = vec![
+            ("frontend-lead", Domain::Frontend),
+            ("backend-lead", Domain::Backend),
+            ("qa-lead", Domain::QA),
+            ("research-lead", Domain::Research),
+            ("debug-lead", Domain::Debug),
+            ("fullstack-lead", Domain::Fullstack),
+            ("devops-lead", Domain::DevOps),
         ];
+
+        let worker_names = config.worker_names.clone();
+        let leads: Vec<Lead> = all_domains
+            .into_iter()
+            .filter(|(_, domain)| {
+                // If enabled_leads is empty, all are enabled
+                config.enabled_leads.is_empty() || config.enabled_leads.contains(domain)
+            })
+            .map(|(name, domain)| {
+                Lead::new(
+                    name,
+                    domain.clone(),
+                    config.provider_for(domain),
+                    platform.clone(),
+                )
+                .with_worker_names(worker_names.clone())
+            })
+            .collect();
 
         Self {
             leads,
@@ -784,7 +774,14 @@ impl Lead {
             workers: Vec::new(),
             provider,
             platform,
+            worker_names: Vec::new(),
         }
+    }
+
+    /// Create a new lead with custom worker names.
+    pub fn with_worker_names(mut self, names: Vec<String>) -> Self {
+        self.worker_names = names;
+        self
     }
 
     pub fn name(&self) -> &str {
@@ -1098,9 +1095,14 @@ impl Lead {
         let model_name = self.provider.model_name().to_string();
         let worker_id = Uuid::new_v4();
 
-        // Pick a worker name from the name pool based on worker count
-        let worker_name = worker_name_for_index(self.workers.len());
-        let system_prompt = prompts::worker_system_prompt_for_domain(worker_name, &self.domain);
+        // Pick a worker name from the custom pool or fall back to the built-in default
+        let idx = self.workers.len();
+        let worker_name: String = if self.worker_names.is_empty() {
+            worker_name_for_index(idx).to_string()
+        } else {
+            self.worker_names[idx % self.worker_names.len()].clone()
+        };
+        let system_prompt = prompts::worker_system_prompt_for_domain(&worker_name, &self.domain);
 
         let mut registry = ToolRegistry::new();
         if let Some(platform) = &self.platform {

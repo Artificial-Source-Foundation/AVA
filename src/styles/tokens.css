@@ -252,6 +252,11 @@
   --agent-custom: var(--pink-4);
   --agent-custom-subtle: var(--pink-alpha-15);
 
+  /* Praxis Director */
+  --director: var(--amber-4);
+  --director-subtle: var(--amber-alpha-15);
+  --director-border: var(--amber-alpha-20);
+
   /* ========================================
      COMPONENT TOKENS
      ======================================== */

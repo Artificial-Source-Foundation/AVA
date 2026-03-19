@@ -292,8 +292,14 @@ export const rustBackend = {
     invokeCommand('search_sessions', { query }),
 
   // Praxis multi-agent
-  startPraxis: (goal: string, domain?: string): Promise<void> =>
-    invokeCommand('start_praxis', { args: { goal, domain: domain ?? null } }),
+  startPraxis: (
+    goal: string,
+    domain?: string,
+    teamConfig?: import('../types/rust-ipc').TeamConfigPayload
+  ): Promise<void> =>
+    invokeCommand('start_praxis', {
+      args: { goal, domain: domain ?? null, teamConfig: teamConfig ?? null },
+    }),
   getPraxisStatus: (): Promise<import('../types/rust-ipc').PraxisStatusResult> =>
     invokeCommand('get_praxis_status'),
   cancelPraxis: (): Promise<void> => invokeCommand('cancel_praxis'),

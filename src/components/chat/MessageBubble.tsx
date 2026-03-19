@@ -1,8 +1,11 @@
+import { Crown } from 'lucide-solid'
 import { type Accessor, type Component, createMemo, For, Match, Show, Switch } from 'solid-js'
 import { formatCost } from '../../lib/cost'
 import { formatMs } from '../../lib/format-time'
+import { useTeam } from '../../stores/team'
 import type { Message, ToolCall } from '../../types'
 import type { PlanData } from '../../types/rust-ipc'
+import { TEAM_DOMAINS, type TeamDomain } from '../../types/team'
 import { EditForm } from './EditForm'
 import { InlinePlanCard } from './InlinePlanCard'
 import { MarkdownContent } from './MarkdownContent'
@@ -50,6 +53,113 @@ function formatTimestamp(msg: Message): string {
   return `${h12}:${m} ${ampm}`
 }
 
+// ============================================================================
+// Lead Question Detection
+// ============================================================================
+
+/** Parsed lead question relayed through the Director */
+interface LeadQuestion {
+  name: string
+  domain: TeamDomain
+  domainLabel: string
+  color: string
+  question: string
+}
+
+/** Domain keyword map for inferring domain from lead names */
+const DOMAIN_KEYWORDS: Array<{ pattern: RegExp; domain: TeamDomain }> = [
+  { pattern: /frontend|FE|UI/i, domain: 'frontend' },
+  { pattern: /backend|BE|API/i, domain: 'backend' },
+  { pattern: /fullstack|FS/i, domain: 'fullstack' },
+  { pattern: /QA|test|quality/i, domain: 'testing' },
+  { pattern: /devops|ops|infra|deploy/i, domain: 'devops' },
+  { pattern: /docs|documentation/i, domain: 'docs' },
+  { pattern: /design|UX/i, domain: 'design' },
+  { pattern: /data|analytics/i, domain: 'data' },
+  { pattern: /security|sec/i, domain: 'security' },
+  { pattern: /research/i, domain: 'general' },
+]
+
+/**
+ * Detect a lead question pattern in message content.
+ * Matches patterns like "Pedro (Backend Lead) asks:" or "Luna (QA Lead) asks:"
+ */
+function parseLeadQuestion(content: string): LeadQuestion | null {
+  const match = content.match(/^(.+?)\s*\(([^)]+?)\s+Lead\)\s+asks:\s*\n?([\s\S]+)$/)
+  if (!match) return null
+  const [, name, domainHint, question] = match
+  let domain: TeamDomain = 'general'
+  for (const { pattern, domain: d } of DOMAIN_KEYWORDS) {
+    if (pattern.test(domainHint)) {
+      domain = d
+      break
+    }
+  }
+  const config = TEAM_DOMAINS[domain]
+  return {
+    name: name.trim(),
+    domain,
+    domainLabel: `${domainHint.trim()} Lead`,
+    color: config.color,
+    question: question.trim(),
+  }
+}
+
+// ============================================================================
+// Lead Question Relay Card
+// ============================================================================
+
+const LeadQuestionCard: Component<{ question: LeadQuestion }> = (props) => {
+  return (
+    <div
+      class="w-full rounded-[var(--radius-xl)] bg-[var(--gray-3)] overflow-hidden my-1"
+      style={{
+        border: `1px solid color-mix(in srgb, ${props.question.color} 25%, transparent)`,
+      }}
+    >
+      <div class="flex flex-col gap-2 px-4 py-3">
+        {/* Header: domain dot + "Name (Domain Lead) asks:" */}
+        <div class="flex items-center gap-1.5">
+          <span
+            class="inline-block w-2 h-2 rounded-full flex-shrink-0"
+            style={{ background: props.question.color }}
+          />
+          <span class="text-[11px] font-semibold" style={{ color: props.question.color }}>
+            {props.question.name} ({props.question.domainLabel}) asks:
+          </span>
+        </div>
+        {/* Question body */}
+        <div class="w-full">
+          <MarkdownContent
+            content={props.question.question}
+            messageRole="assistant"
+            isStreaming={false}
+          />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ============================================================================
+// Director Label
+// ============================================================================
+
+const DirectorLabel: Component = () => {
+  return (
+    <div class="flex items-center gap-1.5 mb-1">
+      <Crown class="w-3.5 h-3.5 flex-shrink-0" style={{ color: 'var(--amber-4)' }} />
+      <span class="text-[11px] font-semibold tracking-wide" style={{ color: 'var(--amber-4)' }}>
+        Director
+      </span>
+    </div>
+  )
+}
+
+// ============================================================================
+// Tool Segment Dispatch
+// ============================================================================
+
 interface ToolSegmentProps {
   toolCalls: ToolCall[]
   isStreaming: boolean
@@ -77,10 +187,14 @@ const ToolSegmentDispatch: Component<ToolSegmentProps> = (props) => {
 }
 
 export const MessageBubble: Component<MessageBubbleProps> = (props) => {
+  const team = useTeam()
   const isUser = () => props.message.role === 'user'
   const shouldAnimateIn = () => props.shouldAnimate && !props.isEditing
 
   const isActiveStreaming = () => props.isStreaming && props.isLastMessage && !isUser()
+
+  /** True when team mode is active and this is an assistant message (Director's message) */
+  const isDirectorMessage = () => !isUser() && team.hierarchy() !== null
 
   const displayContent = () => {
     if (isActiveStreaming() && props.streamingContent) {
@@ -103,6 +217,14 @@ export const MessageBubble: Component<MessageBubbleProps> = (props) => {
     const plan = meta.plan as PlanData
     if (plan.steps && Array.isArray(plan.steps) && plan.summary) return plan
     return null
+  })
+
+  /** Detect if this message is relaying a lead's question */
+  const leadQuestion = createMemo((): LeadQuestion | null => {
+    if (isUser()) return null
+    const content = props.message.content
+    if (!content) return null
+    return parseLeadQuestion(content)
   })
 
   const segments = createMemo((): MessageSegment[] | null => {
@@ -217,8 +339,25 @@ export const MessageBubble: Component<MessageBubbleProps> = (props) => {
         </Show>
 
         <Show when={!isUser()}>
-          <div class="relative group w-[90%] min-w-0">
+          <div
+            class="relative group w-[90%] min-w-0"
+            classList={{
+              'pl-3': isDirectorMessage(),
+            }}
+            style={
+              isDirectorMessage()
+                ? {
+                    'border-left': '2px solid var(--amber-4)',
+                  }
+                : undefined
+            }
+          >
             <div class="flex flex-col w-full min-w-0">
+              {/* Director label (team mode only) */}
+              <Show when={isDirectorMessage()}>
+                <DirectorLabel />
+              </Show>
+
               <Show when={props.message.metadata?.thinking as string}>
                 <ThinkingRow
                   thinking={props.message.metadata!.thinking as string}
@@ -234,6 +373,9 @@ export const MessageBubble: Component<MessageBubbleProps> = (props) => {
                   </div>
                 )}
               </Show>
+
+              {/* Lead question relay card */}
+              <Show when={leadQuestion()}>{(q) => <LeadQuestionCard question={q()} />}</Show>
 
               <Show when={isActiveStreaming()}>
                 <Show when={hasToolCalls()}>
@@ -254,46 +396,51 @@ export const MessageBubble: Component<MessageBubbleProps> = (props) => {
               </Show>
 
               <Show when={!isActiveStreaming()}>
-                <Show when={segments()}>
-                  {(segs) => (
-                    <For each={segs()}>
-                      {(seg) => (
-                        <Switch>
-                          <Match when={seg.type === 'text' && seg}>
-                            {(textSeg) => (
-                              <div class="w-full mb-1">
-                                <MarkdownContent
-                                  content={(textSeg() as MessageSegment & { type: 'text' }).content}
-                                  messageRole="assistant"
+                {/* When content is a lead question, skip normal rendering (card handles it) */}
+                <Show when={!leadQuestion()}>
+                  <Show when={segments()}>
+                    {(segs) => (
+                      <For each={segs()}>
+                        {(seg) => (
+                          <Switch>
+                            <Match when={seg.type === 'text' && seg}>
+                              {(textSeg) => (
+                                <div class="w-full mb-1">
+                                  <MarkdownContent
+                                    content={
+                                      (textSeg() as MessageSegment & { type: 'text' }).content
+                                    }
+                                    messageRole="assistant"
+                                    isStreaming={false}
+                                  />
+                                </div>
+                              )}
+                            </Match>
+                            <Match when={seg.type === 'tools' && seg}>
+                              {(toolSeg) => (
+                                <ToolSegmentDispatch
+                                  toolCalls={
+                                    (toolSeg() as MessageSegment & { type: 'tools' }).toolCalls
+                                  }
                                   isStreaming={false}
                                 />
-                              </div>
-                            )}
-                          </Match>
-                          <Match when={seg.type === 'tools' && seg}>
-                            {(toolSeg) => (
-                              <ToolSegmentDispatch
-                                toolCalls={
-                                  (toolSeg() as MessageSegment & { type: 'tools' }).toolCalls
-                                }
-                                isStreaming={false}
-                              />
-                            )}
-                          </Match>
-                        </Switch>
-                      )}
-                    </For>
-                  )}
-                </Show>
+                              )}
+                            </Match>
+                          </Switch>
+                        )}
+                      </For>
+                    )}
+                  </Show>
 
-                <Show when={!segments() && props.message.content}>
-                  <div class="w-full">
-                    <MarkdownContent
-                      content={props.message.content}
-                      messageRole="assistant"
-                      isStreaming={false}
-                    />
-                  </div>
+                  <Show when={!segments() && props.message.content}>
+                    <div class="w-full">
+                      <MarkdownContent
+                        content={props.message.content}
+                        messageRole="assistant"
+                        isStreaming={false}
+                      />
+                    </div>
+                  </Show>
                 </Show>
               </Show>
 

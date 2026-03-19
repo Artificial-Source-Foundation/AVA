@@ -59,6 +59,8 @@ impl App {
                 platform: Some(platform),
                 scout_provider: None,
                 board_providers: vec![],
+                worker_names: vec![],
+                enabled_leads: vec![],
             });
 
             let (tx, mut rx) = mpsc::unbounded_channel();

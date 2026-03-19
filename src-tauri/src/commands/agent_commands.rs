@@ -727,6 +727,38 @@ pub async fn undo_last_edit(
 // Praxis multi-agent commands
 // ============================================================================
 
+#[derive(Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct LeadConfigPayload {
+    pub domain: String,
+    pub enabled: bool,
+    #[serde(default)]
+    pub model: String,
+    #[serde(default = "default_max_workers")]
+    pub max_workers: usize,
+}
+
+fn default_max_workers() -> usize {
+    3
+}
+
+#[derive(Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct TeamConfigPayload {
+    #[serde(default)]
+    pub default_director_model: String,
+    #[serde(default)]
+    pub default_lead_model: String,
+    #[serde(default)]
+    pub default_worker_model: String,
+    #[serde(default)]
+    pub default_scout_model: String,
+    #[serde(default)]
+    pub worker_names: Vec<String>,
+    #[serde(default)]
+    pub leads: Vec<LeadConfigPayload>,
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StartPraxisArgs {
@@ -735,6 +767,9 @@ pub struct StartPraxisArgs {
     #[serde(default)]
     #[allow(dead_code)]
     pub domain: Option<String>,
+    /// Team configuration from the frontend settings.
+    #[serde(default)]
+    pub team_config: Option<TeamConfigPayload>,
 }
 
 #[derive(Serialize)]
@@ -744,6 +779,49 @@ pub struct PraxisStatus {
     pub total_workers: usize,
     pub succeeded: usize,
     pub failed: usize,
+}
+
+/// Parse a domain string from the frontend into a Praxis [`Domain`].
+fn parse_domain(s: &str) -> Option<ava_praxis::Domain> {
+    match s.to_lowercase().as_str() {
+        "frontend" => Some(ava_praxis::Domain::Frontend),
+        "backend" => Some(ava_praxis::Domain::Backend),
+        "qa" => Some(ava_praxis::Domain::QA),
+        "research" => Some(ava_praxis::Domain::Research),
+        "debug" => Some(ava_praxis::Domain::Debug),
+        "fullstack" => Some(ava_praxis::Domain::Fullstack),
+        "devops" => Some(ava_praxis::Domain::DevOps),
+        _ => None,
+    }
+}
+
+/// Resolve a model spec string (e.g. "openrouter/anthropic/claude-haiku-4.5")
+/// into a provider Arc via the stack's router. Returns `None` if the spec is empty
+/// or resolution fails.
+async fn resolve_model_spec(
+    stack: &ava_agent::stack::AgentStack,
+    model_spec: &str,
+) -> Option<std::sync::Arc<dyn ava_llm::provider::LLMProvider>> {
+    if model_spec.is_empty() {
+        return None;
+    }
+    // Use the same parsing logic as AgentStack: first segment before '/' is
+    // the provider, the rest is the model name. Bare names go through the
+    // model registry.
+    let (provider_name, model_name) = if let Some(idx) = model_spec.find('/') {
+        let prov = &model_spec[..idx];
+        let mdl = &model_spec[idx + 1..];
+        (prov.to_string(), mdl.to_string())
+    } else {
+        // Bare model name — try the registry, fall back to the current provider
+        let (cur_prov, _) = stack.current_model().await;
+        (cur_prov, model_spec.to_string())
+    };
+    stack
+        .router
+        .route_required(&provider_name, &model_name)
+        .await
+        .ok()
 }
 
 /// Start a Praxis multi-agent task. Spawns a Director that delegates to
@@ -766,9 +844,9 @@ pub async fn start_praxis(
     let cancel = bridge.new_cancel_token().await;
     let stack = bridge.stack.clone();
 
-    // Resolve the current provider
+    // Resolve the current provider (used as default fallback)
     let (provider_name, model_name) = stack.current_model().await;
-    let provider = stack
+    let default_provider = stack
         .router
         .route_required(&provider_name, &model_name)
         .await
@@ -776,17 +854,76 @@ pub async fn start_praxis(
 
     let platform = std::sync::Arc::new(ava_platform::StandardPlatform);
 
+    // Build DirectorConfig from the team settings
+    let team_config = args.team_config.clone();
+
+    // Resolve director provider: prefer team config director model, else default
+    let director_provider = if let Some(ref tc) = team_config {
+        resolve_model_spec(&stack, &tc.default_director_model)
+            .await
+            .unwrap_or_else(|| default_provider.clone())
+    } else {
+        default_provider.clone()
+    };
+
+    // Resolve scout provider
+    let scout_provider = if let Some(ref tc) = team_config {
+        resolve_model_spec(&stack, &tc.default_scout_model).await
+    } else {
+        None
+    };
+
+    // Resolve per-domain lead providers
+    let mut domain_providers = std::collections::HashMap::new();
+    if let Some(ref tc) = team_config {
+        for lead_cfg in &tc.leads {
+            if !lead_cfg.enabled {
+                continue;
+            }
+            // Per-lead model override takes priority, then default_lead_model
+            let model_spec = if lead_cfg.model.is_empty() {
+                &tc.default_lead_model
+            } else {
+                &lead_cfg.model
+            };
+            if let Some(domain) = parse_domain(&lead_cfg.domain) {
+                if let Some(provider) = resolve_model_spec(&stack, model_spec).await {
+                    domain_providers.insert(domain, provider);
+                }
+            }
+        }
+    }
+
+    // Determine enabled leads
+    let enabled_leads: Vec<ava_praxis::Domain> = if let Some(ref tc) = team_config {
+        tc.leads
+            .iter()
+            .filter(|l| l.enabled)
+            .filter_map(|l| parse_domain(&l.domain))
+            .collect()
+    } else {
+        vec![] // empty = all enabled
+    };
+
+    // Worker names
+    let worker_names: Vec<String> = team_config
+        .as_ref()
+        .map(|tc| tc.worker_names.clone())
+        .unwrap_or_default();
+
     // Clone the app handle so we can access bridge state from the spawned task
     let app_handle = app.clone();
 
     tokio::spawn(async move {
         let mut director = ava_praxis::Director::new(ava_praxis::DirectorConfig {
             budget: ava_praxis::Budget::interactive(200, 10.0),
-            default_provider: provider,
-            domain_providers: std::collections::HashMap::new(),
+            default_provider: director_provider,
+            domain_providers,
             platform: Some(platform),
-            scout_provider: None,
+            scout_provider,
             board_providers: vec![],
+            worker_names,
+            enabled_leads,
         });
 
         let worker = match director.delegate(ava_praxis::Task {

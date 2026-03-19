@@ -142,6 +142,9 @@ export async function switchSession(id: string): Promise<void> {
   setRetryingMessageId(null)
   setCurrentSession(session)
 
+  // Switch to per-session log file
+  import('../../lib/logger').then((m) => m.setSessionLogFile(id)).catch(() => {})
+
   setIsLoadingMessages(true)
   try {
     const dbMessages = await getMessages(id)

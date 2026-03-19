@@ -21,7 +21,7 @@ import { type FlushWriter, LogBuffer, type LogBufferEntry } from './log-buffer'
 // ============================================================================
 
 const LOG_DIR_NAME = '.ava/log'
-const LOG_FILE_NAME = 'app.log'
+let LOG_FILE_NAME = 'app.log'
 const MAX_LOG_FILE_BYTES = 1_024 * 1_024 // 1 MB
 
 // ============================================================================
@@ -220,6 +220,26 @@ export function getFrontendLogEntries(): ReadonlyArray<LogBufferEntry> {
 /** Get the resolved log file path (available after init). */
 export function getFrontendLogFilePath(): string {
   return logFilePath
+}
+
+/**
+ * Switch to per-session log file.
+ * Creates `~/.ava/log/{sessionId}.log` so each session has its own log.
+ * Call when a session starts or switches.
+ */
+export async function setSessionLogFile(sessionId: string): Promise<void> {
+  if (!isTauriEnv || !sessionId) return
+  await buffer.flush()
+  const shortId = sessionId.slice(0, 8)
+  LOG_FILE_NAME = `${shortId}.log`
+  try {
+    const { homeDir } = await import('@tauri-apps/api/path')
+    const home = await homeDir()
+    logFilePath = `${home}${LOG_DIR_NAME}/${LOG_FILE_NAME}`
+    pushEntry('info', 'logger', `Switched to session log: ${LOG_FILE_NAME}`)
+  } catch {
+    // Keep current log file
+  }
 }
 
 /**

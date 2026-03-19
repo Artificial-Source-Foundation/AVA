@@ -1,5 +1,29 @@
 # Changelog
 
+## v2.2.2 (2026-03-19)
+
+### Added
+
+#### Batch 1: Reliability & UX
+- **Tool schema pre-validation** — catches malformed tool calls before execution, surfaces actionable errors
+- **Stream silence timeout** — 90s configurable timeout with per-chunk reset, prevents hung streams
+- **Auto-compaction toggle + threshold slider** — Settings-configurable compaction behavior
+
+#### Batch 2: Cost & Accuracy
+- **Anthropic prompt caching** — `cache_control` on system prompt + tool definitions, ~25% cost savings on cache hits
+- **Auto-retry middleware for read-only tools** — 2x retry with exponential backoff for transient failures
+- **tiktoken-rs BPE token counting** — accurate token counts replacing character-based heuristic
+
+#### Batch 3: Edit Quality & Audit
+- **Edit reliability cascade: 14 strategies** — added 3-way merge + diff-match-patch (was 12 strategies)
+- **Persistent audit log** — SQLite-backed, opt-out, queryable by session/tool
+
+### Changed
+- 1,692 tests passing (0 failures), up from 1,641
+- 91 Praxis tests (74 unit + 11 integration + 6 doc-tests)
+- 3 Playwright e2e tests passing
+- 0 clippy warnings, 0 TypeScript errors
+
 ## v2.2.1 (2026-03-18)
 
 ### Added

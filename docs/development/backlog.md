@@ -8,6 +8,9 @@ Tool surface policy: default tools stay capped at 6 (`read`, `write`, `edit`, `b
 
 ## Recently Completed
 
+- **Enhancement Batch 3** — edit reliability cascade (14 strategies: 3-way merge + diff-match-patch), persistent audit log (SQLite, opt-out, session/tool queries)
+- **Enhancement Batch 2** — Anthropic prompt caching (cache_control on system + tools, ~25% cost savings), auto-retry middleware for read-only tools (2x, exponential backoff), tiktoken-rs accurate BPE token counting
+- **Enhancement Batch 1** — tool schema pre-validation (catches malformed calls before execution), stream silence timeout (90s configurable, per-chunk reset), auto-compaction toggle + threshold slider in Settings
 - **Web mode** — `ava serve` with HTTP API + WebSocket, session CRUD, async agent streaming, auto-titling, mid-stream messaging endpoints, web DB fallback
 - **Desktop parity** — Ctrl+T thinking toggle, Ctrl+Y copy response, 29 themes, `/later` and `/queue` slash commands, mid-stream messaging IPC
 - **Plugin system Phase 1** — `ava-plugin` crate, AgentStack wiring, TypeScript + Python SDKs, 4 examples, CLI commands, auth hooks
@@ -20,7 +23,7 @@ Tool surface policy: default tools stay capped at 6 (`read`, `write`, `edit`, `b
 
 1. **Wildcard permission patterns** — `*.env` → ask, `src/**/*.rs` → allow. Glob-based rules. Simple, high UX impact.
 2. **Per-agent model override** — each agent uses different provider/model. Already half-built in agents.toml config.
-3. **Fuzzy matching upgrade** — exact → line-trimmed → block-anchor cascade. Fewer failed edits.
+3. ~~**Fuzzy matching upgrade**~~ — DONE: edit reliability cascade now has 14 strategies including 3-way merge + diff-match-patch.
 4. **StreamingDiff** — apply edits as tokens stream. Users see changes instantly instead of waiting.
 
 ### Desktop App Bugs (from testing)

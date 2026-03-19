@@ -1,4 +1,4 @@
-<!-- Last verified: 2026-03-18. Run 'just check' to revalidate. -->
+<!-- Last verified: 2026-03-19. Run 'just check' to revalidate. -->
 
 # AVA Architecture & Conventions (v3)
 
@@ -44,11 +44,13 @@ AVA uses a **Rust-first architecture**. All agent, CLI, and backend code is Rust
 
 ### Codebase Stats
 
-- **21 Rust crates**, ~40K LOC, 1,641 tests
-- **8 LLM providers**: Anthropic, OpenAI-compatible, Gemini, Ollama, OpenRouter, Copilot, Inception, Mock
-- **6 default tools**: `read`, `write`, `edit`, `bash`, `glob`, `grep`
+- **21 Rust crates**, ~40K LOC, 1,692 tests
+- **8 LLM providers**: Anthropic (with prompt caching), OpenAI-compatible, Gemini, Ollama, OpenRouter, Copilot, Inception, Mock
+- **6 default tools**: `read`, `write`, `edit` (14 strategies), `bash`, `glob`, `grep`
 - **8 extended tools**: `apply_patch`, `web_fetch`, `web_search`, `multiedit`, `ast_ops`, `lsp_ops`, `code_search`, `git_read`
+- **1 agent tool**: `plan` (Plannotator-style inline plan editing)
 - **Dynamic tools**: MCP servers + TOML custom tools (`~/.ava/tools/`, `.ava/tools/`)
+- **Key capabilities**: prompt caching (Anthropic), auto-retry middleware, stream silence timeout, tiktoken BPE token counting, persistent audit log, auto-compaction settings
 
 ### Mid-Stream Messaging
 

@@ -6,6 +6,7 @@
 
 import { createMemo, createRoot, createSignal } from 'solid-js'
 import { DEFAULTS } from '../../config/constants'
+import { debugLog } from '../../lib/debug-log'
 import { log } from '../../lib/logger'
 import { getCoreBudget } from '../../services/core-bridge'
 import type {
@@ -103,6 +104,7 @@ export const {
     _setSelectedModel(model)
     _setSelectedProvider(providerId ?? null)
     log.info('model', `Model changed to ${model}`, { provider: providerId ?? 'default' })
+    debugLog('model', 'switched to:', model, 'provider:', providerId ?? 'default')
     try {
       localStorage.setItem(SELECTED_MODEL_KEY, model)
       if (providerId) localStorage.setItem(SELECTED_PROVIDER_KEY, providerId)

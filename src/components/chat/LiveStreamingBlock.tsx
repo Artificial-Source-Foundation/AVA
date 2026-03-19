@@ -13,6 +13,7 @@
 
 import { type Component, createMemo, Show } from 'solid-js'
 import { useAgent } from '../../hooks/useAgent'
+import { debugLog } from '../../lib/debug-log'
 import { MarkdownContent } from './MarkdownContent'
 import { ThinkingRow } from './message-rows/ThinkingRow'
 import { ToolCallGroup } from './ToolCallGroup'
@@ -21,7 +22,16 @@ import { ToolPreview } from './ToolPreview'
 export const LiveStreamingBlock: Component = () => {
   const agent = useAgent()
 
-  const hasThinking = createMemo(() => !!agent.currentThought())
+  const hasThinking = createMemo(() => {
+    const thought = agent.currentThought()
+    debugLog(
+      'thinking',
+      'LiveStreamingBlock hasThinking:',
+      !!thought,
+      thought ? `(${thought.length} chars)` : ''
+    )
+    return !!thought
+  })
   const hasToolCalls = createMemo(() => (agent.activeToolCalls()?.length ?? 0) > 0)
   const hasContent = createMemo(() => !!agent.streamingContent())
   const hasAnyContent = createMemo(() => hasThinking() || hasToolCalls() || hasContent())

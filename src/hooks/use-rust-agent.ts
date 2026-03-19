@@ -2,6 +2,7 @@ import { isTauri, invoke as tauriInvoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { batch, createSignal, onCleanup } from 'solid-js'
 import { apiInvoke, createEventSocket } from '../lib/api-client'
+import { debugLog } from '../lib/debug-log'
 import { log } from '../lib/logger'
 import type { ToolCall } from '../types'
 import type { AgentEvent, PlanCreatedEvent, PlanData, SubmitGoalResult } from '../types/rust-ipc'
@@ -42,14 +43,27 @@ export function useRustAgent() {
   const handleAgentEvent = (event: AgentEvent): void => {
     setEvents((prev) => [...prev, event])
 
+    debugLog(
+      'event',
+      event.type,
+      event.type === 'token' ? `(${(event.content as string)?.length ?? 0} chars)` : event
+    )
+
     switch (event.type) {
       case 'token':
         setStreamingContent((prev) => prev + event.content)
         break
       case 'thinking':
+        debugLog('thinking', 'received:', (event.content as string)?.length ?? 0, 'chars')
         setThinkingContent((prev) => prev + event.content)
         break
       case 'tool_call':
+        debugLog(
+          'tools',
+          'tool_call:',
+          (event as { name?: string }).name,
+          (event as { args?: unknown }).args
+        )
         setActiveToolCalls((prev) => [
           ...prev,
           {
@@ -62,6 +76,12 @@ export function useRustAgent() {
         ])
         break
       case 'tool_result': {
+        debugLog(
+          'tools',
+          'tool_result:',
+          event.is_error ? 'ERROR' : 'OK',
+          (event.content as string)?.slice(0, 120)
+        )
         setActiveToolCalls((prev) => {
           const updated = [...prev]
           // Use indexOf (first running) — results arrive in the same order as tool_call events
@@ -99,6 +119,7 @@ export function useRustAgent() {
         break
       }
       case 'complete':
+        debugLog('agent', 'complete event received')
         batch(() => {
           setIsRunning(false)
           // Mark any remaining running tool calls as interrupted
@@ -138,6 +159,7 @@ export function useRustAgent() {
         break
 
       case 'plan_created': {
+        debugLog('plan', 'plan_created event', (event as PlanCreatedEvent).plan?.summary)
         const planEvent = event as PlanCreatedEvent
         setPendingPlan(planEvent.plan)
         break
@@ -156,6 +178,7 @@ export function useRustAgent() {
       case 'praxis_spec_created':
       case 'praxis_artifact_created':
       case 'praxis_conflict_detected':
+        debugLog('team', event.type, (event as { worker_id?: string }).worker_id ?? '')
         // These are already added to events() signal above — the team bridge
         // in useAgent picks them up via the createEffect on rustAgent.events.
         // Additional state updates for Praxis completion:

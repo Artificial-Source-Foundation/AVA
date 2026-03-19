@@ -9,6 +9,7 @@
 import { batch, createEffect, createSignal, on } from 'solid-js'
 
 import { DEFAULTS } from '../config/constants'
+import { debugLog } from '../lib/debug-log'
 import { generateMessageId } from '../lib/ids'
 import { log } from '../lib/logger'
 import { deriveSessionTitle } from '../lib/title-utils'
@@ -211,7 +212,12 @@ function createAgentStore() {
         }
         // Sync thinking content to frontend signal
         if (event.type === 'thinking') {
-          setCurrentThought((prev) => prev + (event as { content: string }).content)
+          const chunk = (event as { content: string }).content
+          setCurrentThought((prev) => {
+            const updated = prev + chunk
+            debugLog('thinking', 'currentThought updated:', updated.length, 'chars total')
+            return updated
+          })
         }
         // Sync real token counts to the ContextBudget on each turn
         if (event.type === 'token_usage') {
@@ -342,6 +348,12 @@ function createAgentStore() {
       // Get the thinking/reasoning level from frontend settings
       const reasoningEffort = settingsRef.settings().generation.reasoningEffort
       const thinkingLevel = reasoningEffort === 'off' ? undefined : reasoningEffort
+      debugLog('agent', 'run config:', {
+        model: selectedModelId,
+        provider: selectedProviderId,
+        thinkingLevel,
+        reasoningEffort,
+      })
 
       // Team mode: route to Praxis Director instead of solo agent
       if (isTeamMode()) {
@@ -408,6 +420,11 @@ function createAgentStore() {
       if (content) {
         const elapsedMs = Date.now() - runStartedAt
         const thinking = rustAgent.thinkingContent()
+        debugLog(
+          'thinking',
+          'message metadata:',
+          thinking ? `yes (${thinking.length} chars)` : 'no'
+        )
         const assistantMsg: Message = {
           id: generateMessageId('asst'),
           sessionId,

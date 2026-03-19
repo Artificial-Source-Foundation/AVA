@@ -1,6 +1,7 @@
 import { Crown } from 'lucide-solid'
 import { type Accessor, type Component, createMemo, For, Match, Show, Switch } from 'solid-js'
 import { formatCost } from '../../lib/cost'
+import { debugLog } from '../../lib/debug-log'
 import { formatMs } from '../../lib/format-time'
 import { useTeam } from '../../stores/team'
 import type { Message, ToolCall } from '../../types'
@@ -358,7 +359,13 @@ export const MessageBubble: Component<MessageBubbleProps> = (props) => {
                 <DirectorLabel />
               </Show>
 
-              <Show when={props.message.metadata?.thinking as string}>
+              <Show
+                when={(() => {
+                  const t = props.message.metadata?.thinking as string
+                  if (t) debugLog('thinking', 'message metadata: yes', 'msgId:', props.message.id)
+                  return t
+                })()}
+              >
                 <ThinkingRow
                   thinking={props.message.metadata!.thinking as string}
                   isStreaming={props.isStreaming}

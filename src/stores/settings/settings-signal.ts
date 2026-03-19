@@ -5,6 +5,7 @@
  */
 
 import { createRoot, createSignal } from 'solid-js'
+import { debugLog } from '../../lib/debug-log'
 import { applyAppearanceToDOM } from './settings-appearance'
 import { hydrateAgents, hydrateProviders } from './settings-hydration'
 import { loadSettings, saveSettings } from './settings-persistence'
@@ -77,6 +78,7 @@ export type SubObjectKey =
 
 /** Generic sub-object updater: patches a nested key then persists */
 export function updateSubKey<K extends SubObjectKey>(key: K, patch: Partial<AppSettings[K]>): void {
+  debugLog('settings', `updateSubKey(${key})`, patch)
   setSettingsRaw((prev) => {
     const next = { ...prev, [key]: { ...prev[key], ...patch } }
     saveSettings(next)
@@ -85,6 +87,7 @@ export function updateSubKey<K extends SubObjectKey>(key: K, patch: Partial<AppS
 }
 
 export function updateSettings(patch: Partial<AppSettings>): void {
+  debugLog('settings', 'updateSettings', Object.keys(patch))
   setSettingsRaw((prev) => {
     const next = { ...prev, ...patch }
     saveSettings(next)

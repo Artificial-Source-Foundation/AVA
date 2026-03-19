@@ -17,6 +17,8 @@ import {
   onCleanup,
   Show,
 } from 'solid-js'
+import { setDebugDevMode } from '../../../lib/debug-log'
+import { getFrontendLogFilePath, readFrontendLogFile } from '../../../lib/logger'
 import { clearDevLogs, getDevLogs } from '../../../services/dev-console'
 import { useSettings } from '../../../stores/settings'
 import {
@@ -38,6 +40,9 @@ export const DeveloperTab: Component = () => {
   const [sourceFilter, setSourceFilter] = createSignal('all')
   const [textFilter, setTextFilter] = createSignal('')
   const [stickToBottom, setStickToBottom] = createSignal(true)
+  const [fileLogContent, setFileLogContent] = createSignal('')
+  const [fileLogLoading, setFileLogLoading] = createSignal(false)
+  const [fileLogCopied, setFileLogCopied] = createSignal(false)
   let scrollRef: HTMLDivElement | undefined
 
   const availableSources = createMemo(() => {
@@ -125,7 +130,10 @@ export const DeveloperTab: Component = () => {
           </div>
           <Toggle
             checked={settings().devMode ?? false}
-            onChange={(v) => updateSettings({ devMode: v })}
+            onChange={(v) => {
+              updateSettings({ devMode: v })
+              setDebugDevMode(v)
+            }}
           />
         </div>
         <div class="flex items-center justify-between py-1.5">
@@ -276,6 +284,69 @@ export const DeveloperTab: Component = () => {
 
           <p class="text-[10px] text-[var(--text-muted)] mt-2">
             Tip: Copy all logs and paste them when reporting issues.
+          </p>
+        </div>
+      </Show>
+
+      {/* File Log Viewer */}
+      <Show when={settings().devMode}>
+        <div class="pt-2 border-t border-[var(--border-subtle)]">
+          <div class="flex items-center justify-between mb-2">
+            <SectionHeader title="File Logs" />
+            <div class="flex items-center gap-2">
+              <Show when={getFrontendLogFilePath()}>
+                <span class="text-[10px] text-[var(--text-muted)] font-mono truncate max-w-[200px]">
+                  {getFrontendLogFilePath()}
+                </span>
+              </Show>
+              <button
+                type="button"
+                onClick={async () => {
+                  setFileLogLoading(true)
+                  try {
+                    const content = await readFrontendLogFile(200)
+                    setFileLogContent(content)
+                  } finally {
+                    setFileLogLoading(false)
+                  }
+                }}
+                class="flex items-center gap-1 px-2 py-1 text-[10px] text-[var(--text-muted)] hover:text-[var(--accent)] bg-[var(--surface-raised)] border border-[var(--border-subtle)] rounded-[var(--radius-md)] transition-colors"
+              >
+                {fileLogLoading() ? 'Loading...' : 'View Logs'}
+              </button>
+              <Show when={fileLogContent()}>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(fileLogContent())
+                      setFileLogCopied(true)
+                      setTimeout(() => setFileLogCopied(false), 1500)
+                    } catch {
+                      // ignore
+                    }
+                  }}
+                  class="flex items-center gap-1 px-2 py-1 text-[10px] text-[var(--text-muted)] hover:text-[var(--accent)] bg-[var(--surface-raised)] border border-[var(--border-subtle)] rounded-[var(--radius-md)] transition-colors"
+                >
+                  <Copy class="w-3 h-3" />
+                  {fileLogCopied() ? 'Copied!' : 'Copy'}
+                </button>
+              </Show>
+            </div>
+          </div>
+
+          <Show when={fileLogContent()}>
+            <div
+              class="bg-[var(--gray-1)] border border-[var(--border-subtle)] rounded-[var(--radius-md)] overflow-auto font-mono text-[11px] leading-[1.6] whitespace-pre-wrap p-2"
+              style={{ height: '280px' }}
+            >
+              {fileLogContent()}
+            </div>
+          </Show>
+
+          <p class="text-[10px] text-[var(--text-muted)] mt-2">
+            File logs persist across sessions. Debug-level entries only written when Developer Mode
+            is on.
           </p>
         </div>
       </Show>

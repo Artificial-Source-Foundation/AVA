@@ -20,7 +20,8 @@ import { type FlushWriter, LogBuffer, type LogBufferEntry } from './log-buffer'
 // Constants
 // ============================================================================
 
-const LOG_FILE_NAME = 'frontend.log'
+const LOG_DIR_NAME = '.ava/log'
+const LOG_FILE_NAME = 'app.log'
 const MAX_LOG_FILE_BYTES = 1_024 * 1_024 // 1 MB
 
 // ============================================================================
@@ -164,11 +165,11 @@ export async function initFrontendLogger(options?: { webBaseUrl?: string }): Pro
 
   if (isTauriEnv) {
     try {
-      const { appDataDir } = await import('@tauri-apps/api/path')
-      const appData = await appDataDir()
-      const logsDir = `${appData}logs`
+      const { homeDir } = await import('@tauri-apps/api/path')
+      const home = await homeDir()
+      const logsDir = `${home}${LOG_DIR_NAME}`
 
-      // Ensure logs directory exists
+      // Ensure ~/.ava/log/ directory exists
       try {
         const { mkdir } = await import('@tauri-apps/plugin-fs')
         await mkdir(logsDir, { recursive: true })
@@ -214,6 +215,30 @@ export async function disposeFrontendLogger(): Promise<void> {
 /** Get a read-only snapshot of the in-memory log entries. */
 export function getFrontendLogEntries(): ReadonlyArray<LogBufferEntry> {
   return buffer.getEntries()
+}
+
+/** Get the resolved log file path (available after init). */
+export function getFrontendLogFilePath(): string {
+  return logFilePath
+}
+
+/**
+ * Read the last N lines from the log file on disk.
+ * Returns empty string if not in Tauri mode or file doesn't exist.
+ */
+export async function readFrontendLogFile(lines = 100): Promise<string> {
+  if (!logFilePath || !isTauriEnv) {
+    // In web mode, format the in-memory buffer
+    const entries = buffer.getEntries()
+    const tail = entries.slice(-lines)
+    return tail.map(formatEntry).join('\n')
+  }
+  try {
+    const { invoke } = await import('@tauri-apps/api/core')
+    return await invoke<string>('read_latest_logs', { path: logFilePath, lines })
+  } catch {
+    return '(failed to read log file)'
+  }
 }
 
 // ============================================================================

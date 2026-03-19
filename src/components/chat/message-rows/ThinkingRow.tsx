@@ -10,6 +10,7 @@
  */
 
 import { type Component, createEffect, createMemo, createSignal, Show } from 'solid-js'
+import { debugLog } from '../../../lib/debug-log'
 import { useSettings } from '../../../stores/settings'
 
 interface ThinkingRowProps {
@@ -21,8 +22,14 @@ interface ThinkingRowProps {
 
 export const ThinkingRow: Component<ThinkingRowProps> = (props) => {
   const { settings } = useSettings()
-  // Only use the appearance setting (Settings → Appearance → Thinking Display)
+  // Only use the appearance setting (Settings -> Appearance -> Thinking Display)
   const hidden = () => settings().appearance.thinkingDisplay === 'hidden'
+  debugLog('thinking', 'render check:', {
+    hidden: hidden(),
+    thinkingLength: props.thinking?.length,
+    isStreaming: props.isStreaming,
+    thinkingDisplay: settings().appearance.thinkingDisplay,
+  })
   const [expanded, setExpanded] = createSignal(false)
   const [wasStreaming, setWasStreaming] = createSignal(false)
   const [startTime] = createSignal(Date.now())

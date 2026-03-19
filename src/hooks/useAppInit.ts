@@ -9,6 +9,7 @@ import { isTauri } from '@tauri-apps/api/core'
 import { onCleanup } from 'solid-js'
 import { validateEnv } from '../config/env'
 import { checkApiHealth } from '../lib/api-client'
+import { setDebugDevMode } from '../lib/debug-log'
 import { disposeFrontendLogger, initFrontendLogger, log } from '../lib/logger'
 import { registerBuiltInCommands } from '../services/command-resolver'
 import { initCoreBridge } from '../services/core-bridge'
@@ -121,6 +122,7 @@ export async function runAppInit(
     log.info('app', 'Settings loaded from disk', { logLevel: settings().logLevel })
     setLogLevel(settings().logLevel)
     setDevConsoleLogLevel(settings().logLevel)
+    setDebugDevMode(settings().devMode ?? false)
     syncAllApiKeys()
     await detectEnvApiKeys()
 
@@ -264,6 +266,7 @@ async function runWebInit(
     await hydrateSettingsFromFS()
     setLogLevel(settings().logLevel)
     setDevConsoleLogLevel(settings().logLevel)
+    setDebugDevMode(settings().devMode ?? false)
 
     setSplashStatus('Checking backend...')
     const health = await checkApiHealth()

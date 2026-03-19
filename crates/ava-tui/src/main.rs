@@ -27,7 +27,7 @@ async fn main() -> Result<()> {
         && std::io::stdout().is_terminal();
 
     // _log_guard MUST be held for the lifetime of main — dropping it loses buffered logs.
-    let _log_guard = init_logging(is_tui);
+    let _log_guard = init_logging(is_tui, cli.verbose);
 
     // --trust: mark the current project as trusted before loading MCP/hooks
     if cli.trust {
@@ -159,7 +159,7 @@ async fn main() -> Result<()> {
 ///
 /// Returns a guard that MUST be held for the lifetime of `main()`.
 /// Dropping it flushes and closes the non-blocking file writer.
-fn init_logging(is_tui: bool) -> tracing_appender::non_blocking::WorkerGuard {
+fn init_logging(is_tui: bool, verbose: u8) -> tracing_appender::non_blocking::WorkerGuard {
     let log_dir = dirs::home_dir()
         .unwrap_or_else(|| std::path::PathBuf::from("."))
         .join(".ava")
@@ -195,14 +195,27 @@ fn init_logging(is_tui: bool) -> tracing_appender::non_blocking::WorkerGuard {
         tracing_subscriber::registry().with(file_layer).init();
     } else {
         // Headless/CLI mode: file + stderr
+        // --verbose/-v flag overrides RUST_LOG for stderr:
+        //   -v  → info
+        //   -vv → debug
+        //   -vvv+ → trace
+        let stderr_filter = if verbose > 0 {
+            let level = match verbose {
+                1 => "info",
+                2 => "debug",
+                _ => "trace",
+            };
+            tracing_subscriber::EnvFilter::new(level)
+        } else {
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn"))
+        };
+
         let stderr_layer = tracing_subscriber::fmt::layer()
             .with_writer(std::io::stderr)
             .with_target(false)
             .compact()
-            .with_filter(
-                tracing_subscriber::EnvFilter::try_from_default_env()
-                    .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn")),
-            );
+            .with_filter(stderr_filter);
 
         tracing_subscriber::registry()
             .with(file_layer)

@@ -158,6 +158,11 @@ pub struct FeaturesConfig {
     /// Set to false to keep audit entries in memory only (lost on app close).
     #[serde(default = "default_true")]
     pub audit_logging: bool,
+    /// When true, write structured JSONL logs per session to `~/.ava/log/{session-id}.jsonl`.
+    /// Each line records turn number, role, tool calls, token usage, and duration.
+    /// Default: false (opt-in).
+    #[serde(default)]
+    pub session_logging: bool,
 }
 
 fn default_true() -> bool {
@@ -171,6 +176,7 @@ impl Default for FeaturesConfig {
             enable_lsp: true,
             enable_mcp: true,
             audit_logging: true,
+            session_logging: false,
         }
     }
 }

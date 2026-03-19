@@ -39,6 +39,10 @@ pub struct CliArgs {
     #[arg(long, default_value = "default")]
     pub theme: String,
 
+    /// Increase log verbosity. Use -v for info, -vv for debug, -vvv for trace.
+    #[arg(long, short = 'v', action = clap::ArgAction::Count)]
+    pub verbose: u8,
+
     /// Force headless mode (no TUI)
     #[arg(long)]
     pub headless: bool,

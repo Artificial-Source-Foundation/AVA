@@ -69,6 +69,8 @@ pub struct AgentLoop {
     plugin_manager: Option<Arc<tokio::sync::Mutex<PluginManager>>>,
     /// Tracks file diffs for write/edit tool calls.
     diff_tracker: crate::streaming_diff::StreamingDiffTracker,
+    /// Optional JSONL session logger (opt-in via config).
+    session_logger: Option<crate::session_logger::SessionLogger>,
 }
 
 /// Configuration for a single agent loop run — turn limits, cost caps, and model identity.
@@ -238,7 +240,14 @@ impl AgentLoop {
             images: Vec::new(),
             plugin_manager: None,
             diff_tracker: crate::streaming_diff::StreamingDiffTracker::new(),
+            session_logger: None,
         }
+    }
+
+    /// Attach a session logger for structured JSONL logging of each turn.
+    pub fn with_session_logger(mut self, logger: crate::session_logger::SessionLogger) -> Self {
+        self.session_logger = Some(logger);
+        self
     }
 
     /// Attach a plugin manager for hook dispatch during the agent loop.
@@ -844,6 +853,7 @@ impl AgentLoop {
             }
 
             // --- Execute tools ---
+            let turn_start = Instant::now();
             let (tool_results, steering_triggered, repetition_warning) = self
                 .execute_tools_unified(
                     &tool_calls,
@@ -852,6 +862,28 @@ impl AgentLoop {
                     &event_tx,
                 )
                 .await;
+
+            // --- Session JSONL logging ---
+            if let Some(ref logger) = self.session_logger {
+                let (in_tok, out_tok, cost) = match &usage {
+                    Some(u) => (
+                        u.input_tokens,
+                        u.output_tokens,
+                        usage_cost_usd(&self.config.model, u),
+                    ),
+                    None => (0, 0, 0.0),
+                };
+                let entry = crate::session_logger::SessionLogger::build_entry(
+                    turn,
+                    "assistant",
+                    &tool_calls,
+                    in_tok,
+                    out_tok,
+                    cost,
+                    turn_start.elapsed(),
+                );
+                logger.log_turn(&entry);
+            }
 
             // --- Repetition detection ---
             if let Some(ref warning) = repetition_warning {

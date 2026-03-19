@@ -14,6 +14,7 @@ pub(crate) mod memory_enrichment;
 pub mod message_queue;
 pub mod reflection;
 pub mod routing;
+pub mod session_logger;
 pub mod stack;
 pub mod streaming_diff;
 pub mod stuck;

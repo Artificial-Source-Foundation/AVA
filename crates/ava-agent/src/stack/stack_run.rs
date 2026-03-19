@@ -310,6 +310,14 @@ impl AgentStack {
         .with_history(history)
         .with_plugin_manager(Arc::clone(&self.plugin_manager));
 
+        // Attach JSONL session logger if enabled in config
+        if cfg.features.session_logging {
+            let session_id = uuid::Uuid::new_v4().to_string();
+            if let Some(logger) = crate::session_logger::SessionLogger::new(&session_id) {
+                agent = agent.with_session_logger(logger);
+            }
+        }
+
         // Attach images if provided (multimodal input)
         if !images.is_empty() {
             agent = agent.with_images(images);

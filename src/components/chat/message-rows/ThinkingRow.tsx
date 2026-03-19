@@ -1,12 +1,11 @@
 /**
  * Thinking Row
  *
- * Minimal reasoning display inspired by OpenCode/Goose:
- * - Collapsed: "💭 Thought for Xs" clickable badge
+ * Minimal reasoning display matching TUI style:
+ * - Collapsed: "💭 Thought for Xs" — small grey italic text
  * - Expanded: dimmed italic content with left border
+ * - Preview: first 2 lines visible with expand hint
  * - Auto-expands during streaming, auto-collapses when complete
- * - No copy button (thinking is internal, not for copying)
- * - Shimmer animation while streaming
  */
 
 import { type Component, createEffect, createMemo, createSignal, Show } from 'solid-js'
@@ -22,24 +21,30 @@ interface ThinkingRowProps {
 
 export const ThinkingRow: Component<ThinkingRowProps> = (props) => {
   const { settings } = useSettings()
-  // Only use the appearance setting (Settings -> Appearance -> Thinking Display)
-  const hidden = () => settings().appearance.thinkingDisplay === 'hidden'
+  const displayMode = (): string => settings().appearance.thinkingDisplay
+  const hidden = () => displayMode() === 'hidden'
+
   debugLog('thinking', 'render check:', {
     hidden: hidden(),
     thinkingLength: props.thinking?.length,
     isStreaming: props.isStreaming,
-    thinkingDisplay: settings().appearance.thinkingDisplay,
+    thinkingDisplay: displayMode(),
   })
+
   const [expanded, setExpanded] = createSignal(false)
   const [wasStreaming, setWasStreaming] = createSignal(false)
   const [startTime] = createSignal(Date.now())
-
-  const lineCount = createMemo(() => (props.thinking || '').split('\n').filter(Boolean).length)
 
   const duration = createMemo(() => {
     if (props.thinkingDuration) return props.thinkingDuration
     if (!props.isStreaming) return (Date.now() - startTime()) / 1000
     return 0
+  })
+
+  const previewLines = createMemo(() => {
+    if (!props.thinking) return ''
+    const lines = props.thinking.split('\n').filter(Boolean)
+    return lines.slice(0, 2).join('\n')
   })
 
   // Auto-expand while streaming, auto-collapse when done
@@ -57,56 +62,83 @@ export const ThinkingRow: Component<ThinkingRowProps> = (props) => {
     }
   })
 
-  const badgeText = createMemo(() => {
+  const labelText = createMemo(() => {
     if (props.isStreaming && !props.thinking) return 'Thinking...'
     if (props.isStreaming) return 'Thinking...'
     const d = duration()
-    const lines = lineCount()
     if (d > 0.5) return `Thought for ${d.toFixed(1)}s`
-    if (lines > 0) return `Thought (${lines} line${lines !== 1 ? 's' : ''})`
     return 'Thought'
   })
 
+  const isPreview = () =>
+    displayMode() === 'preview' && !expanded() && !!props.thinking && !props.isStreaming
+
   return (
     <Show when={!hidden()}>
-      <div class="mb-2 animate-fade-in">
-        {/* Collapsed: minimal badge */}
+      <div class="mb-1 animate-fade-in">
+        {/* Label line: 💭 Thought for Xs */}
         <button
           type="button"
           onClick={() => setExpanded((v) => !v)}
           aria-expanded={expanded()}
-          class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] transition-all cursor-pointer select-none"
           style={{
-            background: expanded() ? 'var(--alpha-white-5)' : 'transparent',
-            color: 'var(--text-muted)',
+            background: 'none',
             border: 'none',
-            font: 'inherit',
+            padding: '0',
+            margin: '0',
+            cursor: props.thinking ? 'pointer' : 'default',
+            color: 'var(--text-muted)',
+            'font-size': '11px',
+            'font-style': 'italic',
+            'font-family': 'inherit',
+            'line-height': '1.4',
+            display: 'inline',
           }}
         >
-          <span style={{ 'font-size': '12px', opacity: '0.7' }}>
-            {props.isStreaming ? '✦' : '💭'}
+          <span class={props.isStreaming ? 'thinking-shimmer' : ''}>
+            {props.isStreaming ? '✦' : '💭'} {labelText()}
           </span>
-          <span
-            style={{ 'font-style': 'italic' }}
-            class={props.isStreaming ? 'thinking-shimmer' : ''}
-          >
-            {badgeText()}
-          </span>
-          <Show when={!props.isStreaming && props.thinking}>
-            <span style={{ opacity: '0.4', 'font-size': '10px' }}>{expanded() ? '▾' : '▸'}</span>
-          </Show>
         </button>
 
-        {/* Expanded: thinking content */}
-        <Show when={expanded() && props.thinking}>
+        {/* Preview mode: show first 2 lines */}
+        <Show when={isPreview()}>
           <div
-            class={`mt-1.5 ml-2 pl-3 border-l-2 border-[var(--border-subtle)] whitespace-pre-wrap leading-relaxed max-h-[300px] overflow-y-auto scrollbar-thin ${props.isStreaming ? 'thinking-shimmer' : ''}`}
+            class="mt-1 ml-4 pl-3"
             style={{
+              'border-left': '2px solid var(--gray-5, #27272A)',
               color: 'var(--text-muted)',
               'font-style': 'italic',
               'font-size': '12px',
               opacity: '0.6',
               'line-height': '1.5',
+              'white-space': 'pre-wrap',
+            }}
+          >
+            {previewLines()}
+            <div
+              style={{
+                'font-size': '10px',
+                opacity: '0.5',
+                'margin-top': '2px',
+              }}
+            >
+              {'▸ Ctrl+O to see full thinking'}
+            </div>
+          </div>
+        </Show>
+
+        {/* Expanded: full thinking content */}
+        <Show when={expanded() && props.thinking}>
+          <div
+            class={`mt-1 ml-4 pl-3 max-h-[300px] overflow-y-auto scrollbar-thin ${props.isStreaming ? 'thinking-shimmer' : ''}`}
+            style={{
+              'border-left': '2px solid var(--gray-5, #27272A)',
+              color: 'var(--text-muted)',
+              'font-style': 'italic',
+              'font-size': '12px',
+              opacity: '0.6',
+              'line-height': '1.5',
+              'white-space': 'pre-wrap',
             }}
           >
             {props.thinking}

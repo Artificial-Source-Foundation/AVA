@@ -144,10 +144,12 @@ impl OpenAIProvider {
         base_url: impl Into<String>,
     ) -> Self {
         let base_url = base_url.into();
-        // Use Responses API only for ChatGPT OAuth (chatgpt.com).
-        // Regular OpenAI (api.openai.com) uses Chat Completions, which returns
-        // `reasoning_content` without requiring organization verification.
-        let use_responses_api = Self::is_chatgpt_oauth(&base_url);
+        // Use Responses API for native OpenAI (api.openai.com, chatgpt.com).
+        // Responses API supports reasoning summaries for both API keys and OAuth tokens.
+        // Use Chat Completions for third-party OpenAI-compatible APIs (Ollama, Inception, etc.)
+        let is_native = base_url.to_lowercase().contains("api.openai.com")
+            || base_url.to_lowercase().contains("chatgpt.com");
+        let use_responses_api = is_native;
         Self {
             pool,
             api_key: api_key.into(),
@@ -160,18 +162,10 @@ impl OpenAIProvider {
         }
     }
 
-    /// Returns `true` if the base URL points to the ChatGPT OAuth endpoint.
-    /// Only ChatGPT OAuth requires the Responses API format; regular
-    /// `api.openai.com` uses Chat Completions (which returns `reasoning_content`
-    /// without organization verification).
-    fn is_chatgpt_oauth(base_url: &str) -> bool {
-        base_url.to_lowercase().contains("chatgpt.com")
-    }
-
-    /// Returns `true` if using ChatGPT OAuth (subscription-billed, no per-token cost).
-    /// Native OpenAI API key users pay per-token even when using the Responses API.
+    /// Returns `true` if using OAuth subscription (ChatGPT Plus/Pro — no per-token cost).
     fn is_subscription(&self) -> bool {
-        self.base_url.to_lowercase().contains("chatgpt.com")
+        // OAuth tokens start with "ey" (JWT) and have no sk- API key
+        self.api_key.starts_with("ey") || self.base_url.to_lowercase().contains("chatgpt.com")
     }
 
     /// Set the thinking format for this provider (DashScope, Zhipu, etc.).

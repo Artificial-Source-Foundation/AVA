@@ -47,6 +47,7 @@ pub(super) async fn run_single_agent(cli: CliArgs, goal: &str) -> Result<()> {
     populate_queue_from_cli(&cli, &message_tx);
 
     let json_mode = cli.json;
+    let show_thinking = thinking_level != ava_types::ThinkingLevel::Off;
     let cancel = CancellationToken::new();
     let cancel_for_stdin = cancel.clone();
     spawn_stdin_reader(message_tx, json_mode, cancel_for_stdin);
@@ -168,8 +169,18 @@ pub(super) async fn run_single_agent(cli: CliArgs, goal: &str) -> Result<()> {
                     }
                 }
                 AgentEvent::Complete(_) => break,
-                AgentEvent::Thinking(_) => {
-                    // Thinking content is internal — omit from text output
+                AgentEvent::Thinking(t) => {
+                    if show_thinking && !t.is_empty() {
+                        if in_text {
+                            println!();
+                            in_text = false;
+                        }
+                        // Print thinking to stderr in dim style so it doesn't
+                        // pollute stdout (which carries the assistant response).
+                        for line in t.lines() {
+                            eprintln!("\x1b[2m{line}\x1b[0m");
+                        }
+                    }
                 }
                 AgentEvent::BudgetWarning {
                     threshold_percent,

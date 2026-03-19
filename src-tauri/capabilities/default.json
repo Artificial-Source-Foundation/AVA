@@ -6,7 +6,7 @@
   "permissions": [
     "core:default",
     "opener:default",
-    "path:default",
+    "core:path:default",
     "dialog:default",
     "sql:default",
     "sql:allow-load",

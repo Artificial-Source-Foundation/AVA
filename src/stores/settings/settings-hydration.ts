@@ -17,6 +17,7 @@ import {
   DEFAULT_GIT,
   DEFAULT_NOTIFICATIONS,
   DEFAULT_SETTINGS,
+  DEFAULT_TEAM,
   DEFAULT_UI,
 } from './settings-defaults'
 import type { AppSettings } from './settings-types'
@@ -105,5 +106,6 @@ export function mergeWithDefaults(parsed: Partial<AppSettings>): AppSettings {
     behavior: { ...DEFAULT_BEHAVIOR, ...(parsed.behavior ?? {}) },
     notifications: { ...DEFAULT_NOTIFICATIONS, ...(parsed.notifications ?? {}) },
     git: { ...DEFAULT_GIT, ...(parsed.git ?? {}) },
+    team: { ...DEFAULT_TEAM, ...(parsed.team ?? {}) },
   }
 }

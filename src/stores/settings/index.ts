@@ -29,6 +29,7 @@ import {
   updateMcpServer,
   updateNotifications,
   updateProvider,
+  updateTeam,
   updateUI,
 } from './settings-mutators'
 import {
@@ -60,12 +61,14 @@ export type {
   DarkStyle,
   GenerationSettings,
   GitSettings,
+  LeadConfig,
   MCPServerConfig,
   MonoFont,
   NotificationSettings,
   PermissionMode,
   SansFont,
   SendKey,
+  TeamConfig,
   ToolApprovalRule,
   UIDensity,
   UISettings,
@@ -186,5 +189,6 @@ export function useSettings() {
     removeMcpServer,
     updateMcpServer,
     updateAgentBackend,
+    updateTeam,
   }
 }

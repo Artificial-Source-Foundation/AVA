@@ -39,6 +39,7 @@ pub(super) async fn run_multi_agent(cli: CliArgs, goal: &str) -> Result<()> {
         domain_providers: HashMap::new(),
         platform: Some(platform),
         scout_provider: None,
+        board_providers: vec![],
     });
 
     let task = Task {

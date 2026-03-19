@@ -562,6 +562,7 @@ async fn run_harness_task(
         domain_providers,
         platform: Some(platform),
         scout_provider: None,
+        board_providers: vec![],
     });
 
     // Determine task type based on the benchmark task

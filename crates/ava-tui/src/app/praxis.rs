@@ -58,6 +58,7 @@ impl App {
                 domain_providers: HashMap::new(),
                 platform: Some(platform),
                 scout_provider: None,
+                board_providers: vec![],
             });
 
             let worker = match director.delegate(Task {

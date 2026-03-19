@@ -160,6 +160,7 @@ async fn director_multi_agent_coordination() {
         domain_providers: HashMap::new(),
         platform: None,
         scout_provider: None,
+        board_providers: vec![],
     });
 
     let worker_a = director

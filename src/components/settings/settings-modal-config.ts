@@ -12,6 +12,7 @@ import {
   type Settings,
   ShieldCheck,
   Sliders,
+  Users,
   Zap,
 } from 'lucide-solid'
 
@@ -27,6 +28,7 @@ export type SettingsTab =
   | 'plugins'
   | 'skills-commands'
   | 'llm'
+  | 'team'
   | 'developer'
   | 'about'
 
@@ -86,6 +88,21 @@ export const tabGroups: TabGroup[] = [
         label: 'Agents',
         icon: Bot,
         keywords: ['agent', 'team', 'worker', 'preset', 'capability'],
+      },
+      {
+        id: 'team',
+        label: 'Team',
+        icon: Users,
+        keywords: [
+          'team',
+          'praxis',
+          'multi-agent',
+          'director',
+          'lead',
+          'worker',
+          'scout',
+          'delegation',
+        ],
       },
       {
         id: 'llm',

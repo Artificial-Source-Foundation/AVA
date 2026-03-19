@@ -165,6 +165,24 @@ export interface TrustedFoldersSettings {
 /** Which backend stack to use for the agent loop */
 export type AgentBackend = 'core' | 'core-v2'
 
+export interface LeadConfig {
+  domain: string
+  enabled: boolean
+  model: string
+  customPrompt: string
+  maxWorkers: number
+}
+
+export interface TeamConfig {
+  enabled: boolean
+  defaultDirectorModel: string
+  defaultLeadModel: string
+  defaultWorkerModel: string
+  defaultScoutModel: string
+  workerNames: string[]
+  leads: LeadConfig[]
+}
+
 export interface AppSettings {
   onboardingComplete: boolean
   theme: string
@@ -192,4 +210,6 @@ export interface AppSettings {
   trustedFolders: TrustedFoldersSettings
   /** Which backend stack powers the agent loop (default: 'core-v2') */
   agentBackend: AgentBackend
+  /** Team (Praxis) multi-agent configuration */
+  team: TeamConfig
 }

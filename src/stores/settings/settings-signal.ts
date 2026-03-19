@@ -72,6 +72,7 @@ export type SubObjectKey =
   | 'behavior'
   | 'notifications'
   | 'git'
+  | 'team'
 
 /** Generic sub-object updater: patches a nested key then persists */
 export function updateSubKey<K extends SubObjectKey>(key: K, patch: Partial<AppSettings[K]>): void {

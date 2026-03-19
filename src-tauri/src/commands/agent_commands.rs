@@ -786,6 +786,7 @@ pub async fn start_praxis(
             domain_providers: std::collections::HashMap::new(),
             platform: Some(platform),
             scout_provider: None,
+            board_providers: vec![],
         });
 
         let worker = match director.delegate(ava_praxis::Task {

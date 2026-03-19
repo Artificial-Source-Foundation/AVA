@@ -345,6 +345,10 @@ export function updateGit(patch: Partial<AppSettings['git']>): void {
   updateSubKey('git', patch)
 }
 
+export function updateTeam(patch: Partial<AppSettings['team']>): void {
+  updateSubKey('team', patch)
+}
+
 export function updateAgentBackend(backend: AppSettings['agentBackend']): void {
   updateSettings({ agentBackend: backend })
 }

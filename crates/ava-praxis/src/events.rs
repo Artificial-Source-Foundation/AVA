@@ -103,6 +103,52 @@ pub enum PraxisEvent {
         method: String,
         success: bool,
     },
+    // Board of Directors events
+    /// Emitted when the Board of Directors is convened for multi-model consensus.
+    BoardConvened {
+        members: Vec<String>,
+    },
+    /// Emitted when a board member produces their opinion.
+    BoardOpinion {
+        member: String,
+        vote: String,
+        summary: String,
+    },
+    /// Emitted when the board reaches a consensus.
+    BoardResult {
+        consensus: String,
+        vote_summary: String,
+    },
+    // Lead-managed execution events
+    LeadExecutionStarted {
+        lead: String,
+        total_tasks: usize,
+        total_waves: usize,
+    },
+    LeadWaveStarted {
+        lead: String,
+        wave_index: usize,
+        task_count: usize,
+    },
+    LeadWaveCompleted {
+        lead: String,
+        wave_index: usize,
+        succeeded: usize,
+        failed: usize,
+    },
+    LeadReviewStarted {
+        lead: String,
+    },
+    LeadReviewCompleted {
+        lead: String,
+        issues_found: usize,
+    },
+    LeadExecutionCompleted {
+        lead: String,
+        total_tasks: usize,
+        succeeded: usize,
+        failed: usize,
+    },
     // Scout events
     ScoutStarted {
         id: Uuid,

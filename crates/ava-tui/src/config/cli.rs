@@ -63,6 +63,14 @@ pub struct CliArgs {
     #[arg(long, alias = "praxis")]
     pub multi_agent: bool,
 
+    /// Run scouts and create a plan but don't execute (multi-agent mode only)
+    #[arg(long)]
+    pub plan_only: bool,
+
+    /// Consult the Board of Directors (multi-model consensus) before planning
+    #[arg(long)]
+    pub board: bool,
+
     /// Run a workflow pipeline (plan-code-review, code-review, plan-code)
     #[arg(long)]
     pub workflow: Option<String>,

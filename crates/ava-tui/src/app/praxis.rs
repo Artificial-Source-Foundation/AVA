@@ -1,7 +1,7 @@
 use super::*;
 use crate::state::messages::UiMessage;
 use crate::state::praxis::{PraxisTaskStatus, PraxisWorkerState};
-use ava_praxis::{Budget, Director, DirectorConfig, PraxisEvent, Task, TaskType};
+use ava_praxis::{Budget, Director, DirectorConfig, PraxisEvent};
 use std::collections::HashMap;
 
 impl App {
@@ -61,30 +61,55 @@ impl App {
                 board_providers: vec![],
             });
 
-            let worker = match director.delegate(Task {
-                description: goal,
-                task_type: TaskType::Simple,
-                files: vec![],
-            }) {
-                Ok(worker) => worker,
+            let (tx, mut rx) = mpsc::unbounded_channel();
+            let relay_tx = app_tx.clone();
+            let relay_task_id = task_id;
+            let relay = tokio::spawn(async move {
+                while let Some(event) = rx.recv().await {
+                    let _ = relay_tx.send(AppEvent::PraxisRunEvent {
+                        task_id: relay_task_id,
+                        event,
+                    });
+                }
+            });
+
+            // Step 1: Run scouts
+            let cwd = std::env::current_dir().unwrap_or_default();
+            let scout_reports = director
+                .scout(
+                    vec![format!("Analyze codebase for: {}", goal)],
+                    &cwd,
+                    tx.clone(),
+                )
+                .await;
+
+            // Step 2: Build context from scout reports
+            let context = if scout_reports.is_empty() {
+                None
+            } else {
+                Some(
+                    scout_reports
+                        .iter()
+                        .map(|r| r.as_summary())
+                        .collect::<Vec<_>>()
+                        .join("\n\n"),
+                )
+            };
+
+            // Step 3: Create plan using LLM
+            let plan = match director.plan(&goal, context.as_deref()).await {
+                Ok(plan) => plan,
                 Err(err) => {
                     let _ = app_tx.send(AppEvent::PraxisRunDone {
                         task_id,
-                        result: Err(err.to_string()),
+                        result: Err(format!("Planning failed: {err}")),
                     });
                     return;
                 }
             };
 
-            let (tx, mut rx) = mpsc::unbounded_channel();
-            let relay_tx = app_tx.clone();
-            let relay = tokio::spawn(async move {
-                while let Some(event) = rx.recv().await {
-                    let _ = relay_tx.send(AppEvent::PraxisRunEvent { task_id, event });
-                }
-            });
-
-            let result = director.coordinate(vec![worker], cancel, tx).await;
+            // Step 4: Execute plan with sequential groups
+            let result = director.execute_plan(plan, cancel, tx).await;
             let _ = relay.await;
             let _ = app_tx.send(AppEvent::PraxisRunDone {
                 task_id,
@@ -104,6 +129,84 @@ impl App {
         };
 
         match event {
+            PraxisEvent::ScoutStarted { query, .. } => {
+                task.messages.push(UiMessage::new(
+                    MessageKind::System,
+                    format!("Scout investigating: {query}"),
+                ));
+            }
+            PraxisEvent::ScoutCompleted {
+                query,
+                files_examined,
+                snippets_found,
+                ..
+            } => {
+                task.messages.push(UiMessage::new(
+                    MessageKind::System,
+                    format!(
+                        "Scout completed: {query} ({files_examined} files, {snippets_found} snippets)"
+                    ),
+                ));
+            }
+            PraxisEvent::ScoutFailed { query, error, .. } => {
+                task.messages.push(UiMessage::new(
+                    MessageKind::Error,
+                    format!("Scout failed: {query} — {error}"),
+                ));
+            }
+            PraxisEvent::PlanCreated { ref plan } => {
+                let mut plan_msg = format!(
+                    "Plan: {} ({} tasks, {} phases)\n",
+                    plan.goal,
+                    plan.tasks.len(),
+                    plan.execution_groups.len()
+                );
+                for t in &plan.tasks {
+                    plan_msg.push_str(&format!("  [{}] {:?}: {}\n", t.id, t.domain, t.description));
+                }
+                task.messages
+                    .push(UiMessage::new(MessageKind::System, plan_msg));
+            }
+            PraxisEvent::PhaseStarted {
+                phase_index,
+                phase_count,
+                phase_name,
+                ..
+            } => {
+                task.messages.push(UiMessage::new(
+                    MessageKind::System,
+                    format!("Phase {}/{}: {}", phase_index + 1, phase_count, phase_name),
+                ));
+            }
+            PraxisEvent::PhaseCompleted {
+                phase_name, turns, ..
+            } => {
+                task.messages.push(UiMessage::new(
+                    MessageKind::System,
+                    format!("Phase completed: {phase_name} ({turns} turns)"),
+                ));
+            }
+            PraxisEvent::LeadExecutionStarted {
+                ref lead,
+                total_tasks,
+                total_waves,
+            } => {
+                task.messages.push(UiMessage::new(
+                    MessageKind::System,
+                    format!("{lead}: executing {total_tasks} task(s) in {total_waves} wave(s)"),
+                ));
+            }
+            PraxisEvent::LeadReviewCompleted {
+                ref lead,
+                issues_found,
+            } => {
+                let msg = if issues_found > 0 {
+                    format!("{lead} review: {issues_found} issue(s) found")
+                } else {
+                    format!("{lead} review: passed")
+                };
+                task.messages.push(UiMessage::new(MessageKind::System, msg));
+            }
             PraxisEvent::WorkerStarted {
                 worker_id,
                 lead,
@@ -210,7 +313,7 @@ impl App {
                 ));
             }
             _ => {
-                // Workflow/spec/artifact events will be surfaced in a richer Praxis view later.
+                // Other events (Board, ACP, Artifact, etc.) will be surfaced in a richer Praxis view later.
             }
         }
     }

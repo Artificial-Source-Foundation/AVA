@@ -25,6 +25,7 @@ import { ApprovalDock } from './ApprovalDock'
 import { MessageInput } from './MessageInput'
 import { MessageList } from './MessageList'
 import { MessageQueueBar } from './MessageQueueBar'
+import { PlanDock } from './PlanDock'
 import { QuestionDock } from './QuestionDock'
 import { TeamChatView } from './TeamChatView'
 import { TeamStatusStrip } from './TeamStatusStrip'
@@ -141,6 +142,9 @@ export const ChatView: Component = () => {
       <div class="flex flex-col h-full min-h-0 bg-[var(--background)]">
         {/* Messages area */}
         <MessageList />
+
+        {/* Inline plan approval dock */}
+        <PlanDock />
 
         {/* Inline tool approval dock */}
         <ApprovalDock request={activeApproval()} onResolve={handleApprovalResolve} />

@@ -758,6 +758,30 @@ button {
   }
 }
 
+/* Plan card entrance */
+@keyframes planCardIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* Plan step expand */
+@keyframes planStepExpand {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 /* Panel expand — GPU-friendly (no max-height, uses transform) */
 @keyframes expand-down {
   from {

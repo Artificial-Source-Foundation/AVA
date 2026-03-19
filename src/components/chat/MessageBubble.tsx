@@ -2,7 +2,9 @@ import { type Accessor, type Component, createMemo, For, Match, Show, Switch } f
 import { formatCost } from '../../lib/cost'
 import { formatMs } from '../../lib/format-time'
 import type { Message, ToolCall } from '../../types'
+import type { PlanData } from '../../types/rust-ipc'
 import { EditForm } from './EditForm'
+import { InlinePlanCard } from './InlinePlanCard'
 import { MarkdownContent } from './MarkdownContent'
 import { MessageActions } from './MessageActions'
 import { CommandOutputRow, DiffRow, ErrorRow, ThinkingRow, ToolCallRow } from './message-rows'
@@ -94,6 +96,14 @@ export const MessageBubble: Component<MessageBubbleProps> = (props) => {
     return props.message.toolCalls
   }
   const hasToolCalls = () => !isUser() && (effectiveToolCalls()?.length ?? 0) > 0
+
+  const planData = createMemo((): PlanData | null => {
+    const meta = props.message.metadata
+    if (!meta?.plan) return null
+    const plan = meta.plan as PlanData
+    if (plan.steps && Array.isArray(plan.steps) && plan.summary) return plan
+    return null
+  })
 
   const segments = createMemo((): MessageSegment[] | null => {
     if (isUser()) return null
@@ -214,6 +224,15 @@ export const MessageBubble: Component<MessageBubbleProps> = (props) => {
                   thinking={props.message.metadata!.thinking as string}
                   isStreaming={props.isStreaming}
                 />
+              </Show>
+
+              {/* Plan card (rendered from message metadata) */}
+              <Show when={planData()}>
+                {(plan) => (
+                  <div class="w-full my-1.5">
+                    <InlinePlanCard plan={plan()} />
+                  </div>
+                )}
               </Show>
 
               <Show when={isActiveStreaming()}>

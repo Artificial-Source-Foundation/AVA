@@ -20,11 +20,12 @@ use ava_permissions::PermissionSystem;
 use ava_platform::{Platform, StandardPlatform};
 use ava_plugin::PluginManager;
 use ava_session::SessionManager;
+use ava_tools::core::plan::PlanBridge;
 use ava_tools::core::question::QuestionBridge;
 use ava_tools::core::task::{TaskResult, TaskSpawner};
 use ava_tools::core::{
     register_core_tools, register_custom_tools, register_default_tools, register_extended_tools,
-    register_question_tool, register_task_tool, register_todo_tools,
+    register_plan_tool, register_question_tool, register_task_tool, register_todo_tools,
 };
 use ava_tools::mcp_bridge::{MCPBridgeTool, MCPToolCaller};
 use ava_tools::permission_middleware::{
@@ -32,7 +33,7 @@ use ava_tools::permission_middleware::{
 };
 use ava_tools::registry::{ToolRegistry, ToolSource};
 use ava_types::{
-    AvaError, QueuedMessage, Result, Role, Session, ThinkingLevel, TodoState, ToolResult,
+    AvaError, PlanState, QueuedMessage, Result, Role, Session, ThinkingLevel, TodoState, ToolResult,
 };
 use futures::StreamExt;
 use serde_json::Value;
@@ -111,6 +112,10 @@ pub struct AgentStack {
     /// When true, agent is in Plan mode — write/edit restricted to .ava/plans/*.md.
     pub plan_mode: RwLock<bool>,
     pub todo_state: TodoState,
+    /// Shared plan state for the plan tool and TUI display.
+    pub plan_state: PlanState,
+    /// Bridge for the plan tool to communicate with the TUI.
+    plan_bridge: PlanBridge,
     /// Bridge for the question tool to communicate with the TUI.
     question_bridge: QuestionBridge,
     /// Bridge for permission requests that require interactive approval.
@@ -179,6 +184,7 @@ impl AgentStack {
         Self,
         mpsc::UnboundedReceiver<ava_tools::core::question::QuestionRequest>,
         mpsc::UnboundedReceiver<ava_tools::permission_middleware::ApprovalRequest>,
+        mpsc::UnboundedReceiver<ava_tools::core::plan::PlanRequest>,
     )> {
         tokio::fs::create_dir_all(&config.data_dir)
             .await
@@ -307,6 +313,8 @@ impl AgentStack {
         let plugin_manager = Arc::new(tokio::sync::Mutex::new(plugin_mgr));
 
         let todo_state = TodoState::new();
+        let plan_state = PlanState::new();
+        let (plan_bridge, plan_rx) = PlanBridge::new();
         let (question_bridge, question_rx) = QuestionBridge::new();
         let (approval_bridge, approval_rx) = ApprovalBridge::new();
         let permission_context = Arc::new(RwLock::new(InspectionContext {
@@ -337,6 +345,7 @@ impl AgentStack {
         );
         register_todo_tools(&mut registry, todo_state.clone());
         register_question_tool(&mut registry, question_bridge.clone());
+        register_plan_tool(&mut registry, plan_bridge.clone(), plan_state.clone());
         register_custom_tools(&mut registry, &custom_tool_dirs);
 
         let mcp_runtime = init_mcp(&mcp_global_config, &mcp_project_config, &mut registry).await;
@@ -379,6 +388,8 @@ impl AgentStack {
                 mode_prompt_suffix: RwLock::new(None),
                 plan_mode: RwLock::new(false),
                 todo_state,
+                plan_state,
+                plan_bridge,
                 question_bridge,
                 approval_bridge,
                 permission_context,
@@ -390,6 +401,7 @@ impl AgentStack {
             },
             question_rx,
             approval_rx,
+            plan_rx,
         ))
     }
 
@@ -569,6 +581,11 @@ impl AgentStack {
         );
         register_todo_tools(&mut registry, self.todo_state.clone());
         register_question_tool(&mut registry, self.question_bridge.clone());
+        register_plan_tool(
+            &mut registry,
+            self.plan_bridge.clone(),
+            self.plan_state.clone(),
+        );
         register_custom_tools(&mut registry, &self.custom_tool_dirs);
         let disabled = self.disabled_mcp_servers.read().await.clone();
         let runtime = init_mcp_with_disabled(
@@ -882,6 +899,11 @@ impl AgentStack {
         );
         register_todo_tools(&mut registry, self.todo_state.clone());
         register_question_tool(&mut registry, self.question_bridge.clone());
+        register_plan_tool(
+            &mut registry,
+            self.plan_bridge.clone(),
+            self.plan_state.clone(),
+        );
         register_custom_tools(&mut registry, &self.custom_tool_dirs);
 
         let spawner: Arc<dyn TaskSpawner> = Arc::new(AgentTaskSpawner {

@@ -198,6 +198,7 @@ impl AgentState {
         Self,
         tokio::sync::mpsc::UnboundedReceiver<ava_tools::core::question::QuestionRequest>,
         tokio::sync::mpsc::UnboundedReceiver<ava_tools::permission_middleware::ApprovalRequest>,
+        tokio::sync::mpsc::UnboundedReceiver<ava_tools::core::plan::PlanRequest>,
     )> {
         let provider_name = provider.clone().unwrap_or_else(|| "default".to_string());
         let model_name = model.clone().unwrap_or_else(|| "default".to_string());
@@ -211,7 +212,7 @@ impl AgentState {
             yolo,
             ..AgentStackConfig::default()
         };
-        let (agent_stack, question_rx, approval_rx) = AgentStack::new(config).await?;
+        let (agent_stack, question_rx, approval_rx, plan_rx) = AgentStack::new(config).await?;
         let stack = Arc::new(agent_stack);
 
         let mcp_server_count = stack.mcp_server_count().await;
@@ -256,6 +257,7 @@ impl AgentState {
             },
             question_rx,
             approval_rx,
+            plan_rx,
         ))
     }
 
@@ -272,6 +274,11 @@ impl AgentState {
     /// Get the shared todo state from the agent stack (if initialized).
     pub fn todo_state(&self) -> Option<ava_types::TodoState> {
         self.stack.as_ref().map(|s| s.todo_state.clone())
+    }
+
+    /// Get the shared plan state from the agent stack (if initialized).
+    pub fn plan_state(&self) -> Option<ava_types::PlanState> {
+        self.stack.as_ref().map(|s| s.plan_state.clone())
     }
 
     #[allow(clippy::too_many_arguments)]

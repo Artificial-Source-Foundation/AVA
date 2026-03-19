@@ -77,7 +77,7 @@ pub(super) async fn run_voice_loop(cli: CliArgs) -> Result<()> {
 
         eprintln!("[voice] Goal: {text}");
 
-        let (stack, _question_rx, approval_rx) = AgentStack::new(AgentStackConfig {
+        let (stack, _question_rx, approval_rx, _plan_rx) = AgentStack::new(AgentStackConfig {
             data_dir: data_dir.clone(),
             provider: provider.clone(),
             model: model.clone(),

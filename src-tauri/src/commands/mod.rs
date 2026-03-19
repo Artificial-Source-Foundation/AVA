@@ -56,7 +56,7 @@ pub use validation::{validation_validate_edit, validation_validate_with_retry};
 // --- New: re-exports for bridge commands ---
 pub use agent_commands::{
     submit_goal, cancel_agent, get_agent_status,
-    resolve_approval, resolve_question,
+    resolve_approval, resolve_question, resolve_plan,
     steer_agent, follow_up_agent, post_complete_agent, get_message_queue, clear_message_queue,
     retry_last_message, edit_and_resend, regenerate_response, undo_last_edit,
     start_praxis, get_praxis_status, cancel_praxis, steer_lead,

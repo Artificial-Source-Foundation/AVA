@@ -47,7 +47,7 @@ async fn create_test_stack(temp_dir: &Path, api_key: &str) -> AgentStack {
         .await
         .unwrap();
 
-    let (stack, _question_rx, _approval_rx) = AgentStack::new(AgentStackConfig {
+    let (stack, _question_rx, _approval_rx, _plan_rx) = AgentStack::new(AgentStackConfig {
         data_dir: temp_dir.to_path_buf(),
         provider: Some("openrouter".to_string()),
         model: Some(MODEL.to_string()),

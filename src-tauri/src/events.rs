@@ -120,6 +120,32 @@ pub enum AgentEvent {
         workers: (String, String),
         overlapping_files: Vec<String>,
     },
+
+    #[serde(rename = "plan_created")]
+    PlanCreated {
+        plan: PlanPayload,
+    },
+}
+
+/// Flattened plan data for the desktop frontend.
+/// We avoid sending the full `PraxisPlan` (which includes Budget, Domain
+/// enums, etc.) and instead project into a frontend-friendly shape.
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlanPayload {
+    pub summary: String,
+    pub steps: Vec<PlanStepPayload>,
+    pub estimated_turns: usize,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlanStepPayload {
+    pub id: String,
+    pub description: String,
+    pub files: Vec<String>,
+    pub action: String,
+    pub depends_on: Vec<String>,
 }
 
 pub struct EventEmitter {
@@ -365,6 +391,35 @@ pub fn from_praxis_event(event: &ava_praxis::PraxisEvent) -> Option<AgentEvent> 
             workers: (workers.0.to_string(), workers.1.to_string()),
             overlapping_files: overlapping_files.clone(),
         }),
+        PE::PlanCreated { plan } => {
+            let domain_to_action = |d: &ava_praxis::Domain| -> String {
+                match d {
+                    ava_praxis::Domain::Research => "research".to_string(),
+                    ava_praxis::Domain::QA => "test".to_string(),
+                    ava_praxis::Domain::Debug => "review".to_string(),
+                    _ => "implement".to_string(),
+                }
+            };
+            let steps = plan
+                .tasks
+                .iter()
+                .map(|t| PlanStepPayload {
+                    id: t.id.clone(),
+                    description: t.description.clone(),
+                    files: t.files_hint.clone(),
+                    action: domain_to_action(&t.domain),
+                    depends_on: t.dependencies.clone(),
+                })
+                .collect();
+            let estimated_turns: usize = plan.tasks.iter().map(|t| t.budget.max_turns).sum();
+            Some(AgentEvent::PlanCreated {
+                plan: PlanPayload {
+                    summary: plan.goal.clone(),
+                    steps,
+                    estimated_turns,
+                },
+            })
+        }
         // IterationStarted, WorkflowComplete, SpecStatusChanged, SpecWorkflowStarted,
         // SpecWorkflowCompleted, PeerMessageSent, AcpRequestHandled — no direct UI representation yet
         _ => None,
@@ -420,6 +475,39 @@ mod tests {
         assert_eq!(as_json["type"], "approval_request");
         assert_eq!(as_json["tool_name"], "bash");
         assert_eq!(as_json["risk_level"], "high");
+    }
+
+    #[test]
+    fn serializes_plan_created_event() {
+        let event = AgentEvent::PlanCreated {
+            plan: super::PlanPayload {
+                summary: "Build auth system".to_string(),
+                steps: vec![
+                    super::PlanStepPayload {
+                        id: "t1".to_string(),
+                        description: "Research OAuth patterns".to_string(),
+                        files: vec!["docs/auth.md".to_string()],
+                        action: "research".to_string(),
+                        depends_on: vec![],
+                    },
+                    super::PlanStepPayload {
+                        id: "t2".to_string(),
+                        description: "Implement login".to_string(),
+                        files: vec!["src/auth.rs".to_string()],
+                        action: "implement".to_string(),
+                        depends_on: vec!["t1".to_string()],
+                    },
+                ],
+                estimated_turns: 15,
+            },
+        };
+        let as_json = serde_json::to_value(event).expect("event to serialize");
+        assert_eq!(as_json["type"], "plan_created");
+        assert_eq!(as_json["plan"]["summary"], "Build auth system");
+        assert_eq!(as_json["plan"]["steps"].as_array().unwrap().len(), 2);
+        assert_eq!(as_json["plan"]["estimatedTurns"], 15);
+        assert_eq!(as_json["plan"]["steps"][0]["action"], "research");
+        assert_eq!(as_json["plan"]["steps"][1]["dependsOn"][0], "t1");
     }
 
     #[test]

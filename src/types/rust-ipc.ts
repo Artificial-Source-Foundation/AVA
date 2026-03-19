@@ -217,6 +217,40 @@ export interface PraxisConflictDetectedEvent {
   overlapping_files: string[]
 }
 
+// ── Plan events ──────────────────────────────────────────────────────
+
+export type PlanStepAction = 'research' | 'implement' | 'test' | 'review'
+
+export interface PlanStep {
+  id: string
+  description: string
+  files: string[]
+  action: PlanStepAction
+  dependsOn: string[]
+  approved: boolean
+}
+
+export interface PlanData {
+  summary: string
+  steps: PlanStep[]
+  estimatedTurns: number
+  estimatedBudgetUsd?: number
+}
+
+export interface PlanCreatedEvent {
+  type: 'plan_created'
+  plan: PlanData
+}
+
+export type PlanResponse = 'approved' | 'rejected' | 'modified'
+
+export interface ResolvePlanArgs {
+  response: PlanResponse
+  modifiedPlan?: PlanData | null
+  feedback?: string | null
+  stepComments?: Record<string, string> | null
+}
+
 export type PraxisEvent =
   | PraxisWorkerStartedEvent
   | PraxisWorkerProgressEvent
@@ -243,6 +277,7 @@ export type AgentEvent =
   | BudgetWarningEvent
   | ApprovalRequestEvent
   | QuestionRequestEvent
+  | PlanCreatedEvent
   | PraxisEvent
 
 export interface ComputeGrepMatch {

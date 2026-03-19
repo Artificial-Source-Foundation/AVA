@@ -8,6 +8,7 @@
 pub mod context;
 pub mod error;
 pub mod message;
+pub mod plan;
 pub mod session;
 pub mod todo;
 pub mod tool;
@@ -15,6 +16,7 @@ pub mod tool;
 pub use context::Context;
 pub use error::{AvaError, ErrorCategory, Result};
 pub use message::{ImageContent, ImageMediaType, Message, Role};
+pub use plan::{Plan, PlanAction, PlanDecision, PlanState, PlanStep};
 pub use session::Session;
 pub use todo::{TodoItem, TodoPriority, TodoState, TodoStatus};
 pub use tool::{Tool, ToolCall, ToolResult};

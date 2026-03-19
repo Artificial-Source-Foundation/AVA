@@ -150,7 +150,7 @@ impl App {
                     working_dir: Some(isolation.worktree_path),
                 };
                 match ava_agent::stack::AgentStack::new(config).await {
-                    Ok((stack, _, _)) => Arc::new(stack),
+                    Ok((stack, _, _, _)) => Arc::new(stack),
                     Err(err) => {
                         let _ = app_tx_clone.send(AppEvent::AgentRunDone {
                             run_id,

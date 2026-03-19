@@ -111,8 +111,15 @@ async fn run_agent_inner(
         std::mem::replace(&mut *lock, empty)
     };
 
+    let mut plan_rx = {
+        let mut lock = bridge.plan_rx.lock().await;
+        let (_, empty) = mpsc::unbounded_channel();
+        std::mem::replace(&mut *lock, empty)
+    };
+
     let pending_approval = bridge.pending_approval_reply.clone();
     let pending_question = bridge.pending_question_reply.clone();
+    let pending_plan = bridge.pending_plan_reply.clone();
 
     // Spawn approval forwarder
     let app_approval = app.clone();
@@ -156,6 +163,47 @@ async fn run_agent_inner(
         }
     });
 
+    // Spawn plan forwarder
+    let app_plan = app.clone();
+    let plan_forwarder = tokio::spawn(async move {
+        use crate::events::{PlanPayload, PlanStepPayload};
+        while let Some(req) = plan_rx.recv().await {
+            let steps = req
+                .plan
+                .steps
+                .iter()
+                .map(|s| {
+                    let action = match s.action {
+                        ava_types::PlanAction::Research => "research",
+                        ava_types::PlanAction::Implement => "implement",
+                        ava_types::PlanAction::Test => "test",
+                        ava_types::PlanAction::Review => "review",
+                    };
+                    PlanStepPayload {
+                        id: s.id.clone(),
+                        description: s.description.clone(),
+                        files: s.files.clone(),
+                        action: action.to_string(),
+                        depends_on: s.depends_on.clone(),
+                    }
+                })
+                .collect();
+
+            *pending_plan.lock().await = Some(req.reply);
+
+            let _ = app_plan.emit(
+                "agent-event",
+                AgentEvent::PlanCreated {
+                    plan: PlanPayload {
+                        summary: req.plan.summary.clone(),
+                        steps,
+                        estimated_turns: req.plan.estimated_turns,
+                    },
+                },
+            );
+        }
+    });
+
     info!(goal = %goal, "run_agent_inner: starting agent");
 
     // Debug: write to file so we can trace desktop issues
@@ -180,10 +228,11 @@ async fn run_agent_inner(
         )
         .await;
 
-    // Wait for the forwarder to drain; abort the approval/question forwarders
+    // Wait for the forwarder to drain; abort the approval/question/plan forwarders
     let _ = forwarder.await;
     approval_forwarder.abort();
     question_forwarder.abort();
+    plan_forwarder.abort();
 
     // Clean up
     bridge.clear_message_tx().await;
@@ -268,6 +317,7 @@ pub async fn cancel_agent(bridge: State<'_, DesktopBridge>) -> Result<(), String
     bridge.cancel().await;
     let _ = bridge.pending_approval_reply.lock().await.take();
     let _ = bridge.pending_question_reply.lock().await.take();
+    let _ = bridge.pending_plan_reply.lock().await.take();
     Ok(())
 }
 
@@ -354,6 +404,64 @@ pub async fn resolve_question(
 
     reply.send(args.answer).map_err(|_| {
         "Failed to send question response — the agent may have already moved on".to_string()
+    })?;
+
+    Ok(())
+}
+
+// ============================================================================
+// Plan resolution
+// ============================================================================
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResolvePlanArgs {
+    pub response: String,
+    #[serde(default)]
+    pub modified_plan: Option<serde_json::Value>,
+    #[serde(default)]
+    pub feedback: Option<String>,
+    #[serde(default)]
+    pub step_comments: Option<std::collections::HashMap<String, String>>,
+}
+
+/// Resolve a pending plan approval request.
+#[tauri::command]
+pub async fn resolve_plan(
+    args: ResolvePlanArgs,
+    bridge: State<'_, DesktopBridge>,
+) -> Result<(), String> {
+    let reply = bridge
+        .pending_plan_reply
+        .lock()
+        .await
+        .take()
+        .ok_or_else(|| "No pending plan request to resolve".to_string())?;
+
+    let feedback = args.feedback.unwrap_or_default();
+
+    let decision = match args.response.as_str() {
+        "approved" => ava_types::PlanDecision::Approved,
+        "rejected" => ava_types::PlanDecision::Rejected { feedback },
+        "modified" => {
+            let plan: ava_types::Plan = args
+                .modified_plan
+                .ok_or_else(|| "Modified plan is required for 'modified' response".to_string())
+                .and_then(|v| {
+                    serde_json::from_value(v)
+                        .map_err(|e| format!("Invalid modified plan: {e}"))
+                })?;
+            ava_types::PlanDecision::Modified { plan, feedback }
+        }
+        other => {
+            return Err(format!(
+                "Invalid plan response: '{other}'. Expected 'approved', 'rejected', or 'modified'"
+            ));
+        }
+    };
+
+    reply.send(decision).map_err(|_| {
+        "Failed to send plan response — the agent may have already moved on".to_string()
     })?;
 
     Ok(())

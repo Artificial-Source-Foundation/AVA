@@ -11,6 +11,7 @@ use std::sync::Arc;
 
 use ava_agent::message_queue::MessageQueue;
 use ava_agent::stack::{AgentStack, AgentStackConfig};
+use ava_tools::core::plan::PlanRequest;
 use ava_tools::core::question::QuestionRequest;
 use ava_tools::permission_middleware::{ApprovalRequest, ToolApproval};
 use ava_types::{MessageTier, QueuedMessage};
@@ -25,6 +26,9 @@ pub type PendingApprovalReply = Arc<Mutex<Option<oneshot::Sender<ToolApproval>>>
 /// Pending reply channel for question requests, shared between the forwarder
 /// task and the `resolve_question` command.
 pub type PendingQuestionReply = Arc<Mutex<Option<oneshot::Sender<String>>>>;
+
+/// Pending reply channel for plan approval requests.
+pub type PendingPlanReply = Arc<Mutex<Option<oneshot::Sender<ava_types::PlanDecision>>>>;
 
 /// Tracks a file edit so that undo can restore the previous content.
 #[derive(Debug, Clone)]
@@ -52,6 +56,8 @@ pub struct DesktopBridge {
     pub question_rx: Mutex<mpsc::UnboundedReceiver<QuestionRequest>>,
     /// Receiver for tool-approval requests from the permission middleware.
     pub approval_rx: Mutex<mpsc::UnboundedReceiver<ApprovalRequest>>,
+    /// Receiver for plan approval requests from the plan tool.
+    pub plan_rx: Mutex<mpsc::UnboundedReceiver<PlanRequest>>,
     /// Whether an agent task is currently running.
     pub running: RwLock<bool>,
     /// Pending approval reply channel. Set when an approval request is forwarded
@@ -60,6 +66,9 @@ pub struct DesktopBridge {
     /// Pending question reply channel. Set when a question request is forwarded
     /// to the frontend; consumed when the frontend calls `resolve_question`.
     pub pending_question_reply: PendingQuestionReply,
+    /// Pending plan reply channel. Set when a plan_created event is forwarded
+    /// to the frontend; consumed when the frontend calls `resolve_plan`.
+    pub pending_plan_reply: PendingPlanReply,
     /// The session ID of the last completed agent run, used for retry/regenerate.
     pub last_session_id: RwLock<Option<Uuid>>,
     /// Stack of file edits made by the agent, most recent last.
@@ -84,7 +93,7 @@ impl DesktopBridge {
             working_dir: None,
         };
 
-        let (stack, question_rx, approval_rx) =
+        let (stack, question_rx, approval_rx, plan_rx) =
             AgentStack::new(config).await.map_err(|e| e.to_string())?;
 
         Ok(Self {
@@ -93,9 +102,11 @@ impl DesktopBridge {
             message_tx: RwLock::new(None),
             question_rx: Mutex::new(question_rx),
             approval_rx: Mutex::new(approval_rx),
+            plan_rx: Mutex::new(plan_rx),
             running: RwLock::new(false),
             pending_approval_reply: Arc::new(Mutex::new(None)),
             pending_question_reply: Arc::new(Mutex::new(None)),
+            pending_plan_reply: Arc::new(Mutex::new(None)),
             last_session_id: RwLock::new(None),
             edit_history: Arc::new(RwLock::new(VecDeque::new())),
         })

@@ -20,7 +20,13 @@ import { useSettings } from '../stores/settings'
 import { useTeam } from '../stores/team'
 import type { Message } from '../types'
 import type { StreamError } from '../types/llm'
-import type { ApprovalRequestEvent, QuestionRequestEvent } from '../types/rust-ipc'
+import type {
+  ApprovalRequestEvent,
+  PlanCreatedEvent,
+  PlanData,
+  PlanResponse,
+  QuestionRequestEvent,
+} from '../types/rust-ipc'
 import type { AgentState, ApprovalRequest, ToolActivity } from './agent'
 import { createTeamBridge } from './agent/agent-team-bridge'
 import type { QueuedMessage } from './chat/types'
@@ -78,6 +84,7 @@ function createAgentStore() {
   const [toolActivity, setToolActivity] = createSignal<ToolActivity[]>([])
   const [pendingApproval, setPendingApproval] = createSignal<ApprovalRequest | null>(null)
   const [pendingQuestion, setPendingQuestion] = createSignal<QuestionRequest | null>(null)
+  const [pendingPlan, setPendingPlan] = createSignal<PlanData | null>(null)
   const [doomLoopDetected, setDoomLoopDetected] = createSignal(false)
   const [currentAgentId, _setCurrentAgentId] = createSignal<string | null>(null)
   const [streamingTokenEstimate, setStreamingTokenEstimate] = createSignal(0)
@@ -253,6 +260,10 @@ function createAgentStore() {
             question: questionEvent.question,
             options: questionEvent.options,
           })
+        }
+        if (event.type === 'plan_created') {
+          const planEvent = event as PlanCreatedEvent
+          setPendingPlan(planEvent.plan)
         }
       }
       lastProcessedEventIdx = allEvents.length
@@ -499,6 +510,20 @@ function createAgentStore() {
     })
   }
 
+  function resolvePlan(
+    response: PlanResponse,
+    modifiedPlan?: PlanData,
+    feedback?: string,
+    stepComments?: Record<string, string>
+  ): void {
+    setPendingPlan(null)
+    void rustAgentBridge
+      .resolvePlan(response, modifiedPlan ?? null, feedback ?? null, stepComments ?? null)
+      .catch((err) => {
+        console.error('Failed to resolve plan:', err)
+      })
+  }
+
   function clearError(): void {
     batch(() => {
       rustAgent.clearError()
@@ -595,6 +620,7 @@ function createAgentStore() {
     toolActivity,
     pendingApproval,
     pendingQuestion,
+    pendingPlan,
     doomLoopDetected,
     lastError: rustAgent.error,
     currentAgentId,
@@ -630,6 +656,7 @@ function createAgentStore() {
     checkAutoApproval,
     resolveApproval,
     resolveQuestion,
+    resolvePlan,
     clearError,
     getState,
     stopAgent: (memberId: string) => teamBridge.stopAgent(memberId),

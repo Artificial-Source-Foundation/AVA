@@ -16,7 +16,7 @@ async fn main() -> Result<()> {
     println!("Running agent with mock provider...");
     let temp_dir = tempfile::tempdir()?;
 
-    let (stack, _question_rx, _approval_rx) = AgentStack::new(AgentStackConfig {
+    let (stack, _question_rx, _approval_rx, _plan_rx) = AgentStack::new(AgentStackConfig {
         data_dir: temp_dir.path().to_path_buf(),
         yolo: true,
         injected_provider: Some(Arc::new(MockProvider::new(

@@ -4,7 +4,7 @@ import { batch, createSignal, onCleanup } from 'solid-js'
 import { apiInvoke, createEventSocket } from '../lib/api-client'
 import { log } from '../lib/logger'
 import type { ToolCall } from '../types'
-import type { AgentEvent, SubmitGoalResult } from '../types/rust-ipc'
+import type { AgentEvent, PlanCreatedEvent, PlanData, SubmitGoalResult } from '../types/rust-ipc'
 
 /** Invoke the backend — Tauri IPC or HTTP API depending on runtime. */
 function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
@@ -29,6 +29,7 @@ export function useRustAgent() {
     currentCostUsd: number
     maxBudgetUsd: number
   } | null>(null)
+  const [pendingPlan, setPendingPlan] = createSignal<PlanData | null>(null)
 
   let unlisten: UnlistenFn | null = null
   let eventSocket: WebSocket | null = null
@@ -136,6 +137,12 @@ export function useRustAgent() {
         }
         break
 
+      case 'plan_created': {
+        const planEvent = event as PlanCreatedEvent
+        setPendingPlan(planEvent.plan)
+        break
+      }
+
       // Praxis events — pass through to events signal for team bridge consumption
       case 'praxis_worker_started':
       case 'praxis_worker_progress':
@@ -241,6 +248,7 @@ export function useRustAgent() {
       setTokenUsage({ input: 0, output: 0, cost: 0 })
       setProgressMessage(null)
       setBudgetWarning(null)
+      setPendingPlan(null)
     })
   }
 
@@ -399,6 +407,7 @@ export function useRustAgent() {
     events,
     progressMessage,
     budgetWarning,
+    pendingPlan,
     run,
     cancel,
     clearError,

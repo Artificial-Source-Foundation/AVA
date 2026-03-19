@@ -13,6 +13,7 @@ pub mod lsp_ops;
 pub mod multiedit;
 pub mod output_fallback;
 pub mod path_guard;
+pub mod plan;
 pub mod question;
 pub mod read;
 pub mod secret_redaction;
@@ -95,6 +96,15 @@ pub fn register_todo_tools(registry: &mut ToolRegistry, state: ava_types::TodoSt
 /// Register the question tool with a bridge for agent-to-TUI communication.
 pub fn register_question_tool(registry: &mut ToolRegistry, bridge: question::QuestionBridge) {
     registry.register(question::QuestionTool::new(bridge));
+}
+
+/// Register the plan tool with a bridge for agent-to-TUI communication and shared state.
+pub fn register_plan_tool(
+    registry: &mut ToolRegistry,
+    bridge: plan::PlanBridge,
+    state: ava_types::PlanState,
+) {
+    registry.register(plan::PlanTool::new(bridge, state));
 }
 
 /// Register the claude_code tool with the given configuration.

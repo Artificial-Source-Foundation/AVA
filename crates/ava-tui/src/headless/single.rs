@@ -19,7 +19,7 @@ pub(super) async fn run_single_agent(cli: CliArgs, goal: &str) -> Result<()> {
         return Err(eyre!(crate::config::cli::NO_PROVIDER_ERROR));
     }
 
-    let (stack, _question_rx, approval_rx) = AgentStack::new(AgentStackConfig {
+    let (stack, _question_rx, approval_rx, _plan_rx) = AgentStack::new(AgentStackConfig {
         data_dir,
         provider,
         model,

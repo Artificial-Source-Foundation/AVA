@@ -330,7 +330,7 @@ impl App {
             })
             .unwrap_or_default();
 
-        let (agent, question_rx, approval_rx) = AgentState::new(
+        let (agent, question_rx, approval_rx, _plan_rx) = AgentState::new(
             data_dir.clone(),
             provider,
             model,

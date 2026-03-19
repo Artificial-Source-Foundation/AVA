@@ -128,6 +128,20 @@ export const rustAgent = {
     invokeCommand('resolve_approval', { args: { approved, alwaysAllow } }),
   resolveQuestion: (answer: string): Promise<void> =>
     invokeCommand('resolve_question', { args: { answer } }),
+  resolvePlan: (
+    response: import('../types/rust-ipc').PlanResponse,
+    modifiedPlan: import('../types/rust-ipc').PlanData | null,
+    feedback?: string | null,
+    stepComments?: Record<string, string> | null
+  ): Promise<void> =>
+    invokeCommand('resolve_plan', {
+      args: {
+        response,
+        modifiedPlan,
+        feedback: feedback ?? null,
+        stepComments: stepComments ?? null,
+      },
+    }),
 }
 
 export const rustCompute = {

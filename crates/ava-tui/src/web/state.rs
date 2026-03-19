@@ -55,7 +55,7 @@ impl WebState {
             working_dir: None,
         };
 
-        let (stack, question_rx, approval_rx) = AgentStack::new(config).await?;
+        let (stack, question_rx, approval_rx, _plan_rx) = AgentStack::new(config).await?;
 
         // Broadcast channel: 256-event buffer. Slow readers drop old events.
         let (event_tx, _) = broadcast::channel(256);

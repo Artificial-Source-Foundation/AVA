@@ -40,7 +40,7 @@ async fn full_agent_run_with_tool_calls() {
         completion_response("Done"),
     ];
 
-    let (stack, _question_rx, _approval_rx) = AgentStack::new(AgentStackConfig {
+    let (stack, _question_rx, _approval_rx, _plan_rx) = AgentStack::new(AgentStackConfig {
         data_dir: dir.path().to_path_buf(),
         yolo: true,
         injected_provider: Some(Arc::new(MockProvider::new("test-model", responses))),
@@ -87,7 +87,7 @@ async fn agent_run_with_bash_tool() {
         completion_response("bash done"),
     ];
 
-    let (stack, _question_rx, _approval_rx) = AgentStack::new(AgentStackConfig {
+    let (stack, _question_rx, _approval_rx, _plan_rx) = AgentStack::new(AgentStackConfig {
         data_dir: dir.path().to_path_buf(),
         yolo: true,
         injected_provider: Some(Arc::new(MockProvider::new("test-model", responses))),
@@ -119,7 +119,7 @@ async fn agent_run_with_bash_tool() {
 #[tokio::test]
 async fn agent_run_cancellation() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let (stack, _question_rx, _approval_rx) = AgentStack::new(AgentStackConfig {
+    let (stack, _question_rx, _approval_rx, _plan_rx) = AgentStack::new(AgentStackConfig {
         data_dir: dir.path().to_path_buf(),
         injected_provider: Some(Arc::new(SlowProvider {
             model: "slow".to_string(),

@@ -1,4 +1,4 @@
-<!-- Last verified: 2026-03-19 (post-session doc update). Run 'just check' to revalidate. -->
+<!-- Last verified: 2026-03-19 (v2.2.3 doc update). Run 'just check' to revalidate. -->
 
 # AVA Architecture & Conventions (v3)
 
@@ -44,13 +44,13 @@ AVA uses a **Rust-first architecture**. All agent, CLI, and backend code is Rust
 
 ### Codebase Stats
 
-- **21 Rust crates**, ~40K LOC, 1,692 tests (0 failures)
+- **21 Rust crates**, ~40K LOC, 1,712 tests (0 failures)
 - **8 LLM providers**: Anthropic (with prompt caching), OpenAI-compatible, Gemini, Ollama, OpenRouter, Copilot, Inception, Mock
-- **6 default tools**: `read`, `write`, `edit` (14 strategies incl. 3-way merge + diff-match-patch), `bash`, `glob`, `grep`
+- **6 default tools**: `read`, `write`, `edit` (15 strategies incl. ellipsis handling, 3-way merge + diff-match-patch), `bash`, `glob`, `grep`
 - **8 extended tools**: `apply_patch`, `web_fetch`, `web_search`, `multiedit`, `ast_ops`, `lsp_ops`, `code_search`, `git_read`
 - **1 agent tool**: `plan` (Plannotator-style inline plan editing via PlanBridge)
 - **Dynamic tools**: MCP servers + TOML custom tools (`~/.ava/tools/`, `.ava/tools/`)
-- **Key capabilities**: Anthropic prompt caching (`cache_control` on system + tools), auto-retry middleware (2x exponential backoff for read-only tools), stream silence timeout (90s configurable per-chunk reset), tiktoken-rs BPE token counting, tool schema pre-validation, persistent audit log (SQLite, opt-out), auto-compaction settings (toggle + threshold slider)
+- **Key capabilities**: Anthropic prompt caching (`cache_control` on system + tools), auto-retry middleware (2x exponential backoff for read-only tools), stream silence timeout (90s configurable per-chunk reset), tiktoken-rs BPE token counting, tool schema pre-validation, persistent audit log (SQLite, opt-out), auto-compaction settings (toggle + threshold slider), JSONL session logging (`~/.ava/log/`, opt-in), rich edit error feedback (similar lines + "did you mean?")
 
 ### Mid-Stream Messaging
 
@@ -139,7 +139,7 @@ Trust a project: `ava --trust`. Global config (`~/.ava/`) always loads.
 
 ## Praxis (Multi-Agent Orchestration) — v2
 
-Praxis is AVA's multi-agent system in `crates/ava-praxis/`. Uses a **Director -> Scouts -> Leads -> Workers** hierarchy with LLM-powered planning. 91 tests (74 unit + 11 integration + 6 doc-tests). 19 source files: `lib`, `plan`, `prompts`, `scout`, `board`, `events`, `workflow`, `acp`, `acp_handler`, `acp_transport`, `artifact`, `artifact_store`, `conflict`, `decomposition`, `mailbox`, `review`, `spec`, `spec_workflow`, `synthesis`. See [docs/codebase/ava-praxis.md](docs/codebase/ava-praxis.md) for full details.
+Praxis is AVA's multi-agent system in `crates/ava-praxis/`. Uses a **Director -> Scouts -> Leads -> Workers** hierarchy with LLM-powered planning. 91 tests (74 unit + 11 integration + 6 doc-tests). 23 source files: `lib`, `director`, `lead`, `worker`, `routing`, `plan`, `prompts`, `scout`, `board`, `events`, `workflow`, `acp`, `acp_handler`, `acp_transport`, `artifact`, `artifact_store`, `conflict`, `decomposition`, `mailbox`, `review`, `spec`, `spec_workflow`, `synthesis`. See [docs/codebase/ava-praxis.md](docs/codebase/ava-praxis.md) for full details.
 
 ### Director Intelligence Levels
 
@@ -319,6 +319,9 @@ cargo run --bin ava -- "goal" --headless --multi-agent --provider openrouter --m
 # Mid-stream messaging
 cargo run --bin ava -- "goal" --headless --follow-up "also run tests" --provider openrouter --model anthropic/claude-haiku-4.5
 cargo run --bin ava -- "goal" --headless --later "commit when done" --provider openrouter --model anthropic/claude-haiku-4.5
+
+# Verbose logging (stderr): -v info, -vv debug, -vvv trace
+cargo run --bin ava -- -v "goal" --headless --provider openrouter --model anthropic/claude-haiku-4.5
 ```
 
 ## After Making Changes

@@ -1,5 +1,27 @@
 # Changelog
 
+## v2.2.3 (2026-03-19)
+
+### Added
+- **`--verbose` / `-v` CLI flag** — `-v` info, `-vv` debug, `-vvv` trace to stderr; overrides `RUST_LOG`
+- **JSONL session logging** — structured logs at `~/.ava/log/` (opt-in via `features.session_logging: true`)
+- **Ellipsis edit strategy** — handles `...` placeholder lines in `old_text`; 15 total strategies (was 14)
+- **Rich edit error feedback** — on failure, reports most similar lines with line numbers and "did you mean?" hints
+
+### Changed
+
+#### God File Splits
+- `crates/ava-praxis/src/lib.rs` 1,479 LOC split into 5 files: `lib`, `director`, `lead`, `worker`, `routing` (23 source files total)
+- `crates/ava-agent/src/stack.rs` 1,763 LOC split into 4 files: `mod`, `stack_config`, `stack_tools`, `stack_run`
+- `src-tauri/src/commands/agent_commands.rs` 1,044 LOC split into 3 files: `agent_commands`, `praxis_commands`, `helpers`
+
+#### Quality & Security
+- 6 production `unwrap()` calls replaced with proper error handling
+- Extension native loader test fixed for cross-platform safety
+- 0 clippy warnings, 0 dead code warnings across workspace
+- Safe testing: nextest with 6 threads, `just check` tests 3 core crates (ava-agent, ava-tools, ava-praxis)
+- 1,712 tests passing (was 1,692)
+
 ## v2.2.2 (2026-03-19)
 
 ### Added
@@ -15,7 +37,7 @@
 - **tiktoken-rs BPE token counting** — accurate token counts replacing character-based heuristic
 
 #### Batch 3: Edit Quality & Audit
-- **Edit reliability cascade: 14 strategies** — added 3-way merge + diff-match-patch (was 12 strategies)
+- **Edit reliability cascade: 14 strategies** — added 3-way merge + diff-match-patch (was 12 strategies; later expanded to 15 with ellipsis strategy in v2.2.3)
 - **Persistent audit log** — SQLite-backed, opt-out, queryable by session/tool
 
 #### Praxis v2 (Phases 1-6 complete)
@@ -31,7 +53,7 @@
 - **Plan persistence** service (`plan-persistence.ts`) for saving/loading plans
 
 ### Changed
-- 1,692 tests passing (0 failures), up from 1,641
+- 1,692 tests passing (0 failures), up from 1,641 (further increased to 1,712 in v2.2.3)
 - 91 Praxis tests (74 unit + 11 integration + 6 doc-tests)
 - 3 Playwright e2e tests passing
 - 0 clippy warnings, 0 TypeScript errors

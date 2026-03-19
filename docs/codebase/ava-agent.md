@@ -31,7 +31,11 @@
 | `agent_loop/tool_execution.rs` | Tool execution with timing, plan mode checks, post-edit validation |
 | `agent_loop/response.rs` | Tool call parsing from LLM responses |
 | `agent_loop/repetition.rs` | Repetition detection for tool calls |
-| `stack.rs` | AgentStack with routing, MCP, plugins, permissions, sub-agent spawning |
+| `stack/mod.rs` | AgentStack core: routing, MCP, plugins, permissions, sub-agent spawning |
+| `stack/stack_config.rs` | AgentStackConfig builder (data_dir, provider, model, limits) |
+| `stack/stack_tools.rs` | Tool registration and middleware wiring |
+| `stack/stack_run.rs` | Agent run loop, session management, history handling |
+| `session_logger.rs` | JSONL session logger — writes structured log entries to `~/.ava/log/` (opt-in) |
 | `stuck.rs` | StuckDetector with 8 detection scenarios (empty responses, loops, cost thresholds) |
 | `reflection.rs` | Error classification, ReflectionAgent/ToolExecutor traits, ReflectionLoop |
 | `routing.rs` | Task analysis and routing intent based on keywords and task characteristics |
@@ -66,3 +70,6 @@ Used by: ava-tui, src-tauri, ava-praxis
 - **Prompt caching**: `AgentConfig.prompt_caching` flag (default true); Anthropic provider injects `cache_control` on system prompt and tool definitions for ~25% cost savings on cache hits
 - **tiktoken BPE token counting**: `count_tokens()` in `instructions.rs` uses cl100k_base tokenizer for accurate token counts (replaces character-based heuristic)
 - **Auto-retry for read-only tools**: Middleware retries transient failures on read-only tools (2x with exponential backoff)
+- **`--verbose` / `-v` CLI flag**: `-v` info, `-vv` debug, `-vvv` trace to stderr; overrides `RUST_LOG` for debugging
+- **JSONL session logging**: Opt-in via `features.session_logging: true`; writes structured entries (event type, timestamp, data) to `~/.ava/log/{session_id}.jsonl`
+- **15 edit strategies**: ExactMatch, LineTrimmed, AutoBlockAnchor, Ellipsis (`...` placeholder handling), FlexibleMatch, RelativeIndent, BlockAnchor, RegexMatch, FuzzyMatch, LineNumber, TokenBoundary, IndentationAware, MultiOccurrence, ThreeWayMerge, DiffMatchPatch — with rich error feedback on failure (similar lines + "did you mean?" hints)

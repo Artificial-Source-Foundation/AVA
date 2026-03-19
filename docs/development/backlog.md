@@ -8,8 +8,15 @@ Tool surface policy: default tools stay capped at 6 (`read`, `write`, `edit`, `b
 
 ## Recently Completed
 
+- **`--verbose` CLI flag** — `-v` info, `-vv` debug, `-vvv` trace to stderr
+- **JSONL session logging** — structured logs at `~/.ava/log/` (opt-in via `features.session_logging: true`)
+- **Ellipsis edit strategy** — `...` placeholder handling; 15 total strategies (was 14)
+- **Rich edit error feedback** — similar lines + "did you mean?" hints on edit failure
+- **God file splits** — praxis/lib.rs -> 5 files, stack.rs -> 4 files, agent_commands.rs -> 3 files
+- **Security fixes** — 6 production unwraps replaced, extension test fix
+- **Quality fixes** — 0 clippy warnings, 0 dead code, nextest 6 threads, `just check` tests 3 core crates
 - **Praxis v2 Phases 1-6** — LLM-powered Director (3 intelligence levels), scout system, Board of Directors (multi-model consensus), plan tool with PlanBridge, structured events + Tauri bridge, 91 tests
-- **Enhancement Batch 3** — edit reliability cascade (14 strategies: 3-way merge + diff-match-patch), persistent audit log (SQLite, opt-out, session/tool queries)
+- **Enhancement Batch 3** — edit reliability cascade (15 strategies: ellipsis + 3-way merge + diff-match-patch), persistent audit log (SQLite, opt-out, session/tool queries)
 - **Enhancement Batch 2** — Anthropic prompt caching (cache_control on system + tools, ~25% cost savings), auto-retry middleware for read-only tools (2x, exponential backoff), tiktoken-rs accurate BPE token counting
 - **Enhancement Batch 1** — tool schema pre-validation (catches malformed calls before execution), stream silence timeout (90s configurable, per-chunk reset), auto-compaction toggle + threshold slider in Settings
 - **Web mode** — `ava serve` with HTTP API + WebSocket, session CRUD, async agent streaming, auto-titling, mid-stream messaging endpoints, web DB fallback
@@ -24,7 +31,7 @@ Tool surface policy: default tools stay capped at 6 (`read`, `write`, `edit`, `b
 
 1. **Wildcard permission patterns** — `*.env` → ask, `src/**/*.rs` → allow. Glob-based rules. Simple, high UX impact.
 2. **Per-agent model override** — each agent uses different provider/model. Already half-built in agents.toml config.
-3. ~~**Fuzzy matching upgrade**~~ — DONE: edit reliability cascade now has 14 strategies including 3-way merge + diff-match-patch.
+3. ~~**Fuzzy matching upgrade**~~ — DONE: edit reliability cascade now has 15 strategies including ellipsis handling, 3-way merge + diff-match-patch.
 4. **StreamingDiff** — apply edits as tokens stream. Users see changes instantly instead of waiting.
 
 ### Desktop App Bugs (from testing)
@@ -58,9 +65,11 @@ Tool surface policy: default tools stay capped at 6 (`read`, `write`, `edit`, `b
 
 ### Research Items
 
-24. **Batch 4: Security & Transport** — seccomp-bpf sandbox profile for Linux, WebSocket transport for remote agent communication.
-25. **Summary chaining research** — explore chaining compaction summaries across sessions for long-running projects.
-26. **Competitor logging research** — analyze Claude Code / Cursor / Devin logging and telemetry approaches for improving debug observability.
+24. **Seccomp sandboxing** — seccomp-bpf sandbox profile for Linux (research needed: policy design, syscall whitelist, integration with ava-sandbox).
+25. **WebSocket prewarming** — persistent WebSocket connections for remote agent transport (research needed: reconnection strategy, multiplexing, auth).
+26. **`ava doctor` command** — diagnostic command to check provider connectivity, config validity, tool health (not yet implemented).
+27. **Summary chaining research** — explore chaining compaction summaries across sessions for long-running projects.
+28. **Competitor logging research** — ~~analyze Claude Code / Cursor / Devin logging approaches~~ partially addressed by JSONL session logging; remaining: telemetry dashboard.
 
 ### Later (when users ask for it)
 

@@ -88,16 +88,33 @@ impl OpenAIProvider {
         model: impl Into<String>,
         base_url: impl Into<String>,
     ) -> Self {
+        let base_url = base_url.into();
+        // Auto-detect Responses API: only native OpenAI (api.openai.com) supports it.
+        // All other base URLs (Inception, OpenRouter, LiteLLM, etc.) use Chat Completions.
+        let use_responses_api = Self::is_native_openai(&base_url);
         Self {
             pool,
             api_key: api_key.into(),
             model: model.into(),
-            base_url: base_url.into(),
+            base_url,
             thinking_format: ThinkingFormat::OpenAI,
             circuit_breaker: Some(Arc::new(CircuitBreaker::default_provider())),
-            use_responses_api: false,
+            use_responses_api,
             litellm_compatible: false,
         }
+    }
+
+    /// Returns `true` if the base URL points to native OpenAI or ChatGPT Codex endpoints.
+    /// These are the only endpoints that support the Responses API format.
+    fn is_native_openai(base_url: &str) -> bool {
+        let lower = base_url.to_lowercase();
+        lower.contains("api.openai.com") || lower.contains("chatgpt.com")
+    }
+
+    /// Returns `true` if using ChatGPT OAuth (subscription-billed, no per-token cost).
+    /// Native OpenAI API key users pay per-token even when using the Responses API.
+    fn is_subscription(&self) -> bool {
+        self.base_url.to_lowercase().contains("chatgpt.com")
     }
 
     /// Set the thinking format for this provider (DashScope, Zhipu, etc.).
@@ -174,7 +191,14 @@ impl OpenAIProvider {
     /// The completions endpoint URL, respecting the Responses API mode.
     fn completions_url(&self) -> String {
         if self.use_responses_api {
-            format!("{}/responses", self.base_url)
+            // ChatGPT OAuth uses a custom base URL that already includes the path prefix.
+            // Native OpenAI (api.openai.com) needs /v1/responses.
+            let base = self.base_url.trim_end_matches('/');
+            if base.contains("chatgpt.com") {
+                format!("{base}/responses")
+            } else {
+                format!("{base}/v1/responses")
+            }
         } else {
             format!("{}/v1/chat/completions", self.base_url)
         }
@@ -336,7 +360,7 @@ impl OpenAIProvider {
         body
     }
 
-    /// Build request body with reasoning support.
+    /// Build request body with reasoning support (Chat Completions API).
     fn build_request_body_with_thinking(
         &self,
         messages: &[Message],
@@ -344,7 +368,6 @@ impl OpenAIProvider {
         stream: bool,
         thinking: ThinkingLevel,
     ) -> Value {
-        eprintln!("[AVA DEBUG] build_request_body_with_thinking called: model={}, thinking={:?}, thinking_format={:?}", self.model, thinking, self.thinking_format);
         let mut body = self.build_request_body(messages, stream);
 
         if !tools.is_empty() {
@@ -356,7 +379,8 @@ impl OpenAIProvider {
         if thinking != ThinkingLevel::Off && self.supports_reasoning() {
             match self.thinking_format {
                 ThinkingFormat::OpenAI => {
-                    // OpenAI reasoning effort API
+                    // Chat Completions API only supports `reasoning_effort`.
+                    // `reasoning_summary` and `include` are Responses API fields.
                     let effort = match thinking {
                         ThinkingLevel::Off => unreachable!(),
                         ThinkingLevel::Low => "low",
@@ -364,10 +388,7 @@ impl OpenAIProvider {
                         ThinkingLevel::High => "high",
                         ThinkingLevel::Max => self.max_reasoning_effort(),
                     };
-                    eprintln!("[AVA DEBUG] Setting ChatCompletions reasoning: effort={}, reasoning_summary=auto", effort);
                     body["reasoning_effort"] = json!(effort);
-                    body["reasoning_summary"] = json!("auto");
-                    body["include"] = json!(["reasoning.encrypted_content"]);
                 }
                 ThinkingFormat::DashScope => {
                     // Alibaba DashScope: enable_thinking field
@@ -408,9 +429,9 @@ impl OpenAIProvider {
         common::parse_openai_completion_payload(payload)
     }
 
-    /// Label used in error messages — distinguishes ChatGPT Responses API from standard OpenAI.
+    /// Label used in error messages — distinguishes ChatGPT OAuth from standard OpenAI.
     fn provider_label(&self) -> String {
-        if self.use_responses_api {
+        if self.is_subscription() {
             "ChatGPT".to_string()
         } else {
             "OpenAI".to_string()
@@ -516,8 +537,9 @@ impl LLMProvider for OpenAIProvider {
     }
 
     fn estimate_cost(&self, input_tokens: usize, output_tokens: usize) -> f64 {
-        // ChatGPT OAuth (Responses API) is subscription-billed — no per-token cost.
-        if self.use_responses_api {
+        // ChatGPT OAuth is subscription-billed — no per-token cost.
+        // Native OpenAI API key users pay per-token even with Responses API.
+        if self.is_subscription() {
             return 0.0;
         }
         let (in_rate, out_rate) = common::model_pricing_usd_per_million(&self.model);
@@ -537,7 +559,7 @@ impl LLMProvider for OpenAIProvider {
             supports_images: true,
             max_context_window: 128_000,
             supports_prompt_caching: false,
-            is_subscription: self.use_responses_api,
+            is_subscription: self.is_subscription(),
         }
     }
 
@@ -661,9 +683,7 @@ impl LLMProvider for OpenAIProvider {
         tools: &[ava_types::Tool],
         thinking: ThinkingLevel,
     ) -> Result<Pin<Box<dyn Stream<Item = StreamChunk> + Send>>> {
-        eprintln!("[AVA DEBUG] generate_stream_with_thinking called: model={}, thinking={:?}, supports_reasoning={}, use_responses_api={}", self.model, thinking, self.supports_reasoning(), self.use_responses_api);
         if !self.supports_reasoning() || thinking == ThinkingLevel::Off {
-            eprintln!("[AVA DEBUG] Falling back to generate_stream_with_tools (no reasoning)");
             return self.generate_stream_with_tools(messages, tools).await;
         }
 
@@ -676,26 +696,6 @@ impl LLMProvider for OpenAIProvider {
         if !self.use_responses_api {
             body["stream_options"] = json!({"include_usage": true});
         }
-        // Debug: print the reasoning-related fields from the request body
-        eprintln!("[AVA DEBUG] Request URL: {}", self.completions_url());
-        if let Some(reasoning) = body.get("reasoning") {
-            eprintln!("[AVA DEBUG] Request body has 'reasoning': {}", reasoning);
-        }
-        if let Some(effort) = body.get("reasoning_effort") {
-            eprintln!(
-                "[AVA DEBUG] Request body has 'reasoning_effort': {}",
-                effort
-            );
-        }
-        if let Some(summary) = body.get("reasoning_summary") {
-            eprintln!(
-                "[AVA DEBUG] Request body has 'reasoning_summary': {}",
-                summary
-            );
-        }
-        if let Some(include) = body.get("include") {
-            eprintln!("[AVA DEBUG] Request body has 'include': {}", include);
-        }
         let client = self.client().await?;
         let request = client
             .post(self.completions_url())
@@ -705,9 +705,7 @@ impl LLMProvider for OpenAIProvider {
         let response = self.send_request(request).await?;
         let response = common::validate_status(response, &provider_label).await?;
         let use_responses = self.use_responses_api;
-        let model_name = self.model.clone();
         let mut sse_parser = common::SseParser::new();
-        let mut first_sse_logged = false;
         let stream = response.bytes_stream().flat_map(move |chunk| {
             let chunks = chunk
                 .ok()
@@ -716,19 +714,7 @@ impl LLMProvider for OpenAIProvider {
                     sse_parser
                         .feed(&text)
                         .into_iter()
-                        .filter_map(|line| {
-                            // Log the first few raw SSE lines to see what the API sends
-                            if !first_sse_logged {
-                                eprintln!(
-                                    "[AVA DEBUG] First raw SSE line from {} (responses_api={}): {}",
-                                    model_name,
-                                    use_responses,
-                                    &line[..line.len().min(500)]
-                                );
-                                first_sse_logged = true;
-                            }
-                            serde_json::from_str::<Value>(&line).ok()
-                        })
+                        .filter_map(|line| serde_json::from_str::<Value>(&line).ok())
                         .filter_map(|payload| {
                             if use_responses {
                                 common::parse_responses_api_stream_chunk(&payload)

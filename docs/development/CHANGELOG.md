@@ -4,6 +4,16 @@
 
 ### Added
 
+#### Praxis v2 Architecture Design
+- **LLM-powered Director** — replaces code-driven `pick_domain()` router with LLM-based task analysis and adaptive orchestration (3 intelligence levels)
+- **Scout system** — lightweight agents (Haiku/Flash/Mercury) for pre-planning codebase intelligence gathering
+- **Board of Directors** — multi-model consensus (3 SOTA models with distinct personalities) for complex architectural decisions
+- **Plannotator-style plan system** — inline plan editing in chat (clickable steps, comments, reorder, budget per step) for both solo and Director modes
+- **Sequential execution model** — Lead manages worker order (replaces self-claiming), parallel only when safe
+- **Smart model routing** — automatic tier selection by role (scouts=cheap, workers=mid, leads=strong, director=strongest, board=top per provider)
+- **Team configuration** — Settings → Agents page for presets, per-lead model/tool selection, board model selection
+- **SOTA competitive analysis** — documented Claude Code, Cursor, Devin, Codex approaches; Google/MIT research findings on coordinator effectiveness
+
 #### Desktop UI
 - **Soft Zinc design system** — 12 reusable components (Toggle, Select, Badge, Card, etc.), CSS token alignment across all screens
 - **5-step onboarding flow** — Welcome → Connect → Theme → Workspace → Ready

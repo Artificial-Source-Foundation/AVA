@@ -61,10 +61,25 @@ Tool surface policy: default tools stay capped at 6 (`read`, `write`, `edit`, `b
 26. **Stop button per lead/worker** — individual stop buttons trigger Director "what went wrong?" flow and replan.
 27. **Solo/Team mode switching** — full lifecycle: Solo → Team (plan + spawn), Team → Solo (stop all + collapse), Resume Team (review + replan).
 
-**Sprint F: Worktrees + Budget**
+**Sprint F: LLM-Powered Director + Scout System**
 
-22. **Worktree per lead + Merge Worker** — git worktree creation/cleanup per lead, Merge Worker for integration, conflict resolution UI.
-23. **Budget delegation chain** — Director → Leads → Workers proportional budget splitting, warnings, and escalation when exhausted.
+22. **LLM-powered Director planning** — replace `pick_domain()` switch statement with LLM-based task analysis. Director detects complexity (Level 1/2/3) and adapts orchestration.
+23. **Scout system** — lightweight agents (Haiku/Flash/Mercury) that read codebase sections and produce structured summaries for Director. Director spawns scouts before planning.
+24. **Plan UI in chat** — Plannotator-style plan display as structured message in Director chat. Clickable steps, comments, reorder, delete, add. Budget per step + total.
+25. **Budget delegation chain** — Director → Leads → Workers proportional budget splitting, warnings, and escalation when exhausted.
+
+**Sprint G: Board of Directors + Team Configuration**
+
+26. **Board of Directors** — multi-model consensus for Level 3 tasks. 3 SOTA models with distinct personalities vote on approach. Director synthesizes recommendations.
+27. **Team configuration page** — Settings → Agents UI for team presets, per-lead model/tool selection, scout model, board models, execution mode.
+28. **Smart model routing** — automatic model tier selection by role (scouts=cheap, workers=mid, leads=strong, director=strongest, board=top per provider). User overrides in config.
+29. **Worktree per lead + Merge Worker** — git worktree creation/cleanup per lead, Merge Worker for integration, conflict resolution UI.
+
+**Sprint H: Plannotator Integration**
+
+30. **Solo plan mode** — regular AI suggests plan via plan tool, user reviews/edits in chat. Same Plannotator UI as Director mode.
+31. **Director plan mode** — Director creates plan after scout reports, shows in chat with approve/comment/edit buttons.
+32. **Plan persistence** — plans saved to `.ava/plans/` as Markdown, exportable/importable, team-sharable.
 
 ### Later (when users ask for it)
 

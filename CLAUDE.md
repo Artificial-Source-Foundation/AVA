@@ -134,30 +134,52 @@ Trust a project: `ava --trust`. Global config (`~/.ava/`) always loads.
 - Desktop commands: `src-tauri/src/commands/`
 - Configuration: `crates/ava-config/`
 
-## Praxis (Multi-Agent Orchestration)
+## Praxis (Multi-Agent Orchestration) — v2
 
-Praxis is AVA's multi-agent system in `crates/ava-praxis/`. It uses a **Director → Leads → Workers** hierarchy.
+Praxis is AVA's multi-agent system in `crates/ava-praxis/`. Uses a **Director → Scouts → Leads → Workers** hierarchy with LLM-powered planning. See [docs/codebase/ava-praxis.md](docs/codebase/ava-praxis.md) for full details.
 
-### Hierarchy
+### Director Intelligence Levels
 
-- **Director**: IS the main chat. Crown icon, amber color. Orchestrates leads, relays user steering, shows plan inline.
-- **Leads**: Domain-specific agents -- Backend, Frontend, QA, Research, Debug, DevOps, Fullstack. Professional role names ("Backend Lead", "QA Lead"). Split tasks across workers, review output before reporting.
-- **Workers**: Jr. agents with fun first names -- Pedro, Sofia, Luna, Kai, Mira, Rio, Ash, Nico, Ivy, Juno, Zara, Leo. Named as "Pedro (Jr. Backend)", etc.
+The Director is **LLM-powered** (not a code-driven router). It analyzes task complexity and adapts:
 
-### Team Mode
+| Level | Complexity | Behavior |
+|-------|-----------|----------|
+| **1** | Simple (one-file fix) | Spawns one worker + one QA worker. No leads needed. |
+| **2** | Medium (multi-file, clear scope) | Sends scouts, creates plan, user reviews. Spawns 2-3 leads with workers. |
+| **3** | Complex (major refactor, architecture) | Scouts + Board of Directors (3 SOTA models vote on approach). User approves plan. |
 
-- Activated via **Team button** in status bar.
-- **Solo → Team**: Director creates plan, spawns leads and workers.
-- **Team → Solo**: Only when all agents are stopped. "Stop All" → Director asks "What's on your mind?" → user switches.
-- **Resume Team**: Director reviews progress, asks "Continue or replan?"
-- Mode switches preserved in session history.
+### Key Concepts
 
-### Worktree Strategy
+- **Scouts**: Lightweight agents (cheap model: Haiku/Flash/Mercury) that read codebase sections and produce summaries for the Director. Used before planning.
+- **Board of Directors**: Opt-in for Level 3. Three different SOTA models (e.g., Opus, Gemini, GPT-5.4) each with a distinct analytical personality. One round of opinions based on scout reports, then vote. Director synthesizes.
+- **Plan System**: Plannotator-style -- plan shown as structured message in chat, steps are clickable/reorderable/commentable. Works in both solo (regular AI) and Director modes. Plans saved to `.ava/plans/`.
+- **Sequential Execution**: Lead manages worker order (workers do NOT self-claim). Parallel when tasks are independent (different files), sequential when dependencies exist.
+- **QA at Every Level**: Each lead has QA workers. QA Lead for cross-lead merge verification. Workers verify their changes compile + pass tests.
 
-- Each Lead gets its own **git worktree** (workers share their lead's worktree).
-- Leads assign specific files to workers to avoid intra-lead conflicts.
-- When all leads finish → Director spawns a **Merge Worker**.
-- Clean merge: automatic. Minor conflicts: Merge Worker resolves. Hard conflicts: Director shows user diffs.
+### Smart Model Routing
+
+| Role | Model Tier | Examples |
+|------|-----------|----------|
+| Scouts | Cheapest | Haiku, Flash, Mercury |
+| Workers | Mid-tier | Sonnet, GPT-5.3 |
+| Leads | Strong | Sonnet, Opus (complex) |
+| Director | Strongest available | Opus, GPT-5.4 |
+| Board | Top per provider | Best from each configured provider |
+
+### Hierarchy & Naming
+
+- **Director**: Crown icon, amber. IS the main chat.
+- **Leads**: Professional role names -- "Backend Lead", "QA Lead", etc. (7 domains)
+- **Workers**: Fun first names -- "Pedro (Jr. Backend)", "Sofia (Jr. Backend)", etc.
+- **Scouts**: Ephemeral, no names needed.
+- **Board members**: Named by model -- "Opus (Board)", "Gemini (Board)", "GPT (Board)"
+
+### Team Mode & Worktrees
+
+- Solo/Team switching via Team button. Mode switches preserved in session.
+- Each Lead gets its own git worktree; workers share their lead's worktree.
+- Merge Worker integrates lead worktrees. QA Lead reviews merged result.
+- Artifacts saved to `.ava/praxis/{session-id}/{lead-name}/`.
 
 ### Error Handling (Tiered)
 
@@ -166,25 +188,6 @@ Praxis is AVA's multi-agent system in `crates/ava-praxis/`. It uses a **Director
 3. Logic error → Lead reviews, spawns fix worker
 4. Worker budget exhausted → Lead asks Director → Director asks user
 5. Catastrophic → Director asks user
-
-### Frontend Components
-
-- `TeamPanel` — right sidebar: Director → Leads → Workers hierarchy with status, progress, stop buttons
-- `TeamChatView` — read-only lead chat (workers, tool calls, review actions)
-- `TeamStatusStrip` — status bar integration for team mode
-- `SubagentCard` — individual agent status card
-- `agent-team-bridge` — Rust PraxisEvent → Tauri → useAgent → team store → UI
-
-### Key Tauri Commands (Planned)
-
-- `start_delegation` — activate team mode, begin Praxis orchestration
-- `get_praxis_status` — current hierarchy state, progress, budgets
-- `cancel_praxis` — stop all agents, return to solo mode
-- `steer_lead` — relay user input to a specific lead via Director
-
-### Session Persistence
-
-Artifacts saved to `.ava/praxis/{session-id}/{lead-name}/`. Sessions are resumable if interrupted.
 
 > **Note:** Tauri bridge for Praxis events is not yet implemented. Desktop Team UI is wired to the store but Rust events don't flow to it yet. Use TUI `--multi-agent` for Praxis testing.
 

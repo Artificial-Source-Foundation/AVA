@@ -95,6 +95,8 @@ pub struct DirectorConfig {
     pub worker_names: Vec<String>,
     /// Which lead domains are enabled. When empty, all domains are enabled.
     pub enabled_leads: Vec<Domain>,
+    /// Custom system prompt overrides per lead domain.
+    pub lead_prompts: HashMap<Domain, String>,
 }
 
 impl DirectorConfig {
@@ -133,6 +135,8 @@ pub struct Lead {
     platform: Option<Arc<StandardPlatform>>,
     /// Custom worker names pool (empty = use built-in default).
     worker_names: Vec<String>,
+    /// Custom system prompt override (empty = use default from prompts.rs).
+    custom_prompt: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -224,6 +228,11 @@ impl Director {
                 config.enabled_leads.is_empty() || config.enabled_leads.contains(domain)
             })
             .map(|(name, domain)| {
+                let custom_prompt = config
+                    .lead_prompts
+                    .get(&domain)
+                    .cloned()
+                    .unwrap_or_default();
                 Lead::new(
                     name,
                     domain.clone(),
@@ -231,6 +240,7 @@ impl Director {
                     platform.clone(),
                 )
                 .with_worker_names(worker_names.clone())
+                .with_custom_prompt(custom_prompt)
             })
             .collect();
 
@@ -775,12 +785,19 @@ impl Lead {
             provider,
             platform,
             worker_names: Vec::new(),
+            custom_prompt: String::new(),
         }
     }
 
     /// Create a new lead with custom worker names.
     pub fn with_worker_names(mut self, names: Vec<String>) -> Self {
         self.worker_names = names;
+        self
+    }
+
+    /// Set a custom system prompt override for this lead's workers.
+    pub fn with_custom_prompt(mut self, prompt: String) -> Self {
+        self.custom_prompt = prompt;
         self
     }
 
@@ -1102,7 +1119,16 @@ impl Lead {
         } else {
             self.worker_names[idx % self.worker_names.len()].clone()
         };
-        let system_prompt = prompts::worker_system_prompt_for_domain(&worker_name, &self.domain);
+        // Use custom lead prompt if set, otherwise use the default domain prompt
+        let system_prompt = if self.custom_prompt.is_empty() {
+            prompts::worker_system_prompt_for_domain(&worker_name, &self.domain)
+        } else {
+            format!(
+                "{}\n\n## Lead Instructions\n{}",
+                prompts::worker_system_prompt_for_domain(&worker_name, &self.domain),
+                self.custom_prompt
+            )
+        };
 
         let mut registry = ToolRegistry::new();
         if let Some(platform) = &self.platform {

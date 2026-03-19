@@ -61,6 +61,7 @@ impl App {
                 board_providers: vec![],
                 worker_names: vec![],
                 enabled_leads: vec![],
+                lead_prompts: std::collections::HashMap::new(),
             });
 
             let (tx, mut rx) = mpsc::unbounded_channel();

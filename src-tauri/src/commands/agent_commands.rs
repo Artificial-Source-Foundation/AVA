@@ -905,6 +905,18 @@ pub async fn start_praxis(
         vec![] // empty = all enabled
     };
 
+    // Collect per-lead custom prompts
+    let mut lead_prompts = std::collections::HashMap::new();
+    if let Some(ref tc) = team_config {
+        for lead_cfg in &tc.leads {
+            if !lead_cfg.custom_prompt.is_empty() {
+                if let Some(domain) = parse_domain(&lead_cfg.domain) {
+                    lead_prompts.insert(domain, lead_cfg.custom_prompt.clone());
+                }
+            }
+        }
+    }
+
     // Worker names
     let worker_names: Vec<String> = team_config
         .as_ref()
@@ -924,6 +936,7 @@ pub async fn start_praxis(
             board_providers: vec![],
             worker_names,
             enabled_leads,
+            lead_prompts,
         });
 
         let worker = match director.delegate(ava_praxis::Task {

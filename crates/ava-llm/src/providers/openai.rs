@@ -1,5 +1,6 @@
 use std::pin::Pin;
 use std::sync::Arc;
+use std::time::Instant;
 
 use async_trait::async_trait;
 use ava_types::{AvaError, Message, Result, StreamChunk, ThinkingLevel};
@@ -12,6 +13,60 @@ use crate::circuit_breaker::CircuitBreaker;
 use crate::pool::ConnectionPool;
 use crate::provider::{LLMProvider, LLMResponse, ProviderCapabilities};
 use crate::providers::common;
+
+/// Tracks Responses API reasoning timing to convert placeholder sentinels
+/// into human-readable "Thought for X.Xs" messages.
+///
+/// When an unverified org uses the Responses API, no reasoning summary text
+/// is streamed. Instead, we get start/end sentinels and compute elapsed time.
+struct ReasoningTimer {
+    start: Option<Instant>,
+    had_real_content: bool,
+}
+
+impl ReasoningTimer {
+    fn new() -> Self {
+        Self {
+            start: None,
+            had_real_content: false,
+        }
+    }
+
+    /// Process a parsed stream chunk, translating reasoning sentinels into
+    /// timed thinking messages. Returns the (possibly modified) chunks to emit.
+    fn process(&mut self, chunk: StreamChunk) -> Vec<StreamChunk> {
+        if let Some(ref thinking) = chunk.thinking {
+            if thinking == common::REASONING_START_SENTINEL {
+                self.start = Some(Instant::now());
+                self.had_real_content = false;
+                // Emit a brief indicator so the UI shows a thinking bubble
+                return vec![StreamChunk {
+                    thinking: Some("Thinking".to_string()),
+                    ..Default::default()
+                }];
+            }
+            if thinking == common::REASONING_END_SENTINEL {
+                if !self.had_real_content {
+                    // No summary text was streamed — compute elapsed time
+                    let elapsed = self.start.map(|s| s.elapsed().as_secs_f64()).unwrap_or(0.0);
+                    self.start = None;
+                    return vec![StreamChunk {
+                        thinking: Some(format!(" ({elapsed:.1}s)")),
+                        ..Default::default()
+                    }];
+                }
+                // Had real content — nothing to add
+                self.start = None;
+                return vec![];
+            }
+            // Real thinking content arrived (e.g., reasoning summary deltas)
+            if self.start.is_some() {
+                self.had_real_content = true;
+            }
+        }
+        vec![chunk]
+    }
+}
 
 /// Heuristic check for whether a base URL likely points to a LiteLLM proxy.
 ///
@@ -508,6 +563,7 @@ impl LLMProvider for OpenAIProvider {
         let response = common::validate_status(response, &provider_label).await?;
         let use_responses = self.use_responses_api;
         let mut sse_parser = common::SseParser::new();
+        let mut reasoning_timer = ReasoningTimer::new();
         let stream = response.bytes_stream().flat_map(move |chunk| {
             let chunks = chunk
                 .ok()
@@ -522,6 +578,13 @@ impl LLMProvider for OpenAIProvider {
                                 common::parse_responses_api_stream_chunk(&payload)
                             } else {
                                 common::parse_openai_stream_chunk(&payload)
+                            }
+                        })
+                        .flat_map(|c| {
+                            if use_responses {
+                                reasoning_timer.process(c)
+                            } else {
+                                vec![c]
                             }
                         })
                         .collect::<Vec<_>>()
@@ -653,6 +716,7 @@ impl LLMProvider for OpenAIProvider {
         let response = common::validate_status(response, &provider_label).await?;
         let use_responses = self.use_responses_api;
         let mut sse_parser = common::SseParser::new();
+        let mut reasoning_timer = ReasoningTimer::new();
         let stream = response.bytes_stream().flat_map(move |chunk| {
             let chunks = chunk
                 .ok()
@@ -667,6 +731,13 @@ impl LLMProvider for OpenAIProvider {
                                 common::parse_responses_api_stream_chunk(&payload)
                             } else {
                                 common::parse_openai_stream_chunk(&payload)
+                            }
+                        })
+                        .flat_map(|c| {
+                            if use_responses {
+                                reasoning_timer.process(c)
+                            } else {
+                                vec![c]
                             }
                         })
                         .collect::<Vec<_>>()
@@ -709,6 +780,7 @@ impl LLMProvider for OpenAIProvider {
         let response = common::validate_status(response, &provider_label).await?;
         let use_responses = self.use_responses_api;
         let mut sse_parser = common::SseParser::new();
+        let mut reasoning_timer = ReasoningTimer::new();
         let stream = response.bytes_stream().flat_map(move |chunk| {
             let chunks = chunk
                 .ok()
@@ -723,6 +795,13 @@ impl LLMProvider for OpenAIProvider {
                                 common::parse_responses_api_stream_chunk(&payload)
                             } else {
                                 common::parse_openai_stream_chunk(&payload)
+                            }
+                        })
+                        .flat_map(|c| {
+                            if use_responses {
+                                reasoning_timer.process(c)
+                            } else {
+                                vec![c]
                             }
                         })
                         .collect::<Vec<_>>()

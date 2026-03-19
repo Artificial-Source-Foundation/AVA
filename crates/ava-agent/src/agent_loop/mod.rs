@@ -1674,5 +1674,30 @@ mod tests {
             };
             assert!(validate_tool_call(&tc, &registry).is_none());
         }
+
+        #[test]
+        fn string_arguments_are_parsed_and_validated() {
+            let registry = registry_with_bash();
+            // Arguments as a raw JSON string (some providers send this format)
+            let tc = ToolCall {
+                id: "1".to_string(),
+                name: "bash".to_string(),
+                arguments: serde_json::Value::String(r#"{"command": "echo hello"}"#.to_string()),
+            };
+            assert!(validate_tool_call(&tc, &registry).is_none());
+        }
+
+        #[test]
+        fn string_arguments_missing_required_still_fails() {
+            let registry = registry_with_bash();
+            let tc = ToolCall {
+                id: "1".to_string(),
+                name: "bash".to_string(),
+                arguments: serde_json::Value::String(r#"{}"#.to_string()),
+            };
+            let err = validate_tool_call(&tc, &registry);
+            assert!(err.is_some());
+            assert!(err.unwrap().contains("missing required parameter"));
+        }
     }
 }

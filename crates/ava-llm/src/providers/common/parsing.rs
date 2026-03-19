@@ -2,6 +2,15 @@ use ava_types::{AvaError, Result, StreamChunk, StreamToolCall, Tool, ToolCall};
 use serde_json::{json, Value};
 use uuid::Uuid;
 
+/// Sentinel emitted when a Responses API reasoning item starts.
+/// The streaming wrapper in `openai.rs` intercepts this to track timing.
+pub const REASONING_START_SENTINEL: &str = "\x00REASONING_START\x00";
+
+/// Sentinel emitted when a Responses API reasoning item completes without
+/// summary text (unverified org). The streaming wrapper converts this
+/// into a "Thought for X.Xs" message using elapsed time.
+pub const REASONING_END_SENTINEL: &str = "\x00REASONING_END\x00";
+
 pub fn model_pricing_usd_per_million(model: &str) -> (f64, f64) {
     // Delegate to the compiled-in model registry for known models.
     if let Some(pricing) = ava_config::model_catalog::registry::registry().pricing(model) {
@@ -983,9 +992,11 @@ pub fn parse_responses_api_stream_chunk(payload: &Value) -> Option<StreamChunk> 
             let item_type = item.get("type").and_then(Value::as_str)?;
 
             match item_type {
-                // Reasoning item starting — emit indicator for the UI
+                // Reasoning item starting — emit a sentinel that the streaming
+                // wrapper in openai.rs will translate into a timed "Thinking"
+                // indicator (e.g., "Thought for 2.3s") once reasoning completes.
                 "reasoning" => Some(StreamChunk {
-                    thinking: Some("Reasoning...".to_string()),
+                    thinking: Some(REASONING_START_SENTINEL.to_string()),
                     ..Default::default()
                 }),
                 // Skip text/message — already streamed via deltas
@@ -1012,9 +1023,12 @@ pub fn parse_responses_api_stream_chunk(payload: &Value) -> Option<StreamChunk> 
                         }
                     }
                     if summary_text.is_empty() {
-                        // No summary text — the indicator was already emitted
-                        // via output_item.added above.
-                        None
+                        // No summary text (unverified org) — emit end sentinel
+                        // so the streaming wrapper can compute elapsed reasoning time.
+                        Some(StreamChunk {
+                            thinking: Some(REASONING_END_SENTINEL.to_string()),
+                            ..Default::default()
+                        })
                     } else {
                         Some(StreamChunk {
                             thinking: Some(summary_text),
@@ -1024,7 +1038,11 @@ pub fn parse_responses_api_stream_chunk(payload: &Value) -> Option<StreamChunk> 
                 }
                 // Skip text/message — already streamed via delta events
                 "text" | "output_text" | "message" => None,
-                // Tool calls — emit the completed call
+                // Tool calls — emit name/id only; arguments were already
+                // streamed via `response.function_call_arguments.delta` events.
+                // Emitting the full arguments here would duplicate them in the
+                // accumulator, producing invalid JSON like `{...}{...}` which
+                // falls back to `{}` and triggers "missing required parameter".
                 "function_call" | "tool_call" => {
                     let call_id = item
                         .get("call_id")
@@ -1038,11 +1056,6 @@ pub fn parse_responses_api_stream_chunk(payload: &Value) -> Option<StreamChunk> 
                         .or_else(|| item.get("function").and_then(|f| f.get("name")))
                         .and_then(Value::as_str)?
                         .to_string();
-                    let arguments = item
-                        .get("arguments")
-                        .or_else(|| item.get("function").and_then(|f| f.get("arguments")))
-                        .and_then(Value::as_str)
-                        .unwrap_or("{}");
 
                     Some(StreamChunk {
                         tool_call: Some(StreamToolCall {
@@ -1053,7 +1066,7 @@ pub fn parse_responses_api_stream_chunk(payload: &Value) -> Option<StreamChunk> 
                                 call_id
                             }),
                             name: Some(name),
-                            arguments_delta: Some(arguments.to_string()),
+                            arguments_delta: None,
                         }),
                         ..Default::default()
                     })
@@ -2241,13 +2254,13 @@ mod tests {
     // ── Responses API stream chunk: reasoning ──
 
     #[test]
-    fn responses_reasoning_output_item_added_emits_indicator() {
+    fn responses_reasoning_output_item_added_emits_start_sentinel() {
         let payload = json!({
             "type": "response.output_item.added",
             "item": {"type": "reasoning"}
         });
         let chunk = parse_responses_api_stream_chunk(&payload).unwrap();
-        assert_eq!(chunk.thinking.as_deref(), Some("Reasoning..."));
+        assert_eq!(chunk.thinking.as_deref(), Some(REASONING_START_SENTINEL));
         assert!(chunk.content.is_none());
     }
 
@@ -2271,7 +2284,7 @@ mod tests {
     }
 
     #[test]
-    fn responses_reasoning_output_item_done_empty_summary_returns_none() {
+    fn responses_reasoning_output_item_done_empty_summary_emits_end_sentinel() {
         let payload = json!({
             "type": "response.output_item.done",
             "item": {
@@ -2279,16 +2292,19 @@ mod tests {
                 "summary": []
             }
         });
-        assert!(parse_responses_api_stream_chunk(&payload).is_none());
+        let chunk = parse_responses_api_stream_chunk(&payload).unwrap();
+        assert_eq!(chunk.thinking.as_deref(), Some(REASONING_END_SENTINEL));
     }
 
     #[test]
-    fn responses_reasoning_output_item_done_no_summary_field_returns_none() {
+    fn responses_reasoning_output_item_done_no_summary_emits_end_sentinel() {
         let payload = json!({
             "type": "response.output_item.done",
             "item": {"type": "reasoning"}
         });
-        assert!(parse_responses_api_stream_chunk(&payload).is_none());
+        // No summary field at all — treated same as empty summary
+        let chunk = parse_responses_api_stream_chunk(&payload).unwrap();
+        assert_eq!(chunk.thinking.as_deref(), Some(REASONING_END_SENTINEL));
     }
 
     #[test]
@@ -2380,7 +2396,9 @@ mod tests {
         let tc = chunk.tool_call.unwrap();
         assert_eq!(tc.id.as_deref(), Some("call_abc"));
         assert_eq!(tc.name.as_deref(), Some("read"));
-        assert_eq!(tc.arguments_delta.as_deref(), Some("{\"path\":\"/tmp\"}"));
+        // arguments_delta is None — arguments were already streamed via delta events.
+        // Emitting them again here would duplicate them in the accumulator.
+        assert_eq!(tc.arguments_delta, None);
     }
 
     // ── Responses API non-streaming: reasoning ──

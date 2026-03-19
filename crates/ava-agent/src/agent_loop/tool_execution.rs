@@ -61,9 +61,26 @@ pub(super) fn validate_tool_call(tool_call: &ToolCall, registry: &ToolRegistry) 
         return None; // No schema to validate against
     };
 
-    // Arguments must be an object (or null/missing which we treat as empty object)
-    let args = match tool_call.arguments {
+    // Arguments must be an object (or null/missing which we treat as empty object).
+    // Some providers send arguments as a JSON string that needs parsing.
+    let parsed_args;
+    let args = match &tool_call.arguments {
         Value::Object(ref map) => map,
+        Value::String(s) => {
+            // Arguments arrived as a raw JSON string — parse to object
+            match serde_json::from_str::<Value>(s) {
+                Ok(Value::Object(map)) => {
+                    parsed_args = map;
+                    &parsed_args
+                }
+                _ => {
+                    return Some(format!(
+                        "Tool '{}': arguments string is not a valid JSON object",
+                        tool_call.name,
+                    ));
+                }
+            }
+        }
         Value::Null => {
             // Check if there are required params — if so, fail
             if let Some(required) = schema.get("required").and_then(|v| v.as_array()) {

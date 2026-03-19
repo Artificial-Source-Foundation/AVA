@@ -20,7 +20,7 @@ import { type FlushWriter, LogBuffer, type LogBufferEntry } from './log-buffer'
 // Constants
 // ============================================================================
 
-const LOG_DIR_NAME = '.ava/log'
+const LOG_DIR_NAME = '.ava/logs'
 let LOG_FILE_NAME = 'app.log'
 const MAX_LOG_FILE_BYTES = 1_024 * 1_024 // 1 MB
 

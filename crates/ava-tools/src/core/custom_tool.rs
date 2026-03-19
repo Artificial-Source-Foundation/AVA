@@ -1,6 +1,8 @@
 use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
+use ava_permissions::classifier::classify_bash_command;
+use ava_permissions::tags::RiskLevel;
 use ava_types::{AvaError, Result, ToolResult};
 use serde::Deserialize;
 use serde_json::Value;
@@ -154,6 +156,39 @@ impl Tool for CustomTool {
                 (interpreter.clone(), vec!["-c".to_string(), expanded])
             }
         };
+
+        // SEC-1: Route custom tool commands through the bash command classifier.
+        // Custom tools execute arbitrary shell commands and must be subject to
+        // the same blocked-command checks as the built-in bash tool.
+        let effective_command = cmd_args.last().cloned().unwrap_or_default();
+        let classification = classify_bash_command(&effective_command);
+        if classification.blocked {
+            let reason = classification
+                .reason
+                .unwrap_or_else(|| "Blocked command".to_string());
+            warn!(
+                tool = %self.def.name,
+                command = %effective_command,
+                reason = %reason,
+                "Custom tool command blocked by permission classifier"
+            );
+            return Err(AvaError::PermissionDenied(format!(
+                "Custom tool '{}' blocked: {reason}",
+                self.def.name
+            )));
+        }
+        if classification.risk_level >= RiskLevel::Critical {
+            warn!(
+                tool = %self.def.name,
+                command = %effective_command,
+                risk = ?classification.risk_level,
+                "Custom tool command has critical risk level"
+            );
+            return Err(AvaError::PermissionDenied(format!(
+                "Custom tool '{}' denied: command has critical risk level",
+                self.def.name
+            )));
+        }
 
         let output = tokio::time::timeout(
             std::time::Duration::from_secs(timeout),
@@ -437,6 +472,66 @@ script = "print('hello')"
         // Second call should create nothing (files exist)
         let created2 = create_tool_templates(dir.path()).unwrap();
         assert!(created2.is_empty());
+    }
+
+    #[tokio::test]
+    async fn custom_tool_blocks_dangerous_commands() {
+        // A custom tool that tries to run `sudo rm -rf /` should be blocked
+        let def = CustomToolDef {
+            name: "evil_tool".to_string(),
+            description: "test".to_string(),
+            params: vec![],
+            execution: ExecutionDef::Shell {
+                command: "sudo rm -rf /".to_string(),
+                timeout_secs: Some(5),
+            },
+        };
+        let tool = CustomTool::new(def, "evil.toml".to_string());
+        let result = tool.execute(serde_json::json!({})).await;
+        assert!(result.is_err(), "dangerous command should be blocked");
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("blocked") || err.contains("denied"),
+            "error should mention blocked/denied: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn custom_tool_blocks_fork_bomb() {
+        let def = CustomToolDef {
+            name: "fork_bomb".to_string(),
+            description: "test".to_string(),
+            params: vec![],
+            execution: ExecutionDef::Shell {
+                command: ":(){ :|:& };:".to_string(),
+                timeout_secs: Some(5),
+            },
+        };
+        let tool = CustomTool::new(def, "bomb.toml".to_string());
+        let result = tool.execute(serde_json::json!({})).await;
+        assert!(result.is_err(), "fork bomb should be blocked");
+    }
+
+    #[tokio::test]
+    async fn custom_tool_blocks_injected_dangerous_args() {
+        // Even with shell-escaped args, the underlying command template could be dangerous
+        let def = CustomToolDef {
+            name: "rm_tool".to_string(),
+            description: "test".to_string(),
+            params: vec![ParamDef {
+                name: "target".to_string(),
+                param_type: "string".to_string(),
+                required: true,
+                description: String::new(),
+            }],
+            execution: ExecutionDef::Shell {
+                command: "sudo rm -rf {{target}}".to_string(),
+                timeout_secs: Some(5),
+            },
+        };
+        let tool = CustomTool::new(def, "rm.toml".to_string());
+        let result = tool.execute(serde_json::json!({"target": "/tmp"})).await;
+        assert!(result.is_err(), "sudo rm -rf should be blocked");
     }
 
     #[test]

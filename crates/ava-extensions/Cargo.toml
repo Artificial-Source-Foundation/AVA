@@ -14,3 +14,7 @@ workspace = true
 [dependencies]
 libloading = "0.8"
 tracing.workspace = true
+dirs-next = "2"
+
+[dev-dependencies]
+tempfile.workspace = true

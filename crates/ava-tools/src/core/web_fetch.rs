@@ -30,7 +30,65 @@ impl WebFetchTool {
     }
 }
 
+/// Check if an IPv4 address falls within a private/reserved range.
+fn is_private_ipv4(ip: &std::net::Ipv4Addr) -> bool {
+    // 127.0.0.0/8 — loopback
+    if ip.octets()[0] == 127 {
+        return true;
+    }
+    // 10.0.0.0/8 — private
+    if ip.octets()[0] == 10 {
+        return true;
+    }
+    // 172.16.0.0/12 — private (172.16.x.x – 172.31.x.x)
+    if ip.octets()[0] == 172 && (16..=31).contains(&ip.octets()[1]) {
+        return true;
+    }
+    // 192.168.0.0/16 — private
+    if ip.octets()[0] == 192 && ip.octets()[1] == 168 {
+        return true;
+    }
+    // 169.254.0.0/16 — link-local (includes cloud metadata 169.254.169.254)
+    if ip.octets()[0] == 169 && ip.octets()[1] == 254 {
+        return true;
+    }
+    // 0.0.0.0/8 — "this" network
+    if ip.octets()[0] == 0 {
+        return true;
+    }
+    false
+}
+
+/// Check if an IPv6 address falls within a private/reserved range.
+fn is_private_ipv6(ip: &std::net::Ipv6Addr) -> bool {
+    // ::1 — loopback
+    if ip.is_loopback() {
+        return true;
+    }
+    // fe80::/10 — link-local
+    let segments = ip.segments();
+    if segments[0] & 0xffc0 == 0xfe80 {
+        return true;
+    }
+    // fc00::/7 — unique local addresses
+    if segments[0] & 0xfe00 == 0xfc00 {
+        return true;
+    }
+    // :: (unspecified)
+    if ip.is_unspecified() {
+        return true;
+    }
+    // IPv4-mapped IPv6 (::ffff:x.x.x.x) — check the embedded IPv4
+    if let Some(ipv4) = ip.to_ipv4_mapped() {
+        return is_private_ipv4(&ipv4);
+    }
+    false
+}
+
 /// Check if a URL targets a local/private address (SSRF prevention).
+///
+/// This performs both hostname-based blocking (for known local names) and
+/// DNS resolution to catch hostnames that resolve to private IP ranges.
 pub(crate) fn is_blocked_url(url: &str) -> Result<(), AvaError> {
     let lower = url.to_lowercase();
 
@@ -50,7 +108,7 @@ pub(crate) fn is_blocked_url(url: &str) -> Result<(), AvaError> {
         .ok_or_else(|| AvaError::ValidationError("URL has no host".into()))?
         .to_lowercase();
 
-    // Block localhost and loopback addresses
+    // Block known localhost/loopback hostnames
     let blocked_hosts = [
         "localhost",
         "127.0.0.1",
@@ -62,15 +120,59 @@ pub(crate) fn is_blocked_url(url: &str) -> Result<(), AvaError> {
 
     if blocked_hosts.iter().any(|&h| host == h) {
         return Err(AvaError::ValidationError(format!(
-            "Blocked URL: requests to {host} are not allowed (SSRF prevention)"
+            "URL blocked: private/internal network address ({host})"
         )));
     }
 
-    // Block 127.x.x.x range
-    if host.starts_with("127.") {
-        return Err(AvaError::ValidationError(format!(
-            "Blocked URL: requests to {host} are not allowed (SSRF prevention)"
-        )));
+    // Block cloud metadata endpoint by hostname
+    if host == "169.254.169.254" {
+        return Err(AvaError::ValidationError(
+            "URL blocked: private/internal network address (cloud metadata endpoint)".into(),
+        ));
+    }
+
+    // Check if host is a literal IP address
+    let bare_host = host.trim_start_matches('[').trim_end_matches(']');
+    if let Ok(ipv4) = bare_host.parse::<std::net::Ipv4Addr>() {
+        if is_private_ipv4(&ipv4) {
+            return Err(AvaError::ValidationError(format!(
+                "URL blocked: private/internal network address ({ipv4})"
+            )));
+        }
+    }
+    if let Ok(ipv6) = bare_host.parse::<std::net::Ipv6Addr>() {
+        if is_private_ipv6(&ipv6) {
+            return Err(AvaError::ValidationError(format!(
+                "URL blocked: private/internal network address ({ipv6})"
+            )));
+        }
+    }
+
+    // DNS resolution: resolve hostname and check all resulting IPs against blocklists.
+    // This catches cases like `http://evil.com` resolving to 127.0.0.1.
+    let port = parsed
+        .port()
+        .unwrap_or(if parsed.scheme() == "https" { 443 } else { 80 });
+    let socket_addr = format!("{host}:{port}");
+    if let Ok(addrs) = std::net::ToSocketAddrs::to_socket_addrs(&socket_addr.as_str()) {
+        for addr in addrs {
+            match addr.ip() {
+                std::net::IpAddr::V4(ipv4) => {
+                    if is_private_ipv4(&ipv4) {
+                        return Err(AvaError::ValidationError(format!(
+                            "URL blocked: private/internal network address ({host} resolves to {ipv4})"
+                        )));
+                    }
+                }
+                std::net::IpAddr::V6(ipv6) => {
+                    if is_private_ipv6(&ipv6) {
+                        return Err(AvaError::ValidationError(format!(
+                            "URL blocked: private/internal network address ({host} resolves to {ipv6})"
+                        )));
+                    }
+                }
+            }
+        }
     }
 
     Ok(())
@@ -277,6 +379,35 @@ mod tests {
     }
 
     #[test]
+    fn blocks_private_ip_ranges() {
+        // 10.0.0.0/8
+        assert!(is_blocked_url("http://10.0.0.1/").is_err());
+        assert!(is_blocked_url("http://10.255.255.255/").is_err());
+        // 172.16.0.0/12
+        assert!(is_blocked_url("http://172.16.0.1/").is_err());
+        assert!(is_blocked_url("http://172.31.255.255/").is_err());
+        // 172.15.x.x should NOT be blocked
+        assert!(is_blocked_url("http://172.15.0.1/").is_ok());
+        // 172.32.x.x should NOT be blocked
+        assert!(is_blocked_url("http://172.32.0.1/").is_ok());
+        // 192.168.0.0/16
+        assert!(is_blocked_url("http://192.168.0.1/").is_err());
+        assert!(is_blocked_url("http://192.168.255.255/").is_err());
+        // 169.254.169.254 — cloud metadata
+        assert!(is_blocked_url("http://169.254.169.254/latest/meta-data/").is_err());
+        // 169.254.0.0/16 — link-local
+        assert!(is_blocked_url("http://169.254.1.1/").is_err());
+    }
+
+    #[test]
+    fn blocks_ipv6_private() {
+        // ::1 loopback
+        assert!(is_blocked_url("http://[::1]/").is_err());
+        // fe80:: link-local
+        assert!(is_blocked_url("http://[fe80::1]/").is_err());
+    }
+
+    #[test]
     fn blocks_file_urls() {
         assert!(is_blocked_url("file:///etc/passwd").is_err());
     }
@@ -291,6 +422,36 @@ mod tests {
     fn allows_valid_urls() {
         assert!(is_blocked_url("https://example.com").is_ok());
         assert!(is_blocked_url("http://example.com/path?q=1").is_ok());
+    }
+
+    #[test]
+    fn private_ipv4_detection() {
+        use std::net::Ipv4Addr;
+        assert!(is_private_ipv4(&Ipv4Addr::new(10, 0, 0, 1)));
+        assert!(is_private_ipv4(&Ipv4Addr::new(172, 16, 0, 1)));
+        assert!(is_private_ipv4(&Ipv4Addr::new(172, 31, 255, 255)));
+        assert!(!is_private_ipv4(&Ipv4Addr::new(172, 15, 0, 1)));
+        assert!(!is_private_ipv4(&Ipv4Addr::new(172, 32, 0, 1)));
+        assert!(is_private_ipv4(&Ipv4Addr::new(192, 168, 1, 1)));
+        assert!(is_private_ipv4(&Ipv4Addr::new(127, 0, 0, 1)));
+        assert!(is_private_ipv4(&Ipv4Addr::new(169, 254, 169, 254)));
+        assert!(is_private_ipv4(&Ipv4Addr::new(0, 0, 0, 0)));
+        assert!(!is_private_ipv4(&Ipv4Addr::new(8, 8, 8, 8)));
+        assert!(!is_private_ipv4(&Ipv4Addr::new(93, 184, 216, 34)));
+    }
+
+    #[test]
+    fn private_ipv6_detection() {
+        use std::net::Ipv6Addr;
+        assert!(is_private_ipv6(&Ipv6Addr::LOCALHOST));
+        assert!(is_private_ipv6(&Ipv6Addr::UNSPECIFIED));
+        // fe80:: link-local
+        assert!(is_private_ipv6(&"fe80::1".parse().unwrap()));
+        // fc00:: unique-local
+        assert!(is_private_ipv6(&"fc00::1".parse().unwrap()));
+        assert!(is_private_ipv6(&"fd00::1".parse().unwrap()));
+        // Public IPv6 should pass
+        assert!(!is_private_ipv6(&"2001:db8::1".parse().unwrap()));
     }
 
     #[test]

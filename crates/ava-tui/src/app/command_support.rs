@@ -148,7 +148,7 @@ impl App {
                 )),
             },
             Some(sub) if sub.starts_with("remove ") => {
-                let id_prefix = sub.strip_prefix("remove ").unwrap().trim();
+                let id_prefix = sub.trim_start_matches("remove ").trim();
                 if id_prefix.is_empty() {
                     return Some((
                         MessageKind::Error,

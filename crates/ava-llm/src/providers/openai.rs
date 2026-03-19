@@ -243,7 +243,10 @@ impl OpenAIProvider {
                     }
                     // For a single function call with no text, return it directly
                     if items.len() == 1 {
-                        return items.into_iter().next().unwrap();
+                        return items
+                            .into_iter()
+                            .next()
+                            .unwrap_or_else(|| Value::Array(vec![]));
                     }
                     // Multiple items: return as array (the API accepts mixed arrays)
                     return Value::Array(items);

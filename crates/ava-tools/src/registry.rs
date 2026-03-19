@@ -204,7 +204,11 @@ impl ToolRegistry {
 
         // Auto-retry read-only tools on transient failures
         if result.is_err() && retry_middleware::is_retryable_tool(&tool_call.name) {
-            let original_err = result.as_ref().unwrap_err().to_string();
+            let original_err = result
+                .as_ref()
+                .err()
+                .map(|e| e.to_string())
+                .unwrap_or_default();
             if retry_middleware::is_transient_error(&original_err) {
                 for attempt in 0..retry_middleware::MAX_RETRIES {
                     if let Some(backoff) = retry_middleware::backoff_for_attempt(attempt) {

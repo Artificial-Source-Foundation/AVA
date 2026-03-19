@@ -97,11 +97,9 @@ impl App {
                     Some(info)
                 }
                 Err(err) => {
-                    self.state
-                        .background
-                        .lock()
-                        .unwrap()
-                        .fail_task(task_id, err.clone());
+                    if let Ok(mut bg) = self.state.background.lock() {
+                        bg.fail_task(task_id, err.clone());
+                    }
                     self.set_status(
                         format!("Background task #{task_id} setup failed: {err}"),
                         StatusLevel::Error,

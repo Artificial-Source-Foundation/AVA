@@ -1,7 +1,7 @@
 [profile.default]
 fail-fast = false
 retries = 0
-test-threads = 8
+test-threads = 6
 slow-timeout = { period = "60s", terminate-after = 2 }
 
 [[profile.default.overrides]]

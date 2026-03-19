@@ -734,11 +734,9 @@ impl App {
                 );
             }
             Err(err) => {
-                self.state
-                    .background
-                    .lock()
-                    .unwrap()
-                    .fail_task(task_id, err.clone());
+                if let Ok(mut bg) = self.state.background.lock() {
+                    bg.fail_task(task_id, err.clone());
+                }
 
                 if let Some((branch_name, worktree_path)) = isolation_target {
                     Self::spawn_background_worktree_cleanup(

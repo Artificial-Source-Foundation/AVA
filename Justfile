@@ -3,15 +3,19 @@
 default:
     @just --list
 
-# Run all checks (format + lint + test)
+# Run all checks (format + lint + quick test)
 check:
     cargo fmt --all --check
     cargo clippy --workspace -- -D warnings
-    cargo nextest run --workspace
+    cargo nextest run -p ava-agent -p ava-praxis -p ava-tools -j 4
 
-# Run tests
+# Run tests (per-crate to avoid OOM)
 test *ARGS:
-    cargo nextest run --workspace {{ ARGS }}
+    cargo nextest run -j 4 {{ ARGS }}
+
+# Run ALL workspace tests (CI only — uses lots of RAM)
+test-all:
+    cargo nextest run --workspace -j 4
 
 # Run clippy
 lint:

@@ -27,7 +27,7 @@ fn styled_text_spans<'a>(text: &str, input: &InputState, theme: &Theme) -> Vec<S
         let mut earliest: Option<(usize, &str)> = None;
         for placeholder in input.pending_pastes.keys() {
             if let Some(pos) = remaining.find(placeholder.as_str()) {
-                if earliest.is_none() || pos < earliest.unwrap().0 {
+                if earliest.is_none() || earliest.is_some_and(|(ep, _)| pos < ep) {
                     earliest = Some((pos, placeholder.as_str()));
                 }
             }

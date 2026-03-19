@@ -198,7 +198,7 @@ async fn run_agent_inner(
                     plan: PlanPayload {
                         summary: req.plan.summary.clone(),
                         steps,
-                        estimated_turns: req.plan.estimated_turns,
+                        estimated_turns: req.plan.estimated_turns.unwrap_or(0) as usize,
                     },
                 },
             );

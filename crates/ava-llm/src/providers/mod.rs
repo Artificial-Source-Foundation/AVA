@@ -118,7 +118,9 @@ pub fn create_provider(
             let has_oauth = entry.is_oauth_configured() && !entry.is_oauth_expired();
 
             if !has_api_key && has_oauth {
-                // ChatGPT OAuth — use the Responses API
+                // OAuth token (ChatGPT Plus/Pro) — use the Responses API at api.openai.com
+                // The OAuth JWT token works with the standard OpenAI API endpoint.
+                // OpenCode, Pi, and Codex CLI all use api.openai.com/v1/responses with OAuth.
                 let oauth_token = entry
                     .oauth_token
                     .as_deref()
@@ -129,7 +131,7 @@ pub fn create_provider(
                 let base_url = entry
                     .base_url
                     .clone()
-                    .unwrap_or_else(|| "https://chatgpt.com/backend-api/codex".to_string());
+                    .unwrap_or_else(|| "https://api.openai.com".to_string());
                 Ok(Box::new(
                     OpenAIProvider::with_base_url(pool, oauth_token, model, base_url)
                         .with_responses_api(true),

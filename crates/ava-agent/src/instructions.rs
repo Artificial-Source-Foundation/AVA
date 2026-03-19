@@ -19,9 +19,9 @@ const PROJECT_ROOT_FILES: &[&str] = &[
 /// Order defines precedence within each scope (global/project).
 const SKILL_DIRS: &[&str] = &[".claude/skills", ".agents/skills", ".ava/skills"];
 
-/// Estimate token count (rough: ~4 chars per token).
+/// Accurate BPE token count using cl100k_base via tiktoken.
 fn estimate_tokens(text: &str) -> usize {
-    text.len() / 4
+    ava_context::count_tokens_default(text)
 }
 
 /// Trim instructions to fit within a token budget.
@@ -574,8 +574,12 @@ mod tests {
 
     #[test]
     fn test_estimate_tokens() {
+        // BPE tokenizes "abcd" as 1 token
         assert_eq!(estimate_tokens("abcd"), 1);
-        assert_eq!(estimate_tokens("abcdefgh"), 2);
+        // "abcdefgh" is 1-2 tokens depending on BPE merges
+        let count = estimate_tokens("abcdefgh");
+        assert!(count >= 1 && count <= 3, "got {count}");
+        // Empty string is 0 tokens
         assert_eq!(estimate_tokens(""), 0);
     }
 

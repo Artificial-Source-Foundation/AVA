@@ -13,3 +13,4 @@ pub mod mcp_bridge;
 pub mod monitor;
 pub mod permission_middleware;
 pub mod registry;
+pub mod retry_middleware;

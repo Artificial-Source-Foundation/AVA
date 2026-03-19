@@ -7,6 +7,7 @@ pub mod manager;
 pub mod pruner;
 pub mod strategies;
 pub mod token_tracker;
+pub mod tokenizer;
 pub mod types;
 
 pub use condenser::{
@@ -22,4 +23,5 @@ pub use strategies::{
     SummarizationStrategy, Summarizer, ToolTruncationStrategy,
 };
 pub use token_tracker::{estimate_tokens, estimate_tokens_for_message, TokenTracker};
+pub use tokenizer::{count_tokens, count_tokens_default, count_tokens_for_model, TokenEncoding};
 pub use types::{CondensationResult, CondenserConfig, ContextChunk};

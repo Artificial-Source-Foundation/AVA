@@ -635,6 +635,7 @@ async fn run_phase_worker(params: PhaseWorkerParams<'_>) -> ava_types::Result<Se
         post_edit_validation: None,
         auto_compact: true,
         stream_timeout_secs: ava_agent::agent_loop::LLM_STREAM_TIMEOUT_SECS,
+        prompt_caching: true,
     };
 
     let context = ContextManager::new(budget.max_tokens);

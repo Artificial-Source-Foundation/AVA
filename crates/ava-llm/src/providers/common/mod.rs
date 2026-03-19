@@ -406,4 +406,76 @@ mod tests {
         let (pro_in, _) = model_pricing_usd_per_million("gemini-2.5-pro");
         assert!(pro_in > flash_in);
     }
+
+    #[test]
+    fn tools_to_anthropic_format_cached_adds_cache_control_to_last_tool() {
+        let tools = vec![
+            Tool {
+                name: "glob".to_string(),
+                description: "Find files".to_string(),
+                parameters: json!({"type": "object", "properties": {"pattern": {"type": "string"}}}),
+            },
+            Tool {
+                name: "read".to_string(),
+                description: "Read a file".to_string(),
+                parameters: json!({"type": "object", "properties": {"path": {"type": "string"}}}),
+            },
+        ];
+
+        let formatted = tools_to_anthropic_format_cached(&tools, true);
+        assert_eq!(formatted.len(), 2);
+        // First tool should NOT have cache_control
+        assert!(formatted[0].get("cache_control").is_none());
+        // Last tool SHOULD have cache_control
+        assert_eq!(formatted[1]["cache_control"], json!({"type": "ephemeral"}));
+    }
+
+    #[test]
+    fn tools_to_anthropic_format_cached_false_no_cache_control() {
+        let tools = vec![Tool {
+            name: "glob".to_string(),
+            description: "Find files".to_string(),
+            parameters: json!({"type": "object", "properties": {"pattern": {"type": "string"}}}),
+        }];
+
+        let formatted = tools_to_anthropic_format_cached(&tools, false);
+        assert_eq!(formatted.len(), 1);
+        assert!(formatted[0].get("cache_control").is_none());
+    }
+
+    #[test]
+    fn parse_usage_with_cache_tokens() {
+        let payload = json!({
+            "usage": {
+                "input_tokens": 2000,
+                "output_tokens": 300,
+                "cache_read_input_tokens": 1500,
+                "cache_creation_input_tokens": 500
+            }
+        });
+        let usage = parse_usage(&payload).unwrap();
+        assert_eq!(usage.input_tokens, 2000);
+        assert_eq!(usage.output_tokens, 300);
+        assert_eq!(usage.cache_read_tokens, 1500);
+        assert_eq!(usage.cache_creation_tokens, 500);
+    }
+
+    #[test]
+    fn estimate_cost_with_cache_applies_discounts() {
+        let usage = ava_types::TokenUsage {
+            input_tokens: 2000,
+            output_tokens: 100,
+            cache_read_tokens: 1500,
+            cache_creation_tokens: 0,
+        };
+        // in_rate = $3/M, out_rate = $15/M (Sonnet-class)
+        let cost = estimate_cost_with_cache_usd(&usage, 3.0, 15.0);
+        // Non-cached: 500 tokens at $3/M = $0.0015
+        // Cache read: 1500 tokens at $0.3/M = $0.00045
+        // Output: 100 tokens at $15/M = $0.0015
+        let expected = 500.0 / 1_000_000.0 * 3.0
+            + 1500.0 / 1_000_000.0 * 3.0 * 0.1
+            + 100.0 / 1_000_000.0 * 15.0;
+        assert!((cost - expected).abs() < 1e-10);
+    }
 }

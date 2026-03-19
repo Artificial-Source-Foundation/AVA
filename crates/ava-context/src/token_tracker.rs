@@ -1,14 +1,31 @@
 use ava_types::Message;
 
-/// Word-based token estimation (~1.3 tokens per word).
-/// Within 15-20% of actual for English text and code.
+use crate::tokenizer;
+
+/// Accurate BPE token count using cl100k_base encoding.
+///
+/// Uses tiktoken for precise token counting. Returns at least 1 for
+/// non-empty text (matching the old API contract).
 pub fn estimate_tokens(text: &str) -> usize {
-    let word_count = text.split_whitespace().count();
-    if word_count == 0 {
-        // For empty or whitespace-only, fall back to byte-based for punctuation
-        return (text.len() / 4).max(1);
+    let count = tokenizer::count_tokens_default(text);
+    if text.is_empty() {
+        1
+    } else {
+        count.max(1)
     }
-    (word_count * 4 / 3).max(1)
+}
+
+/// Model-aware BPE token count.
+///
+/// Selects the appropriate encoding (cl100k_base or o200k_base) based on
+/// the model name and returns a precise token count.
+pub fn estimate_tokens_for_model(text: &str, model: &str) -> usize {
+    let count = tokenizer::count_tokens_for_model(text, model);
+    if text.is_empty() {
+        1
+    } else {
+        count.max(1)
+    }
 }
 
 pub fn estimate_tokens_for_message(message: &Message) -> usize {
@@ -79,22 +96,24 @@ mod tests {
     }
 
     #[test]
-    fn estimate_tokens_word_based_accuracy() {
-        // "The quick brown fox jumps over the lazy dog" = 9 words
-        // GPT-4 tokenizes this to ~9 tokens. Our estimate: 9 * 4/3 = 12
+    fn estimate_tokens_bpe_accuracy() {
+        // "The quick brown fox jumps over the lazy dog" = 9 tokens in cl100k_base
         let text = "The quick brown fox jumps over the lazy dog";
         let est = estimate_tokens(text);
-        assert!(est >= 9 && est <= 15, "got {est}, expected 9-15");
+        assert_eq!(est, 9, "BPE should count exactly 9 tokens, got {est}");
 
-        // Code snippet: typically more tokens per word due to punctuation
+        // Code snippet: BPE handles punctuation precisely
         let code = "fn main() { println!(\"hello\"); }";
         let est = estimate_tokens(code);
-        assert!(est >= 3, "code estimate should be >= 3, got {est}");
+        assert!(
+            est >= 8 && est <= 13,
+            "code estimate {est} out of expected range"
+        );
 
-        // Empty string
+        // Empty string — returns 1 (API contract: always >= 1)
         assert_eq!(estimate_tokens(""), 1);
 
-        // Whitespace-only
+        // Whitespace-only — returns 1
         assert_eq!(estimate_tokens("   "), 1);
     }
 

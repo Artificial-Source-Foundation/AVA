@@ -271,7 +271,7 @@ impl LLMProvider for CopilotProvider {
     }
 
     fn estimate_tokens(&self, input: &str) -> usize {
-        common::estimate_tokens(input)
+        common::estimate_tokens_for_model(input, &self.model)
     }
 
     /// Copilot is subscription-billed — all models are $0 per token.

@@ -887,6 +887,7 @@ impl AgentStack {
             post_edit_validation: None,
             auto_compact: self.auto_compact,
             stream_timeout_secs: LLM_STREAM_TIMEOUT_SECS,
+            prompt_caching: true,
         };
 
         let enriched_goal = self.enrich_goal_with_memories(goal).await;
@@ -1336,6 +1337,7 @@ impl TaskSpawner for AgentTaskSpawner {
             auto_compact: true,
             post_edit_validation: None,
             stream_timeout_secs: LLM_STREAM_TIMEOUT_SECS,
+            prompt_caching: true,
         };
         let mut agent = AgentLoop::new(
             Box::new(SharedProvider::new(provider)),

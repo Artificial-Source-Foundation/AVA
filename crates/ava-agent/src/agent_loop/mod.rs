@@ -114,6 +114,11 @@ pub struct AgentConfig {
     /// window, the stream is cancelled. Resets on each received chunk. 0 = no timeout.
     #[serde(default = "default_stream_timeout_secs")]
     pub stream_timeout_secs: u64,
+    /// When true (default), tell providers to cache static prompt prefixes (system
+    /// prompt + tool definitions). Reduces latency and cost on multi-turn conversations
+    /// for providers that support it (e.g., Anthropic `cache_control`).
+    #[serde(default = "default_prompt_caching")]
+    pub prompt_caching: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -159,6 +164,10 @@ fn default_post_edit_test_timeout_secs() -> u64 {
 
 fn default_stream_timeout_secs() -> u64 {
     LLM_STREAM_TIMEOUT_SECS
+}
+
+fn default_prompt_caching() -> bool {
+    true
 }
 
 /// Events emitted during streaming agent execution for UI consumption.
@@ -1132,6 +1141,7 @@ mod tests {
             post_edit_validation: None,
             auto_compact: true,
             stream_timeout_secs: LLM_STREAM_TIMEOUT_SECS,
+            prompt_caching: true,
         };
         let llm = crate::tests::mock_llm();
 
@@ -1163,6 +1173,7 @@ mod tests {
             post_edit_validation: None,
             auto_compact: true,
             stream_timeout_secs: LLM_STREAM_TIMEOUT_SECS,
+            prompt_caching: true,
         };
         let llm = crate::tests::mock_llm();
 
@@ -1197,6 +1208,7 @@ mod tests {
             post_edit_validation: None,
             auto_compact: true,
             stream_timeout_secs: LLM_STREAM_TIMEOUT_SECS,
+            prompt_caching: true,
         };
         let llm = crate::tests::mock_llm();
 
@@ -1248,6 +1260,7 @@ mod tests {
             post_edit_validation: None,
             auto_compact: true,
             stream_timeout_secs: LLM_STREAM_TIMEOUT_SECS,
+            prompt_caching: true,
         };
         let llm = crate::tests::mock_llm();
 
@@ -1299,6 +1312,7 @@ mod tests {
             post_edit_validation: None,
             auto_compact: true,
             stream_timeout_secs: LLM_STREAM_TIMEOUT_SECS,
+            prompt_caching: true,
         };
         let llm = crate::tests::mock_llm();
 
@@ -1325,6 +1339,7 @@ mod tests {
             post_edit_validation: None,
             auto_compact: true,
             stream_timeout_secs: LLM_STREAM_TIMEOUT_SECS,
+            prompt_caching: true,
         };
         let llm = crate::tests::mock_llm();
 

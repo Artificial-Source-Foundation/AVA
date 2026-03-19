@@ -507,7 +507,7 @@ impl LLMProvider for OpenAIProvider {
     }
 
     fn estimate_tokens(&self, input: &str) -> usize {
-        common::estimate_tokens(input)
+        common::estimate_tokens_for_model(input, &self.model)
     }
 
     fn estimate_cost(&self, input_tokens: usize, output_tokens: usize) -> f64 {

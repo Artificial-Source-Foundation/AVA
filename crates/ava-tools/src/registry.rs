@@ -5,7 +5,9 @@ use async_trait::async_trait;
 use ava_types::{AvaError, Result, Tool as ToolDefinition, ToolCall, ToolResult};
 use futures::Stream;
 use serde_json::Value;
-use tracing::instrument;
+use tracing::{debug, instrument};
+
+use crate::retry_middleware;
 
 /// Record of a single tool invocation, capturing timing and outcome.
 #[derive(Debug, Clone)]
@@ -198,7 +200,72 @@ impl ToolRegistry {
             }
         })?;
 
-        let mut result = tool.execute(tool_call.arguments.clone()).await?;
+        let mut result = tool.execute(tool_call.arguments.clone()).await;
+
+        // Auto-retry read-only tools on transient failures
+        if result.is_err() && retry_middleware::is_retryable_tool(&tool_call.name) {
+            let original_err = result.as_ref().unwrap_err().to_string();
+            if retry_middleware::is_transient_error(&original_err) {
+                for attempt in 0..retry_middleware::MAX_RETRIES {
+                    if let Some(backoff) = retry_middleware::backoff_for_attempt(attempt) {
+                        debug!(
+                            tool = %tool_call.name,
+                            attempt = attempt + 1,
+                            max = retry_middleware::MAX_RETRIES,
+                            backoff_ms = backoff.as_millis() as u64,
+                            error = %original_err,
+                            "retrying read-only tool after transient error"
+                        );
+                        tokio::time::sleep(backoff).await;
+                        result = tool.execute(tool_call.arguments.clone()).await;
+                        if result.is_ok() {
+                            debug!(
+                                tool = %tool_call.name,
+                                attempt = attempt + 1,
+                                "retry succeeded"
+                            );
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Also retry when the tool returns Ok but with is_error=true (soft errors)
+        if let Ok(ref tool_result) = result {
+            if tool_result.is_error
+                && retry_middleware::is_retryable_tool(&tool_call.name)
+                && retry_middleware::is_transient_error(&tool_result.content)
+            {
+                let original_content = tool_result.content.clone();
+                for attempt in 0..retry_middleware::MAX_RETRIES {
+                    if let Some(backoff) = retry_middleware::backoff_for_attempt(attempt) {
+                        debug!(
+                            tool = %tool_call.name,
+                            attempt = attempt + 1,
+                            max = retry_middleware::MAX_RETRIES,
+                            backoff_ms = backoff.as_millis() as u64,
+                            error = %original_content,
+                            "retrying read-only tool after transient soft error"
+                        );
+                        tokio::time::sleep(backoff).await;
+                        result = tool.execute(tool_call.arguments.clone()).await;
+                        if let Ok(ref r) = result {
+                            if !r.is_error {
+                                debug!(
+                                    tool = %tool_call.name,
+                                    attempt = attempt + 1,
+                                    "retry succeeded"
+                                );
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        let mut result = result?;
 
         for middleware in &self.middleware {
             result = middleware.after(&tool_call, &result).await?;

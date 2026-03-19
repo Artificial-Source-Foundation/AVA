@@ -85,8 +85,14 @@ impl AnthropicProvider {
         m.contains("k2p5") || m.contains("kimi-k2.5") || m.contains("kimi-k2p5")
     }
 
+    /// Whether prompt caching is active for this provider instance.
+    fn use_prompt_caching(&self) -> bool {
+        !self.third_party
+    }
+
     fn build_request_body(&self, messages: &[Message], stream: bool) -> Value {
         let (system, mapped_messages) = common::map_messages_anthropic(messages);
+        let cache = self.use_prompt_caching();
         let mut body = json!({
             "model": self.model,
             "max_tokens": self.max_tokens,
@@ -95,11 +101,14 @@ impl AnthropicProvider {
         });
 
         if let Some(system_message) = system {
-            body["system"] = json!([{
+            let mut block = json!({
                 "type": "text",
                 "text": system_message,
-                "cache_control": {"type": "ephemeral"}
-            }]);
+            });
+            if cache {
+                block["cache_control"] = json!({"type": "ephemeral"});
+            }
+            body["system"] = json!([block]);
         }
 
         body
@@ -113,7 +122,8 @@ impl AnthropicProvider {
     ) -> Value {
         let mut body = self.build_request_body(messages, stream);
         if !tools.is_empty() {
-            body["tools"] = json!(common::tools_to_anthropic_format(tools));
+            let cache = self.use_prompt_caching();
+            body["tools"] = json!(common::tools_to_anthropic_format_cached(tools, cache));
         }
         body
     }
@@ -145,7 +155,8 @@ impl AnthropicProvider {
         let resolved = self.resolve_thinking_config(thinking);
 
         if !tools.is_empty() {
-            body["tools"] = json!(common::tools_to_anthropic_format(tools));
+            let cache = self.use_prompt_caching();
+            body["tools"] = json!(common::tools_to_anthropic_format_cached(tools, cache));
         }
 
         if resolved.applied.level != ThinkingLevel::Off && self.is_kimi_thinking_model() {
@@ -755,6 +766,77 @@ mod tests {
         assert_eq!(
             provider.messages_url(),
             "https://custom-proxy.example.com/v1/messages"
+        );
+    }
+
+    #[test]
+    fn native_provider_adds_cache_control_to_system_and_tools() {
+        let provider = AnthropicProvider::new(pool(), "key", "claude-sonnet-4");
+        let tools = vec![ava_types::Tool {
+            name: "read".to_string(),
+            description: "Read a file".to_string(),
+            parameters: json!({"type": "object", "properties": {"path": {"type": "string"}}}),
+        }];
+        let body = provider.build_request_body_with_tools(
+            &[
+                Message::new(ava_types::Role::System, "You are a helpful assistant."),
+                Message::new(ava_types::Role::User, "hello"),
+            ],
+            &tools,
+            false,
+        );
+
+        // System message should have cache_control
+        let system = body["system"].as_array().expect("system should be array");
+        assert_eq!(
+            system[0]["cache_control"],
+            json!({"type": "ephemeral"}),
+            "native provider should add cache_control to system message"
+        );
+
+        // Last tool should have cache_control
+        let tool_defs = body["tools"].as_array().expect("tools should be array");
+        assert_eq!(
+            tool_defs[0]["cache_control"],
+            json!({"type": "ephemeral"}),
+            "native provider should add cache_control to last tool"
+        );
+    }
+
+    #[test]
+    fn third_party_provider_omits_cache_control() {
+        let provider = AnthropicProvider::with_base_url(
+            pool(),
+            "key",
+            "model",
+            "https://api.kimi.com/coding/v1",
+        );
+        let tools = vec![ava_types::Tool {
+            name: "read".to_string(),
+            description: "Read a file".to_string(),
+            parameters: json!({"type": "object", "properties": {"path": {"type": "string"}}}),
+        }];
+        let body = provider.build_request_body_with_tools(
+            &[
+                Message::new(ava_types::Role::System, "You are a helpful assistant."),
+                Message::new(ava_types::Role::User, "hello"),
+            ],
+            &tools,
+            false,
+        );
+
+        // System message should NOT have cache_control
+        let system = body["system"].as_array().expect("system should be array");
+        assert!(
+            system[0].get("cache_control").is_none(),
+            "third-party provider should not add cache_control to system message"
+        );
+
+        // Tools should NOT have cache_control
+        let tool_defs = body["tools"].as_array().expect("tools should be array");
+        assert!(
+            tool_defs[0].get("cache_control").is_none(),
+            "third-party provider should not add cache_control to tools"
         );
     }
 }

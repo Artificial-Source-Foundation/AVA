@@ -134,8 +134,20 @@ pub fn estimate_cost_with_cache_usd(
         + usage.output_tokens as f64 / m * out_rate
 }
 
+/// Estimate tokens using accurate BPE tokenization (cl100k_base).
+///
+/// Delegates to `ava_context::count_tokens_default` for precise counting.
+/// Always returns at least 1.
 pub fn estimate_tokens(input: &str) -> usize {
-    (input.chars().count() / 4).max(1)
+    ava_context::count_tokens_default(input).max(1)
+}
+
+/// Model-aware token estimation using the appropriate BPE encoding.
+///
+/// Selects cl100k_base or o200k_base based on the model name.
+/// Always returns at least 1.
+pub fn estimate_tokens_for_model(input: &str, model: &str) -> usize {
+    ava_context::count_tokens_for_model(input, model).max(1)
 }
 
 pub fn parse_sse_lines(text: &str) -> Vec<String> {
@@ -534,14 +546,26 @@ pub fn tools_to_openai_format(tools: &[Tool]) -> Vec<Value> {
 
 /// Convert AVA tool definitions to the Anthropic tool use format.
 pub fn tools_to_anthropic_format(tools: &[Tool]) -> Vec<Value> {
+    tools_to_anthropic_format_cached(tools, false)
+}
+
+/// Convert tools to Anthropic format, optionally adding `cache_control` to the
+/// last tool definition so that the entire tool-definition prefix is cached.
+pub fn tools_to_anthropic_format_cached(tools: &[Tool], cache: bool) -> Vec<Value> {
+    let len = tools.len();
     tools
         .iter()
-        .map(|tool| {
-            json!({
+        .enumerate()
+        .map(|(i, tool)| {
+            let mut t = json!({
                 "name": tool.name,
                 "description": tool.description,
                 "input_schema": tool.parameters,
-            })
+            });
+            if cache && i == len - 1 {
+                t["cache_control"] = json!({"type": "ephemeral"});
+            }
+            t
         })
         .collect()
 }
@@ -1127,7 +1151,8 @@ mod tests {
 
     #[test]
     fn estimate_tokens_normal() {
-        assert_eq!(estimate_tokens("hello world"), 2); // 11 chars / 4 = 2
+        // "hello world" is 2 tokens in cl100k_base BPE
+        assert_eq!(estimate_tokens("hello world"), 2);
     }
 
     #[test]
@@ -1137,13 +1162,25 @@ mod tests {
 
     #[test]
     fn estimate_tokens_short() {
-        assert_eq!(estimate_tokens("hi"), 1); // max(0,1) = 1
+        // "hi" is 1 token in cl100k_base
+        assert_eq!(estimate_tokens("hi"), 1);
     }
 
     #[test]
     fn estimate_tokens_unicode() {
-        // Each emoji is 1 char; 4 emojis / 4 = 1
-        assert_eq!(estimate_tokens("🔥🔥🔥🔥"), 1);
+        // BPE encodes emojis as multiple tokens (byte-level)
+        let count = estimate_tokens("🔥🔥🔥🔥");
+        assert!(count >= 1, "emoji tokens should be >= 1, got {count}");
+    }
+
+    #[test]
+    fn estimate_tokens_model_aware() {
+        let text = "The quick brown fox jumps over the lazy dog";
+        let cl100k = estimate_tokens(text);
+        let o200k = estimate_tokens_for_model(text, "gpt-4o");
+        // Both should be reasonable; they may differ slightly
+        assert!(cl100k >= 8 && cl100k <= 12, "cl100k got {cl100k}");
+        assert!(o200k >= 8 && o200k <= 12, "o200k got {o200k}");
     }
 
     // ── parse_sse_lines ──

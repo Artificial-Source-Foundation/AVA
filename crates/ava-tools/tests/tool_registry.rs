@@ -132,6 +132,160 @@ async fn missing_tool_returns_tool_not_found_error() {
     }
 }
 
+/// A tool named "read" that fails with a transient error a configurable number
+/// of times before succeeding.
+struct FlakeyReadTool {
+    fail_count: Arc<Mutex<usize>>,
+    max_failures: usize,
+    error_message: String,
+}
+
+impl FlakeyReadTool {
+    fn new(max_failures: usize, error_message: &str) -> Self {
+        Self {
+            fail_count: Arc::new(Mutex::new(0)),
+            max_failures,
+            error_message: error_message.to_string(),
+        }
+    }
+}
+
+#[async_trait]
+impl Tool for FlakeyReadTool {
+    fn name(&self) -> &str {
+        "read"
+    }
+
+    fn description(&self) -> &str {
+        "Flakey read tool for testing retry"
+    }
+
+    fn parameters(&self) -> Value {
+        json!({"type": "object", "properties": {"path": {"type": "string"}}})
+    }
+
+    async fn execute(&self, _args: Value) -> ava_types::Result<ToolResult> {
+        let mut count = self.fail_count.lock().unwrap();
+        *count += 1;
+        if *count <= self.max_failures {
+            Err(AvaError::ToolError(self.error_message.clone()))
+        } else {
+            Ok(ToolResult {
+                call_id: "call_1".to_string(),
+                content: "file contents".to_string(),
+                is_error: false,
+            })
+        }
+    }
+}
+
+#[tokio::test]
+async fn retry_succeeds_on_transient_error() {
+    let tool = FlakeyReadTool::new(1, "permission denied");
+    let fail_count = tool.fail_count.clone();
+    let mut registry = ToolRegistry::new();
+    registry.register(tool);
+
+    let call = ToolCall {
+        id: "call_1".to_string(),
+        name: "read".to_string(),
+        arguments: json!({"path": "/tmp/test"}),
+    };
+
+    let result = registry
+        .execute(call)
+        .await
+        .expect("should succeed after retry");
+    assert_eq!(result.content, "file contents");
+    assert!(!result.is_error);
+    // Should have attempted twice: 1 failure + 1 success
+    assert_eq!(*fail_count.lock().unwrap(), 2);
+}
+
+#[tokio::test]
+async fn retry_gives_up_after_max_retries() {
+    let tool = FlakeyReadTool::new(5, "connection refused");
+    let fail_count = tool.fail_count.clone();
+    let mut registry = ToolRegistry::new();
+    registry.register(tool);
+
+    let call = ToolCall {
+        id: "call_1".to_string(),
+        name: "read".to_string(),
+        arguments: json!({"path": "/tmp/test"}),
+    };
+
+    let err = registry
+        .execute(call)
+        .await
+        .expect_err("should fail after max retries");
+    assert!(err.to_string().contains("connection refused"));
+    // Should have attempted 3 times: 1 initial + 2 retries
+    assert_eq!(*fail_count.lock().unwrap(), 3);
+}
+
+#[tokio::test]
+async fn no_retry_on_permanent_error() {
+    let tool = FlakeyReadTool::new(5, "file not found: /tmp/missing.txt");
+    let fail_count = tool.fail_count.clone();
+    let mut registry = ToolRegistry::new();
+    registry.register(tool);
+
+    let call = ToolCall {
+        id: "call_1".to_string(),
+        name: "read".to_string(),
+        arguments: json!({"path": "/tmp/missing.txt"}),
+    };
+
+    let err = registry
+        .execute(call)
+        .await
+        .expect_err("should fail immediately");
+    assert!(err.to_string().contains("file not found"));
+    // Should have attempted only once — no retries for permanent errors
+    assert_eq!(*fail_count.lock().unwrap(), 1);
+}
+
+/// A tool named "write" that always fails. Should never be retried.
+struct FlakeyWriteTool;
+
+#[async_trait]
+impl Tool for FlakeyWriteTool {
+    fn name(&self) -> &str {
+        "write"
+    }
+
+    fn description(&self) -> &str {
+        "Flakey write tool for testing no-retry"
+    }
+
+    fn parameters(&self) -> Value {
+        json!({"type": "object"})
+    }
+
+    async fn execute(&self, _args: Value) -> ava_types::Result<ToolResult> {
+        Err(AvaError::ToolError("permission denied".to_string()))
+    }
+}
+
+#[tokio::test]
+async fn no_retry_on_non_read_only_tools() {
+    let mut registry = ToolRegistry::new();
+    registry.register(FlakeyWriteTool);
+
+    let call = ToolCall {
+        id: "call_1".to_string(),
+        name: "write".to_string(),
+        arguments: json!({}),
+    };
+
+    let err = registry
+        .execute(call)
+        .await
+        .expect_err("write should fail without retry");
+    assert!(err.to_string().contains("permission denied"));
+}
+
 #[test]
 fn list_tools_returns_registered_definitions() {
     let mut registry = ToolRegistry::new();

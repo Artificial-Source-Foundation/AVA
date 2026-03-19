@@ -381,6 +381,20 @@ pub fn parse_anthropic_stream_chunk(payload: &Value) -> Option<StreamChunk> {
 
 /// Parse a rich StreamChunk from an OpenAI SSE event payload.
 pub fn parse_openai_stream_chunk(payload: &Value) -> Option<StreamChunk> {
+    // Debug: log the raw SSE event type/structure for reasoning investigation
+    if let Some(obj) = payload.as_object() {
+        let keys: Vec<&String> = obj.keys().collect();
+        // Log if we see anything reasoning-related at the top level
+        if keys
+            .iter()
+            .any(|k| k.contains("reason") || k.contains("think") || k.contains("summary"))
+        {
+            eprintln!(
+                "[AVA DEBUG] ChatCompletions SSE has reasoning-related top-level keys: {:?}",
+                keys
+            );
+        }
+    }
     let choice = payload
         .get("choices")
         .and_then(Value::as_array)
@@ -405,8 +419,26 @@ pub fn parse_openai_stream_chunk(payload: &Value) -> Option<StreamChunk> {
         .and_then(Value::as_str)
     {
         if !reasoning.is_empty() {
+            eprintln!(
+                "[AVA DEBUG] ChatCompletions reasoning chunk: {} chars",
+                reasoning.len()
+            );
             chunk.thinking = Some(reasoning.to_string());
             has_data = true;
+        }
+    } else {
+        // Debug: log all delta keys so we can see what the API actually returns
+        if let Some(obj) = delta.as_object() {
+            let keys: Vec<&String> = obj.keys().collect();
+            if keys
+                .iter()
+                .any(|k| k.contains("reason") || k.contains("think") || k.contains("summary"))
+            {
+                eprintln!(
+                    "[AVA DEBUG] ChatCompletions delta has reasoning-related keys: {:?}",
+                    keys
+                );
+            }
         }
     }
 
@@ -678,6 +710,8 @@ pub fn tools_to_responses_api_format(tools: &[Tool]) -> Vec<Value> {
 /// instead of the Chat Completions `choices[].delta` format.
 pub fn parse_responses_api_stream_chunk(payload: &Value) -> Option<StreamChunk> {
     let event_type = payload.get("type").and_then(Value::as_str)?;
+    // Debug: log every SSE event type we receive from the Responses API
+    eprintln!("[AVA DEBUG] Responses API SSE event type: {}", event_type);
 
     match event_type {
         // Text content deltas
@@ -696,6 +730,10 @@ pub fn parse_responses_api_stream_chunk(payload: &Value) -> Option<StreamChunk> 
         | "response.reasoning_summary.delta"
         | "response.reasoning_summary_text.delta"
         | "response.reasoning_summary_part.delta" => {
+            eprintln!(
+                "[AVA DEBUG] Responses API reasoning event: type={}",
+                event_type
+            );
             // The delta text may be at top-level "delta" or nested under "part.text"
             let delta = payload
                 .get("delta")
@@ -710,6 +748,10 @@ pub fn parse_responses_api_stream_chunk(payload: &Value) -> Option<StreamChunk> 
             if delta.is_empty() {
                 return None;
             }
+            eprintln!(
+                "[AVA DEBUG] Responses API reasoning delta: {} chars",
+                delta.len()
+            );
             Some(StreamChunk {
                 thinking: Some(delta.to_string()),
                 ..Default::default()
@@ -884,7 +926,13 @@ pub fn parse_responses_api_stream_chunk(payload: &Value) -> Option<StreamChunk> 
             Some(StreamChunk::text(format!("[Refusal] {delta}")))
         }
 
-        _ => None,
+        _ => {
+            eprintln!(
+                "[AVA DEBUG] Responses API UNHANDLED event type: {}",
+                event_type
+            );
+            None
+        }
     }
 }
 

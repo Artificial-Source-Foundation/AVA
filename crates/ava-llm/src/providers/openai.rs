@@ -344,6 +344,7 @@ impl OpenAIProvider {
         stream: bool,
         thinking: ThinkingLevel,
     ) -> Value {
+        eprintln!("[AVA DEBUG] build_request_body_with_thinking called: model={}, thinking={:?}, thinking_format={:?}", self.model, thinking, self.thinking_format);
         let mut body = self.build_request_body(messages, stream);
 
         if !tools.is_empty() {
@@ -363,6 +364,7 @@ impl OpenAIProvider {
                         ThinkingLevel::High => "high",
                         ThinkingLevel::Max => self.max_reasoning_effort(),
                     };
+                    eprintln!("[AVA DEBUG] Setting ChatCompletions reasoning: effort={}, reasoning_summary=auto", effort);
                     body["reasoning_effort"] = json!(effort);
                     body["reasoning_summary"] = json!("auto");
                     body["include"] = json!(["reasoning.encrypted_content"]);
@@ -659,7 +661,9 @@ impl LLMProvider for OpenAIProvider {
         tools: &[ava_types::Tool],
         thinking: ThinkingLevel,
     ) -> Result<Pin<Box<dyn Stream<Item = StreamChunk> + Send>>> {
+        eprintln!("[AVA DEBUG] generate_stream_with_thinking called: model={}, thinking={:?}, supports_reasoning={}, use_responses_api={}", self.model, thinking, self.supports_reasoning(), self.use_responses_api);
         if !self.supports_reasoning() || thinking == ThinkingLevel::Off {
+            eprintln!("[AVA DEBUG] Falling back to generate_stream_with_tools (no reasoning)");
             return self.generate_stream_with_tools(messages, tools).await;
         }
 
@@ -672,6 +676,26 @@ impl LLMProvider for OpenAIProvider {
         if !self.use_responses_api {
             body["stream_options"] = json!({"include_usage": true});
         }
+        // Debug: print the reasoning-related fields from the request body
+        eprintln!("[AVA DEBUG] Request URL: {}", self.completions_url());
+        if let Some(reasoning) = body.get("reasoning") {
+            eprintln!("[AVA DEBUG] Request body has 'reasoning': {}", reasoning);
+        }
+        if let Some(effort) = body.get("reasoning_effort") {
+            eprintln!(
+                "[AVA DEBUG] Request body has 'reasoning_effort': {}",
+                effort
+            );
+        }
+        if let Some(summary) = body.get("reasoning_summary") {
+            eprintln!(
+                "[AVA DEBUG] Request body has 'reasoning_summary': {}",
+                summary
+            );
+        }
+        if let Some(include) = body.get("include") {
+            eprintln!("[AVA DEBUG] Request body has 'include': {}", include);
+        }
         let client = self.client().await?;
         let request = client
             .post(self.completions_url())
@@ -681,7 +705,9 @@ impl LLMProvider for OpenAIProvider {
         let response = self.send_request(request).await?;
         let response = common::validate_status(response, &provider_label).await?;
         let use_responses = self.use_responses_api;
+        let model_name = self.model.clone();
         let mut sse_parser = common::SseParser::new();
+        let mut first_sse_logged = false;
         let stream = response.bytes_stream().flat_map(move |chunk| {
             let chunks = chunk
                 .ok()
@@ -690,7 +716,19 @@ impl LLMProvider for OpenAIProvider {
                     sse_parser
                         .feed(&text)
                         .into_iter()
-                        .filter_map(|line| serde_json::from_str::<Value>(&line).ok())
+                        .filter_map(|line| {
+                            // Log the first few raw SSE lines to see what the API sends
+                            if !first_sse_logged {
+                                eprintln!(
+                                    "[AVA DEBUG] First raw SSE line from {} (responses_api={}): {}",
+                                    model_name,
+                                    use_responses,
+                                    &line[..line.len().min(500)]
+                                );
+                                first_sse_logged = true;
+                            }
+                            serde_json::from_str::<Value>(&line).ok()
+                        })
                         .filter_map(|payload| {
                             if use_responses {
                                 common::parse_responses_api_stream_chunk(&payload)

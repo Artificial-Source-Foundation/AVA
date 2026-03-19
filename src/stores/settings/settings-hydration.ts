@@ -87,7 +87,7 @@ export function mergeWithDefaults(parsed: Partial<AppSettings>): AppSettings {
     []
 
   // Migrate thinkingEnabled → reasoningEffort (old boolean → new effort level)
-  const gen = { ...DEFAULT_GENERATION, ...(parsed.generation ?? {}) }
+  const gen = { ...DEFAULT_GENERATION, ...parsed.generation }
   if (!('reasoningEffort' in (parsed.generation ?? {}))) {
     gen.reasoningEffort = gen.thinkingEnabled ? 'medium' : 'off'
   }
@@ -99,13 +99,13 @@ export function mergeWithDefaults(parsed: Partial<AppSettings>): AppSettings {
     customSkills,
     customRules: parsed.customRules ?? [],
     hiddenBuiltInSkills: parsed.hiddenBuiltInSkills ?? [],
-    ui: { ...DEFAULT_UI, ...(parsed.ui ?? {}) },
-    appearance: { ...DEFAULT_APPEARANCE, ...(parsed.appearance ?? {}) },
+    ui: { ...DEFAULT_UI, ...parsed.ui },
+    appearance: { ...DEFAULT_APPEARANCE, ...parsed.appearance },
     generation: gen,
-    agentLimits: { ...DEFAULT_AGENT_LIMITS, ...(parsed.agentLimits ?? {}) },
-    behavior: { ...DEFAULT_BEHAVIOR, ...(parsed.behavior ?? {}) },
-    notifications: { ...DEFAULT_NOTIFICATIONS, ...(parsed.notifications ?? {}) },
-    git: { ...DEFAULT_GIT, ...(parsed.git ?? {}) },
-    team: { ...DEFAULT_TEAM, ...(parsed.team ?? {}) },
+    agentLimits: { ...DEFAULT_AGENT_LIMITS, ...parsed.agentLimits },
+    behavior: { ...DEFAULT_BEHAVIOR, ...parsed.behavior },
+    notifications: { ...DEFAULT_NOTIFICATIONS, ...parsed.notifications },
+    git: { ...DEFAULT_GIT, ...parsed.git },
+    team: { ...DEFAULT_TEAM, ...parsed.team },
   }
 }

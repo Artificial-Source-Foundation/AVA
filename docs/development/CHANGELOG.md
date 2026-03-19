@@ -34,14 +34,19 @@
 - Mid-stream messaging UI (queue badges, send during processing)
 - Question modal for agent questions
 
-#### Praxis Multi-Agent
+#### Praxis Multi-Agent (Phases 1-6 Complete)
+- **Phase 1: Director brain + prompts + scouts** — LLM-powered Director with 3 intelligence levels, scout system for pre-planning codebase intelligence, structured prompts module
+- **Phase 2: Board of Directors** — multi-model consensus (3 SOTA models with distinct analytical personalities), vote synthesis for complex architectural decisions
+- **Phase 3: Plan system** — `plan` tool with `PlanBridge` for agent-to-TUI communication, inline plan editing, step management (add/update/reorder), plan persistence to `.ava/plans/`
+- **Phase 4: Events + Tauri bridge** — structured Praxis event system, Director/Lead/Worker/Scout lifecycle events, Tauri event forwarding
+- **Phase 5: Scout implementation** — lightweight agents (Haiku/Flash/Mercury) for codebase reconnaissance, scout reports fed to Director for planning
+- **Phase 6: Integration + polish** — 91 tests (74 unit + 11 integration + 6 doc-tests), plan tool registered in tool registry
 - **Praxis UI design finalized** — Director Chat, Team Panel, Lead Chat screens designed in ava-ui.pen
 - **Praxis design decisions documented** — naming convention (professional leads, fun worker names), tiered error handling, worktree-per-lead strategy, Solo/Team mode switching, budget delegation chain, session persistence
 - TeamPanel wired to team store with stop buttons + metrics
 - Worker naming pool (Pedro, Sofia, Luna, Kai, Mira, Rio, Ash, Nico, Ivy, Juno, Zara, Leo)
 - Domain colors as constants, Team tab in RightPanel
 - Agent-team-bridge event forwarding
-- **Note**: Tauri bridge for Praxis events still needed (Sprint E)
 
 ### Changed
 - Deduplicated 4 inline Toggles → shared a11y component

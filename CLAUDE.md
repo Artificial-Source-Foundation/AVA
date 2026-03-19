@@ -44,7 +44,7 @@ AVA uses a **Rust-first architecture**. All agent, CLI, and backend code is Rust
 
 ### Codebase Stats
 
-- **21 Rust crates**, ~40K LOC, 1,513 tests
+- **21 Rust crates**, ~40K LOC, 1,641 tests
 - **8 LLM providers**: Anthropic, OpenAI-compatible, Gemini, Ollama, OpenRouter, Copilot, Inception, Mock
 - **6 default tools**: `read`, `write`, `edit`, `bash`, `glob`, `grep`
 - **8 extended tools**: `apply_patch`, `web_fetch`, `web_search`, `multiedit`, `ast_ops`, `lsp_ops`, `code_search`, `git_read`
@@ -101,6 +101,7 @@ Keep the default set capped at 6. New capabilities should ship as Extended, MCP,
 |------|------:|-------|
 | Default | 6 | read, write, edit, bash, glob, grep |
 | Extended | 8 | apply_patch, web_fetch, web_search, multiedit, ast_ops, lsp_ops, code_search, git_read |
+| Agent | 1 | plan (Praxis plan tool with PlanBridge for agent-to-TUI communication) |
 
 Additional helpers (todo_read/write, question, task, codebase_search, memory/session tools) are always available when initialized. Dynamic MCP tools and TOML custom tools load at runtime from `~/.ava/tools/`, `.ava/tools/`, `~/.ava/mcp.json`, `.ava/mcp.json`.
 
@@ -136,7 +137,7 @@ Trust a project: `ava --trust`. Global config (`~/.ava/`) always loads.
 
 ## Praxis (Multi-Agent Orchestration) — v2
 
-Praxis is AVA's multi-agent system in `crates/ava-praxis/`. Uses a **Director → Scouts → Leads → Workers** hierarchy with LLM-powered planning. See [docs/codebase/ava-praxis.md](docs/codebase/ava-praxis.md) for full details.
+Praxis is AVA's multi-agent system in `crates/ava-praxis/`. Uses a **Director → Scouts → Leads → Workers** hierarchy with LLM-powered planning. 91 tests (74 unit + 11 integration + 6 doc-tests). Modules: `plan`, `prompts`, `scout`, `board`, `events`, `lib` (plus `acp`, `artifact`, `conflict`, `decomposition`, `mailbox`, `review`, `spec`, `synthesis`, `workflow`). See [docs/codebase/ava-praxis.md](docs/codebase/ava-praxis.md) for full details.
 
 ### Director Intelligence Levels
 

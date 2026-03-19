@@ -63,6 +63,10 @@ pub struct CliArgs {
     #[arg(long)]
     pub trust: bool,
 
+    /// Thinking/reasoning effort level: off, low, medium, high, xhigh
+    #[arg(long, default_value = "off")]
+    pub thinking: String,
+
     /// Use multi-agent Director mode (Praxis) instead of single AgentStack
     #[arg(long, alias = "praxis")]
     pub multi_agent: bool,

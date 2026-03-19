@@ -31,6 +31,18 @@ pub(super) async fn run_single_agent(cli: CliArgs, goal: &str) -> Result<()> {
     .await?;
     spawn_auto_approve_requests(approval_rx);
 
+    // Apply thinking level from CLI flag
+    let thinking_level = match cli.thinking.as_str() {
+        "low" => ava_types::ThinkingLevel::Low,
+        "medium" | "med" => ava_types::ThinkingLevel::Medium,
+        "high" => ava_types::ThinkingLevel::High,
+        "max" | "xhigh" => ava_types::ThinkingLevel::Max,
+        _ => ava_types::ThinkingLevel::Off,
+    };
+    if thinking_level != ava_types::ThinkingLevel::Off {
+        stack.set_thinking_level(thinking_level).await;
+    }
+
     let (message_queue, message_tx) = MessageQueue::new();
     populate_queue_from_cli(&cli, &message_tx);
 

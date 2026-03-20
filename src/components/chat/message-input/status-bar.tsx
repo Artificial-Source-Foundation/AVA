@@ -68,15 +68,18 @@ export const StatusBar: Component<StatusBarProps> = (props) => {
   }
 
   const tokenDisplay = (): string => {
-    const real = sessionTokenStats().total
-    if (real > 0) return fmt(real)
-    return fmt(contextUsage().used)
+    // Only show tokens after the first real API usage event (contextUsage.used is
+    // updated by token_usage events via bgt.setUsed). This avoids showing the
+    // cumulative historical tokensUsed from a restored session as if it were current
+    // context window usage on a fresh (pre-send) chat.
+    const budgetUsed = contextUsage().used
+    if (budgetUsed > 0) return fmt(budgetUsed)
+    return '0'
   }
 
   const percentage = (): number => {
-    const real = sessionTokenStats().total
-    const limit = contextUsage().total
-    if (real > 0 && limit > 0) return Math.min(100, (real / limit) * 100)
+    // Use only the live budget usage (updated by token_usage events) to avoid
+    // showing inflated percentages from historical persisted token counts.
     return contextUsage().percentage
   }
 
@@ -89,9 +92,8 @@ export const StatusBar: Component<StatusBarProps> = (props) => {
 
   /** Human-readable tooltip for context window usage breakdown */
   const contextTooltip = (): string => {
-    const real = sessionTokenStats().total
+    const used = contextUsage().used
     const limit = contextUsage().total
-    const used = real > 0 ? real : contextUsage().used
     const pct = percentage().toFixed(0)
     const fmtK = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}K` : String(n))
     if (limit > 0) {

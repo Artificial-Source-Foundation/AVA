@@ -7,6 +7,7 @@ import { log } from '../../lib/logger'
 import {
   deleteMessageFromDb as dbDeleteMessage,
   deleteMessagesFromTimestamp as dbDeleteMessagesFromTimestamp,
+  insertMessages as dbInsertMessages,
   getMessages,
 } from '../../services/database'
 import { logError } from '../../services/logger'
@@ -42,6 +43,13 @@ export function addMessage(message: Message): void {
     role: message.role,
     sessionId: message.sessionId,
   })
+
+  // Persist to database (fire-and-forget, don't block UI)
+  dbInsertMessages([message]).catch((err: unknown) =>
+    logError('Session', 'Failed to persist message', err)
+  )
+
+  // Update frontend state immediately
   setMessages((prev) => [...prev, message])
 
   setSessions((prev) =>

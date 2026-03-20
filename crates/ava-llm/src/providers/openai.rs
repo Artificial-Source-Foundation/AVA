@@ -320,8 +320,12 @@ impl OpenAIProvider {
                             "content": [{"type": "output_text", "text": m.content}],
                         }));
                     }
-                    // Add function calls
+                    // Add function calls — skip any with an empty name to avoid a
+                    // Responses API 400 "empty_string" error on `input[N].name`.
                     for tc in &m.tool_calls {
+                        if tc.name.is_empty() {
+                            continue;
+                        }
                         items.push(json!({
                             "type": "function_call",
                             "call_id": tc.id,

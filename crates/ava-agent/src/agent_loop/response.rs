@@ -59,6 +59,11 @@ pub(super) fn accumulate_tool_call(
 pub(super) fn finalize_tool_calls(accumulators: Vec<ToolCallAccumulator>) -> Vec<ToolCall> {
     accumulators
         .into_iter()
+        // Skip accumulators with no name — these are incomplete fragments from
+        // streaming (e.g. a Responses API function_call whose output_item.added
+        // event never carried a `name` field). Sending a ToolCall with an empty
+        // name back to the Responses API triggers a 400 "empty_string" error.
+        .filter(|acc| !acc.name.is_empty())
         .map(|acc| {
             let arguments =
                 serde_json::from_str(&acc.arguments_json).unwrap_or(serde_json::json!({}));

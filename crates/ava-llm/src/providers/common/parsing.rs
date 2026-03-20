@@ -1197,9 +1197,16 @@ pub fn parse_responses_api_stream_chunk(payload: &Value) -> Option<StreamChunk> 
                         .and_then(Value::as_str)
                         .map(String::from);
                     let name = item.get("name").and_then(Value::as_str).map(String::from);
-                    // `index` in output_item.added identifies which position
-                    // in the output array this function call occupies.
-                    let index = item.get("index").and_then(Value::as_u64).unwrap_or(0) as usize;
+                    // The Responses API puts the output array position in the
+                    // top-level `output_index` of the event (same as delta events),
+                    // not nested inside `item`. Fall back to `item.index` for any
+                    // provider that embeds it differently, then to 0.
+                    let index = payload
+                        .get("output_index")
+                        .or_else(|| payload.get("index"))
+                        .or_else(|| item.get("index"))
+                        .and_then(Value::as_u64)
+                        .unwrap_or(0) as usize;
                     Some(StreamChunk {
                         tool_call: Some(StreamToolCall {
                             index,

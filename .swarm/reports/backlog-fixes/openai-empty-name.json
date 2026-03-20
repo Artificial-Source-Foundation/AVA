@@ -1,0 +1,18 @@
+{
+  "status": "fixed",
+  "root_cause": "Three related bugs caused the OpenAI Responses API 400 'empty_string' error on input[N].name: (1) PRIMARY: in build_responses_request_body (openai.rs), function_call items were emitted to the Responses API input array even when tc.name was empty string — the API rejects any function_call with name: ''. This could happen when a ToolCall was stored with an empty name from streaming. (2) SECONDARY: in finalize_tool_calls (response.rs), streaming accumulators with an empty name were converted into ToolCall structs with name: '' and stored in message history, which then got replayed as function_call items with empty name on the next turn. (3) TERTIARY: in parse_responses_api_stream_chunk for output_item.added function_call events, the index was read from item.get('index') but the Responses API puts the output array position in the top-level 'output_index' field (same as delta events), causing index mismatches when tool calls appeared after reasoning items.",
+  "files_modified": [
+    "crates/ava-llm/src/providers/openai.rs",
+    "crates/ava-llm/src/providers/common/parsing.rs",
+    "crates/ava-agent/src/agent_loop/response.rs"
+  ],
+  "changes": {
+    "crates/ava-llm/src/providers/openai.rs": "In build_responses_request_body, added a guard to skip any tc where tc.name.is_empty() before pushing a function_call item into the Responses API input array.",
+    "crates/ava-agent/src/agent_loop/response.rs": "In finalize_tool_calls, added .filter(|acc| !acc.name.is_empty()) to discard streaming accumulators that never received a name — preventing broken ToolCalls from being stored in message history.",
+    "crates/ava-llm/src/providers/common/parsing.rs": "In parse_responses_api_stream_chunk for output_item.added function_call events, changed index extraction to read from payload.get('output_index') first (top-level, consistent with delta events), falling back to payload.get('index') and then item.get('index'), matching how argument deltas locate their accumulator."
+  },
+  "summary": "Fixed OpenAI Responses API 400 error by (1) filtering empty-name tool calls before serializing to the input array, (2) filtering empty-name accumulators in finalize_tool_calls to prevent bad ToolCalls entering history, and (3) correcting the output_index extraction in output_item.added to use the top-level field. Chat Completions API path is unaffected — all three changes are inside Responses API-specific code paths or guarded by the existing empty-name check.",
+  "cargo_check_pass": true,
+  "tests_pass": true,
+  "test_suites_run": ["ava-llm (17 passed)", "ava-agent (13 passed)"]
+}

@@ -1,0 +1,15 @@
+{
+  "status": "fixed",
+  "files_modified": [
+    "crates/ava-tools/src/core/mod.rs",
+    "crates/ava-agent/src/stack/stack_tools.rs",
+    "crates/ava-agent/src/stack/stack_run.rs",
+    "crates/ava-agent/src/stack/mod.rs",
+    "crates/ava-tools/tests/core_tools_test.rs"
+  ],
+  "summary": "Cleaned up the AVA tool surface. register_extended_tools() is now a no-op (keeping its signature for backwards-compat). register_core_tools() is now a simple alias for register_default_tools(). The 9 default tools (read, write, edit, bash, glob, grep, web_fetch, web_search, git) were already in register_default_tools — no moves needed. build_tool_registry() in stack_tools.rs no longer calls register_extended_tools() and no longer takes a shared_index parameter. All 3 call sites in mod.rs and stack_run.rs were updated. The SharedCodebaseIndex import was removed from stack_tools.rs. Tests updated: default_tools_gives_6_tools renamed to default_tools_gives_9_tools with correct count, extended_registration_gives_all_16_tools renamed to extended_registration_is_now_empty asserting empty extended tier, extended_tools_are_executable_regardless_of_tier_filter renamed to unregistered_extended_tools_return_not_found asserting ToolNotFound for apply_patch, core_tools_are_registered updated to check web_fetch/web_search/git instead of apply_patch. All 7 extended tools (apply_patch, multiedit, ast_ops, lsp_ops, code_search, lint, test_runner) source files are untouched and remain in the crate.",
+  "default_tools": 9,
+  "extended_tools": 0,
+  "cargo_check_pass": true,
+  "cargo_test_pass": true
+}

@@ -18,9 +18,7 @@ use tokio::sync::RwLock;
 use tracing::{info, warn};
 
 use ava_permissions::inspector::InspectionContext;
-use ava_tools::core::{
-    code_search::SharedCodebaseIndex, register_default_tools, register_extended_tools,
-};
+use ava_tools::core::register_default_tools;
 
 pub(crate) struct ExtensionManagerCaller {
     pub(crate) manager: ExtensionManager,
@@ -178,11 +176,9 @@ pub(crate) fn build_tool_registry(
     permission_inspector: Arc<dyn PermissionInspector>,
     permission_context: Arc<RwLock<InspectionContext>>,
     approval_bridge: ApprovalBridge,
-    shared_index: Option<SharedCodebaseIndex>,
 ) -> (ToolRegistry, SharedToolSources) {
     let mut registry = ToolRegistry::new();
-    register_default_tools(&mut registry, platform.clone());
-    register_extended_tools(&mut registry, platform, shared_index);
+    register_default_tools(&mut registry, platform);
     let middleware = PermissionMiddleware::new(
         permission_inspector,
         permission_context,

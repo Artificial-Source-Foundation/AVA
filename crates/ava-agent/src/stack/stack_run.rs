@@ -259,7 +259,6 @@ impl AgentStack {
             Arc::clone(&self.permission_inspector),
             Arc::clone(&self.permission_context),
             self.approval_bridge.clone(),
-            Some(Arc::clone(&self.codebase_index)),
         );
         register_todo_tools(&mut registry, self.todo_state.clone());
         register_question_tool(&mut registry, self.question_bridge.clone());

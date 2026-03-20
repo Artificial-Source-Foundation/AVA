@@ -7,6 +7,8 @@ use ava_tools::core::{
     apply_patch::ApplyPatchTool, bash::BashTool, edit::EditTool, glob::GlobTool, grep::GrepTool,
     hashline, multiedit::MultiEditTool, read::ReadTool, write::WriteTool,
 };
+// Note: apply_patch and multiedit are no longer registered by default; their tool structs
+// are still importable for direct use in tests.
 use ava_tools::registry::Tool;
 use serde_json::json;
 use tempfile::tempdir_in;
@@ -450,13 +452,18 @@ fn core_tools_are_registered() {
     assert!(names.contains(&"glob"), "glob should be registered");
     assert!(names.contains(&"grep"), "grep should be registered");
     assert!(
-        names.contains(&"apply_patch"),
-        "apply_patch should be registered"
+        names.contains(&"web_fetch"),
+        "web_fetch should be registered"
     );
+    assert!(
+        names.contains(&"web_search"),
+        "web_search should be registered"
+    );
+    assert!(names.contains(&"git"), "git should be registered");
 }
 
 #[test]
-fn default_tools_gives_6_tools() {
+fn default_tools_gives_9_tools() {
     use ava_tools::core::register_default_tools;
     use ava_tools::registry::{ToolRegistry, ToolTier};
 
@@ -466,16 +473,26 @@ fn default_tools_gives_6_tools() {
     let all = registry.list_tools();
     assert_eq!(
         all.len(),
-        6,
-        "default tier should have exactly 6 tools, got: {:?}",
+        9,
+        "default tier should have exactly 9 tools, got: {:?}",
         all.iter().map(|t| t.name.as_str()).collect::<Vec<_>>()
     );
 
     let default_only = registry.list_tools_for_tiers(&[ToolTier::Default]);
-    assert_eq!(default_only.len(), 6);
+    assert_eq!(default_only.len(), 9);
 
     let names: Vec<&str> = default_only.iter().map(|t| t.name.as_str()).collect();
-    for expected in &["read", "write", "edit", "bash", "glob", "grep"] {
+    for expected in &[
+        "read",
+        "write",
+        "edit",
+        "bash",
+        "glob",
+        "grep",
+        "web_fetch",
+        "web_search",
+        "git",
+    ] {
         assert!(
             names.contains(expected),
             "{expected} should be in default tools"
@@ -484,7 +501,7 @@ fn default_tools_gives_6_tools() {
 }
 
 #[test]
-fn extended_registration_gives_all_16_tools() {
+fn extended_registration_is_now_empty() {
     use ava_tools::core::{register_default_tools, register_extended_tools};
     use ava_tools::registry::{ToolRegistry, ToolTier};
 
@@ -492,85 +509,46 @@ fn extended_registration_gives_all_16_tools() {
     register_default_tools(&mut registry, Arc::new(StandardPlatform));
     register_extended_tools(&mut registry, Arc::new(StandardPlatform), None);
 
+    // Extended tools are no longer registered by default — extended set is empty.
     let all = registry.list_tools();
     assert_eq!(
         all.len(),
-        16,
-        "default (6) + extended (10) should have 16 tools, got: {:?}",
+        9,
+        "after register_extended_tools (no-op), should still have 9 tools, got: {:?}",
         all.iter().map(|t| t.name.as_str()).collect::<Vec<_>>()
     );
 
-    // Default tier only should still give 6
+    // Default tier only should give 9
     let default_only = registry.list_tools_for_tiers(&[ToolTier::Default]);
-    assert_eq!(default_only.len(), 6);
+    assert_eq!(default_only.len(), 9);
 
-    // Extended tier only should give 10 (8 original + lint + test_runner)
+    // Extended tier should be empty
     let extended_only = registry.list_tools_for_tiers(&[ToolTier::Extended]);
-    assert_eq!(extended_only.len(), 10);
-
-    // Both tiers should give 16
-    let both = registry.list_tools_for_tiers(&[ToolTier::Default, ToolTier::Extended]);
-    assert_eq!(both.len(), 16);
-
-    // Verify extended tools are present
-    let ext_names: Vec<&str> = extended_only.iter().map(|t| t.name.as_str()).collect();
-    for expected in &[
-        "apply_patch",
-        "web_fetch",
-        "multiedit",
-        "git",
-        "web_search",
-        "ast_ops",
-        "lsp_ops",
-        "code_search",
-        "lint",
-        "test_runner",
-    ] {
-        assert!(
-            ext_names.contains(expected),
-            "{expected} should be in extended tools"
-        );
-    }
+    assert_eq!(extended_only.len(), 0, "extended tier should be empty");
 }
 
 #[test]
-fn extended_tools_are_executable_regardless_of_tier_filter() {
-    use ava_tools::core::{register_default_tools, register_extended_tools};
-    use ava_tools::registry::{ToolRegistry, ToolTier};
+fn unregistered_extended_tools_return_not_found() {
+    use ava_tools::core::register_default_tools;
+    use ava_tools::registry::ToolRegistry;
 
     let mut registry = ToolRegistry::new();
     register_default_tools(&mut registry, Arc::new(StandardPlatform));
-    register_extended_tools(&mut registry, Arc::new(StandardPlatform), None);
 
-    // Listing with default-only filter should not include apply_patch
-    let default_only = registry.list_tools_for_tiers(&[ToolTier::Default]);
-    let names: Vec<&str> = default_only.iter().map(|t| t.name.as_str()).collect();
-    assert!(
-        !names.contains(&"apply_patch"),
-        "apply_patch should not be in default-only listing"
-    );
-
-    // But execute should still work for apply_patch (it's registered, just filtered from prompt)
+    // apply_patch is no longer registered — calling it should return ToolNotFound
     let tool_call = ava_types::ToolCall {
         id: "call_1".to_string(),
         name: "apply_patch".to_string(),
         arguments: serde_json::json!({"patch": "invalid"}),
     };
-    // We expect an error because the patch is invalid, but NOT a ToolNotFound error
     let result = tokio::runtime::Runtime::new()
         .unwrap()
         .block_on(registry.execute(tool_call));
-    // The tool should be found and executed (even if it returns an error for bad input)
-    match result {
-        Ok(_) => {} // tool executed successfully (unlikely with invalid patch)
-        Err(e) => {
-            let msg = e.to_string();
-            assert!(
-                !msg.contains("not found"),
-                "apply_patch should be executable even when filtered from prompt, got: {msg}"
-            );
-        }
-    }
+    let err = result.expect_err("unregistered tool should return an error");
+    assert!(
+        err.to_string().contains("not found"),
+        "expected 'not found' error for unregistered apply_patch, got: {err}"
+    );
 }
 
 #[tokio::test]

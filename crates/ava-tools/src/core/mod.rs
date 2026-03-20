@@ -50,14 +50,18 @@ use std::sync::Arc;
 use ava_platform::Platform;
 
 use crate::core::code_search::SharedCodebaseIndex;
-use crate::registry::{ToolRegistry, ToolTier};
+use crate::registry::ToolRegistry;
 
-/// Register the 6 default tools that are always sent to the LLM.
+/// Register the 9 default tools that are always sent to the LLM.
+///
+/// The default set covers file I/O, search, shell, web, and git — enough for
+/// most coding tasks without overwhelming the tool definition list.
 ///
 /// A shared [`hashline::HashlineCache`] is created and passed to both the
 /// read and edit tools so that hash-anchored edits work across tool calls.
 pub fn register_default_tools(registry: &mut ToolRegistry, platform: Arc<dyn Platform>) {
     let hashline_cache = hashline::new_cache();
+    // Core 6: file I/O + search + shell
     registry.register(read::ReadTool::new(
         platform.clone(),
         hashline_cache.clone(),
@@ -67,56 +71,33 @@ pub fn register_default_tools(registry: &mut ToolRegistry, platform: Arc<dyn Pla
     registry.register(bash::BashTool::new(platform.clone()));
     registry.register(glob::GlobTool::new());
     registry.register(grep::GrepTool::new());
+    // +3: web + git
+    registry.register(web_fetch::WebFetchTool::new());
+    registry.register(web_search::WebSearchTool::new());
+    registry.register(git_read::GitReadTool::new());
 }
 
-/// Register extended tools (available but not sent to the LLM by default).
+/// Register extended tools.
 ///
-/// These tools are always *executable* — the tier only controls whether their
-/// definitions are included in the system prompt sent to the LLM.
+/// Extended tools (apply_patch, multiedit, ast_ops, lsp_ops, code_search,
+/// lint, test_runner) are **not** registered by default. They are available as
+/// plugins or can be registered manually for advanced use cases.
 ///
-/// Pass `shared_index` to let the `code_search` tool reuse the pre-built
-/// [`ava_codebase::CodebaseIndex`] that `AgentStack` populates in a background
-/// task at startup, avoiding an O(n) disk rebuild on every invocation.
+/// This function is intentionally empty — the signature is kept for
+/// backwards-compatibility with any external code that calls it.
+#[allow(unused_variables)]
 pub fn register_extended_tools(
     registry: &mut ToolRegistry,
     platform: Arc<dyn Platform>,
     shared_index: Option<SharedCodebaseIndex>,
 ) {
-    registry.register_with_tier(
-        apply_patch::ApplyPatchTool::new(platform.clone()),
-        ToolTier::Extended,
-    );
-    registry.register_with_tier(web_fetch::WebFetchTool::new(), ToolTier::Extended);
-    registry.register_with_tier(web_search::WebSearchTool::new(), ToolTier::Extended);
-    registry.register_with_tier(
-        multiedit::MultiEditTool::new(platform.clone()),
-        ToolTier::Extended,
-    );
-    registry.register_with_tier(
-        ast_ops::AstOpsTool::new(platform.clone()),
-        ToolTier::Extended,
-    );
-    registry.register_with_tier(
-        lsp_ops::LspOpsTool::new(platform.clone()),
-        ToolTier::Extended,
-    );
-    let code_search_tool = match shared_index {
-        Some(idx) => code_search::CodeSearchTool::with_shared_index(idx),
-        None => code_search::CodeSearchTool::new(),
-    };
-    registry.register_with_tier(code_search_tool, ToolTier::Extended);
-    registry.register_with_tier(git_read::GitReadTool::new(), ToolTier::Extended);
-    registry.register_with_tier(lint::LintTool::new(platform.clone()), ToolTier::Extended);
-    registry.register_with_tier(
-        test_runner::TestRunnerTool::new(platform.clone()),
-        ToolTier::Extended,
-    );
+    // No-op: extended tools are not registered by default.
+    // They will be available as plugins in a future release.
 }
 
-/// Register all core tools (default + extended). Backwards-compatible alias.
+/// Register all core tools. Backwards-compatible alias for `register_default_tools`.
 pub fn register_core_tools(registry: &mut ToolRegistry, platform: Arc<dyn Platform>) {
-    register_default_tools(registry, platform.clone());
-    register_extended_tools(registry, platform, None);
+    register_default_tools(registry, platform);
 }
 
 /// Register the task tool with a spawner that can create sub-agent runs.

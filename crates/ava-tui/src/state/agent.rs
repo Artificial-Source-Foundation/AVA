@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
+use tracing::warn;
 
 #[derive(Debug, Default, Clone)]
 pub struct TokenUsage {
@@ -545,8 +546,13 @@ impl AgentState {
         self.thinking_level = level;
         if let Some(stack) = &self.stack {
             let stack = stack.clone();
-            tokio::spawn(async move {
+            let handle = tokio::spawn(async move {
                 stack.set_thinking_level(level).await;
+            });
+            tokio::spawn(async move {
+                if let Err(e) = handle.await {
+                    warn!("set_thinking_level task panicked: {e}");
+                }
             });
         }
     }
@@ -563,8 +569,13 @@ impl AgentState {
         if let Some(stack) = &self.stack {
             let stack = stack.clone();
             let level = self.thinking_level;
-            tokio::spawn(async move {
+            let handle = tokio::spawn(async move {
                 stack.set_thinking_level(level).await;
+            });
+            tokio::spawn(async move {
+                if let Err(e) = handle.await {
+                    warn!("cycle_thinking task panicked: {e}");
+                }
             });
         }
         self.thinking_level.label()
@@ -634,9 +645,14 @@ impl AgentState {
         let is_plan = matches!(mode, AgentMode::Plan);
         if let Some(stack) = &self.stack {
             let stack = stack.clone();
-            tokio::spawn(async move {
+            let handle = tokio::spawn(async move {
                 stack.set_mode_prompt_suffix(suffix).await;
                 stack.set_plan_mode(is_plan).await;
+            });
+            tokio::spawn(async move {
+                if let Err(e) = handle.await {
+                    warn!("set_mode task panicked: {e}");
+                }
             });
         }
     }

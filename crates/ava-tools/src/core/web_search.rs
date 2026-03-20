@@ -210,4 +210,14 @@ mod tests {
         let result = tool.execute(json!({})).await;
         assert!(result.is_err());
     }
+
+    /// Force evaluation of all `LazyLock<Regex>` statics used in this module.
+    /// The two function-local statics (RESULT_RE, TAG_RE inside
+    /// `parse_duckduckgo_results`) are exercised by passing an empty string;
+    /// the regexes must compile or the test panics.
+    #[test]
+    fn regexes_compile() {
+        // Drives RESULT_RE and TAG_RE through parse_duckduckgo_results.
+        let _ = parse_duckduckgo_results("", 0);
+    }
 }

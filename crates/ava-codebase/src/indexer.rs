@@ -356,6 +356,18 @@ const x = require("lodash");"#;
         assert!(hits.len() >= 2);
     }
 
+    /// Force evaluation of all `LazyLock<Regex>` statics in this module so that
+    /// a malformed pattern causes an immediate panic at test time rather than
+    /// a silent failure at runtime.
+    #[test]
+    fn regexes_compile() {
+        let _ = &*RUST_USE_RE;
+        let _ = &*JS_IMPORT_RE;
+        let _ = &*JS_REQUIRE_RE;
+        let _ = &*PY_IMPORT_RE;
+        let _ = &*PY_FROM_RE;
+    }
+
     #[cfg(feature = "semantic")]
     #[tokio::test]
     async fn semantic_workspace_index_builds_semantic_store() {

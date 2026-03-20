@@ -1,0 +1,309 @@
+{
+  "features_found": [
+    {
+      "feature": "TextShimmer — shimmer animation on active tool titles",
+      "description": "A CSS-driven shimmer sweep plays over the tool title text while the tool is running. When the tool completes the shimmer fades out with a 220ms debounce so it doesn't cut off abruptly. The component renders two stacked spans (base + shimmer) so keyboard users see the aria-label, not the animated duplicate. Used on every tool trigger in BasicTool, bash, edit, write, webfetch, task, and inside ContextToolGroup. Source: components/text-shimmer.tsx lines 1-62; components/basic-tool.tsx line 135.",
+      "opencode_file": "packages/ui/src/components/text-shimmer.tsx",
+      "ava_status": "partial",
+      "importance": "high",
+      "ava_recommendation": "AVA has a CSS class 'thinking-shimmer' applied to the ThinkingRow label but nothing on tool titles. Add a TextShimmer equivalent to ToolCallCard's header while status === 'running'. The existing 'animate-tool-card-in' animation fires once on mount; this must be continuous. Implement as a small SolidJS component wrapping the tool label span with a keyframe CSS animation, triggered by an 'active' data-attribute."
+    },
+    {
+      "feature": "ToolStatusTitle — animated active→done text transition with shared prefix optimisation",
+      "description": "Shows 'Gathering context...' while running and 'Gathered context' when done. The component finds the longest common prefix between the two strings, keeps it stationary, and only swaps/animates the differing suffix. Width is measured via Range.getBoundingClientRect to prevent layout shift during the word swap. All width tracking uses requestAnimationFrame and document.fonts.ready to survive font load. Source: components/tool-status-title.tsx lines 1-133.",
+      "opencode_file": "packages/ui/src/components/tool-status-title.tsx",
+      "ava_status": "missing",
+      "importance": "high",
+      "ava_recommendation": "AVA's ContextGroupHeader changes the label string directly: 'Gathering context... (N)' → 'Gathered context (N reads, M searches)'. The jump is abrupt. Port the shared-prefix trick: measure both label widths, animate width and swap the suffix span. This is the main polish gap visible when a context group completes."
+    },
+    {
+      "feature": "AnimatedNumber — slot-machine digit spinner for context group counts",
+      "description": "Counts in 'Exploring — 3 reads, 2 searches' animate like a slot machine when they increment. Each digit is a strip of 0-9 that translates vertically. Direction-aware (counts up vs down), normalises modulo 10, and self-corrects after transitionEnd. Source: components/animated-number.tsx lines 1-100; used via AnimatedCountLabel → AnimatedCountList inside ContextToolGroup.",
+      "opencode_file": "packages/ui/src/components/animated-number.tsx",
+      "ava_status": "missing",
+      "importance": "medium",
+      "ava_recommendation": "AVA shows static count strings. Add an AnimatedNumber component to the context group summary: when the count increments (new read/grep arrives), the digit spins. Low implementation cost — pure CSS transform on a 30-cell digit strip, one small component."
+    },
+    {
+      "feature": "TextReveal — gradient-wipe animated text swap",
+      "description": "When text changes (e.g. reasoning heading update during thinking), a left-to-right gradient mask wipes out the old text and reveals the new text simultaneously. Uses two absolutely-positioned spans (entering/leaving), animates width of the track container, and handles font-load timing via document.fonts.ready. Used in SessionTurn for the reasoning summary heading display during 'Thinking' state. Source: components/text-reveal.tsx lines 1-135.",
+      "opencode_file": "packages/ui/src/components/text-reveal.tsx",
+      "ava_status": "missing",
+      "importance": "medium",
+      "ava_recommendation": "AVA's ThinkingRow label just re-renders the text string. When thinking transitions from 'Thinking...' to a heading derived from the first markdown heading in the reasoning block, a TextReveal wipe would feel polished. Port the component and apply it to the ThinkingRow label span."
+    },
+    {
+      "feature": "Context tool grouping with animated count summary (read/search/list breakdown)",
+      "description": "Consecutive read/glob/grep/list tool calls are batched into a single ContextToolGroup row. The summary line shows animated counts broken down by type: '3 reads, 2 searches, 1 list'. The group has a single Collapsible to expand individual items. The group is identified at render time via groupParts() which only creates a group boundary when a non-context tool interrupts. The busy prop propagates so the shimmer stays active if the last entry in the group is still running. Source: components/message-part.tsx lines 358-888.",
+      "opencode_file": "packages/ui/src/components/message-part.tsx",
+      "ava_status": "partial",
+      "importance": "critical",
+      "ava_recommendation": "AVA's ContextGroupHeader groups consecutive context tools correctly but shows a flat count ('Gathering context... (3)') without type breakdown. Add read/search/list breakdown to the summary label to match OpenCode's more informative display. The groupParts algorithm in AVA's partitionByContext (tool-call-utils.ts) is functionally equivalent — just improve the label rendering."
+    },
+    {
+      "feature": "Compaction part — visual divider marker in message history",
+      "description": "When context is compacted, a dedicated 'compaction' part type renders a horizontal divider with the label 'History compacted'. This appears inline in the message stream between the user message and assistant content, making the compaction event visible rather than silent. Source: components/message-part.tsx lines 1308-1321.",
+      "opencode_file": "packages/ui/src/components/message-part.tsx",
+      "ava_status": "missing",
+      "importance": "high",
+      "ava_recommendation": "AVA performs compaction (AgentStack compaction) but the desktop UI does not display any visual marker when compaction occurs. Emit a compaction event from the Rust agent through the Tauri bridge, add a 'compaction' message type or metadata flag, and render a styled divider in ChatView. Users currently have no awareness that history was truncated."
+    },
+    {
+      "feature": "Per-turn diff summary — collapsible modified-files list after each turn",
+      "description": "After an agent turn completes, a 'Modified N files' collapsible shows all files edited in that turn, with a mini bar chart (5-block diff indicator) showing +/- ratio. Individual files expand to show a before/after diff view. The diff is deduplicated (last write wins) and only shown for completed turns. Source: components/session-turn.tsx lines 228-515.",
+      "opencode_file": "packages/ui/src/components/session-turn.tsx",
+      "ava_status": "missing",
+      "importance": "critical",
+      "ava_recommendation": "AVA shows no per-turn file change summary. After each completed turn, render a collapsible 'N files modified' row in the MessageBubble footer area. The Rust backend already tracks file diffs (DiffRow renders them per-tool-call); aggregate them at the turn level and show the bar chart + expandable accordion. This is the single most visible UX gap vs OpenCode."
+    },
+    {
+      "feature": "DiffChanges bar chart — 5-block proportional add/delete indicator",
+      "description": "A 5-block SVG bar chart shows the proportion of additions vs deletions. The algorithm handles edge cases: small changes (<5 lines) show 1 block per colour; ratios >4:1 get fewer neutral blocks; a minimum of 1 block per colour category that has any changes. Two variants: 'default' (+N/-N numbers) and 'bars' (icon only). Source: components/diff-changes.tsx lines 1-115.",
+      "opencode_file": "packages/ui/src/components/diff-changes.tsx",
+      "ava_status": "missing",
+      "importance": "high",
+      "ava_recommendation": "AVA's DiffRow shows a plain '+N lines / -N lines' text. Replace with the bar chart variant for the tool trigger header (fits in narrow space) and keep the numeric form in the expanded diff header. The SVG bar chart is compact and immediately readable."
+    },
+    {
+      "feature": "createAutoScroll — smart auto-scroll with nested-scroll detection and overflow anchoring",
+      "description": "Manages auto-scroll to bottom during streaming with: (1) nested [data-scrollable] regions treated as independent scroll containers (wheel events inside them do NOT pause auto-scroll), (2) dynamic overflow-anchor switching (none while following, auto when user scrolled) to prevent browser scroll-anchoring fighting auto-scroll, (3) a 300ms settle timer after working=false to absorb late content updates, (4) ResizeObserver-based triggering rather than polling, (5) programmatic scrollTop assignment (not smooth) to avoid CSS scroll-behavior fighting. Source: hooks/create-auto-scroll.tsx lines 1-252.",
+      "opencode_file": "packages/ui/src/hooks/create-auto-scroll.tsx",
+      "ava_status": "missing",
+      "importance": "critical",
+      "ava_recommendation": "AVA's MessageList uses a basic scrollToBottom approach without the nested-scroll guard. When tool output areas (bash output, code blocks) scroll internally, it incorrectly pauses auto-scroll. Port the [data-scrollable] sentinel pattern and the overflow-anchor toggling. Apply to the main chat scroll container in MessageList.tsx and mark tool output scroll areas with data-scrollable."
+    },
+    {
+      "feature": "Markdown rendering with morphdom diffing and LRU cache",
+      "description": "Markdown is rendered async (marked.js + DOMPurify) and applied to the DOM via morphdom, which diffs the new HTML against existing DOM nodes. This means streaming updates only touch changed nodes rather than replacing innerHTML entirely. An LRU cache keyed by (cacheKey, checksum) stores up to 200 rendered HTML strings so revisiting old messages costs nothing. Code blocks get copy buttons injected imperatively after morphdom runs. Source: components/markdown.tsx lines 1-329.",
+      "opencode_file": "packages/ui/src/components/markdown.tsx",
+      "ava_status": "partial",
+      "importance": "high",
+      "ava_recommendation": "AVA's MarkdownContent uses innerHTML assignment on every update. This tears down and recreates all DOM nodes on each streaming token, causing flicker and losing focus if the user selects text. Replace with morphdom (already well-supported) and add the LRU cache keyed by message ID + content checksum. Streaming throttle is already at 150ms in AVA — correct — but the DOM replacement strategy needs fixing."
+    },
+    {
+      "feature": "TEXT_RENDER_THROTTLE_MS — 100ms reactive throttle on text part updates",
+      "description": "Text parts use createThrottledValue() which applies a trailing 100ms throttle to the reactive text signal. This means at 100ms intervals the markdown renderer fires at most once, preventing Solid's reactivity from hammering the DOM on each token. The throttle is per-part (not global), cleans up on unmount, and fires immediately if >100ms have elapsed since last render. Source: components/message-part.tsx lines 158-192.",
+      "opencode_file": "packages/ui/src/components/message-part.tsx",
+      "ava_status": "partial",
+      "importance": "high",
+      "ava_recommendation": "AVA throttles at 150ms via a setTimeout but does so inside an effect that watches two signals simultaneously ([content, isStreaming]), meaning any isStreaming change can retrigger rendering. Refactor to match OpenCode's per-signal throttle that only watches the text content, not the streaming flag."
+    },
+    {
+      "feature": "Defer pattern for tool content — requestAnimationFrame before showing rich content",
+      "description": "BasicTool has a 'defer' prop that delays mounting children until the next animation frame after the collapsible opens. This prevents the layout calculation for heavy content (diff viewers, code) from happening in the same frame as the open animation, keeping the open animation at 60fps. Source: components/basic-tool.tsx lines 54-78 and lines 197-200.",
+      "opencode_file": "packages/ui/src/components/basic-tool.tsx",
+      "ava_status": "missing",
+      "importance": "medium",
+      "ava_recommendation": "AVA's ToolCallCard mounts all content immediately. For DiffRow (which renders syntax-highlighted diff HTML), add a one-frame defer: set a 'ready' signal after requestAnimationFrame, gate the content on ready(). This makes the expand animation smooth when diffs are large."
+    },
+    {
+      "feature": "Animated collapsible height via Motion spring (BasicTool animated prop)",
+      "description": "When animated=true, BasicTool animates the collapsible height with a spring (visualDuration: 0.35, bounce: 0) via the Motion library. The animation controls overflow=hidden during transition and overflow=visible once settled so content isn't clipped. The animation is cancelled on unmount. Source: components/basic-tool.tsx lines 80-110.",
+      "opencode_file": "packages/ui/src/components/basic-tool.tsx",
+      "ava_status": "missing",
+      "importance": "medium",
+      "ava_recommendation": "AVA uses CSS transitions for expand/collapse but they require knowing the target height. The Spring-based animate-to-auto approach from Motion library allows height:'auto' targets. Add this to ToolCallCard's expand for a more natural collapse feel. Only use for non-streaming cards (would conflict with ResizeObserver auto-scroll)."
+    },
+    {
+      "feature": "LSP diagnostics overlay on edit/write tool output",
+      "description": "After an edit or write completes, if the Rust backend provides diagnostics (LSP errors), up to 3 severity-1 errors are shown as a DiagnosticsDisplay below the diff. Each shows 'Error [line:col] message'. Source: components/message-part.tsx lines 90-127 and the render functions for 'edit' and 'write' tools (lines 1771-1900).",
+      "opencode_file": "packages/ui/src/components/message-part.tsx",
+      "ava_status": "missing",
+      "importance": "high",
+      "ava_recommendation": "AVA has ava-lsp as a crate and the lsp-diagnostics middleware, but the desktop frontend never surfaces LSP errors inline in tool cards. After an edit tool call completes, emit diagnostics through the IPC bridge and render them below the diff in DiffRow. This closes the feedback loop: users see compile/type errors immediately without leaving the chat."
+    },
+    {
+      "feature": "ShellSubmessage — animated width-expanding description reveal",
+      "description": "For bash tool calls, the input.description field is hidden during execution and revealed as the tool completes. The reveal animates: width goes from 0 → auto via Motion spring, and opacity+blur goes from (0, 2px) → (1, 0) with a custom ease curve. Fires via requestAnimationFrame on mount. Source: components/message-part.tsx lines 57-88.",
+      "opencode_file": "packages/ui/src/components/message-part.tsx",
+      "ava_status": "missing",
+      "importance": "medium",
+      "ava_recommendation": "AVA shows the bash description immediately in the tool trigger. Port the animated reveal: show tool name while running, animate-in the description subtitle when the tool completes. Makes it clear the description is a summary of what ran, not what is being requested."
+    },
+    {
+      "feature": "Session fork and revert actions on user messages",
+      "description": "Each user message has a fork button (branch icon) and a revert button (reset icon) that appear on hover in the message footer. Fork creates a new session branched from that message; revert rolls back changes. Buttons disable while the operation is in-flight (busy state). Source: components/message-part.tsx lines 967-1097 (UserMessageDisplay).",
+      "opencode_file": "packages/ui/src/components/message-part.tsx",
+      "ava_status": "partial",
+      "importance": "high",
+      "ava_recommendation": "AVA has onBranch and onRewind callbacks on MessageBubble but they appear in the MessageActions hover panel (bottom row). OpenCode puts fork and revert directly on the user bubble footer, always discoverable. Move branch/rewind to the user message footer alongside the copy button for consistency with the pattern."
+    },
+    {
+      "feature": "HighlightedText — inline file and agent reference highlighting in user messages",
+      "description": "When a user message references file attachments or agent mentions, the corresponding character ranges in the text are highlighted with a data-highlight='file'|'agent' attribute for CSS styling. The highlight positions come from the FilePart.source.text.{start,end} fields attached to the message. Source: components/message-part.tsx lines 1100-1137.",
+      "opencode_file": "packages/ui/src/components/message-part.tsx",
+      "ava_status": "missing",
+      "importance": "medium",
+      "ava_recommendation": "AVA renders user message content as plain text. If the Rust backend provides character offsets for file references in the user message (e.g. @file mentions), surface them as inline highlighted spans. Requires backend support first; file this as a future feature once @-mention is implemented."
+    },
+    {
+      "feature": "Session retry display — live countdown and attempt number",
+      "description": "When the backend emits a retry status (e.g. rate limit), a SessionRetry card appears inline with a Spinner, the error message (truncated to 80 chars with tooltip for full text), a live countdown ('retrying in 4s'), and the attempt number. Updates every second via setInterval. Source: components/session-retry.tsx lines 1-74.",
+      "opencode_file": "packages/ui/src/components/session-retry.tsx",
+      "ava_status": "missing",
+      "importance": "high",
+      "ava_recommendation": "AVA shows generic error text in ErrorRow. The Rust backend already has RetryBudget with exponential backoff; emit retry events through the Tauri bridge and render a SessionRetry-style card in the LiveStreamingBlock. Countdown is a setInterval decrementing from (next_retry_time - now()) / 1000 — trivial to implement."
+    },
+    {
+      "feature": "Session review panel — full-session diff browser with unified/split toggle",
+      "description": "A dedicated SessionReview component shows all files changed in a session (or turn) as an expandable accordion. Features: unified/split diff style toggle, expand-all/collapse-all button, large-diff guard (>500 changed lines shows warning + 'render anyway'), media file support (images/audio), line comments with popover editor. Source: components/session-review.tsx lines 1-540.",
+      "opencode_file": "packages/ui/src/components/session-review.tsx",
+      "ava_status": "missing",
+      "importance": "critical",
+      "ava_recommendation": "AVA has no session-level diff browser. Add a 'Changes' panel/tab in the RightPanel that aggregates all DiffRow data from the session and renders a SessionReview-style accordion. The per-turn diff summary (see above) is the lighter version; the session review is the full version for reviewing everything before committing."
+    },
+    {
+      "feature": "Large diff guard — skips rendering diffs over 500 changed lines",
+      "description": "When a diff has >500 changed lines and the accordion is expanded, SessionReview shows a message 'Diff too large to render' with line counts and a 'Render anyway' button that force-renders. This prevents the browser from locking up on 10,000-line diffs. Source: components/session-review.tsx lines 300-487.",
+      "opencode_file": "packages/ui/src/components/session-review.tsx",
+      "ava_status": "missing",
+      "importance": "high",
+      "ava_recommendation": "AVA's DiffRow renders all diffs unconditionally. Add a line-count threshold (500 is reasonable) in DiffRow: if additions+deletions > 500, show a warning and a 'Show diff' button that sets a force signal. This is a one-day addition that prevents browser hangs on large file rewrites."
+    },
+    {
+      "feature": "Line comment annotations on diffs — GitHub-style inline review",
+      "description": "Users can select a line range in any diff view and add a comment. Comments appear as inline annotations at the selected line, persist across accordion open/close, and can be edited/deleted via a dropdown menu. The system uses a @pierre/diffs custom element's line selection events and injects Solid components into the diff shadow DOM. Source: components/line-comment-annotations.tsx; components/session-review.tsx lines 324-375.",
+      "opencode_file": "packages/ui/src/components/line-comment-annotations.tsx",
+      "ava_status": "missing",
+      "importance": "medium",
+      "ava_recommendation": "This is the most complex feature in OpenCode's UI — deeply tied to the @pierre/diffs web component. AVA would need either the same diff component or a custom implementation. Defer until the session review panel is stable. Lower priority than the structural features above."
+    },
+    {
+      "feature": "ScrollView — custom scrollbar overlay with drag and keyboard nav",
+      "description": "A custom scroll container that overlays a draggable thumb (visible on hover/drag, min height 32px, bounded within 8px track padding). Supports keyboard: PageUp/Down (80% viewport), Home/End, Arrow keys (40px). Passes through all pointer/touch/wheel/key events. Uses ResizeObserver to keep thumb position accurate as content changes. Source: components/scroll-view.tsx lines 1-241.",
+      "opencode_file": "packages/ui/src/components/scroll-view.tsx",
+      "ava_status": "missing",
+      "importance": "medium",
+      "ava_recommendation": "AVA relies on the browser's native scrollbar in tool output areas and session review. Native scrollbars are styled inconsistently across platforms, especially on Windows. Add a ScrollView wrapper at the session review level at minimum. The keyboard nav (PageUp/Down, Home/End) is an accessibility requirement that native scrollbars don't guarantee in all embedded contexts."
+    },
+    {
+      "feature": "Virtualizer from @pierre/diffs for diff rendering performance",
+      "description": "The pierre virtualizer attaches to the nearest scrollable ancestor and renders only visible diff hunks. It caches one Virtualizer per scroll root and ref-counts it so multiple diffs in the same scroll area share one virtualizer instance. Source: pierre/virtualizer.ts lines 1-100.",
+      "opencode_file": "packages/ui/src/pierre/virtualizer.ts",
+      "ava_status": "missing",
+      "importance": "medium",
+      "ava_recommendation": "AVA doesn't need to port the @pierre/diffs virtualizer directly (it's tied to that library's web component) but should implement virtualization for long message lists. If the session review panel is built, use a simple intersection-observer-based approach to skip rendering diff content for off-screen accordion items."
+    },
+    {
+      "feature": "Typewriter component — humanised character-by-character text reveal",
+      "description": "Animates text appearing character by character with variable timing: 5% chance of 150-250ms pause (hesitation), 10% chance of 80-140ms (natural variation), else 30-80ms. Shows a blinking cursor that stops blinking when typing finishes, then hides after 2 seconds. Source: components/typewriter.tsx lines 1-55.",
+      "opencode_file": "packages/ui/src/components/typewriter.tsx",
+      "ava_status": "missing",
+      "importance": "low",
+      "ava_recommendation": "AVA doesn't use typewriter-style rendering. Could be applied to the initial 'ava is thinking...' message in LiveStreamingBlock for a more human feel. Low priority."
+    },
+    {
+      "feature": "Internationalization (i18n) across all UI strings",
+      "description": "Every user-visible string is looked up via useI18n().t('key') with 15 language files (en, de, fr, es, ja, ko, zh, ru, pl, ar, da, th, no, tr, br). Pluralisation is handled inline with count tokens like {{count}} reads / {{count}} read. Source: context/i18n.tsx; i18n/*.ts.",
+      "opencode_file": "packages/ui/src/context/i18n.tsx",
+      "ava_status": "missing",
+      "importance": "low",
+      "ava_recommendation": "AVA has no i18n. All strings are hardcoded in English. Add an i18n context for the desktop frontend if international market expansion is a goal. Not urgent for current user base."
+    },
+    {
+      "feature": "Worker pool context for offloading heavy computation",
+      "description": "A WorkerPoolContext provides a shared pool of Web Workers. The pierre diff renderer uses this to compute diff hunks off the main thread. Source: context/worker-pool.tsx.",
+      "opencode_file": "packages/ui/src/context/worker-pool.tsx",
+      "ava_status": "missing",
+      "importance": "medium",
+      "ava_recommendation": "AVA's markdown rendering and diff HTML generation happen on the main thread. Consider moving the markdown rendering (marked.js parse + DOMPurify sanitize) to a Web Worker for large responses. This would eliminate the main thread jank visible when streaming long code-heavy responses."
+    },
+    {
+      "feature": "Message agent and model metadata in text part footer",
+      "description": "The text part footer shows: agent name (if subagent context), model name, turn duration (formatted as '45s' or '2m 3s'), and 'interrupted' label if the message was aborted. All as a single line of small grey text. Source: components/message-part.tsx lines 1332-1424 (TextPartDisplay).",
+      "opencode_file": "packages/ui/src/components/message-part.tsx",
+      "ava_status": "partial",
+      "importance": "medium",
+      "ava_recommendation": "AVA's TimestampLine already shows timestamp, model, tokens, cost, elapsedMs. It's partially equivalent. The missing pieces are: (1) turn duration formatted as '2m 3s' rather than raw ms, (2) 'interrupted' label for aborted messages. Add these two fields to the TimestampLine formula."
+    },
+    {
+      "feature": "apply_patch tool — multi-file diff accordion with per-file expand/lazy render",
+      "description": "The apply_patch tool renders each patched file as an accordion item with a sticky header showing file icon, directory/filename (using Unicode BiDi isolation \\u202A/\\u202C), and the diff bar chart. Files default-open unless type=delete. Diff content is only mounted (setVisible) after requestAnimationFrame following accordion open to avoid layout-blocking render. Source: components/message-part.tsx lines 1914-2113.",
+      "opencode_file": "packages/ui/src/components/message-part.tsx",
+      "ava_status": "missing",
+      "importance": "high",
+      "ava_recommendation": "AVA's DiffRow shows one diff per tool call. When apply_patch is used (multiple files), AVA would show N separate DiffRow cards. Port the multi-file accordion from OpenCode: group all files in a single card with an accordion per file, lazy-mount diff content on expand. The Rust ava-tools apply_patch tool already tracks per-file metadata."
+    },
+    {
+      "feature": "Todo list tool — read-only checkbox display with completed/pending counts",
+      "description": "The todowrite tool renders a checklist of Todo items from metadata.todos with read-only checkboxes, a subtitle showing 'X/N' completion, and auto-opens by default. Source: components/message-part.tsx lines 2115-2164.",
+      "opencode_file": "packages/ui/src/components/message-part.tsx",
+      "ava_status": "missing",
+      "importance": "medium",
+      "ava_recommendation": "AVA's todo_read/todo_write tools exist but the desktop frontend shows them as plain ToolCallCard rows. Render the todo list content as a checklist with read-only checkboxes, matching the actual task list in the TUI. The HIDDEN_TOOLS logic (hiding todoread/todowrite from the main stream but showing todowrite content) should also be ported."
+    },
+    {
+      "feature": "Question tool — completed Q&A display with answers shown post-completion",
+      "description": "The question tool is hidden while pending/running (no spinner shown) and only rendered after answers are provided. It then shows as a collapsible with each Q paired with its A(s) or 'No answer'. Subtitle shows 'X question(s) answered'. Source: components/message-part.tsx lines 2166-2209.",
+      "opencode_file": "packages/ui/src/components/message-part.tsx",
+      "ava_status": "partial",
+      "importance": "medium",
+      "ava_recommendation": "AVA's QuestionDock handles the interaction but does not render a post-completion record of Q&A pairs in the message stream. After the question tool completes, show a compact Q&A card in the message stream so the conversation history is complete."
+    },
+    {
+      "feature": "File icon based on file extension in diff headers",
+      "description": "Every file path in a diff header or accordion trigger shows a language-specific file icon (e.g. Rust crab, TypeScript logo, Python snake) via the FileIcon component. Icons are matched by file extension against a large icon map. Source: components/file-icon.tsx (referenced throughout diff tooling).",
+      "opencode_file": "packages/ui/src/components/file-icon.tsx",
+      "ava_status": "missing",
+      "importance": "medium",
+      "ava_recommendation": "AVA's DiffRow shows a plain file path with no icon. Add extension-based file icons to DiffRow and any future accordion headers. Can use a simple SVG map or an existing npm package (vscode-icons-ts, etc.)."
+    },
+    {
+      "feature": "Sticky accordion headers — headers that stick below a configurable offset while scrolling",
+      "description": "StickyAccordionHeader wraps Accordion.Trigger with position:sticky + a CSS variable --sticky-accordion-offset (default 40px). This keeps the file header visible while the diff content below it scrolls, matching the behaviour of GitHub's file headers in the PR review interface. Source: components/sticky-accordion-header.tsx.",
+      "opencode_file": "packages/ui/src/components/sticky-accordion-header.tsx",
+      "ava_status": "missing",
+      "importance": "medium",
+      "ava_recommendation": "If/when AVA adds a session review panel, sticky file headers are essential for usability in long diff lists. Apply position:sticky to file accordion triggers inside a scroll container with the appropriate top offset."
+    },
+    {
+      "feature": "Accessibility: aria-live, aria-hidden, aria-label, role='log' throughout",
+      "description": "Message content area uses aria-hidden={working()} so screen readers don't read partial streaming content. The scroll region has role='region' aria-label='Chat messages'. Copy buttons have aria-label that switches between 'Copy' and 'Copied' states. Tool shimmer duplicates text in aria-label while hiding animated spans via aria-hidden. Source: throughout message-part.tsx and session-turn.tsx.",
+      "opencode_file": "packages/ui/src/components/session-turn.tsx",
+      "ava_status": "partial",
+      "importance": "high",
+      "ava_recommendation": "AVA has aria-expanded on ToolCallCard and the ThinkingRow toggle button. Missing: (1) aria-hidden on streaming content while it is incomplete, (2) role='log' on the message list region, (3) aria-label switching on copy buttons between 'Copy' and 'Copied' states, (4) aria-label on tool shimmer components. These are low-effort but important for screen reader users."
+    },
+    {
+      "feature": "Binary scroll search in session turn messages (Binary.search)",
+      "description": "SessionTurn uses a binary search (Binary.search from @opencode-ai/util/binary) to locate a message by ID in the sorted messages array rather than Array.find(). This matters when sessions have hundreds of messages. Source: components/session-turn.tsx lines 174-181.",
+      "opencode_file": "packages/ui/src/components/session-turn.tsx",
+      "ava_status": "missing",
+      "importance": "low",
+      "ava_recommendation": "AVA's message list rendering uses index-based access. If message counts grow large (>100 per session), add a Map<id, Message> index rather than linear search. Lower priority than the rendering features."
+    },
+    {
+      "feature": "useSpring (motion-spring) — spring-physics value interpolation for any numeric signal",
+      "description": "A composable hook wrapping Motion's attachSpring that turns any reactive number into a spring-animated number. Cleans up the motion values on unmount. Used for smooth animated transitions of counts, widths, etc. Source: components/motion-spring.tsx lines 1-45.",
+      "opencode_file": "packages/ui/src/components/motion-spring.tsx",
+      "ava_status": "missing",
+      "importance": "low",
+      "ava_recommendation": "AVA uses CSS transitions for most animation. If spring-physics-based animation is desired (e.g. for the context group count display), add the Motion library and port useSpring. Low priority."
+    },
+    {
+      "feature": "Message model/provider display with per-message model name lookup",
+      "description": "Every assistant message footer shows the model name resolved from the provider store: data.store.provider.all.find(p => p.id === providerID)?.models[modelID]?.name ?? modelID. Falls back gracefully to raw modelID. Source: components/message-part.tsx lines 1332-1343.",
+      "opencode_file": "packages/ui/src/components/message-part.tsx",
+      "ava_status": "partial",
+      "importance": "medium",
+      "ava_recommendation": "AVA's TimestampLine already shows model name from message.model. The difference: OpenCode strips date suffixes (-20241022) from model IDs. AVA does this in formatModelName() too. Both are equivalent. No action needed."
+    },
+    {
+      "feature": "Turn duration display formatted as Xs or Xm Xs",
+      "description": "The text part footer shows the total time from user message to last assistant message completion. Formatted as '45s' or '2m 3s'. The duration accumulates across all assistant messages in the turn (max of completed timestamps). Source: components/message-part.tsx lines 1339-1355; session-turn.tsx lines 318-332.",
+      "opencode_file": "packages/ui/src/components/message-part.tsx",
+      "ava_status": "partial",
+      "importance": "medium",
+      "ava_recommendation": "AVA uses formatMs() which shows '2300ms'. Change to the Xs / Xm Xs format for durations ≥1s. One line change in format-time.ts."
+    },
+    {
+      "feature": "Skill tool renderer — collapsible with brain icon",
+      "description": "A registered 'skill' tool type shows a collapsible card with a brain icon, shimmering title while running, and hides details (no expand content). Source: components/message-part.tsx lines 2211-2231.",
+      "opencode_file": "packages/ui/src/components/message-part.tsx",
+      "ava_status": "missing",
+      "importance": "low",
+      "ava_recommendation": "AVA's skill tool calls render as generic ToolCallCards. Add a skill-specific renderer that shows the skill name and a brain icon. Low effort, good polish."
+    }
+  ],
+  "summary": "Top 10 things AVA should adopt from OpenCode:\n\n1. PER-TURN FILE DIFF SUMMARY (critical): After each completed turn, show a 'N files modified' collapsible with a 5-block proportional +/- bar chart and expandable before/after diffs. This is the most visible structural UX gap. Files: src/components/chat/MessageBubble.tsx, requires Rust bridge changes.\n\n2. SMART AUTO-SCROLL with nested-scroll detection (critical): Port createAutoScroll's [data-scrollable] sentinel pattern and dynamic overflow-anchor toggling. Fixes the bug where scrolling inside bash output blocks incorrectly pauses auto-scroll. Files: src/components/chat/MessageList.tsx.\n\n3. SESSION REVIEW PANEL (critical): A full-session diff browser with accordion per file, unified/split toggle, expand-all, and large-diff guard (>500 lines). The 'Changes' tab in RightPanel is the natural home. Requires aggregating DiffRow data at session level.\n\n4. COMPACTION VISUAL MARKER (high): When context compaction occurs, emit an event through the Tauri bridge and render a horizontal 'History compacted' divider in the message stream. Users currently have no awareness. Files: crates/ava-agent (emit event) + src/components/chat/ChatView.tsx.\n\n5. MORPHDOM FOR MARKDOWN UPDATES (high): Replace innerHTML assignment in MarkdownContent with morphdom diffing. This stops DOM teardown on every streaming token, prevents text-selection loss, and reduces rendering cost. One dependency addition (morphdom) + refactor of the apply-HTML effect.\n\n6. TEXTSHIMMER ON TOOL TITLES (high): Show a continuous shimmer sweep on tool name text while the tool is running. Currently AVA has no visual distinction between a pending and a running tool beyond the spinner icon. Add a CSS keyframe animation to the tool title span, controlled by a data-active attribute.\n\n7. LSP DIAGNOSTICS INLINE (high): After edit/write tool completion, show LSP errors (severity 1) below the diff. The ava-lsp crate already provides diagnostics; wire them through the Tauri IPC bridge and render up to 3 errors per DiffRow. Closes the feedback loop without leaving the chat.\n\n8. SESSION RETRY LIVE COUNTDOWN (high): When the Rust backend retries a failed API call (rate limit, server error), emit a retry event through the bridge and show a live countdown card: error message + 'retrying in 4s' + attempt number. The Rust RetryBudget already has the timing data.\n\n9. LARGE DIFF GUARD (high): In DiffRow, if additions+deletions > 500, skip rendering and show 'Diff too large to render (N lines). Render anyway?' This prevents browser hangs on large file rewrites and matches OpenCode's MAX_DIFF_CHANGED_LINES=500 threshold.\n\n10. ANIMATED CONTEXT GROUP SUMMARY with type breakdown (high): Change ContextGroupHeader from 'Gathering context... (3)' to 'Exploring — 3 reads, 2 searches, 1 list' with the ToolStatusTitle animated active→done transition and AnimatedNumber digit-spin for count increments. The grouping logic is already correct; only the label display needs updating."
+}

@@ -1,0 +1,397 @@
+{
+  "features_found": [
+    {
+      "feature": "user-message-inline-edit-with-fork",
+      "description": "User messages show an Edit button on hover. Clicking it replaces the bubble with a full inline textarea. Two distinct actions: 'Edit in Place' (updates session in-place) vs 'Fork Session' (creates a brand new session from that edit point). Keyboard: Cmd+Enter to save, Escape to cancel. Auto-resizes textarea up to 300px. Focuses textarea and positions cursor at end on enter.",
+      "goose_file": "docs/reference-code/goose/ui/desktop/src/components/UserMessage.tsx:16-247",
+      "ava_status": "partial",
+      "importance": "critical",
+      "ava_recommendation": "AVA has EditForm + MessageActions with edit button, but lacks the explicit fork-vs-edit-in-place dual-action distinction. The UX hint 'Edit in Place updates this session • Fork Session creates a new session' (line 167) is excellent copy that clarifies the semantic difference. Add this dual-button UX with explicit hint text to AVA's EditForm. AVA already has branch/rewind; the copy is the gap."
+    },
+    {
+      "feature": "tool-call-response-style-setting",
+      "description": "ToolCallView reads a 'responseStyle' user setting (concise vs detailed). In concise mode, tool details are collapsed by default; in detailed mode they start expanded. Setting is read live via window.electron.getSetting and re-read on RESPONSE_STYLE_CHANGED event.",
+      "goose_file": "docs/reference-code/goose/ui/desktop/src/components/ToolCallWithResponse.tsx:436-461",
+      "ava_status": "missing",
+      "importance": "high",
+      "ava_recommendation": "Add a 'tool verbosity' setting (concise/detailed) in AVA settings that controls default expand state of ToolCallCard. Wire it to the existing settings store. Low implementation cost; high UX impact for power users who find tool output noisy."
+    },
+    {
+      "feature": "tool-call-timing-tracker",
+      "description": "ToolCallView tracks wall-clock start time when a tool has no response yet, enabling a future elapsed-time display. The startTime signal is set when toolResponse is null and never set again.",
+      "goose_file": "docs/reference-code/goose/ui/desktop/src/components/ToolCallWithResponse.tsx:479-486",
+      "ava_status": "missing",
+      "importance": "medium",
+      "ava_recommendation": "AVA's MessageBubble already shows elapsed time from message metadata. Add per-tool elapsed time display inside ToolCallCard while the tool is running (e.g., '2.4s'). Store startTime in the tool call state."
+    },
+    {
+      "feature": "tool-call-inline-approval-with-amber-border",
+      "description": "When a tool call needs approval, its card gets an amber border (border-amber-500/50) and the approval UI appears inline inside the same card (not a separate dock or modal). The approval prompt text appears in an amber-tinted header above the approve/deny buttons. After approval, the visual distinction is cleared.",
+      "goose_file": "docs/reference-code/goose/ui/desktop/src/components/ToolCallWithResponse.tsx:183-221",
+      "ava_status": "partial",
+      "importance": "high",
+      "ava_recommendation": "AVA has ApprovalDock as a separate bar between MessageList and input. Goose's approach of embedding approval inline within the tool call card is contextually superior — users see exactly what is being approved. Consider adding an inline approval mode for the tool call card in addition to or instead of ApprovalDock."
+    },
+    {
+      "feature": "tool-call-permission-granularity-allow-once-always-deny",
+      "description": "ToolApprovalButtons offers: Allow Once, Always Allow, Deny (once), with a 'prompt' mode that hides Always Allow (for sensitive tools). Decision is stored in a module-level globalApprovalState Map so re-renders show the past decision ('Always allowed', 'Denied once') as static text rather than re-showing buttons.",
+      "goose_file": "docs/reference-code/goose/ui/desktop/src/components/ToolApprovalButtons.tsx:1-99",
+      "ava_status": "partial",
+      "importance": "high",
+      "ava_recommendation": "AVA's ApprovalDock has alwaysAllow checkbox and approve/deny, but doesn't distinguish allow-once vs always-allow as separate named buttons. Rename the checkbox pattern to explicit buttons like Goose for clarity. Also add post-approval static text ('Allowed once') so historical approvals are readable in chat history."
+    },
+    {
+      "feature": "tool-call-mcp-progress-bar",
+      "description": "ToolCallView tracks MCP progress notifications (method: notifications/progress). Progress entries are grouped by progressToken and rendered as a determinate or indeterminate progress bar with optional text message. While loading: max-height 4rem for logs; after completion: max-height 20rem.",
+      "goose_file": "docs/reference-code/goose/ui/desktop/src/components/ToolCallWithResponse.tsx:500-1002",
+      "ava_status": "missing",
+      "importance": "medium",
+      "ava_recommendation": "AVA has no MCP progress rendering. Add notifications/progress parsing in the ava-mcp layer and surface a progress bar in ToolCallCard. This is important for long-running MCP tools."
+    },
+    {
+      "feature": "tool-call-semantic-description-generation",
+      "description": "Instead of showing raw tool name + raw JSON arguments, getToolDescription() generates human-readable verb phrases: 'writing src/main.rs', 'running cargo test', 'searching for README'. Falls back to snakeToTitleCase(toolName) + key list for unknown tools, ensuring any MCP tool still shows readable output.",
+      "goose_file": "docs/reference-code/goose/ui/desktop/src/components/ToolCallWithResponse.tsx:523-679",
+      "ava_status": "partial",
+      "importance": "high",
+      "ava_recommendation": "AVA's ToolCallCard shows tool name and a collapsed view, but the label uses the raw tool name. Implement a getToolDescription-style function for AVA's 6 core tools (read→'reading path', write→'writing path', edit→'editing path', bash→'running cmd', glob→'searching pattern', grep→'searching for pattern'). This single function dramatically improves readability."
+    },
+    {
+      "feature": "tool-call-extension-tooltip",
+      "description": "For MCP tools (name contains double-underscore), getExtensionTooltip extracts the extension name and shows it in a tooltip on the tool icon ('my_server extension'). The cursor shows pointer+hover:opacity-80 on the label when a tooltip is available.",
+      "goose_file": "docs/reference-code/goose/ui/desktop/src/components/ToolCallWithResponse.tsx:419-427",
+      "ava_status": "missing",
+      "importance": "medium",
+      "ava_recommendation": "AVA uses tool-call-icon.tsx for icons but doesn't show MCP extension provenance. Add tooltip on MCP tool calls showing '{extension name} MCP tool'. Low effort, high clarity."
+    },
+    {
+      "feature": "tool-call-logs-section-with-live-scroll",
+      "description": "ToolLogsView renders MCP log notifications (method: notifications/message) as a scrollable log pane inside the tool call card. While working: max-height 4rem (shows just newest), collapsed after. Logs auto-scroll to newest entry via boxRef.scrollTop = boxRef.scrollHeight on every logs update.",
+      "goose_file": "docs/reference-code/goose/ui/desktop/src/components/ToolCallWithResponse.tsx:925-980",
+      "ava_status": "missing",
+      "importance": "medium",
+      "ava_recommendation": "Add a collapsible Logs section inside AVA's tool call cards for MCP log notifications. This is a key differentiator for MCP tool debugging."
+    },
+    {
+      "feature": "tool-icon-with-status-dot",
+      "description": "ToolIconWithStatus composites a tool-type icon with a small status dot (2x2 px, absolute -top-0.5 -right-0.5) that is green (success), red (error), yellow+animate-pulse (loading), or gray (pending). This gives at-a-glance tool status without expanding the card.",
+      "goose_file": "docs/reference-code/goose/ui/desktop/src/components/ToolCallStatusIndicator.tsx:1-61",
+      "ava_status": "partial",
+      "importance": "high",
+      "ava_recommendation": "AVA has tool-call-icon.tsx but no status overlay dot. Add a 2x2 px status dot overlay composited on the tool icon, matching Goose's pattern. This is a fast-scan affordance used throughout Goose's tool cards."
+    },
+    {
+      "feature": "message-copy-with-html-clipboard",
+      "description": "MessageCopyLink copies both 'text/plain' and 'text/html' (sanitized innerHTML) to the clipboard simultaneously via ClipboardItem API. Buttons are stripped before copying. Falls back to text-only. Appears as a slide-up overlay on group hover (opacity-0 -translate-y-4, animate to opacity-100 translate-y-0).",
+      "goose_file": "docs/reference-code/goose/ui/desktop/src/components/MessageCopyLink.tsx:1-60",
+      "ava_status": "partial",
+      "importance": "high",
+      "ava_recommendation": "AVA copies plain text (MessageActions). Add HTML clipboard support using ClipboardItem so pasting formatted markdown into rich text apps (Notion, Google Docs) preserves formatting. The slide-up transition on hover is also a nice polish detail to adopt."
+    },
+    {
+      "feature": "timestamp-slide-out-on-hover",
+      "description": "Both UserMessage and GooseMessage show a monospace timestamp below the message. On group hover, the timestamp slides up and fades (group-hover:-translate-y-4 group-hover:opacity-0) to reveal the copy/edit action buttons underneath. This is a clean information-density trick: metadata when idle, actions on intent.",
+      "goose_file": "docs/reference-code/goose/ui/desktop/src/components/GooseMessage.tsx:175, UserMessage.tsx:217",
+      "ava_status": "partial",
+      "importance": "high",
+      "ava_recommendation": "AVA has timestamps and MessageActions but places actions in a separate fixed toolbar (-top-3, right-0). Goose's slide-replace pattern is more space-efficient. Consider adopting: timestamp slides up and fades, revealing action buttons in its place on hover."
+    },
+    {
+      "feature": "progressive-message-rendering-with-search-trigger",
+      "description": "ProgressiveMessageList renders messages in batches (default: 20 per 20ms tick) to avoid blocking the UI on long histories. Shows a LoadingGoose indicator during batch loading. Crucially: pressing Cmd/Ctrl+F immediately renders ALL messages so search works correctly. Only activates for sessions > showLoadingThreshold (default 50) messages.",
+      "goose_file": "docs/reference-code/goose/ui/desktop/src/components/ProgressiveMessageList.tsx:1-281",
+      "ava_status": "partial",
+      "importance": "high",
+      "ava_recommendation": "AVA has virtual scrolling in MessageList with scroll-up backfill, which handles long histories differently. However, the 'press Cmd+F to force-render all for search' pattern is an excellent fallback. Ensure AVA's search (SearchBar.tsx) triggers full message load when activated."
+    },
+    {
+      "feature": "chat-state-specific-animated-loading-icons",
+      "description": "LoadingGoose maps each ChatState (Thinking, Streaming, WaitingForUserInput, Compacting, RestartingAgent, LoadingConversation) to both a specific text message AND a different animated icon: AnimatedIcons (cycling through 7 icons) for thinking, FlyingBird (150ms cycle) for streaming, Watch icons (0-6) for waiting. Positioned absolutely at bottom-left of scroll area.",
+      "goose_file": "docs/reference-code/goose/ui/desktop/src/components/LoadingGoose.tsx:1-50",
+      "ava_status": "partial",
+      "importance": "medium",
+      "ava_recommendation": "AVA's LiveStreamingBlock shows typing dots + 'ava is thinking...' text for idle streaming. Consider differentiating the loading animation between thinking, tool-running, and waiting states with different icon animations, as Goose does. The AnimatedIcons cycling approach is playful and informative."
+    },
+    {
+      "feature": "animated-cycling-icon-set",
+      "description": "AnimatedIcons cycles through 7 icons (CodeXml, Cog, Fuel, GalleryHorizontalEnd, Gavel, GlassWater, Grape) for 'thinking' variant and 7 Watch icons (Watch0-Watch6) for 'waiting' variant on a configurable interval. Transition via opacity duration-200.",
+      "goose_file": "docs/reference-code/goose/ui/desktop/src/components/AnimatedIcons.tsx:1-51",
+      "ava_status": "missing",
+      "importance": "low",
+      "ava_recommendation": "Nice polish detail. AVA could add a similar icon cycling animation during long-running tool calls to show the agent is alive. Relatively low value vs implementation cost."
+    },
+    {
+      "feature": "chat-in-search-bar-with-case-sensitivity",
+      "description": "SearchBar is a sticky top bar that appears on Cmd+F, with debounced search (200ms, min 2 chars), case-sensitive toggle, up/down navigation arrows with result count (currentIndex/total), and slide-in/slide-out CSS animations. Integrated via SearchView context that wraps message list.",
+      "goose_file": "docs/reference-code/goose/ui/desktop/src/components/conversation/SearchBar.tsx:1-235",
+      "ava_status": "has",
+      "importance": "high",
+      "ava_recommendation": "AVA already has SearchBar.tsx in src/components/chat/. Verify case-sensitivity toggle and result count navigation are implemented. Goose's debounce at 200ms with 2-char minimum is a good pattern."
+    },
+    {
+      "feature": "message-queue-with-drag-reorder",
+      "description": "MessageQueue shows queued messages as draggable numbered cards above the input. Supports: drag-to-reorder (HTML5 drag API with visual feedback: scale-105 + rotate-2 on drag, green border on drop target), inline edit by clicking text, 'Send Now' to stop current and send immediately, individual remove, clear all, paused/active state with amber vs blue indicator dot. Collapsible header with +N remaining count.",
+      "goose_file": "docs/reference-code/goose/ui/desktop/src/components/MessageQueue.tsx:1-435",
+      "ava_status": "partial",
+      "importance": "high",
+      "ava_recommendation": "AVA has MessageQueueBar.tsx for the three-tier queue (steering/follow-up/post-complete). Goose's queue is simpler (single tier) but has superior UX: drag-to-reorder, inline edit by clicking, Send Now button, and numbered priority indicators. Add drag-to-reorder and inline click-to-edit to AVA's MessageQueueBar."
+    },
+    {
+      "feature": "interruption-detector-with-confidence-ui",
+      "description": "InterruptionHandler shows a modal overlay when an interruption keyword is detected in the typed message. Shows: action type icon (stop/pause/redirect), action description, confidence percentage as a color-coded progress bar (green >80%, amber >60%, red <60%), and a redirect input for redirect actions. Animated entry (scale-95 → scale-100).",
+      "goose_file": "docs/reference-code/goose/ui/desktop/src/components/InterruptionHandler.tsx:1-236",
+      "ava_status": "missing",
+      "importance": "medium",
+      "ava_recommendation": "AVA's three-tier queue handles interruptions differently (no detection UI — just sends to steering tier). Goose auto-detects stop/pause/redirect intent in typed text and shows a confirmation modal with confidence score. Consider adding interruption keyword detection in AVA's input handler (e.g. 'stop', 'cancel', 'wait') with a lightweight confirmation."
+    },
+    {
+      "feature": "elicitation-request-with-json-schema-form-and-countdown",
+      "description": "ElicitationRequest renders a structured form (JsonSchemaForm) from a JSON Schema for MCP elicitation protocol. Shows a 300-second countdown timer with pulse animation that turns red at 60s remaining. Shows 'expired' state when timer hits 0. Shows 'submitted' checkmark after submission. Shows 'cancelled' message if the request was cancelled.",
+      "goose_file": "docs/reference-code/goose/ui/desktop/src/components/ElicitationRequest.tsx:1-148",
+      "ava_status": "missing",
+      "importance": "high",
+      "ava_recommendation": "AVA has QuestionDock for agent questions but no MCP elicitation protocol support. This is the MCP 'elicitation' spec (draft). Add ElicitationRequest rendering in AVA for MCP tools that use the elicitation protocol. The countdown timer is a key UX detail — without it users don't know why nothing is happening."
+    },
+    {
+      "feature": "session-status-indicators-in-sidebar",
+      "description": "SessionIndicators renders per-session visual states in the session list: streaming spinner (Loader2 animate-spin, blue), unread dot (green 2x2 rounded-full), error icon (AlertCircle, red). Priority: error > streaming > unread.",
+      "goose_file": "docs/reference-code/goose/ui/desktop/src/components/SessionIndicators.tsx:1-46",
+      "ava_status": "partial",
+      "importance": "medium",
+      "ava_recommendation": "AVA's SessionSwitcher shows session names/dates. Add streaming, unread, and error status indicators to each session row in the SessionSwitcher. Priority ordering (error first) is important."
+    },
+    {
+      "feature": "session-fork-navigation",
+      "description": "When a user edits a message with 'Fork Session', BaseChat navigates to a new session URL with resumeSessionId + shouldStartAgent + editedMessage params. Uses React Router navigate with disableAnimation: true and immediately dispatches SESSION_CREATED event. The new session is initialized from the fork point with the edited message.",
+      "goose_file": "docs/reference-code/goose/ui/desktop/src/components/BaseChat.tsx:272-300",
+      "ava_status": "has",
+      "importance": "critical",
+      "ava_recommendation": "AVA has branching (onBranch in MessageActions). Ensure the branch creates a visible new session entry in SessionSwitcher rather than just being a git worktree operation. UX should mirror Goose: fork → new session → navigate to it."
+    },
+    {
+      "feature": "command-history-navigation-with-global-fallback",
+      "description": "ChatInput maintains per-session command history and falls back to a global message history (LocalMessageStorage.getRecentMessages()) when the session history is exhausted. Navigation: Cmd/Ctrl+Up (go older) / Cmd/Ctrl+Down (go newer). Tracks 'hasUserTyped' to prevent history navigation when the user is actively editing.",
+      "goose_file": "docs/reference-code/goose/ui/desktop/src/components/ChatInput.tsx:761-837",
+      "ava_status": "missing",
+      "importance": "medium",
+      "ava_recommendation": "AVA's text-area.tsx does not implement command history navigation. Add Cmd/Ctrl+Up/Down to cycle through previous messages. Store recent messages in a session-scoped ringbuffer. This is a power-user quality-of-life feature."
+    },
+    {
+      "feature": "image-compression-before-upload",
+      "description": "ChatInput calls compressImageDataUrl() on every pasted or file-selected image before storing it. Max 10 images per message (MAX_IMAGES_PER_MESSAGE). Shows loading spinner overlay on each image while compressing. Error state per image (red border, error text overlaid).",
+      "goose_file": "docs/reference-code/goose/ui/desktop/src/components/ChatInput.tsx:671-742",
+      "ava_status": "partial",
+      "importance": "high",
+      "ava_recommendation": "AVA has image attachment support (attachment-previews.tsx). Verify that image compression is applied before base64 encoding, as large images can easily exceed LLM input limits. Add per-image loading state and error overlay."
+    },
+    {
+      "feature": "image-click-to-expand",
+      "description": "ImagePreview renders images with click-to-toggle expanded state: max-h-40 max-w-40 collapsed, max-w-full max-h-96 expanded. Shows 'Click to expand/collapse' hint below. Error state replaces image with italic red text.",
+      "goose_file": "docs/reference-code/goose/ui/desktop/src/components/ImagePreview.tsx:1-32",
+      "ava_status": "missing",
+      "importance": "medium",
+      "ava_recommendation": "AVA renders images inline in MessageBubble with fixed max dimensions. Add click-to-expand toggle for images in conversation history. The expand/collapse state is per-image and not persisted."
+    },
+    {
+      "feature": "math-rendering-with-katex",
+      "description": "MarkdownContent uses remark-math + rehype-katex for LaTeX math rendering (both display and inline). singleDollarTextMath: false (only $$ for display math, \\\\( \\\\) for inline). throwOnError: false with red error color fallback.",
+      "goose_file": "docs/reference-code/goose/ui/desktop/src/components/MarkdownContent.tsx:1-28",
+      "ava_status": "missing",
+      "importance": "medium",
+      "ava_recommendation": "AVA's markdown library (renderMarkdown in src/lib/markdown.ts) does not include KaTeX. Add remark-math + rehype-katex or equivalent. This is important for scientific/mathematical queries."
+    },
+    {
+      "feature": "html-in-markdown-wrapped-in-code-block",
+      "description": "MarkdownContent calls wrapHTMLInCodeBlock() before parsing — raw HTML in model output is converted to a fenced code block to prevent XSS and display it verbatim. Also has a URL protocol allowlist (BLOCKED_PROTOCOLS) with custom urlTransform. Non-http deep links (spotify:, vscode:) show a confirmation modal before opening.",
+      "goose_file": "docs/reference-code/goose/ui/desktop/src/components/MarkdownContent.tsx:148-275",
+      "ava_status": "missing",
+      "importance": "critical",
+      "ava_recommendation": "AVA's renderMarkdown does not sanitize raw HTML. This is a security issue: if a model returns HTML, it can be rendered as live DOM nodes. Add HTML sanitization (wrap raw HTML in code fence or strip it). Also add a protocol allowlist for links. This is the highest-priority security gap."
+    },
+    {
+      "feature": "custom-url-transform-for-deep-links",
+      "description": "React-markdown's default urlTransform blocks non-http protocols. Goose overrides it with a custom function that allows all protocols EXCEPT a blocked list (javascript:, data:, file:). Non-safe protocols trigger a confirmation modal ('Open spotify: link?') via window.electron.openExternal.",
+      "goose_file": "docs/reference-code/goose/ui/desktop/src/components/MarkdownContent.tsx:148-162, 235-268",
+      "ava_status": "missing",
+      "importance": "high",
+      "ava_recommendation": "AVA's markdown renderer likely strips or ignores custom protocols. Add a confirmation modal for non-http links (vscode://, spotify://, etc.) to match Goose's pattern, so these deep links actually work."
+    },
+    {
+      "feature": "code-block-memoization-for-large-blocks",
+      "description": "Goose's CodeBlock is wrapped in React.memo and the SyntaxHighlighter is additionally wrapped in useMemo keyed on [language, children]. Logs a warning for code blocks > 10KB. showLineNumbers and wrapLines are explicitly false for performance.",
+      "goose_file": "docs/reference-code/goose/ui/desktop/src/components/MarkdownContent.tsx:44-130",
+      "ava_status": "partial",
+      "importance": "medium",
+      "ava_recommendation": "AVA's markdown renderer attaches copy handlers via DOM manipulation (attachCopyHandlers). Verify syntax highlighting doesn't re-render on every streaming token. The 10KB large-block warning is a good debugging aid to add."
+    },
+    {
+      "feature": "code-block-expand-collapse-for-long-code",
+      "description": "AVA's MarkdownContent (src/components/chat/MarkdownContent.tsx:167-192) auto-collapses code blocks with > 20 lines and adds a 'Show all (N lines)' button. This is AVA-only and better than Goose's always-visible pattern.",
+      "goose_file": "N/A (AVA-only feature)",
+      "ava_status": "has",
+      "importance": "high",
+      "ava_recommendation": "AVA already has this. Ensure the threshold and button copy are good."
+    },
+    {
+      "feature": "working-directory-switcher-in-input-bar",
+      "description": "ChatInput has a DirSwitcher component (bottom left of input bar) that shows and lets the user change the session's working directory. Changing it restarts the agent session (onRestartStart/onRestartEnd callbacks, sets ChatState.RestartingAgent). Shows the current working dir as a clickable pill.",
+      "goose_file": "docs/reference-code/goose/ui/desktop/src/components/ChatInput.tsx:1513-1525",
+      "ava_status": "missing",
+      "importance": "medium",
+      "ava_recommendation": "AVA has no working directory UI in the chat input. This is a useful feature for switching project context without starting a new session. Consider adding a dir badge to the status bar or input toolbar that allows changing the active path."
+    },
+    {
+      "feature": "context-window-progress-alert-with-compact-button",
+      "description": "ChatInput tracks totalTokens vs tokenLimit and shows an alert with a progress bar when tokens are in use. The alert has a 'compact' button (with ScrollText icon) that sends '/compact' to the agent. Token limit is resolved with 3-tier priority: predefined env models → canonical API info → provider metadata → fallback 128K.",
+      "goose_file": "docs/reference-code/goose/ui/desktop/src/components/ChatInput.tsx:468-503",
+      "ava_status": "has",
+      "importance": "critical",
+      "ava_recommendation": "AVA already shows token count in the status bar. Verify the compact trigger button is accessible from the input area (AVA has /compact command). The 3-tier model limit lookup is worth reviewing for completeness."
+    },
+    {
+      "feature": "tool-count-warning-alert",
+      "description": "ChatInput shows a Warning alert when toolCount > 60 (TOOLS_MAX_SUGGESTED) with text 'Too many tools can degrade performance. Tool count: N (recommend: 60)' and an action button 'View extensions'. Alert is auto-show: false (user must open it).",
+      "goose_file": "docs/reference-code/goose/ui/desktop/src/components/ChatInput.tsx:491-503",
+      "ava_status": "missing",
+      "importance": "medium",
+      "ava_recommendation": "AVA loads MCP tools dynamically. Add a warning in the input toolbar (non-intrusive badge or alert) when active tool count exceeds a threshold. Link it to the extensions/tools settings page."
+    },
+    {
+      "feature": "cost-tracker-in-input-bar",
+      "description": "CostTracker component in the input bar shows per-session accumulated cost when COST_TRACKING_ENABLED is true. Shows inputTokens + outputTokens + totalCost, broken down by model. Lives in the secondary actions row below the textarea.",
+      "goose_file": "docs/reference-code/goose/ui/desktop/src/components/ChatInput.tsx:1546-1558",
+      "ava_status": "has",
+      "importance": "high",
+      "ava_recommendation": "AVA shows cost per message in TimestampLine (formatCost). Also has UsageDetailsDialog. Verify cost is visible in the input bar area (not just in message timestamps) for a running total while composing."
+    },
+    {
+      "feature": "diagnostics-bundle-generator",
+      "description": "A Bug icon button in the ChatInput secondary row opens DiagnosticsModal that generates a diagnostics bundle for the session. Triggered via trackDiagnosticsOpened() analytics call. Available any time a sessionId exists.",
+      "goose_file": "docs/reference-code/goose/ui/desktop/src/components/ChatInput.tsx:1607-1625",
+      "ava_status": "missing",
+      "importance": "low",
+      "ava_recommendation": "A support-diagnostics bundle (session logs, tool calls, errors) is useful for bug reports. Add a 'Report issue' or diagnostic export button accessible from the input or settings."
+    },
+    {
+      "feature": "create-recipe-from-session",
+      "description": "A ChefHat icon button in ChatInput (visible after messages exist) opens CreateRecipeFromSessionModal to save the current session as a re-runnable recipe (template with parameter substitution). If already a recipe, shows 'View/Edit Recipe' instead.",
+      "goose_file": "docs/reference-code/goose/ui/desktop/src/components/ChatInput.tsx:1577-1603",
+      "ava_status": "missing",
+      "importance": "low",
+      "ava_recommendation": "AVA has no recipe/template system. This is a significant product feature, not just a UI detail. Not a quick add. Low priority for now."
+    },
+    {
+      "feature": "voice-dictation-waveform-visualizer",
+      "description": "WaveformVisualizer uses Web Audio API (AnalyserNode, FFT 256) to render real-time frequency bars on a canvas while recording. Bars are colored with HSL gradients (hue 200-220 blue-to-cyan, intensity-based saturation/lightness) with smoothing factor 0.3. DPR-aware canvas sizing.",
+      "goose_file": "docs/reference-code/goose/ui/desktop/src/components/WaveformVisualizer.tsx:1-113",
+      "ava_status": "missing",
+      "importance": "low",
+      "ava_recommendation": "AVA has voice recording (mic-button.tsx) but no waveform visualization. Add a canvas waveform to the mic recording UI for visual feedback. Nice polish but not critical."
+    },
+    {
+      "feature": "voice-auto-submit-on-keyword",
+      "description": "When voice transcription returns text ending with 'submit' (case-insensitive, with optional trailing punctuation), ChatInput automatically strips the word and submits the message. Uses regex /\\bsubmit[.,!?;'\"\\\\s]*$/i. Tracks via trackVoiceDictation('auto_submit').",
+      "goose_file": "docs/reference-code/goose/ui/desktop/src/components/ChatInput.tsx:302-316",
+      "ava_status": "missing",
+      "importance": "medium",
+      "ava_recommendation": "AVA has voice recording (voice-button.tsx) but no auto-submit keyword. Add 'say submit to send' as a voice command. Simple regex addition to the transcription callback."
+    },
+    {
+      "feature": "popular-chat-topics-empty-state",
+      "description": "When the session has 0 messages and no initial message, BaseChat shows PopularChatTopics — 3 clickable suggestion cards with icons (FolderTree, MessageSquare, Code) positioned absolutely at the bottom-left of the scroll area. Clicking a topic submits it as a message.",
+      "goose_file": "docs/reference-code/goose/ui/desktop/src/components/PopularChatTopics.tsx:1-76, BaseChat.tsx:450-454",
+      "ava_status": "missing",
+      "importance": "medium",
+      "ava_recommendation": "AVA has a welcome screen but no clickable example prompts in the main chat empty state. Add 3-5 contextual starter prompts (relevant to the current project if possible) shown when the chat is empty. These drive first-session engagement."
+    },
+    {
+      "feature": "file-drop-zones-on-both-scroll-area-and-input",
+      "description": "BaseChat wires onDrop/onDragOver to both the ScrollArea and the ChatInput div (data-drop-zone='true' on both). Files dropped anywhere in the chat area are captured. Drops are merged from both zones into allDroppedFiles. Non-image files show as file boxes with extension badge; images show as thumbnails.",
+      "goose_file": "docs/reference-code/goose/ui/desktop/src/components/BaseChat.tsx:408-414, ChatInput.tsx:1213",
+      "ava_status": "partial",
+      "importance": "high",
+      "ava_recommendation": "AVA has attachment support in MessageInput. Verify that drag-and-drop works on both the message area AND the input div, not just on a specific drop target. Dual-zone drop is essential for natural file-dropping behavior."
+    },
+    {
+      "feature": "mention-popover-at-typing",
+      "description": "Typing '@' anywhere in the input opens MentionPopover for file/directory selection. Typing '/' at the start opens it for slash commands. Popover uses a custom fuzzy match algorithm with bonuses for: consecutive chars (3x), word boundaries (+10), filename prefix (+15), exact substring (+20), filename match (+25). Depth-ordered results with priority dirs. Full recursive directory scan up to depth 5.",
+      "goose_file": "docs/reference-code/goose/ui/desktop/src/components/MentionPopover.tsx:1-587, ChatInput.tsx:572-610",
+      "ava_status": "partial",
+      "importance": "high",
+      "ava_recommendation": "AVA has file-mention-popover.tsx and slash-command-popover.tsx. Compare the fuzzy matching algorithm — Goose's custom scorer with path-separator bonuses may outperform a simple prefix match. Also verify that '@' mention works mid-sentence (not just at start of input)."
+    },
+    {
+      "feature": "subagent-tool-display-in-notifications",
+      "description": "ToolLogsView specially formats MCP 'subagent_tool_request' notification data: shows '[subagent:shortId] toolName | extensionName'. For execute_code with a tool_graph, shows numbered steps with dependencies: '1. tool: description (uses 2, 3)'.",
+      "goose_file": "docs/reference-code/goose/ui/desktop/src/components/ToolCallWithResponse.tsx:327-403",
+      "ava_status": "missing",
+      "importance": "low",
+      "ava_recommendation": "AVA has Praxis multi-agent with SubagentCard.tsx. The sub-agent tool notification formatting in Goose is MCP-specific. AVA's Praxis uses a different IPC model. Consider if AVA's TeamChatView needs similar sub-agent tool attribution."
+    },
+    {
+      "feature": "auto-focus-on-session-activation",
+      "description": "BaseChat has a useEffect that sets a 100ms timeout to focus chatInputRef.current whenever isActiveSession && sessionId && chatState !== LoadingConversation. This ensures focus is restored when switching between open sessions.",
+      "goose_file": "docs/reference-code/goose/ui/desktop/src/components/BaseChat.tsx:247-260",
+      "ava_status": "partial",
+      "importance": "medium",
+      "ava_recommendation": "Verify AVA restores input focus when switching sessions. The 100ms delay is intentional to let the DOM settle after session navigation."
+    },
+    {
+      "feature": "ime-composition-handling",
+      "description": "ChatInput tracks isComposing state via onCompositionStart/End events on the textarea. Enter key does NOT submit during composition (isComposing check in handleKeyDown line 980). Shift+Enter adds a newline. Alt+Enter also adds a newline (line 986). This prevents premature submission during CJK IME input.",
+      "goose_file": "docs/reference-code/goose/ui/desktop/src/components/ChatInput.tsx:753-760, 978-990",
+      "ava_status": "has",
+      "importance": "critical",
+      "ava_recommendation": "AVA has IME handling (use-input-state.ts). Verify Shift+Enter and Alt+Enter both add newlines consistently."
+    },
+    {
+      "feature": "credits-exhausted-notification-inline",
+      "description": "CreditsExhaustedNotification renders a yellow alert card inline in the message list (not a modal) when the provider returns a credits-exhausted system notification. Shows 'Insufficient Credits' + message + 'Add credits' button that opens an external URL. URL is validated against a web protocol allowlist.",
+      "goose_file": "docs/reference-code/goose/ui/desktop/src/components/context_management/CreditsExhaustedNotification.tsx:1-80",
+      "ava_status": "missing",
+      "importance": "medium",
+      "ava_recommendation": "AVA's error handling (ErrorRow in message-rows) shows API errors. Add a specialized inline card for credit/quota exhaustion errors with a 'Top up credits' CTA for providers that support it (e.g., OpenRouter). Currently rate limit errors show as generic error rows."
+    },
+    {
+      "feature": "tool-call-consecutive-chain-timestamp-hiding",
+      "description": "GooseMessage uses identifyConsecutiveToolCalls() and shouldHideTimestamp() to suppress the timestamp on assistant messages that are part of a rapid tool call chain. This prevents the UI from being cluttered with many timestamps when the agent runs many tools in sequence.",
+      "goose_file": "docs/reference-code/goose/ui/desktop/src/components/GooseMessage.tsx:88-92, ../utils/toolCallChaining.ts",
+      "ava_status": "missing",
+      "importance": "medium",
+      "ava_recommendation": "AVA's MessageBubble shows a TimestampLine after every message. When an assistant uses many tools in sequence, this creates repetitive timestamps. Suppress timestamps for intermediate tool-call messages, only showing them at natural narrative breaks."
+    },
+    {
+      "feature": "session-load-error-state-in-chat",
+      "description": "BaseChat detects sessionLoadError and renders a full-screen error state with a styled red error card ('Failed to Load Session' + error text) and a 'Go home' button that navigates back to the chat hub. No modal — the error replaces the chat area entirely.",
+      "goose_file": "docs/reference-code/goose/ui/desktop/src/components/BaseChat.tsx:345-376",
+      "ava_status": "partial",
+      "importance": "high",
+      "ava_recommendation": "AVA's ChatView handles loading/error states. Verify that session load failures show a clear, actionable error with a 'New chat' or 'Go home' escape hatch, not just a blank area or spinner."
+    },
+    {
+      "feature": "global-scroll-to-bottom-event",
+      "description": "BaseChat listens for a SCROLL_CHAT_TO_BOTTOM custom window event with a 200ms delay for DOM settlement. This allows MCP UI resource renderers to programmatically trigger scroll after inserting content.",
+      "goose_file": "docs/reference-code/goose/ui/desktop/src/components/BaseChat.tsx:232-244",
+      "ava_status": "partial",
+      "importance": "low",
+      "ava_recommendation": "AVA already has scroll-to-bottom in useMessageScroll. The global event approach is useful if MCP tools or plan cards need to trigger scroll after dynamic content insertion. Consider exposing a scrollToBottom event bus."
+    },
+    {
+      "feature": "goose-watermark-in-chat-area",
+      "description": "BaseChat renders a small Goose logo + 'goose' text in the top-right corner of the scroll area (z-[60], no-drag). It links to the Goose website. This is the app branding mark inside the content area.",
+      "goose_file": "docs/reference-code/goose/ui/desktop/src/components/BaseChat.tsx:390-403",
+      "ava_status": "missing",
+      "importance": "low",
+      "ava_recommendation": "AVA has no branding watermark in the chat area. Not a functional need, but a branding consideration."
+    },
+    {
+      "feature": "recipe-security-scan-on-load",
+      "description": "When loading a recipe-based session, BaseChat runs scanRecipe() to check for security warnings and shows a RecipeWarningModal before allowing execution. Tracks whether the user has accepted the recipe before via window.electron.hasAcceptedRecipeBefore() and recordRecipeHash(). Modal is skipped on repeat use.",
+      "goose_file": "docs/reference-code/goose/ui/desktop/src/components/BaseChat.tsx:188-209",
+      "ava_status": "missing",
+      "importance": "low",
+      "ava_recommendation": "Not applicable unless AVA adds a recipe/template system."
+    }
+  ],
+  "summary": "Top 10 things AVA should adopt from Goose's desktop chat UI:\n\n1. HTML SANITIZATION IN MARKDOWN (critical security): Goose wraps raw HTML in code fences and has a URL protocol allowlist + non-http link confirmation modal. AVA's renderMarkdown has no HTML sanitization — a model returning raw HTML can inject DOM nodes. Fix immediately.\n\n2. DUAL-ACTION USER MESSAGE EDIT (Edit in Place vs Fork Session): Goose's UserMessage replaces the bubble with a full textarea and two distinct action buttons with a helpful hint 'Edit in Place updates this session • Fork Session creates a new session'. AVA has an EditForm but lacks this clear semantic distinction and hint copy.\n\n3. INLINE TOOL APPROVAL INSIDE TOOL CARD: Goose embeds the approval UI (amber border + Allow Once/Always Allow/Deny buttons) directly inside the tool call card, not in a separate dock. Users see exactly what is being approved without context-switching. AVA's ApprovalDock is a separate bar — consider adding an inline approval mode.\n\n4. TOOL-CALL SEMANTIC DESCRIPTION LABELS: Goose generates human-readable verb phrases for every tool call ('writing src/main.rs', 'running cargo test') via getToolDescription(). AVA shows raw tool names. Implementing this for AVA's 6 core tools + generic MCP fallback dramatically improves readability.\n\n5. STATUS DOT OVERLAY ON TOOL ICON: Goose composites a 2x2 px animated dot (green/red/yellow-pulse/gray) on the tool type icon. This gives at-a-glance tool status. AVA has tool-call-icon.tsx but no status overlay — a 10-line addition with high UX payoff.\n\n6. MESSAGE COPY WITH HTML CLIPBOARD: Goose copies both text/plain and text/html (sanitized innerHTML) using ClipboardItem API. Pasting into Notion, Google Docs etc. preserves markdown formatting. AVA copies plain text only.\n\n7. MCP ELICITATION PROTOCOL: Goose has ElicitationRequest — a JSON Schema form rendered inline in the chat when an MCP tool requests structured user input, with a 300s countdown timer turning red at 60s. AVA has QuestionDock but no MCP elicitation support. Essential for MCP ecosystem compatibility.\n\n8. RESPONSIVE TOOL VERBOSITY SETTING: Goose reads a 'responseStyle' setting (concise/detailed) that controls whether tool details start collapsed or expanded. AVA has no equivalent setting. Low implementation cost with high power-user value.\n\n9. MESSAGE QUEUE DRAG-TO-REORDER: Goose's MessageQueue supports HTML5 drag-and-drop to reorder queued messages with rich visual feedback (scale, rotate, green drop indicator). AVA's MessageQueueBar exists but lacks reordering and inline edit. AVA's three-tier model is superior architecturally but needs this UX polish.\n\n10. POPULAR CHAT TOPICS EMPTY STATE: When no messages exist, Goose shows 3 clickable example prompts. AVA has a welcome screen but no in-chat starter prompts. These drive first-session engagement and help users discover what the agent can do."
+}

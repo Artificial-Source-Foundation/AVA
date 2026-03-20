@@ -480,13 +480,9 @@ impl OpenAIProvider {
         common::parse_openai_completion_payload(payload)
     }
 
-    /// Label used in error messages — distinguishes ChatGPT OAuth from standard OpenAI.
+    /// Label used in error messages and credential lookups.
     fn provider_label(&self) -> String {
-        if self.is_subscription() {
-            "ChatGPT".to_string()
-        } else {
-            "OpenAI".to_string()
-        }
+        "openai".to_string()
     }
 
     async fn client(&self) -> Result<Arc<reqwest::Client>> {

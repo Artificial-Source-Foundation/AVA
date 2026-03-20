@@ -1,0 +1,17 @@
+{
+  "timestamp": "2026-03-20T00:00:00Z",
+  "rust_tests_passed": 1756,
+  "rust_tests_failed": 0,
+  "rust_tests_ignored": 3,
+  "clippy_warnings": 0,
+  "cargo_check_pass": true,
+  "tsc_pass": true,
+  "eslint_errors": 1,
+  "eslint_warnings": 114,
+  "ts_tests_passed": 412,
+  "ts_tests_failed": 19,
+  "ts_tests_failed_note": "6 test files fail - likely e2e needing Tauri runtime",
+  "total_rust_files": 361,
+  "total_ts_files": 523,
+  "crate_count": 21
+}

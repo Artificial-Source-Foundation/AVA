@@ -1,0 +1,14 @@
+{
+  "status": "fixed",
+  "files_modified": [
+    "src/stores/session/session-state.ts",
+    "src/stores/session/index.ts",
+    "src/components/chat/CompactionDivider.tsx",
+    "src/components/chat/MessageList.tsx",
+    "src/components/chat/ToolCallCard.tsx",
+    "src/components/chat/tool-call-icon.tsx",
+    "src/index.css"
+  ],
+  "summary": "Implemented all three UI polish features. (1) Compaction Divider: added compactionIndex signal to session-state.ts that listens for the existing ava:compacted window event and records the message count at compaction time. The signal is exported through session/index.ts and consumed in MessageList.tsx, which renders a <CompactionDivider> component before the first post-compaction message and applies a compaction-pre CSS class (50% opacity, 75% on hover) to all pre-compaction message rows. (2) Tool Shimmer: added @keyframes tool-shimmer and .tool-summary-shimmer CSS class (background-clip:text gradient sweep) in index.css; applied conditionally via classList in ToolCallCard.tsx when isRunning() is true. (3) Tool Status Dot: added .tool-status-dot-wrapper + .tool-status-dot--{pending|running|success|error} CSS classes including a pulse @keyframes for running state; wrapped the icon render in tool-call-icon.tsx with a relative container and overlaid the 8px dot at top-right. All animations use only opacity and transform — no layout-triggering properties. Zero new TypeScript errors introduced.",
+  "tsc_pass": true
+}

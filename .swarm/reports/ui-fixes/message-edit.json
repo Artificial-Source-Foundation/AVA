@@ -1,0 +1,6 @@
+{
+  "status": "fixed",
+  "files_modified": ["src/components/chat/EditForm.tsx"],
+  "summary": "The user message edit-and-resend feature was already fully wired end-to-end: MessageActions shows a hover-reveal Pencil button on user messages (opacity-0 group-hover:opacity-100), clicking it calls onStartEdit which sets editingMessageId in the session store, MessageBubble swaps the bubble for EditForm when isEditing=true, EditForm has a pre-filled textarea and Save & Resend / Cancel buttons, and onSaveEdit calls editAndResend(messageId, content) which routes through useChat -> useAgent -> rustBackend.editAndResend IPC. The only gap was the textarea lacked true auto-focus-with-cursor-at-end and auto-height-grow behaviour. Fixed in EditForm.tsx: added ref + onMount logic that resizes the textarea to its scroll height, places cursor at end of text, and focuses the element; added autoResize() called on every onInput event so the textarea grows as the user types; removed the now-redundant autofocus HTML attribute in favour of the explicit focus() call; changed void-return handleSave call to use void keyword to satisfy strict TS.",
+  "tsc_pass": true
+}

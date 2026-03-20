@@ -37,6 +37,10 @@ export function useMessageScroll(opts: UseMessageScrollOptions): MessageScrollAP
   let scrollRaf: number | undefined
   let resizeObserver: ResizeObserver | undefined
   let userScrolledUp = false
+  // True while the pointer is hovering over a nested [data-scrollable] region.
+  // Scroll events that occur during this time come from scrolling inside tool
+  // output / diff viewers — they must not disable main-chat auto-scroll.
+  let pointerOverNestedScrollable = false
 
   const [shouldAutoScroll, setShouldAutoScroll] = createSignal(true)
 
@@ -66,9 +70,45 @@ export function useMessageScroll(opts: UseMessageScrollOptions): MessageScrollAP
     resizeObserver.observe(containerRef)
   }
 
-  const handleScroll = (): void => {
+  const handlePointerEnterNested = (): void => {
+    pointerOverNestedScrollable = true
+  }
+
+  const handlePointerLeaveNested = (): void => {
+    pointerOverNestedScrollable = false
+  }
+
+  /** Attach pointer-enter/leave tracking to all [data-scrollable] descendants. */
+  const observeNestedScrollables = (): void => {
+    if (!containerRef) return
+    const nested = containerRef.querySelectorAll('[data-scrollable]')
+    nested.forEach((el) => {
+      el.addEventListener('pointerenter', handlePointerEnterNested)
+      el.addEventListener('pointerleave', handlePointerLeaveNested)
+    })
+  }
+
+  /** Re-run whenever new [data-scrollable] nodes may have been added. */
+  const nestedScrollObserver = new MutationObserver(() => {
+    if (!containerRef) return
+    const nested = containerRef.querySelectorAll('[data-scrollable]')
+    nested.forEach((el) => {
+      // Add listeners idempotently by removing first
+      el.removeEventListener('pointerenter', handlePointerEnterNested)
+      el.removeEventListener('pointerleave', handlePointerLeaveNested)
+      el.addEventListener('pointerenter', handlePointerEnterNested)
+      el.addEventListener('pointerleave', handlePointerLeaveNested)
+    })
+  })
+
+  const handleScroll = (_event: Event): void => {
     if (!containerRef) return
     if (scrollRaf !== undefined) return
+
+    // If the pointer is over a nested [data-scrollable] region (tool output,
+    // diff viewer, etc.), this scroll event was caused by scrolling inside that
+    // region overflowing into the outer container.  Don't change auto-scroll.
+    if (pointerOverNestedScrollable) return
 
     scrollRaf = requestAnimationFrame(() => {
       scrollRaf = undefined
@@ -83,7 +123,8 @@ export function useMessageScroll(opts: UseMessageScrollOptions): MessageScrollAP
         userScrolledUp = distanceFromBottom > 300
         if (!userScrolledUp) setShouldAutoScroll(true)
       } else {
-        const nextAutoScroll = distanceFromBottom < 100
+        // Re-lock auto-scroll when user returns to within 50px of bottom
+        const nextAutoScroll = distanceFromBottom < 50
         if (nextAutoScroll !== shouldAutoScroll()) {
           setShouldAutoScroll(nextAutoScroll)
         }
@@ -103,6 +144,10 @@ export function useMessageScroll(opts: UseMessageScrollOptions): MessageScrollAP
         // Passive listener — critical for smooth scrolling in WebKitGTK.
         containerRef.addEventListener('scroll', handleScroll, { passive: true })
         setupResizeObserver()
+        // Track pointer position relative to nested scrollable regions so
+        // we can ignore scroll events that originate from within them.
+        observeNestedScrollables()
+        nestedScrollObserver.observe(containerRef, { childList: true, subtree: true })
       }
     })
 
@@ -110,6 +155,7 @@ export function useMessageScroll(opts: UseMessageScrollOptions): MessageScrollAP
       if (scrollRaf !== undefined) cancelAnimationFrame(scrollRaf)
       containerRef?.removeEventListener('scroll', handleScroll)
       resizeObserver?.disconnect()
+      nestedScrollObserver.disconnect()
     })
   }
 

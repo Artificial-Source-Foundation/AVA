@@ -21,6 +21,7 @@ import { useSession } from '../../stores/session'
 import { useSettings } from '../../stores/settings'
 import { ConfirmDialog } from '../ui/ConfirmDialog'
 import { Dialog } from '../ui/Dialog'
+import { CompactionDivider } from './CompactionDivider'
 import { FocusChainBar } from './FocusChainBar'
 import { LiveStreamingBlock } from './LiveStreamingBlock'
 import { ModelChangeIndicator } from './ModelChangeIndicator'
@@ -53,6 +54,7 @@ export const MessageList: Component = () => {
     checkpoints,
     rollbackToCheckpoint,
     revertFilesAfter,
+    compactionIndex,
   } = useSession()
   const agent = useAgent()
   const { isStreaming, retryMessage, editAndResend, regenerateResponse } = useChat()
@@ -104,7 +106,7 @@ export const MessageList: Component = () => {
       <div
         ref={scroll.setContainerRef}
         class="flex-1 overflow-y-auto px-12 py-7"
-        style={{ 'overflow-anchor': 'none' }}
+        style={{ 'overflow-anchor': 'none', 'will-change': 'scroll-position' }}
       >
         <Show when={isLoadingMessages()}>
           <MessageListLoading />
@@ -140,37 +142,51 @@ export const MessageList: Component = () => {
                 const shouldAnimate = !animatedMessageIds.has(msg.id)
                 if (shouldAnimate) animatedMessageIds.add(msg.id)
 
+                // Show divider before the first message that arrived after compaction.
+                // compactionIndex() === totalMessages at the time of compaction, so
+                // the first message whose index equals that value is post-compaction.
+                const showDivider = () => compactionIndex() > 0 && msgIndex() === compactionIndex()
+
+                // Messages whose index is below the compaction boundary get dimmed.
+                const isPreCompaction = () =>
+                  compactionIndex() > 0 && msgIndex() < compactionIndex()
+
                 return (
                   <>
+                    <Show when={showDivider()}>
+                      <CompactionDivider />
+                    </Show>
                     <Show when={modelChange()}>
                       {(change) => <ModelChangeIndicator from={change().from} to={change().to} />}
                     </Show>
-                    <MessageRow
-                      message={msg}
-                      shouldAnimate={shouldAnimate}
-                      isEditing={editingMessageId() === msg.id}
-                      isRetrying={retryingMessageId() === msg.id}
-                      isStreaming={
-                        (isStreaming() || agent.isRunning()) &&
-                        msg.id === data.lastMessageId() &&
-                        msg.role === 'assistant'
-                      }
-                      isLastMessage={msg.id === data.lastMessageId()}
-                      isSearchMatch={searchMatchIds().has(msg.id)}
-                      isCurrentSearchMatch={currentSearchId() === msg.id}
-                      checkpoint={data.checkpointAtIndex(msgIndex()) ?? undefined}
-                      streamingToolCalls={undefined}
-                      streamingContent={undefined}
-                      onStartEdit={() => startEditing(msg.id)}
-                      onCancelEdit={stopEditing}
-                      onSaveEdit={(content) => editAndResend(msg.id, content)}
-                      onRetry={() => retryMessage(msg.id)}
-                      onRegenerate={() => regenerateResponse(msg.id)}
-                      onDelete={() => actions.handleDeleteRequest(msg.id)}
-                      onBranch={() => actions.handleBranch(msg.id)}
-                      onRewind={() => actions.setRewindTarget(msg.id)}
-                      onRestoreCheckpoint={rollbackToCheckpoint}
-                    />
+                    <div classList={{ 'compaction-pre': isPreCompaction() }}>
+                      <MessageRow
+                        message={msg}
+                        shouldAnimate={shouldAnimate}
+                        isEditing={editingMessageId() === msg.id}
+                        isRetrying={retryingMessageId() === msg.id}
+                        isStreaming={
+                          (isStreaming() || agent.isRunning()) &&
+                          msg.id === data.lastMessageId() &&
+                          msg.role === 'assistant'
+                        }
+                        isLastMessage={msg.id === data.lastMessageId()}
+                        isSearchMatch={searchMatchIds().has(msg.id)}
+                        isCurrentSearchMatch={currentSearchId() === msg.id}
+                        checkpoint={data.checkpointAtIndex(msgIndex()) ?? undefined}
+                        streamingToolCalls={undefined}
+                        streamingContent={undefined}
+                        onStartEdit={() => startEditing(msg.id)}
+                        onCancelEdit={stopEditing}
+                        onSaveEdit={(content) => editAndResend(msg.id, content)}
+                        onRetry={() => retryMessage(msg.id)}
+                        onRegenerate={() => regenerateResponse(msg.id)}
+                        onDelete={() => actions.handleDeleteRequest(msg.id)}
+                        onBranch={() => actions.handleBranch(msg.id)}
+                        onRewind={() => actions.setRewindTarget(msg.id)}
+                        onRestoreCheckpoint={rollbackToCheckpoint}
+                      />
+                    </div>
                   </>
                 )
               }}
@@ -182,6 +198,10 @@ export const MessageList: Component = () => {
                 <LiveStreamingBlock />
               </Show>
             </div>
+
+            {/* Scroll anchor sentinel — overflow-anchor:auto keeps the viewport
+                pinned to new content at the bottom during streaming. */}
+            <div aria-hidden="true" style={{ 'overflow-anchor': 'auto', height: '1px' }} />
           </div>
         </Show>
       </div>

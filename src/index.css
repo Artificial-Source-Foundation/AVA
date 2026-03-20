@@ -662,6 +662,128 @@ button {
   pointer-events: none;
 }
 
+/* ========================================
+   TOOL SHIMMER
+   Sweeping highlight on running tool description text.
+   Uses background-clip:text trick — pure GPU (no layout thrash).
+   ======================================== */
+
+@keyframes tool-shimmer {
+  0% {
+    background-position: -200% center;
+  }
+  100% {
+    background-position: 200% center;
+  }
+}
+
+.tool-summary-shimmer {
+  /* Clip the gradient to the text glyphs */
+  background: linear-gradient(
+    90deg,
+    var(--text-secondary) 20%,
+    var(--text-primary) 40%,
+    var(--accent-hover) 50%,
+    var(--text-primary) 60%,
+    var(--text-secondary) 80%
+  );
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  animation: tool-shimmer 2s linear infinite;
+}
+
+/* ========================================
+   TOOL STATUS DOT
+   8px colored indicator overlaid top-right of the tool icon.
+   ======================================== */
+
+.tool-status-dot-wrapper {
+  position: relative;
+  display: inline-flex;
+  flex-shrink: 0;
+}
+
+.tool-status-dot {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1.5px solid var(--background);
+}
+
+.tool-status-dot--pending {
+  background: var(--text-muted);
+}
+
+.tool-status-dot--running {
+  background: var(--warning);
+  animation: tool-dot-pulse 1.2s ease-in-out infinite;
+}
+
+.tool-status-dot--success {
+  background: var(--success);
+}
+
+.tool-status-dot--error {
+  background: var(--error);
+}
+
+@keyframes tool-dot-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.55;
+    transform: scale(0.8);
+  }
+}
+
+/* ========================================
+   COMPACTION DIVIDER
+   Thin rule with centered label; messages above are dimmed.
+   ======================================== */
+
+.compaction-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 20px 0;
+  pointer-events: none;
+  user-select: none;
+}
+
+.compaction-divider__line {
+  flex: 1;
+  height: 1px;
+  background: var(--border-subtle);
+}
+
+.compaction-divider__label {
+  font-size: 10px;
+  font-family: var(--font-ui-mono, var(--font-mono));
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+/* Messages above the compaction divider are rendered at 50% opacity */
+.compaction-pre {
+  opacity: 0.5;
+  transition: opacity var(--duration-fast, 150ms) ease;
+}
+
+.compaction-pre:hover {
+  opacity: 0.75;
+}
+
 /* Input focus glow for onboarding */
 .onboarding-input:focus {
   border-color: var(--accent);

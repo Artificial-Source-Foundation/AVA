@@ -5,9 +5,9 @@
  * code blocks (lineNumbers, wordWrap), and notifications.
  */
 
-import { Bell, Code2, Keyboard, MessageCircle } from 'lucide-solid'
+import { Bell, Code2, Keyboard, MessageCircle, Wrench } from 'lucide-solid'
 import { type Component, Show } from 'solid-js'
-import type { SendKey } from '../../../stores/settings'
+import type { SendKey, ToolResponseStyle } from '../../../stores/settings'
 import { useSettings } from '../../../stores/settings'
 import { segmentedBtnClass } from '../../ui/SegmentedControl'
 import { ToggleRow } from '../../ui/ToggleRow'
@@ -18,7 +18,7 @@ import { SettingsCard } from '../SettingsCard'
 // ============================================================================
 
 export const BehaviorTab: Component = () => {
-  const { settings, updateBehavior, updateNotifications } = useSettings()
+  const { settings, updateBehavior, updateNotifications, updateUI } = useSettings()
 
   return (
     <div class="grid grid-cols-1" style={{ gap: '28px' }}>
@@ -77,6 +77,39 @@ export const BehaviorTab: Component = () => {
           checked={settings().behavior.wordWrap}
           onChange={(v) => updateBehavior({ wordWrap: v })}
         />
+      </SettingsCard>
+
+      <SettingsCard
+        icon={Wrench}
+        title="Tool Results"
+        description="How tool output is displayed in chat"
+      >
+        <div class="flex items-center justify-between py-2">
+          <div>
+            <span class="text-[14px] text-[var(--text-secondary)]">Tool response style</span>
+            <p class="text-[13px] text-[var(--text-muted)]">
+              {settings().ui.toolResponseStyle === 'concise'
+                ? 'Results collapsed by default — click to expand'
+                : 'Results expanded with full output'}
+            </p>
+          </div>
+          <div class="flex gap-1">
+            <button
+              type="button"
+              onClick={() => updateUI({ toolResponseStyle: 'concise' as ToolResponseStyle })}
+              class={segmentedBtnClass(settings().ui.toolResponseStyle === 'concise')}
+            >
+              Concise
+            </button>
+            <button
+              type="button"
+              onClick={() => updateUI({ toolResponseStyle: 'detailed' as ToolResponseStyle })}
+              class={segmentedBtnClass(settings().ui.toolResponseStyle === 'detailed')}
+            >
+              Detailed
+            </button>
+          </div>
+        </div>
       </SettingsCard>
 
       <SettingsCard icon={Bell} title="Notifications" description="Desktop and sound alerts">

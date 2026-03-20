@@ -38,7 +38,26 @@ export const MessageActions: Component<MessageActionsProps> = (props) => {
 
   const handleCopy = async () => {
     try {
-      await navigator.clipboard.writeText(props.message.content)
+      const plainText = props.message.content
+      // Feature: Rich clipboard copy — write both HTML (preserves formatting) and plain text
+      if (typeof ClipboardItem !== 'undefined' && navigator.clipboard.write) {
+        try {
+          // Render markdown to HTML for rich copy
+          const { renderMarkdown } = await import('../../lib/markdown')
+          const htmlContent =
+            props.message.role === 'assistant' ? renderMarkdown(plainText) : plainText
+          const htmlBlob = new Blob([htmlContent], { type: 'text/html' })
+          const textBlob = new Blob([plainText], { type: 'text/plain' })
+          await navigator.clipboard.write([
+            new ClipboardItem({ 'text/html': htmlBlob, 'text/plain': textBlob }),
+          ])
+        } catch {
+          // Fall back to plain text if ClipboardItem fails
+          await navigator.clipboard.writeText(plainText)
+        }
+      } else {
+        await navigator.clipboard.writeText(plainText)
+      }
       setCopied(true)
       success('Copied to clipboard')
       props.onCopy()

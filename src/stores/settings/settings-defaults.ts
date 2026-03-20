@@ -27,6 +27,7 @@ export const DEFAULT_UI: UISettings = {
   showModelInTitleBar: true,
   hideThinking: false,
   sidebarOrder: ['sessions', 'explorer'],
+  toolResponseStyle: 'concise',
 }
 
 export const DEFAULT_APPEARANCE: AppearanceSettings = {

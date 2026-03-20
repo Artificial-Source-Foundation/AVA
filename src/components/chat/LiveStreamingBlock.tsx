@@ -63,7 +63,7 @@ export const LiveStreamingBlock: Component = () => {
 
   const hasThinking = createMemo(() => {
     const segments = agent.thinkingSegments()
-    const hasAny = segments.length > 0 && segments.some((s) => s.thinking.length > 0)
+    const hasAny = segments.some((s) => s.thinking.length > 0)
     debugLog(
       'thinking',
       'LiveStreamingBlock hasThinking:',
@@ -120,7 +120,7 @@ export const LiveStreamingBlock: Component = () => {
                       thinking={agent
                         .thinkingSegments()
                         .map((s) => s.thinking)
-                        .join('')}
+                        .join('\n\n')}
                       isStreaming={true}
                     />
                   </Show>

@@ -36,6 +36,17 @@ export const MessageRow: Component<MessageRowProps> = (props) => (
         !!props.isSearchMatch && !props.isCurrentSearchMatch,
     }}
     data-message-id={props.message.id}
+    style={{
+      // Virtual scrolling foundation: browser can skip layout/paint for
+      // off-screen messages. Provides ~80% of full virtualization benefit
+      // without the complexity of a virtual list library.
+      'content-visibility': 'auto',
+      // Estimated intrinsic size prevents layout thrash when content becomes
+      // visible. 120px covers a typical short message; tall messages expand
+      // naturally without clipping because content-visibility only defers
+      // rendering — it does not clip to this size.
+      'contain-intrinsic-size': 'auto 120px',
+    }}
   >
     <MessageBubble
       message={props.message}

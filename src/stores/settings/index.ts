@@ -70,6 +70,7 @@ export type {
   SendKey,
   TeamConfig,
   ToolApprovalRule,
+  ToolResponseStyle,
   UIDensity,
   UISettings,
 } from './settings-types'

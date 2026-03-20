@@ -1,4 +1,4 @@
-import { Crown } from 'lucide-solid'
+import { Crown, RefreshCw } from 'lucide-solid'
 import { type Accessor, type Component, createMemo, For, Match, Show, Switch } from 'solid-js'
 import type { ThinkingSegment } from '../../hooks/use-rust-agent'
 import { formatCost } from '../../lib/cost'
@@ -16,6 +16,7 @@ import { CommandOutputRow, DiffRow, ErrorRow, ThinkingRow, ToolCallRow } from '.
 import { type MessageSegment, segmentMessage } from './message-segments'
 import { ContextGroupHeader } from './ToolCallGroup'
 import { ToolPreview } from './ToolPreview'
+import { TurnDiffSummary } from './TurnDiffSummary'
 import { ToolCallErrorBoundary } from './tool-call-error-boundary'
 import { partitionByContext } from './tool-call-utils'
 
@@ -355,6 +356,23 @@ export const MessageBubble: Component<MessageBubbleProps> = (props) => {
     return segs as ThinkingSegment[]
   })
 
+  /**
+   * Detect if the assistant response appears truncated.
+   * Heuristic: no terminal punctuation (.!?:) and content is non-trivial.
+   * Only applies to completed (non-streaming) assistant messages with content.
+   */
+  const isTruncated = createMemo((): boolean => {
+    if (isUser() || isActiveStreaming() || props.isStreaming) return false
+    const content = props.message.content
+    if (!content || content.length < 80) return false
+    // Skip if message ended with an error
+    if (props.message.error) return false
+    const trimmed = content.trimEnd()
+    // Check last non-whitespace character
+    const lastChar = trimmed[trimmed.length - 1]
+    return !/[.!?:)\]}"'`]/.test(lastChar)
+  })
+
   /** Map from tool call ID to ToolCall for interleaved rendering */
   const toolCallsById = createMemo((): Map<string, ToolCall> => {
     const map = new Map<string, ToolCall>()
@@ -607,7 +625,30 @@ export const MessageBubble: Component<MessageBubbleProps> = (props) => {
                 </Show>
               </Show>
 
+              {/* Per-turn file diff summary (shown after message content, collapsed by default) */}
+              <Show
+                when={!isActiveStreaming() && !isUser() && (effectiveToolCalls()?.length ?? 0) > 0}
+              >
+                <TurnDiffSummary
+                  toolCalls={effectiveToolCalls()!}
+                  isStreaming={props.isStreaming}
+                />
+              </Show>
+
               <TimestampLine align="left" />
+
+              {/* Truncation hint — response appears cut off mid-sentence */}
+              <Show when={isTruncated() && props.isLastMessage}>
+                <button
+                  type="button"
+                  onClick={props.onRegenerate}
+                  class="mt-1 flex items-center gap-1.5 text-[11px] text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors"
+                  title="Response may be truncated — continue generation"
+                >
+                  <RefreshCw class="w-3 h-3" />
+                  <span>Continue generation</span>
+                </button>
+              </Show>
 
               <Show when={props.message.error}>
                 <ErrorRow

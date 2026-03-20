@@ -64,6 +64,8 @@ export const {
   sessionTokenStats,
   contextUsage,
   agentStats,
+  compactionIndex,
+  setCompactionIndex,
 } = createRoot(() => {
   const [currentSession, setCurrentSession] = createSignal<Session | null>(null)
   const [sessions, setSessions] = createSignal<SessionWithStats[]>([])
@@ -75,6 +77,16 @@ export const {
   const [terminalExecutions, setTerminalExecutions] = createSignal<TerminalExecution[]>([])
   const [memoryItems, setMemoryItems] = createSignal<MemoryItem[]>([])
   const [archivedSessions, setArchivedSessions] = createSignal<SessionWithStats[]>([])
+
+  // Compaction divider — index of the first message after the last compaction.
+  // -1 means no compaction has occurred in this session view.
+  const [compactionIndex, setCompactionIndex] = createSignal<number>(-1)
+  if (typeof window !== 'undefined') {
+    window.addEventListener('ava:compacted', () => {
+      // Snapshot the current message count so we know where the divider sits.
+      setCompactionIndex(messages().length)
+    })
+  }
 
   // Busy session IDs (tracked from session:status events)
   const [busySessionIds, setBusySessionIds] = createSignal<Set<string>>(new Set())
@@ -221,5 +233,7 @@ export const {
     setBudgetTick,
     contextUsage,
     agentStats,
+    compactionIndex,
+    setCompactionIndex,
   }
 })

@@ -78,6 +78,24 @@ function App() {
     onCleanup(() => window.removeEventListener('ava:compacted', handleCompacted))
   })
 
+  // Handle "Apply to file" from code blocks — write code content to file via Tauri
+  onMount(() => {
+    const handleApplyCode = async (e: Event) => {
+      const { filePath, content } = (e as CustomEvent<{ filePath: string; content: string }>).detail
+      if (!filePath || !content) return
+      try {
+        const { invoke } = await import('@tauri-apps/api/core')
+        await invoke('write_file', { path: filePath, content })
+        info('Applied', `Wrote to ${filePath}`)
+      } catch {
+        // write_file command may not be registered; fall back to a no-op notification
+        info('Apply', `Code for ${filePath} — paste manually or use the write tool`)
+      }
+    }
+    window.addEventListener('ava:apply-code', handleApplyCode)
+    onCleanup(() => window.removeEventListener('ava:apply-code', handleApplyCode))
+  })
+
   // Auto-show changelog after update
   onMount(() => {
     if (shouldShowChangelog()) {

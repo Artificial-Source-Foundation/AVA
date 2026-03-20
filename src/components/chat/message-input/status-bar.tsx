@@ -82,9 +82,22 @@ export const StatusBar: Component<StatusBarProps> = (props) => {
 
   const barColor = (): string => {
     const pct = percentage()
-    if (pct > 80) return 'var(--warning)'
-    if (pct > 60) return 'var(--text-muted)'
-    return 'var(--accent)'
+    if (pct >= 90) return 'var(--error)'
+    if (pct >= 70) return 'var(--warning)'
+    return 'var(--success, #22c55e)'
+  }
+
+  /** Human-readable tooltip for context window usage breakdown */
+  const contextTooltip = (): string => {
+    const real = sessionTokenStats().total
+    const limit = contextUsage().total
+    const used = real > 0 ? real : contextUsage().used
+    const pct = percentage().toFixed(0)
+    const fmtK = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}K` : String(n))
+    if (limit > 0) {
+      return `Context: ${fmtK(used)} / ${fmtK(limit)} tokens (${pct}% used)`
+    }
+    return `Context: ${fmtK(used)} tokens used (${pct}%)`
   }
 
   const msgCount = (): number => messages().length
@@ -185,18 +198,28 @@ export const StatusBar: Component<StatusBarProps> = (props) => {
         </button>
       </Show>
 
-      {/* Progress bar + percentage (togglable) */}
+      {/* Context window progress bar + percentage (togglable) */}
       <Show when={showTokens()}>
-        <div class="w-10 h-1 bg-[var(--surface-raised)] rounded-full overflow-hidden">
+        <div
+          class="w-16 h-1.5 bg-[var(--surface-raised)] rounded-full overflow-hidden cursor-default"
+          title={contextTooltip()}
+        >
           <div
-            class="h-full rounded-full transition-all duration-300"
+            class="h-full rounded-full transition-all duration-500"
             style={{
               width: `${Math.min(100, percentage())}%`,
               'background-color': barColor(),
             }}
           />
         </div>
-        <span class="tabular-nums" classList={{ 'text-[var(--warning)]': percentage() >= 80 }}>
+        <span
+          class="tabular-nums cursor-default"
+          title={contextTooltip()}
+          classList={{
+            'text-[var(--error)]': percentage() >= 90,
+            'text-[var(--warning)]': percentage() >= 70 && percentage() < 90,
+          }}
+        >
           {percentage().toFixed(0)}%
         </span>
       </Show>

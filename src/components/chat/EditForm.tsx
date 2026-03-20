@@ -6,7 +6,7 @@
  */
 
 import { Check, Loader2, X } from 'lucide-solid'
-import { type Component, createSignal, Show } from 'solid-js'
+import { type Component, createSignal, onMount, Show } from 'solid-js'
 
 interface EditFormProps {
   initialContent: string
@@ -17,6 +17,23 @@ interface EditFormProps {
 export const EditForm: Component<EditFormProps> = (props) => {
   const [content, setContent] = createSignal(props.initialContent)
   const [isSaving, setIsSaving] = createSignal(false)
+  let textareaRef: HTMLTextAreaElement | undefined
+
+  /** Auto-grow the textarea to fit its content */
+  const autoResize = (el: HTMLTextAreaElement) => {
+    el.style.height = 'auto'
+    el.style.height = `${el.scrollHeight}px`
+  }
+
+  onMount(() => {
+    if (textareaRef) {
+      autoResize(textareaRef)
+      // Move cursor to end of text
+      const len = textareaRef.value.length
+      textareaRef.setSelectionRange(len, len)
+      textareaRef.focus()
+    }
+  })
 
   const handleSave = async () => {
     if (!content().trim() || isSaving()) return
@@ -31,7 +48,7 @@ export const EditForm: Component<EditFormProps> = (props) => {
   const handleKeyDown = (e: KeyboardEvent) => {
     if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
       e.preventDefault()
-      handleSave()
+      void handleSave()
     }
     if (e.key === 'Escape') {
       props.onCancel()
@@ -49,8 +66,12 @@ export const EditForm: Component<EditFormProps> = (props) => {
       "
     >
       <textarea
+        ref={textareaRef}
         value={content()}
-        onInput={(e) => setContent(e.currentTarget.value)}
+        onInput={(e) => {
+          setContent(e.currentTarget.value)
+          autoResize(e.currentTarget)
+        }}
         onKeyDown={handleKeyDown}
         class="
           w-full p-3
@@ -65,7 +86,6 @@ export const EditForm: Component<EditFormProps> = (props) => {
           disabled:opacity-50
         "
         rows={3}
-        autofocus
         disabled={isSaving()}
       />
       <div class="flex items-center justify-between mt-3">

@@ -81,26 +81,43 @@ interface ToolIconProps {
   class?: string
 }
 
+function dotClass(status: ToolCallStatus): string {
+  switch (status) {
+    case 'pending':
+      return 'tool-status-dot tool-status-dot--pending'
+    case 'running':
+      return 'tool-status-dot tool-status-dot--running'
+    case 'success':
+      return 'tool-status-dot tool-status-dot--success'
+    case 'error':
+      return 'tool-status-dot tool-status-dot--error'
+  }
+}
+
 export const ToolIcon: Component<ToolIconProps> = (props) => {
   const isRunning = () => props.status === 'running' || props.status === 'pending'
   const isError = () => props.status === 'error'
   const baseClass = () => `w-4 h-4 flex-shrink-0 ${props.class ?? ''}`
 
   return (
-    <Show
-      when={!isRunning()}
-      fallback={<Loader2 class={`${baseClass()} animate-spin text-[var(--accent-text)]`} />}
-    >
+    <div class="tool-status-dot-wrapper">
       <Show
-        when={!isError()}
-        fallback={<AlertCircle class={baseClass()} style={{ color: 'var(--error)' }} />}
+        when={!isRunning()}
+        fallback={<Loader2 class={`${baseClass()} animate-spin text-[var(--accent-text)]`} />}
       >
-        <Dynamic
-          component={getToolIcon(props.name)}
-          class={baseClass()}
-          style={{ color: getIconColor(props.status) }}
-        />
+        <Show
+          when={!isError()}
+          fallback={<AlertCircle class={baseClass()} style={{ color: 'var(--error)' }} />}
+        >
+          <Dynamic
+            component={getToolIcon(props.name)}
+            class={baseClass()}
+            style={{ color: getIconColor(props.status) }}
+          />
+        </Show>
       </Show>
-    </Show>
+      {/* Status dot — overlaid top-right */}
+      <div class={dotClass(props.status)} aria-hidden="true" />
+    </div>
   )
 }

@@ -28,6 +28,12 @@ interface DiffStats {
  */
 const SMALL_DIFF_LINE_THRESHOLD = 30
 
+/**
+ * Threshold for treating a diff as "large" — collapses by default with a
+ * "Show large diff (N lines)" button to avoid rendering 500+ lines.
+ */
+const LARGE_DIFF_LINE_THRESHOLD = 500
+
 function computeDiffStats(oldContent: string, newContent: string): DiffStats {
   const oldLines = oldContent.split('\n')
   const newLines = newContent.split('\n')
@@ -90,11 +96,17 @@ export const DiffRow: Component<DiffRowProps> = (props) => {
       : stats().changedLines <= SMALL_DIFF_LINE_THRESHOLD
   )
 
+  const isLargeDiff = createMemo(() =>
+    isNewFile()
+      ? newFileLineCount() > LARGE_DIFF_LINE_THRESHOLD
+      : stats().changedLines > LARGE_DIFF_LINE_THRESHOLD
+  )
+
   const [expanded, setExpanded] = createSignal(false)
 
-  // Auto-expand small diffs once stats are computed
+  // Auto-expand small diffs once stats are computed; keep large diffs collapsed
   createEffect(() => {
-    if (isSmallDiff()) setExpanded(true)
+    if (isSmallDiff() && !isLargeDiff()) setExpanded(true)
   })
 
   const fileName = (): string => shortFileName(props.toolCall.filePath)
@@ -129,8 +141,15 @@ export const DiffRow: Component<DiffRowProps> = (props) => {
 
           <span class="flex-1" />
 
+          {/* Large diff: show collapse hint when not expanded */}
+          <Show when={isLargeDiff() && !expanded()}>
+            <span class="text-[11px] text-[var(--text-muted)] tabular-nums font-mono">
+              Show large diff ({isNewFile() ? newFileLineCount() : stats().changedLines} lines)
+            </span>
+          </Show>
+
           {/* New file: show line count badge */}
-          <Show when={isNewFile()}>
+          <Show when={isNewFile() && (!isLargeDiff() || expanded())}>
             <span class="text-[11px] text-[var(--success)] tabular-nums font-mono">
               +{newFileLineCount()} lines
             </span>

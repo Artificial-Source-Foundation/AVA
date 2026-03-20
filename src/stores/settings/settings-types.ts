@@ -26,6 +26,8 @@ export interface MCPServerConfig {
 
 export type PermissionMode = 'ask' | 'auto-approve' | 'bypass'
 
+export type ToolResponseStyle = 'concise' | 'detailed'
+
 export interface UISettings {
   showBottomPanel: boolean
   showAgentActivity: boolean
@@ -35,6 +37,8 @@ export interface UISettings {
   showModelInTitleBar: boolean
   hideThinking: boolean
   sidebarOrder: string[]
+  /** Controls default expansion state of tool results in chat */
+  toolResponseStyle: ToolResponseStyle
 }
 
 export type AccentColor = 'violet' | 'blue' | 'green' | 'rose' | 'amber' | 'cyan' | 'custom'

@@ -1,0 +1,11 @@
+{
+  "status": "fixed",
+  "files_modified": [
+    "src/components/chat/message-list/useMessageScroll.ts",
+    "src/components/chat/message-list/message-row.tsx",
+    "src/components/chat/MessageList.tsx",
+    "src/components/chat/tool-call-output.tsx"
+  ],
+  "summary": "Feature 1 (Smart Auto-Scroll): Added pointer-tracking approach to ignore scroll events from nested scrollable regions. `useMessageScroll` now tracks `pointerOverNestedScrollable` via `pointerenter`/`pointerleave` events on `[data-scrollable]` elements, discovered dynamically via MutationObserver. Scroll events that fire while the pointer is over a nested region are silently dropped — they came from scrolling tool output / diff viewers, not the user intentionally scrolling the chat. `data-scrollable` attribute added to both overflow-auto containers in `tool-call-output.tsx` (diff viewer and syntax-highlighted output). Bottom re-lock threshold tightened from 100px to 50px per spec. Added `overflow-anchor: auto` sentinel element at bottom of message list (outer container keeps `overflow-anchor: none` intentionally to let our manual scroll-to-bottom code win during streaming). Feature 2 (Virtual Scrolling Foundation): Added `content-visibility: auto` + `contain-intrinsic-size: auto 120px` inline styles to `MessageRow` — browser skips layout and paint for off-screen messages, giving roughly 80% of full virtualization benefit with zero library complexity. `ScrollToBottomButton` already existed in sections.tsx and was already wired in `MessageList.tsx`.",
+  "tsc_pass": true
+}

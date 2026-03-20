@@ -6,11 +6,43 @@
  *
  * During streaming: renders markdown with throttled updates (~150ms)
  * and streaming-safe fence handling. After streaming: renders once.
+ *
+ * Security: markdown.ts configures markdown-it with html:false (raw HTML
+ * pass-through disabled) and runs DOMPurify on all rendered output.
+ * Additionally, sanitizeModelOutput() below strips dangerous HTML tags and
+ * event handler attributes from model output before it reaches the renderer,
+ * providing defense-in-depth against XSS from LLM-generated content.
  */
 
 import { type Component, createEffect, createSignal, on, onCleanup, Show } from 'solid-js'
 import { renderMarkdown, renderMarkdownStreaming } from '../../lib/markdown'
 import { useSettings } from '../../stores/settings'
+
+// ============================================================================
+// Input sanitization (defense-in-depth before markdown rendering)
+// ============================================================================
+
+/**
+ * Strip dangerous HTML tags and inline event handlers from raw model output
+ * before passing it to the markdown renderer. The markdown renderer already
+ * uses DOMPurify; this is a belt-and-suspenders pre-sanitization step.
+ *
+ * Targets the most common XSS vectors in model-generated content:
+ *   <script>, <iframe>, <object>, <embed>, <form>, on* attributes
+ */
+function sanitizeModelOutput(content: string): string {
+  return (
+    content
+      // Remove dangerous block-level tags and their content
+      .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '')
+      .replace(/<iframe\b[^>]*>[\s\S]*?<\/iframe>/gi, '')
+      .replace(/<object\b[^>]*>[\s\S]*?<\/object>/gi, '')
+      .replace(/<embed\b[^>]*\/?>/gi, '')
+      .replace(/<form\b[^>]*>[\s\S]*?<\/form>/gi, '')
+      // Strip inline event handler attributes (onclick=, onerror=, etc.)
+      .replace(/\bon\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]*)/gi, '')
+  )
+}
 
 interface MarkdownContentProps {
   content: string
@@ -28,6 +60,11 @@ export const MarkdownContent: Component<MarkdownContentProps> = (props) => {
 
   // Throttled streaming render — avoids re-parsing markdown on every token
   let streamRenderTimer: ReturnType<typeof setTimeout> | null = null
+  // Track the latest content that needs rendering so the timer always picks
+  // up the most recent value even if multiple tokens arrived while it was
+  // pending. This prevents the final streamed token from being dropped when
+  // a new token arrives but is silently skipped by the early-return guard.
+  let pendingContent = ''
   let lastRenderedContent = ''
 
   onCleanup(() => {
@@ -44,36 +81,48 @@ export const MarkdownContent: Component<MarkdownContentProps> = (props) => {
           return
         }
 
+        // Pre-sanitize model output before passing to the markdown renderer
+        const safeContent = sanitizeModelOutput(content)
+
         if (streaming) {
+          // Always record the latest content so the timer can flush it
+          pendingContent = safeContent
+
           // During streaming: throttle rendering to avoid DOM thrashing
-          if (streamRenderTimer !== null) return // already scheduled
+          if (streamRenderTimer !== null) return // already scheduled; timer will pick up pendingContent
+
+          // Render immediately on first content so there's no blank flash
+          if (!lastRenderedContent && safeContent) {
+            lastRenderedContent = safeContent
+            pendingContent = ''
+            setRenderedHtml(renderMarkdownStreaming(safeContent))
+          }
+
           streamRenderTimer = setTimeout(() => {
             streamRenderTimer = null
-            const current = props.content
+            // Use pendingContent (latest) rather than a stale closure value
+            const current = pendingContent || sanitizeModelOutput(props.content)
+            pendingContent = ''
             if (current && current !== lastRenderedContent) {
               lastRenderedContent = current
               setRenderedHtml(renderMarkdownStreaming(current))
             }
           }, STREAM_RENDER_INTERVAL)
-          // Render immediately on first content
-          if (!lastRenderedContent && content) {
-            lastRenderedContent = content
-            setRenderedHtml(renderMarkdownStreaming(content))
-          }
         } else {
-          // Completed: full render
+          // Completed: cancel any pending throttle and do a final full render
           if (streamRenderTimer !== null) {
             clearTimeout(streamRenderTimer)
             streamRenderTimer = null
           }
+          pendingContent = ''
           lastRenderedContent = ''
-          setRenderedHtml(renderMarkdown(content))
+          setRenderedHtml(renderMarkdown(safeContent))
         }
       }
     )
   )
 
-  // Apply rendered HTML and attach copy/expand handlers after render
+  // Apply rendered HTML and attach copy/expand/apply handlers after render
   createEffect(
     on(renderedHtml, () => {
       if (!containerRef) return
@@ -81,6 +130,7 @@ export const MarkdownContent: Component<MarkdownContentProps> = (props) => {
       queueMicrotask(() => {
         attachCopyHandlers(containerRef)
         attachExpandHandlers(containerRef)
+        attachApplyHandlers(containerRef)
       })
     })
   )
@@ -156,6 +206,40 @@ function attachCopyHandlers(container: HTMLElement | undefined) {
       } catch {
         // Clipboard API may fail in some contexts
       }
+    })
+  }
+}
+
+// ============================================================================
+// Apply Handler — write code block content to a file path
+// ============================================================================
+
+function attachApplyHandlers(container: HTMLElement | undefined) {
+  if (!container) return
+  const buttons = container.querySelectorAll<HTMLButtonElement>('[data-apply-code]')
+  for (const btn of buttons) {
+    if (btn.dataset.applyAttached) continue
+    btn.dataset.applyAttached = 'true'
+
+    btn.addEventListener('click', async () => {
+      const wrapper = btn.closest('.code-block-wrapper')
+      const codeEl = wrapper?.querySelector('pre code')
+      if (!codeEl) return
+
+      const filePath = btn.dataset.filePath || ''
+      const content = codeEl.textContent || ''
+
+      // Dispatch an event so the parent app can handle the file write
+      // (avoids needing to import Tauri invoke here)
+      window.dispatchEvent(new CustomEvent('ava:apply-code', { detail: { filePath, content } }))
+
+      const label = btn.querySelector('.code-apply-label')
+      if (label) label.textContent = 'Applied!'
+      btn.classList.add('applied')
+      setTimeout(() => {
+        if (label) label.textContent = 'Apply'
+        btn.classList.remove('applied')
+      }, 2000)
     })
   }
 }

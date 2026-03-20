@@ -34,11 +34,24 @@ export const ThinkingRow: Component<ThinkingRowProps> = (props) => {
   const [expanded, setExpanded] = createSignal(false)
   const [wasStreaming, setWasStreaming] = createSignal(false)
   const [startTime] = createSignal(Date.now())
+  // Track the elapsed time at the moment streaming ends so we don't show a
+  // stale "0.0s" or a value frozen at component-mount time for completed msgs.
+  const [completedDuration, setCompletedDuration] = createSignal<number | null>(null)
 
   const duration = createMemo(() => {
+    // Prefer an explicit duration prop from message metadata
     if (props.thinkingDuration) return props.thinkingDuration
-    if (!props.isStreaming) return (Date.now() - startTime()) / 1000
-    return 0
+    // For a completed message, use the value we captured when streaming stopped
+    if (!props.isStreaming) return completedDuration() ?? 0
+    // While streaming, show live elapsed time
+    return (Date.now() - startTime()) / 1000
+  })
+
+  // Capture elapsed duration the moment streaming finishes
+  createEffect(() => {
+    if (!props.isStreaming && wasStreaming()) {
+      setCompletedDuration((Date.now() - startTime()) / 1000)
+    }
   })
 
   const previewLines = createMemo(() => {

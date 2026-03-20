@@ -88,8 +88,15 @@ export const ToolCallCard: Component<ToolCallCardProps> = (props) => {
         {/* Tool icon */}
         <ToolIcon name={props.toolCall.name} status={props.toolCall.status} />
 
-        {/* Human-readable summary */}
-        <span class="text-[var(--text-secondary)] truncate" title={summary()}>
+        {/* Human-readable summary — shimmer while running */}
+        <span
+          class="truncate"
+          classList={{
+            'tool-summary-shimmer': isRunning(),
+            'text-[var(--text-secondary)]': !isRunning(),
+          }}
+          title={summary()}
+        >
           {summary()}
         </span>
 

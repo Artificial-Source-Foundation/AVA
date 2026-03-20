@@ -16,6 +16,7 @@ import {
   backgroundPlanProgress,
   busySessionIds,
   checkpoints,
+  compactionIndex,
   contextUsage,
   currentSession,
   editingMessageId,
@@ -33,6 +34,7 @@ import {
   setAgents,
   setBackgroundPlanActive,
   setBackgroundPlanProgress,
+  setCompactionIndex,
   setCurrentSession,
   setEditingMessageId,
   setFileOperations,
@@ -129,6 +131,9 @@ export function useSession() {
     clearMemoryItems: data.clearMemoryItems,
     queryMemoriesAcrossSessions: data.queryMemoriesAcrossSessions,
 
+    // Compaction divider
+    compactionIndex,
+
     // Checkpoints
     checkpoints,
     createCheckpoint: msg.createCheckpoint,
@@ -166,6 +171,7 @@ export function useSession() {
       setRetryingMessageId(null)
       setBackgroundPlanActive(false)
       setBackgroundPlanProgress('')
+      setCompactionIndex(-1)
     },
     getLastSessionId: (): string | null => {
       return localStorage.getItem(STORAGE_KEYS.LAST_SESSION)

@@ -26,10 +26,23 @@ const md = new MarkdownIt({
     const highlighted = language ? highlightCode(str, language) : escapeHtml(str)
     const displayLang = language || 'text'
 
+    // Detect a file path in the language hint (e.g. ```typescript:src/foo.ts or ```src/foo.ts)
+    const colonIdx = lang.indexOf(':')
+    const filePath = colonIdx >= 0 ? lang.slice(colonIdx + 1).trim() : ''
+    const applyBtn = filePath
+      ? `<button type="button" class="code-apply-btn" data-apply-code data-file-path="${escapeHtml(filePath)}" title="Apply to ${escapeHtml(filePath)}" aria-label="Apply to file">` +
+        `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">` +
+        `<path d="M12 5v14"/><path d="M5 12l7 7 7-7"/>` +
+        `</svg>` +
+        `<span class="code-apply-label">Apply</span>` +
+        `</button>`
+      : ''
+
     return (
       `<div class="code-block-wrapper">` +
       `<div class="code-header">` +
       `<span class="code-lang">${escapeHtml(displayLang)}</span>` +
+      applyBtn +
       `<button type="button" class="code-copy-btn" data-copy-code aria-label="Copy code">` +
       `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">` +
       `<rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>` +
@@ -120,6 +133,7 @@ const PURIFY_CONFIG = {
     'href',
     'target',
     'rel',
+    'title',
     'data-copy-code',
     'aria-label',
     'aria-hidden',

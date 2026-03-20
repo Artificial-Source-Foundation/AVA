@@ -6,7 +6,7 @@
  */
 
 import { ChevronRight, Terminal } from 'lucide-solid'
-import { type Component, createMemo, createSignal, onCleanup, Show } from 'solid-js'
+import { type Component, createEffect, createMemo, createSignal, onCleanup, Show } from 'solid-js'
 import type { ToolCall } from '../../../types'
 import { formatDuration, formatElapsed } from '../tool-call-utils'
 
@@ -51,13 +51,16 @@ export const CommandOutputRow: Component<CommandOutputRowProps> = (props) => {
     return meta.exitCode as number | undefined
   }
 
-  const timer = setInterval(() => {
-    if (isRunning()) {
+  // Only run the elapsed timer when the tool call is actually running.
+  // Wrapping in createEffect prevents the interval from starting (and firing
+  // at least once) when the component mounts for an already-completed call.
+  createEffect(() => {
+    if (!isRunning()) return
+    const timer = setInterval(() => {
       setElapsed(formatElapsed(props.toolCall.startedAt))
-    }
-  }, 1000)
-
-  onCleanup(() => clearInterval(timer))
+    }, 1000)
+    onCleanup(() => clearInterval(timer))
+  })
 
   return (
     <div

@@ -398,7 +398,7 @@ impl AgentLoop {
         &self,
         name: &str,
         arguments: Value,
-    ) -> Result<ToolResult, String> {
+    ) -> ava_types::Result<ToolResult> {
         self.tools
             .execute(ToolCall {
                 id: format!("post-edit-validation-{name}"),
@@ -406,7 +406,6 @@ impl AgentLoop {
                 arguments,
             })
             .await
-            .map_err(|error| error.to_string())
     }
 
     /// Add tool results to context and session.
@@ -515,7 +514,7 @@ fn strip_patch_path(path: &str, strip: usize) -> String {
     }
 }
 
-fn format_validation_result(label: &str, result: Result<ToolResult, String>) -> ValidationLine {
+fn format_validation_result(label: &str, result: ava_types::Result<ToolResult>) -> ValidationLine {
     match result {
         Ok(result) => {
             let text = match label {

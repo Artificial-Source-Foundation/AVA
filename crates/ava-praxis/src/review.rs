@@ -539,6 +539,18 @@ fn build_review_goal(ctx: &ReviewContext) -> String {
 mod tests {
     use super::*;
 
+    /// Verify that all `LazyLock<Regex>` patterns in this module compile
+    /// successfully. This test will catch typos in regex syntax at `cargo test`
+    /// time rather than at runtime (where `.unwrap()` would panic).
+    #[test]
+    fn regexes_compile() {
+        // Force initialisation of every LazyLock<Regex> defined at module level.
+        // If any pattern is invalid the LazyLock::new closure panics and this
+        // test fails with a clear message.
+        let _ = RE_DIFF_STAT.as_str();
+        let _ = RE_ISSUE.as_str();
+    }
+
     #[test]
     fn parse_review_output_full() {
         let text = r#"## Summary

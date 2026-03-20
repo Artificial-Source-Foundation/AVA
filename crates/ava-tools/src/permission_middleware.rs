@@ -288,4 +288,140 @@ mod tests {
             .await
             .expect("second call should skip approval");
     }
+
+    struct DenyInspector;
+
+    impl PermissionInspector for DenyInspector {
+        fn inspect(
+            &self,
+            _tool_name: &str,
+            _arguments: &serde_json::Value,
+            _context: &InspectionContext,
+        ) -> InspectionResult {
+            InspectionResult {
+                action: Action::Deny,
+                reason: "explicitly denied".to_string(),
+                risk_level: RiskLevel::Critical,
+                tags: Vec::new(),
+                warnings: Vec::new(),
+            }
+        }
+    }
+
+    struct AllowInspector;
+
+    impl PermissionInspector for AllowInspector {
+        fn inspect(
+            &self,
+            _tool_name: &str,
+            _arguments: &serde_json::Value,
+            _context: &InspectionContext,
+        ) -> InspectionResult {
+            InspectionResult {
+                action: Action::Allow,
+                reason: "allowed".to_string(),
+                risk_level: RiskLevel::Low,
+                tags: Vec::new(),
+                warnings: Vec::new(),
+            }
+        }
+    }
+
+    /// A deny result from the inspector propagates as `AvaError::PermissionDenied`.
+    #[tokio::test]
+    async fn deny_propagates_as_permission_denied() {
+        let middleware = PermissionMiddleware::new(Arc::new(DenyInspector), test_context(), None);
+
+        let err = middleware
+            .before(&test_call())
+            .await
+            .expect_err("deny should return error");
+
+        assert!(
+            matches!(err, ava_types::AvaError::PermissionDenied(_)),
+            "expected PermissionDenied, got: {err:?}"
+        );
+    }
+
+    /// When there is no approval bridge, an Ask result is treated as a Deny.
+    #[tokio::test]
+    async fn ask_without_bridge_propagates_as_permission_denied() {
+        let middleware = PermissionMiddleware::new(Arc::new(AskInspector), test_context(), None);
+
+        let err = middleware
+            .before(&test_call())
+            .await
+            .expect_err("Ask without bridge should return error");
+
+        assert!(
+            matches!(err, ava_types::AvaError::PermissionDenied(_)),
+            "expected PermissionDenied, got: {err:?}"
+        );
+    }
+
+    /// A user rejection via the approval bridge propagates as `AvaError::PermissionDenied`.
+    #[tokio::test]
+    async fn rejection_propagates_as_permission_denied() {
+        let (bridge, mut rx) = ApprovalBridge::new();
+        let middleware =
+            PermissionMiddleware::new(Arc::new(AskInspector), test_context(), Some(bridge));
+
+        tokio::spawn(async move {
+            let req = rx.recv().await.expect("approval request");
+            req.reply
+                .send(ToolApproval::Rejected(Some("user said no".to_string())))
+                .expect("send rejection");
+        });
+
+        let err = middleware
+            .before(&test_call())
+            .await
+            .expect_err("rejection should return error");
+
+        assert!(
+            matches!(&err, ava_types::AvaError::PermissionDenied(msg) if msg.contains("user said no")),
+            "expected PermissionDenied with reason, got: {err:?}"
+        );
+    }
+
+    /// When auto_approve is set in the context and the inspector returns Allow,
+    /// the call proceeds without needing the approval bridge.
+    #[tokio::test]
+    async fn auto_approve_context_bypasses_bridge_for_allowed_tools() {
+        // Build a context with auto_approve = true
+        let context = Arc::new(RwLock::new(InspectionContext {
+            workspace_root: "/workspace".into(),
+            auto_approve: true,
+            session_approved: std::collections::HashSet::new(),
+            persistent_rules: ava_permissions::persistent::PersistentRules::default(),
+            safety_profiles: std::collections::HashMap::new(),
+            tool_source: None,
+            glob_rules: ava_permissions::glob_rules::GlobRuleset::empty(),
+        }));
+
+        // AllowInspector always allows — with auto_approve the bridge is never needed.
+        // We intentionally pass None bridge to prove no bridge required.
+        let middleware = PermissionMiddleware::new(Arc::new(AllowInspector), context, None);
+
+        middleware
+            .before(&test_call())
+            .await
+            .expect("allow + auto_approve should not require bridge");
+    }
+
+    /// `after` is a passthrough — it should return the result unchanged.
+    #[tokio::test]
+    async fn after_passthrough() {
+        let middleware = PermissionMiddleware::new(Arc::new(AllowInspector), test_context(), None);
+
+        let result = ava_types::ToolResult {
+            call_id: "call_1".to_string(),
+            content: "ok".to_string(),
+            is_error: false,
+        };
+
+        let out = middleware.after(&test_call(), &result).await.unwrap();
+        assert_eq!(out.content, "ok");
+        assert!(!out.is_error);
+    }
 }

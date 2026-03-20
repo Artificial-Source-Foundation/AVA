@@ -65,33 +65,76 @@ pub enum AvaError {
     Cancelled,
 
     // ── Legacy string-payload variants (backward compat) ────────────────
-    /// Generic tool error (legacy — prefer `ToolExecutionError` for new code).
+    //
+    // These variants are **retained for backward compatibility** only.
+    // New code should use the structured variants above (e.g. `ToolExecutionError`,
+    // `NotFound`, `PermissionDenied`) which preserve machine-readable fields and
+    // participate correctly in `is_retryable()` and `category()`.
+    //
+    // Migration guide:
+    //   AvaError::ToolError(msg)        → AvaError::ToolExecutionError { tool, message }
+    //   AvaError::IoError(msg)          → AvaError::NotFound / AvaError::PermissionDenied
+    //                                     / AvaError::TimeoutError (when kind is known);
+    //                                     IoError only when kind is truly generic
+    //   AvaError::ConfigError(msg)      → callers that know the provider: MissingApiKey
+    //   AvaError::NotFound(msg)         → AvaError::ModelNotFound or keep as-is if not a model
+    /// Generic tool error.
+    ///
+    /// # Deprecated
+    /// Prefer `ToolExecutionError { tool, message }` for new code. This variant
+    /// is retained for backward compatibility with existing call sites.
     #[error("Tool execution failed: {0}")]
     ToolError(String),
-    /// I/O error (file system, network socket, pipe).
+
+    /// I/O error (file system, network socket, pipe) — kind not preserved.
+    ///
+    /// # Deprecated
+    /// This variant discards the underlying `io::ErrorKind`. When the kind is
+    /// known at the call site, use `NotFound`, `PermissionDenied`, or
+    /// `TimeoutError` directly. `From<io::Error>` now maps common kinds to those
+    /// structured variants and falls back to `IoError` only for unknown kinds.
     #[error("IO error: {0}")]
     IoError(String),
+
     /// JSON/YAML serialization or deserialization failure.
     #[error("Serialization error: {0}")]
     SerializationError(String),
+
     /// OS-level or platform abstraction error.
+    ///
+    /// # Deprecated
+    /// For I/O-derived platform errors prefer constructing `NotFound`,
+    /// `PermissionDenied`, or `TimeoutError` directly.
     #[error("Platform error: {0}")]
     PlatformError(String),
+
     /// Configuration file or value error.
+    ///
+    /// # Deprecated
+    /// When the provider is known at the call site, prefer `MissingApiKey`.
     #[error("Configuration error: {0}")]
     ConfigError(String),
+
     /// Input validation failure.
     #[error("Validation error: {0}")]
     ValidationError(String),
+
     /// SQLite or other database error.
     #[error("Database error: {0}")]
     DatabaseError(String),
+
     /// Operation exceeded its time budget — retryable.
     #[error("Timeout error: {0}")]
     TimeoutError(String),
+
     /// Requested resource not found.
+    ///
+    /// # Note
+    /// For model-not-found errors where the provider is known, prefer
+    /// `ModelNotFound { provider, model }`.
     #[error("Not found: {0}")]
     NotFound(String),
+
     /// Action blocked by permission policy or inspector.
     #[error("Permission denied: {0}")]
     PermissionDenied(String),
@@ -215,8 +258,23 @@ impl AvaError {
 }
 
 impl From<std::io::Error> for AvaError {
+    /// Convert an `io::Error` to `AvaError`, preserving `ErrorKind` where possible.
+    ///
+    /// | `io::ErrorKind`        | `AvaError` variant          |
+    /// |------------------------|-----------------------------|
+    /// | `NotFound`             | `NotFound`                  |
+    /// | `PermissionDenied`     | `PermissionDenied`          |
+    /// | `TimedOut`             | `TimeoutError` (retryable)  |
+    /// | `WouldBlock`           | `TimeoutError` (retryable)  |
+    /// | anything else          | `IoError` (legacy fallback) |
     fn from(err: std::io::Error) -> Self {
-        AvaError::IoError(err.to_string())
+        match err.kind() {
+            std::io::ErrorKind::NotFound => AvaError::NotFound(err.to_string()),
+            std::io::ErrorKind::PermissionDenied => AvaError::PermissionDenied(err.to_string()),
+            std::io::ErrorKind::TimedOut => AvaError::TimeoutError(err.to_string()),
+            std::io::ErrorKind::WouldBlock => AvaError::TimeoutError(err.to_string()),
+            _ => AvaError::IoError(err.to_string()),
+        }
     }
 }
 
@@ -232,11 +290,40 @@ mod tests {
 
     #[test]
     fn test_error_conversions() {
+        // NotFound io::Error → AvaError::NotFound (preserves kind)
         let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "file not found");
         let ava_err: AvaError = io_err.into();
         match ava_err {
+            AvaError::NotFound(_) => (),
+            _ => panic!("Expected NotFound variant for NotFound io::Error"),
+        }
+
+        // PermissionDenied io::Error → AvaError::PermissionDenied (preserves kind)
+        let io_err = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "access denied");
+        let ava_err: AvaError = io_err.into();
+        match ava_err {
+            AvaError::PermissionDenied(_) => (),
+            _ => panic!("Expected PermissionDenied variant for PermissionDenied io::Error"),
+        }
+
+        // TimedOut io::Error → AvaError::TimeoutError (retryable)
+        let io_err = std::io::Error::new(std::io::ErrorKind::TimedOut, "timed out");
+        let ava_err: AvaError = io_err.into();
+        match &ava_err {
+            AvaError::TimeoutError(_) => (),
+            _ => panic!("Expected TimeoutError variant for TimedOut io::Error"),
+        }
+        assert!(
+            ava_err.is_retryable(),
+            "TimedOut io::Error should be retryable"
+        );
+
+        // Generic (BrokenPipe) io::Error → AvaError::IoError (legacy fallback)
+        let io_err = std::io::Error::new(std::io::ErrorKind::BrokenPipe, "broken pipe");
+        let ava_err: AvaError = io_err.into();
+        match ava_err {
             AvaError::IoError(_) => (),
-            _ => panic!("Expected IoError variant"),
+            _ => panic!("Expected IoError variant for generic io::Error"),
         }
 
         let json_err = serde_json::from_str::<serde_json::Value>("invalid json").unwrap_err();

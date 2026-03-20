@@ -495,4 +495,15 @@ mod tests {
             .await;
         assert!(result.is_err());
     }
+
+    /// Force evaluation of all `LazyLock<Regex>` statics in this module so that
+    /// any malformed pattern causes a test failure rather than a runtime panic.
+    #[test]
+    fn regexes_compile() {
+        let _ = RE_SCRIPT.as_str();
+        let _ = RE_STYLE.as_str();
+        let _ = RE_BLOCK.as_str();
+        let _ = RE_TAGS.as_str();
+        let _ = RE_BLANK_LINES.as_str();
+    }
 }

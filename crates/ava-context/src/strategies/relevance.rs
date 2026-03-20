@@ -184,4 +184,11 @@ mod tests {
         assert!(paths.iter().any(|p| p.contains("main.rs")));
         assert!(paths.iter().any(|p| p.contains("lib.rs")));
     }
+
+    /// Force evaluation of the `LazyLock<Regex>` static so that a malformed
+    /// pattern fails at test time rather than panicking at runtime.
+    #[test]
+    fn regexes_compile() {
+        let _ = RE_FILE_PATH.as_str();
+    }
 }

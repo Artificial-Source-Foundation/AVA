@@ -71,7 +71,12 @@ async fn read_tool_errors_on_missing_file() {
         .await
         .expect_err("missing path should error");
 
-    assert!(error.to_string().contains("not found"));
+    // AvaError::NotFound displays as "Not found: ..." — check case-insensitively
+    // so this test remains correct regardless of capitalisation changes.
+    assert!(
+        error.to_string().to_ascii_lowercase().contains("not found"),
+        "expected 'not found' in error message, got: {error}"
+    );
 }
 
 #[tokio::test]

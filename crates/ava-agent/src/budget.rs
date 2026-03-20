@@ -126,3 +126,108 @@ impl BudgetTelemetry {
         self.skipped_post_complete_messages += message_count;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::agent_loop::AgentEvent;
+
+    fn token_usage_event(cost_usd: f64) -> AgentEvent {
+        AgentEvent::TokenUsage {
+            input_tokens: 100,
+            output_tokens: 50,
+            cost_usd,
+        }
+    }
+
+    #[test]
+    fn observe_accumulates_cost() {
+        let mut budget = BudgetTelemetry::new(5.0);
+        budget.observe(&token_usage_event(1.0));
+        budget.observe(&token_usage_event(0.5));
+        assert!((budget.total_cost_usd - 1.5).abs() < 1e-9);
+        assert_eq!(budget.input_tokens, 200);
+        assert_eq!(budget.output_tokens, 100);
+    }
+
+    #[test]
+    fn observe_emits_threshold_warnings() {
+        let mut budget = BudgetTelemetry::new(1.0);
+        // No budget warning below 50%
+        let warnings = budget.observe(&token_usage_event(0.4));
+        assert!(warnings.is_empty(), "below 50% should produce no warnings");
+
+        // Cross the 50% threshold
+        let warnings = budget.observe(&token_usage_event(0.15));
+        assert_eq!(warnings.len(), 1);
+        match &warnings[0] {
+            AgentEvent::BudgetWarning {
+                threshold_percent, ..
+            } => assert_eq!(*threshold_percent, 50),
+            _ => panic!("expected BudgetWarning"),
+        }
+    }
+
+    #[test]
+    fn threshold_warnings_are_emitted_only_once() {
+        let mut budget = BudgetTelemetry::new(1.0);
+        // Push past 50% in a single step
+        budget.observe(&token_usage_event(0.55));
+        // A second event at the same level must not re-emit the 50% warning
+        let warnings = budget.observe(&token_usage_event(0.01));
+        assert!(
+            warnings.is_empty(),
+            "threshold at 50% should not fire twice"
+        );
+    }
+
+    #[test]
+    fn no_warnings_when_no_budget_set() {
+        let mut budget = BudgetTelemetry::new(0.0);
+        let warnings = budget.observe(&token_usage_event(100.0));
+        assert!(
+            warnings.is_empty(),
+            "no budget limit → no warnings regardless of cost"
+        );
+    }
+
+    #[test]
+    fn budget_exhausted_when_over_limit() {
+        let mut budget = BudgetTelemetry::new(1.0);
+        budget.observe(&token_usage_event(1.5));
+        assert!(budget.budget_exhausted());
+        assert_eq!(budget.remaining_budget_usd(), Some(0.0));
+    }
+
+    #[test]
+    fn remaining_budget_none_when_no_limit() {
+        let budget = BudgetTelemetry::new(0.0);
+        assert_eq!(budget.remaining_budget_usd(), None);
+    }
+
+    #[test]
+    fn budget_status_label_with_limit() {
+        let mut budget = BudgetTelemetry::new(5.0);
+        budget.observe(&token_usage_event(1.25));
+        let label = budget.budget_status_label();
+        assert!(label.contains("$1.25"), "label: {label}");
+        assert!(label.contains("$5.00"), "label: {label}");
+    }
+
+    #[test]
+    fn budget_status_label_without_limit() {
+        let mut budget = BudgetTelemetry::new(0.0);
+        budget.observe(&token_usage_event(0.5));
+        let label = budget.budget_status_label();
+        assert!(label.contains("$0.50"), "label: {label}");
+        assert!(!label.contains('/'), "no slash when no budget set: {label}");
+    }
+
+    #[test]
+    fn non_usage_events_do_not_accumulate_cost() {
+        let mut budget = BudgetTelemetry::new(1.0);
+        let warnings = budget.observe(&AgentEvent::Token("hello".to_string()));
+        assert!(warnings.is_empty());
+        assert_eq!(budget.total_cost_usd, 0.0);
+    }
+}

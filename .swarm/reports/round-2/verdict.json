@@ -1,0 +1,24 @@
+{
+  "round": 2,
+  "verdict": "PASS",
+  "cargo_test_pass": true,
+  "cargo_clippy_warnings": 0,
+  "cargo_check_pass": true,
+  "critical_remaining": 5,
+  "warnings_remaining": 45,
+  "fixes_applied": 11,
+  "summary": "Round 2 passes all gate checks: cargo check clean, 0 clippy warnings, all 1750 tests pass across 69 suites (no failures, no regressions). 11 fixes applied across 16 source files (+719/-54 lines). Critical wins: (1) rm -rf block-list bypass fully closed — replaced string-replacement approach with POSIX tokeniser (collect_flags, has_recursive_force, extract_rm_paths), expanded critical path list from 4 to 17 prefixes, added has_pipe_to_shell for 9 shell binaries, added 14 regression tests covering all 6 bypass classes identified in analysis; (2) ToolCall unconditional clone eliminated — repair_tool_name() called first, owned ToolCall only allocated when name actually changed; (3) blocking std::fs I/O in async context fixed — added build_system_prompt_suffix_async() wrapping sync impl in spawn_blocking, stack_run.rs now awaits async version with no lock held across await point. Warning-level fixes: DEFAULT_MAX_RETRIES constant published and used by all 5 providers; circuit breaker magic literals (5, 30) extracted to named pub constants; web server eprintln! calls replaced with tracing::info!; MEMORY_BLOCK_MAX_CHARS constant added to ava-types and shared across ava-agent and ava-praxis; instruction budget magic divisor 3 extracted to named constant with doc comment. 2 findings deferred (fire-and-forget spawn error logging in agent.rs — AgentStack methods return () not Result; codebase index JoinHandle retention in stack/mod.rs — requires structural AgentStack field change). Critical count dropped from 8 (end of R1) to 5: the 3 actionable criticals (security bypass + perf clone + async blocking) are resolved; remaining 5 are the deferred quality/reference-alignment items from R1 (no agent loop tests, no permission middleware tests, rm-rf tokenizer was the only security item and is now fixed, AvaError design, unstructured spawns). Warnings count is slightly higher than R1 (44→45) because R2 analysis surfaced 16 new warning-level findings of which 8 were fixed and 8 remain open (run_unified/stack_run size, ProjectState::save error types, map_err erasure in tool_execution, LazyLock regex unwrap, generate_turn_streaming size, AvaError io ErrorKind loss, AvaError dual-personality retryability gap, and 2 deferred spawn issues).",
+  "failures": [],
+  "focus_next_round": [
+    "quality: crates/ava-agent/src/agent_loop/mod.rs — run_unified() is 325 lines with zero integration tests; extract handle_steering_queue(), handle_stuck(), process_turn_result() and add mock-provider smoke tests",
+    "quality: crates/ava-tools/src/permission_middleware.rs — add deny-propagation and auto-approve bypass test coverage",
+    "error-handling: crates/ava-types/src/error.rs — From<io::Error> discards ErrorKind; add structured match (NotFound→AvaError::NotFound, PermissionDenied, TimedOut); update is_retryable() to cover transient ToolError strings",
+    "error-handling: crates/ava-agent/src/agent_loop/tool_execution.rs line 401 — run_post_edit_validation() returns Result<ToolResult, String> via map_err(|e| e.to_string()); change to ava_types::Result<ToolResult>",
+    "error-handling: crates/ava-config/src/lib.rs line 330 — ProjectState::save() returns Result<(), String>; change to structured error type or AvaError",
+    "safety: crates/ava-praxis/src/review.rs line 14 — LazyLock<Regex> uses .unwrap(); add compile-time test regexes_compile() to catch invalid patterns during cargo test",
+    "async: crates/ava-tui/src/state/agent.rs — fire-and-forget spawns for set_thinking_level/cycle_thinking/set_mode need error surfacing; requires changing AgentStack method signatures to return Result",
+    "async: crates/ava-agent/src/stack/mod.rs — codebase indexing JoinHandle dropped; add field to AgentStack and poll before first codebase_search to surface silent index failures",
+    "reference-alignment: crates/ava-types/src/error.rs — AvaError dual-personality (10 legacy string variants + 11 structured variants); add deprecation doc comments on legacy variants and migration guide",
+    "style: crates/ava-agent/src/stack/stack_run.rs — run() is 455 lines; extract build_agent_loop(), run_with_loop() to reduce orchestration to ~100 lines"
+  ]
+}

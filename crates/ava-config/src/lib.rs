@@ -327,11 +327,13 @@ impl ProjectState {
     }
 
     /// Save project state to `.ava/state.json` relative to the given project root.
-    pub fn save(&self, project_root: &std::path::Path) -> std::result::Result<(), String> {
+    pub fn save(&self, project_root: &std::path::Path) -> ava_types::Result<()> {
         let dir = project_root.join(".ava");
-        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-        let content = serde_json::to_string_pretty(self).map_err(|e| e.to_string())?;
-        std::fs::write(dir.join("state.json"), content).map_err(|e| e.to_string())
+        std::fs::create_dir_all(&dir).map_err(AvaError::from)?;
+        let content = serde_json::to_string_pretty(self)
+            .map_err(|e| AvaError::SerializationError(e.to_string()))?;
+        std::fs::write(dir.join("state.json"), content).map_err(AvaError::from)?;
+        Ok(())
     }
 }
 

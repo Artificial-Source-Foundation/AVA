@@ -1,13 +1,25 @@
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use async_trait::async_trait;
-use ava_codebase::{index_project, SearchQuery};
+use ava_codebase::{index_project, CodebaseIndex, SearchQuery};
 use ava_types::{AvaError, ToolResult};
 use serde_json::{json, Value};
+use tokio::sync::RwLock;
 
 use crate::registry::Tool;
 
-pub struct CodeSearchTool;
+/// Shared codebase index type — the same `Arc<RwLock<Option<Arc<CodebaseIndex>>>>` that
+/// `AgentStack` holds and populates in a background task at startup.
+pub type SharedCodebaseIndex = Arc<RwLock<Option<Arc<CodebaseIndex>>>>;
+
+pub struct CodeSearchTool {
+    /// When set, the tool will reuse this pre-built index instead of rebuilding
+    /// one on every invocation.  The `Option<Arc<CodebaseIndex>>` inside the
+    /// lock starts as `None` while the background indexing task is still
+    /// running; once the task completes it becomes `Some(...)`.
+    shared_index: Option<SharedCodebaseIndex>,
+}
 
 impl Default for CodeSearchTool {
     fn default() -> Self {
@@ -16,8 +28,18 @@ impl Default for CodeSearchTool {
 }
 
 impl CodeSearchTool {
+    /// Create a standalone tool with no shared index (falls back to building
+    /// a fresh index on every invocation — the original behaviour).
     pub fn new() -> Self {
-        Self
+        Self { shared_index: None }
+    }
+
+    /// Create a tool that will reuse `index` when it is populated, avoiding
+    /// a full rebuild on every invocation.
+    pub fn with_shared_index(index: SharedCodebaseIndex) -> Self {
+        Self {
+            shared_index: Some(index),
+        }
     }
 }
 
@@ -89,11 +111,39 @@ impl Tool for CodeSearchTool {
 
         tracing::debug!(tool = "code_search", %query, %mode, "executing code_search tool");
 
-        // TODO: Reuse shared CodebaseIndex instead of rebuilding per invocation.
-        // This is a performance issue, not a security issue.
-        let index = index_project(&root)
-            .await
-            .map_err(|e| AvaError::ToolError(format!("failed to index project: {e}")))?;
+        // Attempt to reuse the shared index supplied at construction time.
+        // If the shared index is not yet populated (background task still
+        // running), or no shared index was provided, fall back to building
+        // a fresh one.
+        let owned_index;
+        let index: &CodebaseIndex =
+            if let Some(shared) = &self.shared_index {
+                let guard = shared.read().await;
+                if let Some(idx) = guard.as_ref() {
+                    // The shared index is ready — clone the Arc so we can drop the
+                    // read-lock before performing the (potentially slow) search.
+                    owned_index = Arc::clone(idx);
+                    drop(guard);
+                    &owned_index
+                } else {
+                    // Index not yet ready; build a fresh one for this call.
+                    drop(guard);
+                    tracing::debug!(
+                        tool = "code_search",
+                        "shared index not yet populated, building fresh index"
+                    );
+                    owned_index = Arc::new(index_project(&root).await.map_err(|e| {
+                        AvaError::ToolError(format!("failed to index project: {e}"))
+                    })?);
+                    &owned_index
+                }
+            } else {
+                owned_index =
+                    Arc::new(index_project(&root).await.map_err(|e| {
+                        AvaError::ToolError(format!("failed to index project: {e}"))
+                    })?);
+                &owned_index
+            };
 
         let search_query = SearchQuery::new(query).with_max_results(max_results);
         let hits = match mode {

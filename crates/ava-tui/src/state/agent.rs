@@ -1,4 +1,5 @@
-use crate::event::AppEvent;
+use crate::event::{AppEvent, CommandMessageResult};
+use crate::ui::status_bar::StatusLevel;
 use ava_agent::stack::{AgentRunResult, AgentStack, AgentStackConfig};
 use ava_types::{QueuedMessage, Session, ThinkingLevel};
 use color_eyre::Result;
@@ -542,14 +543,28 @@ impl AgentState {
     }
 
     /// Set thinking level and sync to agent stack.
-    pub fn set_thinking_level(&mut self, level: ThinkingLevel) {
+    pub fn set_thinking_level(
+        &mut self,
+        level: ThinkingLevel,
+        app_tx: Option<mpsc::UnboundedSender<AppEvent>>,
+    ) {
         self.thinking_level = level;
         if let Some(stack) = &self.stack {
             let stack = stack.clone();
             tokio::spawn(async move {
-                match stack.set_thinking_level(level).await {
-                    Ok(()) => {}
-                    Err(e) => warn!("set_thinking_level failed: {e}"),
+                if let Err(e) = stack.set_thinking_level(level).await {
+                    warn!("set_thinking_level failed: {e}");
+                    if let Some(tx) = app_tx {
+                        let _ = tx.send(AppEvent::CommandMessage(CommandMessageResult {
+                            kind: crate::state::messages::MessageKind::Error,
+                            content: format!("Failed to set thinking level: {e}"),
+                            status: Some((
+                                StatusLevel::Error,
+                                format!("Thinking level error: {e}"),
+                            )),
+                            transient: true,
+                        }));
+                    }
                 }
             });
         }
@@ -558,7 +573,10 @@ impl AgentState {
     /// Cycle thinking level and sync to agent stack. Returns the new level's label.
     /// Uses binary cycling (Off↔High) for models that don't support granular levels
     /// (e.g. Kimi, DeepSeek, Alibaba), and full cycling for Claude/GPT/Gemini.
-    pub fn cycle_thinking(&mut self) -> &'static str {
+    pub fn cycle_thinking(
+        &mut self,
+        app_tx: Option<mpsc::UnboundedSender<AppEvent>>,
+    ) -> &'static str {
         self.thinking_level = if self.model_supports_thinking_levels() {
             self.thinking_level.cycle()
         } else {
@@ -568,9 +586,19 @@ impl AgentState {
             let stack = stack.clone();
             let level = self.thinking_level;
             tokio::spawn(async move {
-                match stack.set_thinking_level(level).await {
-                    Ok(()) => {}
-                    Err(e) => warn!("cycle_thinking: set_thinking_level failed: {e}"),
+                if let Err(e) = stack.set_thinking_level(level).await {
+                    warn!("cycle_thinking: set_thinking_level failed: {e}");
+                    if let Some(tx) = app_tx {
+                        let _ = tx.send(AppEvent::CommandMessage(CommandMessageResult {
+                            kind: crate::state::messages::MessageKind::Error,
+                            content: format!("Failed to cycle thinking level: {e}"),
+                            status: Some((
+                                StatusLevel::Error,
+                                format!("Thinking level error: {e}"),
+                            )),
+                            transient: true,
+                        }));
+                    }
                 }
             });
         }
@@ -636,17 +664,34 @@ impl AgentState {
     }
 
     /// Sync the agent mode prompt suffix and plan_mode flag to the stack.
-    pub fn set_mode(&self, mode: super::agent::AgentMode) {
+    pub fn set_mode(
+        &self,
+        mode: super::agent::AgentMode,
+        app_tx: Option<mpsc::UnboundedSender<AppEvent>>,
+    ) {
         let suffix = mode.prompt_suffix().map(|s| s.to_string());
         let is_plan = matches!(mode, AgentMode::Plan);
         if let Some(stack) = &self.stack {
             let stack = stack.clone();
             tokio::spawn(async move {
+                let mut error: Option<String> = None;
                 if let Err(e) = stack.set_mode_prompt_suffix(suffix).await {
                     warn!("set_mode: set_mode_prompt_suffix failed: {e}");
+                    error = Some(format!("set_mode_prompt_suffix: {e}"));
                 }
                 if let Err(e) = stack.set_plan_mode(is_plan).await {
                     warn!("set_mode: set_plan_mode failed: {e}");
+                    if error.is_none() {
+                        error = Some(format!("set_plan_mode: {e}"));
+                    }
+                }
+                if let (Some(msg), Some(tx)) = (error, app_tx) {
+                    let _ = tx.send(AppEvent::CommandMessage(CommandMessageResult {
+                        kind: crate::state::messages::MessageKind::Error,
+                        content: format!("Failed to apply mode: {msg}"),
+                        status: Some((StatusLevel::Error, format!("Mode switch error: {msg}"))),
+                        transient: true,
+                    }));
                 }
             });
         }

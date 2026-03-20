@@ -69,6 +69,10 @@ impl StreamingDiffTracker {
     /// # Note
     /// This performs blocking I/O. Call from a `spawn_blocking` context or use
     /// [`snapshot_before_edit_async`] when inside an async task.
+    #[deprecated(
+        since = "0.0.0",
+        note = "Use `snapshot_before_edit_async` in async contexts to avoid blocking the executor"
+    )]
     pub fn snapshot_before_edit(&mut self, path: &Path) -> DiffEvent {
         let canonical = normalize_path(path);
         let content = std::fs::read_to_string(path).unwrap_or_default();
@@ -114,6 +118,10 @@ impl StreamingDiffTracker {
     /// # Note
     /// This performs blocking I/O. Call from a `spawn_blocking` context or use
     /// [`record_edit_complete_async`] when inside an async task.
+    #[deprecated(
+        since = "0.0.0",
+        note = "Use `record_edit_complete_async` in async contexts to avoid blocking the executor"
+    )]
     pub fn record_edit_complete(&mut self, path: &Path) -> Option<DiffEvent> {
         let canonical = normalize_path(path);
         let pending = self.pending_edits.get_mut(&canonical)?;
@@ -285,6 +293,7 @@ pub fn format_diff_summary(additions: usize, deletions: usize) -> String {
 }
 
 #[cfg(test)]
+#[allow(deprecated)]
 mod tests {
     use super::*;
     use std::fs;

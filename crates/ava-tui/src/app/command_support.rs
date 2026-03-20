@@ -309,7 +309,9 @@ impl App {
             }
             Action::ModeNext => {
                 self.state.agent_mode = self.state.agent_mode.cycle_next();
-                self.state.agent.set_mode(self.state.agent_mode);
+                self.state
+                    .agent
+                    .set_mode(self.state.agent_mode, app_tx.clone());
                 self.set_status(
                     format!("Mode: {}", self.state.agent_mode.label()),
                     StatusLevel::Info,
@@ -317,7 +319,9 @@ impl App {
             }
             Action::ModePrev => {
                 self.state.agent_mode = self.state.agent_mode.cycle_prev();
-                self.state.agent.set_mode(self.state.agent_mode);
+                self.state
+                    .agent
+                    .set_mode(self.state.agent_mode, app_tx.clone());
                 self.set_status(
                     format!("Mode: {}", self.state.agent_mode.label()),
                     StatusLevel::Info,

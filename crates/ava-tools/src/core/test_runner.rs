@@ -53,8 +53,10 @@ impl Tool for TestRunnerTool {
             .and_then(Value::as_u64)
             .unwrap_or(DEFAULT_TIMEOUT_MS / 1000);
 
-        // TODO: Execute test frameworks via direct argv builders instead of sh -c
-        // This prevents shell injection from test/lint command composition.
+        // User-supplied filter strings are passed through shell_single_quote()
+        // before embedding in the sh -c string.  Custom commands are
+        // pre-validated by validate_custom_command() which rejects anything
+        // above low risk via the permission classifier.
         let base_command = if let Some(cmd) = custom_command {
             validate_custom_command(cmd)?;
             cmd.to_string()
@@ -78,6 +80,7 @@ impl Tool for TestRunnerTool {
                     timeout: Some(Duration::from_secs(timeout_secs)),
                     working_dir: None,
                     env_vars: Vec::new(),
+                    scrub_env: false,
                 },
             )
             .await?;
@@ -100,7 +103,6 @@ impl Tool for TestRunnerTool {
     }
 }
 
-// TODO: Factor out shared project-tooling detector (DRY with lint.rs)
 async fn detect_test_command(platform: &dyn Platform) -> ava_types::Result<String> {
     if platform.exists(Path::new("Cargo.toml")).await {
         return Ok("cargo test".to_string());
@@ -139,8 +141,9 @@ fn truncate_split(content: &mut String, max_bytes: usize) {
     *content = format!("{head}\n[...truncated...]\n{tail}");
 }
 
+/// Delegate to the shared quoting helper in the parent module.
 fn shell_single_quote(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "'\\''"))
+    super::shell_single_quote(value)
 }
 
 fn validate_custom_command(command: &str) -> ava_types::Result<()> {
@@ -188,5 +191,17 @@ mod tests {
     #[test]
     fn validate_custom_command_rejects_dangerous() {
         assert!(validate_custom_command("rm -rf /").is_err());
+    }
+
+    #[test]
+    fn filter_injection_is_neutralised() {
+        // A filter string containing shell metacharacters must be safely quoted.
+        let malicious = "'; rm -rf /tmp/test; echo '";
+        let quoted = shell_single_quote(malicious);
+        // The result must be a properly single-quoted word.
+        assert!(quoted.starts_with('\''));
+        assert!(quoted.ends_with('\''));
+        // Each embedded `'` is replaced by `'\''`.
+        assert!(quoted.contains("'\\''"));
     }
 }

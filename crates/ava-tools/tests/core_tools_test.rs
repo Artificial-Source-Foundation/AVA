@@ -484,19 +484,19 @@ fn default_tools_gives_6_tools() {
 }
 
 #[test]
-fn extended_registration_gives_all_14_tools() {
+fn extended_registration_gives_all_16_tools() {
     use ava_tools::core::{register_default_tools, register_extended_tools};
     use ava_tools::registry::{ToolRegistry, ToolTier};
 
     let mut registry = ToolRegistry::new();
     register_default_tools(&mut registry, Arc::new(StandardPlatform));
-    register_extended_tools(&mut registry, Arc::new(StandardPlatform));
+    register_extended_tools(&mut registry, Arc::new(StandardPlatform), None);
 
     let all = registry.list_tools();
     assert_eq!(
         all.len(),
-        14,
-        "default (6) + extended (8) should have 14 tools, got: {:?}",
+        16,
+        "default (6) + extended (10) should have 16 tools, got: {:?}",
         all.iter().map(|t| t.name.as_str()).collect::<Vec<_>>()
     );
 
@@ -504,13 +504,13 @@ fn extended_registration_gives_all_14_tools() {
     let default_only = registry.list_tools_for_tiers(&[ToolTier::Default]);
     assert_eq!(default_only.len(), 6);
 
-    // Extended tier only should give 8 (removed lint, diagnostics, test_runner)
+    // Extended tier only should give 10 (8 original + lint + test_runner)
     let extended_only = registry.list_tools_for_tiers(&[ToolTier::Extended]);
-    assert_eq!(extended_only.len(), 8);
+    assert_eq!(extended_only.len(), 10);
 
-    // Both tiers should give 14
+    // Both tiers should give 16
     let both = registry.list_tools_for_tiers(&[ToolTier::Default, ToolTier::Extended]);
-    assert_eq!(both.len(), 14);
+    assert_eq!(both.len(), 16);
 
     // Verify extended tools are present
     let ext_names: Vec<&str> = extended_only.iter().map(|t| t.name.as_str()).collect();
@@ -523,6 +523,8 @@ fn extended_registration_gives_all_14_tools() {
         "ast_ops",
         "lsp_ops",
         "code_search",
+        "lint",
+        "test_runner",
     ] {
         assert!(
             ext_names.contains(expected),
@@ -538,7 +540,7 @@ fn extended_tools_are_executable_regardless_of_tier_filter() {
 
     let mut registry = ToolRegistry::new();
     register_default_tools(&mut registry, Arc::new(StandardPlatform));
-    register_extended_tools(&mut registry, Arc::new(StandardPlatform));
+    register_extended_tools(&mut registry, Arc::new(StandardPlatform), None);
 
     // Listing with default-only filter should not include apply_patch
     let default_only = registry.list_tools_for_tiers(&[ToolTier::Default]);

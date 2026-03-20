@@ -1,0 +1,12 @@
+{
+  "status": "fixed",
+  "files_modified": [
+    "crates/ava-tools/src/core/mod.rs",
+    "crates/ava-tools/src/core/lint.rs",
+    "crates/ava-tools/src/core/test_runner.rs",
+    "crates/ava-tools/tests/core_tools_test.rs"
+  ],
+  "summary": "lint.rs and test_runner.rs were orphan files — not declared in core/mod.rs and therefore not compiled. Added them to the module tree, registered both as Extended-tier tools in register_extended_tools(), and deduplicated the private shell_single_quote() helper into a shared public function in core/mod.rs with a doc-test. Both files now delegate to super::shell_single_quote(). Added injection-resistance tests to each file verifying that single-quote payloads are safely neutralised (result starts and ends with single-quote, embedded quotes are escaped as '\\''). Removed stale TODO comments. Updated the integration test extended_registration_gives_all_14_tools → extended_registration_gives_all_16_tools to reflect the new count (6 default + 10 extended). No argv refactor was required: the Platform trait is string-based, but all user-controlled inputs (scope_path, filter) are properly single-quoted before interpolation, and custom commands are pre-validated by the permission classifier.",
+  "cargo_check_pass": true,
+  "cargo_test_pass": true
+}

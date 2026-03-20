@@ -1,0 +1,11 @@
+{
+  "status": "fixed",
+  "files_modified": [
+    "crates/ava-agent/src/agent_loop/mod.rs",
+    "crates/ava-agent/src/streaming_diff.rs"
+  ],
+  "summary": "Migrated both sync call sites of snapshot_before_edit() and record_edit_complete() in crates/ava-agent/src/agent_loop/mod.rs (lines ~636 and ~652) to their async counterparts (snapshot_before_edit_async().await and record_edit_complete_async().await). Both calls are inside the async agent loop write-tool execution block. The sync versions were marked #[deprecated] with a note pointing to the async variants. The test module in streaming_diff.rs received #[allow(deprecated)] since tests legitimately use sync versions in non-async contexts. The pre-existing compilation failures in ava-tools (register_extended_tools arity mismatch, ExecuteOptions missing scrub_env field) prevented running the full ava-agent test suite, but those are unrelated pre-existing issues. cargo check -p ava-agent passed cleanly with no new errors or warnings from our changes.",
+  "cargo_check_pass": true,
+  "cargo_test_pass": false,
+  "cargo_test_note": "Test suite could not be compiled due to pre-existing failures in ava-tools dependency (register_extended_tools arity mismatch, ExecuteOptions missing scrub_env field) — unrelated to this fix"
+}

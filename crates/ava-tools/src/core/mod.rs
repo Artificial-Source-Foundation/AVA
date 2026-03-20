@@ -9,6 +9,7 @@ pub mod git_read;
 pub mod glob;
 pub mod grep;
 pub mod hashline;
+pub mod lint;
 pub mod lsp_ops;
 pub mod multiedit;
 pub mod output_fallback;
@@ -18,15 +19,37 @@ pub mod question;
 pub mod read;
 pub mod secret_redaction;
 pub mod task;
+pub mod test_runner;
 pub mod todo;
 pub mod web_fetch;
 pub mod web_search;
 pub mod write;
 
+/// Wrap `value` in POSIX single-quotes, escaping any embedded single-quotes.
+///
+/// The result is safe to embed verbatim in an `sh -c` command string as a
+/// single argument (no word-splitting, no glob expansion, no variable
+/// expansion occurs inside single-quotes).  The only byte that requires
+/// special handling is `'` itself: the shell quoting is closed, a
+/// backslash-escaped `'` is emitted, and the quoting is re-opened.
+///
+/// # Examples
+/// ```
+/// use ava_tools::core::shell_single_quote;
+/// assert_eq!(shell_single_quote("src/main.rs"), "'src/main.rs'");
+/// assert_eq!(shell_single_quote("a'b"), "'a'\\''b'");
+/// ```
+pub fn shell_single_quote(value: &str) -> String {
+    // Close the single-quote, emit a backslash-escaped literal quote, reopen.
+    // e.g. "a'b" -> "'a'\\''b'"
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
 use std::sync::Arc;
 
 use ava_platform::Platform;
 
+use crate::core::code_search::SharedCodebaseIndex;
 use crate::registry::{ToolRegistry, ToolTier};
 
 /// Register the 6 default tools that are always sent to the LLM.
@@ -50,7 +73,15 @@ pub fn register_default_tools(registry: &mut ToolRegistry, platform: Arc<dyn Pla
 ///
 /// These tools are always *executable* — the tier only controls whether their
 /// definitions are included in the system prompt sent to the LLM.
-pub fn register_extended_tools(registry: &mut ToolRegistry, platform: Arc<dyn Platform>) {
+///
+/// Pass `shared_index` to let the `code_search` tool reuse the pre-built
+/// [`ava_codebase::CodebaseIndex`] that `AgentStack` populates in a background
+/// task at startup, avoiding an O(n) disk rebuild on every invocation.
+pub fn register_extended_tools(
+    registry: &mut ToolRegistry,
+    platform: Arc<dyn Platform>,
+    shared_index: Option<SharedCodebaseIndex>,
+) {
     registry.register_with_tier(
         apply_patch::ApplyPatchTool::new(platform.clone()),
         ToolTier::Extended,
@@ -69,14 +100,23 @@ pub fn register_extended_tools(registry: &mut ToolRegistry, platform: Arc<dyn Pl
         lsp_ops::LspOpsTool::new(platform.clone()),
         ToolTier::Extended,
     );
-    registry.register_with_tier(code_search::CodeSearchTool::new(), ToolTier::Extended);
+    let code_search_tool = match shared_index {
+        Some(idx) => code_search::CodeSearchTool::with_shared_index(idx),
+        None => code_search::CodeSearchTool::new(),
+    };
+    registry.register_with_tier(code_search_tool, ToolTier::Extended);
     registry.register_with_tier(git_read::GitReadTool::new(), ToolTier::Extended);
+    registry.register_with_tier(lint::LintTool::new(platform.clone()), ToolTier::Extended);
+    registry.register_with_tier(
+        test_runner::TestRunnerTool::new(platform.clone()),
+        ToolTier::Extended,
+    );
 }
 
 /// Register all core tools (default + extended). Backwards-compatible alias.
 pub fn register_core_tools(registry: &mut ToolRegistry, platform: Arc<dyn Platform>) {
     register_default_tools(registry, platform.clone());
-    register_extended_tools(registry, platform);
+    register_extended_tools(registry, platform, None);
 }
 
 /// Register the task tool with a spawner that can create sub-agent runs.

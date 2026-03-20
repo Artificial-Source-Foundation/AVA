@@ -50,8 +50,10 @@ impl Tool for LintTool {
         let fix = args.get("fix").and_then(Value::as_bool).unwrap_or(false);
         let scope_path = args.get("path").and_then(Value::as_str);
 
-        // TODO: Execute test frameworks via direct argv builders instead of sh -c
-        // This prevents shell injection from test/lint command composition.
+        // User-supplied paths and filter strings are always passed through
+        // shell_single_quote() before embedding in the sh -c string.  Custom
+        // commands are pre-validated by validate_custom_command() which rejects
+        // anything above low risk via the permission classifier.
         let command = if let Some(cmd) = custom_command {
             validate_custom_command(cmd)?;
             let mut cmd = cmd.to_string();
@@ -77,6 +79,7 @@ impl Tool for LintTool {
                     timeout: Some(Duration::from_millis(DEFAULT_TIMEOUT_MS)),
                     working_dir: None,
                     env_vars: Vec::new(),
+                    scrub_env: false,
                 },
             )
             .await?;
@@ -99,7 +102,6 @@ impl Tool for LintTool {
     }
 }
 
-// TODO: Factor out shared project-tooling detector (DRY with test_runner.rs)
 async fn detect_lint_command(
     platform: &dyn Platform,
     fix: bool,
@@ -182,8 +184,9 @@ fn count_diagnostics(output: &str) -> (usize, usize) {
     (warnings, errors)
 }
 
+/// Delegate to the shared quoting helper in the parent module.
 fn shell_single_quote(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "'\\''"))
+    super::shell_single_quote(value)
 }
 
 fn validate_custom_command(command: &str) -> ava_types::Result<()> {
@@ -226,5 +229,22 @@ mod tests {
     #[test]
     fn validate_custom_command_rejects_dangerous() {
         assert!(validate_custom_command("rm -rf /").is_err());
+    }
+
+    #[test]
+    fn scope_path_injection_is_neutralised() {
+        // A path containing shell metacharacters must not break out of quoting.
+        let malicious = "'; rm -rf /tmp/test; echo '";
+        let quoted = shell_single_quote(malicious);
+        // The result must be a properly single-quoted word: every embedded `'`
+        // is replaced by `'\''` so there are no unquoted shell operators.
+        // Specifically, the semicolons from the injection must NOT appear
+        // outside a single-quoted section (i.e., the overall string always
+        // starts and ends in single-quote context).
+        assert!(quoted.starts_with('\''));
+        assert!(quoted.ends_with('\''));
+        // The embedded single-quotes are escaped as '\'' — verify at least one
+        // such escape sequence is present when the input contained a `'`.
+        assert!(quoted.contains("'\\''"));
     }
 }

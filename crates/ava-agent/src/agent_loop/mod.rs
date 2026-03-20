@@ -632,9 +632,11 @@ impl AgentLoop {
                 // Snapshot file before write/edit tools for diff tracking
                 let diff_path =
                     if crate::streaming_diff::StreamingDiffTracker::is_tracked_tool(&tc.name) {
-                        extract_tool_path(tc).inspect(|p| {
-                            self.diff_tracker.snapshot_before_edit(p);
-                        })
+                        let maybe_path = extract_tool_path(tc);
+                        if let Some(ref p) = maybe_path {
+                            self.diff_tracker.snapshot_before_edit_async(p).await;
+                        }
+                        maybe_path
                     } else {
                         None
                     };
@@ -649,7 +651,7 @@ impl AgentLoop {
                             ref diff_text,
                             additions,
                             deletions,
-                        }) = self.diff_tracker.record_edit_complete(path)
+                        }) = self.diff_tracker.record_edit_complete_async(path).await
                         {
                             Self::emit(
                                 event_tx,

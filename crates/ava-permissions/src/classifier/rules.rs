@@ -2,25 +2,146 @@ use crate::tags::{RiskLevel, SafetyTag};
 
 use super::CommandClassification;
 
+/// Protected path prefixes that must never be targeted by a recursive rm.
+const CRITICAL_PATH_PREFIXES: &[&str] = &[
+    "/", "~", "/home", "/root", "/etc", "/usr", "/var", "/boot", "/sys", "/proc", "/dev", "/lib",
+    "/lib64", "/bin", "/sbin", "/opt",
+];
+
+/// Known shell binary names used in pipe-to-shell detection.
+const SHELL_BINARIES: &[&str] = &[
+    "sh", "bash", "zsh", "fish", "dash", "ksh", "csh", "tcsh", "ash",
+];
+
+/// Collect all single-character flags from an argument list.
+///
+/// Handles both combined flags (`-rf`) and separate flags (`-r -f`).
+fn collect_flags(tokens: &[&str]) -> std::collections::HashSet<char> {
+    let mut flags = std::collections::HashSet::new();
+    for token in tokens.iter().skip(1) {
+        // Stop processing flags at `--` (end-of-options sentinel)
+        if *token == "--" {
+            break;
+        }
+        if let Some(rest) = token.strip_prefix('-') {
+            if !rest.is_empty() && !rest.starts_with('-') {
+                flags.extend(rest.chars());
+            }
+        }
+    }
+    flags
+}
+
+/// Return true if the flags include both recursive (`r`/`R`) and force (`f`) flags.
+fn has_recursive_force(flags: &std::collections::HashSet<char>) -> bool {
+    (flags.contains(&'r') || flags.contains(&'R')) && flags.contains(&'f')
+}
+
+/// Extract non-flag path arguments from a tokenised rm command.
+///
+/// Strips leading/trailing ASCII quotes and rejects tokens containing
+/// shell metacharacters (`;`, `&&`, `||`, `|`, `` ` ``), env-var
+/// references (`$`), and unicode trickery (zero-width chars).
+fn extract_rm_paths(tokens: &[&str]) -> Vec<String> {
+    let mut paths = Vec::new();
+    let mut past_double_dash = false;
+    for token in tokens.iter().skip(1) {
+        if *token == "--" {
+            past_double_dash = true;
+            continue;
+        }
+        // Before `--`, pure flag tokens are skipped
+        if !past_double_dash && token.starts_with('-') {
+            continue;
+        }
+        // Strip wrapping quotes
+        let stripped = token.trim_matches(|c| c == '"' || c == '\'');
+        // Reject tokens that contain shell metacharacters or env-var references
+        if stripped
+            .chars()
+            .any(|c| matches!(c, ';' | '|' | '`' | '$' | '&'))
+        {
+            continue;
+        }
+        // Reject tokens with zero-width or unusual unicode that could bypass matching
+        if stripped
+            .chars()
+            .any(|c| (c as u32) < 0x20 || c == '\u{200b}')
+        {
+            continue;
+        }
+        if !stripped.is_empty() {
+            paths.push(stripped.to_string());
+        }
+    }
+    paths
+}
+
+/// Return true if the path (after normalisation) matches a critical prefix.
+fn path_is_critical(path: &str) -> bool {
+    // Normalise: collapse multiple slashes, remove trailing slash (except root)
+    let normalised = {
+        let mut s = path.trim().to_string();
+        // Collapse runs of '/' to a single '/'
+        while s.contains("//") {
+            s = s.replace("//", "/");
+        }
+        // Remove trailing slash unless it IS the root
+        if s.len() > 1 && s.ends_with('/') {
+            s.pop();
+        }
+        s
+    };
+
+    for prefix in CRITICAL_PATH_PREFIXES {
+        // Exact match
+        if normalised == *prefix {
+            return true;
+        }
+        // "prefix/*" or "prefix/" glob patterns
+        if normalised == format!("{prefix}/*") || normalised == format!("{prefix}/") {
+            return true;
+        }
+        // Path IS just the prefix followed by a wildcard at the top level
+        // e.g. "/home/*" when prefix is "/home"
+        if let Some(rest) = normalised.strip_prefix(*prefix) {
+            if rest == "/*" || rest == "*" {
+                return true;
+            }
+        }
+    }
+
+    false
+}
+
+/// Detect pipe-to-shell patterns: `| sh`, `| bash`, `| /bin/sh`, etc.
+fn has_pipe_to_shell(cmd: &str) -> bool {
+    if let Some(after_pipe) = cmd.split_once('|').map(|(_, r)| r.trim()) {
+        let first_word = after_pipe.split_ascii_whitespace().next().unwrap_or("");
+        // Strip any leading path component (e.g. /bin/bash → bash)
+        let binary = first_word.rsplit('/').next().unwrap_or(first_word);
+        // Strip trailing flags or arguments
+        let binary = binary.split_ascii_whitespace().next().unwrap_or(binary);
+        return SHELL_BINARIES.contains(&binary);
+    }
+    false
+}
+
 /// Check for patterns that should be BLOCKED (Critical risk).
 /// These are ALWAYS denied, even in auto-approve mode.
 pub(super) fn check_blocked_patterns(lower: &str, _original: &str) -> Option<String> {
-    // rm -rf / or rm -rf ~ or rm -rf /*
-    if (lower.contains("rm ") || lower.starts_with("rm "))
-        && (lower.contains("-rf") || lower.contains("-fr"))
+    // rm with recursive+force flags on a critical path
     {
-        // Extract the path after rm -rf
-        let after_flags = lower
-            .replace("rm", "")
-            .replace("-rf", "")
-            .replace("-fr", "")
-            .replace("-r", "")
-            .replace("-f", "")
-            .trim()
-            .to_string();
-        let target = after_flags.trim();
-        if target == "/" || target == "~" || target == "/*" || target == "~/*" {
-            return Some(format!("rm -rf on critical path: {target}"));
+        let tokens: Vec<&str> = lower.split_ascii_whitespace().collect();
+        if tokens.first().copied() == Some("rm") {
+            let flags = collect_flags(&tokens);
+            if has_recursive_force(&flags) {
+                for path in extract_rm_paths(&tokens) {
+                    if path_is_critical(&path) {
+                        return Some(format!("rm -rf on critical path: {path}"));
+                    }
+                }
+            }
         }
     }
 
@@ -30,12 +151,7 @@ pub(super) fn check_blocked_patterns(lower: &str, _original: &str) -> Option<Str
     }
 
     // curl/wget piped to shell
-    if (lower.contains("curl ") || lower.contains("wget "))
-        && (lower.contains("| sh")
-            || lower.contains("| bash")
-            || lower.contains("|sh")
-            || lower.contains("|bash"))
-    {
+    if (lower.contains("curl ") || lower.contains("wget ")) && has_pipe_to_shell(lower) {
         return Some("Piping downloaded content to shell is dangerous".to_string());
     }
 
@@ -102,7 +218,12 @@ pub(super) fn check_high_risk_patterns(
     let mut tags = vec![SafetyTag::Destructive];
 
     // rm -rf (non-root paths -- root is already blocked)
-    if first_word == "rm" && (lower.contains("-rf") || lower.contains("-fr")) {
+    let rm_has_recursive_force = first_word == "rm" && {
+        let tokens: Vec<&str> = lower.split_ascii_whitespace().collect();
+        let flags = collect_flags(&tokens);
+        has_recursive_force(&flags)
+    };
+    if rm_has_recursive_force {
         warnings.push("rm -rf can recursively delete files".to_string());
         return Some(CommandClassification {
             risk_level: RiskLevel::High,

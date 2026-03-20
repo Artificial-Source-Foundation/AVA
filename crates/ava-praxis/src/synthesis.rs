@@ -1,5 +1,5 @@
 use ava_llm::provider::LLMProvider;
-use ava_types::{AvaError, Message, Result, Role, Session};
+use ava_types::{AvaError, Message, Result, Role, Session, MEMORY_BLOCK_MAX_CHARS};
 use serde::Deserialize;
 use std::sync::Arc;
 
@@ -74,7 +74,7 @@ fn build_synthesis_messages(goal: &str, outcomes: &[WorkerOutcome]) -> Vec<Messa
                     .clone()
                     .unwrap_or_else(|| "no result".to_string())
             });
-        let extracted = extracted.chars().take(2000).collect::<String>();
+        let extracted = extracted.chars().take(MEMORY_BLOCK_MAX_CHARS).collect::<String>();
         prompt.push_str(&format!(
             "- worker_id: {}\n  lead: {}\n  task: {}\n  result: {}\n",
             outcome.worker_id, outcome.lead, outcome.task_description, extracted

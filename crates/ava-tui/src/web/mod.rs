@@ -115,18 +115,16 @@ pub async fn run_server(host: &str, port: u16) -> Result<()> {
     let listener = tokio::net::TcpListener::bind(&addr).await?;
 
     info!("AVA web server listening on http://{addr}");
-    eprintln!("AVA web server running at http://{addr}");
-    eprintln!("  API:       http://{addr}/api/");
-    eprintln!("  WebSocket: ws://{addr}/ws");
-    eprintln!("  Health:    http://{addr}/api/health");
-    eprintln!();
-    eprintln!("Press Ctrl+C to stop.");
+    info!("  API:       http://{addr}/api/");
+    info!("  WebSocket: ws://{addr}/ws");
+    info!("  Health:    http://{addr}/api/health");
+    info!("Press Ctrl+C to stop.");
 
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await?;
 
-    eprintln!("\nShutting down.");
+    info!("Web server shut down.");
     Ok(())
 }
 

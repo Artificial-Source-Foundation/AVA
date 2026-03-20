@@ -1,0 +1,118 @@
+{
+  "domain": "focused-r2",
+  "severity_counts": {
+    "critical": 3,
+    "warning": 5,
+    "suggestion": 4
+  },
+  "findings": [
+    {
+      "severity": "critical",
+      "file": "crates/ava-permissions/src/classifier/rules.rs",
+      "line": 7,
+      "issue": "rm -rf block-list bypass: the critical-path check uses string replacement to strip flags and the path, then compares the remainder against a short allow-list. This approach has at least six bypass classes: (1) double spaces ('rm  -rf /') survive .replace('-rf','') because the token comparison expects exact equality after trim; (2) env-var expansion ('rm -rf $HOME/' passes because $HOME is not in the literal list); (3) unicode lookalikes in the path (e.g. '/\\u200b') survive trim; (4) quoted paths ('rm -rf \"/\"') — the quote characters are not stripped so target becomes '\"' not '/'; (5) flag reordering ('rm -fr /') is handled but 'rm -f -r /' is not — the compound flag '-fr' is replaced but '-f -r' leaves '-r /' after the inner replace pass, making target == '-r /' which does not match '/'; (6) shell metacharacters can split the token ('rm -rf / && true' — after stripping, target becomes '&& true').",
+      "recommendation": "Replace the string-replacement approach with a proper POSIX-flag tokeniser. Split the raw command on ASCII whitespace (not a single space), discard tokens that are pure flag strings (match regex ^-[a-zA-Z]+$), and collect the remaining tokens as paths. Then check each path against the block-list. Example:\n\n```rust\nfn extract_rm_paths(cmd: &str) -> Vec<String> {\n    let tokens: Vec<&str> = cmd.split_ascii_whitespace().collect();\n    // skip 'rm' itself and any pure-flag tokens\n    tokens.iter().skip(1)\n        .filter(|t| !t.starts_with('-'))\n        .map(|t| t.trim_matches(|c| c == '\\\"' || c == '\\'')\n        .to_string())\n        .collect()\n}\n\nconst CRITICAL_PATHS: &[&str] = &[\"/\", \"~\", \"/*\", \"~/\", \"~/*\"];\n\nif tokens[0] == \"rm\" && has_recursive_flag(&tokens) {\n    for path in extract_rm_paths(cmd) {\n        if CRITICAL_PATHS.contains(&path.as_str()) {\n            return Some(format!(\"rm -rf on critical path: {path}\"));\n        }\n    }\n}\n```\nAlso normalise env-vars: reject any path that starts with '$' or contains shell metacharacters (';', '&&', '||', '|', '`').",
+      "code_snippet": "let after_flags = lower\n    .replace(\"rm\", \"\")\n    .replace(\"-rf\", \"\")\n    .replace(\"-fr\", \"\")\n    .replace(\"-r\", \"\")\n    .replace(\"-f\", \"\")\n    .trim()\n    .to_string();\nlet target = after_flags.trim();\nif target == \"/\" || target == \"~\" || target == \"/*\" || target == \"~/*\" {\n    return Some(format!(\"rm -rf on critical path: {target}\"));\n}",
+      "category": "security"
+    },
+    {
+      "severity": "critical",
+      "file": "crates/ava-permissions/src/classifier/rules.rs",
+      "line": 9,
+      "issue": "rm -rf block-list bypass via compound flag split: 'rm -f -r /' is not blocked. The check fires on .contains('-rf') || .contains('-fr'), but 'rm -f -r /' contains neither '-rf' nor '-fr' as substrings. The individual-flag remove pass does strip '-r' and '-f' but the path token extraction is already wrong (see finding above). Combined, 'rm -f -r /' falls through to the High-risk path and only warns, not blocks.",
+      "recommendation": "Normalise all flag tokens before the critical-path check. Collect all single-character flags from '-X' tokens and from combined '-XY' tokens, then check whether the set contains both 'r' and 'f' (in any combination). This is O(n) in tokens and handles all POSIX flag forms:\n\n```rust\nfn has_recursive_force(tokens: &[&str]) -> bool {\n    let mut flags = std::collections::HashSet::new();\n    for t in tokens.iter().skip(1) {\n        if let Some(rest) = t.strip_prefix('-') {\n            flags.extend(rest.chars());\n        }\n    }\n    flags.contains(&'r') && flags.contains(&'f')\n}\n```",
+      "code_snippet": "if (lower.contains(\"rm \") || lower.starts_with(\"rm \"))\n    && (lower.contains(\"-rf\") || lower.contains(\"-fr\"))\n{",
+      "category": "security"
+    },
+    {
+      "severity": "critical",
+      "file": "crates/ava-agent/src/agent_loop/tool_execution.rs",
+      "line": 181,
+      "issue": "ToolCall is cloned unconditionally on every tool execution, even when no name repair is needed. The clone allocates a new String for name, a new String for id, and deep-copies the arguments Value (which can be a large JSON tree). This clone happens before the tool is dispatched, and then tool_call.arguments is cloned AGAIN inside ToolRegistry::execute (line 203 of registry.rs: tool.execute(tool_call.arguments.clone())) and once more in each retry attempt. For a busy agent loop executing dozens of tool calls, this is three heap allocations of the arguments tree per invocation.",
+      "recommendation": "The repair case is rare. Avoid the unconditional clone by using Cow or by passing &mut ToolCall:\n\n```rust\n// Option A: avoid clone when no repair needed\nlet repaired = repair_tool_name(&tool_call.name, &self.tools);\nlet owned;\nlet tool_call = if repaired != tool_call.name {\n    owned = ToolCall { name: repaired, ..tool_call.clone() };\n    &owned\n} else {\n    tool_call\n};\n\n// Option B (larger refactor): change Tool::execute to accept &Value\nasync fn execute(&self, args: &Value) -> Result<ToolResult>;\n```\nOption B is the correct long-term fix and eliminates all the downstream clones inside execute() and the retry loop. The trait change is mechanical — every Tool impl changes `args: Value` to `args: &Value` and removes internal `.clone()` calls on args.",
+      "code_snippet": "let mut tool_call = tool_call.clone();  // line 181 — unconditional clone\nlet repaired = repair_tool_name(&tool_call.name, &self.tools);\nif repaired != tool_call.name {\n    tool_call.name = repaired;\n}\n// ...\nlet mut result = match self.tools.execute(tool_call.clone()).await {  // second clone (registry.rs:190 takes owned ToolCall)\n// inside registry.rs:\nlet mut result = tool.execute(tool_call.arguments.clone()).await;  // third clone",
+      "category": "performance"
+    },
+    {
+      "severity": "warning",
+      "file": "crates/ava-agent/src/instructions.rs",
+      "line": 70,
+      "issue": "load_project_instructions() and load_project_instructions_with_config() use std::fs (blocking) throughout: fs::canonicalize, fs::read_dir, fs::read_to_string, fs::create_dir_all (in check_plan_mode_tool), path.is_dir(), path.is_file(). These are called from build_system_prompt_suffix() at line 203 of stack_run.rs, which is inside an async fn that holds an RwLock guard (.read().await). Blocking the async executor while holding a lock prevents other tasks from making progress and can cause priority inversion in the TUI event loop.",
+      "recommendation": "Wrap the entire synchronous instruction loading in tokio::task::spawn_blocking, or convert each individual fs call to its tokio::fs async equivalent. The spawn_blocking approach is less invasive:\n\n```rust\n// In instruction_resolver.rs\npub async fn build_system_prompt_suffix_async(\n    mode_suffix: Option<String>,\n    model_name: &str,\n    extra_instruction_paths: Vec<String>,\n) -> Option<String> {\n    let model_name = model_name.to_string();\n    tokio::task::spawn_blocking(move || {\n        build_system_prompt_suffix(mode_suffix, &model_name, &extra_instruction_paths)\n    })\n    .await\n    .ok()\n    .flatten()\n}\n```\nThen in stack_run.rs, await the async version (drop the lock guard before calling it, since the lock is only needed to read mode_suffix which is a cheap clone).",
+      "code_snippet": "pub fn load_project_instructions_with_config(extra_paths: &[String]) -> Option<String> {\n    let cwd = std::env::current_dir().ok()?;  // blocking\n    // ...\n    // calls: fs::canonicalize, fs::read_dir, fs::read_to_string across ~10 call sites\n}",
+      "category": "async"
+    },
+    {
+      "severity": "warning",
+      "file": "crates/ava-tui/src/state/agent.rs",
+      "line": 548,
+      "issue": "Three tokio::spawn fire-and-forget calls in set_thinking_level() (line 548), cycle_thinking_level() (line 566), and set_mode() (line 637) spawn tasks that call async methods on AgentStack but their JoinHandles are dropped immediately. If the AgentStack methods fail (e.g., lock poisoned, channel closed), the error is silently discarded. More critically, if the TUI shuts down while these spawns are in flight, the spawns may race against teardown and attempt to use a partially-dropped stack.",
+      "recommendation": "For UI-synchronous mutations that should never fail silently, use a bounded channel to enqueue the change and process it from the main TUI event loop, or collect the handle and await it in the next event cycle. At minimum, log errors from the spawn:\n\n```rust\nlet stack = stack.clone();\nlet level = self.thinking_level;\ntokio::spawn(async move {\n    if let Err(e) = stack.set_thinking_level(level).await {\n        tracing::warn!(\"set_thinking_level failed: {e}\");\n    }\n});\n```\nFor set_mode() which chains two awaits, consider combining them into a single stack method to reduce the window for partial updates.",
+      "code_snippet": "tokio::spawn(async move {\n    stack.set_thinking_level(level).await;  // error silently dropped\n});",
+      "category": "async"
+    },
+    {
+      "severity": "warning",
+      "file": "crates/ava-agent/src/stack/mod.rs",
+      "line": 141,
+      "issue": "tokio::spawn for codebase indexing (line 141) drops the JoinHandle. If the indexing task panics (e.g., walkdir on a directory with permission errors), the panic is silently absorbed by the runtime. There is no way to know the index was never built, and subsequent codebase_search calls will silently return empty results from the uninitialized RwLock<Option<Arc<CodebaseIndex>>>.",
+      "recommendation": "Retain the handle in the AgentStack struct and poll it lazily (checking .is_finished()) before the first codebase_search invocation. Alternatively, use a one-shot channel to signal completion or failure:\n\n```rust\nlet (index_done_tx, index_done_rx) = tokio::sync::oneshot::channel();\nlet handle = tokio::spawn(async move {\n    let result = index_project(&project_root).await;\n    // ...\n    let _ = index_done_tx.send(result.is_ok());\n});\nself.codebase_index_task = Some(handle);\n```",
+      "code_snippet": "tokio::spawn(async move {\n    let index_result = if workspace_roots_for_task.len() > 1 {\n        index_workspace(&workspace_roots_for_task).await\n    } else {\n        index_project(&project_root).await\n    };\n    // ...\n});  // handle dropped",
+      "category": "async"
+    },
+    {
+      "severity": "warning",
+      "file": "crates/ava-types/src/error.rs",
+      "line": 217,
+      "issue": "From<std::io::Error> converts to AvaError::IoError(err.to_string()), discarding the std::io::ErrorKind. This means callers cannot match on the kind (NotFound, PermissionDenied, WouldBlock, etc.) to make retry decisions or show differentiated UI. Any code that does .map_err(AvaError::from)? on an io::Error loses the ability to distinguish 'file not found' from 'permission denied'. The same pattern applies to From<serde_json::Error> losing the error category (io vs syntax vs data).",
+      "recommendation": "At minimum, preserve ErrorKind in the structured variant or use a wrapper:\n\n```rust\nimpl From<std::io::Error> for AvaError {\n    fn from(err: std::io::Error) -> Self {\n        match err.kind() {\n            std::io::ErrorKind::NotFound => AvaError::NotFound(err.to_string()),\n            std::io::ErrorKind::PermissionDenied => AvaError::PermissionDenied(err.to_string()),\n            std::io::ErrorKind::TimedOut => AvaError::TimeoutError(err.to_string()),\n            _ => AvaError::IoError(err.to_string()),\n        }\n    }\n}\n```\nThis is backward-compatible since all existing match arms continue to compile.",
+      "code_snippet": "impl From<std::io::Error> for AvaError {\n    fn from(err: std::io::Error) -> Self {\n        AvaError::IoError(err.to_string())  // ErrorKind discarded\n    }\n}",
+      "category": "error-handling"
+    },
+    {
+      "severity": "warning",
+      "file": "crates/ava-types/src/error.rs",
+      "line": 68,
+      "issue": "AvaError has 10 string-payload (legacy) variants and 11 structured variants, making the dual-personality doc comment accurate but the boundary unclear to callsites. The structured ToolExecutionError and legacy ToolError coexist, and the is_retryable() logic does not include ToolError (only ToolTimeout) — so any tool error raised via the legacy variant is non-retryable even if it represents a transient failure. Similarly, ToolError is categorised as Tool but so is ToolExecutionError; pattern matching across both is verbose.",
+      "recommendation": "Document a deprecation timeline for the 10 legacy variants with a lint (clippy::deprecated) to prevent new code from constructing them. Add a migration table in a doc comment. At minimum, update is_retryable() to check ToolError for known transient substrings to prevent silent non-retry of transient tool failures:\n\n```rust\nAvaError::ToolError(msg) if is_transient_error(msg) => true,\n```",
+      "code_snippet": "/// Generic tool error (legacy — prefer `ToolExecutionError` for new code).\n#[error(\"Tool execution failed: {0}\")]\nToolError(String),\n// ...\npub fn is_retryable(&self) -> bool {\n    matches!(\n        self,\n        AvaError::TimeoutError(_)\n            | AvaError::DatabaseError(_)\n            | AvaError::PlatformError(_)\n            | AvaError::RateLimited { .. }\n            | AvaError::ToolTimeout { .. }\n            | AvaError::ProviderUnavailable { .. }\n        // NOTE: ToolError is NOT here — transient tool errors via legacy path are non-retryable\n    )\n}",
+      "category": "error-handling"
+    },
+    {
+      "severity": "suggestion",
+      "file": "crates/ava-permissions/src/classifier/rules.rs",
+      "line": 33,
+      "issue": "curl/wget pipe-to-shell detection uses substring matching on '| sh' and '| bash' but misses: '|sh', '|bash' without space (handled), but also '| zsh', '| fish', '| dash', '| ksh', '| sh -c', and heredoc-based execution patterns. An attacker-controlled command could use '| /bin/sh' or '| python3 -c'.",
+      "recommendation": "Extend the pipe-to-shell pattern to check for any token after '|' that names a known shell binary:\n\n```rust\nconst SHELL_BINARIES: &[&str] = &[\"sh\", \"bash\", \"zsh\", \"fish\", \"dash\", \"ksh\", \"csh\", \"tcsh\"];\nif has_pipe_to_shell(lower, SHELL_BINARIES) { ... }\n\nfn has_pipe_to_shell(cmd: &str, shells: &[&str]) -> bool {\n    if let Some(after_pipe) = cmd.split_once('|').map(|(_, r)| r.trim()) {\n        let first_word = after_pipe.split_ascii_whitespace().next().unwrap_or(\"\");\n        let binary = first_word.rsplit('/').next().unwrap_or(first_word);\n        shells.contains(&binary)\n    } else { false }\n}\n```",
+      "code_snippet": "&& (lower.contains(\"| sh\")\n    || lower.contains(\"| bash\")\n    || lower.contains(\"|sh\")\n    || lower.contains(\"|bash\"))",
+      "category": "security"
+    },
+    {
+      "severity": "suggestion",
+      "file": "crates/ava-tools/src/registry.rs",
+      "line": 203,
+      "issue": "In ToolRegistry::execute, tool_call.arguments is cloned before each retry attempt (lines 203, 224, 256). Since arguments is a serde_json::Value which may be a large nested object, each retry allocates a full deep copy. The retry loop executes up to MAX_RETRIES times per tool call.",
+      "recommendation": "Change Tool::execute to accept &Value (borrow) instead of Value (owned). The Value does not need to be consumed — tools only read arguments. This eliminates all clones in the retry loop and in the initial call:\n\n```rust\nasync fn execute(&self, args: &Value) -> Result<ToolResult>;\n// registry call becomes:\nlet mut result = tool.execute(&tool_call.arguments).await;\n// retry:\nresult = tool.execute(&tool_call.arguments).await;\n```",
+      "code_snippet": "let mut result = tool.execute(tool_call.arguments.clone()).await;\n// ...\nresult = tool.execute(tool_call.arguments.clone()).await;  // each retry",
+      "category": "performance"
+    },
+    {
+      "severity": "suggestion",
+      "file": "crates/ava-tui/src/app/spawners.rs",
+      "line": 148,
+      "issue": "spawn_credential_command and several other spawners (spawn_commit_prep at line 162, spawn_provider_connect_load at line 187, spawn_session_list_load at line 202) all drop their JoinHandles. These are fire-and-forget with error reporting via the app_tx channel. The pattern is acceptable since they report completion via AppEvent, but there is no timeout — a slow disk or network operation will leave these tasks running indefinitely with no cancellation path. If the TUI exits while a spawner is in flight, the spawned task holds a clone of app_tx which prevents the channel from closing, potentially delaying shutdown.",
+      "recommendation": "Add a shutdown CancellationToken (from tokio-util) to each spawner and select! between the operation and the token. Alternatively, give each spawner a timeout using tokio::time::timeout wrapping the inner async block:\n\n```rust\ntokio::spawn(async move {\n    let result = tokio::time::timeout(\n        std::time::Duration::from_secs(30),\n        async { /* operation */ }\n    ).await.unwrap_or_else(|_| Err(\"operation timed out\".to_string()));\n    let _ = app_tx.send(AppEvent::CommandMessage { /* ... */ });\n});\n```",
+      "code_snippet": "tokio::spawn(async move {\n    let mut store = ava_config::CredentialStore::load_default()\n        .await\n        .unwrap_or_default();\n    // ... no timeout, handle dropped\n});",
+      "category": "async"
+    },
+    {
+      "severity": "suggestion",
+      "file": "crates/ava-agent/src/instructions.rs",
+      "line": 454,
+      "issue": "contextual_instructions_for_file() is called from execute_tool_call_timed() on every successful 'read' tool invocation (tool_execution.rs line 285). It performs multiple synchronous fs::read_to_string calls inside the async executor. While typically fast for local files, this can add latency on network filesystems or when the agent reads many files in a parallel batch (the read-only parallel execution path).",
+      "recommendation": "Either (a) cache the result keyed by directory path using a per-run HashMap stored in AgentLoop, invalidated when the directory content changes; or (b) move the call into a spawn_blocking:\n\n```rust\nlet instructions = tokio::task::spawn_blocking(move || {\n    contextual_instructions_for_file(&file_path, &project_root)\n}).await.ok().flatten();\n```",
+      "code_snippet": "if let Some(instructions) =\n    contextual_instructions_for_file(&file_path, &project_root)  // blocking fs in async context\n{\n    result.content.push_str(\"\\n\\n---\\n\");\n    result.content.push_str(&instructions);\n}",
+      "category": "async"
+    }
+  ]
+}

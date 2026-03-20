@@ -7,7 +7,15 @@ use tracing::info;
 
 use ava_config::model_catalog::registry::ModelRegistry;
 
+/// Fraction of the model's context window reserved for project instructions.
+/// Reserves 1/3 for instructions, leaving 2/3 for conversation history and tool results.
+const INSTRUCTION_BUDGET_DIVISOR: usize = 3;
+
 /// Build the system prompt suffix by combining mode instructions and project instructions.
+///
+/// This is the **synchronous** variant kept for internal use and tests.  Callers
+/// inside an async executor should prefer [`build_system_prompt_suffix_async`] to
+/// avoid blocking the runtime while reading instruction files from disk.
 ///
 /// - `mode_suffix`: optional mode-specific prompt (e.g., Plan mode instructions)
 /// - `model_name`: used to look up context window size for trimming
@@ -33,6 +41,25 @@ pub fn build_system_prompt_suffix(
     }
 }
 
+/// Async version of [`build_system_prompt_suffix`].
+///
+/// Wraps the blocking file I/O in [`tokio::task::spawn_blocking`] so the async
+/// executor is not stalled while instruction files are read from disk.  The
+/// `mode_suffix` and `model_name` values should be cheaply cloned and captured
+/// *before* the lock guard is held, so there is no lock held across the await
+/// point.
+pub async fn build_system_prompt_suffix_async(
+    mode_suffix: Option<String>,
+    model_name: String,
+    extra_instruction_paths: Vec<String>,
+) -> Option<String> {
+    tokio::task::spawn_blocking(move || {
+        build_system_prompt_suffix(mode_suffix, &model_name, &extra_instruction_paths)
+    })
+    .await
+    .unwrap_or(None)
+}
+
 /// Load and trim project instructions for a sub-agent, using only the model name
 /// to determine the context budget.
 ///
@@ -49,7 +76,7 @@ fn trim_instructions_for_model(instructions: &str, model_name: &str) -> String {
         .find(model_name)
         .map(|m| m.limits.context_window)
         .unwrap_or(200_000); // default to 200K if unknown
-    let instruction_budget = context_window / 3;
+    let instruction_budget = context_window / INSTRUCTION_BUDGET_DIVISOR;
     info!(
         bytes = instructions.len(),
         estimated_tokens = instructions.len() / 4,

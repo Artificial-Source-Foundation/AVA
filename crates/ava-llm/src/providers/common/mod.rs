@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use ava_types::{AvaError, Result};
 
-const DEFAULT_MAX_RETRIES: usize = 3;
+pub const DEFAULT_MAX_RETRIES: usize = 3;
 
 pub fn rate_limited_error(provider: &str, body: &str) -> AvaError {
     let retry_after_secs = serde_json::from_str::<serde_json::Value>(body)

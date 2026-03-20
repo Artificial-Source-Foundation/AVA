@@ -177,13 +177,20 @@ impl AgentLoop {
         &self,
         tool_call: &ToolCall,
     ) -> (ToolResult, ToolExecution) {
-        // Auto-repair misnamed tool calls (e.g. "Read" → "read")
-        let mut tool_call = tool_call.clone();
-        let repaired = repair_tool_name(&tool_call.name, &self.tools);
-        if repaired != tool_call.name {
-            tool_call.name = repaired;
-        }
-        let tool_call = &tool_call;
+        // Auto-repair misnamed tool calls (e.g. "Read" → "read").
+        // Only allocate a new ToolCall when the name actually needs repairing.
+        let repaired_name = repair_tool_name(&tool_call.name, &self.tools);
+        let owned_tool_call;
+        let tool_call: &ToolCall = if repaired_name != tool_call.name {
+            owned_tool_call = ToolCall {
+                name: repaired_name,
+                id: tool_call.id.clone(),
+                arguments: tool_call.arguments.clone(),
+            };
+            &owned_tool_call
+        } else {
+            tool_call
+        };
 
         // Pre-validate tool call schema (required params, types) before execution
         if let Some(validation_error) = validate_tool_call(tool_call, &self.tools) {

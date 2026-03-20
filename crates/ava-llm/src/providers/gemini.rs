@@ -152,7 +152,13 @@ impl GeminiProvider {
     }
 
     async fn send_request(&self, request: reqwest::RequestBuilder) -> Result<reqwest::Response> {
-        common::send_with_retry_cb(request, "Gemini", 3, self.circuit_breaker.as_deref()).await
+        common::send_with_retry_cb(
+            request,
+            "Gemini",
+            common::DEFAULT_MAX_RETRIES,
+            self.circuit_breaker.as_deref(),
+        )
+        .await
     }
 }
 

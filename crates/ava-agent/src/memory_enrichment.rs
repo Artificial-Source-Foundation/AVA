@@ -5,6 +5,7 @@
 //! user goals and persists them as learned patterns.
 
 use ava_memory::MemorySystem;
+use ava_types::MEMORY_BLOCK_MAX_CHARS;
 use tracing::warn;
 
 /// Enrich a goal string with relevant memories from the memory system.
@@ -51,8 +52,8 @@ pub async fn enrich_goal_with_memories(memory: &MemorySystem, goal: &str) -> Str
     }
 
     let memory_block = blocks.join("\n\n");
-    let memory_block = if memory_block.len() > 2000 {
-        let truncated: String = memory_block.chars().take(2000).collect();
+    let memory_block = if memory_block.len() > MEMORY_BLOCK_MAX_CHARS {
+        let truncated: String = memory_block.chars().take(MEMORY_BLOCK_MAX_CHARS).collect();
         format!("{truncated}...")
     } else {
         memory_block

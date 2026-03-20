@@ -21,6 +21,13 @@ pub use session::Session;
 pub use todo::{TodoItem, TodoPriority, TodoState, TodoStatus};
 pub use tool::{Tool, ToolCall, ToolResult};
 
+// --- Shared limits / magic number constants ---
+
+/// Maximum number of characters included in a memory context block injected into the
+/// agent's goal.  Empirically chosen to keep the enriched goal within a single system
+/// prompt turn without dominating the available context budget.
+pub const MEMORY_BLOCK_MAX_CHARS: usize = 2000;
+
 // --- Context attachment types (B35: @-mention scoping) ---
 
 /// A context attachment resolved from an @-mention in the composer.

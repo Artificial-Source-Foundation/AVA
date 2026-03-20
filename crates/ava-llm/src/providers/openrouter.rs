@@ -106,7 +106,13 @@ impl OpenRouterProvider {
     }
 
     async fn send_request(&self, request: reqwest::RequestBuilder) -> Result<reqwest::Response> {
-        common::send_with_retry_cb(request, "OpenRouter", 3, self.circuit_breaker.as_deref()).await
+        common::send_with_retry_cb(
+            request,
+            "OpenRouter",
+            common::DEFAULT_MAX_RETRIES,
+            self.circuit_breaker.as_deref(),
+        )
+        .await
     }
 }
 

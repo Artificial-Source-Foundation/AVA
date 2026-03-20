@@ -199,12 +199,15 @@ impl AgentStack {
         let plan_mode = *self.plan_mode.read().await;
         let mode_suffix = self.mode_prompt_suffix.read().await.clone();
 
-        // Build system prompt suffix: mode instructions + project instructions
-        let system_prompt_suffix = crate::instruction_resolver::build_system_prompt_suffix(
+        // Build system prompt suffix: mode instructions + project instructions.
+        // Uses spawn_blocking internally to avoid blocking the async executor
+        // on synchronous file I/O while reading instruction files.
+        let system_prompt_suffix = crate::instruction_resolver::build_system_prompt_suffix_async(
             mode_suffix,
-            provider.model_name(),
-            &cfg.instructions,
-        );
+            provider.model_name().to_string(),
+            cfg.instructions.clone(),
+        )
+        .await;
 
         let config = AgentConfig {
             max_turns: turns_limit,

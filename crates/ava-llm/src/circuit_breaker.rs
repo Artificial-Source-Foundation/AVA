@@ -6,6 +6,11 @@ const STATE_CLOSED: u8 = 0;
 const STATE_OPEN: u8 = 1;
 const STATE_HALF_OPEN: u8 = 2;
 
+/// Default number of consecutive failures before the circuit trips open.
+pub const DEFAULT_FAILURE_THRESHOLD: u32 = 5;
+/// Default cooldown duration (seconds) before a tripped circuit allows a probe request.
+pub const DEFAULT_COOLDOWN_SECS: u64 = 30;
+
 pub struct CircuitBreaker {
     failure_count: AtomicU32,
     failure_threshold: u32,
@@ -25,9 +30,12 @@ impl CircuitBreaker {
         }
     }
 
-    /// Default circuit breaker: 5 failures, 30s cooldown.
+    /// Default circuit breaker: [`DEFAULT_FAILURE_THRESHOLD`] failures, [`DEFAULT_COOLDOWN_SECS`]s cooldown.
     pub fn default_provider() -> Self {
-        Self::new(5, Duration::from_secs(30))
+        Self::new(
+            DEFAULT_FAILURE_THRESHOLD,
+            Duration::from_secs(DEFAULT_COOLDOWN_SECS),
+        )
     }
 
     /// Check if a request is allowed. Returns `true` if allowed.

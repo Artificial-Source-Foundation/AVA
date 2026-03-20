@@ -1,0 +1,11 @@
+{
+  "status": "fixed",
+  "files_modified": [
+    "CLAUDE.md",
+    "docs/development/CHANGELOG.md",
+    "docs/development/backlog.md",
+    "docs/codebase/ava-tools.md",
+    "docs/reference/overview.md"
+  ],
+  "summary": "Updated all documentation to reflect the security and refactor audit cycle (git commits e864a6a..0c8211b). Key changes: (1) Tool surface: 6 default → 9 default (web_fetch, web_search, git_read promoted); extended tools (apply_patch, multiedit, ast_ops, lsp_ops, code_search, lint, test_runner) are no longer auto-registered — plugin-only. (2) Test count: 1,712 → 1,798 (+86 new tests). (3) CHANGELOG: new v2.2.4 entry with Security, Performance, Error Handling, Testing, and Frontend categories covering all audit rounds. (4) Backlog: policy statement updated to 9 default tools; recently-completed list prepended with all audit items. (5) ava-tools.md: register_default_tools docstring updated to 9 tools; tier system description updated. (6) reference/overview.md: crate count 20 → 21, ava-tools row updated, ava-llm provider count corrected to 8, diagram updated from '6 + 7' to '9 default'."
+}

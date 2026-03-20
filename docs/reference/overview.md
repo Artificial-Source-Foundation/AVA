@@ -29,7 +29,7 @@ only for the Tauri desktop webview.
    +------+------+  +-----+------+   +------+------+
           |                |                 |
           |         +------v------+   +------v------+
-           |         |  Providers  |   |  6 + 7      |
+           |         |  Providers  |   |  9 default  |
           |         |  anthropic  |   |  + MCP      |
           |         |  openai     |   |  + custom   |
           |         |  gemini     |   +-------------+
@@ -54,15 +54,15 @@ only for the Tauri desktop webview.
    +-------------------+
 ```
 
-## The 20 Crates
+## The 21 Crates
 
 ### Core Runtime
 
 | Crate | Purpose | Key File |
 |---|---|---|
 | `ava-agent` | Agent execution loop, stuck detection, system prompt, sub-agent spawning | `src/stack.rs`, `src/agent_loop/mod.rs` |
-| `ava-llm` | LLM provider trait, 7 built-in providers plus a mock provider for tests, connection pool, retry, circuit breaker | `src/provider.rs`, `src/providers/` |
-| `ava-tools` | Tool trait, registry, middleware, 6 built-in tools by default plus 7 extended tools, custom TOML tools | `src/registry.rs`, `src/core/` |
+| `ava-llm` | LLM provider trait, 8 built-in providers (Anthropic, OpenAI, Gemini, Ollama, OpenRouter, Copilot, Inception, Mock), connection pool, retry, circuit breaker | `src/provider.rs`, `src/providers/` |
+| `ava-tools` | Tool trait, registry, middleware, 9 built-in tools by default; 7 extended tools available as plugins (not auto-registered), custom TOML tools | `src/registry.rs`, `src/core/` |
 | `ava-praxis` | Multi-agent workflows (plan-code-review, etc.) | `src/workflow.rs` |
 | `ava-cli-providers` | CLI provider resolution (cli:* prefix for external providers) | `src/provider.rs` |
 

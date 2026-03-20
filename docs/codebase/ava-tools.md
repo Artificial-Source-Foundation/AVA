@@ -18,9 +18,9 @@
 | `PermissionMiddleware` | Permission checking middleware with approval bridge |
 | `ApprovalBridge` | Bridge for interactive tool approval via TUI |
 | `ToolApproval` | Approval decision (Allowed, AllowedForSession, AllowAlways, Rejected) |
-| `register_core_tools()` | Registers default + extended tools |
-| `register_default_tools()` | Registers 6 default tools (read, write, edit, bash, glob, grep) |
-| `register_extended_tools()` | Registers extended-tier tools (apply_patch, web_fetch, etc.) |
+| `register_core_tools()` | Registers default tools only (extended must be loaded via plugin config) |
+| `register_default_tools()` | Registers 9 default tools (read, write, edit, bash, glob, grep, web_fetch, web_search, git_read) |
+| `register_extended_tools()` | Registers extended-tier tools (apply_patch, multiedit, etc.) — NOT called by default |
 | `register_todo_tools()` | Registers todo_read/todo_write with shared state |
 | `register_custom_tools()` | Registers TOML-defined custom tools from directories |
 | `hash_arguments()` | Hashes tool arguments for deduplication detection |
@@ -70,7 +70,7 @@ Used by: ava-agent, ava-tui, src-tauri, ava-mcp, ava-praxis
 ## Key Patterns
 
 - **Tool trait**: Async trait requiring name, description, JSON parameters schema, execute method
-- **Tier system**: Default (6 tools in LLM prompt), Extended (additional tools), Plugin (MCP/custom)
+- **Tier system**: Default (9 tools always registered), Extended (plugin-only, not auto-registered), Plugin (MCP/custom)
 - **Source tracking**: BuiltIn, MCP {server}, Custom {path} for grouping and selective reload
 - **Middleware pipeline**: Before/after hooks run in insertion order for all tool executions
 - **Repetition detection**: Detects ExactRepeat (same args), ToolLoop (same tool), AlternatingLoop (A-B-A-B)

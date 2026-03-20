@@ -1,5 +1,47 @@
 # Changelog
 
+## v2.2.4 (2026-03-20)
+
+### Tool Surface
+
+- **9 default tools** — `web_fetch`, `web_search`, `git_read` promoted from Extended to Default tier
+- **Extended tools no longer auto-registered** — `apply_patch`, `multiedit`, `ast_ops`, `lsp_ops`, `code_search`, `lint`, `test_runner` are now plugin-only (not loaded unless explicitly configured)
+- Test: `default_tools_gives_9_tools` passes (was `_6_tools`)
+
+### Security
+
+- **SBPL injection hardening** — bash tool scrubs shell-breaking characters from arguments before execution
+- **Env scrubbing** — sensitive environment variables stripped from bash tool environment
+- **rm -rf hardening** — destructive rm variants blocked even in AutoApprove mode
+- **find -delete blocking** — `find ... -delete` classified as Critical, blocked by permission middleware
+- **Regex compile safety** — user-supplied regex patterns caught at compile time with actionable errors
+
+### Performance
+
+- **Blocking I/O → async** — file reads in read/write tools converted to `tokio::fs` async equivalents
+- **Trust caching** — workspace trust checks cached per-path to avoid repeated filesystem hits
+- **Connection pooling** — reqwest client reuse extended; per-provider pool prevents connection storms
+- **ToolCall clone elimination** — `Arc<ToolCall>` replaces repeated `.clone()` in agent loop hot path
+- **CodebaseIndex sharing** — single shared `Arc<CodebaseIndex>` across agent runs (was re-indexed per run)
+
+### Error Handling
+
+- **`From<io::Error>` preserves ErrorKind** — error kind forwarded through AvaError instead of being lost
+- **Typed errors throughout** — remaining `map_err(|e| AvaError::Other(e.to_string()))` chains replaced with specific variants
+- **Deprecated legacy AvaError variants** — `Other`, `Internal` marked deprecated; callers migrated to typed variants
+
+### Testing
+
+- **1,798 tests** (was 1,712; +86 new tests)
+- **42+ new tests** — regex compile safety, permission middleware edge cases, budget tracking, agent loop integration tests
+- **Web mode parity** — 14 new HTTP endpoints verified for desktop↔web feature parity
+
+### Frontend (Desktop)
+
+- **Debug log cleanup** — `console.log` / `console.error` calls removed from production paths
+- **Dead code removed** — unused imports, unreachable branches, and stale state slices cleaned
+- **Async prop fixed** — async accessor passed to SolidJS reactive context correctly
+
 ## v2.2.3 (2026-03-19)
 
 ### Added

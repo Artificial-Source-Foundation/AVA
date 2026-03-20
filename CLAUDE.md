@@ -1,4 +1,4 @@
-<!-- Last verified: 2026-03-19 (v2.2.3 doc update). Run 'just check' to revalidate. -->
+<!-- Last verified: 2026-03-20 (v2.2.4 doc update). Run 'just check' to revalidate. -->
 
 # AVA Architecture & Conventions (v3)
 
@@ -44,13 +44,13 @@ AVA uses a **Rust-first architecture**. All agent, CLI, and backend code is Rust
 
 ### Codebase Stats
 
-- **21 Rust crates**, ~40K LOC, 1,712 tests (0 failures)
+- **21 Rust crates**, ~40K LOC, 1,798 tests (0 failures)
 - **8 LLM providers**: Anthropic (with prompt caching), OpenAI-compatible, Gemini, Ollama, OpenRouter, Copilot, Inception, Mock
-- **6 default tools**: `read`, `write`, `edit` (15 strategies incl. ellipsis handling, 3-way merge + diff-match-patch), `bash`, `glob`, `grep`
-- **8 extended tools**: `apply_patch`, `web_fetch`, `web_search`, `multiedit`, `ast_ops`, `lsp_ops`, `code_search`, `git_read`
+- **9 default tools**: `read`, `write`, `edit` (15 strategies incl. ellipsis handling, 3-way merge + diff-match-patch), `bash`, `glob`, `grep`, `web_fetch`, `web_search`, `git_read`
+- **Extended tools** (not auto-registered): `apply_patch`, `multiedit`, `ast_ops`, `lsp_ops`, `code_search`, `lint`, `test_runner` — available as plugins
 - **1 agent tool**: `plan` (Plannotator-style inline plan editing via PlanBridge)
 - **Dynamic tools**: MCP servers + TOML custom tools (`~/.ava/tools/`, `.ava/tools/`)
-- **Key capabilities**: Anthropic prompt caching (`cache_control` on system + tools), auto-retry middleware (2x exponential backoff for read-only tools), stream silence timeout (90s configurable per-chunk reset), tiktoken-rs BPE token counting, tool schema pre-validation, persistent audit log (SQLite, opt-out), auto-compaction settings (toggle + threshold slider), JSONL session logging (`~/.ava/log/`, opt-in), rich edit error feedback (similar lines + "did you mean?")
+- **Key capabilities**: Anthropic prompt caching (`cache_control` on system + tools), auto-retry middleware (2x exponential backoff for read-only tools), stream silence timeout (90s configurable per-chunk reset), tiktoken-rs BPE token counting, tool schema pre-validation, persistent audit log (SQLite, opt-out), auto-compaction settings (toggle + threshold slider), JSONL session logging (`~/.ava/log/`, opt-in), rich edit error feedback (similar lines + "did you mean?"), SBPL injection hardening, env scrubbing in bash, rm -rf and find -delete blocking
 
 ### Mid-Stream Messaging
 
@@ -72,7 +72,7 @@ AVA/
 |   +-- ava-tui/              # CLI/TUI binary (Ratatui) -- THE primary interface
 |   +-- ava-agent/            # Agent execution loop + reflection
 |   +-- ava-llm/              # LLM providers (8 built-in)
-|   +-- ava-tools/            # Tool trait + registry + 6 default + 8 extended tools
+|   +-- ava-tools/            # Tool trait + registry + 9 default tools (extended available as plugins)
 |   +-- ava-praxis/           # Multi-agent orchestration (Praxis)
 |   +-- ava-permissions/      # Permission rules + bash command classifier
 |   +-- ava-config/           # Config, credentials, model catalog
@@ -97,15 +97,15 @@ AVA/
 
 ## Tool Surface
 
-Keep the default set capped at 6. New capabilities should ship as Extended, MCP, plugin, or custom tools.
+New capabilities should ship as Extended (available as plugins), MCP, or custom tools. The default set is now 9.
 
 | Tier | Count | Tools |
 |------|------:|-------|
-| Default | 6 | read, write, edit, bash, glob, grep |
-| Extended | 8 | apply_patch, web_fetch, web_search, multiedit, ast_ops, lsp_ops, code_search, git_read |
+| Default | 9 | read, write, edit, bash, glob, grep, web_fetch, web_search, git_read |
+| Extended (plugin) | 7 | apply_patch, multiedit, ast_ops, lsp_ops, code_search, lint, test_runner |
 | Agent | 1 | plan (Praxis plan tool with PlanBridge for agent-to-TUI communication) |
 
-Additional helpers (todo_read/write, question, task, codebase_search, memory/session tools) are always available when initialized. Dynamic MCP tools and TOML custom tools load at runtime from `~/.ava/tools/`, `.ava/tools/`, `~/.ava/mcp.json`, `.ava/mcp.json`.
+Extended tools are **not auto-registered**; they must be explicitly loaded via plugin/MCP configuration. Additional helpers (todo_read/write, question, task, codebase_search, memory/session tools) are always available when initialized. Dynamic MCP tools and TOML custom tools load at runtime from `~/.ava/tools/`, `.ava/tools/`, `~/.ava/mcp.json`, `.ava/mcp.json`.
 
 ## Project Instructions
 
@@ -224,7 +224,7 @@ Lower number = earlier execution. Register via `ToolRegistry::add_middleware()`.
 
 ### Add a Tool (Rust)
 
-1. Decide tier: default to Extended; only expand the default 6 with strong justification
+1. Decide tier: default to Extended (plugin); only expand the default 9 with strong justification
 2. Create `crates/ava-tools/src/core/{tool_name}.rs`
 3. Implement `Tool` trait (`name`, `description`, `parameters`, `execute`)
 4. Register in `register_core_tools()` with appropriate tiering

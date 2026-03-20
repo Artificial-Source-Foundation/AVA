@@ -1,13 +1,20 @@
 # AVA Backlog
 
-> Last updated: 2026-03-19
+> Last updated: 2026-03-20
 > Related: [roadmap.md](roadmap.md), [epics.md](epics.md)
 > SOTA gap research: [sota-gap-analysis.md](sota-gap-analysis.md) (60 items from 12 codebases — reference only, not a todo list)
 
-Tool surface policy: default tools stay capped at 6 (`read`, `write`, `edit`, `bash`, `glob`, `grep`). New capabilities go to Extended, MCP, plugin, or custom-tool tier.
+Tool surface policy: default tools are now 9 (`read`, `write`, `edit`, `bash`, `glob`, `grep`, `web_fetch`, `web_search`, `git_read`). New capabilities go to Extended (plugin), MCP, or custom-tool tier. Extended tools are NOT auto-registered.
 
 ## Recently Completed
 
+- **Tool surface refactor** — 9 default tools (was 6); `web_fetch`, `web_search`, `git_read` promoted; Extended tools no longer auto-registered
+- **Security audit round 1-6** — SBPL injection, env scrubbing, rm -rf hardening, find -delete blocking, regex compile safety
+- **Performance audit** — blocking I/O → async, trust caching, connection pooling, ToolCall clone elimination, CodebaseIndex sharing
+- **Error handling** — `From<io::Error>` preserves ErrorKind; typed AvaError variants; deprecated `Other`/`Internal` variants
+- **Test coverage** — 1,798 tests (was 1,712); +86 tests across permission middleware, budget tracking, agent loop integration
+- **Web mode endpoint parity** — 14 new endpoints for desktop↔web feature parity
+- **Frontend audit** — debug logs removed, dead code cleaned, async prop fixed
 - **`--verbose` CLI flag** — `-v` info, `-vv` debug, `-vvv` trace to stderr
 - **JSONL session logging** — structured logs at `~/.ava/log/` (opt-in via `features.session_logging: true`)
 - **Ellipsis edit strategy** — `...` placeholder handling; 15 total strategies (was 14)

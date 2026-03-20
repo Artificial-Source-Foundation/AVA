@@ -1,0 +1,357 @@
+{
+  "domain": "bridge-audit",
+  "audit_date": "2026-03-20",
+  "auditor": "senior-fullstack-agent",
+
+  "tauri_commands_registered": [
+    "greet",
+    "oauth_listen",
+    "oauth_copilot_device_start",
+    "oauth_copilot_device_poll",
+    "get_env_var",
+    "allow_project_path",
+    "append_log",
+    "cleanup_old_logs",
+    "read_latest_logs",
+    "get_cwd",
+    "get_plugins_state",
+    "set_plugins_state",
+    "install_plugin",
+    "uninstall_plugin",
+    "set_plugin_enabled",
+    "pty_spawn",
+    "pty_write",
+    "pty_resize",
+    "pty_kill",
+    "compute_grep",
+    "compute_fuzzy_replace",
+    "compute_repo_map",
+    "execute_tool",
+    "agent_run",
+    "agent_stream",
+    "list_tools",
+    "execute_git_tool",
+    "execute_browser_tool",
+    "memory_remember",
+    "memory_recall",
+    "memory_search",
+    "memory_recent",
+    "evaluate_permission",
+    "sandbox_apply_landlock",
+    "extensions_register_native",
+    "extensions_register_wasm",
+    "validation_validate_edit",
+    "validation_validate_with_retry",
+    "reflection_reflect_and_fix",
+    "submit_goal",
+    "cancel_agent",
+    "get_agent_status",
+    "resolve_approval",
+    "resolve_question",
+    "resolve_plan",
+    "steer_agent",
+    "follow_up_agent",
+    "post_complete_agent",
+    "get_message_queue",
+    "clear_message_queue",
+    "retry_last_message",
+    "edit_and_resend",
+    "regenerate_response",
+    "undo_last_edit",
+    "start_praxis",
+    "get_praxis_status",
+    "cancel_praxis",
+    "steer_lead",
+    "list_sessions",
+    "load_session",
+    "create_session",
+    "delete_session",
+    "rename_session",
+    "search_sessions",
+    "list_models",
+    "get_current_model",
+    "switch_model",
+    "list_providers",
+    "get_config",
+    "list_agent_tools",
+    "list_mcp_servers",
+    "reload_mcp_servers",
+    "get_permission_level",
+    "set_permission_level",
+    "toggle_permission_level",
+    "compact_context"
+  ],
+
+  "frontend_commands_called": [
+    "submit_goal",
+    "cancel_agent",
+    "get_agent_status",
+    "resolve_approval",
+    "resolve_question",
+    "resolve_plan",
+    "steer_agent",
+    "follow_up_agent",
+    "post_complete_agent",
+    "get_message_queue",
+    "clear_message_queue",
+    "retry_last_message",
+    "edit_and_resend",
+    "regenerate_response",
+    "undo_last_edit",
+    "start_praxis",
+    "get_praxis_status",
+    "cancel_praxis",
+    "steer_lead",
+    "list_sessions",
+    "load_session",
+    "create_session",
+    "delete_session",
+    "rename_session",
+    "search_sessions",
+    "list_models",
+    "get_current_model",
+    "switch_model",
+    "list_providers",
+    "get_config",
+    "list_agent_tools",
+    "list_mcp_servers",
+    "reload_mcp_servers",
+    "get_permission_level",
+    "set_permission_level",
+    "toggle_permission_level",
+    "compact_context",
+    "memory_remember",
+    "memory_recall",
+    "memory_search",
+    "memory_recent",
+    "evaluate_permission",
+    "validation_validate_edit",
+    "validation_validate_with_retry",
+    "execute_git_tool",
+    "execute_browser_tool",
+    "compute_grep",
+    "compute_fuzzy_replace",
+    "compute_repo_map",
+    "reflection_reflect_and_fix",
+    "pty_spawn",
+    "pty_write",
+    "pty_resize",
+    "pty_kill",
+    "oauth_listen",
+    "oauth_copilot_device_start",
+    "oauth_copilot_device_poll",
+    "get_env_var",
+    "get_cwd",
+    "append_log",
+    "cleanup_old_logs",
+    "allow_project_path",
+    "get_plugins_state",
+    "set_plugins_state",
+    "install_plugin",
+    "uninstall_plugin",
+    "set_plugin_enabled",
+    "extensions_register_native",
+    "extensions_register_wasm",
+    "list_tools",
+    "execute_tool",
+    "agent_run",
+    "agent_stream"
+  ],
+
+  "mismatches": [
+    {
+      "type": "args_wrapping_inconsistency",
+      "command": "submit_goal",
+      "description": "rust-bridge.ts:rustAgent.run() and .stream() both call invokeCommand('submit_goal', { args: { goal } }) — wrapping goal in a redundant { args: { goal } } outer object. However, rustBackend.submitGoal() correctly calls invokeCommand('submit_goal', { args }) where args is the full SubmitGoalArgs. The Rust command receives the top-level 'args' key as the SubmitGoalArgs struct. The rustAgent.run/.stream shortcuts are unused duplicates of rustBackend.submitGoal but the wrapping is consistent with how Tauri deserializes named params — this is not actually broken for Tauri IPC but creates confusion."
+    },
+    {
+      "type": "web_mode_missing_endpoints",
+      "command": "search_sessions",
+      "description": "Frontend api-client.ts maps search_sessions to POST /api/sessions/search, but the web API router (web/mod.rs) has no /api/sessions/search route. The Tauri command exists but the HTTP web-mode equivalent is absent. In browser/web mode, search_sessions will silently return undefined (the 404 fallback in apiInvoke returns undefined for unmapped commands)."
+    },
+    {
+      "type": "web_mode_missing_endpoints",
+      "command": "get_current_model",
+      "description": "Frontend maps get_current_model to GET /api/models/current, but the web router only has GET /api/models (list_models). There is no /api/models/current route in web/mod.rs."
+    },
+    {
+      "type": "web_mode_missing_endpoints",
+      "command": "switch_model",
+      "description": "Frontend maps switch_model to POST /api/models/switch, but the web router has no /api/models/switch route."
+    },
+    {
+      "type": "web_mode_missing_endpoints",
+      "command": "get_config",
+      "description": "Frontend maps get_config to GET /api/config, but the web router has no /api/config route."
+    },
+    {
+      "type": "web_mode_missing_endpoints",
+      "command": "list_agent_tools / list_tools / execute_tool",
+      "description": "Frontend maps list_agent_tools to GET /api/tools/agent, list_tools to GET /api/tools, execute_tool to POST /api/tools/execute. None of these routes exist in the web router."
+    },
+    {
+      "type": "web_mode_missing_endpoints",
+      "command": "list_mcp_servers / reload_mcp_servers",
+      "description": "Frontend maps these to GET /api/mcp and POST /api/mcp/reload. Neither route exists in the web router."
+    },
+    {
+      "type": "web_mode_missing_endpoints",
+      "command": "get_permission_level / set_permission_level / toggle_permission_level",
+      "description": "Frontend maps these to /api/permissions (GET/POST) and /api/permissions/toggle (POST). None exist in the web router."
+    },
+    {
+      "type": "web_mode_missing_endpoints",
+      "command": "compact_context",
+      "description": "Frontend maps to POST /api/context/compact. Not in the web router."
+    },
+    {
+      "type": "web_mode_missing_endpoints",
+      "command": "resolve_approval / resolve_question",
+      "description": "Frontend maps resolve_approval to POST /api/agent/resolve-approval and resolve_question to POST /api/agent/resolve-question. Neither route exists in the web router. This means approval/question flows (the interactive tool approval UI) are completely broken in web mode."
+    },
+    {
+      "type": "web_mode_missing_endpoints",
+      "command": "retry_last_message / edit_and_resend / regenerate_response / undo_last_edit",
+      "description": "Frontend maps these to /api/agent/retry, /api/agent/edit-resend, /api/agent/regenerate, /api/agent/undo. None exist in the web router."
+    },
+    {
+      "type": "field_naming_dual_handling",
+      "command": "token_usage event",
+      "description": "The Rust backend emits token_usage events with snake_case fields (input_tokens, output_tokens, cost_usd) as defined in src-tauri/src/events.rs. The frontend in use-rust-agent.ts handles both snake_case and camelCase via: 'const input = tu.input_tokens ?? tu.inputTokens ?? 0'. This dual-read guard is necessary because Tauri's serde uses snake_case but the TypeScript AgentEvent type definition may declare camelCase. The fallback is functional but indicates the TypeScript type and Rust serialization are not in sync on naming convention."
+    },
+    {
+      "type": "web_mode_event_gap",
+      "command": "approval_request / question_request / plan_created events",
+      "description": "The WebAgentEvent enum in web/api.rs includes ApprovalRequest but not QuestionRequest or PlanCreated. The convert_agent_event() function has a catch-all '_ => None' that silently drops these events in web mode. Users cannot receive question prompts or plan approvals when using ava serve (web mode)."
+    },
+    {
+      "type": "tauri_commands_registered_but_not_bridged",
+      "commands": ["agent_run", "agent_stream"],
+      "description": "The legacy agent_run and agent_stream commands are still registered in lib.rs and exported from tauri-agent.ts, but the codebase has migrated to submit_goal. These are dead code paths in the frontend (useAgent and use-rust-agent use submit_goal exclusively). They remain registered, causing binary bloat and potential confusion."
+    },
+    {
+      "type": "debug_artifact",
+      "command": "submit_goal",
+      "description": "agent_commands.rs:run_agent_inner() writes debug logs to /tmp/ava-debug/rust-agent.log (lines 211-217 and 243-252). This is development-only debug code left in production code paths, creating filesystem artifacts in /tmp on every agent run. The directory /tmp/ava-debug may not exist, causing silent errors, but std::fs errors are discarded with let _ = so it won't crash."
+    }
+  ],
+
+  "tool_display_status": "working",
+  "tool_display_notes": "Tool calls are fully rendered. LiveStreamingBlock.tsx shows thinking (ThinkingRow), completed tool calls (ToolCallGroup), active tool calls (ToolPreview), and streaming text (MarkdownContent with cursor). MessageBubble.tsx handles completed messages with ToolSegmentDispatch dispatching bash commands to CommandOutputRow, diff-producing tools to DiffRow, and all others to ToolCallRow. ToolCallRow shows collapsible output with auto-expand for <=5 lines. The ApprovalDock is a functional inline component with keyboard shortcuts (Enter=approve, Escape=deny), risk badges, and always-allow toggle. Tool approval flow works in Tauri IPC mode. In web mode, resolve_approval and resolve_question endpoints are missing from the HTTP API (see mismatches).",
+
+  "streaming_status": "working",
+  "streaming_notes": "The streaming pipeline is well-designed. Tauri mode: agent-event Tauri events are listened via @tauri-apps/api/event listen(). Web mode: WebSocket at /ws delivers the same events as JSON text frames. use-rust-agent.ts handles all event types: token (accumulates streamingContent), thinking (accumulates thinkingContent), tool_call (adds to activeToolCalls with running status), tool_result (updates first running tool call to success/error), progress (sets progressMessage), budget_warning, token_usage, complete (resolves completion promise, clears isRunning), error, plan_created, and all praxis_* events. The web-mode completion flow uses a Promise resolver tied to the complete/error WebSocket event, which is correct since the HTTP submit returns immediately while the agent runs async.",
+
+  "web_mode_status": "partial",
+  "web_mode_notes": "The web server (ava serve) implements a solid subset of the API. Core agent operations (submit, cancel, status, steer, follow-up, post-complete, queue) work. Session CRUD works. Model listing and provider listing work. The WebSocket delivers token/thinking/tool_call/tool_result/progress/complete/error/token_usage/budget_warning events correctly. However, approximately 15 endpoint mappings declared in api-client.ts are missing from the web router: model switching, current model, config, tools listing/execution, MCP management, permission management, context compaction, approval/question resolution, retry/regenerate/undo, and session search. Interactive approval and question flows are completely non-functional in web mode.",
+
+  "shared_design": true,
+  "shared_design_notes": "Yes — the same SolidJS frontend code runs in both Tauri and web modes. The switching mechanism is in rust-bridge.ts and tauri-agent.ts, both using: if (isTauri()) { tauriInvoke(...) } else { apiInvoke(...) }. The api-client.ts COMMAND_TO_ENDPOINT map translates Tauri command names to HTTP REST paths for web mode. The event system uses Tauri's listen() in desktop mode and a WebSocket connection at /ws in web mode, with the same handleAgentEvent() handler processing events from either source.",
+
+  "severity_counts": {
+    "critical": 2,
+    "warning": 8,
+    "suggestion": 3
+  },
+
+  "findings": [
+    {
+      "severity": "critical",
+      "file": "crates/ava-tui/src/web/mod.rs + crates/ava-tui/src/web/api.rs",
+      "line": 0,
+      "issue": "resolve_approval and resolve_question have no HTTP endpoints in the web router. Tool approval requests from the agent will appear in the frontend UI (the ApprovalDock renders from the approval_request WebSocket event) but clicking Approve or Deny will fail silently in web mode — the IPC call 404s and apiInvoke returns undefined without throwing.",
+      "recommendation": "Add POST /api/agent/resolve-approval and POST /api/agent/resolve-question routes in web/mod.rs. Implement state in WebState to hold the oneshot sender (similar to bridge.pending_approval_reply in Tauri) and wire the approval/question middleware to populate it when running under the web server."
+    },
+    {
+      "severity": "critical",
+      "file": "crates/ava-tui/src/web/api.rs",
+      "line": 853,
+      "issue": "convert_agent_event() in web/api.rs silently drops question_request and plan_created events (caught by the '_ => None' arm). These are never sent over the WebSocket in web mode. Users interacting with web mode cannot receive agent questions or plan approvals — the agent will block indefinitely waiting for a response that never comes.",
+      "recommendation": "Add QuestionRequest and PlanCreated variants to the WebAgentEvent enum and handle them in convert_agent_event(). Additionally, implement the /api/agent/resolve-question and plan resolve endpoints so the frontend can respond."
+    },
+    {
+      "severity": "warning",
+      "file": "crates/ava-tui/src/web/mod.rs",
+      "line": 52,
+      "issue": "9 frontend-declared API endpoints are missing from the web router: /api/sessions/search, /api/models/current, /api/models/switch, /api/config, /api/tools, /api/tools/agent, /api/tools/execute, /api/mcp, /api/mcp/reload. These silently return undefined via the 404 fallback in apiInvoke.",
+      "recommendation": "Implement the missing routes in the web router. Many have existing Tauri command implementations that can be adapted directly (session search, model switching, tool listing, MCP management)."
+    },
+    {
+      "severity": "warning",
+      "file": "crates/ava-tui/src/web/mod.rs",
+      "line": 52,
+      "issue": "6 more missing web endpoints: /api/permissions (GET/POST), /api/permissions/toggle, /api/context/compact, /api/agent/retry, /api/agent/edit-resend, /api/agent/regenerate, /api/agent/undo. Retry, edit-resend, regenerate, and undo are all non-functional in web mode.",
+      "recommendation": "Add permission level endpoints and context compaction to the web router. For retry/regenerate/undo, implement state tracking of the last session ID in WebState (analogous to DesktopBridge.last_session_id) so these operations can access the right session."
+    },
+    {
+      "severity": "warning",
+      "file": "src-tauri/src/commands/agent_commands.rs",
+      "line": 211,
+      "issue": "Debug file logging to /tmp/ava-debug/rust-agent.log is present in production code path (run_agent_inner). This runs on every agent invocation, attempting to create /tmp/ava-debug and write to it. The let _ = discards errors so it won't crash, but it creates filesystem pollution and is clearly development-only code.",
+      "recommendation": "Remove the debug file logging or gate it behind a feature flag / environment variable (e.g., if std::env::var(\"AVA_DEBUG_AGENT\").is_ok() { ... })."
+    },
+    {
+      "severity": "warning",
+      "file": "src/services/rust-bridge.ts",
+      "line": 121,
+      "issue": "rustAgent.run() and rustAgent.stream() both invoke submit_goal with wrapping { args: { goal } } but only pass the 'goal' string — they ignore provider, model, maxTurns, thinkingLevel, and sessionId. These are dead code paths (use-rust-agent.ts calls rustBackend.submitGoal or invoke('submit_goal', submitArgs) directly) but the presence of two incomplete wrapper functions that share a name with the working rustBackend.submitGoal creates confusion.",
+      "recommendation": "Remove rustAgent.run() and rustAgent.stream() from rust-bridge.ts (lines 121-124). They are superseded by rustBackend.submitGoal(). Also remove the legacy agent_run and agent_stream commands from the Tauri invoke handler if they are truly unused."
+    },
+    {
+      "severity": "warning",
+      "file": "src/services/tauri-agent.ts",
+      "line": 45,
+      "issue": "tauri-agent.ts exports agentRun() and agentStream() which call the legacy agent_run and agent_stream Tauri commands. These legacy commands still exist in agent_integration.rs but the main agent execution path in useAgent/use-rust-agent uses submit_goal exclusively. If any component imports from tauri-agent.ts expecting these to work with the current agent stack, it will get stale behavior.",
+      "recommendation": "Audit imports of tauri-agent.ts across the frontend. If agentRun/agentStream are not imported anywhere, deprecate and remove tauri-agent.ts. Update agent_integration.rs commands to either delegate to submit_goal or mark as deprecated."
+    },
+    {
+      "severity": "warning",
+      "file": "src/hooks/use-rust-agent.ts",
+      "line": 147,
+      "issue": "token_usage event field reading has a dual snake_case/camelCase fallback: 'tu.input_tokens ?? tu.inputTokens'. This suggests the TypeScript AgentEvent type and the Rust serialization are out of sync. Rust emits snake_case (input_tokens) per src-tauri/src/events.rs, and Tauri's default serde does NOT automatically camelCase event payloads (unlike invoke results). The camelCase fallback may never trigger, but it indicates a type definition gap.",
+      "recommendation": "Align the TypeScript AgentEvent type (in src/types/rust-ipc.ts) to use snake_case field names for token_usage (input_tokens, output_tokens, cost_usd) matching the Rust serialization. Remove the camelCase fallback once types are consistent."
+    },
+    {
+      "severity": "warning",
+      "file": "src/hooks/use-rust-agent.ts + src/hooks/useAgent.ts",
+      "line": 51,
+      "issue": "Multiple console.warn('[THINKING-DEBUG] ...') calls are scattered throughout use-rust-agent.ts, useAgent.ts, LiveStreamingBlock.tsx, ThinkingRow.tsx, and MessageBubble.tsx. These debug logs run on every thinking event and every render, creating significant console noise in production builds.",
+      "recommendation": "Replace all [THINKING-DEBUG] console.warn calls with the existing debugLog() utility (which already uses a conditional based on AVA_DEBUG_LOG). The debugLog infrastructure is already present in the codebase."
+    },
+    {
+      "severity": "suggestion",
+      "file": "src/lib/api-client.ts",
+      "line": 108,
+      "issue": "The apiInvoke camelCase-to-snake_case conversion (line 108-115) applies a simple regex replace to all POST body keys. This only handles top-level keys and does not recurse into nested objects. Commands with nested payloads (e.g., compact_context with messages array containing nested objects, or resolve_plan with modifiedPlan) may have their nested field names left in camelCase, which the Rust backend's serde(rename_all = 'snake_case') will not deserialize.",
+      "recommendation": "Implement a recursive camelCase-to-snake_case converter in apiInvoke, or use a library like 'humps' to transform entire request bodies recursively before sending."
+    },
+    {
+      "severity": "suggestion",
+      "file": "crates/ava-tui/src/web/api.rs",
+      "line": 826,
+      "issue": "WebAgentEvent does not include praxis_* events. When Praxis (multi-agent) is used via 'ava serve', team mode events will be silently dropped at the convert_agent_event catch-all. The TeamChatView and team bridge in the frontend will never receive worker updates.",
+      "recommendation": "Add praxis_* variants to WebAgentEvent and handle them in convert_agent_event(). This would bring web-mode team features to parity with Tauri desktop mode."
+    },
+    {
+      "severity": "suggestion",
+      "file": "src/services/rust-bridge.ts + src/hooks/use-rust-agent.ts",
+      "line": 0,
+      "issue": "There are two separate invoke() implementations — one in rust-bridge.ts (invokeCommand) and one re-defined locally in use-rust-agent.ts and tauri-agent.ts. They have identical logic but are duplicated, meaning any future change (e.g., adding request interceptors or error standardization) must be applied in multiple places.",
+      "recommendation": "Export a single shared invokeCommand() from rust-bridge.ts and import it in use-rust-agent.ts and tauri-agent.ts, eliminating the duplication."
+    }
+  ],
+
+  "summary": {
+    "overall_health": "good_with_gaps",
+    "tauri_desktop_mode": "Fully functional. All 72 registered Tauri commands have matching frontend callers in rust-bridge.ts. Agent streaming, tool display, approval UI, thinking display, mid-stream messaging, session management, and Praxis team events all work correctly end-to-end.",
+    "web_browser_mode": "Partially functional. Core agent loop (submit/cancel/stream events), session CRUD, model listing, and mid-stream messaging work. Approximately 15+ endpoints declared in api-client.ts are missing from the web router. Critical gaps: approval and question resolution are completely broken (agent will hang), question_request and plan_created events are never sent over WebSocket, and all model switching, tool management, MCP management, permission control, and context compaction are non-functional.",
+    "shared_code": "The single-codebase design (same SolidJS frontend for both modes via isTauri() branching) is well-executed. The api-client.ts command mapping is clean and extensible.",
+    "tool_rendering": "Fully working. Live streaming block shows thinking, active tools, and streaming content. Completed messages correctly segment text/tool-call blocks and dispatch to specialized renderers (CommandOutputRow, DiffRow, ToolCallRow).",
+    "priority_fixes": [
+      "Add resolve_approval, resolve_question routes to web router + send question_request/plan_created over WebSocket",
+      "Add ~15 missing web API routes (models, tools, MCP, permissions, context, retry/undo)",
+      "Remove /tmp/ava-debug debug logging from production agent_commands.rs",
+      "Replace [THINKING-DEBUG] console.warn calls with debugLog()"
+    ]
+  }
+}

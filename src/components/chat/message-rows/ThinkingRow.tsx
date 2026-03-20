@@ -24,13 +24,6 @@ export const ThinkingRow: Component<ThinkingRowProps> = (props) => {
   const displayMode = (): string => settings().appearance.thinkingDisplay
   const hidden = () => displayMode() === 'hidden'
 
-  console.warn('[THINKING-DEBUG] ThinkingRow render:', {
-    hidden: hidden(),
-    thinkingLength: props.thinking?.length,
-    thinkingPreview: props.thinking?.slice(0, 100),
-    isStreaming: props.isStreaming,
-    thinkingDisplay: displayMode(),
-  })
   debugLog('thinking', 'render check:', {
     hidden: hidden(),
     thinkingLength: props.thinking?.length,

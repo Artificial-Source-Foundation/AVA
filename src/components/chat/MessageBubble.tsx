@@ -362,12 +362,6 @@ export const MessageBubble: Component<MessageBubbleProps> = (props) => {
               <Show
                 when={(() => {
                   const t = props.message.metadata?.thinking as string
-                  console.warn('[THINKING-DEBUG] MessageBubble metadata check:', {
-                    hasThinking: !!t,
-                    thinkingLength: t?.length ?? 0,
-                    msgId: props.message.id,
-                    metadataKeys: props.message.metadata ? Object.keys(props.message.metadata) : [],
-                  })
                   if (t) debugLog('thinking', 'message metadata: yes', 'msgId:', props.message.id)
                   return t
                 })()}

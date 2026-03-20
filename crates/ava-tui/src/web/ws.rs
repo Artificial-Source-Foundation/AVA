@@ -19,7 +19,7 @@ use axum::response::IntoResponse;
 use futures::{SinkExt, StreamExt};
 use tracing::{debug, warn};
 
-use super::api::convert_agent_event;
+use super::api::convert_web_event;
 use super::state::WebState;
 
 /// Axum handler that upgrades the HTTP connection to a WebSocket.
@@ -44,7 +44,7 @@ async fn handle_socket(socket: WebSocket, state: WebState) {
     let send_task = tokio::spawn(async move {
         while let Ok(event) = event_rx.recv().await {
             // Convert backend event to frontend-compatible format
-            let web_event = match convert_agent_event(&event) {
+            let web_event = match convert_web_event(&event) {
                 Some(e) => e,
                 None => continue, // Skip events without frontend representation
             };

@@ -6,26 +6,46 @@
 //!
 //! # Endpoints
 //!
-//! | Method | Path                          | Description                              |
-//! |--------|-------------------------------|------------------------------------------|
-//! | POST   | `/api/agent/submit`           | Start the agent (async, streams via WS)  |
-//! | POST   | `/api/agent/cancel`           | Cancel the running agent                 |
-//! | GET    | `/api/agent/status`           | Get agent running status                 |
-//! | GET    | `/api/sessions`               | List recent sessions                     |
-//! | POST   | `/api/sessions/create`        | Create a new session                     |
-//! | GET    | `/api/sessions/{id}`          | Get session with messages                |
-//! | POST   | `/api/sessions/{id}/rename`   | Rename a session                         |
-//! | DELETE | `/api/sessions/{id}`          | Delete a session                         |
-//! | POST   | `/api/sessions/{id}/message`  | Add a message to a session               |
-//! | GET    | `/api/sessions/{id}/agents`   | List agents for a session (stub)         |
-//! | GET    | `/api/sessions/{id}/files`    | List file operations (stub)              |
-//! | GET    | `/api/sessions/{id}/terminal` | List terminal executions (stub)          |
-//! | GET    | `/api/sessions/{id}/memory`   | List memory items (stub)                 |
-//! | GET    | `/api/sessions/{id}/checkpoints` | List checkpoints (stub)               |
-//! | GET    | `/api/models`                 | List available models                    |
-//! | GET    | `/api/providers`              | List configured providers                |
-//! | POST   | `/api/log`                    | Ingest frontend log entry                |
-//! | GET    | `/ws`                         | WebSocket for streaming events           |
+//! | Method | Path                              | Description                               |
+//! |--------|-----------------------------------|-------------------------------------------|
+//! | POST   | `/api/agent/submit`               | Start the agent (async, streams via WS)   |
+//! | POST   | `/api/agent/cancel`               | Cancel the running agent                  |
+//! | GET    | `/api/agent/status`               | Get agent running status                  |
+//! | POST   | `/api/agent/resolve-approval`     | Resolve a pending tool approval request   |
+//! | POST   | `/api/agent/resolve-question`     | Resolve a pending question request        |
+//! | POST   | `/api/agent/resolve-plan`         | Resolve a pending plan approval request   |
+//! | POST   | `/api/agent/retry`                | Retry the last user message               |
+//! | POST   | `/api/agent/edit-resend`          | Edit a message and re-run the agent       |
+//! | POST   | `/api/agent/regenerate`           | Regenerate the last assistant response    |
+//! | POST   | `/api/agent/undo`                 | Undo the last file edit                   |
+//! | POST   | `/api/agent/steer`                | Inject a steering message (Tier 1)        |
+//! | POST   | `/api/agent/follow-up`            | Queue a follow-up message (Tier 2)        |
+//! | POST   | `/api/agent/post-complete`        | Queue a post-complete message (Tier 3)    |
+//! | GET    | `/api/agent/queue`                | Get message queue state                   |
+//! | POST   | `/api/agent/queue/clear`          | Clear the message queue                   |
+//! | GET    | `/api/sessions`                   | List recent sessions                      |
+//! | POST   | `/api/sessions/create`            | Create a new session                      |
+//! | POST   | `/api/sessions/search`            | Search sessions by message content        |
+//! | GET    | `/api/sessions/{id}`              | Get session with messages                 |
+//! | POST   | `/api/sessions/{id}/rename`       | Rename a session                          |
+//! | DELETE | `/api/sessions/{id}`              | Delete a session                          |
+//! | POST   | `/api/sessions/{id}/message`      | Add a message to a session                |
+//! | GET    | `/api/sessions/{id}/agents`       | List agents for a session (stub)          |
+//! | GET    | `/api/sessions/{id}/files`        | List file operations (stub)               |
+//! | GET    | `/api/sessions/{id}/terminal`     | List terminal executions (stub)           |
+//! | GET    | `/api/sessions/{id}/memory`       | List memory items (stub)                  |
+//! | GET    | `/api/sessions/{id}/checkpoints`  | List checkpoints (stub)                   |
+//! | GET    | `/api/models`                     | List available models                     |
+//! | GET    | `/api/models/current`             | Get the currently-active model            |
+//! | POST   | `/api/models/switch`              | Switch the active model                   |
+//! | GET    | `/api/providers`                  | List configured providers                 |
+//! | GET    | `/api/config`                     | Get full configuration as JSON            |
+//! | GET    | `/api/permissions`                | Get current permission level              |
+//! | POST   | `/api/permissions`                | Set permission level                      |
+//! | POST   | `/api/permissions/toggle`         | Toggle permission level                   |
+//! | POST   | `/api/log`                        | Ingest frontend log entry                 |
+//! | GET    | `/api/health`                     | Health check                              |
+//! | GET    | `/ws`                             | WebSocket for streaming events            |
 
 pub mod api;
 pub mod state;
@@ -54,6 +74,15 @@ fn build_router(state: WebState) -> Router {
         .route("/api/agent/submit", post(api::submit_goal))
         .route("/api/agent/cancel", post(api::cancel_agent))
         .route("/api/agent/status", get(api::agent_status))
+        // Interactive approval / question / plan resolution
+        .route("/api/agent/resolve-approval", post(api::resolve_approval))
+        .route("/api/agent/resolve-question", post(api::resolve_question))
+        .route("/api/agent/resolve-plan", post(api::resolve_plan))
+        // Retry / edit-resend / regenerate / undo
+        .route("/api/agent/retry", post(api::retry_last_message))
+        .route("/api/agent/edit-resend", post(api::edit_and_resend))
+        .route("/api/agent/regenerate", post(api::regenerate_response))
+        .route("/api/agent/undo", post(api::undo_last_edit))
         // Mid-stream messaging (3-tier)
         .route("/api/agent/steer", post(api::steer_agent))
         .route("/api/agent/follow-up", post(api::follow_up_agent))
@@ -63,6 +92,7 @@ fn build_router(state: WebState) -> Router {
         // Session CRUD endpoints
         .route("/api/sessions", get(api::list_sessions))
         .route("/api/sessions/create", post(api::create_session))
+        .route("/api/sessions/search", post(api::search_sessions))
         .route(
             "/api/sessions/{id}",
             get(api::get_session).delete(api::delete_session),
@@ -88,7 +118,20 @@ fn build_router(state: WebState) -> Router {
         .route("/api/sessions/load", post(api::load_session_body))
         // Model/provider endpoints
         .route("/api/models", get(api::list_models))
+        .route("/api/models/current", get(api::get_current_model))
+        .route("/api/models/switch", post(api::switch_model))
         .route("/api/providers", get(api::list_providers))
+        // Config
+        .route("/api/config", get(api::get_config))
+        // Permission level
+        .route(
+            "/api/permissions",
+            get(api::get_permission_level).post(api::set_permission_level),
+        )
+        .route(
+            "/api/permissions/toggle",
+            post(api::toggle_permission_level),
+        )
         // WebSocket
         .route("/ws", get(ws::ws_handler))
         // Frontend log ingestion

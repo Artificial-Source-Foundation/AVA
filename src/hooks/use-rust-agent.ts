@@ -47,11 +47,6 @@ export function useRustAgent() {
 
   /** Shared event handler — used by both Tauri listen() and WebSocket. */
   const handleAgentEvent = (event: AgentEvent): void => {
-    if (event.type === 'thinking' || event.type === 'token') {
-      console.warn('[THINKING-DEBUG] handleAgentEvent:', event.type, {
-        contentLength: (event.content as string)?.length ?? 0,
-      })
-    }
     setEvents((prev) => [...prev, event])
 
     debugLog(
@@ -71,11 +66,6 @@ export function useRustAgent() {
         setStreamingContent((prev) => prev + event.content)
         break
       case 'thinking':
-        console.warn('[THINKING-DEBUG] use-rust-agent: thinking event received', {
-          contentLength: (event.content as string)?.length ?? 0,
-          contentPreview: (event.content as string)?.slice(0, 100),
-          totalThinkingSoFar: thinkingContent().length,
-        })
         debugLog('thinking', 'received:', (event.content as string)?.length ?? 0, 'chars')
         setThinkingContent((prev) => prev + event.content)
         break
@@ -244,13 +234,6 @@ export function useRustAgent() {
 
     if (isTauri()) {
       unlisten = await listen<AgentEvent>('agent-event', (evt) => {
-        if (evt.payload.type === 'thinking') {
-          console.warn('[THINKING-DEBUG] Tauri listener raw event:', {
-            type: evt.payload.type,
-            contentLength: (evt.payload.content as string)?.length ?? 0,
-            contentPreview: (evt.payload.content as string)?.slice(0, 100),
-          })
-        }
         handleAgentEvent(evt.payload)
       })
     } else {

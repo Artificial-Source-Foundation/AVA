@@ -131,9 +131,10 @@ export const AppDialogs: Component<AppDialogsProps> = (props) => {
       <CheckpointDialog
         open={props.checkpointDialogOpen}
         onClose={() => props.setCheckpointDialogOpen(false)}
-        onSave={async (desc) => {
-          const id = await createCheckpoint(desc)
-          if (id) info('Checkpoint saved', desc)
+        onSave={(desc) => {
+          void createCheckpoint(desc).then((id) => {
+            if (id) info('Checkpoint saved', desc)
+          })
         }}
       />
       <ExportOptionsDialog

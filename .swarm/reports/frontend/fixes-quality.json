@@ -1,0 +1,24 @@
+{
+  "status": "fixed",
+  "files_modified": [
+    "src/hooks/use-rust-agent.ts",
+    "src/hooks/useAgent.ts",
+    "src/components/chat/LiveStreamingBlock.tsx",
+    "src/components/chat/MessageBubble.tsx",
+    "src/components/chat/message-rows/ThinkingRow.tsx",
+    "src/components/AppDialogs.tsx",
+    "src/services/tauri-agent.ts"
+  ],
+  "summary": "Removed all 9 [THINKING-DEBUG] console.warn statements across use-rust-agent.ts (3 blocks), useAgent.ts (3 blocks), LiveStreamingBlock.tsx (1 block), MessageBubble.tsx (1 block), and ThinkingRow.tsx (1 block). Fixed async SolidJS prop in AppDialogs.tsx line 134 — replaced `onSave={async (desc) => { ... }}` with a non-async wrapper that fires the async logic via `void .then()` so SolidJS reactivity tracking is not broken. Added a TODO comment to tauri-agent.ts marking it as dead production code (kept only because tauri-agent.test.ts still imports it — both files should be deleted together after tests are migrated to use-rust-agent.ts). Lint warnings reduced from 114 to 109. The single pre-existing solid/prefer-for error in AppearanceTab.tsx was not in scope and was not touched.",
+  "tsc_pass": true,
+  "lint_pass": true,
+  "lint_errors_before": 1,
+  "lint_errors_after": 1,
+  "lint_warnings_before": 114,
+  "lint_warnings_after": 109,
+  "notes": [
+    "The 1 lint error (solid/prefer-for in AppearanceTab.tsx) is pre-existing and was not in scope for this task.",
+    "tauri-agent.ts was not deleted because tauri-agent.test.ts imports it — a note is added to the file and both should be removed together.",
+    "All console.warn('[THINKING-DEBUG]') calls are removed; the adjacent debugLog() calls using the conditional debug logger are preserved."
+  ]
+}

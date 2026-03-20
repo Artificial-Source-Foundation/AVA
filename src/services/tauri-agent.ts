@@ -1,3 +1,9 @@
+// TODO: Dead module — no production code imports this file. All consumers use
+// rust-bridge.ts / use-rust-agent.ts instead. AgentSession and ToolInfo here
+// duplicate RustSession / RustToolInfo in rust-ipc.ts. Keep only for the
+// unit tests in tauri-agent.test.ts; delete both files when those tests are
+// migrated to test use-rust-agent.ts directly.
+
 import { isTauri, invoke as tauriInvoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { apiInvoke, createEventSocket } from '../lib/api-client'

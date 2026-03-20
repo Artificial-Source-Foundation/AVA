@@ -1,0 +1,115 @@
+{
+  "domain": "chat-ui",
+  "severity_counts": { "critical": 2, "warning": 6, "suggestion": 5 },
+  "features": {
+    "tool_calls_display": "working",
+    "tool_results_display": "working",
+    "thinking_display": "working",
+    "streaming": "working",
+    "token_tracking": "working",
+    "model_selector": "working",
+    "tool_approval": "partial",
+    "diff_display": "working"
+  },
+  "tui_parity_gaps": [
+    "TUI approval dock offers 4 options: Approve / Allow Session / Reject / Auto-approve. Desktop offers only Approve / Deny / Always-allow (checkbox). 'Allow Session' (scoped to session only, not permanently) is missing from the desktop.",
+    "TUI approval dock has a RejectionReason stage that prompts the user to type a rejection reason. Desktop has no rejection-reason input flow.",
+    "TUI has a /btw branch conversation command (even if the overlay was removed; the branching system is still present in TUI state). Desktop has no /btw or side-branch UI.",
+    "TUI displays a full diff_preview modal with per-hunk accept/reject controls (DiffPreviewState in widgets/diff_preview.rs). Desktop shows a unified read-only DiffViewer only — no per-hunk accept/reject.",
+    "TUI has a sidebar todo list (todo_list.rs + ava_types::TodoItem) that shows the agent's in-progress checklist. Desktop has no todo/checklist panel.",
+    "TUI shows bash exit code as part of the tool call header (sourced from a proper metadata field). Desktop tries to read exitCode from args (wrong field — see Bug #1 below), so exit code is never displayed."
+  ],
+  "findings": [
+    {
+      "severity": "critical",
+      "file": "src/components/chat/LiveStreamingBlock.tsx",
+      "line": 27,
+      "issue": "Production debug log: `console.warn('[THINKING-DEBUG] LiveStreamingBlock hasThinking:', ...)` fires on every reactive update during live streaming. This pollutes the browser console in production and degrades performance.",
+      "recommendation": "Remove the console.warn block entirely (lines 27-37). The `debugLog('thinking', ...)` call on the following line already handles conditional debug output. Same pattern exists in MessageBubble.tsx:365 and ThinkingRow.tsx:27 — remove all three console.warn blocks."
+    },
+    {
+      "severity": "critical",
+      "file": "src/components/chat/message-rows/CommandOutputRow.tsx",
+      "line": 48,
+      "issue": "Exit code extraction reads from `props.toolCall.args` cast to `Record<string, unknown>` and then pulls `meta.exitCode`. The `ToolCall` interface in src/types/index.ts has no `exitCode` field, and the Rust bridge never sets it in args. The exit code display block (lines 95-105) therefore never renders.",
+      "recommendation": "Add `exitCode?: number` to the `ToolCall` interface in src/types/index.ts, and populate it from the Rust side (bash tool result). Then simplify the extraction in CommandOutputRow to `props.toolCall.exitCode`."
+    },
+    {
+      "severity": "warning",
+      "file": "src/components/chat/MessageBubble.tsx",
+      "line": 365,
+      "issue": "Production debug log: `console.warn('[THINKING-DEBUG] MessageBubble metadata check:', ...)` fires inside a `createMemo` Show accessor on every message render that has thinking metadata, logging msgId and metadata keys. This is identical to the LiveStreamingBlock issue.",
+      "recommendation": "Remove the console.warn at line 365. The adjacent `debugLog('thinking', ...)` call is the correct conditional logging path."
+    },
+    {
+      "severity": "warning",
+      "file": "src/components/chat/message-rows/ThinkingRow.tsx",
+      "line": 27,
+      "issue": "Production debug log: `console.warn('[THINKING-DEBUG] ThinkingRow render:', ...)` fires on every ThinkingRow render, including every token during live streaming, logging the full thinking preview and displayMode value.",
+      "recommendation": "Remove the console.warn block (lines 27-33). Retain the `debugLog('thinking', ...)` block below it."
+    },
+    {
+      "severity": "warning",
+      "file": "src/components/chat/ApprovalDock.tsx",
+      "line": 149,
+      "issue": "Desktop approval dock is missing a 'Allow this session' scoped option. The TUI offers four discrete choices: Approve (once), Allow Session (session-scoped auto-allow), Reject, Auto-approve (global). The desktop conflates 'Allow this session' and permanent always-allow into a single checkbox, with no session scope.",
+      "recommendation": "Add a 'This session' option to the approval dock (a middle ground between once and always-allow). Pass `alwaysAllow: 'session' | 'permanent' | false` to onResolve. This requires backend support via the permission store."
+    },
+    {
+      "severity": "warning",
+      "file": "src/components/chat/message-rows/ToolCallRow.tsx",
+      "line": 1,
+      "issue": "ToolCallRow is used for all non-bash, non-diff tool calls (read, write, glob, grep, web_fetch, web_search, git_read, etc.) but dispatches to it as a generic fallback via `ToolSegmentDispatch`. The fallback renders a single generic card. Read/glob/grep results above 5 lines collapse but the threshold is only 5 lines — files read by the agent are often hundreds of lines. Users must expand to see them, with no search/filter within the output.",
+      "recommendation": "Consider raising AUTO_EXPAND_LINE_THRESHOLD (currently 5) to 10, or exposing a search-within-output control for long file reads. This is a usability improvement, not a breakage."
+    },
+    {
+      "severity": "warning",
+      "file": "src/components/chat/message-rows/DiffRow.tsx",
+      "line": 22,
+      "issue": "DiffRow uses a naive set-difference algorithm to compute +/- line counts (`computeDiffStats`). It counts unique line frequency differences rather than actual edit operations (insertions/deletions). For files with many repeated lines (e.g., blank lines, closing braces), the displayed counts will be incorrect.",
+      "recommendation": "Compute diff stats from the DiffViewer's underlying `diffLines()` result rather than running a separate set-difference pass. Alternatively, emit addition/deletion counts from Rust alongside the diff payload."
+    },
+    {
+      "severity": "warning",
+      "file": "src/components/chat/ToolCallGroup.tsx",
+      "line": 209,
+      "issue": "In the multi-tool unified group header, the icon is hardcoded to 'bash' when any tool is running (`anyRunning() ? 'bash' : 'read'`). A running `read` or `grep` group would incorrectly show a bash/terminal icon.",
+      "recommendation": "Track the name of the most recently active tool and pass it to `ToolIcon`. Fallback to a generic 'tool' icon rather than 'bash' when mixed tool types are running."
+    },
+    {
+      "severity": "suggestion",
+      "file": "src/components/chat/message-segments.ts",
+      "line": 27,
+      "issue": "Messages without `contentOffset` on any tool call fall back to a [tools, text] ordering (tools first, then text). This is correct for legacy messages, but if Rust emits tool calls with no offset for new messages, the inline interleaving will break. There is no guard distinguishing legacy messages from new ones that simply omit offsets.",
+      "recommendation": "Add a message schema version field (e.g., `message.metadata.schemaVersion`) and only apply the legacy fallback when the version is absent or below a threshold."
+    },
+    {
+      "severity": "suggestion",
+      "file": "src/components/chat/ToolCallGroup.tsx",
+      "line": 173,
+      "issue": "The grouping threshold `shouldGroup()` is `toolCalls.length > 2`, meaning exactly 3 tool calls get a unified mega-group header while 1-2 calls render inline. This boundary is arbitrary and the comment in code does not justify the choice.",
+      "recommendation": "Document the threshold choice or raise it to 5 to match the TUI's experience of showing most small batches inline."
+    },
+    {
+      "severity": "suggestion",
+      "file": "src/components/chat/approval-dock/ApprovalExpandedDetails.tsx",
+      "line": 47,
+      "issue": "Long argument values are truncated at 300 characters per argument key. For tools like `write` or `edit` with large `content` or `new_string` args, this truncation hides most of what would actually be written — users cannot make an informed approval decision.",
+      "recommendation": "Add an 'expand' button per argument row that reveals the full value in a scrollable area when the truncation limit is hit."
+    },
+    {
+      "severity": "suggestion",
+      "file": "src/components/chat/message-rows/ThinkingRow.tsx",
+      "line": 133,
+      "issue": "The preview mode hint says 'Ctrl+O to see full thinking' but Ctrl+O is not a documented shortcut in CLAUDE.md or the keyboard shortcuts table. The actual shortcut to toggle thinking display is Ctrl+T.",
+      "recommendation": "Change the hint text to match the real shortcut: 'Ctrl+T to toggle thinking' or 'click to expand'."
+    },
+    {
+      "severity": "suggestion",
+      "file": "src/components/chat/tool-call-output.tsx",
+      "line": 207,
+      "issue": "The copy button on tool output uses `opacity-0 group-hover/output:opacity-100`, requiring the Tailwind scoped group name `group/output` from the parent div. The parent div has `class='group/output px-3 py-2'` which is correct, but this scoped group name syntax requires Tailwind v3.2+. If the project downgrades Tailwind or switches JIT configs, the button becomes permanently invisible.",
+      "recommendation": "Add a comment noting the Tailwind version dependency, or use a `createSignal(false)` hover state via `onMouseEnter`/`onMouseLeave` for robustness."
+    }
+  ]
+}

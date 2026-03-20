@@ -12,7 +12,7 @@ use serde_json::Value;
 use tokio::sync::mpsc;
 use tracing::info;
 
-use super::state::WebState;
+use super::state::{FileEditRecord, PlanStepPayload, WebEvent, WebState};
 
 // ============================================================================
 // Health
@@ -113,16 +113,122 @@ pub async fn submit_goal(
     let (msg_queue, msg_queue_tx) = stack.create_message_queue();
     *state.inner.message_queue.write().await = Some(msg_queue_tx);
 
+    // Take approval/question/plan receivers out of the state for this run
+    let mut approval_rx = {
+        let mut lock = inner.approval_rx.lock().await;
+        let (_, empty) = mpsc::unbounded_channel();
+        std::mem::replace(&mut *lock, empty)
+    };
+    let mut question_rx = {
+        let mut lock = inner.question_rx.lock().await;
+        let (_, empty) = mpsc::unbounded_channel();
+        std::mem::replace(&mut *lock, empty)
+    };
+    let mut plan_rx = {
+        let mut lock = inner.plan_rx.lock().await;
+        let (_, empty) = mpsc::unbounded_channel();
+        std::mem::replace(&mut *lock, empty)
+    };
+
+    let pending_approval = inner.pending_approval_reply.clone();
+    let pending_question = inner.pending_question_reply.clone();
+    let pending_plan = inner.pending_plan_reply.clone();
+    let edit_history = inner.edit_history.clone();
+
     // Spawn the agent run in a background task
     tokio::spawn(async move {
         // Create an mpsc channel for the agent to send events into,
         // then forward those events to the broadcast channel.
         let (tx, mut rx) = mpsc::unbounded_channel();
         let event_broadcast = inner.event_tx.clone();
+        let edit_hist = edit_history.clone();
 
+        // Forward raw agent events to the WS broadcast channel, tracking edits
         let forwarder = tokio::spawn(async move {
             while let Some(event) = rx.recv().await {
-                let _ = event_broadcast.send(event);
+                // Track write/edit tool calls for undo support
+                if let ava_agent::agent_loop::AgentEvent::ToolCall(ref tc) = event {
+                    if tc.name == "edit" || tc.name == "write" {
+                        if let Some(path) = tc.arguments.get("file_path").and_then(|v| v.as_str()) {
+                            if let Ok(content) = tokio::fs::read_to_string(path).await {
+                                let mut hist = edit_hist.write().await;
+                                if hist.len() >= 100 {
+                                    hist.pop_front();
+                                }
+                                hist.push_back(FileEditRecord {
+                                    file_path: path.to_string(),
+                                    previous_content: content,
+                                });
+                            }
+                        }
+                    }
+                }
+                let _ = event_broadcast.send(WebEvent::Agent(event));
+            }
+        });
+
+        // Forward approval requests as WebEvent::ApprovalRequest
+        let event_broadcast_approval = inner.event_tx.clone();
+        let approval_forwarder = tokio::spawn(async move {
+            while let Some(req) = approval_rx.recv().await {
+                let risk_level = format!("{:?}", req.inspection.risk_level).to_lowercase();
+                let id = format!("approval-{}", uuid::Uuid::new_v4());
+                *pending_approval.lock().await = Some(req.reply);
+                let _ = event_broadcast_approval.send(WebEvent::ApprovalRequest {
+                    id,
+                    tool_name: req.call.name.clone(),
+                    args: req.call.arguments.clone(),
+                    risk_level,
+                    reason: req.inspection.reason.clone(),
+                    warnings: req.inspection.warnings.clone(),
+                });
+            }
+        });
+
+        // Forward question requests as WebEvent::QuestionRequest
+        let event_broadcast_question = inner.event_tx.clone();
+        let question_forwarder = tokio::spawn(async move {
+            while let Some(req) = question_rx.recv().await {
+                let id = format!("question-{}", uuid::Uuid::new_v4());
+                *pending_question.lock().await = Some(req.reply);
+                let _ = event_broadcast_question.send(WebEvent::QuestionRequest {
+                    id,
+                    question: req.question.clone(),
+                    options: req.options.clone(),
+                });
+            }
+        });
+
+        // Forward plan requests as WebEvent::PlanCreated
+        let event_broadcast_plan = inner.event_tx.clone();
+        let plan_forwarder = tokio::spawn(async move {
+            while let Some(req) = plan_rx.recv().await {
+                *pending_plan.lock().await = Some(req.reply);
+                let steps: Vec<PlanStepPayload> = req
+                    .plan
+                    .steps
+                    .iter()
+                    .map(|s| {
+                        let action = match s.action {
+                            ava_types::PlanAction::Research => "research",
+                            ava_types::PlanAction::Implement => "implement",
+                            ava_types::PlanAction::Test => "test",
+                            ava_types::PlanAction::Review => "review",
+                        };
+                        PlanStepPayload {
+                            id: s.id.clone(),
+                            description: s.description.clone(),
+                            files: s.files.clone(),
+                            action: action.to_string(),
+                            depends_on: s.depends_on.clone(),
+                        }
+                    })
+                    .collect();
+                let _ = event_broadcast_plan.send(WebEvent::PlanCreated {
+                    summary: req.plan.summary.clone(),
+                    steps,
+                    estimated_turns: req.plan.estimated_turns.unwrap_or(0) as usize,
+                });
             }
         });
 
@@ -138,8 +244,11 @@ pub async fn submit_goal(
             )
             .await;
 
-        // Wait for the forwarder to drain
+        // Wait for the forwarder to drain; abort the interactive forwarders
         let _ = forwarder.await;
+        approval_forwarder.abort();
+        question_forwarder.abort();
+        plan_forwarder.abort();
 
         // Clear the message queue sender and mark as not running
         *inner.message_queue.write().await = None;
@@ -148,6 +257,7 @@ pub async fn submit_goal(
         match result {
             Ok(run_result) => {
                 let _ = stack.session_manager.save(&run_result.session);
+                *inner.last_session_id.write().await = Some(run_result.session.id);
             }
             Err(e) => {
                 tracing::error!("Agent run failed: {e}");
@@ -165,6 +275,10 @@ pub async fn submit_goal(
 /// Cancel the currently-running agent.
 pub async fn cancel_agent(State(state): State<WebState>) -> impl IntoResponse {
     state.cancel().await;
+    // Clear any pending interactive replies
+    let _ = state.inner.pending_approval_reply.lock().await.take();
+    let _ = state.inner.pending_question_reply.lock().await.take();
+    let _ = state.inner.pending_plan_reply.lock().await.take();
     Json(serde_json::json!({ "cancelled": true }))
 }
 
@@ -184,6 +298,505 @@ pub async fn agent_status(State(state): State<WebState>) -> impl IntoResponse {
         provider,
         model,
     })
+}
+
+// ============================================================================
+// Approval / Question / Plan resolution
+// ============================================================================
+
+#[derive(Deserialize)]
+pub struct ResolveApprovalRequest {
+    pub approved: bool,
+    #[serde(default)]
+    pub always_allow: bool,
+}
+
+/// Resolve a pending tool approval request.
+///
+/// The frontend calls this after the user clicks Approve or Deny in the ApprovalDock.
+pub async fn resolve_approval(
+    State(state): State<WebState>,
+    Json(req): Json<ResolveApprovalRequest>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ErrorResponse>)> {
+    use ava_tools::permission_middleware::ToolApproval;
+
+    let reply = state
+        .inner
+        .pending_approval_reply
+        .lock()
+        .await
+        .take()
+        .ok_or_else(|| error_response(StatusCode::CONFLICT, "No pending approval request"))?;
+
+    let approval = if req.approved {
+        if req.always_allow {
+            ToolApproval::AllowAlways
+        } else {
+            ToolApproval::AllowedForSession
+        }
+    } else {
+        ToolApproval::Rejected(Some("User denied via web UI".to_string()))
+    };
+
+    reply.send(approval).map_err(|_| {
+        error_response(
+            StatusCode::GONE,
+            "Failed to send approval — the agent may have already moved on",
+        )
+    })?;
+
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+#[derive(Deserialize)]
+pub struct ResolveQuestionRequest {
+    pub answer: String,
+}
+
+/// Resolve a pending question request.
+pub async fn resolve_question(
+    State(state): State<WebState>,
+    Json(req): Json<ResolveQuestionRequest>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ErrorResponse>)> {
+    let reply = state
+        .inner
+        .pending_question_reply
+        .lock()
+        .await
+        .take()
+        .ok_or_else(|| error_response(StatusCode::CONFLICT, "No pending question request"))?;
+
+    reply.send(req.answer).map_err(|_| {
+        error_response(
+            StatusCode::GONE,
+            "Failed to send answer — the agent may have already moved on",
+        )
+    })?;
+
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+#[derive(Deserialize)]
+pub struct ResolvePlanRequest {
+    pub response: String,
+    #[serde(default)]
+    pub modified_plan: Option<serde_json::Value>,
+    #[serde(default)]
+    pub feedback: Option<String>,
+    #[serde(default)]
+    pub step_comments: Option<std::collections::HashMap<String, String>>,
+}
+
+/// Resolve a pending plan approval request.
+pub async fn resolve_plan(
+    State(state): State<WebState>,
+    Json(req): Json<ResolvePlanRequest>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ErrorResponse>)> {
+    let reply = state
+        .inner
+        .pending_plan_reply
+        .lock()
+        .await
+        .take()
+        .ok_or_else(|| error_response(StatusCode::CONFLICT, "No pending plan request"))?;
+
+    let feedback = req.feedback.unwrap_or_default();
+    let decision = match req.response.as_str() {
+        "approved" => ava_types::PlanDecision::Approved,
+        "rejected" => ava_types::PlanDecision::Rejected { feedback },
+        "modified" => {
+            let plan: ava_types::Plan = req
+                .modified_plan
+                .ok_or_else(|| {
+                    error_response(
+                        StatusCode::BAD_REQUEST,
+                        "modified_plan is required for 'modified' response",
+                    )
+                })
+                .and_then(|v| {
+                    serde_json::from_value(v).map_err(|e| {
+                        error_response(
+                            StatusCode::BAD_REQUEST,
+                            &format!("Invalid modified_plan: {e}"),
+                        )
+                    })
+                })?;
+            ava_types::PlanDecision::Modified { plan, feedback }
+        }
+        other => {
+            return Err(error_response(
+                StatusCode::BAD_REQUEST,
+                &format!(
+                    "Invalid response '{other}'. Expected 'approved', 'rejected', or 'modified'"
+                ),
+            ));
+        }
+    };
+
+    reply.send(decision).map_err(|_| {
+        error_response(
+            StatusCode::GONE,
+            "Failed to send plan decision — the agent may have already moved on",
+        )
+    })?;
+
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+// ============================================================================
+// Retry / Edit+Resend / Regenerate / Undo
+// ============================================================================
+
+/// Helper: run a new agent task with the given goal and history, returning
+/// the same format as SubmitGoalResponse. Used by retry/regenerate/edit-resend.
+async fn run_agent_from_history(
+    state: &WebState,
+    goal: String,
+    history: Vec<ava_types::Message>,
+) -> Result<Json<SubmitGoalResponse>, (StatusCode, Json<ErrorResponse>)> {
+    // Build a fake SubmitGoalRequest and reuse submit_goal logic
+    let req = SubmitGoalRequest {
+        goal,
+        max_turns: 0,
+        provider: None,
+        model: None,
+        session_id: None,
+    };
+    // We override the history by temporarily injecting it via a one-shot path.
+    // Since submit_goal loads history from session_id, we instead call the inner
+    // logic directly here.
+    {
+        let running = state.inner.running.read().await;
+        if *running {
+            return Err(error_response(
+                StatusCode::CONFLICT,
+                "Agent is already running. Cancel first.",
+            ));
+        }
+    }
+    *state.inner.running.write().await = true;
+
+    let session_id_str = uuid::Uuid::new_v4().to_string();
+    let cancel = state.new_cancel_token().await;
+    let inner = state.inner.clone();
+    let stack = inner.stack.clone();
+    let max_turns = 0usize;
+    let goal = req.goal.clone();
+
+    let (msg_queue, msg_queue_tx) = stack.create_message_queue();
+    *state.inner.message_queue.write().await = Some(msg_queue_tx);
+
+    let mut approval_rx = {
+        let mut lock = inner.approval_rx.lock().await;
+        let (_, empty) = mpsc::unbounded_channel();
+        std::mem::replace(&mut *lock, empty)
+    };
+    let mut question_rx = {
+        let mut lock = inner.question_rx.lock().await;
+        let (_, empty) = mpsc::unbounded_channel();
+        std::mem::replace(&mut *lock, empty)
+    };
+    let mut plan_rx = {
+        let mut lock = inner.plan_rx.lock().await;
+        let (_, empty) = mpsc::unbounded_channel();
+        std::mem::replace(&mut *lock, empty)
+    };
+
+    let pending_approval = inner.pending_approval_reply.clone();
+    let pending_question = inner.pending_question_reply.clone();
+    let pending_plan = inner.pending_plan_reply.clone();
+    let edit_history = inner.edit_history.clone();
+
+    tokio::spawn(async move {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let event_broadcast = inner.event_tx.clone();
+        let edit_hist = edit_history.clone();
+
+        let forwarder = tokio::spawn(async move {
+            while let Some(event) = rx.recv().await {
+                if let ava_agent::agent_loop::AgentEvent::ToolCall(ref tc) = event {
+                    if tc.name == "edit" || tc.name == "write" {
+                        if let Some(path) = tc.arguments.get("file_path").and_then(|v| v.as_str()) {
+                            if let Ok(content) = tokio::fs::read_to_string(path).await {
+                                let mut hist = edit_hist.write().await;
+                                if hist.len() >= 100 {
+                                    hist.pop_front();
+                                }
+                                hist.push_back(FileEditRecord {
+                                    file_path: path.to_string(),
+                                    previous_content: content,
+                                });
+                            }
+                        }
+                    }
+                }
+                let _ = event_broadcast.send(WebEvent::Agent(event));
+            }
+        });
+
+        let event_broadcast_approval = inner.event_tx.clone();
+        let approval_forwarder = tokio::spawn(async move {
+            while let Some(req) = approval_rx.recv().await {
+                let risk_level = format!("{:?}", req.inspection.risk_level).to_lowercase();
+                let id = format!("approval-{}", uuid::Uuid::new_v4());
+                *pending_approval.lock().await = Some(req.reply);
+                let _ = event_broadcast_approval.send(WebEvent::ApprovalRequest {
+                    id,
+                    tool_name: req.call.name.clone(),
+                    args: req.call.arguments.clone(),
+                    risk_level,
+                    reason: req.inspection.reason.clone(),
+                    warnings: req.inspection.warnings.clone(),
+                });
+            }
+        });
+
+        let event_broadcast_question = inner.event_tx.clone();
+        let question_forwarder = tokio::spawn(async move {
+            while let Some(req) = question_rx.recv().await {
+                let id = format!("question-{}", uuid::Uuid::new_v4());
+                *pending_question.lock().await = Some(req.reply);
+                let _ = event_broadcast_question.send(WebEvent::QuestionRequest {
+                    id,
+                    question: req.question.clone(),
+                    options: req.options.clone(),
+                });
+            }
+        });
+
+        let event_broadcast_plan = inner.event_tx.clone();
+        let plan_forwarder = tokio::spawn(async move {
+            while let Some(req) = plan_rx.recv().await {
+                *pending_plan.lock().await = Some(req.reply);
+                let steps: Vec<PlanStepPayload> = req
+                    .plan
+                    .steps
+                    .iter()
+                    .map(|s| {
+                        let action = match s.action {
+                            ava_types::PlanAction::Research => "research",
+                            ava_types::PlanAction::Implement => "implement",
+                            ava_types::PlanAction::Test => "test",
+                            ava_types::PlanAction::Review => "review",
+                        };
+                        PlanStepPayload {
+                            id: s.id.clone(),
+                            description: s.description.clone(),
+                            files: s.files.clone(),
+                            action: action.to_string(),
+                            depends_on: s.depends_on.clone(),
+                        }
+                    })
+                    .collect();
+                let _ = event_broadcast_plan.send(WebEvent::PlanCreated {
+                    summary: req.plan.summary.clone(),
+                    steps,
+                    estimated_turns: req.plan.estimated_turns.unwrap_or(0) as usize,
+                });
+            }
+        });
+
+        let result = stack
+            .run(
+                &goal,
+                max_turns,
+                Some(tx),
+                cancel,
+                history,
+                Some(msg_queue),
+                vec![],
+            )
+            .await;
+
+        let _ = forwarder.await;
+        approval_forwarder.abort();
+        question_forwarder.abort();
+        plan_forwarder.abort();
+
+        *inner.message_queue.write().await = None;
+        *inner.running.write().await = false;
+
+        match result {
+            Ok(run_result) => {
+                let _ = stack.session_manager.save(&run_result.session);
+                *inner.last_session_id.write().await = Some(run_result.session.id);
+            }
+            Err(e) => {
+                tracing::error!("Agent run (retry/regen) failed: {e}");
+            }
+        }
+    });
+
+    Ok(Json(SubmitGoalResponse {
+        success: true,
+        turns: 0,
+        session_id: session_id_str,
+    }))
+}
+
+/// Retry the last user message.
+pub async fn retry_last_message(
+    State(state): State<WebState>,
+) -> Result<Json<SubmitGoalResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let session_id = state
+        .inner
+        .last_session_id
+        .read()
+        .await
+        .ok_or_else(|| error_response(StatusCode::CONFLICT, "No previous session to retry"))?;
+
+    let session = state
+        .inner
+        .stack
+        .session_manager
+        .get(session_id)
+        .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?
+        .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "Session not found"))?;
+
+    let last_user_msg = session
+        .messages
+        .iter()
+        .rev()
+        .find(|m| m.role == ava_types::Role::User)
+        .ok_or_else(|| error_response(StatusCode::CONFLICT, "No user message found in session"))?;
+
+    let goal = last_user_msg.content.clone();
+    let history = collect_history_before_last_user(&session.messages);
+
+    info!(goal = %goal, %session_id, "Web: retry_last_message");
+    run_agent_from_history(&state, goal, history).await
+}
+
+#[derive(Deserialize)]
+pub struct EditAndResendRequest {
+    pub message_id: String,
+    pub new_content: String,
+}
+
+/// Edit a specific user message and re-run the agent from that point.
+pub async fn edit_and_resend(
+    State(state): State<WebState>,
+    Json(req): Json<EditAndResendRequest>,
+) -> Result<Json<SubmitGoalResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let session_id = state
+        .inner
+        .last_session_id
+        .read()
+        .await
+        .ok_or_else(|| error_response(StatusCode::CONFLICT, "No previous session to edit"))?;
+
+    let session = state
+        .inner
+        .stack
+        .session_manager
+        .get(session_id)
+        .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?
+        .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "Session not found"))?;
+
+    let target_id = uuid::Uuid::parse_str(&req.message_id).map_err(|e| {
+        error_response(StatusCode::BAD_REQUEST, &format!("Invalid message_id: {e}"))
+    })?;
+
+    let pos = session
+        .messages
+        .iter()
+        .position(|m| m.id == target_id)
+        .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "Message not found in session"))?;
+
+    let history: Vec<ava_types::Message> = session.messages[..pos].to_vec();
+
+    info!(new_content = %req.new_content, message_id = %req.message_id, "Web: edit_and_resend");
+    run_agent_from_history(&state, req.new_content, history).await
+}
+
+/// Regenerate the last assistant response.
+pub async fn regenerate_response(
+    State(state): State<WebState>,
+) -> Result<Json<SubmitGoalResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let session_id = state.inner.last_session_id.read().await.ok_or_else(|| {
+        error_response(
+            StatusCode::CONFLICT,
+            "No previous session to regenerate from",
+        )
+    })?;
+
+    let session = state
+        .inner
+        .stack
+        .session_manager
+        .get(session_id)
+        .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?
+        .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "Session not found"))?;
+
+    let last_user_pos = session
+        .messages
+        .iter()
+        .rposition(|m| m.role == ava_types::Role::User)
+        .ok_or_else(|| {
+            error_response(
+                StatusCode::CONFLICT,
+                "No user message found in session to regenerate from",
+            )
+        })?;
+
+    let goal = session.messages[last_user_pos].content.clone();
+    let history: Vec<ava_types::Message> = session.messages[..last_user_pos].to_vec();
+
+    info!(goal = %goal, %session_id, "Web: regenerate_response");
+    run_agent_from_history(&state, goal, history).await
+}
+
+#[derive(Serialize)]
+pub struct UndoResult {
+    pub success: bool,
+    pub message: String,
+    #[serde(rename = "filePath")]
+    pub file_path: Option<String>,
+}
+
+/// Undo the last file edit made by the agent.
+pub async fn undo_last_edit(
+    State(state): State<WebState>,
+) -> Result<Json<UndoResult>, (StatusCode, Json<ErrorResponse>)> {
+    let record = state.inner.edit_history.write().await.pop_back();
+
+    match record {
+        Some(edit) => {
+            let path = edit.file_path.clone();
+            match tokio::fs::write(&edit.file_path, &edit.previous_content).await {
+                Ok(()) => {
+                    info!(file = %path, "Web: undo_last_edit restored file");
+                    Ok(Json(UndoResult {
+                        success: true,
+                        message: format!("Restored {path} to its previous content"),
+                        file_path: Some(path),
+                    }))
+                }
+                Err(e) => Ok(Json(UndoResult {
+                    success: false,
+                    message: format!("Failed to restore {path}: {e}"),
+                    file_path: Some(path),
+                })),
+            }
+        }
+        None => Ok(Json(UndoResult {
+            success: false,
+            message: "No file edits to undo".to_string(),
+            file_path: None,
+        })),
+    }
+}
+
+/// Collect all messages before the last user message (for retry/regenerate).
+fn collect_history_before_last_user(messages: &[ava_types::Message]) -> Vec<ava_types::Message> {
+    if let Some(pos) = messages
+        .iter()
+        .rposition(|m| m.role == ava_types::Role::User)
+    {
+        messages[..pos].to_vec()
+    } else {
+        vec![]
+    }
 }
 
 // ============================================================================
@@ -486,6 +1099,61 @@ pub async fn load_session_body(
     get_session(State(state), Path(req.id)).await
 }
 
+#[derive(Deserialize)]
+pub struct SearchSessionsRequest {
+    pub query: String,
+}
+
+/// Search sessions by message content.
+pub async fn search_sessions(
+    State(state): State<WebState>,
+    Json(req): Json<SearchSessionsRequest>,
+) -> Result<Json<Vec<SessionSummary>>, (StatusCode, Json<ErrorResponse>)> {
+    let trimmed = req.query.trim();
+    if trimmed.is_empty() {
+        return Ok(Json(vec![]));
+    }
+    let sessions = state
+        .inner
+        .stack
+        .session_manager
+        .search(trimmed)
+        .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
+
+    let summaries = sessions
+        .iter()
+        .map(|s| {
+            let title = s
+                .metadata
+                .get("title")
+                .and_then(|v| v.as_str())
+                .map(String::from)
+                .unwrap_or_else(|| {
+                    s.messages
+                        .first()
+                        .map(|m| {
+                            let c = &m.content;
+                            if c.len() > 80 {
+                                format!("{}...", &c[..77])
+                            } else {
+                                c.clone()
+                            }
+                        })
+                        .unwrap_or_else(|| "New session".to_string())
+                });
+            SessionSummary {
+                id: s.id.to_string(),
+                title,
+                message_count: s.messages.len(),
+                created_at: s.created_at.to_rfc3339(),
+                updated_at: s.updated_at.to_rfc3339(),
+            }
+        })
+        .collect();
+
+    Ok(Json(summaries))
+}
+
 // ── Messages ─────────────────────────────────────────────────────────────────
 
 #[derive(Deserialize)]
@@ -587,6 +1255,39 @@ pub async fn list_models() -> impl IntoResponse {
     Json(models)
 }
 
+#[derive(Serialize)]
+pub struct CurrentModel {
+    pub provider: String,
+    pub model: String,
+}
+
+/// Get the currently-active provider and model.
+pub async fn get_current_model(State(state): State<WebState>) -> impl IntoResponse {
+    let (provider, model) = state.inner.stack.current_model().await;
+    Json(CurrentModel { provider, model })
+}
+
+#[derive(Deserialize)]
+pub struct SwitchModelRequest {
+    pub provider: String,
+    pub model: String,
+}
+
+/// Switch the active provider and model.
+pub async fn switch_model(
+    State(state): State<WebState>,
+    Json(req): Json<SwitchModelRequest>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ErrorResponse>)> {
+    state
+        .inner
+        .stack
+        .switch_model(&req.provider, &req.model)
+        .await
+        .map_err(|e| error_response(StatusCode::BAD_REQUEST, &e.to_string()))?;
+
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
 // ============================================================================
 // Providers
 // ============================================================================
@@ -604,6 +1305,82 @@ pub async fn list_providers(State(state): State<WebState>) -> impl IntoResponse 
         .map(|name| ProviderInfo { name })
         .collect();
     Json(providers)
+}
+
+// ============================================================================
+// Config
+// ============================================================================
+
+/// Get the full configuration as JSON.
+pub async fn get_config(
+    State(state): State<WebState>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ErrorResponse>)> {
+    let cfg = state.inner.stack.config.get().await;
+    let value = serde_json::to_value(&cfg)
+        .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
+    Ok(Json(value))
+}
+
+// ============================================================================
+// Permission level
+// ============================================================================
+
+#[derive(Serialize)]
+pub struct PermissionLevelInfo {
+    pub level: String,
+}
+
+fn level_label(auto_approve: bool) -> String {
+    if auto_approve {
+        "autoApprove".to_string()
+    } else {
+        "standard".to_string()
+    }
+}
+
+fn parse_level(level: &str) -> Result<bool, String> {
+    match level {
+        "standard" => Ok(false),
+        "autoApprove" | "auto_approve" | "auto-approve" => Ok(true),
+        other => Err(format!(
+            "Unknown permission level \"{other}\". Expected \"standard\" or \"autoApprove\"."
+        )),
+    }
+}
+
+/// Get the current permission level.
+pub async fn get_permission_level(State(state): State<WebState>) -> impl IntoResponse {
+    let auto = state.inner.stack.is_auto_approve().await;
+    Json(PermissionLevelInfo {
+        level: level_label(auto),
+    })
+}
+
+#[derive(Deserialize)]
+pub struct SetPermissionRequest {
+    pub level: String,
+}
+
+/// Set the permission level.
+pub async fn set_permission_level(
+    State(state): State<WebState>,
+    Json(req): Json<SetPermissionRequest>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ErrorResponse>)> {
+    let auto = parse_level(&req.level).map_err(|e| error_response(StatusCode::BAD_REQUEST, &e))?;
+    state.inner.stack.set_auto_approve(auto).await;
+    Ok(Json(PermissionLevelInfo {
+        level: level_label(auto),
+    }))
+}
+
+/// Toggle between Standard and AutoApprove.
+pub async fn toggle_permission_level(State(state): State<WebState>) -> impl IntoResponse {
+    let current = state.inner.stack.is_auto_approve().await;
+    let new_auto = !current;
+    state.inner.stack.set_auto_approve(new_auto).await;
+    Json(PermissionLevelInfo {
+        level: level_label(new_auto),
+    })
 }
 
 // ============================================================================
@@ -762,11 +1539,34 @@ pub async fn get_message_queue(State(state): State<WebState>) -> impl IntoRespon
     Json(serde_json::json!({ "active": running && has_queue }))
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ClearTarget {
+    All,
+    Steering,
+    FollowUp,
+    PostComplete,
+}
+
 /// Clear the message queue.
-pub async fn clear_message_queue(State(_state): State<WebState>) -> impl IntoResponse {
-    // The message queue is internal to the agent loop; clearing it from the
-    // outside requires draining the mpsc channel, which isn't safe.
-    // For now, return OK — the queue will be dropped when the agent finishes.
+///
+/// Cancels the agent for "all" and "steering" targets (which clears the steering
+/// queue). For follow-up and post-complete, returns OK — those are drained by
+/// the agent loop when it processes them; there is no safe external drain path.
+pub async fn clear_message_queue(
+    State(state): State<WebState>,
+    body: Option<Json<serde_json::Value>>,
+) -> impl IntoResponse {
+    let target_str = body
+        .and_then(|b| b.get("target").and_then(|v| v.as_str()).map(String::from))
+        .unwrap_or_else(|| "all".to_string());
+
+    match target_str.as_str() {
+        "all" | "steering" | "All" | "Steering" => {
+            state.cancel().await;
+        }
+        _ => {}
+    }
     Json(serde_json::json!({ "ok": true }))
 }
 
@@ -846,6 +1646,85 @@ pub enum WebAgentEvent {
         reason: String,
         warnings: Vec<String>,
     },
+    #[serde(rename = "question_request")]
+    QuestionRequest {
+        id: String,
+        question: String,
+        options: Vec<String>,
+    },
+    #[serde(rename = "plan_created")]
+    PlanCreated { plan: PlanPayload },
+}
+
+/// Plan payload for the frontend (matches `PlanPayload` in `src-tauri/src/events.rs`).
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlanPayload {
+    pub summary: String,
+    pub steps: Vec<PlanStepFrontend>,
+    pub estimated_turns: usize,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlanStepFrontend {
+    pub id: String,
+    pub description: String,
+    pub files: Vec<String>,
+    pub action: String,
+    pub depends_on: Vec<String>,
+}
+
+/// Convert a `WebEvent` to a frontend-compatible `WebAgentEvent`.
+/// Returns `None` for events that have no direct frontend representation.
+pub fn convert_web_event(event: &WebEvent) -> Option<WebAgentEvent> {
+    match event {
+        WebEvent::Agent(backend_event) => convert_agent_event(backend_event),
+        WebEvent::ApprovalRequest {
+            id,
+            tool_name,
+            args,
+            risk_level,
+            reason,
+            warnings,
+        } => Some(WebAgentEvent::ApprovalRequest {
+            id: id.clone(),
+            tool_name: tool_name.clone(),
+            args: args.clone(),
+            risk_level: risk_level.clone(),
+            reason: reason.clone(),
+            warnings: warnings.clone(),
+        }),
+        WebEvent::QuestionRequest {
+            id,
+            question,
+            options,
+        } => Some(WebAgentEvent::QuestionRequest {
+            id: id.clone(),
+            question: question.clone(),
+            options: options.clone(),
+        }),
+        WebEvent::PlanCreated {
+            summary,
+            steps,
+            estimated_turns,
+        } => Some(WebAgentEvent::PlanCreated {
+            plan: PlanPayload {
+                summary: summary.clone(),
+                steps: steps
+                    .iter()
+                    .map(|s| PlanStepFrontend {
+                        id: s.id.clone(),
+                        description: s.description.clone(),
+                        files: s.files.clone(),
+                        action: s.action.clone(),
+                        depends_on: s.depends_on.clone(),
+                    })
+                    .collect(),
+                estimated_turns: *estimated_turns,
+            },
+        }),
+    }
 }
 
 /// Convert a backend `AgentEvent` to a frontend-compatible `WebAgentEvent`.
@@ -897,7 +1776,7 @@ pub fn convert_agent_event(event: &ava_agent::agent_loop::AgentEvent) -> Option<
             current_cost_usd: *current_cost_usd,
             max_budget_usd: *max_budget_usd,
         }),
-        // ToolStats and SubAgentComplete have no direct frontend representation.
+        // ToolStats, DiffPreview, SubAgentComplete have no direct frontend representation.
         _ => None,
     }
 }

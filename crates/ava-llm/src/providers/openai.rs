@@ -39,24 +39,18 @@ impl ReasoningTimer {
             if thinking == common::REASONING_START_SENTINEL {
                 self.start = Some(Instant::now());
                 self.had_real_content = false;
-                // Emit a brief indicator so the UI shows a thinking bubble
-                return vec![StreamChunk {
-                    thinking: Some("Thinking".to_string()),
-                    ..Default::default()
-                }];
+                // Don't emit anything yet — wait to see if real content arrives.
+                // If no summary text is streamed, we suppress the thinking bubble entirely.
+                return vec![];
             }
             if thinking == common::REASONING_END_SENTINEL {
-                if !self.had_real_content {
-                    // No summary text was streamed — compute elapsed time
-                    let elapsed = self.start.map(|s| s.elapsed().as_secs_f64()).unwrap_or(0.0);
-                    self.start = None;
-                    return vec![StreamChunk {
-                        thinking: Some(format!(" ({elapsed:.1}s)")),
-                        ..Default::default()
-                    }];
-                }
-                // Had real content — nothing to add
                 self.start = None;
+                if !self.had_real_content {
+                    // No summary text was streamed — suppress thinking display entirely.
+                    // The model still reasoned (thinking is enabled), but the backend
+                    // didn't expose readable summaries for this model.
+                    return vec![];
+                }
                 return vec![];
             }
             // Real thinking content arrived (e.g., reasoning summary deltas)
@@ -126,6 +120,12 @@ pub struct OpenAIProvider {
     /// When true, inject a dummy tool into requests with empty tool lists
     /// to prevent LiteLLM proxy routing issues with certain models.
     litellm_compatible: bool,
+    /// When true, this provider uses an OAuth subscription (ChatGPT Plus/Pro)
+    /// so cost estimation returns 0 (subscription-billed, no per-token cost).
+    subscription: bool,
+    /// ChatGPT account ID for OAuth subscriptions.
+    /// Sent as `ChatGPT-Account-ID` header with requests to chatgpt.com.
+    chatgpt_account_id: Option<String>,
 }
 
 impl OpenAIProvider {
@@ -159,13 +159,14 @@ impl OpenAIProvider {
             circuit_breaker: Some(Arc::new(CircuitBreaker::default_provider())),
             use_responses_api,
             litellm_compatible: false,
+            subscription: false,
+            chatgpt_account_id: None,
         }
     }
 
     /// Returns `true` if using OAuth subscription (ChatGPT Plus/Pro — no per-token cost).
     fn is_subscription(&self) -> bool {
-        // OAuth tokens start with "ey" (JWT) and have no sk- API key
-        self.api_key.starts_with("ey") || self.base_url.to_lowercase().contains("chatgpt.com")
+        self.subscription
     }
 
     /// Set the thinking format for this provider (DashScope, Zhipu, etc.).
@@ -189,6 +190,18 @@ impl OpenAIProvider {
     /// no tools, preventing LiteLLM proxy routing issues with certain models.
     pub fn with_litellm_compatible(mut self, enabled: bool) -> Self {
         self.litellm_compatible = enabled;
+        self
+    }
+
+    /// Mark this provider as using an OAuth subscription (no per-token cost).
+    pub fn with_subscription(mut self, enabled: bool) -> Self {
+        self.subscription = enabled;
+        self
+    }
+
+    /// Set the ChatGPT account ID for OAuth subscriptions.
+    pub fn with_chatgpt_account_id(mut self, account_id: Option<String>) -> Self {
+        self.chatgpt_account_id = account_id;
         self
     }
 
@@ -489,6 +502,17 @@ impl OpenAIProvider {
         self.pool.get_client(&self.base_url).await
     }
 
+    /// Add auth headers to a request. Includes ChatGPT-Account-ID for OAuth subscriptions.
+    fn auth_request(&self, request: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+        let mut req = request.bearer_auth(&self.api_key);
+        if let Some(ref account_id) = self.chatgpt_account_id {
+            req = req
+                .header("ChatGPT-Account-ID", account_id)
+                .header("originator", "codex_cli_rs");
+        }
+        req
+    }
+
     async fn send_request(&self, request: reqwest::RequestBuilder) -> Result<reqwest::Response> {
         common::send_with_retry_cb(request, "OpenAI", 3, self.circuit_breaker.as_deref()).await
     }
@@ -505,10 +529,8 @@ impl LLMProvider for OpenAIProvider {
         } else {
             self.build_request_body(messages, false)
         };
-        let request = client
-            .post(self.completions_url())
-            .bearer_auth(&self.api_key)
-            .json(&body);
+        let request = client.post(self.completions_url()).json(&body);
+        let request = self.auth_request(request);
 
         let response = self.send_request(request).await?;
         let response = common::validate_status(response, &provider_label).await?;
@@ -544,10 +566,8 @@ impl LLMProvider for OpenAIProvider {
         } else {
             self.build_request_body(messages, true)
         };
-        let request = client
-            .post(self.completions_url())
-            .bearer_auth(&self.api_key)
-            .json(&body);
+        let request = client.post(self.completions_url()).json(&body);
+        let request = self.auth_request(request);
 
         let response = self.send_request(request).await?;
         let response = common::validate_status(response, &provider_label).await?;
@@ -645,10 +665,8 @@ impl LLMProvider for OpenAIProvider {
             "Sending generate_with_tools request"
         );
         let client = self.client().await?;
-        let request = client
-            .post(self.completions_url())
-            .bearer_auth(&self.api_key)
-            .json(&body);
+        let request = client.post(self.completions_url()).json(&body);
+        let request = self.auth_request(request);
 
         let response = self.send_request(request).await?;
         let response = common::validate_status(response, &provider_label).await?;
@@ -697,10 +715,8 @@ impl LLMProvider for OpenAIProvider {
             body["stream_options"] = json!({"include_usage": true});
         }
         let client = self.client().await?;
-        let request = client
-            .post(self.completions_url())
-            .bearer_auth(&self.api_key)
-            .json(&body);
+        let request = client.post(self.completions_url()).json(&body);
+        let request = self.auth_request(request);
 
         let response = self.send_request(request).await?;
         let response = common::validate_status(response, &provider_label).await?;
@@ -761,10 +777,8 @@ impl LLMProvider for OpenAIProvider {
             body["stream_options"] = json!({"include_usage": true});
         }
         let client = self.client().await?;
-        let request = client
-            .post(self.completions_url())
-            .bearer_auth(&self.api_key)
-            .json(&body);
+        let request = client.post(self.completions_url()).json(&body);
+        let request = self.auth_request(request);
 
         let response = self.send_request(request).await?;
         let response = common::validate_status(response, &provider_label).await?;
@@ -847,10 +861,8 @@ impl LLMProvider for OpenAIProvider {
             self.build_request_body_with_thinking(messages, tools, false, thinking)
         };
         let client = self.client().await?;
-        let request = client
-            .post(self.completions_url())
-            .bearer_auth(&self.api_key)
-            .json(&body);
+        let request = client.post(self.completions_url()).json(&body);
+        let request = self.auth_request(request);
 
         let response = self.send_request(request).await?;
         let response = common::validate_status(response, &provider_label).await?;

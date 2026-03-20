@@ -321,13 +321,19 @@ pub fn provider_info(id: &str) -> Option<&'static ProviderInfo> {
 
 /// Start the appropriate auth flow for a provider.
 pub async fn authenticate(provider_id: &str) -> Result<AuthResult, AuthError> {
-    tracing::info!("Starting auth flow for provider: {provider_id}");
-    let info = provider_info(provider_id).ok_or_else(|| {
-        tracing::error!("Auth failed: unknown provider '{provider_id}'");
-        AuthError::UnknownProvider(provider_id.to_string())
-    })?;
+    let info = provider_info(provider_id)
+        .ok_or_else(|| AuthError::UnknownProvider(provider_id.to_string()))?;
+    authenticate_with_flow(provider_id, info.primary_flow()).await
+}
 
-    match info.primary_flow() {
+/// Start a specific auth flow for a provider.
+pub async fn authenticate_with_flow(
+    provider_id: &str,
+    flow: AuthFlow,
+) -> Result<AuthResult, AuthError> {
+    tracing::info!("Starting {flow:?} auth flow for provider: {provider_id}");
+
+    match flow {
         AuthFlow::Pkce => {
             let cfg = oauth_config(provider_id)
                 .ok_or_else(|| AuthError::NoOAuthConfig(provider_id.to_string()))?;
@@ -349,6 +355,7 @@ pub async fn authenticate(provider_id: &str) -> Result<AuthResult, AuthError> {
 
             let oauth_tokens =
                 tokens::exchange_code_for_tokens(cfg, &cb.code, &pkce_params).await?;
+
             Ok(AuthResult::OAuth(oauth_tokens))
         }
         AuthFlow::DeviceCode => {
@@ -357,9 +364,12 @@ pub async fn authenticate(provider_id: &str) -> Result<AuthResult, AuthError> {
             let device = device_code::request_device_code(cfg).await?;
             Ok(AuthResult::DeviceCodePending(device))
         }
-        AuthFlow::ApiKey => Ok(AuthResult::NeedsApiKey {
-            env_var: info.env_var.map(String::from),
-        }),
+        AuthFlow::ApiKey => {
+            let env_var = provider_info(provider_id)
+                .and_then(|i| i.env_var)
+                .map(String::from);
+            Ok(AuthResult::NeedsApiKey { env_var })
+        }
     }
 }
 

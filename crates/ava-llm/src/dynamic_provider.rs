@@ -120,8 +120,18 @@ impl DynamicCredentialProvider {
 
     /// Check whether an error is an auth failure (401) that could be resolved
     /// by refreshing OAuth credentials.
+    ///
+    /// Note: `MissingApiKey` is NOT refreshable — it means no credential entry
+    /// exists at all. Only `ConfigError` from expired-token refresh failures
+    /// and HTTP 401 errors from the provider API are refreshable.
     fn is_refreshable_auth_error(err: &AvaError) -> bool {
-        matches!(err, AvaError::MissingApiKey { .. })
+        match err {
+            AvaError::ConfigError(msg) => msg.contains("expired") || msg.contains("refresh"),
+            AvaError::ProviderError { message, .. } => {
+                message.contains("401") || message.contains("Unauthorized")
+            }
+            _ => false,
+        }
     }
 }
 
@@ -131,11 +141,24 @@ pub(crate) async fn resolve_credentials_snapshot(
     credentials_path: Option<&Path>,
     refresh_locks: &ProviderRefreshLocks,
 ) -> Result<CredentialStore> {
+    // Normalize provider name for credential lookup (handles "ChatGPT" -> "chatgpt", etc.)
+    let normalized = provider_name.to_ascii_lowercase();
+    let lookup_name = {
+        let creds = credentials.read().await;
+        if creds.providers.contains_key(provider_name) {
+            provider_name.to_string()
+        } else if creds.providers.contains_key(&normalized) {
+            normalized.clone()
+        } else {
+            provider_name.to_string()
+        }
+    };
+
     let (snapshot, state) = {
         let credentials = credentials.read().await;
         (
             credentials.clone(),
-            credentials.provider_credential_state(provider_name),
+            credentials.provider_credential_state(&lookup_name),
         )
     };
 
@@ -143,14 +166,14 @@ pub(crate) async fn resolve_credentials_snapshot(
         return Ok(snapshot);
     };
 
-    let provider_lock = refresh_lock(provider_name, refresh_locks).await;
+    let provider_lock = refresh_lock(&lookup_name, refresh_locks).await;
     let _guard = provider_lock.lock().await;
 
     let (snapshot, state) = {
         let credentials = credentials.read().await;
         (
             credentials.clone(),
-            credentials.provider_credential_state(provider_name),
+            credentials.provider_credential_state(&lookup_name),
         )
     };
 
@@ -166,12 +189,12 @@ pub(crate) async fn resolve_credentials_snapshot(
     {
         Ok(tokens) => tokens,
         Err(error) if !refresh.existing.api_key.trim().is_empty() => {
-            warn!(provider = provider_name, %error, "OAuth refresh failed; falling back to static API key");
+            warn!(provider = %lookup_name, %error, "OAuth refresh failed; falling back to static API key");
             return Ok(snapshot);
         }
         Err(error) => {
             return Err(AvaError::ConfigError(format!(
-                "Failed to refresh OAuth credential for {provider_name}: {error}"
+                "Failed to refresh OAuth credential for {lookup_name}: {error}"
             )))
         }
     };
@@ -179,7 +202,7 @@ pub(crate) async fn resolve_credentials_snapshot(
     let updated_snapshot = {
         let mut credentials = credentials.write().await;
         let _refreshed = credentials.apply_refreshed_provider_tokens(
-            provider_name,
+            &lookup_name,
             &refresh.existing,
             refreshed_tokens,
         );

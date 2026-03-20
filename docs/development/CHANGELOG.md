@@ -9,6 +9,7 @@
 - **Rich edit error feedback** — on failure, reports most similar lines with line numbers and "did you mean?" hints
 
 ### Changed
+- **OpenAI OAuth account routing** — derive `ChatGPT-Account-ID` from JWT claims when credentials do not already store it, covering older/device-code logins and token refreshes
 
 #### God File Splits
 - `crates/ava-praxis/src/lib.rs` 1,479 LOC split into 5 files: `lib`, `director`, `lead`, `worker`, `routing` (23 source files total)

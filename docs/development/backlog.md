@@ -12,6 +12,7 @@ Tool surface policy: default tools stay capped at 6 (`read`, `write`, `edit`, `b
 - **JSONL session logging** — structured logs at `~/.ava/log/` (opt-in via `features.session_logging: true`)
 - **Ellipsis edit strategy** — `...` placeholder handling; 15 total strategies (was 14)
 - **Rich edit error feedback** — similar lines + "did you mean?" hints on edit failure
+- **OpenAI OAuth account fallback** — derive `ChatGPT-Account-ID` from JWT claims for ChatGPT/Codex requests when credentials lack a stored account id
 - **God file splits** — praxis/lib.rs -> 5 files, stack.rs -> 4 files, agent_commands.rs -> 3 files
 - **Security fixes** — 6 production unwraps replaced, extension test fix
 - **Quality fixes** — 0 clippy warnings, 0 dead code, nextest 6 threads, `just check` tests 3 core crates

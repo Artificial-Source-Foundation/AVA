@@ -6,8 +6,10 @@
  */
 
 import { type Accessor, createEffect, createMemo } from 'solid-js'
+import { getModelFromCatalog } from '../../../services/providers/models-dev-catalog'
 import { useSession } from '../../../stores/session'
 import { useSettings } from '../../../stores/settings'
+import type { LLMProvider } from '../../../types/llm'
 import { cycleReasoningEffort } from './toolbar-buttons'
 
 // ---------------------------------------------------------------------------
@@ -78,17 +80,26 @@ export function useModelState(): ModelState {
   const modelSupportsReasoning = createMemo(() => {
     const modelId = selectedModel()
     const provId = activeProviderId()
+
+    // 1. Check capabilities from the provider model list (settings store)
+    const checkCaps = (caps?: string[]): boolean =>
+      caps?.some((c) => c === 'thinking' || c === 'reasoning') ?? false
+
     if (provId) {
       const provider = settings().providers.find((p) => p.id === provId)
       const model = provider?.models.find((m) => m.id === modelId)
-      if (model)
-        return model.capabilities?.some((c) => c === 'thinking' || c === 'reasoning') ?? false
+      if (model?.capabilities?.length && checkCaps(model.capabilities)) return true
     }
     for (const provider of settings().providers) {
       const model = provider.models.find((m) => m.id === modelId)
-      if (model)
-        return model.capabilities?.some((c) => c === 'thinking' || c === 'reasoning') ?? false
+      if (model?.capabilities?.length && checkCaps(model.capabilities)) return true
     }
+
+    // 2. Check models.dev catalog (authoritative source for capabilities)
+    const catalogModel = getModelFromCatalog(modelId, provId as LLMProvider | undefined)
+    if (catalogModel?.reasoning === true) return true
+
+    // 3. Infer from model name for unknown models
     return /claude|sonnet|opus|gpt-5|o3-|o4-|codex|gemini|deepseek-r/i.test(modelId)
   })
 

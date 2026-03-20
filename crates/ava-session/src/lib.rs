@@ -62,6 +62,11 @@ pub struct BranchLeaf {
 
 pub struct SessionManager {
     db_path: PathBuf,
+    /// Persistent connection reused across all method calls.
+    ///
+    /// Eliminates per-call `Connection::open()` + PRAGMA setup overhead (~0.5-2 ms each).
+    /// The `Mutex` ensures single-writer access since `rusqlite::Connection` is not `Send`.
+    conn: std::sync::Mutex<Connection>,
 }
 
 /// Generate a short descriptive title from a user message.
@@ -111,8 +116,11 @@ fn truncate_at_word_boundary(s: &str, max_len: usize) -> String {
 
 impl SessionManager {
     pub fn new(path: impl AsRef<Path>) -> Result<Self> {
+        let db_path = path.as_ref().to_path_buf();
+        let conn = Self::open_new_conn(&db_path)?;
         let manager = Self {
-            db_path: path.as_ref().to_path_buf(),
+            db_path,
+            conn: std::sync::Mutex::new(conn),
         };
         manager.init_schema()?;
         Ok(manager)
@@ -945,8 +953,9 @@ impl SessionManager {
         Ok(())
     }
 
-    fn open_conn(&self) -> Result<Connection> {
-        let conn = Connection::open(&self.db_path).map_err(db_error)?;
+    /// Open a brand-new SQLite connection with WAL mode and foreign keys enabled.
+    fn open_new_conn(db_path: &Path) -> Result<Connection> {
+        let conn = Connection::open(db_path).map_err(db_error)?;
         conn.execute_batch(
             "PRAGMA journal_mode = WAL;
              PRAGMA foreign_keys = ON;
@@ -954,6 +963,14 @@ impl SessionManager {
         )
         .map_err(db_error)?;
         Ok(conn)
+    }
+
+    /// Acquire the persistent connection.
+    ///
+    /// Callers hold the `MutexGuard` for the duration of their DB operation and then
+    /// drop it, returning the connection to the pool.
+    fn open_conn(&self) -> Result<std::sync::MutexGuard<'_, Connection>> {
+        Ok(self.conn.lock().unwrap_or_else(|e| e.into_inner()))
     }
 }
 

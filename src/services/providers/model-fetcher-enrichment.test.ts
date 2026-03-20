@@ -104,7 +104,7 @@ describe('enrichWithCatalog', () => {
     expect(enriched[0].capabilities).toContain('vision')
   })
 
-  it('does not override existing capabilities', () => {
+  it('merges catalog capabilities into existing ones', () => {
     const fetched: FetchedModel[] = [
       {
         id: 'grok-4-1-fast-reasoning',
@@ -114,7 +114,10 @@ describe('enrichWithCatalog', () => {
       },
     ]
     const enriched = enrichWithCatalog('xai', fetched)
-    expect(enriched[0].capabilities).toEqual(['tools'])
+    // Existing 'tools' is preserved, catalog adds 'reasoning' and 'vision'
+    expect(enriched[0].capabilities).toContain('tools')
+    expect(enriched[0].capabilities).toContain('reasoning')
+    expect(enriched[0].capabilities).toContain('vision')
   })
 
   it('passes through models not found in catalog', () => {

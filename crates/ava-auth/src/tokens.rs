@@ -161,14 +161,24 @@ pub fn decode_jwt_payload(jwt: &str) -> Result<serde_json::Value, AuthError> {
         .map_err(|e| AuthError::Other(format!("Failed to parse JWT payload: {e}")))
 }
 
-/// Extract ChatGPT account ID from an id_token.
+/// Extract ChatGPT account ID from an OpenAI JWT.
 ///
-/// Checks top-level `chatgpt_account_id` first, then `organizations[0].id`.
-pub fn extract_account_id(id_token: &str) -> Option<String> {
-    let payload = decode_jwt_payload(id_token).ok()?;
+/// Checks top-level `chatgpt_account_id`, then the nested
+/// `https://api.openai.com/auth.chatgpt_account_id` claim used by ChatGPT
+/// access tokens, then `organizations[0].id`.
+pub fn extract_account_id(token: &str) -> Option<String> {
+    let payload = decode_jwt_payload(token).ok()?;
 
     // Check top-level field
     if let Some(id) = payload.get("chatgpt_account_id").and_then(|v| v.as_str()) {
+        return Some(id.to_string());
+    }
+
+    if let Some(id) = payload
+        .get("https://api.openai.com/auth")
+        .and_then(|claim| claim.get("chatgpt_account_id"))
+        .and_then(|v| v.as_str())
+    {
         return Some(id.to_string());
     }
 
@@ -211,6 +221,17 @@ mod tests {
         let payload = serde_json::json!({"chatgpt_account_id": "acct-123"});
         let jwt = make_jwt(&payload);
         assert_eq!(extract_account_id(&jwt), Some("acct-123".to_string()));
+    }
+
+    #[test]
+    fn extract_account_id_from_nested_openai_auth_claim() {
+        let payload = serde_json::json!({
+            "https://api.openai.com/auth": {
+                "chatgpt_account_id": "acct-nested"
+            }
+        });
+        let jwt = make_jwt(&payload);
+        assert_eq!(extract_account_id(&jwt), Some("acct-nested".to_string()));
     }
 
     #[test]

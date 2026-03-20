@@ -112,9 +112,9 @@ export const OPENAI_CONTEXT_WINDOWS: Record<string, number> = {
   'gpt-5-pro': 400000,
   'o3-pro': 200000,
   // GPT-4.1 family
-  'gpt-4.1': 1047576,
-  'gpt-4.1-mini': 1047576,
-  'gpt-4.1-nano': 1047576,
+  'gpt-4.1': 1048576,
+  'gpt-4.1-mini': 1048576,
+  'gpt-4.1-nano': 1048576,
   // GPT-4o family (legacy)
   'gpt-4o': 128000,
   'gpt-4o-mini': 128000,

@@ -160,7 +160,16 @@ impl App {
                     }
                 }
             } else {
-                shared_stack.expect("shared stack exists for non-isolated background runs")
+                let Some(stack) = shared_stack else {
+                    let _ = app_tx_clone.send(AppEvent::AgentRunDone {
+                        run_id,
+                        result: Err(
+                            "no shared stack available for non-isolated background run".to_string()
+                        ),
+                    });
+                    return;
+                };
+                stack
             };
 
             let (agent_event_tx, mut agent_event_rx) = mpsc::unbounded_channel();

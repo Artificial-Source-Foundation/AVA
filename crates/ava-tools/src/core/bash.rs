@@ -119,8 +119,8 @@ impl Tool for BashTool {
                 ExecuteOptions {
                     timeout: Some(Duration::from_millis(timeout_ms)),
                     working_dir,
-                    env_vars: Vec::new(),
-                    scrub_env: false,
+                    env_vars: filtered_env(),
+                    scrub_env: true,
                 },
             )
             .await?;
@@ -170,8 +170,8 @@ impl Tool for BashTool {
                 ExecuteOptions {
                     timeout: Some(Duration::from_millis(timeout_ms)),
                     working_dir,
-                    env_vars: Vec::new(),
-                    scrub_env: false,
+                    env_vars: filtered_env(),
+                    scrub_env: true,
                 },
             )
             .await?;

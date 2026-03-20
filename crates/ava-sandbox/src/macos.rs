@@ -1,6 +1,19 @@
-use crate::error::Result;
+use crate::error::{Result, SandboxError};
 use crate::policy::{validate_policy, validate_request};
 use crate::types::{SandboxPlan, SandboxPolicy, SandboxRequest};
+
+/// Escape a path string for safe embedding in an SBPL string literal.
+///
+/// Rejects paths containing characters that are syntactically meaningful in SBPL
+/// (double quotes, backslashes, parentheses) to prevent profile injection.
+fn escape_sbpl_path(path: &str) -> Result<String> {
+    if path.contains('"') || path.contains('\\') || path.contains('(') || path.contains(')') {
+        return Err(SandboxError::InvalidPolicy(format!(
+            "path contains characters not allowed in SBPL literals: {path:?}"
+        )));
+    }
+    Ok(path.to_string())
+}
 
 pub fn build_sandbox_exec_plan(
     request: &SandboxRequest,
@@ -23,11 +36,13 @@ pub fn build_sandbox_exec_plan(
         .iter()
         .chain(policy.writable_paths.iter())
     {
-        profile_parts.push(format!("(allow file-read* (subpath \"{path}\"))"));
+        let safe = escape_sbpl_path(path)?;
+        profile_parts.push(format!("(allow file-read* (subpath \"{safe}\"))"));
     }
 
     for path in &policy.writable_paths {
-        profile_parts.push(format!("(allow file-write* (subpath \"{path}\"))"));
+        let safe = escape_sbpl_path(path)?;
+        profile_parts.push(format!("(allow file-write* (subpath \"{safe}\"))"));
     }
 
     if policy.allow_network {
@@ -35,8 +50,9 @@ pub fn build_sandbox_exec_plan(
     }
 
     if let Some(cwd) = &request.working_dir {
-        profile_parts.push(format!("(allow file-read* (subpath \"{cwd}\"))"));
-        profile_parts.push(format!("(allow file-write* (subpath \"{cwd}\"))"));
+        let safe = escape_sbpl_path(cwd)?;
+        profile_parts.push(format!("(allow file-read* (subpath \"{safe}\"))"));
+        profile_parts.push(format!("(allow file-write* (subpath \"{safe}\"))"));
     }
 
     let profile = profile_parts.join(" ");
@@ -75,6 +91,24 @@ mod tests {
         assert_eq!(plan.program, "sandbox-exec");
         assert_eq!(plan.args[0], "-p");
         assert!(plan.args[1].contains("deny default"));
+    }
+
+    #[test]
+    fn sbpl_path_injection_is_rejected() {
+        let malicious_cwd = "/tmp/evil\")(allow file-read* (subpath \"/etc\")".to_string();
+        let request = SandboxRequest {
+            command: "echo".to_string(),
+            args: vec![],
+            working_dir: Some(malicious_cwd),
+            env: vec![],
+        };
+        let result = build_sandbox_exec_plan(&request, &SandboxPolicy::default());
+        assert!(result.is_err(), "malicious path should be rejected");
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("invalid policy"),
+            "error should indicate invalid policy: {err}"
+        );
     }
 
     #[test]

@@ -408,11 +408,6 @@ pub fn parse_openai_stream_chunk(payload: &Value) -> Option<StreamChunk> {
     }
 
     // Reasoning/thinking content (Chat Completions uses `reasoning_content` in delta)
-    // DEBUG: temporarily log reasoning_content presence for diagnostics
-    eprintln!(
-        "[REASONING] delta.reasoning_content = {:?}",
-        delta.get("reasoning_content")
-    );
     if let Some(reasoning) = delta
         .get("reasoning_content")
         .or_else(|| delta.get("reasoning"))

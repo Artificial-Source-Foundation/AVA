@@ -1,0 +1,61 @@
+{
+  "domain": "rust-fixes",
+  "fixes_applied": [
+    {
+      "file": "crates/ava-llm/src/providers/common/parsing.rs",
+      "original_issue": "Debug eprintln! fires on every OpenAI streaming chunk in production (lines 411-415), polluting stderr with '[REASONING] delta.reasoning_content = ...' on every chunk",
+      "fix_applied": "Removed the entire eprintln! debug block (5 lines including comment). The adjacent comment '// DEBUG: temporarily log reasoning_content presence for diagnostics' was also removed. The reasoning content parsing logic below it is unchanged.",
+      "status": "fixed"
+    },
+    {
+      "file": "crates/ava-praxis/src/review.rs",
+      "original_issue": "Three debug eprint!/eprintln! calls stream raw review agent output directly to stderr: eprint!(\"{t}\") on every token, eprintln!(\"[tool: {}]\") on every tool call, and a trailing eprintln!()",
+      "fix_applied": "Removed eprint!(\"{t}\") from the Token arm, removed eprintln!(\"[tool: {}]\", tc.name) from the ToolCall arm (kept the existing debug!() tracing call), and removed the trailing eprintln!(). Output tokens are still accumulated in the output String and returned.",
+      "status": "fixed"
+    },
+    {
+      "file": "crates/ava-tui/src/app/background.rs",
+      "original_issue": ".expect() panic inside a spawned tokio task at line 163 — panics the async task instead of returning an error through the event channel when shared_stack is None for non-isolated runs",
+      "fix_applied": "Replaced .expect() with a let-else pattern: if shared_stack is None, sends AppEvent::AgentRunDone { result: Err(...) } to the app channel and returns early — matching the error-path pattern used for isolated runs (lines 154-160).",
+      "status": "fixed"
+    },
+    {
+      "file": "crates/ava-sandbox/src/macos.rs",
+      "original_issue": "sandbox-exec SBPL profile strings built by directly interpolating path strings without escaping. A path containing '\"' or '(' can break out of SBPL string literals and inject arbitrary sandbox rules (CWE-94).",
+      "fix_applied": "Added escape_sbpl_path() function that rejects paths containing '\"', '\\\\', '(', or ')' with a SandboxError::InvalidPolicy error. Applied to all four path-embedding sites (read_only_paths, writable_paths, working_dir read, working_dir write). Added test sbpl_path_injection_is_rejected() that verifies a malicious path is rejected.",
+      "status": "fixed"
+    },
+    {
+      "file": "crates/ava-tools/src/core/bash.rs",
+      "original_issue": "Non-sandboxed bash execution passes scrub_env: false and env_vars: Vec::new(), causing all API keys and secrets from the parent environment to be inherited by every LLM-spawned shell command (CWE-214)",
+      "fix_applied": "Changed both execute_with_options and execute_streaming_with_options call sites (lines ~115 and ~166) to use env_vars: filtered_env() and scrub_env: true. This applies the same allowlist (PATH, HOME, USER, SHELL, LANG, LC_ALL, LC_CTYPE, TERM, CARGO_HOME, RUSTUP_HOME) that was already used for sandboxed install-class commands.",
+      "status": "fixed"
+    },
+    {
+      "file": "crates/ava-agent/src/session_logger.rs",
+      "original_issue": "Blocking std::fs::OpenOptions::new().open() called inside async agent loop on every agent turn in log_turn(), blocking the Tokio executor thread on file I/O",
+      "fix_applied": "Removed the top-level 'use std::io::Write;' import. Wrapped the file open + writeln in tokio::task::spawn_blocking, using a local 'use std::io::Write as _' inside the closure. The log_path is cloned before the closure to satisfy the 'move' capture. Fire-and-forget (JoinHandle dropped) since logging is best-effort.",
+      "status": "fixed"
+    },
+    {
+      "file": "crates/ava-agent/src/streaming_diff.rs",
+      "original_issue": "std::fs::read_to_string() called synchronously in snapshot_before_edit() and record_edit_complete(), both intended for async contexts, blocking the Tokio executor thread",
+      "fix_applied": "Added async counterpart methods snapshot_before_edit_async() and record_edit_complete_async() that offload the file I/O to tokio::task::spawn_blocking. Added doc comments to the sync versions marking them as blocking. The sync versions are preserved unchanged since they are public API and callers may legitimately use them from spawn_blocking contexts.",
+      "status": "fixed"
+    },
+    {
+      "file": "crates/ava-config/src/trust.rs",
+      "original_issue": "is_project_trusted() reads and parses a JSON file from disk on every invocation with no caching. Called on every 'read' tool result in the hot agent loop — 100 calls = 100 synchronous disk reads + 100 JSON parses of the same file.",
+      "fix_applied": "Added a process-scoped static TRUST_CACHE: RwLock<Option<HashSet<PathBuf>>>. is_project_trusted() checks the cache with a read lock (fast path), and on cache miss loads from disk via load_trusted_set() then populates the cache. trust_project() invalidates the cache by setting it to None after writing the file.",
+      "status": "fixed"
+    },
+    {
+      "file": "crates/ava-session/src/lib.rs",
+      "original_issue": "open_conn() creates a new rusqlite::Connection on every method call with PRAGMA setup (~0.5-2ms each). 17+ calls per save creates contention and latency.",
+      "fix_applied": "Added a 'conn: std::sync::Mutex<Connection>' field to SessionManager. Added open_new_conn(db_path: &Path) as a static constructor for the raw connection. Changed open_conn() to return a MutexGuard<Connection> instead of a fresh Connection — all 18 call sites continue to work transparently via Deref. SessionManager::new() opens the connection once via open_new_conn() and stores it.",
+      "status": "fixed"
+    }
+  ],
+  "cargo_check_pass": true,
+  "summary": "Fixed all 7 CRITICAL issues from the priority list: 2 debug eprintln!/eprint! blocks removed from production streaming code (parsing.rs, review.rs); 1 .expect() panic converted to graceful error channel send (background.rs); SBPL path injection patched with rejection function + test (macos.rs); env scrubbing applied to non-sandboxed bash execution fixing credential leakage (bash.rs); blocking file I/O in session_logger moved to spawn_blocking (session_logger.rs); async counterparts added for streaming_diff blocking methods (streaming_diff.rs); trust state cached in-process with RwLock to eliminate per-tool-call disk reads (trust.rs); session SQLite connection pooled via persistent Mutex<Connection> to eliminate per-call connection open overhead (lib.rs). All changes compile cleanly with 'cargo check --workspace'."
+}

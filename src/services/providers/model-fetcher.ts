@@ -51,10 +51,11 @@ export async function fetchModels(
 ): Promise<FetchedModel[]> {
   switch (provider) {
     case 'openai':
-      if (!options.apiKey) {
-        throw new Error('OpenAI API key required to fetch models')
+      if (options.apiKey) {
+        return enrichWithCatalog('openai', await fetchOpenAIModels(options.apiKey))
       }
-      return enrichWithCatalog('openai', await fetchOpenAIModels(options.apiKey))
+      // OAuth users have no API key — use models.dev catalog as fallback
+      return catalogModelsToFetched(getModelsDevModels('openai'))
 
     case 'copilot':
       if (options.apiKey) {
@@ -83,12 +84,10 @@ export async function fetchModels(
           logWarn('models', 'Could not fetch Google models, using defaults')
         }
       }
-      return [
-        { id: 'gemini-3-pro-preview', name: 'Gemini 3 Pro', contextWindow: 2000000 },
-        { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', contextWindow: 1000000 },
-        { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', contextWindow: 1000000 },
-        { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash', contextWindow: 1000000 },
-      ]
+      {
+        const catalogFallback = catalogModelsToFetched(getModelsDevModels('google'))
+        return catalogFallback.length > 0 ? catalogFallback : []
+      }
 
     case 'xai':
     case 'mistral':
@@ -190,15 +189,18 @@ export function enrichWithCatalog(provider: LLMProvider, fetched: FetchedModel[]
       }
     }
 
-    // Fill capabilities if missing
-    if (!enriched.capabilities?.length) {
-      const caps: string[] = []
-      if (catalogEntry.tool_call) caps.push('tools')
-      if (catalogEntry.reasoning) caps.push('reasoning')
-      if (catalogEntry.attachment || catalogEntry.modalities?.input?.includes('image')) {
-        caps.push('vision')
+    // Merge capabilities from catalog (add missing ones, don't remove existing)
+    {
+      const existing = new Set(enriched.capabilities ?? [])
+      if (catalogEntry.tool_call && !existing.has('tools')) existing.add('tools')
+      if (catalogEntry.reasoning && !existing.has('reasoning')) existing.add('reasoning')
+      if (
+        (catalogEntry.attachment || catalogEntry.modalities?.input?.includes('image')) &&
+        !existing.has('vision')
+      ) {
+        existing.add('vision')
       }
-      if (caps.length > 0) enriched.capabilities = caps
+      enriched.capabilities = [...existing]
     }
 
     return enriched

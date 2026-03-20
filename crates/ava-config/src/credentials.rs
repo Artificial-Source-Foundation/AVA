@@ -237,15 +237,17 @@ impl CredentialStore {
         }
 
         let mut refreshed = current;
-        refreshed.oauth_token = Some(refreshed_tokens.access_token);
+        refreshed.oauth_token = Some(refreshed_tokens.access_token.clone());
         refreshed.oauth_refresh_token = refreshed_tokens
             .refresh_token
             .or(refreshed.oauth_refresh_token.clone());
         refreshed.oauth_expires_at = refreshed_tokens.expires_at;
-        if let Some(id_token) = refreshed_tokens.id_token.as_deref() {
-            refreshed.oauth_account_id = ava_auth::tokens::extract_account_id(id_token)
-                .or(refreshed.oauth_account_id.clone());
-        }
+        refreshed.oauth_account_id = refreshed_tokens
+            .id_token
+            .as_deref()
+            .and_then(ava_auth::tokens::extract_account_id)
+            .or_else(|| ava_auth::tokens::extract_account_id(&refreshed_tokens.access_token))
+            .or(refreshed.oauth_account_id.clone());
 
         self.providers
             .insert(provider.to_string(), refreshed.clone());
@@ -672,6 +674,53 @@ mod tests {
         let persisted = CredentialStore::load(&path).await.unwrap();
         let persisted_openai = persisted.get("openai").unwrap();
         assert_eq!(persisted_openai.oauth_token.as_deref(), Some("fresh-token"));
+    }
+
+    #[tokio::test]
+    async fn credentials_refresh_extracts_account_id_from_access_token() {
+        let mut store = CredentialStore::default();
+        store.set(
+            "openai",
+            ProviderCredential {
+                api_key: String::new(),
+                base_url: None,
+                org_id: None,
+                oauth_token: Some("expired-token".to_string()),
+                oauth_refresh_token: Some("refresh-token".to_string()),
+                oauth_expires_at: Some(1),
+                oauth_account_id: None,
+                litellm_compatible: None,
+            },
+        );
+
+        let resolved = store
+            .resolve_provider_credentials_with_refresher(
+                "openai",
+                None,
+                |_config, _refresh_token| {
+                    Box::pin(async move {
+                        Ok(ava_auth::tokens::OAuthTokens {
+                            access_token: {
+                                let header =
+                                    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(b"{}");
+                                let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD
+                                    .encode(br#"{"https://api.openai.com/auth":{"chatgpt_account_id":"acct-access"}}"#);
+                                let sig =
+                                    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(b"sig");
+                                format!("{header}.{payload}.{sig}")
+                            },
+                            refresh_token: Some("fresh-refresh".to_string()),
+                            expires_at: Some(999_999_999),
+                            id_token: None,
+                        })
+                    })
+                },
+            )
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(resolved.oauth_account_id.as_deref(), Some("acct-access"));
     }
 
     #[tokio::test]

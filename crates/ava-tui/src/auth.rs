@@ -33,18 +33,32 @@ async fn auth_login(provider_id: &str) -> Result<()> {
 
     println!("Signing in to {}...", info.name);
 
-    match info.primary_flow() {
+    // For providers with multiple flows, prefer PKCE (browser OAuth) over API key
+    // when invoked via `auth login` (the user explicitly wants to log in, not paste a key).
+    let flow = if info.auth_flows.contains(&AuthFlow::Pkce) {
+        AuthFlow::Pkce
+    } else {
+        info.primary_flow()
+    };
+
+    match flow {
         AuthFlow::Pkce => {
-            let result = ava_auth::authenticate(provider_id).await;
+            let result = ava_auth::authenticate_with_flow(provider_id, AuthFlow::Pkce).await;
             match result {
                 Ok(ava_auth::AuthResult::OAuth(tokens)) => {
-                    // Store OAuth tokens
+                    // Store OAuth tokens for ChatGPT subscription access.
                     let mut store = CredentialStore::load_default().await.unwrap_or_default();
                     let account_id = tokens
                         .id_token
                         .as_deref()
-                        .and_then(ava_auth::tokens::extract_account_id);
+                        .and_then(ava_auth::tokens::extract_account_id)
+                        .or_else(|| {
+                            ava_auth::tokens::extract_account_id(tokens.access_token.as_str())
+                        });
 
+                    // OAuth tokens are always stored in oauth_token.
+                    // The provider creation path detects OAuth-only credentials
+                    // and routes to the ChatGPT backend API accordingly.
                     store.set(
                         provider_id,
                         ProviderCredential {
@@ -93,6 +107,13 @@ async fn auth_login(provider_id: &str) -> Result<()> {
             {
                 Some(tokens) => {
                     let mut store = CredentialStore::load_default().await.unwrap_or_default();
+                    let account_id = tokens
+                        .id_token
+                        .as_deref()
+                        .and_then(ava_auth::tokens::extract_account_id)
+                        .or_else(|| {
+                            ava_auth::tokens::extract_account_id(tokens.access_token.as_str())
+                        });
                     store.set(
                         provider_id,
                         ProviderCredential {
@@ -102,7 +123,7 @@ async fn auth_login(provider_id: &str) -> Result<()> {
                             oauth_token: Some(tokens.access_token),
                             oauth_refresh_token: tokens.refresh_token,
                             oauth_expires_at: tokens.expires_at,
-                            oauth_account_id: None,
+                            oauth_account_id: account_id,
                             litellm_compatible: None,
                         },
                     );

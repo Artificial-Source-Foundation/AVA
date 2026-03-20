@@ -22,14 +22,14 @@ export const alibaba: LLMProviderConfig = {
       name: 'Qwen3.5 Plus',
       contextWindow: 1000000,
       pricing: { input: 0.4, output: 1.2 },
-      capabilities: ['tools', 'thinking', 'vision'],
+      capabilities: ['tools', 'reasoning', 'vision'],
     },
     {
       id: 'qwen3-max-2026-01-23',
       name: 'Qwen3 Max',
       contextWindow: 1000000,
       pricing: { input: 1.6, output: 6.4 },
-      capabilities: ['tools', 'thinking'],
+      capabilities: ['tools', 'reasoning'],
     },
     {
       id: 'qwen3-coder-next',
@@ -51,27 +51,27 @@ export const alibaba: LLMProviderConfig = {
       id: 'glm-5',
       name: 'GLM-5',
       contextWindow: 128000,
-      capabilities: ['tools', 'thinking'],
+      capabilities: ['tools', 'reasoning'],
     },
     {
       id: 'glm-4.7',
       name: 'GLM-4.7',
       contextWindow: 128000,
-      capabilities: ['tools', 'thinking'],
+      capabilities: ['tools', 'reasoning'],
     },
     // ── Kimi ──
     {
       id: 'kimi-k2.5',
       name: 'Kimi K2.5',
       contextWindow: 131072,
-      capabilities: ['tools', 'thinking', 'vision'],
+      capabilities: ['tools', 'reasoning', 'vision'],
     },
     // ── MiniMax ──
     {
       id: 'MiniMax-M2.5',
       name: 'MiniMax M2.5',
       contextWindow: 1000000,
-      capabilities: ['tools', 'thinking'],
+      capabilities: ['tools', 'reasoning'],
     },
   ],
 }

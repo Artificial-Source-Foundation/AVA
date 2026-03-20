@@ -33,13 +33,20 @@ static OPENAI_CONFIG: OAuthConfig = OAuthConfig {
     client_id: "app_EMoamEEZ73f0CkXaXp7hrann",
     authorization_url: "https://auth.openai.com/oauth/authorize",
     token_url: "https://auth.openai.com/oauth/token",
-    scopes: &["openid", "profile", "email", "offline_access"],
+    scopes: &[
+        "openid",
+        "profile",
+        "email",
+        "offline_access",
+        "api.connectors.read",
+        "api.connectors.invoke",
+    ],
     redirect_port: 1455,
     redirect_path: "/auth/callback",
     extra_params: &[
         ("id_token_add_organizations", "true"),
         ("codex_cli_simplified_flow", "true"),
-        ("originator", "ava_cli"),
+        ("originator", "codex_cli_rs"),
     ],
     flow: AuthFlow::Pkce,
 };
@@ -134,6 +141,6 @@ mod tests {
         assert!(url.contains("code_challenge_method=S256"));
         assert!(url.contains(&format!("state={}", pkce.state)));
         assert!(url.contains(&format!("code_challenge={}", pkce.challenge)));
-        assert!(url.contains("originator=ava_cli"));
+        assert!(url.contains("originator=codex_cli_rs"));
     }
 }

@@ -65,9 +65,34 @@ impl StreamingDiffTracker {
     /// Call this before executing a tool that modifies `path`.
     /// If the file does not exist yet, stores an empty snapshot
     /// so the diff shows all lines as additions.
+    ///
+    /// # Note
+    /// This performs blocking I/O. Call from a `spawn_blocking` context or use
+    /// [`snapshot_before_edit_async`] when inside an async task.
     pub fn snapshot_before_edit(&mut self, path: &Path) -> DiffEvent {
         let canonical = normalize_path(path);
         let content = std::fs::read_to_string(path).unwrap_or_default();
+        self.pending_edits.insert(
+            canonical.clone(),
+            PendingEdit {
+                file_path: canonical.clone(),
+                original_content: content,
+                streamed_content: String::new(),
+                complete: false,
+            },
+        );
+        DiffEvent::EditStarted { file: canonical }
+    }
+
+    /// Async version of [`snapshot_before_edit`]: offloads file I/O to a blocking thread.
+    pub async fn snapshot_before_edit_async(&mut self, path: &Path) -> DiffEvent {
+        let path_owned = path.to_path_buf();
+        let content = tokio::task::spawn_blocking(move || {
+            std::fs::read_to_string(&path_owned).unwrap_or_default()
+        })
+        .await
+        .unwrap_or_default();
+        let canonical = normalize_path(path);
         self.pending_edits.insert(
             canonical.clone(),
             PendingEdit {
@@ -85,6 +110,10 @@ impl StreamingDiffTracker {
     /// Reads the file's current content from disk and diffs it against
     /// the pre-edit snapshot. Returns `None` if there was no snapshot
     /// for this file or if the content did not change.
+    ///
+    /// # Note
+    /// This performs blocking I/O. Call from a `spawn_blocking` context or use
+    /// [`record_edit_complete_async`] when inside an async task.
     pub fn record_edit_complete(&mut self, path: &Path) -> Option<DiffEvent> {
         let canonical = normalize_path(path);
         let pending = self.pending_edits.get_mut(&canonical)?;
@@ -110,11 +139,46 @@ impl StreamingDiffTracker {
         })
     }
 
+    /// Async version of [`record_edit_complete`]: offloads file I/O to a blocking thread.
+    pub async fn record_edit_complete_async(&mut self, path: &Path) -> Option<DiffEvent> {
+        let canonical = normalize_path(path);
+        let pending = self.pending_edits.get_mut(&canonical)?;
+
+        let path_owned = path.to_path_buf();
+        let after = tokio::task::spawn_blocking(move || {
+            std::fs::read_to_string(&path_owned).unwrap_or_default()
+        })
+        .await
+        .unwrap_or_default();
+
+        if pending.original_content == after {
+            self.pending_edits.remove(&canonical);
+            return None;
+        }
+
+        pending.streamed_content = after.clone();
+        pending.complete = true;
+
+        let (diff_text, additions, deletions) =
+            compute_unified_diff(&pending.original_content, &after, &canonical);
+
+        Some(DiffEvent::EditComplete {
+            file: canonical,
+            diff_text,
+            additions,
+            deletions,
+        })
+    }
+
     /// Compute a preview diff for a file that is still being edited.
     ///
     /// Reads the file's current content from disk and diffs it against
     /// the snapshot. Returns `None` if no snapshot exists or content
     /// has not changed.
+    ///
+    /// # Note
+    /// This performs blocking I/O. Call from a `spawn_blocking` context when inside
+    /// an async task.
     pub fn preview(&self, path: &Path) -> Option<DiffEvent> {
         let canonical = normalize_path(path);
         let pending = self.pending_edits.get(&canonical)?;

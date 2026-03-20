@@ -1,23 +1,20 @@
 /**
  * LLM Bridge for Tauri
- * Bridges local model resolution with @ava/core-v2 LLM client
+ * Model-to-provider resolution for the frontend.
  */
 
+import { defaultProviders } from '../../config/defaults/provider-defaults'
+import { settings } from '../../stores/settings/settings-signal'
 import type { LLMProvider } from '../../types/llm'
-
-/** Minimal LLMClient type (replaces @ava/core-v2/llm import) */
-export interface LLMClient {
-  chat(messages: unknown[], options?: unknown): Promise<unknown>
-  [key: string]: unknown
-}
 
 // ============================================================================
 // Model to Provider Resolution
 // ============================================================================
 
 /**
- * Find the native provider for a model ID using prefix matching.
- * Covers all 14 providers' model naming patterns.
+ * Find the native provider for a model ID.
+ * First checks provider model lists from settings (or defaults),
+ * then falls back to prefix matching for unrecognized models.
  */
 export function findProviderForModel(model: string): LLMProvider | null {
   // OpenRouter slash format: "anthropic/claude-sonnet-4.6"
@@ -32,6 +29,15 @@ export function findProviderForModel(model: string): LLMProvider | null {
     return 'openrouter'
   }
 
+  // ── Look up in provider model lists (settings first, then defaults) ──
+  const providers = settings()?.providers ?? defaultProviders
+  for (const provider of providers) {
+    if (provider.models.some((m) => m.id === model)) {
+      return provider.id as LLMProvider
+    }
+  }
+
+  // ── Fallback: prefix matching for models not in any provider list ──
   if (model.startsWith('claude')) return 'anthropic'
   if (
     model.startsWith('gpt') ||
@@ -49,11 +55,8 @@ export function findProviderForModel(model: string): LLMProvider | null {
     model.endsWith('stral-latest')
   )
     return 'mistral'
-  if (model.startsWith('llama')) return 'groq'
   if (model.startsWith('deepseek')) return 'deepseek'
   if (model.startsWith('command')) return 'cohere'
-  if (model.startsWith('glm')) return 'glm'
-  if (model.startsWith('moonshot') || model.startsWith('kimi')) return 'kimi'
   if (model.includes(':')) return 'ollama' // ollama uses "model:tag" format
 
   return null
@@ -66,25 +69,6 @@ export function resolveProvider(model: string): LLMProvider {
   const native = findProviderForModel(model)
   // For now, always use the native provider or default to openrouter
   return native || 'openrouter'
-}
-
-// ============================================================================
-// Client Factory
-// ============================================================================
-
-/**
- * Create LLM client for a model.
- * LLM client creation now happens in Rust via Tauri IPC.
- * This stub returns a placeholder — callers should use invoke() instead.
- */
-export function createClient(_model: string): LLMClient {
-  return {
-    async chat() {
-      throw new Error(
-        'LLM client creation is now handled by the Rust backend. Use Tauri invoke() instead.'
-      )
-    },
-  }
 }
 
 /**

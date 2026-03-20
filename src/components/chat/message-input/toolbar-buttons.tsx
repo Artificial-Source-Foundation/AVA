@@ -46,7 +46,6 @@ const PROVIDER_EFFORTS: Record<string, ReasoningEffort[]> = {
   openrouter: ['low', 'medium', 'high'],
   google: ['low', 'medium', 'high'],
   copilot: ['low', 'medium', 'high', 'xhigh'],
-  azure: ['low', 'medium', 'high'],
   groq: ['none', 'low', 'medium', 'high'],
   xai: ['low', 'medium', 'high'],
   deepseek: ['low', 'medium', 'high'],
@@ -54,7 +53,6 @@ const PROVIDER_EFFORTS: Record<string, ReasoningEffort[]> = {
   mistral: ['low', 'medium', 'high'],
   cohere: ['low', 'medium', 'high'],
   ollama: ['low', 'medium', 'high'],
-  litellm: ['low', 'medium', 'high'],
   glm: ['low', 'medium', 'high'],
   kimi: ['low', 'medium', 'high'],
 }
@@ -76,33 +74,31 @@ export const ReasoningDropdown: Component<ReasoningDropdownProps> = (props) => {
   const isActive = () => props.effort() !== 'off'
 
   return (
-    <Show when={props.available()}>
-      <button
-        type="button"
-        onClick={props.onCycle}
-        class={`
-          flex items-center gap-1 px-1.5 py-1
-          text-[11px] font-medium rounded-[var(--radius-md)]
-          transition-all duration-200
-          ${
-            isActive()
-              ? 'text-[var(--accent)] bg-[var(--accent-subtle)]'
-              : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] bg-transparent hover:bg-[var(--surface-raised)]'
-          }
-        `}
-        title={isActive() ? `Reasoning: ${EFFORT_LABELS[props.effort()]}` : 'Enable reasoning'}
-      >
-        <Brain
-          class="w-3.5 h-3.5 transition-all duration-200"
-          style={{
-            filter: isActive() ? 'drop-shadow(0 0 4px var(--accent))' : 'none',
-          }}
-        />
-        <Show when={isActive()}>
-          <span>{EFFORT_LABELS[props.effort()]}</span>
-        </Show>
-      </button>
-    </Show>
+    <button
+      type="button"
+      onClick={props.onCycle}
+      class={`
+        flex items-center gap-1 px-1.5 py-1
+        text-[11px] font-medium rounded-[var(--radius-md)]
+        transition-all duration-200
+        ${
+          isActive()
+            ? 'text-[var(--accent)] bg-[var(--accent-subtle)]'
+            : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] bg-transparent hover:bg-[var(--surface-raised)]'
+        }
+      `}
+      title={isActive() ? `Reasoning: ${EFFORT_LABELS[props.effort()]}` : 'Enable reasoning'}
+    >
+      <Brain
+        class="w-3.5 h-3.5 transition-all duration-200"
+        style={{
+          filter: isActive() ? 'drop-shadow(0 0 4px var(--accent))' : 'none',
+        }}
+      />
+      <Show when={isActive()}>
+        <span>{EFFORT_LABELS[props.effort()]}</span>
+      </Show>
+    </button>
   )
 }
 
@@ -147,43 +143,6 @@ export const DelegationToggle: Component<DelegationToggleProps> = (props) => (
     <Users class="w-3.5 h-3.5" />
     <span>{props.enabled() ? 'Team' : 'Solo'}</span>
   </button>
-)
-
-// ---------------------------------------------------------------------------
-// ThinkingToggle (kept for backward compat)
-// ---------------------------------------------------------------------------
-
-export interface ThinkingToggleProps {
-  enabled: Accessor<boolean>
-  onToggle: () => void
-  available: Accessor<boolean>
-}
-
-export const ThinkingToggle: Component<ThinkingToggleProps> = (props) => (
-  <Show when={props.available()}>
-    <button
-      type="button"
-      onClick={props.onToggle}
-      class={`
-        flex items-center gap-1 px-1.5 py-1
-        text-[11px] font-medium rounded-[var(--radius-md)]
-        transition-all duration-200
-        ${
-          props.enabled()
-            ? 'text-[var(--accent)] bg-[var(--accent-subtle)]'
-            : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] bg-transparent hover:bg-[var(--surface-raised)]'
-        }
-      `}
-      title={props.enabled() ? 'Thinking mode on' : 'Enable thinking mode'}
-    >
-      <Brain
-        class="w-3.5 h-3.5 transition-all duration-200"
-        style={{
-          filter: props.enabled() ? 'drop-shadow(0 0 4px var(--accent))' : 'none',
-        }}
-      />
-    </button>
-  </Show>
 )
 
 // ---------------------------------------------------------------------------

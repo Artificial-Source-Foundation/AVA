@@ -294,20 +294,19 @@ impl HttpTransport {
 
 #[async_trait]
 impl MCPTransport for HttpTransport {
-    async fn send(&mut self, message: &JsonRpcMessage) -> Result<()> {
-        // For HTTP transport we combine send+receive in receive().
-        // Store the outgoing message for the next receive() call.
-        // In a real implementation we'd use reqwest. For now we store
-        // the serialized message and send it on receive().
-        // NOTE: This is a simplified HTTP transport. A full implementation
-        // would use SSE for server-to-client messages.
-        let _ = message;
-        Ok(())
+    async fn send(&mut self, _message: &JsonRpcMessage) -> Result<()> {
+        // HTTP/SSE transport is not yet implemented. Fail loudly so callers
+        // discover the gap immediately rather than silently losing messages.
+        // A full implementation would POST to `self.base_url` and use SSE for
+        // server-to-client messages. Tracked in the backlog.
+        Err(AvaError::ToolError(
+            "HTTP MCP transport is not yet implemented — use stdio transport instead".to_string(),
+        ))
     }
 
     async fn receive(&mut self) -> Result<JsonRpcMessage> {
         Err(AvaError::ToolError(
-            "HTTP transport not yet fully implemented — use stdio transport".to_string(),
+            "HTTP MCP transport is not yet implemented — use stdio transport instead".to_string(),
         ))
     }
 
@@ -506,5 +505,33 @@ mod tests {
         assert_eq!(echo.method.as_deref(), Some("ping"));
 
         transport.close().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn http_transport_send_fails_loudly() {
+        // HttpTransport must not silently discard messages — it must return an
+        // error so callers discover the gap immediately rather than losing data.
+        let mut transport = HttpTransport::new("http://localhost:9999");
+        let msg = JsonRpcMessage::request(1, "test", serde_json::json!({}));
+        let result = transport.send(&msg).await;
+        assert!(
+            result.is_err(),
+            "HttpTransport::send must return Err — silent data loss is not acceptable"
+        );
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("not yet implemented") || err_msg.contains("stdio"),
+            "Error should guide caller to stdio transport: {err_msg}"
+        );
+    }
+
+    #[tokio::test]
+    async fn http_transport_receive_fails_loudly() {
+        let mut transport = HttpTransport::new("http://localhost:9999");
+        let result = transport.receive().await;
+        assert!(
+            result.is_err(),
+            "HttpTransport::receive must return Err — it is not implemented"
+        );
     }
 }

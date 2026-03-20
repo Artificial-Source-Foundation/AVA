@@ -28,7 +28,7 @@ pub use openrouter::OpenRouterProvider;
 
 /// Return the default base URL for a known provider name.
 pub fn base_url_for_provider(provider_name: &str) -> Option<&'static str> {
-    match provider_name {
+    match provider_name.to_ascii_lowercase().as_str() {
         "anthropic" => Some("https://api.anthropic.com"),
         "openai" => Some("https://api.openai.com"),
         "chatgpt" => Some("https://chatgpt.com/backend-api/codex"),
@@ -46,6 +46,15 @@ pub fn base_url_for_provider(provider_name: &str) -> Option<&'static str> {
         "minimax-cn-coding-plan" => Some("https://api.minimaxi.com/anthropic/v1"),
         _ => None,
     }
+}
+
+fn openai_oauth_account_id(entry: &ava_config::ProviderCredential) -> Option<String> {
+    entry.oauth_account_id.clone().or_else(|| {
+        entry
+            .oauth_token
+            .as_deref()
+            .and_then(ava_auth::tokens::extract_account_id)
+    })
 }
 
 /// Create a provider by name from credentials, using the shared connection pool.
@@ -90,9 +99,19 @@ pub fn create_provider(
         )));
     }
 
-    let credential = credentials.get(provider_name);
+    // Normalize provider name to lowercase for matching. This handles cases where
+    // the UI or config sends "ChatGPT" instead of "chatgpt", "OpenAI" instead of
+    // "openai", etc. Credential lookup tries original name first, then normalized.
+    let normalized = provider_name.to_ascii_lowercase();
+    let credential = credentials.get(provider_name).or_else(|| {
+        if normalized != provider_name {
+            credentials.get(&normalized)
+        } else {
+            None
+        }
+    });
 
-    match provider_name {
+    match normalized.as_str() {
         "anthropic" => {
             let entry = credential
                 .ok_or_else(|| AvaError::MissingApiKey {
@@ -111,16 +130,13 @@ pub fn create_provider(
                     provider: "openai".to_string(),
                 })?;
 
-            // Detect OAuth-only credentials (ChatGPT Plus/Pro subscriptions):
+            // ChatGPT OAuth uses chatgpt.com/backend-api/codex with JWT access_token.
             // When the user has an OAuth token but NO API key, route to the
-            // ChatGPT Responses API at chatgpt.com/backend-api/codex.
+            // ChatGPT Responses API instead of api.openai.com.
             let has_api_key = !entry.api_key.trim().is_empty();
             let has_oauth = entry.is_oauth_configured() && !entry.is_oauth_expired();
 
             if !has_api_key && has_oauth {
-                // OAuth token (ChatGPT Plus/Pro) — use the Responses API at api.openai.com
-                // The OAuth JWT token works with the standard OpenAI API endpoint.
-                // OpenCode, Pi, and Codex CLI all use api.openai.com/v1/responses with OAuth.
                 let oauth_token = entry
                     .oauth_token
                     .as_deref()
@@ -131,17 +147,33 @@ pub fn create_provider(
                 let base_url = entry
                     .base_url
                     .clone()
-                    .unwrap_or_else(|| "https://api.openai.com".to_string());
+                    .unwrap_or_else(|| {
+                        "https://chatgpt.com/backend-api/codex".to_string()
+                    });
+                let account_id = openai_oauth_account_id(&entry);
                 Ok(Box::new(
                     OpenAIProvider::with_base_url(pool, oauth_token, model, base_url)
-                        .with_responses_api(true),
+                        .with_responses_api(true)
+                        .with_subscription(true)
+                        .with_chatgpt_account_id(account_id),
                 ))
             } else {
                 // Standard API key — use Chat Completions API
                 let api_key = entry
                     .effective_api_key()
-                    .ok_or_else(|| AvaError::MissingApiKey {
-                        provider: "openai".to_string(),
+                    .ok_or_else(|| {
+                        // Provide a more specific error when OAuth is configured but expired
+                        if entry.is_oauth_configured() && entry.is_oauth_expired() {
+                            AvaError::ConfigError(
+                                "OpenAI OAuth token has expired. Reconnect with /connect openai \
+                                 or set an API key in ~/.ava/credentials.json"
+                                    .to_string(),
+                            )
+                        } else {
+                            AvaError::MissingApiKey {
+                                provider: "openai".to_string(),
+                            }
+                        }
                     })?
                     .to_string();
                 let base_url = entry
@@ -253,9 +285,12 @@ pub fn create_provider(
                 .base_url
                 .clone()
                 .unwrap_or_else(|| "https://chatgpt.com/backend-api/codex".to_string());
+            let account_id = openai_oauth_account_id(&entry);
             Ok(Box::new(
                 OpenAIProvider::with_base_url(pool, oauth_token, model, base_url)
-                    .with_responses_api(true),
+                    .with_responses_api(true)
+                    .with_subscription(true)
+                    .with_chatgpt_account_id(account_id),
             ))
         }
         // OpenAI-compatible coding plan providers
@@ -269,13 +304,13 @@ pub fn create_provider(
                     provider: provider_name.to_string(),
                 })?
                 .to_string();
-            let default_url = match provider_name {
+            let default_url = match normalized.as_str() {
                 "zai-coding-plan" => "https://api.z.ai/api/coding/paas/v4",
                 "zhipuai-coding-plan" => "https://open.bigmodel.cn/api/coding/paas/v4",
                 _ => unreachable!(),
             };
             let base_url = entry.base_url.as_deref().unwrap_or(default_url);
-            let thinking_format = match provider_name {
+            let thinking_format = match normalized.as_str() {
                 "zai-coding-plan" | "zhipuai-coding-plan" => openai::ThinkingFormat::Zhipu,
                 _ => unreachable!(),
             };
@@ -294,7 +329,7 @@ pub fn create_provider(
                 .ok_or_else(|| AvaError::MissingApiKey {
                     provider: provider_name.to_string(),
                 })?;
-            let default_url = match provider_name {
+            let default_url = match normalized.as_str() {
                 "alibaba" => "https://coding-intl.dashscope.aliyuncs.com/apps/anthropic/v1",
                 "alibaba-cn" => "https://coding.dashscope.aliyuncs.com/apps/anthropic/v1",
                 "kimi-for-coding" => "https://api.kimi.com/coding/v1",
@@ -365,6 +400,18 @@ mod tests {
             Some("https://api.individual.githubcopilot.com")
         );
         assert!(base_url_for_provider("unknown").is_none());
+    }
+
+    #[test]
+    fn base_url_for_provider_normalizes_case() {
+        assert_eq!(
+            base_url_for_provider("OpenAI"),
+            Some("https://api.openai.com")
+        );
+        assert_eq!(
+            base_url_for_provider("ChatGPT"),
+            Some("https://chatgpt.com/backend-api/codex")
+        );
     }
 
     #[test]
@@ -543,6 +590,32 @@ mod tests {
         let provider = create_provider("openai", "codex-mini", &store, default_pool())
             .expect("should create OpenAI provider with OAuth");
         assert_eq!(provider.model_name(), "codex-mini");
+    }
+
+    #[test]
+    fn openai_oauth_account_id_falls_back_to_oauth_token_claim() {
+        let token = concat!(
+            "e30.",
+            "eyJodHRwczovL2FwaS5vcGVuYWkuY29tL2F1dGgiOnsiY2hhdGdwdF9hY2NvdW50X2lkIjoiYWNjdC1mcm9tLWFjY2Vzcy10b2tlbiJ9fQ.",
+            "c2ln"
+        )
+        .to_string();
+
+        let entry = ava_config::ProviderCredential {
+            api_key: String::new(),
+            base_url: None,
+            org_id: None,
+            oauth_token: Some(token),
+            oauth_refresh_token: Some("refresh-token".to_string()),
+            oauth_expires_at: Some(u64::MAX),
+            oauth_account_id: None,
+            litellm_compatible: None,
+        };
+
+        assert_eq!(
+            openai_oauth_account_id(&entry).as_deref(),
+            Some("acct-from-access-token")
+        );
     }
 
     #[test]

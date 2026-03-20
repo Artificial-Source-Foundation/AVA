@@ -498,11 +498,9 @@ pub async fn run_review_agent(
         match event {
             AgentEvent::Token(t) => {
                 output.push_str(&t);
-                eprint!("{t}");
             }
             AgentEvent::ToolCall(tc) => {
                 debug!(tool = %tc.name, "Review agent tool call");
-                eprintln!("[tool: {}]", tc.name);
             }
             AgentEvent::Complete(_) => break,
             AgentEvent::Error(e) => return Err(e),
@@ -510,7 +508,6 @@ pub async fn run_review_agent(
         }
     }
 
-    eprintln!();
     Ok(output)
 }
 

@@ -27,6 +27,8 @@ export interface ModelPricing {
   output?: number // per 1M tokens
 }
 
+// 'reasoning' is the canonical capability name (matches models.dev standard).
+// 'thinking' is kept for backward compatibility with older data sources.
 export type ModelCapability = 'reasoning' | 'tools' | 'vision' | 'free' | 'thinking'
 
 // ============================================================================

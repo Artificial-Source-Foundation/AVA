@@ -76,9 +76,28 @@ pub async fn listen_for_callback(
         .into_owned()
         .collect();
 
+    // Check for OAuth error response (e.g., denied scopes, user cancelled)
+    if let Some(error) = params.get("error") {
+        let desc = params.get("error_description").cloned().unwrap_or_default();
+        return Err(AuthError::Other(format!(
+            "OAuth error: {error}{}",
+            if desc.is_empty() {
+                String::new()
+            } else {
+                format!(" — {desc}")
+            }
+        )));
+    }
+
     let code = params
         .get("code")
-        .ok_or_else(|| AuthError::Other("Missing 'code' parameter in callback".to_string()))?
+        .ok_or_else(|| {
+            let all_params: Vec<String> = params.keys().cloned().collect();
+            AuthError::Other(format!(
+                "Missing 'code' parameter in callback (got: {})",
+                all_params.join(", ")
+            ))
+        })?
         .clone();
     let state = params
         .get("state")

@@ -1,0 +1,190 @@
+{
+  "domain": "performance",
+  "severity_counts": {
+    "critical": 5,
+    "warning": 11,
+    "suggestion": 4
+  },
+  "findings": [
+    {
+      "severity": "critical",
+      "file": "crates/ava-agent/src/session_logger.rs",
+      "line": 68,
+      "issue": "Blocking std::fs::OpenOptions::new().open() called inside async agent loop on every agent turn. This opens and closes a file handle on each call to log_turn(), which runs synchronously inside an async task and blocks the Tokio executor thread.",
+      "recommendation": "Either wrap in tokio::task::spawn_blocking, use tokio::fs::OpenOptions for async I/O, or hold a persistent BufWriter<File> across turns (open once at logger creation time, flush per-turn). The cheapest fix is to open the file once in SessionLogger::new() and store a Mutex<BufWriter<File>>.",
+      "code_snippet": "match std::fs::OpenOptions::new()\n    .create(true)\n    .append(true)\n    .open(&self.log_path) {\n    Ok(mut file) => { writeln!(file, \"{json}\") ... }",
+      "category": "blocking"
+    },
+    {
+      "severity": "critical",
+      "file": "crates/ava-agent/src/streaming_diff.rs",
+      "line": 70,
+      "issue": "std::fs::read_to_string() called synchronously in snapshot_before_edit() and record_edit_complete(), both called from execute_tools_unified() inside an async context. For large files (e.g., 1MB source files), this blocks the Tokio executor thread for milliseconds per write tool call.",
+      "recommendation": "Replace with tokio::fs::read_to_string().await, or offload to tokio::task::spawn_blocking. Affects every write/edit/multiedit/apply_patch tool call.",
+      "code_snippet": "pub fn snapshot_before_edit(&mut self, path: &Path) -> DiffEvent {\n    let content = std::fs::read_to_string(path).unwrap_or_default();\n    ...\n}\npub fn record_edit_complete(&mut self, path: &Path) -> Option<DiffEvent> {\n    let after = std::fs::read_to_string(path).unwrap_or_default();",
+      "category": "blocking"
+    },
+    {
+      "severity": "critical",
+      "file": "crates/ava-config/src/trust.rs",
+      "line": 12,
+      "issue": "is_project_trusted() reads and parses a JSON file from disk on every invocation, with no caching. It is called on EVERY 'read' tool result (tool_execution.rs:288) inside the hot agent loop. For a session with 100 read tool calls, this performs 100 synchronous disk reads + 100 JSON parses of the same file.",
+      "recommendation": "Cache the trust state in a OnceLock<bool> or thread_local, keyed by project path. Invalidate on trust_project() writes. At minimum, use a process-scoped Arc<RwLock<HashMap<PathBuf, bool>>> cache so repeated calls in the same session skip the file read.",
+      "code_snippet": "pub fn is_project_trusted(project_root: &Path) -> bool {\n    // ... \n    let Ok(content) = std::fs::read_to_string(&trust_path) else { return false; };\n    let Ok(data) = serde_json::from_str::<serde_json::Value>(&content) else { return false; };\n    // ... array linear scan",
+      "category": "caching"
+    },
+    {
+      "severity": "critical",
+      "file": "crates/ava-session/src/lib.rs",
+      "line": 948,
+      "issue": "open_conn() creates a new rusqlite::Connection on every method call (save, get, list_recent, search, etc.). Each connection open + WAL/foreign_key PRAGMA setup costs ~0.5-2ms. Called 17+ times per save (one per unique method). For active sessions with frequent saves, this causes contention and latency.",
+      "recommendation": "Use r2d2-sqlite or deadpool-sqlite for connection pooling, or hold a single connection on SessionManager (with Mutex). At minimum, the PRAGMA setup string should be set once via execute_batch on connection open, and a single connection should be reused per SessionManager instance.",
+      "code_snippet": "fn open_conn(&self) -> Result<Connection> {\n    let conn = Connection::open(&self.db_path).map_err(db_error)?;\n    conn.execute_batch(\n        \"PRAGMA journal_mode = WAL;\n         PRAGMA foreign_keys = ON;\n         PRAGMA busy_timeout = 5000;\",\n    ).map_err(db_error)?;\n    Ok(conn)\n}",
+      "category": "connection"
+    },
+    {
+      "severity": "critical",
+      "file": "crates/ava-agent/src/agent_loop/tool_execution.rs",
+      "line": 260,
+      "issue": "tool_call.clone() passed to self.tools.execute() clones the entire ToolCall including its serde_json::Value arguments on every tool execution. Additionally, the registry clones arguments again via tool.execute(tool_call.arguments.clone()). For tool calls with large argument values (e.g., write tool with large file content), this doubles the allocation cost before even running the tool.",
+      "recommendation": "Change Tool::execute() trait signature to accept &Value instead of Value to avoid the clone at the registry layer. Change ToolRegistry::execute() to accept &ToolCall by reference. The arguments clone at line 203 of registry.rs is avoidable if execute() takes &Value.",
+      "code_snippet": "let mut result = match self.tools.execute(tool_call.clone()).await {\n// ... and in registry.rs:\nlet mut result = tool.execute(tool_call.arguments.clone()).await;",
+      "category": "allocation"
+    },
+    {
+      "severity": "warning",
+      "file": "crates/ava-agent/src/agent_loop/mod.rs",
+      "line": 616,
+      "issue": "results[pos].clone() called on (ToolResult, ToolExecution) pairs after join_all for read-only concurrent tools. ToolResult contains a content String that can be up to 50KB (MAX_TOOL_RESULT_BYTES). Cloning this for each concurrent read tool result is wasteful.",
+      "recommendation": "Use std::mem::take or restructure indexed_results to own the tuples rather than cloning. join_all returns owned results; use into_iter() with enumerate to avoid the clone.",
+      "code_snippet": "let results = futures::future::join_all(futs).await;\nfor (pos, (i, _)) in read_calls.iter().enumerate() {\n    let (result, execution) = results[pos].clone();\n    indexed_results.push((*i, result, execution));\n}",
+      "category": "allocation"
+    },
+    {
+      "severity": "warning",
+      "file": "crates/ava-agent/src/agent_loop/mod.rs",
+      "line": 709,
+      "issue": "tool_results.push(result.clone()) and Self::emit(event_tx, AgentEvent::ToolResult(result.clone())) perform two clones of every ToolResult in the hot path. For tools with large outputs (up to 50KB), this allocates and copies twice per tool result.",
+      "recommendation": "Restructure to move the result into tool_results first, then emit a reference or a lightweight summary event. Alternatively, wrap ToolResult in Arc<> so cloning is cheap.",
+      "code_snippet": "tool_results.push(result.clone());\nSelf::emit(event_tx, AgentEvent::ToolResult(result.clone()));",
+      "category": "allocation"
+    },
+    {
+      "severity": "warning",
+      "file": "crates/ava-agent/src/agent_loop/tool_execution.rs",
+      "line": 418,
+      "issue": "In add_tool_results(), Message::new(Role::Tool, result.content.clone()) clones the content string, then .with_tool_results(vec![result.clone()]) clones the entire ToolResult again (including content). This means tool result content is allocated 3 times: original, Message::content clone, and ToolResult clone in the vec.",
+      "recommendation": "Redesign Message to hold a reference or Arc to ToolResult content, or have with_tool_results() consume the Vec and avoid an extra clone. At minimum, the Message::content should reference the ToolResult::content rather than duplicating it.",
+      "code_snippet": "let tool_message = Message::new(Role::Tool, result.content.clone())\n    .with_tool_call_id(&tool_call.id)\n    .with_tool_results(vec![result.clone()]);\nself.context.add_message(tool_message.clone());",
+      "category": "allocation"
+    },
+    {
+      "severity": "warning",
+      "file": "crates/ava-tools/src/registry.rs",
+      "line": 196,
+      "issue": "When a tool is not found, the error path calls self.tools.keys().cloned().collect::<Vec<_>>().join(\", \") — allocating all tool names into a string. This happens on the error path only, but it's a Vec<String> allocation. More importantly, tool_names() at line 355 returns Vec<String> (with clones) and is called in hot paths like repair_tool_name() which iterates all tool names on every tool call with a mismatched name.",
+      "recommendation": "tool_names() should return impl Iterator<Item=&str> or &[String] to avoid allocation on callers that only need to iterate. For the error path format, consider lazy_static or a cached comma-separated string.",
+      "code_snippet": "pub fn tool_names(&self) -> Vec<String> {\n    self.tools.keys().cloned().collect()\n}",
+      "category": "allocation"
+    },
+    {
+      "severity": "warning",
+      "file": "crates/ava-agent/src/instructions.rs",
+      "line": 454,
+      "issue": "contextual_instructions_for_file() performs a filesystem walk up the directory tree (checking for AGENTS.md files) using std::fs blocking I/O. This is called on EVERY successful 'read' tool result in the hot agent loop, which can involve multiple syscalls per read tool.",
+      "recommendation": "Cache the result per directory path in a session-scoped HashMap<PathBuf, Option<String>> to avoid repeated filesystem walks for files in the same directory. The AGENTS.md content rarely changes during a session.",
+      "code_snippet": "pub fn contextual_instructions_for_file(file_path: &Path, project_root: &Path) -> Option<String> {\n    let mut dir = file_path.parent()?;\n    loop {\n        let agents_md = dir.join(\"AGENTS.md\");\n        if agents_md.is_file() {\n            if let Ok(content) = fs::read_to_string(&agents_md) { ... }\n        }\n        ...\n    }\n}",
+      "category": "caching"
+    },
+    {
+      "severity": "warning",
+      "file": "crates/ava-tools/src/core/glob.rs",
+      "line": 63,
+      "issue": "std::fs::metadata() called per glob match to get modification time, sorting results by mtime. For a glob matching 1000 files, this performs 1000 synchronous stat() syscalls sequentially in an async fn. The glob tool is in the READ_ONLY_TOOLS set and can run concurrently with other tools, amplifying the blocking impact.",
+      "recommendation": "Use tokio::task::spawn_blocking to run the entire glob + stat + sort operation on a blocking thread pool. Alternatively, use std::fs::DirEntry::metadata() from walkdir which avoids the extra stat by reusing the dirent data on Linux.",
+      "code_snippet": "for entry in glob::glob(&query)... {\n    let path = entry...?;\n    let modified = std::fs::metadata(&path)\n        .and_then(|m| m.modified())\n        .unwrap_or(SystemTime::UNIX_EPOCH);\n    matches.push((path, modified));\n}",
+      "category": "blocking"
+    },
+    {
+      "severity": "warning",
+      "file": "crates/ava-context/src/token_tracker.rs",
+      "line": 39,
+      "issue": "estimate_tokens_for_message() calls tc.arguments.to_string() for each tool call to compute tokens. serde_json::Value::to_string() allocates a new String for JSON serialization on every call, purely for token estimation. For messages with many tool calls, this is wasteful.",
+      "recommendation": "Use a raw byte-length approximation (arguments.to_string().len() / 4) for tool call arguments in token estimation, or cache the serialized form in ToolCall. The BPE tokenization of JSON-like structures is well-approximated by byte count / 3.5.",
+      "code_snippet": "total += message\n    .tool_calls\n    .iter()\n    .map(|tc| estimate_tokens(&tc.name) + estimate_tokens(&tc.arguments.to_string()) + 3)\n    .sum::<usize>();",
+      "category": "allocation"
+    },
+    {
+      "severity": "warning",
+      "file": "crates/ava-agent/src/agent_loop/mod.rs",
+      "line": 301,
+      "issue": "inject_system_prompt() calls self.context.get_messages().iter().any(|m| m.role == Role::System) — a linear scan over all messages on every run_unified() call. While the check is idempotent-guard logic, the linear scan grows with conversation length.",
+      "recommendation": "Add a bool flag `system_prompt_injected: bool` to ContextManager or AgentLoop to track this in O(1), eliminating the linear scan on every run call.",
+      "code_snippet": "if self.context.get_messages().iter().any(|m| m.role == Role::System) {\n    return;\n}",
+      "category": "algorithm"
+    },
+    {
+      "severity": "warning",
+      "file": "crates/ava-agent/src/agent_loop/mod.rs",
+      "line": 951,
+      "issue": "assistant_message is constructed with response_text.clone() and tool_calls.clone() twice in some code paths (once at line 890 for repetition/stuck path, and again at line 951 for the normal path). The response_text can be a multi-KB string for long LLM responses.",
+      "recommendation": "Restructure the control flow to construct assistant_message once after all checks. Use Option<Message> pattern where the message is built lazily and reused.",
+      "code_snippet": "let assistant_message = Message::new(Role::Assistant, response_text.clone())\n    .with_tool_calls(tool_calls.clone());\nself.context.add_message(assistant_message.clone());\nsession.add_message(assistant_message);",
+      "category": "allocation"
+    },
+    {
+      "severity": "warning",
+      "file": "crates/ava-agent/src/agent_loop/tool_execution.rs",
+      "line": 479,
+      "issue": "extract_apply_patch_paths() uses paths.contains(&path) inside a loop over all patch path entries — O(n²) deduplication. While patches rarely have many paths, this is a code-quality concern for large patches with many files.",
+      "recommendation": "Use a HashSet<String> for deduplication: insert into the set and only push to paths Vec if newly inserted. Replace Vec<String> with a structure that tracks insertion order + uniqueness.",
+      "code_snippet": "if !paths.contains(&path) {\n    paths.push(path);\n}",
+      "category": "algorithm"
+    },
+    {
+      "severity": "warning",
+      "file": "crates/ava-agent/src/agent_loop/tool_execution.rs",
+      "line": 287,
+      "issue": "std::env::current_dir() called on every successful 'read' tool result. This is a syscall (getcwd) that is unnecessary since the working directory does not change during tool execution. Called potentially hundreds of times in a session.",
+      "recommendation": "Cache std::env::current_dir() once at AgentLoop construction time and store it as a field, or pass it as a parameter. The current_dir cannot change between tool calls in normal operation.",
+      "code_snippet": "let project_root = std::env::current_dir().unwrap_or_default();\nif ava_config::is_project_trusted(&project_root) {",
+      "category": "caching"
+    },
+    {
+      "severity": "suggestion",
+      "file": "crates/ava-agent/src/trace.rs",
+      "line": 56,
+      "issue": "append_trace_event() calls std::fs::create_dir_all() on every trace event write, even though the directory already exists after the first call. This is a redundant syscall on the hot path of every agent turn.",
+      "recommendation": "Create the traces directory once at initialization and store a path handle, or use an atomic flag to ensure create_dir_all is called at most once per process.",
+      "code_snippet": "pub fn append_trace_event(data_dir: &std::path::Path, event: &RunEvent) {\n    let traces_dir = data_dir.join(\"traces\");\n    std::fs::create_dir_all(&traces_dir).ok();  // called every event",
+      "category": "startup"
+    },
+    {
+      "severity": "suggestion",
+      "file": "crates/ava-context/src/token_tracker.rs",
+      "line": 31,
+      "issue": "estimate_tokens_for_message() calls the full BPE tokenizer (tiktoken-rs) for every message added to context. While the tokenizer is cached via OnceLock (good), encoding large tool result strings (up to 50KB) on every add is CPU-intensive. This is called in the hot loop after every tool result.",
+      "recommendation": "For tool result messages, consider a fast byte-count approximation (bytes / 3.5 rounded up) instead of full BPE for the token tracker's running total. Reserve exact BPE counting for the compaction decision boundary. Alternatively, memoize the token count in Message itself so it's computed once and reused.",
+      "code_snippet": "pub fn add_message(&mut self, message: &Message) {\n    self.current_tokens += estimate_tokens_for_message(message);\n}",
+      "category": "algorithm"
+    },
+    {
+      "severity": "suggestion",
+      "file": "crates/ava-tools/src/core/glob.rs",
+      "line": 58,
+      "issue": "base_path.join(pattern).to_string_lossy().to_string() allocates a String via to_string_lossy().to_string() (potentially two allocations if the path contains non-UTF8). The glob crate accepts &str, so to_string_lossy() alone should suffice with .as_ref().",
+      "recommendation": "Use let query = base_path.join(pattern); glob::glob(query.to_str().unwrap_or(\"\"))? to avoid the extra String allocation, or keep Cow<str> from to_string_lossy() without converting to owned String.",
+      "code_snippet": "let query = base_path.join(pattern).to_string_lossy().to_string();",
+      "category": "allocation"
+    },
+    {
+      "severity": "suggestion",
+      "file": "crates/ava-agent/src/agent_loop/mod.rs",
+      "line": 682,
+      "issue": "When steering is triggered, an executed_indices HashSet is built by iterating indexed_results twice. This is minor but uses a HashSet<usize> allocation in a path that's only hit on steering events.",
+      "recommendation": "Since write_calls are executed sequentially and the first unexecuted index is known at the point steering is triggered (via the loop break), use a simple counter/index rather than a HashSet for the skipped-tool detection.",
+      "code_snippet": "let executed_indices: std::collections::HashSet<usize> =\n    indexed_results.iter().map(|(i, _, _)| *i).collect();\nfor (i, tc) in &write_calls {\n    if !executed_indices.contains(i) {",
+      "category": "allocation"
+    }
+  ]
+}

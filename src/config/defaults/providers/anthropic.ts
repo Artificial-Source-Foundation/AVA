@@ -22,7 +22,7 @@ export const anthropic: LLMProviderConfig = {
       name: 'Claude Opus 4.6',
       contextWindow: 200000,
       pricing: { input: 5, output: 25 },
-      capabilities: ['vision', 'tools', 'reasoning', 'thinking'],
+      capabilities: ['vision', 'tools', 'reasoning'],
     },
     {
       id: 'claude-sonnet-4-6',
@@ -30,14 +30,14 @@ export const anthropic: LLMProviderConfig = {
       contextWindow: 200000,
       isDefault: true,
       pricing: { input: 3, output: 15 },
-      capabilities: ['vision', 'tools', 'reasoning', 'thinking'],
+      capabilities: ['vision', 'tools', 'reasoning'],
     },
     {
       id: 'claude-haiku-4-5-20251001',
       name: 'Claude Haiku 4.5',
       contextWindow: 200000,
       pricing: { input: 1, output: 5 },
-      capabilities: ['vision', 'tools', 'reasoning', 'thinking'],
+      capabilities: ['vision', 'tools', 'reasoning'],
     },
   ],
 }

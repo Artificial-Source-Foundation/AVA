@@ -24,6 +24,11 @@ export const LiveStreamingBlock: Component = () => {
 
   const hasThinking = createMemo(() => {
     const thought = agent.currentThought()
+    console.warn('[THINKING-DEBUG] LiveStreamingBlock hasThinking:', {
+      hasThought: !!thought,
+      thoughtLength: thought?.length ?? 0,
+      isRunning: agent.isRunning(),
+    })
     debugLog(
       'thinking',
       'LiveStreamingBlock hasThinking:',

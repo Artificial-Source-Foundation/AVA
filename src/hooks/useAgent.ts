@@ -213,8 +213,16 @@ function createAgentStore() {
         // Sync thinking content to frontend signal
         if (event.type === 'thinking') {
           const chunk = (event as { content: string }).content
+          console.warn('[THINKING-DEBUG] useAgent: thinking event in effect loop', {
+            chunkLength: chunk?.length,
+            chunkPreview: chunk?.slice(0, 100),
+            currentThoughtBefore: currentThought().length,
+          })
           setCurrentThought((prev) => {
             const updated = prev + chunk
+            console.warn('[THINKING-DEBUG] useAgent: currentThought updated', {
+              totalLength: updated.length,
+            })
             debugLog('thinking', 'currentThought updated:', updated.length, 'chars total')
             return updated
           })
@@ -355,6 +363,13 @@ function createAgentStore() {
       // Get the thinking/reasoning level from frontend settings
       const reasoningEffort = settingsRef.settings().generation.reasoningEffort
       const thinkingLevel = reasoningEffort === 'off' ? undefined : reasoningEffort
+      console.warn('[THINKING-DEBUG] useAgent.run() config:', {
+        model: selectedModelId,
+        provider: selectedProviderId,
+        thinkingLevel,
+        reasoningEffort,
+        thinkingDisplay: settingsRef.settings().appearance.thinkingDisplay,
+      })
       debugLog('agent', 'run config:', {
         model: selectedModelId,
         provider: selectedProviderId,
@@ -390,7 +405,7 @@ function createAgentStore() {
             id: generateMessageId('err'),
             sessionId,
             role: 'assistant',
-            content: `**Team Error:** ${msg}`,
+            content: '',
             createdAt: Date.now(),
             error: { type: 'unknown', message: msg, timestamp: Date.now() },
           }
@@ -410,11 +425,13 @@ function createAgentStore() {
       // Check if the agent errored (rustAgent.run catches internally, returns null)
       if (errorText) {
         log.error('agent', 'Run failed', { error: errorText })
+        // Only set the `error` field — the ErrorRow component renders it.
+        // Do NOT duplicate the error in `content` (that caused double display).
         const errorMsg: Message = {
           id: generateMessageId('err'),
           sessionId,
           role: 'assistant',
-          content: `**Error:** ${errorText}`,
+          content: '',
           createdAt: Date.now(),
           error: { type: 'unknown', message: errorText, timestamp: Date.now() },
         }

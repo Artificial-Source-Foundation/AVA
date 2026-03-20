@@ -88,7 +88,7 @@ export function autoFetchModels(id: string): void {
         const pricing = m.pricing
           ? { input: m.pricing.prompt, output: m.pricing.completion }
           : def?.pricing
-        const capabilities = m.capabilities?.length ? m.capabilities : def?.capabilities
+        const capabilities = [...new Set([...(m.capabilities ?? []), ...(def?.capabilities ?? [])])]
         fetchedMap.set(m.id, {
           id: m.id,
           name: m.name,
@@ -159,8 +159,9 @@ export function populateModelsFromCatalog(): number {
       const catalogMatch = catalogModels.find((cm) => cm.id === existing.id)
       if (!catalogMatch) return existing
       const patched = { ...existing }
-      if (!patched.capabilities?.length && catalogMatch.capabilities?.length) {
-        patched.capabilities = catalogMatch.capabilities
+      if (catalogMatch.capabilities?.length) {
+        const merged = new Set([...(patched.capabilities ?? []), ...catalogMatch.capabilities])
+        patched.capabilities = [...merged]
       }
       if (!patched.pricing && catalogMatch.pricing) {
         patched.pricing = catalogMatch.pricing

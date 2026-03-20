@@ -30,7 +30,7 @@ export const openrouter: LLMProviderConfig = {
       name: 'GPT-5.3 Codex',
       contextWindow: 400000,
       pricing: { input: 1.75, output: 14 },
-      capabilities: ['vision', 'tools', 'reasoning', 'thinking'],
+      capabilities: ['vision', 'tools', 'reasoning'],
     },
     {
       id: 'google/gemini-2.5-pro',

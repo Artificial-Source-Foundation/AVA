@@ -85,7 +85,7 @@ export const COPILOT_DEFAULT_MODELS: FetchedModel[] = [
     capabilities: ['vision', 'tools', 'reasoning'],
   },
   {
-    id: 'claude-opus-41',
+    id: 'claude-opus-4.1',
     name: 'Claude Opus 4.1',
     contextWindow: 80000,
     capabilities: ['vision', 'reasoning'],

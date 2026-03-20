@@ -4,7 +4,6 @@
 //! line per agent turn to `~/.ava/log/{session-id}.jsonl`. Each line captures
 //! the turn number, role, tool calls, token usage, and duration.
 
-use std::io::Write;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -60,25 +59,32 @@ impl SessionLogger {
     }
 
     /// Append a single turn entry to the JSONL file.
+    ///
+    /// The blocking file I/O is offloaded via `tokio::task::spawn_blocking`
+    /// so the async executor thread is not stalled.
     pub fn log_turn(&self, entry: &TurnLogEntry) {
         let Ok(json) = serde_json::to_string(entry) else {
             warn!("Failed to serialize session log entry");
             return;
         };
-        match std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&self.log_path)
-        {
-            Ok(mut file) => {
-                if let Err(e) = writeln!(file, "{json}") {
-                    warn!("Failed to write session log entry: {e}");
+        let log_path = self.log_path.clone();
+        tokio::task::spawn_blocking(move || {
+            use std::io::Write as _;
+            match std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&log_path)
+            {
+                Ok(mut file) => {
+                    if let Err(e) = writeln!(file, "{json}") {
+                        warn!("Failed to write session log entry: {e}");
+                    }
+                }
+                Err(e) => {
+                    warn!("Failed to open session log file: {e}");
                 }
             }
-            Err(e) => {
-                warn!("Failed to open session log file: {e}");
-            }
-        }
+        });
     }
 
     /// Convenience builder for a turn entry.
@@ -162,8 +168,8 @@ mod tests {
         assert_eq!(entry.duration_ms, 567);
     }
 
-    #[test]
-    fn session_logger_creates_file() {
+    #[tokio::test]
+    async fn session_logger_creates_file() {
         let dir = tempfile::tempdir().unwrap();
         let log_path = dir.path().join("test-session.jsonl");
         let logger = SessionLogger {
@@ -179,12 +185,15 @@ mod tests {
             Duration::from_millis(100),
         );
         logger.log_turn(&entry);
+        // Give spawn_blocking time to complete
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         let content = std::fs::read_to_string(&log_path).unwrap();
         assert!(content.contains("\"turn\":1"));
         assert_eq!(content.lines().count(), 1);
 
         // Second entry appends
         logger.log_turn(&entry);
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         let content = std::fs::read_to_string(&log_path).unwrap();
         assert_eq!(content.lines().count(), 2);
     }

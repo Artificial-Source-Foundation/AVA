@@ -209,10 +209,22 @@ impl AgentStack {
         )
         .await;
 
+        // Look up the model's actual context window from the compiled-in registry.
+        // This drives context compaction thresholds and ensures large-context models
+        // (e.g. GPT-5.4 with 1M tokens) don't trigger premature compaction.
+        // Falls back to 128K for unknown models.
+        let model_context_window = {
+            let model_id = provider.model_name();
+            let reg = ava_config::model_catalog::registry::registry();
+            reg.find(model_id)
+                .map(|m| m.limits.context_window)
+                .unwrap_or(128_000)
+        };
+
         let config = AgentConfig {
             max_turns: turns_limit,
             max_budget_usd: self.max_budget_usd,
-            token_limit: 128_000,
+            token_limit: model_context_window,
             model: provider.model_name().to_string(),
             max_cost_usd: 10.0,
             loop_detection: true,
@@ -671,10 +683,17 @@ impl TaskSpawner for AgentTaskSpawner {
             .prompt
             .unwrap_or_else(build_sub_agent_system_prompt);
 
+        let sub_agent_context_window = {
+            let reg = ava_config::model_catalog::registry::registry();
+            reg.find(&effective_model)
+                .map(|m| m.limits.context_window)
+                .unwrap_or(128_000)
+        };
+
         let config = AgentConfig {
             max_turns: sub_max_turns,
             max_budget_usd: 0.0, // sub-agents don't get CLI budget
-            token_limit: 128_000,
+            token_limit: sub_agent_context_window,
             model: effective_model.clone(),
             max_cost_usd: 5.0,
             loop_detection: true,

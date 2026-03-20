@@ -23,7 +23,9 @@ import type { ToolCall } from '../../types'
 import { MarkdownContent } from './MarkdownContent'
 import { ThinkingRow } from './message-rows/ThinkingRow'
 import { ToolCallCard } from './ToolCallCard'
+import { ContextGroupHeader } from './ToolCallGroup'
 import { ToolPreview } from './ToolPreview'
+import { partitionByContext } from './tool-call-utils'
 
 /** Render a single interleaved segment: thinking block + the tools that followed */
 const InterleavedSegment: Component<{
@@ -48,10 +50,45 @@ const InterleavedSegment: Component<{
         />
       </Show>
 
-      {/* Tool calls that happened after this thinking block */}
+      {/* Tool calls that happened after this thinking block — grouped by context */}
       <Show when={segmentTools().length > 0}>
         <div class="flex flex-col gap-1 ml-2">
-          <For each={segmentTools()}>{(tc) => <ToolCallCard toolCall={tc} />}</For>
+          <For each={partitionByContext(segmentTools())}>
+            {(seg) => (
+              <Show
+                when={
+                  seg.kind === 'context' &&
+                  (seg as ReturnType<typeof partitionByContext>[number] & { kind: 'context' }).calls
+                    .length > 1
+                }
+                fallback={
+                  <ToolCallCard
+                    toolCall={
+                      seg.kind === 'context'
+                        ? (
+                            seg as ReturnType<typeof partitionByContext>[number] & {
+                              kind: 'context'
+                            }
+                          ).calls[0]
+                        : (
+                            seg as ReturnType<typeof partitionByContext>[number] & {
+                              kind: 'single'
+                            }
+                          ).call
+                    }
+                  />
+                }
+              >
+                <ContextGroupHeader
+                  calls={
+                    (seg as ReturnType<typeof partitionByContext>[number] & { kind: 'context' })
+                      .calls
+                  }
+                  isStreaming={props.isStreaming}
+                />
+              </Show>
+            )}
+          </For>
         </div>
       </Show>
     </div>
@@ -125,15 +162,56 @@ export const LiveStreamingBlock: Component = () => {
                     />
                   </Show>
 
-                  {/* Completed tool calls */}
+                  {/* Completed tool calls — grouped by context (read/glob/grep collapse together) */}
                   <Show when={hasToolCalls()}>
                     <div class="flex flex-col gap-1 my-1">
                       <For
-                        each={agent
-                          .activeToolCalls()
-                          .filter((tc) => tc.status === 'success' || tc.status === 'error')}
+                        each={partitionByContext(
+                          agent
+                            .activeToolCalls()
+                            .filter((tc) => tc.status === 'success' || tc.status === 'error')
+                        )}
                       >
-                        {(tc) => <ToolCallCard toolCall={tc} />}
+                        {(seg) => (
+                          <Show
+                            when={
+                              seg.kind === 'context' &&
+                              (
+                                seg as ReturnType<typeof partitionByContext>[number] & {
+                                  kind: 'context'
+                                }
+                              ).calls.length > 1
+                            }
+                            fallback={
+                              <ToolCallCard
+                                toolCall={
+                                  seg.kind === 'context'
+                                    ? (
+                                        seg as ReturnType<typeof partitionByContext>[number] & {
+                                          kind: 'context'
+                                        }
+                                      ).calls[0]
+                                    : (
+                                        seg as ReturnType<typeof partitionByContext>[number] & {
+                                          kind: 'single'
+                                        }
+                                      ).call
+                                }
+                              />
+                            }
+                          >
+                            <ContextGroupHeader
+                              calls={
+                                (
+                                  seg as ReturnType<typeof partitionByContext>[number] & {
+                                    kind: 'context'
+                                  }
+                                ).calls
+                              }
+                              isStreaming={true}
+                            />
+                          </Show>
+                        )}
                       </For>
                     </div>
                   </Show>
@@ -147,10 +225,51 @@ export const LiveStreamingBlock: Component = () => {
             >
               {/* Interleaved: thinking → tools → thinking → tools */}
               <div class="flex flex-col gap-1.5">
-                {/* Orphan tool calls (happened before any thinking) */}
+                {/* Orphan tool calls (happened before any thinking) — grouped by context */}
                 <Show when={orphanToolCalls().length > 0}>
                   <div class="flex flex-col gap-1 ml-2">
-                    <For each={orphanToolCalls()}>{(tc) => <ToolCallCard toolCall={tc} />}</For>
+                    <For each={partitionByContext(orphanToolCalls())}>
+                      {(seg) => (
+                        <Show
+                          when={
+                            seg.kind === 'context' &&
+                            (
+                              seg as ReturnType<typeof partitionByContext>[number] & {
+                                kind: 'context'
+                              }
+                            ).calls.length > 1
+                          }
+                          fallback={
+                            <ToolCallCard
+                              toolCall={
+                                seg.kind === 'context'
+                                  ? (
+                                      seg as ReturnType<typeof partitionByContext>[number] & {
+                                        kind: 'context'
+                                      }
+                                    ).calls[0]
+                                  : (
+                                      seg as ReturnType<typeof partitionByContext>[number] & {
+                                        kind: 'single'
+                                      }
+                                    ).call
+                              }
+                            />
+                          }
+                        >
+                          <ContextGroupHeader
+                            calls={
+                              (
+                                seg as ReturnType<typeof partitionByContext>[number] & {
+                                  kind: 'context'
+                                }
+                              ).calls
+                            }
+                            isStreaming={true}
+                          />
+                        </Show>
+                      )}
+                    </For>
                   </div>
                 </Show>
 

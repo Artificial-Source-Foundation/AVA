@@ -15,6 +15,12 @@ export async function saveMessage(message: Omit<Message, 'id' | 'createdAt'>): P
   const id = crypto.randomUUID()
   const createdAt = Date.now()
 
+  // Merge toolCalls into metadata so they survive session restore
+  const metadataToSave = {
+    ...(message.metadata || {}),
+    ...(message.toolCalls && message.toolCalls.length > 0 ? { toolCalls: message.toolCalls } : {}),
+  }
+
   await database.execute(
     `INSERT INTO messages (id, session_id, role, content, agent_id, created_at, tokens_used, metadata, cost_usd, model)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -26,7 +32,7 @@ export async function saveMessage(message: Omit<Message, 'id' | 'createdAt'>): P
       message.agentId || null,
       createdAt,
       message.tokensUsed || 0,
-      JSON.stringify(message.metadata || {}),
+      JSON.stringify(metadataToSave),
       message.costUSD || null,
       message.model || null,
     ]
@@ -135,6 +141,11 @@ export async function deleteSessionMessages(sessionId: string): Promise<void> {
 export async function insertMessages(msgs: Message[]): Promise<void> {
   const database = await initDatabase()
   for (const msg of msgs) {
+    // Merge toolCalls into metadata so they survive session restore
+    const metadataToSave = {
+      ...(msg.metadata || {}),
+      ...(msg.toolCalls && msg.toolCalls.length > 0 ? { toolCalls: msg.toolCalls } : {}),
+    }
     await database.execute(
       `INSERT INTO messages (id, session_id, role, content, agent_id, created_at, tokens_used, metadata, cost_usd, model)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -146,7 +157,7 @@ export async function insertMessages(msgs: Message[]): Promise<void> {
         msg.agentId || null,
         msg.createdAt,
         msg.tokensUsed || 0,
-        JSON.stringify(msg.metadata || {}),
+        JSON.stringify(metadataToSave),
         msg.costUSD || null,
         msg.model || null,
       ]

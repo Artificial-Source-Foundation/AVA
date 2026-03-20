@@ -1275,9 +1275,22 @@ pub fn parse_responses_api_stream_chunk(payload: &Value) -> Option<StreamChunk> 
                         .and_then(Value::as_str)?
                         .to_string();
 
+                    // The Responses API puts the output array position in the top-level
+                    // `output_index` of the event (same as delta events and output_item.added),
+                    // NOT inside the `item` object. Using `item.index` here would default to 0
+                    // for reasoning models where the function_call is at output_index 1 (after
+                    // the reasoning item at index 0), causing the id/name to be accumulated into
+                    // the wrong slot and producing empty arguments ("missing required parameter").
+                    let index = payload
+                        .get("output_index")
+                        .or_else(|| payload.get("index"))
+                        .or_else(|| item.get("index"))
+                        .and_then(Value::as_u64)
+                        .unwrap_or(0) as usize;
+
                     Some(StreamChunk {
                         tool_call: Some(StreamToolCall {
-                            index: item.get("index").and_then(Value::as_u64).unwrap_or(0) as usize,
+                            index,
                             id: Some(if call_id.is_empty() {
                                 Uuid::new_v4().to_string()
                             } else {

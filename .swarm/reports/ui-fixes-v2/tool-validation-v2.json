@@ -1,0 +1,33 @@
+{
+  "status": "fixed",
+  "bugs_fixed": [
+    {
+      "id": "BUG1",
+      "title": "Tool calls fail with missing required parameter on Responses API streaming",
+      "root_cause": "In parse_responses_api_stream_chunk (parsing.rs), the response.output_item.done handler for function_call items used item.get(\"index\") to determine the accumulator slot. The Responses API puts the output array position in the top-level event field \"output_index\", not inside the item object. For reasoning models that produce [reasoning(index=0), function_call(index=1)], output_item.done would emit StreamToolCall{index: 0} (defaulting because item.index is absent), updating the wrong accumulator. Meanwhile, the argument deltas correctly targeted index=1 via output_index. Result: accumulator at index=0 got name/id but no arguments; accumulator at index=1 got arguments but no name. finalize_tool_calls filters accumulators with empty names, so index=1 was dropped and index=0 produced empty arguments={}, triggering 'missing required parameter'.",
+      "fix": "Changed response.output_item.done function_call index lookup to use payload.get(\"output_index\") first (same as output_item.added and delta events), with fallback to payload.get(\"index\") then item.get(\"index\"). This matches the correct position for all Responses API event types.",
+      "file": "crates/ava-llm/src/providers/common/parsing.rs",
+      "line_range": "1264-1291"
+    },
+    {
+      "id": "BUG2",
+      "title": "Context window shows incorrect percentage for GPT-5.4",
+      "root_cause": "The compiled-in registry already had gpt-5.4 with context_window=1048576. However, the AgentConfig.token_limit was hardcoded to 128_000 in stack_run.rs for both the main agent run and sub-agent runs. This value drives context compaction thresholds (ContextManager). For a model with 1M context, compaction would trigger at 128K*0.75=96K tokens instead of 750K. The 25% display at 50K tokens aligns with a 200K context window — the default used by instruction_resolver when a model is not found. If the model name used at runtime differs slightly from the registry entry, lookup_context_window returns None and the status bar shows no percentage, but the compaction logic using 128K would fire prematurely. The token_limit now correctly reads the model's context_window from the registry.",
+      "fix": "In stack_run.rs, replaced hardcoded token_limit: 128_000 with a registry lookup that returns the model's actual context_window (falling back to 128K for unknown models). Applied to both main agent runs and sub-agent runs.",
+      "file": "crates/ava-agent/src/stack/stack_run.rs",
+      "line_range": "212-230 and 686-705"
+    }
+  ],
+  "root_cause": "Two independent bugs: (1) Wrong index resolution in Responses API stream accumulator for output_item.done function_call events caused arguments to be accumulated at the wrong slot, producing empty tool call arguments. (2) Hardcoded token_limit=128K ignored the model's actual context window from the registry, causing premature context compaction for large-context models like GPT-5.4 (1M tokens).",
+  "files_modified": [
+    "crates/ava-llm/src/providers/common/parsing.rs",
+    "crates/ava-agent/src/stack/stack_run.rs"
+  ],
+  "cargo_check_pass": true,
+  "tests_pass": true,
+  "test_summary": {
+    "ava-llm": "17 passed, 0 failed",
+    "ava-agent": "13 passed, 0 failed",
+    "parsing_suite": "119 passed, 0 failed"
+  }
+}

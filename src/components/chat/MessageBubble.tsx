@@ -635,7 +635,10 @@ export const MessageBubble: Component<MessageBubbleProps> = (props) => {
                 />
               </Show>
 
-              <TimestampLine align="left" />
+              {/* Timestamp + message actions — only shown for completed (non-streaming) messages */}
+              <Show when={!isActiveStreaming()}>
+                <TimestampLine align="left" />
+              </Show>
 
               {/* Truncation hint — response appears cut off mid-sentence */}
               <Show when={isTruncated() && props.isLastMessage}>

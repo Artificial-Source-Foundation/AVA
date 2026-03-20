@@ -1,11 +1,11 @@
 /**
  * Thinking Row
  *
- * Minimal reasoning display matching TUI style:
- * - Collapsed: "💭 Thought for Xs" — small grey italic text
- * - Expanded: dimmed italic content with left border
- * - Preview: first 2 lines visible with expand hint
- * - Auto-expands during streaming, auto-collapses when complete
+ * Collapsed <details> pattern matching Goose's design:
+ * - Summary: "Thinking..." while streaming, "Thought for Ns" after completion
+ * - Collapsed by default for completed messages
+ * - Expanded (open) during live streaming
+ * - Muted secondary styling with subtle left border
  */
 
 import { type Component, createEffect, createMemo, createSignal, Show } from 'solid-js'
@@ -31,19 +31,14 @@ export const ThinkingRow: Component<ThinkingRowProps> = (props) => {
     thinkingDisplay: displayMode(),
   })
 
-  const [expanded, setExpanded] = createSignal(false)
   const [wasStreaming, setWasStreaming] = createSignal(false)
   const [startTime] = createSignal(Date.now())
-  // Track the elapsed time at the moment streaming ends so we don't show a
-  // stale "0.0s" or a value frozen at component-mount time for completed msgs.
+  // Track the elapsed time at the moment streaming ends
   const [completedDuration, setCompletedDuration] = createSignal<number | null>(null)
 
   const duration = createMemo(() => {
-    // Prefer an explicit duration prop from message metadata
     if (props.thinkingDuration) return props.thinkingDuration
-    // For a completed message, use the value we captured when streaming stopped
     if (!props.isStreaming) return completedDuration() ?? 0
-    // While streaming, show live elapsed time
     return (Date.now() - startTime()) / 1000
   })
 
@@ -54,102 +49,62 @@ export const ThinkingRow: Component<ThinkingRowProps> = (props) => {
     }
   })
 
-  const previewLines = createMemo(() => {
-    if (!props.thinking) return ''
-    const lines = props.thinking.split('\n').filter(Boolean)
-    return lines.slice(0, 2).join('\n')
-  })
-
-  // Auto-expand while streaming, auto-collapse when done
   createEffect(() => {
     if (props.isStreaming && props.thinking) {
-      setExpanded(true)
       setWasStreaming(true)
     }
   })
 
   createEffect(() => {
     if (!props.isStreaming && wasStreaming()) {
-      setExpanded(false)
       setWasStreaming(false)
     }
   })
 
-  const labelText = createMemo(() => {
-    if (props.isStreaming && !props.thinking) return 'Thinking...'
+  const summaryText = createMemo(() => {
     if (props.isStreaming) return 'Thinking...'
     const d = duration()
     if (d > 0.5) return `Thought for ${d.toFixed(1)}s`
     return 'Thought'
   })
 
-  const isPreview = () =>
-    displayMode() === 'preview' && !expanded() && !!props.thinking && !props.isStreaming
+  // details element is open (expanded) during streaming, closed when done
+  const isOpen = () => props.isStreaming
 
   return (
     <Show when={!hidden()}>
-      <div class="mb-1 animate-fade-in">
-        {/* Label line: 💭 Thought for Xs */}
-        <button
-          type="button"
-          onClick={() => setExpanded((v) => !v)}
-          aria-expanded={expanded()}
+      <details
+        class="mb-2 animate-fade-in"
+        open={isOpen()}
+        style={{
+          'border-left': '2px solid var(--border-subtle, rgba(127,127,127,0.2))',
+          'padding-left': '10px',
+        }}
+      >
+        <summary
+          class={props.isStreaming ? 'thinking-shimmer' : ''}
           style={{
-            background: 'none',
-            border: 'none',
-            padding: '0',
-            margin: '0',
-            cursor: props.thinking ? 'pointer' : 'default',
-            color: 'var(--text-muted)',
+            cursor: 'pointer',
             'font-size': '11px',
             'font-style': 'italic',
-            'font-family': 'inherit',
-            'line-height': '1.4',
-            display: 'inline',
+            color: 'var(--text-tertiary, var(--text-muted))',
+            'user-select': 'none',
+            'list-style': 'none',
+            display: 'flex',
+            'align-items': 'center',
+            gap: '4px',
           }}
         >
-          <span class={props.isStreaming ? 'thinking-shimmer' : ''}>
-            {props.isStreaming ? '✦' : '💭'} {labelText()}
-          </span>
-        </button>
-
-        {/* Preview mode: show first 2 lines */}
-        <Show when={isPreview()}>
+          {summaryText()}
+        </summary>
+        <Show when={props.thinking}>
           <div
-            class="mt-1 ml-4 pl-3"
+            class={`mt-1 max-h-[300px] overflow-y-auto scrollbar-thin ${props.isStreaming ? 'thinking-shimmer' : ''}`}
             style={{
-              'border-left': '2px solid var(--gray-5, #27272A)',
-              color: 'var(--text-muted)',
+              color: 'var(--text-tertiary, var(--text-muted))',
               'font-style': 'italic',
               'font-size': '12px',
-              opacity: '0.6',
-              'line-height': '1.5',
-              'white-space': 'pre-wrap',
-            }}
-          >
-            {previewLines()}
-            <div
-              style={{
-                'font-size': '10px',
-                opacity: '0.5',
-                'margin-top': '2px',
-              }}
-            >
-              {'▸ Ctrl+O to see full thinking'}
-            </div>
-          </div>
-        </Show>
-
-        {/* Expanded: full thinking content */}
-        <Show when={expanded() && props.thinking}>
-          <div
-            class={`mt-1 ml-4 pl-3 max-h-[300px] overflow-y-auto scrollbar-thin ${props.isStreaming ? 'thinking-shimmer' : ''}`}
-            style={{
-              'border-left': '2px solid var(--gray-5, #27272A)',
-              color: 'var(--text-muted)',
-              'font-style': 'italic',
-              'font-size': '12px',
-              opacity: '0.6',
+              opacity: '0.7',
               'line-height': '1.5',
               'white-space': 'pre-wrap',
             }}
@@ -160,7 +115,7 @@ export const ThinkingRow: Component<ThinkingRowProps> = (props) => {
             </Show>
           </div>
         </Show>
-      </div>
+      </details>
     </Show>
   )
 }

@@ -142,55 +142,66 @@ export function useRustAgent() {
           (event.content as string)?.slice(0, 120)
         )
         setActiveToolCalls((prev) => {
-          const updated = [...prev]
           // Use indexOf (first running) — results arrive in the same order as tool_call events
-          const firstIdx = updated.findIndex((tc) => tc.status === 'running')
-          const first = firstIdx >= 0 ? updated[firstIdx] : undefined
-          if (first) {
-            first.status = event.is_error ? 'error' : 'success'
-            first.output = event.content
-            first.completedAt = Date.now()
-            const durationMs = first.completedAt - first.startedAt
-            log.info('tools', 'Tool call completed', {
-              tool: first.name,
-              success: !event.is_error,
-              durationMs,
-            })
-            log.debug('perf', 'Tool execution time', { tool: first.name, durationMs })
+          const firstIdx = prev.findIndex((tc) => tc.status === 'running')
+          if (firstIdx < 0) return prev
 
-            // Populate diff data for file-modifying tools from their args
-            if (!event.is_error) {
-              const toolArgs = first.args as Record<string, unknown>
-              if (
-                first.name === 'edit' ||
-                first.name === 'apply_patch' ||
-                first.name === 'multiedit'
-              ) {
-                // For edit tools: build diff from old_text/new_text args (Rust tool schema)
-                // Also handle old_string/new_string variants for compatibility
-                const oldStr = (toolArgs.old_text ??
-                  toolArgs.old_string ??
-                  toolArgs.old_content ??
-                  '') as string
-                const newStr = (toolArgs.new_text ??
-                  toolArgs.new_string ??
-                  toolArgs.new_content ??
-                  '') as string
-                if (oldStr || newStr) {
-                  first.diff = { oldContent: oldStr, newContent: newStr }
-                }
-              } else if (
-                first.name === 'write' ||
-                first.name === 'write_file' ||
-                first.name === 'create_file'
-              ) {
-                // For write tools: treat as new file creation (empty old content)
-                const content = (toolArgs.content ?? toolArgs.new_content ?? '') as string
-                if (content) {
-                  first.diff = { oldContent: '', newContent: content }
-                }
+          const first = prev[firstIdx]
+          const completedAt = Date.now()
+          const durationMs = completedAt - first.startedAt
+          log.info('tools', 'Tool call completed', {
+            tool: first.name,
+            success: !event.is_error,
+            durationMs,
+          })
+          log.debug('perf', 'Tool execution time', { tool: first.name, durationMs })
+
+          // Build diff data for file-modifying tools from their args
+          let diff: { oldContent: string; newContent: string } | undefined = first.diff
+          if (!event.is_error) {
+            const toolArgs = first.args as Record<string, unknown>
+            if (
+              first.name === 'edit' ||
+              first.name === 'apply_patch' ||
+              first.name === 'multiedit'
+            ) {
+              // For edit tools: build diff from old_text/new_text args (Rust tool schema)
+              // Also handle old_string/new_string variants for compatibility
+              const oldStr = (toolArgs.old_text ??
+                toolArgs.old_string ??
+                toolArgs.old_content ??
+                '') as string
+              const newStr = (toolArgs.new_text ??
+                toolArgs.new_string ??
+                toolArgs.new_content ??
+                '') as string
+              if (oldStr || newStr) {
+                diff = { oldContent: oldStr, newContent: newStr }
+              }
+            } else if (
+              first.name === 'write' ||
+              first.name === 'write_file' ||
+              first.name === 'create_file'
+            ) {
+              // For write tools: treat as new file creation (empty old content)
+              const content = (toolArgs.content ?? toolArgs.new_content ?? '') as string
+              if (content) {
+                diff = { oldContent: '', newContent: content }
               }
             }
+          }
+
+          // Create a NEW object so SolidJS For detects the change and re-renders.
+          // Mutating in-place doesn't trigger reactivity because the object reference
+          // stays the same — only the array reference changes, but For reconciles
+          // by identity and keeps the existing component instance without updating.
+          const updated = [...prev]
+          updated[firstIdx] = {
+            ...first,
+            status: event.is_error ? 'error' : 'success',
+            output: event.content,
+            completedAt,
+            diff,
           }
           return updated
         })

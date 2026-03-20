@@ -21,6 +21,7 @@ interface ProvidersTabGridProps {
   onSetDefaultModel?: (providerId: string, modelId: string) => void
   onTestConnection?: (id: string) => void
   onUpdateModels?: (providerId: string, models: ProviderModel[]) => void
+  onSaveBaseUrl?: (providerId: string, url: string) => void
 }
 
 export const ProvidersTabGrid: Component<ProvidersTabGridProps> = (props) => (
@@ -45,6 +46,7 @@ export const ProvidersTabGrid: Component<ProvidersTabGridProps> = (props) => (
             onSetDefaultModel={(modelId) => props.onSetDefaultModel?.(provider.id, modelId)}
             onTestConnection={() => props.onTestConnection?.(provider.id)}
             onUpdateModels={(models) => props.onUpdateModels?.(provider.id, models)}
+            onSaveBaseUrl={(url) => props.onSaveBaseUrl?.(provider.id, url)}
           />
         )}
       </For>

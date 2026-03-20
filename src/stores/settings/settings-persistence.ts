@@ -104,16 +104,26 @@ export function syncAllApiKeys(current: AppSettings): void {
 // ============================================================================
 
 /**
- * Push current frontend settings to the core SettingsManager.
+ * Push current frontend settings to the Rust AgentStack via Tauri IPC.
  *
- * Note: With core-v2 removed, getCoreSettings() always returns null.
- * This function now only syncs the permission mode to the desktop
- * approval middleware. The rest is a no-op stub.
+ * Syncs:
+ * - permissionMode → desktop approval middleware + Rust set_permission_level
+ *
+ * Additional settings (reasoningEffort → thinkingLevel, maxTurns, temperature) are
+ * passed per-run via SubmitGoalArgs in submit_goal. There are no standalone AgentStack
+ * IPC commands for them yet; they are persisted to localStorage/FS and read by the
+ * frontend when constructing each submit_goal call.
  */
 export function pushSettingsToCore(s: AppSettings): void {
-  // Sync permission mode to the desktop approval middleware
+  // Sync permission mode to the desktop approval middleware (+ Rust backend)
   setPermissionMode(s.permissionMode)
-  logDebug('settings', 'Core settings sync skipped (core-v2 removed)')
+
+  logDebug('settings', 'Core settings synced', {
+    permissionMode: s.permissionMode,
+    reasoningEffort: s.generation.reasoningEffort,
+    maxTurns: s.agentLimits.agentMaxTurns,
+    temperature: s.generation.temperature,
+  })
 }
 
 // ============================================================================

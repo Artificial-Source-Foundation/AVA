@@ -1,0 +1,130 @@
+{
+  "domain": "project-onboarding",
+  "severity_counts": {
+    "critical": 5,
+    "warning": 9,
+    "suggestion": 7
+  },
+  "findings": [
+    {
+      "severity": "critical",
+      "file": "src/components/onboarding/steps/WorkspaceStep.tsx",
+      "issue": "The 'Trust Current Folder' workspace option always displays '~/Projects' as the path, a hardcoded placeholder. The actual working directory is never resolved — OnboardingFlow.tsx line 79 returns the string '~/Projects' unconditionally with a TODO comment about Tauri API. A new user trusting their project folder will trust the wrong path.",
+      "recommendation": "In OnboardingFlow.tsx, resolve the real cwd using the Tauri `path` plugin (e.g. `homeDir()` + project name, or `invoke('get_cwd')`) inside an `onMount` that sets a signal. Pass the resolved path to WorkspaceStep."
+    },
+    {
+      "severity": "critical",
+      "file": "src/components/dialogs/OnboardingDialog.tsx + src/App.tsx",
+      "issue": "The workspaceChoice collected during onboarding (trust/import/fresh) is passed to the legacy OnboardingData shape as a string field but App.tsx's handleOnboardingComplete never reads or acts on it. The workspace trust selection is silently discarded — the entire WorkspaceStep has no effect on any runtime behavior.",
+      "recommendation": "In App.tsx handleOnboardingComplete, read data.workspaceChoice and apply the corresponding trust action (e.g. invoke Tauri trust command, open folder picker for 'import', or no-op for 'fresh'). Wire the choice to the permission/trust system."
+    },
+    {
+      "severity": "critical",
+      "file": "src/components/onboarding/steps/ProviderStep.tsx",
+      "issue": "OAuth and Configure auth options are explicitly no-ops: line 105 reads '// OAuth and Configure are no-ops for now — they'll connect to Tauri IPC later'. Clicking 'OAuth' on OpenAI or Google does nothing and gives no feedback. Users attempting OAuth-based setup are silently blocked.",
+      "recommendation": "Either hide OAuth buttons until they are wired to the real Tauri IPC flow (invoke('start_oauth_flow', ...)), or show a 'Coming soon' tooltip/badge so users know to use API Key instead. Do not present inactive controls as active."
+    },
+    {
+      "severity": "critical",
+      "file": "src/components/project-hub/ProjectHub.tsx",
+      "issue": "All error handlers (handleNewSession, handleOpenProject, handleResumeLast, handleProjectClick) catch errors and call logError but provide no user-facing feedback. If creating a session or opening a project fails, the UI silently does nothing — the user has no indication of what went wrong or how to recover.",
+      "recommendation": "Import the notification context (useNotification) and call its error() method in each catch block with an actionable message. For example: 'Failed to open project. Check that the folder is accessible and try again.'"
+    },
+    {
+      "severity": "critical",
+      "file": "src/components/project-hub/ProjectHub.tsx",
+      "issue": "handleSettingsClick calls useLayout() inside an event handler (line 114), not at component setup time. In SolidJS, hooks must be called at the top level of a component or reactive root — calling useLayout() inside an onClick handler is a rules-of-hooks violation that may cause reactive tracking loss or runtime errors in strict mode.",
+      "recommendation": "Move `const { openSettings } = useLayout()` to the top of the ProjectHub component body alongside the other hook calls, then reference openSettings directly in handleSettingsClick."
+    },
+    {
+      "severity": "warning",
+      "file": "src/components/project-hub/ProjectHub.tsx",
+      "issue": "No empty state is shown when orderedProjects() is empty. The recent projects section is hidden via Show when={orderedProjects().length > 0}, but there is no fallback UI at all — first-time users see a blank white space below the Quick Actions. There is no 'No recent projects' illustration or call-to-action.",
+      "recommendation": "Add a Show fallback with an empty state: a folder icon, text like 'No recent projects', and a secondary CTA to open a folder. This is especially important for first-run where the hub is the main screen."
+    },
+    {
+      "severity": "warning",
+      "file": "src/components/project-hub/ProjectHub.tsx",
+      "issue": "No loading state while projects list is fetching. The project store exposes isLoadingProjects but ProjectHub never reads it. On first open, the recent projects area is blank until the async data loads, with no spinner or skeleton, creating a jarring flash of empty content.",
+      "recommendation": "Import isLoadingProjects from useProject(), and show a skeleton or spinner inside the recent projects section while it is true."
+    },
+    {
+      "severity": "warning",
+      "file": "src/components/onboarding/OnboardingFlow.tsx",
+      "issue": "The theme field is hardcoded to 'glass' (line 94) in handleComplete, ignoring any theme choice made by the user in the ThemeStep. The ThemeStep lets users pick Soft Zinc, Ocean Blue, Forest, or Rose presets, but these choices are overridden. Only darkStyle, borderRadius, and accentColor are preserved.",
+      "recommendation": "Store the user's resolved theme name from the activePreset or compute it properly, and pass it through to the onComplete payload instead of hardcoding 'glass'."
+    },
+    {
+      "severity": "warning",
+      "file": "src/components/dialogs/AddMCPServerDialog.tsx + src/components/dialogs/CheckpointDialog.tsx + src/components/dialogs/ExportOptionsDialog.tsx + src/components/dialogs/MCPOAuthDialog.tsx + src/components/dialogs/UpdateDialog.tsx",
+      "issue": "Five dialogs implement their own bespoke modal scaffold (fixed inset-0 z-50 overlay div) instead of using the shared Dialog component from src/components/ui/Dialog.tsx. This bypasses Kobalte's built-in focus trap, Escape key handling, and ARIA role=dialog/aria-modal attributes. These dialogs have no focus trap and no ARIA modal semantics.",
+      "recommendation": "Migrate all custom-scaffold dialogs to use the shared Dialog component (or Kobalte's Dialog directly), which provides focus trapping, Escape dismissal, aria-modal=true, role=dialog, and animation out of the box."
+    },
+    {
+      "severity": "warning",
+      "file": "src/components/dialogs/AddMCPServerDialog.tsx",
+      "issue": "The Browse Presets tab renders a list of clickable preset cards but clicking a preset immediately switches to the Manual tab. There is no confirmation or preview step. A user browsing presets who accidentally clicks one will lose their place in the browse view without warning.",
+      "recommendation": "Show a brief hover-state 'Use this preset' affordance or a two-step selection (select then a 'Configure' button) so accidental clicks are not destructive."
+    },
+    {
+      "severity": "warning",
+      "file": "src/components/dialogs/ChangelogDialog.tsx",
+      "issue": "The changelog version is hardcoded to '0.1.0' (line 10, APP_VERSION constant). The changelog content also lists features that don't match the current architecture (e.g. '14 LLM providers', '28 built-in tools' vs actual 8 providers, 9 default tools). This creates misleading first-run information for users.",
+      "recommendation": "Source APP_VERSION from the Tauri package version (e.g. via invoke('get_app_version') or import from package.json at build time). Keep changelog content synchronized with CHANGELOG.md via a build step or at minimum update the static content."
+    },
+    {
+      "severity": "warning",
+      "file": "src/components/dialogs/onboarding/ApiKeysStep.tsx + src/components/dialogs/onboarding/OnboardingSteps.tsx",
+      "issue": "A second, older onboarding flow exists in src/components/dialogs/onboarding/ (ApiKeysStep, OnboardingSteps with WelcomeStep, ThemeStep, FeaturesStep, CompleteStep) alongside the newer flow in src/components/onboarding/. This dead code is never used in the active import chain (OnboardingDialog.tsx imports only from ../onboarding/OnboardingFlow). Two parallel onboarding implementations create maintenance confusion.",
+      "recommendation": "Delete or archive src/components/dialogs/onboarding/ once the new flow in src/components/onboarding/ is confirmed stable. If the old steps have useful features (e.g. FeaturesStep with capability overview), consider merging them into the new flow."
+    },
+    {
+      "severity": "warning",
+      "file": "src/components/onboarding/steps/WorkspaceStep.tsx",
+      "issue": "The 'Trust Current Folder' option has an empty description string ('') in the WORKSPACE_OPTIONS data. In the rendered card, the description slot shows the currentPath (which is the hardcoded '~/Projects'), but the empty description field for the 'trust' option makes the data inconsistent. The 'import' and 'fresh' options have real descriptions, but 'trust' silently relies on a special-case code path.",
+      "recommendation": "Give 'trust' a proper description string like 'Allow AVA to read and modify files in this project', and render currentPath as a secondary line below it, so the path and the permission description are both visible."
+    },
+    {
+      "severity": "warning",
+      "file": "src/services/project-detector.ts",
+      "issue": "detectProject swallows all git errors silently (empty catch blocks on lines 37 and 49). If git is not installed, if the path doesn't exist, or if there are permission errors, the function returns a non-git result with no indication that detection failed. The caller has no way to distinguish 'not a git repo' from 'git command failed' or 'path not found'.",
+      "recommendation": "Return a discriminated result type or set an isGitError flag that callers can inspect. At minimum, log the error using logError so diagnostics are possible. Consider passing the error reason through DetectedProject for display in the UI."
+    },
+    {
+      "severity": "suggestion",
+      "file": "src/components/onboarding/OnboardingFlow.tsx",
+      "issue": "No keyboard navigation is provided for the step-by-step onboarding flow. There is no way to advance with Enter, go back with Escape or ArrowLeft/ArrowRight, or navigate between provider cards with the keyboard. This is a full-screen flow with no keyboard shortcuts.",
+      "recommendation": "Add a window keydown listener while the onboarding is active: Enter to advance (if form state is valid), Escape or ArrowLeft to go back, and ensure all interactive elements within each step are keyboard-reachable in logical tab order."
+    },
+    {
+      "severity": "suggestion",
+      "file": "src/components/onboarding/steps/ThemeStep.tsx",
+      "issue": "Theme preset cards and accent swatches have no aria-pressed or aria-checked to indicate their selected state to assistive technology. The selected state is conveyed only visually via border color. The accent swatch buttons only have a title attribute (which is tooltip-only) and no accessible name describing the color option.",
+      "recommendation": "Add aria-pressed={props.selectedPreset === preset.id} to theme preset buttons and aria-pressed={props.selectedAccent === swatch.id} to swatch buttons. Add aria-label={`${swatch.id} accent color`} to each swatch button."
+    },
+    {
+      "severity": "suggestion",
+      "file": "src/components/project-hub/ProjectCard.tsx",
+      "issue": "ProjectCard renders as a <button> but has no aria-label or accessible description beyond the visible project name. Screen readers will announce the button content as a flat string combining folder icon, name, path, git branch, session count, and time — which may be confusing without structure.",
+      "recommendation": "Add aria-label={`Open project ${props.project.name}, ${props.project.sessionCount} sessions, last active ${formatLastActive(props.project.lastOpenedAt)}`} to the button element to provide a clean synthesized accessible description."
+    },
+    {
+      "severity": "suggestion",
+      "file": "src/components/project-hub/QuickActions.tsx",
+      "issue": "The three quick action buttons have no loading state. If any of the underlying async operations (createNewSession, openDirectory) are in flight, the buttons remain active and can be clicked multiple times. There is no disabled state or spinner during async execution.",
+      "recommendation": "Lift an isLoading signal into QuickActions or down from ProjectHub, and disable all three buttons with a visual spinner on the active one while an operation is pending. This prevents double-submission and gives clear feedback."
+    },
+    {
+      "severity": "suggestion",
+      "file": "src/components/dialogs/PermissionDialog.tsx",
+      "issue": "The permission dialog only handles riskLevel === 'high' for the warning banner (line 190), but shows no elevated warning for 'critical' risk level operations. The risk config presumably includes a 'critical' tier, but it receives the same default presentation as 'medium' or 'low'.",
+      "recommendation": "Add explicit handling for riskLevel === 'critical' with a stronger visual treatment (e.g. red header background, mandatory confirmation checkbox 'I understand this is irreversible') to differentiate truly critical operations from merely high-risk ones."
+    },
+    {
+      "severity": "suggestion",
+      "file": "src/components/dialogs/MCPOAuthDialog.tsx",
+      "issue": "The waiting state after OAuth authorization provides no timeout or completion detection mechanism. The spinner and 'Waiting for authorization...' message will spin indefinitely if the user closes their browser tab or if the redirect callback never fires. There is no timeout or manual 'I completed authorization' confirmation button.",
+      "recommendation": "Add a timeout (e.g. 5 minutes) after which the dialog transitions to an error state with a retry option. Alternatively add an 'I've authorized, check status' button that invokes a Tauri command to poll for the OAuth callback completion."
+    }
+  ]
+}

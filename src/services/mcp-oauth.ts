@@ -19,9 +19,11 @@ export type OAuthStatus = 'none' | 'authorized' | 'expired' | 'error'
 const tokenStore = new Map<string, OAuthTokenSet>()
 
 /**
- * Generate PKCE code verifier and challenge
+ * Generate PKCE code verifier and S256 challenge.
+ * Uses Web Crypto API (SubtleCrypto) to compute SHA-256 of the verifier,
+ * then base64url-encodes the digest per RFC 7636.
  */
-function generatePKCE(): { verifier: string; challenge: string } {
+async function generatePKCE(): Promise<{ verifier: string; challenge: string }> {
   const array = new Uint8Array(32)
   crypto.getRandomValues(array)
   const verifier = btoa(String.fromCharCode(...array))
@@ -29,9 +31,15 @@ function generatePKCE(): { verifier: string; challenge: string } {
     .replace(/\//g, '_')
     .replace(/=+$/, '')
 
-  // For simplicity, use S256 challenge = base64url(sha256(verifier))
-  // In browser we'd use SubtleCrypto; for now use plain challenge
-  return { verifier, challenge: verifier }
+  // S256: challenge = BASE64URL(SHA-256(ASCII(verifier)))
+  const encoded = new TextEncoder().encode(verifier)
+  const digest = await crypto.subtle.digest('SHA-256', encoded)
+  const challenge = btoa(String.fromCharCode(...new Uint8Array(digest)))
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '')
+
+  return { verifier, challenge }
 }
 
 /**
@@ -45,7 +53,7 @@ export async function startOAuthFlow(
   scopes: string[],
   redirectUri: string
 ): Promise<{ verifier: string; authorizationUrl: string }> {
-  const { verifier, challenge } = generatePKCE()
+  const { verifier, challenge } = await generatePKCE()
   const state = crypto.randomUUID()
 
   const params = new URLSearchParams({

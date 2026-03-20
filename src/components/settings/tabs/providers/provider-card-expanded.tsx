@@ -36,11 +36,13 @@ interface ProviderCardExpandedProps {
   onSetDefaultModel?: (modelId: string) => void
   onTestConnection?: () => void
   onUpdateModels?: (models: ProviderModel[]) => void
+  onSaveBaseUrl?: (url: string) => void
 }
 
 export const ProviderCardExpanded: Component<ProviderCardExpandedProps> = (props) => {
   const [apiKey, setApiKey] = createSignal(props.provider.apiKey ? '••••••••••••' : '')
   const [showKey, setShowKey] = createSignal(false)
+  const [baseUrl, setBaseUrl] = createSignal(props.provider.baseUrl || '')
   const [isLoadingModels, setIsLoadingModels] = createSignal(false)
   const [isOAuthLoading, setIsOAuthLoading] = createSignal(false)
   const [isOAuthConnected, setIsOAuthConnected] = createSignal(checkStoredOAuth(props.provider.id))
@@ -159,7 +161,9 @@ export const ProviderCardExpanded: Component<ProviderCardExpandedProps> = (props
       <Show when={props.provider.id === 'ollama' || props.provider.id === 'custom'}>
         <input
           type="url"
-          value={props.provider.baseUrl || ''}
+          value={baseUrl()}
+          onInput={(e) => setBaseUrl(e.currentTarget.value)}
+          onBlur={() => props.onSaveBaseUrl?.(baseUrl())}
           placeholder="http://localhost:11434"
           class="w-full px-3 py-2 bg-[var(--input-background)] text-xs text-[var(--text-primary)] placeholder:text-[var(--input-placeholder)] border border-[var(--input-border)] rounded-[var(--radius-md)] focus:outline-none focus:border-[var(--input-border-focus)] transition-colors"
         />

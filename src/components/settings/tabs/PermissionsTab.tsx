@@ -18,11 +18,11 @@ export const PermissionsTab: Component = () => {
   const rules = () => settings().toolRules
   const approvedTools = () => settings().autoApprovedTools
 
-  const modes: PermissionMode[] = ['ask', 'auto-approve', 'bypass']
+  const modes: PermissionMode[] = ['ask', 'auto-approve']
   const modeLabels: Record<PermissionMode, string> = {
     ask: 'Ask',
     'auto-approve': 'Auto',
-    bypass: 'Bypass',
+    bypass: 'Auto', // 'bypass' is legacy — treated as 'auto-approve'
   }
 
   const applyPreset = (preset: 'strict' | 'balanced' | 'yolo') => {
@@ -52,7 +52,7 @@ export const PermissionsTab: Component = () => {
     }
 
     updateSettings({
-      permissionMode: 'bypass',
+      permissionMode: 'auto-approve',
       toolRules: [],
     })
   }

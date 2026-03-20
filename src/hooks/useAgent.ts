@@ -98,8 +98,11 @@ function createAgentStore() {
     return msg ? { type: 'unknown', message: msg } : null
   }
 
-  // ── Forward agent events to team bridge ──────────────────────────────
-  let lastTeamBridgeIdx = 0
+  // ── Forward agent events to team bridge + handle UI events ──────────
+  // Single cursor shared across both concerns — avoids double-iteration of the
+  // events signal and prevents the subtle bug where two independent cursors could
+  // diverge when the events array is cleared between runs.
+  let lastEventIdx = 0
 
   /**
    * Map Praxis IPC events (from Rust) to the team bridge's AgentEvent format.
@@ -168,12 +171,14 @@ function createAgentStore() {
 
   createEffect(
     on(rustAgent.events, (allEvents) => {
-      if (allEvents.length < lastTeamBridgeIdx) {
-        lastTeamBridgeIdx = 0
+      // Reset cursor when events array is cleared (new run started)
+      if (allEvents.length < lastEventIdx) {
+        lastEventIdx = 0
       }
-      for (let i = lastTeamBridgeIdx; i < allEvents.length; i++) {
+      for (let i = lastEventIdx; i < allEvents.length; i++) {
         const event = allEvents[i]!
-        // Try to map Praxis events to team bridge events
+
+        // ── Team bridge: forward Praxis events ─────────────────────
         const praxisMapped = mapPraxisToTeamEvent(event)
         if (praxisMapped) {
           // Ensure the director agent exists before forwarding child events
@@ -191,22 +196,8 @@ function createAgentStore() {
         } else {
           teamBridge.bridgeToTeam(event as import('./agent/agent-events').AgentEvent)
         }
-      }
-      lastTeamBridgeIdx = allEvents.length
-    })
-  )
 
-  // ── Watch for approval_request / question_request events from Rust ──
-  let lastProcessedEventIdx = 0
-
-  createEffect(
-    on(rustAgent.events, (allEvents) => {
-      // Reset index when events array is cleared (new run started)
-      if (allEvents.length < lastProcessedEventIdx) {
-        lastProcessedEventIdx = 0
-      }
-      for (let i = lastProcessedEventIdx; i < allEvents.length; i++) {
-        const event = allEvents[i]!
+        // ── UI signals: approval / question / thinking / tokens ────
         if (event.type === 'tool_call') {
           log.debug('agent', 'Tool called', { tool: (event as { name?: string }).name })
         }
@@ -279,7 +270,7 @@ function createAgentStore() {
           setPendingPlan(planEvent.plan)
         }
       }
-      lastProcessedEventIdx = allEvents.length
+      lastEventIdx = allEvents.length
     })
   )
 

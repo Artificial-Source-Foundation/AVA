@@ -24,6 +24,7 @@ interface ProviderCardProps {
   onSetDefaultModel?: (modelId: string) => void
   onTestConnection?: () => void
   onUpdateModels?: (models: LLMProviderConfig['models']) => void
+  onSaveBaseUrl?: (url: string) => void
 }
 
 const BUILTIN_IDS = new Set(defaultProviders.map((p) => p.id))
@@ -125,6 +126,7 @@ export const ProviderCard: Component<ProviderCardProps> = (props) => {
             onSetDefaultModel={props.onSetDefaultModel}
             onTestConnection={props.onTestConnection}
             onUpdateModels={props.onUpdateModels}
+            onSaveBaseUrl={props.onSaveBaseUrl}
           />
         </Show>
       </div>

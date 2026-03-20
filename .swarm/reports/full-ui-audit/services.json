@@ -1,0 +1,137 @@
+{
+  "domain": "services",
+  "audited_at": "2026-03-20",
+  "severity_counts": {
+    "critical": 3,
+    "warning": 12,
+    "suggestion": 7
+  },
+  "findings": [
+    {
+      "severity": "critical",
+      "file": "src/services/mcp-oauth.ts",
+      "issue": "PKCE S256 challenge is NOT implemented — the code claims 'code_challenge_method: S256' but sends the raw verifier as the challenge. The comment even acknowledges it: 'For simplicity, use S256 challenge = base64url(sha256(verifier)) // In browser we'd use SubtleCrypto; for now use plain challenge'. Any OAuth server that validates the PKCE challenge will reject the token exchange.",
+      "recommendation": "Implement real S256: `const encoded = new TextEncoder().encode(verifier); const digest = await crypto.subtle.digest('SHA-256', encoded); const challenge = btoa(String.fromCharCode(...new Uint8Array(digest))).replace(/\\+/g,'-').replace(/\\//g,'_').replace(/=+$/,'');`. Remove the plain-verifier fallback."
+    },
+    {
+      "severity": "critical",
+      "file": "src/hooks/useAgent.ts",
+      "issue": "Two separate createEffect calls both iterate over rustAgent.events using independent close-over integer cursors (lastTeamBridgeIdx and lastProcessedEventIdx). Neither effect is inside a reactive root with cleanup — createAgentStore() is called from a singleton factory that runs outside any SolidJS component tree. This means the effects are created in a detached reactive context, SolidJS emits a warning ('computations created outside a reactive root'), and if the singleton were ever reset via _resetAgentSingleton() the old effects would continue to fire against the stale signal, leaking memory.",
+      "recommendation": "Wrap createAgentStore() body in createRoot() and store the disposer so _resetAgentSingleton() can call it. Alternatively merge the two createEffect loops into one to halve the iteration work."
+    },
+    {
+      "severity": "critical",
+      "file": "src/services/rust-bridge.ts",
+      "issue": "rustAgent.run and rustAgent.stream are identical — both invoke 'submit_goal' with the same payload. There is no streaming-specific command on the Rust side; the agent always streams via the 'agent-event' Tauri event channel. The bridge exposes a false distinction that misleads callers into thinking they can choose between batch and streaming execution.",
+      "recommendation": "Remove rustAgent.stream. If a streaming variant is needed, document that all agent execution is inherently streaming via the event channel; the run() return value is only the final session summary."
+    },
+    {
+      "severity": "warning",
+      "file": "src/services/tauri-agent.ts",
+      "issue": "File is explicitly marked dead code in its own module comment ('TODO: Dead module — no production code imports this file'). However the file is still compiled, its test file (tauri-agent.test.ts) still passes, and the legacy Tauri commands it calls (agent_run, agent_stream) are still registered in src-tauri/src/lib.rs and agent_integration.rs. This dead surface area will confuse contributors and keeps unused Rust commands alive.",
+      "recommendation": "Migrate or delete tauri-agent.test.ts (its test coverage should move to use-rust-agent.ts tests). Then delete tauri-agent.ts and remove agent_run/agent_stream from agent_integration.rs and lib.rs. The greet command in greet.rs can also be removed."
+    },
+    {
+      "severity": "warning",
+      "file": "src/lib/api-client.ts",
+      "issue": "Several Tauri IPC commands used by rustBackend have no mapping in COMMAND_TO_ENDPOINT, so web-mode falls back to generic '/api/{command}' paths that almost certainly don't exist on the Rust HTTP server. Missing mappings: resolve_plan, start_praxis, cancel_praxis, get_praxis_status, steer_lead. These fail silently with undefined returns (status 404 is caught and returns undefined as T).",
+      "recommendation": "Add explicit mappings for each missing command. If the web-mode HTTP server genuinely doesn't support Praxis (per CLAUDE.md: 'Tauri bridge for Praxis events is not yet implemented'), document that and add early-exit guards in the callers rather than silently returning undefined."
+    },
+    {
+      "severity": "warning",
+      "file": "src/hooks/use-rust-agent.ts",
+      "issue": "token_usage event parsing uses a dual-key fallback pattern: `const tu = event as unknown as Record<string, number>; const input = tu.input_tokens ?? tu.inputTokens ?? 0;`. The TokenUsageEvent type (rust-ipc.ts) declares camelCase fields (inputTokens, outputTokens, costUsd), but the comment says Rust serializes as snake_case. The type definition is therefore wrong for the actual wire format, and the unsafe `as unknown as` cast bypasses TypeScript checking entirely. The same dual-parse is duplicated in useAgent.ts line 225.",
+      "recommendation": "Fix TokenUsageEvent in rust-ipc.ts to match the actual Rust serialization (snake_case with serde rename_all = 'snake_case'). Remove the dual-key fallback once the type is correct. Remove the duplicate parse in useAgent.ts and rely solely on the event type."
+    },
+    {
+      "severity": "warning",
+      "file": "src/stores/session/session-state.ts",
+      "issue": "Five window.addEventListener calls are attached inside a createRoot() block with no corresponding removeEventListener. createRoot() does not automatically dispose DOM listeners when the reactive scope is collected — it only tracks SolidJS computations. Because the session store is module-level (effectively a singleton for the app lifetime), these listeners are effectively permanent, but if the module were ever reloaded in tests or hot-reload scenarios they would accumulate.",
+      "recommendation": "Wrap each window.addEventListener with a matching removeEventListener returned from the createRoot disposer, or consolidate them into a single onCleanup-aware init function called from useAppInit."
+    },
+    {
+      "severity": "warning",
+      "file": "src/stores/settings/settings-signal.ts",
+      "issue": "An ava:core-settings-changed window event listener is attached inside createRoot() with no cleanup. The handler applies partial patches using unchecked casts (e.g., `patch.autoApprovePatterns as string[]`) without validating that the incoming data actually matches the expected shape. A malformed event would silently corrupt settings.",
+      "recommendation": "Add runtime shape validation (or use a type guard) before applying patches from the event. Add removeEventListener on createRoot disposer."
+    },
+    {
+      "severity": "warning",
+      "file": "src/stores/diagnostics.ts",
+      "issue": "Module-level window.addEventListener('ava:diagnostics', ...) at line 40 has no corresponding cleanup. This listener is outside any reactive root.",
+      "recommendation": "Move the listener registration inside a useDiagnostics() call with onCleanup, or add cleanup to the module export pattern."
+    },
+    {
+      "severity": "warning",
+      "file": "src/services/rust-bridge.ts",
+      "issue": "rustAgent and rustBackend both expose submit_goal/cancel_agent/get_agent_status with different parameter shapes and return types. rustAgent.run wraps goal as {args:{goal:'...'}} while rustBackend.submitGoal accepts a full SubmitGoalArgs struct. This split API means useAgent.ts must import from both namespaces for equivalent functionality, and new callers may use the wrong one.",
+      "recommendation": "Consolidate rustAgent into rustBackend or vice versa. rustAgent is primarily used by use-rust-agent.ts; rustBackend provides the richer API used by useAgent.ts. Consider deprecating rustAgent after verifying use-rust-agent.ts can migrate to rustBackend calls."
+    },
+    {
+      "severity": "warning",
+      "file": "src/services/settings-sync.ts",
+      "issue": "Entire file is a no-op stub. Both exported functions (markPushing, startSettingsSync) do nothing. The only consumer is settings-sync.test.ts, which tests the no-op. This is dead service code that exists only for backward compatibility with removed core-v2.",
+      "recommendation": "Delete settings-sync.ts and its test. The settings signal now uses window event listener directly in settings-signal.ts. Any legitimate callers should use that mechanism directly."
+    },
+    {
+      "severity": "warning",
+      "file": "src/services/backend-switcher.ts",
+      "issue": "Entire file is a trivial stub that always returns 'rust'. No consumers import it (grep confirms zero imports outside the file itself). Kept for unknown reasons.",
+      "recommendation": "Delete backend-switcher.ts. If runtime backend detection is ever needed, it should be part of a meaningful service, not a file that returns a hardcoded constant."
+    },
+    {
+      "severity": "warning",
+      "file": "src/services/sandbox-middleware.ts",
+      "issue": "createSandboxMiddleware() returns a middleware whose before() handler is `async (_ctx) => _ctx` — it returns the context unchanged instead of returning undefined (pass-through) or MiddlewareResult. This is a type mismatch with ToolMiddleware.before() which should return Promise<ToolMiddlewareResult | undefined>. Beyond the type issue, the function is never called anywhere in production code (confirmed by grep).",
+      "recommendation": "Delete sandbox-middleware.ts entirely. Sandbox enforcement is confirmed to be handled by the Rust backend."
+    },
+    {
+      "severity": "warning",
+      "file": "src/services/logger.ts + src/lib/logger.ts",
+      "issue": "Two separate logger implementations coexist. services/logger.ts is a file-logger that writes to $APPDATA/ava/logs/ via Tauri IPC (invoke('append_log')). lib/logger.ts is the structured frontend logger that writes to ~/.ava/logs/ via a LogBuffer. Both are used in production: services/logger.ts is imported by file-watcher.ts, git-extension.ts, session-lifecycle.ts, settings-persistence.ts, etc. lib/logger.ts provides the `log` object used by hooks and components. They write to different directories and have different log formats.",
+      "recommendation": "Consolidate to lib/logger.ts (which has the richer LogBuffer and LogBufferEntry infrastructure). Migrate services/*.ts imports from services/logger to lib/logger. services/logger.ts can remain as a thin re-export shim during migration."
+    },
+    {
+      "severity": "suggestion",
+      "file": "src/services/tauri-agent.ts",
+      "issue": "The listenToAgentEvents function creates a WebSocket but the returned unlisten closure only calls ws.close() — it does not null out the reference or prevent onmessage from firing after close() is called (close() is async; messages may still arrive before the connection tears down).",
+      "recommendation": "Set ws.onmessage = null before calling ws.close() in the unlisten function."
+    },
+    {
+      "severity": "suggestion",
+      "file": "src/services/file-watcher.ts",
+      "issue": "processedHashes is a module-level Set that grows unbounded while the watcher is running. Long-lived projects with many file saves could accumulate thousands of entries. The set is cleared on stopFileWatcher() but never pruned during active watching.",
+      "recommendation": "Implement LRU eviction: cap processedHashes at a reasonable size (e.g., 10,000 entries) and evict oldest entries when the cap is reached. Or use a WeakRef-based approach keyed on file path with a TTL."
+    },
+    {
+      "severity": "suggestion",
+      "file": "src/services/env-bridge.ts",
+      "issue": "initEnvBridge() prefetches COMMON_ENV_VARS (17 variables) but is never called from useAppInit.ts or anywhere in the app initialization flow. The env proxy therefore always returns undefined until getEnvVar() is explicitly called by a consumer.",
+      "recommendation": "Either call initEnvBridge() from runAppInit() (before tools need env vars), or remove COMMON_ENV_VARS and document that consumers must call getEnvVar() lazily."
+    },
+    {
+      "severity": "suggestion",
+      "file": "src/hooks/useChat.ts",
+      "issue": "useChat() is a thin wrapper over useAgent() that re-exposes a nearly-identical API. sendMessage() drops the _model and _images parameters entirely (they are documented but ignored). contextStats() always returns null. currentProvider() always returns null. This wrapper adds no value and creates API confusion for developers who see both useChat and useAgent exported.",
+      "recommendation": "Deprecate useChat() and migrate the few remaining callers to useAgent() directly. The wrapper was marked as a 'backward-compat' shim — complete the migration."
+    },
+    {
+      "severity": "suggestion",
+      "file": "src/services/rust-bridge.ts",
+      "issue": "rustPty duplicates functionality already in src/services/pty-bridge.ts. rustPty.spawn/write/resize/kill directly call invokeCommand(), while pty-bridge.ts exposes spawnPty/writePty/resizePty/killPty which also listen to Tauri events. Components that use pty-bridge.ts (XTerminal.tsx) get the full event subscription; anything using rustPty would miss output/exit events.",
+      "recommendation": "Remove rustPty from rust-bridge.ts. All PTY callers should use pty-bridge.ts which handles both IPC and event subscription correctly."
+    },
+    {
+      "severity": "suggestion",
+      "file": "src/__tests__/ + src/services/ + src/hooks/",
+      "issue": "Test coverage gaps: rust-bridge.ts (the primary Tauri IPC surface, ~300 lines) has no test file. api-client.ts (the entire web-mode communication layer) has no test file. use-rust-agent.ts (core streaming/event handling logic) has no test file. session-lifecycle.ts has no test. The existing tauri-agent.test.ts tests a dead module.",
+      "recommendation": "Add unit tests for: (1) api-client.ts — COMMAND_TO_ENDPOINT routing, payload serialization, 404 handling; (2) use-rust-agent.ts — event handler dispatch, thinking segment accumulation, tool_result FIFO matching; (3) rust-bridge.ts — invokeCommand error wrapping. Delete or repurpose tauri-agent.test.ts."
+    },
+    {
+      "severity": "suggestion",
+      "file": "src/services/core-bridge.ts",
+      "issue": "getCoreSettings(), getCoreBus(), and getCoreSessionManager() are stub functions that always return null. They exist only for backward compatibility with removed core-v2 consumers. Callers that call these functions receive null and must defensively check before use, spreading null-checks through the codebase.",
+      "recommendation": "Remove all three stubs. Any file still importing them should be updated: use rustBackend directly for settings/sessions, or remove the call entirely if the feature is no longer needed."
+    }
+  ]
+}

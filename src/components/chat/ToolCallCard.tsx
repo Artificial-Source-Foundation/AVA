@@ -10,6 +10,7 @@
 
 import { ChevronRight } from 'lucide-solid'
 import { type Component, createEffect, createSignal, onCleanup, Show } from 'solid-js'
+import { useSettings } from '../../stores/settings'
 import type { ToolCall } from '../../types'
 import { SubagentCard } from './SubagentCard'
 import { ToolIcon } from './tool-call-icon'
@@ -34,7 +35,10 @@ export const ToolCallCard: Component<ToolCallCardProps> = (props) => {
     return <SubagentCard toolCall={props.toolCall} />
   }
 
-  const [expanded, setExpanded] = createSignal(false)
+  const { settings } = useSettings()
+  // When toolResponseStyle is 'detailed', tool results start expanded by default
+  const defaultExpanded = () => settings().ui.toolResponseStyle === 'detailed'
+  const [expanded, setExpanded] = createSignal(defaultExpanded())
   const [elapsed, setElapsed] = createSignal('')
 
   const summary = () => summarizeAction(props.toolCall.name, props.toolCall.args)

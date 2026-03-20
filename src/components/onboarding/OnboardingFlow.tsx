@@ -7,7 +7,7 @@
  * Manages all step state and emits a single OnboardingData payload on completion.
  */
 
-import { type Component, createSignal, Show } from 'solid-js'
+import { type Component, createSignal, onMount, Show } from 'solid-js'
 import type { AccentColor } from '../../stores/settings/settings-types'
 import { StepDots } from './StepDots'
 import { CompleteStep } from './steps/CompleteStep'
@@ -74,10 +74,19 @@ export const OnboardingFlow: Component<OnboardingFlowProps> = (props) => {
   const [workspaceChoice, setWorkspaceChoice] = createSignal<WorkspaceChoice>('trust')
 
   // Resolve current working directory for workspace step
-  const currentPath = (): string => {
-    // In Tauri, we could use Tauri API. For now use a placeholder.
-    return '~/Projects'
-  }
+  const [currentPath, setCurrentPath] = createSignal('~/Projects')
+
+  onMount(() => {
+    void (async () => {
+      try {
+        const { homeDir } = await import('@tauri-apps/api/path')
+        const home = await homeDir()
+        setCurrentPath(home)
+      } catch {
+        // Non-Tauri (web) environment — keep placeholder
+      }
+    })()
+  })
 
   // Navigation
   const next = (): void => {

@@ -83,6 +83,7 @@ export const SettingsModalContent: Component<SettingsModalContentProps> = (props
             })
           }}
           onTestConnection={props.onTestProvider}
+          onSaveBaseUrl={(id, url) => props.onUpdateProvider(id, { baseUrl: url || undefined })}
         />
       </Show>
 

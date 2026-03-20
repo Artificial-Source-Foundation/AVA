@@ -41,19 +41,29 @@ const TreeNode: Component<{
         style={{ 'padding-left': `${props.depth * 16 + 8}px` }}
       >
         <Show when={hasChildren()} fallback={<span class="w-4" />}>
-          <button
-            type="button"
+          {/* biome-ignore lint/a11y/useSemanticElements: div+role avoids nested button (invalid HTML / WebKitGTK crash risk) */}
+          <div
+            role="button"
+            tabIndex={0}
             onClick={(e) => {
               e.stopPropagation()
               setExpanded((v) => !v)
             }}
-            class="p-0.5 rounded-[var(--radius-sm)] hover:bg-[var(--alpha-white-5)] transition-transform"
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.stopPropagation()
+                setExpanded((v) => !v)
+              }
+            }}
+            class="p-0.5 rounded-[var(--radius-sm)] hover:bg-[var(--alpha-white-5)] transition-transform cursor-pointer"
+            aria-label={expanded() ? 'Collapse' : 'Expand'}
+            aria-expanded={expanded()}
           >
             <ChevronRight
               class="w-3 h-3 text-[var(--text-muted)] transition-transform"
               classList={{ 'rotate-90': expanded() }}
             />
-          </button>
+          </div>
         </Show>
         <Show when={props.depth > 0}>
           <GitBranch class="w-3 h-3 text-[var(--text-muted)] flex-shrink-0" />

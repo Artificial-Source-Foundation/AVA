@@ -102,7 +102,9 @@ export const ProviderStep: Component<ProviderStepProps> = (props) => {
     if (type === 'apikey') {
       setExpandedProvider((prev) => (prev === provider.id ? null : provider.id))
     }
-    // OAuth and Configure are no-ops for now — they'll connect to Tauri IPC later
+    // TODO(auth): wire 'oauth' type to invoke('start_oauth_flow', { provider: provider.id })
+    // TODO(auth): wire 'configure' type to invoke('open_provider_settings', { provider: provider.id })
+    // Until wired, OAuth and Configure buttons are disabled below to avoid misleading users.
   }
 
   return (
@@ -148,12 +150,20 @@ export const ProviderStep: Component<ProviderStepProps> = (props) => {
                       <button
                         type="button"
                         onClick={() => handleAuth(provider, opt.type)}
+                        disabled={opt.type === 'oauth' || opt.type === 'configure'}
+                        title={
+                          opt.type === 'oauth' || opt.type === 'configure'
+                            ? 'Coming soon — use API Key for now'
+                            : undefined
+                        }
                         class="px-3 py-1.5 text-xs font-medium rounded-lg transition-colors"
                         classList={{
-                          'bg-[var(--accent)] text-white hover:bg-[var(--violet-8)]':
+                          'bg-[var(--accent)] text-white opacity-40 cursor-not-allowed':
                             opt.type === 'oauth',
                           'bg-[var(--gray-5)] text-[var(--text-primary)] hover:bg-[var(--gray-6)]':
-                            opt.type === 'apikey' || opt.type === 'configure',
+                            opt.type === 'apikey',
+                          'bg-[var(--gray-5)] text-[var(--text-primary)] opacity-40 cursor-not-allowed':
+                            opt.type === 'configure',
                         }}
                       >
                         {opt.label}

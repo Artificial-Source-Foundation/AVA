@@ -18,6 +18,7 @@ export interface ProvidersTabProps {
   onSetDefaultModel?: (providerId: string, modelId: string) => void
   onTestConnection?: (id: string) => void
   onUpdateModels?: (providerId: string, models: ProviderModel[]) => void
+  onSaveBaseUrl?: (providerId: string, url: string) => void
 }
 
 export const ProvidersTab: Component<ProvidersTabProps> = (props) => {
@@ -54,6 +55,7 @@ export const ProvidersTab: Component<ProvidersTabProps> = (props) => {
         onSetDefaultModel={props.onSetDefaultModel}
         onTestConnection={props.onTestConnection}
         onUpdateModels={props.onUpdateModels}
+        onSaveBaseUrl={props.onSaveBaseUrl}
       />
 
       <p class="text-[10px] text-[var(--text-muted)] text-center">

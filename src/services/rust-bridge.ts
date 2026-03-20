@@ -118,9 +118,9 @@ export const rustTools = {
 }
 
 export const rustAgent = {
+  // All agent execution is inherently streaming via the 'agent-event' Tauri event channel.
+  // The return value is only the final session summary; real-time output arrives via events.
   run: (goal: string): Promise<SubmitGoalResult> =>
-    invokeCommand('submit_goal', { args: { goal } }),
-  stream: (goal: string): Promise<SubmitGoalResult> =>
     invokeCommand('submit_goal', { args: { goal } }),
   cancel: (): Promise<void> => invokeCommand('cancel_agent'),
   status: (): Promise<AgentStatus> => invokeCommand('get_agent_status'),

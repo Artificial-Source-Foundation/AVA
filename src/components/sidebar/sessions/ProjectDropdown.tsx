@@ -4,7 +4,6 @@
  * Quick-switch dropdown for changing projects from the sidebar header.
  */
 
-import { open } from '@tauri-apps/plugin-dialog'
 import { ChevronDown, Compass, FolderOpen } from 'lucide-solid'
 import { type Component, createMemo, createSignal, For, onCleanup, Show } from 'solid-js'
 import { logError } from '../../../services/logger'
@@ -75,6 +74,7 @@ export const ProjectDropdown: Component = () => {
   const handleOpenProject = async (): Promise<void> => {
     setDropdownOpen(false)
     try {
+      const { open } = await import('@tauri-apps/plugin-dialog')
       const selected = await open({ directory: true, title: 'Select Project Folder' })
       if (!selected || typeof selected !== 'string') return
       await openDirectory(selected)

@@ -6,8 +6,7 @@
  * polished, design-spec-aligned layout.
  */
 
-import { open } from '@tauri-apps/plugin-dialog'
-import { Settings } from 'lucide-solid'
+import { Folder, Settings } from 'lucide-solid'
 import { type Component, For, Show } from 'solid-js'
 import { logError } from '../../services/logger'
 import { useLayout } from '../../stores/layout'
@@ -26,9 +25,15 @@ function getGreeting(): string {
 }
 
 export const ProjectHub: Component = () => {
-  const { closeProjectHub } = useLayout()
-  const { currentProject, recentProjects, favoriteProjects, openDirectory, switchProject } =
-    useProject()
+  const { closeProjectHub, openSettings } = useLayout()
+  const {
+    currentProject,
+    recentProjects,
+    favoriteProjects,
+    openDirectory,
+    switchProject,
+    isLoadingProjects,
+  } = useProject()
   const { createNewSession, loadSessionsForCurrentProject, restoreForCurrentProject } = useSession()
 
   /** Deduplicated ordered list: favorites first, then recent. */
@@ -56,6 +61,7 @@ export const ProjectHub: Component = () => {
   const handleOpenProject = async (): Promise<void> => {
     let selected: string | string[] | null = null
     try {
+      const { open } = await import('@tauri-apps/plugin-dialog')
       selected = await open({ directory: true, title: 'Select Project Folder' })
     } catch (error) {
       logError('ProjectHub', 'Failed to open folder dialog', error)
@@ -110,8 +116,6 @@ export const ProjectHub: Component = () => {
   }
 
   const handleSettingsClick = (): void => {
-    // Dispatch event that AppDialogs / layout can listen to
-    const { openSettings } = useLayout()
     openSettings()
   }
 
@@ -162,15 +166,33 @@ export const ProjectHub: Component = () => {
         </div>
 
         {/* Recent Projects */}
-        <Show when={orderedProjects().length > 0}>
-          <div>
-            <h2
-              class="text-[10px] font-semibold text-[var(--gray-6)] uppercase mb-4"
-              style={{ 'letter-spacing': '0.8px' }}
-            >
-              Recent Projects
-            </h2>
+        <div>
+          <h2
+            class="text-[10px] font-semibold text-[var(--gray-6)] uppercase mb-4"
+            style={{ 'letter-spacing': '0.8px' }}
+          >
+            Recent Projects
+          </h2>
 
+          {/* Loading state */}
+          <Show when={isLoadingProjects()}>
+            <div class="flex items-center gap-2 text-sm text-[var(--text-muted)] py-4">
+              <div class="w-4 h-4 border-2 border-[var(--gray-5)] border-t-[var(--accent)] rounded-full animate-spin" />
+              <span>Loading projects…</span>
+            </div>
+          </Show>
+
+          {/* Empty state */}
+          <Show when={!isLoadingProjects() && orderedProjects().length === 0}>
+            <div class="flex flex-col items-center justify-center py-10 text-[var(--text-muted)]">
+              <Folder class="w-10 h-10 mb-3 opacity-40" />
+              <p class="text-sm font-medium">No recent projects</p>
+              <p class="text-xs mt-1 text-[var(--text-muted)]">Open a folder to get started</p>
+            </div>
+          </Show>
+
+          {/* Project cards */}
+          <Show when={!isLoadingProjects() && orderedProjects().length > 0}>
             <div class="flex flex-wrap gap-4">
               <For each={orderedProjects()}>
                 {(project) => (
@@ -182,8 +204,8 @@ export const ProjectHub: Component = () => {
                 )}
               </For>
             </div>
-          </div>
-        </Show>
+          </Show>
+        </div>
       </div>
     </div>
   )

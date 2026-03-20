@@ -837,27 +837,105 @@ pub fn parse_openai_tool_calls(payload: &Value) -> Vec<ToolCall> {
 /// - Add ALL property keys to `required`
 /// - Recurse into nested objects and array items
 fn make_strict_schema(schema: &mut Value) {
+    make_strict_schema_with_required(schema, &[]);
+}
+
+/// Recursively make a JSON Schema strict for the OpenAI Responses API.
+///
+/// OpenAI's strict mode requires:
+/// 1. `additionalProperties: false` on every object schema
+/// 2. ALL properties listed in `required`
+/// 3. Optional properties (not originally in `required`) must allow `null`
+///    so the model can omit them by sending `null` rather than inventing values.
+///
+/// `parent_required` is the set of property names that are already required
+/// in the parent object — used when recursing into property schemas to decide
+/// whether to add `null` to the type union.
+fn make_strict_schema_with_required(schema: &mut Value, parent_required: &[String]) {
+    let _ = parent_required; // used by callers, not at this level
     if let Some(obj) = schema.as_object_mut() {
         // If this is an object type with properties, make it strict
         if obj.get("type").and_then(|t| t.as_str()) == Some("object") {
             obj.entry("additionalProperties".to_string())
                 .or_insert(Value::Bool(false));
-            // All properties must be in required
+
+            // Collect the set of properties that are already required so we
+            // know which ones are optional and need a null-type allowance.
+            let originally_required: Vec<String> = obj
+                .get("required")
+                .and_then(|r| r.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                })
+                .unwrap_or_default();
+
+            // Make all property keys required (OpenAI strict mode requirement).
             if let Some(props) = obj.get("properties").and_then(|p| p.as_object()) {
                 let all_keys: Vec<Value> = props.keys().map(|k| Value::String(k.clone())).collect();
                 obj.insert("required".to_string(), Value::Array(all_keys));
             }
-        }
-        // Recurse into properties
-        if let Some(Value::Object(props)) = obj.get_mut("properties") {
-            for prop_schema in props.values_mut() {
-                make_strict_schema(prop_schema);
+
+            // Recurse into properties, passing required-status for null-type widening.
+            if let Some(Value::Object(props)) = obj.get_mut("properties") {
+                for (prop_name, prop_schema) in props.iter_mut() {
+                    let is_optional = !originally_required.contains(prop_name);
+                    if is_optional {
+                        // Optional property promoted to required: allow null so
+                        // the model can send null to indicate "not specified".
+                        allow_null_in_schema(prop_schema);
+                    }
+                    make_strict_schema(prop_schema);
+                }
+            }
+        } else {
+            // Recurse into properties for non-top-level objects
+            if let Some(Value::Object(props)) = obj.get_mut("properties") {
+                for prop_schema in props.values_mut() {
+                    make_strict_schema(prop_schema);
+                }
             }
         }
         // Recurse into array items
         if let Some(items) = obj.get_mut("items") {
             make_strict_schema(items);
         }
+    }
+}
+
+/// Widen a JSON Schema type to also allow `null`.
+///
+/// - `{"type": "string"}` → `{"type": ["string", "null"]}`
+/// - `{"type": ["string", "integer"]}` → `{"type": ["string", "integer", "null"]}`
+/// - Already includes "null" → no change
+/// - No "type" field → no change
+fn allow_null_in_schema(schema: &mut Value) {
+    let Some(obj) = schema.as_object_mut() else {
+        return;
+    };
+    match obj.get("type") {
+        Some(Value::String(t)) => {
+            if t != "null" {
+                let original = t.clone();
+                obj.insert(
+                    "type".to_string(),
+                    Value::Array(vec![
+                        Value::String(original),
+                        Value::String("null".to_string()),
+                    ]),
+                );
+            }
+        }
+        Some(Value::Array(types)) => {
+            let already_nullable = types.iter().any(|t| t.as_str() == Some("null"));
+            if !already_nullable {
+                let mut new_types = types.clone();
+                new_types.push(Value::String("null".to_string()));
+                obj.insert("type".to_string(), Value::Array(new_types));
+            }
+        }
+        _ => {}
     }
 }
 
@@ -965,9 +1043,19 @@ pub fn parse_responses_api_stream_chunk(payload: &Value) -> Option<StreamChunk> 
                 .and_then(Value::as_str)
                 .map(String::from);
 
+            // The Responses API uses `output_index` to identify which output item
+            // this delta belongs to (e.g., a function call at index 1 after a
+            // reasoning item at index 0). Fall back to `index` for compatibility
+            // with other providers, then to 0 as a last resort.
+            let index = payload
+                .get("output_index")
+                .or_else(|| payload.get("index"))
+                .and_then(Value::as_u64)
+                .unwrap_or(0) as usize;
+
             Some(StreamChunk {
                 tool_call: Some(StreamToolCall {
-                    index: payload.get("index").and_then(Value::as_u64).unwrap_or(0) as usize,
+                    index,
                     id: call_id,
                     name,
                     arguments_delta,
@@ -999,6 +1087,36 @@ pub fn parse_responses_api_stream_chunk(payload: &Value) -> Option<StreamChunk> 
                     thinking: Some(REASONING_START_SENTINEL.to_string()),
                     ..Default::default()
                 }),
+                // Function call starting — emit a StreamToolCall with the
+                // correct index, name, and id. This seeds the accumulator at
+                // the right index so that subsequent argument delta events
+                // (which use `output_index` to identify which function call
+                // they belong to) land on the correct accumulator entry.
+                // Without this, reasoning models that produce a reasoning item
+                // at output_index 0 and a function call at output_index 1 would
+                // fail: argument deltas would default to index 0 but the
+                // output_item.done would create a separate entry at index 1,
+                // leaving the function call with empty arguments.
+                "function_call" | "tool_call" => {
+                    let call_id = item
+                        .get("call_id")
+                        .or_else(|| item.get("id"))
+                        .and_then(Value::as_str)
+                        .map(String::from);
+                    let name = item.get("name").and_then(Value::as_str).map(String::from);
+                    // `index` in output_item.added identifies which position
+                    // in the output array this function call occupies.
+                    let index = item.get("index").and_then(Value::as_u64).unwrap_or(0) as usize;
+                    Some(StreamChunk {
+                        tool_call: Some(StreamToolCall {
+                            index,
+                            id: call_id,
+                            name,
+                            arguments_delta: None,
+                        }),
+                        ..Default::default()
+                    })
+                }
                 // Skip text/message — already streamed via deltas
                 "text" | "output_text" | "message" => None,
                 _ => None,
@@ -2399,6 +2517,92 @@ mod tests {
         // arguments_delta is None — arguments were already streamed via delta events.
         // Emitting them again here would duplicate them in the accumulator.
         assert_eq!(tc.arguments_delta, None);
+    }
+
+    #[test]
+    fn responses_function_call_arguments_delta_uses_output_index() {
+        // The Responses API uses `output_index` (not `index`) in
+        // response.function_call_arguments.delta events.  When a reasoning
+        // item occupies output_index 0 and the function call is at
+        // output_index 1, the delta must be mapped to accumulator index 1
+        // so it lands on the right entry.
+        let payload = json!({
+            "type": "response.function_call_arguments.delta",
+            "call_id": "call_xyz",
+            "output_index": 1,
+            "delta": "{\"path\":\"/foo\"}"
+        });
+        let chunk = parse_responses_api_stream_chunk(&payload).unwrap();
+        let tc = chunk.tool_call.unwrap();
+        assert_eq!(
+            tc.index, 1,
+            "output_index should map to StreamToolCall.index"
+        );
+        assert_eq!(tc.id.as_deref(), Some("call_xyz"));
+        assert_eq!(tc.arguments_delta.as_deref(), Some("{\"path\":\"/foo\"}"));
+    }
+
+    #[test]
+    fn responses_output_item_added_function_call_seeds_accumulator() {
+        // output_item.added for a function_call should emit a StreamToolCall
+        // with the correct index, name, and id so the accumulator is seeded
+        // at the right position before argument delta events arrive.
+        let payload = json!({
+            "type": "response.output_item.added",
+            "item": {
+                "type": "function_call",
+                "call_id": "call_abc",
+                "name": "glob",
+                "index": 1
+            }
+        });
+        let chunk = parse_responses_api_stream_chunk(&payload).unwrap();
+        let tc = chunk.tool_call.unwrap();
+        assert_eq!(tc.index, 1);
+        assert_eq!(tc.id.as_deref(), Some("call_abc"));
+        assert_eq!(tc.name.as_deref(), Some("glob"));
+        assert_eq!(tc.arguments_delta, None);
+    }
+
+    #[test]
+    fn make_strict_schema_adds_null_to_optional_fields() {
+        // Optional fields (not in the original `required` array) should be
+        // widened to ["T", "null"] so the model can send null to indicate
+        // "not specified" rather than being forced to invent a value.
+        let mut schema = serde_json::json!({
+            "type": "object",
+            "required": ["path"],
+            "properties": {
+                "path": {"type": "string"},
+                "offset": {"type": "integer", "minimum": 1},
+                "limit": {"type": "integer", "minimum": 1},
+                "hash_lines": {"type": "boolean"}
+            }
+        });
+        make_strict_schema(&mut schema);
+
+        // All keys are now required
+        let required = schema["required"].as_array().unwrap();
+        assert!(required.contains(&serde_json::json!("path")));
+        assert!(required.contains(&serde_json::json!("offset")));
+        assert!(required.contains(&serde_json::json!("limit")));
+        assert!(required.contains(&serde_json::json!("hash_lines")));
+
+        // `path` was already required — should remain non-nullable
+        assert_eq!(schema["properties"]["path"]["type"], "string");
+
+        // Optional fields should now allow null
+        let offset_type = &schema["properties"]["offset"]["type"];
+        assert!(offset_type.is_array(), "offset should have union type");
+        let offset_types = offset_type.as_array().unwrap();
+        assert!(offset_types.contains(&serde_json::json!("integer")));
+        assert!(offset_types.contains(&serde_json::json!("null")));
+
+        let hash_type = &schema["properties"]["hash_lines"]["type"];
+        assert!(hash_type.is_array());
+        let hash_types = hash_type.as_array().unwrap();
+        assert!(hash_types.contains(&serde_json::json!("boolean")));
+        assert!(hash_types.contains(&serde_json::json!("null")));
     }
 
     // ── Responses API non-streaming: reasoning ──

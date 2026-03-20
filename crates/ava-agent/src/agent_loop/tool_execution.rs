@@ -117,17 +117,54 @@ pub(super) fn validate_tool_call(tool_call: &ToolCall, registry: &ToolRegistry) 
         }
     }
 
+    // Collect required parameter names for null-value skipping below.
+    let required_params: std::collections::HashSet<&str> = schema
+        .get("required")
+        .and_then(|v| v.as_array())
+        .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect())
+        .unwrap_or_default();
+
     // Check parameter types against schema properties
     if let Some(properties) = schema.get("properties").and_then(|v| v.as_object()) {
         for (key, value) in args {
             if let Some(prop_schema) = properties.get(key) {
-                if let Some(expected_type) = prop_schema.get("type").and_then(|v| v.as_str()) {
-                    if !value_matches_type(value, expected_type) {
-                        errors.push(format!(
-                            "parameter '{key}' expected type '{expected_type}', got {}",
-                            value_type_name(value)
-                        ));
+                // Skip type validation for null values on optional parameters.
+                // When strict mode widens optional types to ["T", "null"], the
+                // model sends null to indicate "not specified". Validating null
+                // against the base type would produce a spurious type error.
+                if value.is_null() && !required_params.contains(key.as_str()) {
+                    continue;
+                }
+                // Handle both single-type ("string") and union-type (["string", "null"]) schemas.
+                let type_field = prop_schema.get("type");
+                let type_mismatch = match type_field {
+                    Some(Value::String(expected_type)) => {
+                        !value_matches_type(value, expected_type.as_str())
                     }
+                    Some(Value::Array(types)) => {
+                        // Union type — value must match at least one type in the array.
+                        !types.iter().any(|t| {
+                            t.as_str()
+                                .map(|ts| value_matches_type(value, ts))
+                                .unwrap_or(false)
+                        })
+                    }
+                    _ => false, // No type constraint — skip validation
+                };
+                if type_mismatch {
+                    let type_display = match type_field {
+                        Some(Value::String(t)) => t.clone(),
+                        Some(Value::Array(types)) => types
+                            .iter()
+                            .filter_map(|t| t.as_str())
+                            .collect::<Vec<_>>()
+                            .join("|"),
+                        _ => "unknown".to_string(),
+                    };
+                    errors.push(format!(
+                        "parameter '{key}' expected type '{type_display}', got {}",
+                        value_type_name(value)
+                    ));
                 }
             }
         }

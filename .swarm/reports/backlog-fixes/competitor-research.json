@@ -1,0 +1,203 @@
+{
+  "goose_patterns": [
+    {
+      "feature": "Tool call display — collapsible with inline status dot",
+      "approach": "Each tool call is a bordered card with a `ToolCallExpandable` toggle. The header row shows: icon (category-specific SVG) + status dot (green/yellow-pulse/red colored dot overlaid top-right of icon) + human-readable description string (e.g., 'reading /path/to/file'). Chevron rotates to indicate expand/collapse. Two sub-sections are nested collapsibles: 'Tool Details' (args) and 'Output'. Both start collapsed unless `responseStyle === 'detailed'`.",
+      "file": "docs/reference-code/goose/ui/desktop/src/components/ToolCallWithResponse.tsx",
+      "ava_recommendation": "AVA's ToolListDialog is a separate overlay. Instead, render tool calls inline as bordered collapsible cards in the message stream — mirroring Goose's pattern. Add status dot (pending=gray, loading=yellow-pulse, success=green, error=red) overlaid on the tool icon. Default collapsed for read-only tools, auto-expand when logs/progress are streaming."
+    },
+    {
+      "feature": "Tool description strings — human-readable summary from args",
+      "approach": "`getToolDescription()` in ToolCallView dispatches on tool name and produces readable strings: 'reading /path', 'editing src/foo.rs', 'running cargo test', 'scraping https://...'. Fallback for unknown tools: ToolName + first key=value or key list. This replaces raw tool names in the header.",
+      "file": "docs/reference-code/goose/ui/desktop/src/components/ToolCallWithResponse.tsx (lines 522-679)",
+      "ava_recommendation": "AVA currently shows the raw tool name. Add a `get_tool_summary(name, args)` function (Rust side or TS side) that maps AVA's 6 core tools to readable strings: read='reading {path}', write='writing {path}', edit='editing {path}', bash='running {cmd}', glob='searching {pattern}', grep='searching {pattern} in {path}'. Pass this to the tool card header."
+    },
+    {
+      "feature": "Tool timing — start time tracked, shown after completion",
+      "approach": "A `startTime` state is set when the tool request arrives without a response. Duration is computed as `Date.now() - startTime` when the response arrives. Not yet rendered in UI but wired up.",
+      "file": "docs/reference-code/goose/ui/desktop/src/components/ToolCallWithResponse.tsx (lines 479-486)",
+      "ava_recommendation": "AVA should track and display per-tool elapsed time (e.g., '1.2s') in the tool card header next to the status dot. This helps users understand which tools are slow. The Rust side already emits timing via StreamChunk; surface it in the desktop."
+    },
+    {
+      "feature": "Streaming logs panel with auto-scroll",
+      "approach": "`ToolLogsView` renders an MCP `notifications/message` log stream inside the expanded tool section. During streaming: max-height 4rem (tiny scrolling window). After completion: max-height 20rem. Uses a `boxRef` with `scrollTop = scrollHeight` to auto-scroll to newest log entry. Spinner badge on 'Logs' section header while working.",
+      "file": "docs/reference-code/goose/ui/desktop/src/components/ToolCallWithResponse.tsx (lines 925-980)",
+      "ava_recommendation": "AVA's bash tool output is shown post-completion only. Add a live log panel inside the tool card that streams output during execution (max 4rem height), expands to 20rem after done. Auto-scroll to bottom on each new line. This is particularly important for long-running bash commands."
+    },
+    {
+      "feature": "Progress bar for MCP tool progress notifications",
+      "approach": "Goose renders MCP `notifications/progress` events as a determinate or indeterminate progress bar inside the tool card, keyed by `progressToken`. Multiple progress tokens render as multiple bars.",
+      "file": "docs/reference-code/goose/ui/desktop/src/components/ToolCallWithResponse.tsx (lines 772-778, 982-1002)",
+      "ava_recommendation": "AVA's MCP client receives progress events but doesn't visualize them. Add a thin progress bar inside the tool card (below header) that appears when `notifications/progress` is received. Use indeterminate animation when total is unknown."
+    },
+    {
+      "feature": "Inline tool approval — amber border + approval buttons embedded in card",
+      "approach": "When a tool is pending approval, the entire card gets `border-amber-500/50 bg-amber-50/5` styling and a border-separated footer section renders `ToolApprovalButtons` with the tool confirmation data. The approval prompt string is shown above the buttons in amber text.",
+      "file": "docs/reference-code/goose/ui/desktop/src/components/ToolCallWithResponse.tsx (lines 183-220)",
+      "ava_recommendation": "AVA's ApprovalDock is a separate sticky bottom bar. Consider also offering inline approval inside the tool card itself (amber border variant) so the user sees exactly which tool needs approval in context. The ApprovalDock can remain as primary but the inline card approach reduces cognitive context switching."
+    },
+    {
+      "feature": "Thinking display — `<think>` tag parsing OR native reasoning content",
+      "approach": "GooseMessage calls `splitChainOfThought(text)` which uses regex `/<think>([\\s\\S]*?)<\/think>/i` to extract CoT from text content. Native reasoning arrives via `getReasoningContent(message)` which reads a different content type. Both render as `<details>` with 'Show thinking' / 'Show reasoning' summary text — collapsed by default. CoT has secondary styling (bg-background-secondary border).",
+      "file": "docs/reference-code/goose/ui/desktop/src/components/GooseMessage.tsx (lines 53-154)",
+      "ava_recommendation": "AVA already handles thinking blocks in Rust. On the desktop frontend, render thinking as a `<details>` collapsed summary with 'Show reasoning' label — matching Goose's pattern. The ThinkingRow in AVA is already close but should default to collapsed, not expanded."
+    },
+    {
+      "feature": "Cancel behavior — AbortController abort, messages preserved",
+      "approach": "`stopStreaming()` calls `abortControllerRef.current?.abort()` and sets chatState to Idle. The SSE stream's catch block filters `AbortError` silently. All messages accumulated before abort are preserved in state. The stream ending without Finish/Error shows a toast: 'Connection lost. Response may be incomplete.' when NOT user-aborted.",
+      "file": "docs/reference-code/goose/ui/desktop/src/hooks/useChatStream.ts (lines 619-624, 715-719)",
+      "ava_recommendation": "AVA should match this: on cancel, preserve all streamed messages received so far (partial response visible), just stop streaming. Show a subtle 'interrupted' indicator on the last message (like OpenCode does with `data-interrupted`). Do NOT wipe messages on cancel."
+    },
+    {
+      "feature": "Streaming — batched updates for reduced motion preference",
+      "approach": "When `window.matchMedia('(prefers-reduced-motion: reduce)').matches`, updates are batched at 1-second intervals instead of per-token. Otherwise updates fire immediately per SSE event. This prevents 60fps DOM thrashing for accessibility.",
+      "file": "docs/reference-code/goose/ui/desktop/src/hooks/useChatStream.ts (lines 199-253)",
+      "ava_recommendation": "AVA should honor `prefers-reduced-motion` in streaming updates. Currently AVA streams at full rate. Add a 1s batch mode when reduced motion is preferred."
+    },
+    {
+      "feature": "Message editing — fork vs edit-in-place",
+      "approach": "User messages show an 'Edit' button on hover (pencil icon). Clicking opens an in-place textarea replacing the message bubble. Two save actions: 'Edit in Place' (truncates session and re-runs from that point in the same session) and 'Fork Session' (creates a new session with the edited message). Both use `forkSession()` API.",
+      "file": "docs/reference-code/goose/ui/desktop/src/components/UserMessage.tsx",
+      "ava_recommendation": "AVA doesn't support message editing. This is a high-value feature. Implement hover-reveal 'Edit' on user messages. Start with Fork Session only (simpler: create new session from that checkpoint). Edit-in-place requires truncation API support."
+    },
+    {
+      "feature": "Consecutive tool call timestamp suppression",
+      "approach": "`identifyConsecutiveToolCalls(messages)` and `shouldHideTimestamp()` detect runs of tool-only messages and suppress timestamps on intermediate ones, only showing timestamp on the final message of a chain. This reduces visual noise.",
+      "file": "docs/reference-code/goose/ui/desktop/src/utils/toolCallChaining.ts",
+      "ava_recommendation": "AVA shows timestamps on every message. Hide timestamps on intermediate tool-only messages in a consecutive chain — only show on the last one."
+    },
+    {
+      "feature": "Interruption detection — NLP keyword matching with confidence score",
+      "approach": "InterruptionHandler is a modal triggered by NLP analysis of user input. Detects keywords like 'stop', 'pause', 'redirect' with a confidence score (0-1). Shows a modal with color coding per action type (stop=red, pause=amber, redirect=blue) and confidence bar. Redirect action adds a text input for new instruction.",
+      "file": "docs/reference-code/goose/ui/desktop/src/components/InterruptionHandler.tsx",
+      "ava_recommendation": "AVA has three-tier mid-stream messaging (Enter=steer, Alt+Enter=follow-up). This Goose feature is different — it detects intent from user phrasing. Lower priority, but the color-coded interruption modal design (stop=red, pause=amber) is worth borrowing for AVA's stop confirmation UI."
+    },
+    {
+      "feature": "User message layout — right-aligned dark bubble",
+      "approach": "User messages render as right-aligned bubbles: `flex justify-end w-full` → inner `max-w-[85%]` → `bg-text-primary text-background-primary rounded-xl`. Timestamp fades out on hover (translate-y-4 + opacity-0 transition). Copy + Edit buttons fade in on hover at the same y position (translate-y-0).",
+      "file": "docs/reference-code/goose/ui/desktop/src/components/UserMessage.tsx (lines 193-239)",
+      "ava_recommendation": "AVA's user messages already use a dark bubble but verify hover-reveal copy/edit follows this exact pattern: timestamp fades out as copy+edit fades in at the same position (animated swap). Currently AVA uses a similar pattern in MessageBubble.tsx."
+    },
+    {
+      "feature": "Category-specific tool icons",
+      "approach": "Goose uses `getToolCallIcon(toolCallName)` which maps tool names to category icons: browser→Globe, shell→Terminal, file-read→Eye, file-write→FileEdit, search→Search, etc. Each is a specific SVG icon, not a generic wrench.",
+      "file": "docs/reference-code/goose/ui/desktop/src/utils/toolIconMapping.tsx",
+      "ava_recommendation": "AVA should assign specific icons to each of its 6 default tools: read→Eye/Glasses, write→FilePlus, edit→FileEdit/Pencil, bash→Terminal, glob→Search, grep→Search. Extended tools get their own icons. This significantly improves visual scanning."
+    }
+  ],
+  "opencode_patterns": [
+    {
+      "feature": "Part-based message model — text, reasoning, tool, compaction as typed parts",
+      "approach": "OpenCode's message model decomposes each assistant message into `Part` objects: `{ type: 'text' | 'reasoning' | 'tool' | 'compaction' | 'file' | 'agent' }`. Parts are rendered in order, enabling natural thinking+tool interleaving without special casing. The `PART_MAPPING` registry maps part types to components dynamically via `registerPartComponent()`. This means a reasoning part can appear between two tool parts and render correctly.",
+      "file": "docs/reference-code/opencode/packages/ui/src/components/message-part.tsx (lines 156, 1228-1439)",
+      "ava_recommendation": "AVA's frontend currently receives flat StreamChunk events. The desktop bridge should expose a part-list model to the SolidJS frontend. Each turn would have an ordered list of parts: thinking parts, text parts, tool parts. This enables natural interleaving display without special-casing thinking+tool sequences."
+    },
+    {
+      "feature": "Thinking + tool interleaving — reasoning part between tool parts",
+      "approach": "Because parts are typed and ordered, a thinking model that reasons before/between tool calls naturally produces: [reasoning_part, tool_part, reasoning_part, tool_part, text_part]. The `AssistantParts` component renders them in sequence. The `PART_MAPPING['reasoning']` component renders markdown text with 100ms throttle. The `showReasoningSummaries` setting controls whether reasoning parts are visible at all.",
+      "file": "docs/reference-code/opencode/packages/ui/src/components/message-part.tsx (lines 483-583, 1427-1439)",
+      "ava_recommendation": "AVA currently shows thinking as a separate ThinkingRow above the message. For thinking models, thinking content should appear inline in sequence with tool calls. When the model thinks → uses tool → thinks again → responds, each phase should be shown in order. This requires the part-based model described above."
+    },
+    {
+      "feature": "Context tool grouping — read/glob/grep batched under 'Gathering context'",
+      "approach": "Consecutive read/glob/grep/list tool parts are grouped into a single `ContextToolGroup` collapsible. The header shows 'Gathering context' (shimmer animation while busy) / 'Gathered context' (when done) with a summary like '3 files read, 2 searches'. Expanding the group shows each individual tool. This dramatically reduces visual noise from many context-reading operations.",
+      "file": "docs/reference-code/opencode/packages/ui/src/components/message-part.tsx (lines 358, 414-456, 792-888)",
+      "ava_recommendation": "AVA should group consecutive read/glob/grep calls under a single collapsible 'Gathering context' header with an animated count summary. This is the single biggest visual improvement possible for reducing tool call noise. Implement as a post-processing step on the parts list: scan for consecutive CONTEXT_GROUP_TOOLS and emit a group node."
+    },
+    {
+      "feature": "Tool status — pending/running/completed/error lifecycle with shimmer animation",
+      "approach": "Each tool part has `state.status: 'pending' | 'running' | 'completed' | 'error'`. The `TextShimmer` component renders the tool title with a shimmer animation when `active={status === 'pending' || status === 'running'}`. On completion, the shimmer stops and the subtitle (filename, command description) fades in with a blur animation.",
+      "file": "docs/reference-code/opencode/packages/ui/src/components/message-part.tsx (lines 1709-1769 bash tool, 1780-1840 edit tool)",
+      "ava_recommendation": "AVA should use a shimmer/pulse animation on the tool header title text while the tool is running. On completion, the description/result should animate in (opacity + blur transition). Currently AVA uses a static loading spinner."
+    },
+    {
+      "feature": "Edit/write tool — shows file diff inline with before/after",
+      "approach": "The `edit` and `write` tools render a `ToolFileAccordion` that contains a `DiffChanges` bar chart (+N/-N additions/deletions) and an expandable file diff view (before/after content via a `fileComponent` dynamic renderer). The accordion defaults to open for non-delete operations. Diff changes bar uses green/red pixel bars.",
+      "file": "docs/reference-code/opencode/packages/ui/src/components/message-part.tsx (lines 1771-1841)",
+      "ava_recommendation": "AVA's edit tool only shows 'edited file.rs'. It should show an inline collapsible diff with before/after content and a visual +N/-N changes indicator. This is the most requested feature from coding agent users. The Rust side already has the diff; it needs to be passed through the Tauri bridge to the frontend."
+    },
+    {
+      "feature": "Bash tool — shows command + output in a code block with copy button",
+      "approach": "Bash tool renders a `<pre><code>` block with `$ {command}\\n{output}` combined. A copy button (top-right of the code block) copies both command and output. The output section is scrollable (`data-scrollable`). ANSI codes are stripped via `strip-ansi`. Description text fades in with blur animation after completion.",
+      "file": "docs/reference-code/opencode/packages/ui/src/components/message-part.tsx (lines 1705-1769)",
+      "ava_recommendation": "AVA's bash tool should display a `$ command` + stdout/stderr block in a monospace code box. Add a copy button. Strip ANSI escape codes before display. The command and output combined in one block (with a newline separator) is cleaner than separate sections."
+    },
+    {
+      "feature": "Cancel behavior — server-side abort + MessageAbortedError detection",
+      "approach": "Cancel calls `sdk.client.session.abort({ sessionID })` which is a server-side abort (not just HTTP abort). The response message gets `error.name === 'MessageAbortedError'`. `SessionTurn` detects this via `interrupted()` memo and passes `interrupted={true}` to the `Message` component. The user message gets `data-interrupted` attribute which triggers amber/dimmed styling. Messages are fully preserved.",
+      "file": "docs/reference-code/opencode/packages/ui/src/components/session-turn.tsx (lines 278-279) + docs/reference-code/opencode/packages/app/src/components/prompt-input/submit.ts (lines 219-239)",
+      "ava_recommendation": "AVA calls `ava abort` on the Rust side. The key missing piece is surfacing the interrupted state visually: when a run is aborted, the last user message should show an 'interrupted' badge/indicator. This is done via the `interrupted` prop on the message component."
+    },
+    {
+      "feature": "Turn duration display — wall-clock time per assistant response",
+      "approach": "`turnDurationMs` is computed as `max(completed) - message.time.created` across all assistant messages in the turn. Displayed in the text part footer as '3s' or '1m 30s' alongside model name.",
+      "file": "docs/reference-code/opencode/packages/ui/src/components/session-turn.tsx (lines 318-332) + message-part.tsx (lines 1338-1355)",
+      "ava_recommendation": "AVA should display per-turn duration in the message footer (next to the model name). Computed as the time from user message sent to last assistant chunk received. This is already tracked in the Rust session; pass it through the Tauri bridge."
+    },
+    {
+      "feature": "Timeline staging — progressive DOM mount to avoid first-paint blocking",
+      "approach": "`createTimelineStaging` progressively renders turns using `requestAnimationFrame`. Config: init=1 (render 1 turn on first paint), batch=3 (render 3 more per rAF frame). Once staging completes for a session it never re-stages. This allows long sessions to load without blocking the main thread.",
+      "file": "docs/reference-code/opencode/packages/app/src/pages/session/message-timeline.tsx (lines 118-194)",
+      "ava_recommendation": "AVA's ProgressiveMessageList already does something similar. Ensure it uses requestAnimationFrame batching (not setTimeout) and defers rendering of early turns. OpenCode's approach (init=1, batch=3) is a good starting point."
+    },
+    {
+      "feature": "Content-visibility CSS for off-screen turns",
+      "approach": "Each message turn container gets `style={{ 'content-visibility': 'auto', 'contain-intrinsic-size': 'auto 500px' }}`. This tells the browser to skip layout/paint for off-screen turns, dramatically improving scroll performance for long sessions.",
+      "file": "docs/reference-code/opencode/packages/app/src/pages/session/message-timeline.tsx (line 957)",
+      "ava_recommendation": "Apply `content-visibility: auto; contain-intrinsic-size: auto 500px` to each message turn container in AVA's desktop frontend. This is a zero-cost performance win for long sessions."
+    },
+    {
+      "feature": "Text rendering throttle — 100ms throttle on streaming text",
+      "approach": "`createThrottledValue` wraps text signals with a 100ms throttle: if <100ms since last render, schedule update; if >=100ms, render immediately. This prevents per-token re-renders from causing 10-60fps DOM updates during fast streaming.",
+      "file": "docs/reference-code/opencode/packages/ui/src/components/message-part.tsx (lines 158-192)",
+      "ava_recommendation": "AVA's LiveStreamingBlock should throttle text updates to ~100ms during streaming. This smooths out rendering without adding noticeable lag. Currently if the model streams at 100 tok/s, AVA re-renders every ~10ms which is wasteful."
+    },
+    {
+      "feature": "Compaction divider — visual separator with 'Context compacted' label",
+      "approach": "When context compaction occurs, a `compaction` part is emitted. It renders as a horizontal rule with centered text 'Context compacted' between two lines. This clearly marks where in the conversation history was summarized.",
+      "file": "docs/reference-code/opencode/packages/ui/src/components/message-part.tsx (lines 1308-1321)",
+      "ava_recommendation": "AVA already has compaction. Add a visual divider (horizontal line + 'Context compacted' label) in the message stream at the compaction point, rather than just a status bar update. This helps users understand why the model may have 'forgotten' earlier context."
+    },
+    {
+      "feature": "Error display — JSON unwrapping for API errors",
+      "approach": "`unwrap(message)` recursively JSON-parses error strings to extract the innermost human-readable message. Handles double-encoded JSON, `{error: {type, message}}`, `{message}`, `{error: string}` patterns. Falls back to raw string. Errors render in a `Card variant='error'` component.",
+      "file": "docs/reference-code/opencode/packages/ui/src/components/session-turn.tsx (lines 27-74, 517-521)",
+      "ava_recommendation": "AVA's error display shows raw error strings which are often JSON-encoded API responses. Add an `unwrap_error(s: &str)` utility (or TS equivalent) that extracts the human-readable message from nested JSON error structures before displaying."
+    },
+    {
+      "feature": "Session fork/revert actions on user messages",
+      "approach": "User messages have fork and revert IconButtons visible on hover. Fork creates a child session branching from that message. Revert rolls the session back to that message point. Both are server-side operations via `sdk.client.session.update()`. The session history forms a tree, not a linear list.",
+      "file": "docs/reference-code/opencode/packages/ui/src/components/message-part.tsx (lines 959-1095)",
+      "ava_recommendation": "AVA should implement session forking from any user message. This enables 'what if I had asked differently' exploration. The fork creates a new session starting at that message's context. This pairs with the message editing feature from Goose."
+    },
+    {
+      "feature": "File diff summary per turn — collapsible 'N files modified' panel",
+      "approach": "After each turn completes, if `message.summary.diffs` is non-empty, a collapsible 'Modified N files' section appears below the assistant response. It shows a `DiffChanges` bar summary and an accordion with per-file before/after diffs. Files are deduped (only latest edit per file shown).",
+      "file": "docs/reference-code/opencode/packages/ui/src/components/session-turn.tsx (lines 227-515)",
+      "ava_recommendation": "AVA should add a 'Files changed' summary panel at the end of each turn that lists all files modified in that turn with +/- counts. Currently users must look at individual tool calls to understand net file changes. A summary panel (collapsed by default) provides this at a glance."
+    },
+    {
+      "feature": "LSP diagnostics display inside edit/write tool",
+      "approach": "After edit/write operations, `getDiagnostics(props.metadata.diagnostics, filePath)` extracts LSP error diagnostics (severity=1) for the edited file, capped at 3. Renders as `[line:col] message` inside the tool card. Helps users immediately see if an edit introduced type errors.",
+      "file": "docs/reference-code/opencode/packages/ui/src/components/message-part.tsx (lines 99-127, 1776-1777)",
+      "ava_recommendation": "AVA has LSP middleware. Pass LSP diagnostic results to the frontend after write/edit operations and display them inside the tool card (below the diff). This closes the loop on 'did the edit work?'"
+    }
+  ],
+  "priority_recommendations": [
+    "1. CONTEXT TOOL GROUPING (OpenCode): Group consecutive read/glob/grep calls under a single 'Gathering context' collapsible with count summary. This is the #1 UX improvement for reducing tool noise. Implement as a part-grouping pass in AVA's message rendering.",
+    "2. INLINE DIFF VIEW FOR EDIT/WRITE (OpenCode): Show before/after diff with +N/-N bar inside the edit/write tool card. This is the most requested feature from coding agent users. Rust side has the diff; wire it through the Tauri bridge.",
+    "3. CONTEXT TOOL GROUPING (OpenCode): Same as #1 — restated because it's genuinely the highest leverage item.",
+    "4. TOOL DESCRIPTION STRINGS (Goose): Replace raw tool names ('edit', 'bash') with human-readable summaries ('editing src/main.rs', 'running cargo test'). Implement as a JS mapping function from tool name + args.",
+    "5. SHIMMER ANIMATION ON RUNNING TOOLS (OpenCode): Animate the tool title text with a shimmer while running, then fade in the description on completion. Signals active work without cluttered spinner icons.",
+    "6. INTERRUPTED STATE INDICATOR (OpenCode): When user cancels, show 'interrupted' badge on the last user message. Currently AVA provides no visual feedback that the cancel was acknowledged.",
+    "7. STREAMING TEXT THROTTLE (OpenCode): Throttle DOM updates to 100ms during streaming. This prevents per-token re-renders at 60+ tok/s and makes the UI smoother.",
+    "8. COMPACTION DIVIDER (OpenCode): Add a 'Context compacted' horizontal divider in the message stream at the compaction point. Currently compaction is only visible in the status bar.",
+    "9. CONTENT-VISIBILITY CSS (OpenCode): Add `content-visibility: auto; contain-intrinsic-size: auto 500px` to message turn containers. Zero-code-change performance win for long sessions.",
+    "10. TURN DURATION DISPLAY (OpenCode): Show wall-clock time per assistant turn (e.g., '3s' or '1m 30s') in the response footer. Helps users understand which tasks are slow.",
+    "11. MESSAGE EDITING + FORK (Goose): Add hover-reveal 'Edit' on user messages. Clicking opens an in-place textarea with 'Fork Session' action. High user value for prompt iteration.",
+    "12. CATEGORY-SPECIFIC TOOL ICONS (Goose): Assign specific icons to each tool (Eye=read, Terminal=bash, FileEdit=edit, etc.) instead of a generic wrench. Dramatically improves visual scanning.",
+    "13. STREAMING LIVE LOG PANEL (Goose): Show live bash/tool output as it arrives in a small scrollable panel (4rem height) inside the tool card. Expands to 20rem when done.",
+    "14. FILES CHANGED SUMMARY PER TURN (OpenCode): Add a collapsed 'N files modified' summary with +/- stats at the end of each turn. Gives users a quick overview of net changes.",
+    "15. ERROR JSON UNWRAPPING (OpenCode): Parse nested JSON in error messages to extract the human-readable string before displaying. Currently AVA shows raw JSON strings from API errors."
+  ]
+}

@@ -409,6 +409,51 @@ function createAgentStore() {
 
       // Check if the agent errored (rustAgent.run catches internally, returns null)
       if (errorText) {
+        const isCancelled =
+          errorText === 'Agent run cancelled by user' || errorText.includes('cancelled by user')
+
+        if (isCancelled) {
+          log.info('agent', 'Run cancelled by user — preserving partial response')
+          // Preserve any streaming content received before cancellation
+          const partialContent = rustAgent.streamingContent()
+          const partialThinking = rustAgent.thinkingContent()
+          const elapsedMs = Date.now() - runStartedAt
+          if (partialContent || partialThinking) {
+            const cancelledMsg: Message = {
+              id: generateMessageId('asst'),
+              sessionId,
+              role: 'assistant',
+              content: partialContent,
+              createdAt: Date.now(),
+              tokensUsed: rustAgent.tokenUsage().output,
+              costUSD: rustAgent.tokenUsage().cost || undefined,
+              model: selectedModelId,
+              toolCalls: rustAgent.activeToolCalls(),
+              metadata: {
+                provider: selectedProviderId,
+                model: selectedModelId,
+                mode: isPlanMode() ? 'plan' : 'code',
+                elapsedMs,
+                cancelled: true,
+                ...(partialThinking ? { thinking: partialThinking } : {}),
+              },
+            }
+            session.addMessage(cancelledMsg)
+          }
+          // Add a subtle system-level cancellation note
+          const cancelNote: Message = {
+            id: generateMessageId('sys'),
+            sessionId,
+            role: 'assistant',
+            content: '',
+            createdAt: Date.now(),
+            metadata: { cancelled: true, system: true },
+            error: { type: 'cancelled', message: 'Session interrupted', timestamp: Date.now() },
+          }
+          session.addMessage(cancelNote)
+          return null
+        }
+
         log.error('agent', 'Run failed', { error: errorText })
         // Only set the `error` field — the ErrorRow component renders it.
         // Do NOT duplicate the error in `content` (that caused double display).

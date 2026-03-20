@@ -1,0 +1,58 @@
+{
+  "cargo_check": "pass",
+  "cargo_clippy_warnings": 0,
+  "cargo_test": { "passed": 1798, "failed": 0 },
+  "tsc": "pass",
+  "eslint_errors": 1,
+  "vitest": { "passed": 413, "failed": 18 },
+  "cargo_fmt": "pass",
+  "code_review_issues": [
+    {
+      "file": "src/hooks/use-rust-agent.ts",
+      "severity": "info",
+      "issue": "No stray debug logs. Uses debugLog() (guarded utility) and log.*() (structured logger) throughout — both are intentional and appropriate."
+    },
+    {
+      "file": "src/hooks/useAgent.ts",
+      "severity": "info",
+      "issue": "No stray debug logs. Uses debugLog() only at meaningful decision points (plan metadata, run config, thinking content). Clean."
+    },
+    {
+      "file": "src/components/chat/LiveStreamingBlock.tsx",
+      "severity": "low",
+      "issue": "debugLog() call inside createMemo() on every evaluation (line 27-32) logs hasThinking state on every render cycle. Harmless in production if debugLog is gated, but slightly noisy in dev mode."
+    },
+    {
+      "file": "src/components/AppDialogs.tsx",
+      "severity": "info",
+      "issue": "No async fix visible here — all async operations use void/await correctly. useWorkflows().importFromFile() is awaited. createCheckpoint().then() uses void. No issues found."
+    },
+    {
+      "file": "crates/ava-tui/src/web/api.rs",
+      "severity": "low",
+      "issue": "run_agent_from_history() duplicates ~100 lines of the submit_goal() handler (forwarder setup, approval/question/plan forwarding, spawn logic). This is significant code duplication that could introduce bugs if one path is updated but not the other. No compile errors."
+    },
+    {
+      "file": "crates/ava-tui/src/web/mod.rs",
+      "severity": "info",
+      "issue": "All routes registered correctly and match the documented endpoint table. mid-stream messaging routes (steer, follow-up, post-complete, queue, queue/clear) all present. Session CRUD, models, providers, permissions, log, health, and WS all registered."
+    },
+    {
+      "file": "crates/ava-tools/src/core/mod.rs",
+      "severity": "warning",
+      "issue": "register_default_tools() registers 9 tools (read, write, edit, bash, glob, grep + web_fetch, web_search, git_read), not 6. The comment in the function says 'Core 6: file I/O + search + shell' but then adds '+3: web + git'. CLAUDE.md states the default set is capped at 6. The 9-tool count conflicts with the documented 6-tool cap. This may be an intentional architectural decision post-doc, but the discrepancy should be noted."
+    },
+    {
+      "file": "vitest (e2e/integration tests)",
+      "severity": "warning",
+      "issue": "18 vitest tests fail. Root cause: all failures are 'Failed to parse URL from /api/...' — the e2e and integration tests are attempting real HTTP calls against a server that is not running during the test suite. Tests in tests/e2e/real-scenarios.test.ts, tests/e2e/hooks.test.ts, tests/e2e/rust-bridge.test.ts, src/hooks/useChat.integration.test.ts, src/components/chat/ChatView.integration.test.tsx, and src/services/tauri-agent.test.ts all depend on a live Rust backend or Tauri IPC. These are infrastructure-dependent failures, not logic regressions. The 1 additional hooks.test.ts failure (useRustTools loads and executes tools) is an assertion mismatch likely related to the same missing backend."
+    },
+    {
+      "file": "src/ (ESLint)",
+      "severity": "low",
+      "issue": "1 ESLint error: solid/prefer-for — an Array#map is used where SolidJS <For /> component should be used (causes DOM elements to be recreated). 109 ESLint warnings, mostly solid/reactivity warnings about reactive variables used outside tracked scopes. Pre-existing baseline issues, not introduced by recent changes."
+    }
+  ],
+  "verdict": "ISSUES_FOUND",
+  "summary": "Rust backend is clean: cargo check passes, 0 clippy warnings, 1798 tests pass, fmt clean. TypeScript compiles cleanly (tsc pass). Vitest has 18 failures — all are infrastructure-dependent e2e/integration tests that require a live Rust server or Tauri IPC; no unit test regressions. ESLint has 1 error (solid/prefer-for) and 109 warnings (pre-existing). Key findings: (1) register_default_tools() registers 9 tools not 6 as CLAUDE.md documents — intentional expansion or doc drift; (2) run_agent_from_history() in api.rs duplicates ~100 lines of submit_goal() creating maintenance risk; (3) vitest e2e failures are environment issues, not code bugs. No debug logs found in reviewed frontend files."
+}

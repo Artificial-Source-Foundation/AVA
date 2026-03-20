@@ -2,7 +2,7 @@
 
 // Message error for retry functionality
 export interface MessageError {
-  type: 'rate_limit' | 'auth' | 'server' | 'network' | 'api' | 'unknown'
+  type: 'rate_limit' | 'auth' | 'server' | 'network' | 'api' | 'unknown' | 'cancelled'
   message: string
   retryAfter?: number
   timestamp: number

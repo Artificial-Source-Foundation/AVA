@@ -1,0 +1,14 @@
+{
+  "status": "fixed",
+  "files_modified": [
+    "src/hooks/useAgent.ts",
+    "src/components/chat/message-rows/ErrorRow.tsx",
+    "src/types/index.ts"
+  ],
+  "summary": "Fixed agent cancellation so partial responses are preserved. Root cause: when the user cancelled, the backend returned AvaError::Cancelled ('Agent run cancelled by user'), the frontend treated it as a plain error and discarded the in-flight streaming content from rustAgent.streamingContent(). Fix: (1) In useAgent.ts::run(), detect the cancellation error string and save partialContent + partialThinking as a regular assistant message with metadata.cancelled=true, then add a subtle 'Session interrupted' indicator instead of a red error. (2) Added 'cancelled' as a valid MessageError type in src/types/index.ts. (3) Updated ErrorRow.tsx to render cancelled messages as a muted italic indicator with a Ban icon rather than a red bordered error box with a Retry button. The TUI backend was already handling cancellation correctly (mark_interrupted_messages + preserving session messages); only the desktop frontend needed fixing.",
+  "cargo_check_pass": true,
+  "tsc_pass": true,
+  "root_cause": "In Tauri mode, submit_goal throws when cancel fires. useAgent.ts::run() received errorText='Agent run cancelled by user', treated it as a generic error, and only added an error message — discarding all streaming content accumulated in rustAgent.streamingContent() and rustAgent.thinkingContent() signals. Those signals are not cleared until the next run() starts.",
+  "behaviour_before": "User cancels → LiveStreamingBlock hides (isRunning=false) → All thinking/tool-calls/partial text lost → Red 'Agent run cancelled by user' error message shown with a Retry button",
+  "behaviour_after": "User cancels → Partial assistant message with all streamed content preserved in session store → Subtle muted 'Session interrupted' indicator shown → No alarming red error box"
+}

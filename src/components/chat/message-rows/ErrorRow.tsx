@@ -3,9 +3,12 @@
  *
  * Red-bordered error display that parses provider/code/message from
  * message error with a retry button.
+ *
+ * For `cancelled` errors, renders a subtle muted indicator instead of
+ * a red error — the session was interrupted, not failed.
  */
 
-import { AlertCircle, Loader2, RotateCcw } from 'lucide-solid'
+import { AlertCircle, Ban, Loader2, RotateCcw } from 'lucide-solid'
 import { type Component, createEffect, createSignal, on, onCleanup, Show } from 'solid-js'
 import type { MessageError } from '../../../types'
 
@@ -23,6 +26,7 @@ const ERROR_TYPE_LABELS: Record<string, string> = {
   network: 'Network Error',
   api: 'API Error',
   unknown: 'Error',
+  cancelled: 'Interrupted',
 }
 
 /** Contextual hints matching the TUI's error guidance */
@@ -92,6 +96,16 @@ export const ErrorRow: Component<ErrorRowProps> = (props) => {
   )
 
   const typeLabel = (): string => ERROR_TYPE_LABELS[props.error.type] ?? 'Error'
+
+  // Cancelled sessions render as a subtle muted indicator, not a red error
+  if (props.error.type === 'cancelled') {
+    return (
+      <div class="mt-1 flex items-center gap-1.5 text-xs text-[var(--text-muted)] opacity-60 animate-fade-in">
+        <Ban class="w-3 h-3 flex-shrink-0" />
+        <span class="italic">Session interrupted</span>
+      </div>
+    )
+  }
 
   return (
     <div class="mt-2 p-3 bg-[var(--error-subtle)] border border-[var(--error)] rounded-[var(--radius-md)] animate-fade-in">

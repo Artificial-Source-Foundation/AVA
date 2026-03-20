@@ -1,4 +1,84 @@
+use ava_llm::ProviderKind;
 use ava_types::Tool;
+
+/// Return provider-specific instructions to append to the base system prompt.
+///
+/// The core system prompt stays the same for all providers. This function returns
+/// an additive suffix that optimizes instructions for each provider family's
+/// tool-calling and reasoning conventions.
+///
+/// Returns `None` for providers that work well with the default prompt.
+pub fn provider_prompt_suffix(provider_kind: ProviderKind, model_name: &str) -> Option<String> {
+    let model_lower = model_name.to_lowercase();
+    match provider_kind {
+        ProviderKind::Anthropic => {
+            // Claude models use tool_use content blocks. Emphasize concise structured output.
+            let mut suffix = String::from(
+                "## Provider notes (Anthropic Claude)\n\
+                 - Respond concisely. Avoid over-explaining before acting.\n\
+                 - When you call tools, do not include prose before the tool call unless it adds \
+                   meaningful context the user would want to see.\n",
+            );
+            // Adaptive thinking models: remind the agent when thinking is available
+            let is_thinking_model = model_lower.contains("claude-opus-4.6")
+                || model_lower.contains("claude-sonnet-4.6")
+                || model_lower.contains("claude-opus-4-6")
+                || model_lower.contains("claude-sonnet-4-6");
+            if is_thinking_model {
+                suffix.push_str(
+                    "- Extended thinking is available for this model. Use it for complex \
+                     multi-step reasoning before committing to an approach.\n",
+                );
+            }
+            Some(suffix)
+        }
+        ProviderKind::OpenAI => {
+            // GPT and o-series models. o-series have built-in chain-of-thought.
+            let is_o_series = model_lower.starts_with("o3")
+                || model_lower.starts_with("o4")
+                || model_lower.contains("codex");
+            let mut suffix = String::from(
+                "## Provider notes (OpenAI)\n\
+                 - Use function calling for all tool interactions. Do not simulate tool output \
+                   in text.\n\
+                 - When multiple independent tool calls can be made in parallel, use parallel \
+                   function calls.\n",
+            );
+            if is_o_series {
+                suffix.push_str(
+                    "- This is a reasoning model. Your internal reasoning runs automatically — \
+                     keep your visible response focused on actions and results.\n",
+                );
+            } else {
+                suffix.push_str(
+                    "- Think step-by-step in your response before calling tools when the task \
+                     requires multi-step reasoning.\n",
+                );
+            }
+            Some(suffix)
+        }
+        ProviderKind::Gemini => {
+            // Gemini models require explicit, well-structured tool parameter values.
+            Some(String::from(
+                "## Provider notes (Google Gemini)\n\
+                 - Be explicit about all tool parameter values. Do not omit optional parameters \
+                   unless they are truly not needed.\n\
+                 - Prefer structured, step-by-step reasoning before committing to a tool call.\n\
+                 - When tools return errors, read the error carefully before retrying.\n",
+            ))
+        }
+        ProviderKind::OpenRouter => {
+            // OpenRouter routes to various underlying models — use a balanced default.
+            Some(String::from(
+                "## Provider notes (OpenRouter)\n\
+                 - Use function calling for all tool interactions.\n\
+                 - Be explicit and concise in your tool arguments.\n",
+            ))
+        }
+        // Other providers use the base prompt without additions
+        _ => None,
+    }
+}
 
 /// Build a system prompt that tells the LLM it's an AI coding agent with tools.
 ///
@@ -175,5 +255,67 @@ mod tests {
             "prompt too long: {} chars",
             prompt.len()
         );
+    }
+
+    // ── provider_prompt_suffix tests ──────────────────────────────────
+
+    #[test]
+    fn anthropic_suffix_is_present() {
+        let suffix = provider_prompt_suffix(ProviderKind::Anthropic, "claude-sonnet-4");
+        assert!(suffix.is_some());
+        let text = suffix.unwrap();
+        assert!(text.contains("Anthropic"));
+    }
+
+    #[test]
+    fn anthropic_thinking_model_gets_thinking_note() {
+        let suffix = provider_prompt_suffix(ProviderKind::Anthropic, "claude-sonnet-4.6");
+        let text = suffix.unwrap();
+        assert!(
+            text.contains("thinking"),
+            "should mention thinking for 4.6 models"
+        );
+    }
+
+    #[test]
+    fn anthropic_non_thinking_model_no_thinking_note() {
+        let suffix = provider_prompt_suffix(ProviderKind::Anthropic, "claude-haiku-4");
+        let text = suffix.unwrap();
+        // Haiku is not a thinking model, should not have thinking note
+        assert!(!text.contains("thinking"));
+    }
+
+    #[test]
+    fn openai_suffix_mentions_function_calling() {
+        let suffix = provider_prompt_suffix(ProviderKind::OpenAI, "gpt-4.1");
+        let text = suffix.unwrap();
+        assert!(text.contains("function calling") || text.contains("function call"));
+    }
+
+    #[test]
+    fn openai_o_series_gets_reasoning_note() {
+        let suffix = provider_prompt_suffix(ProviderKind::OpenAI, "o3-mini");
+        let text = suffix.unwrap();
+        assert!(text.contains("reasoning model"));
+    }
+
+    #[test]
+    fn gemini_suffix_mentions_explicit_params() {
+        let suffix = provider_prompt_suffix(ProviderKind::Gemini, "gemini-2.5-pro");
+        let text = suffix.unwrap();
+        assert!(text.contains("explicit") || text.contains("parameter"));
+    }
+
+    #[test]
+    fn openrouter_suffix_present() {
+        let suffix = provider_prompt_suffix(ProviderKind::OpenRouter, "some/model");
+        assert!(suffix.is_some());
+    }
+
+    #[test]
+    fn ollama_no_suffix() {
+        // Ollama uses generic prompts — no provider-specific suffix
+        let suffix = provider_prompt_suffix(ProviderKind::Ollama, "llama3");
+        assert!(suffix.is_none());
     }
 }

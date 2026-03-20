@@ -1,5 +1,6 @@
 import { Crown } from 'lucide-solid'
 import { type Accessor, type Component, createMemo, For, Match, Show, Switch } from 'solid-js'
+import type { ThinkingSegment } from '../../hooks/use-rust-agent'
 import { formatCost } from '../../lib/cost'
 import { debugLog } from '../../lib/debug-log'
 import { formatMs } from '../../lib/format-time'
@@ -13,8 +14,10 @@ import { MarkdownContent } from './MarkdownContent'
 import { MessageActions } from './MessageActions'
 import { CommandOutputRow, DiffRow, ErrorRow, ThinkingRow, ToolCallRow } from './message-rows'
 import { type MessageSegment, segmentMessage } from './message-segments'
+import { ContextGroupHeader } from './ToolCallGroup'
 import { ToolPreview } from './ToolPreview'
 import { ToolCallErrorBoundary } from './tool-call-error-boundary'
+import { partitionByContext } from './tool-call-utils'
 
 interface MessageBubbleProps {
   message: Message
@@ -166,22 +169,131 @@ interface ToolSegmentProps {
   isStreaming: boolean
 }
 
+/**
+ * Render a single non-context tool call with specialized row components
+ * (CommandOutputRow for bash, DiffRow for edits with diffs, ToolCallRow otherwise).
+ */
+const SingleToolCallRow: Component<{ toolCall: ToolCall }> = (props) => {
+  return (
+    <ToolCallErrorBoundary>
+      <Switch fallback={<ToolCallRow toolCall={props.toolCall} />}>
+        <Match when={props.toolCall.name === 'bash' && props.toolCall}>
+          {(call) => <CommandOutputRow toolCall={call()} />}
+        </Match>
+        <Match when={props.toolCall.diff && props.toolCall.name !== 'bash' && props.toolCall}>
+          {(call) => <DiffRow toolCall={call()} />}
+        </Match>
+      </Switch>
+    </ToolCallErrorBoundary>
+  )
+}
+
 const ToolSegmentDispatch: Component<ToolSegmentProps> = (props) => {
+  const segments = () => partitionByContext(props.toolCalls)
+
   return (
     <div class="flex flex-col gap-1.5 my-1">
-      <For each={props.toolCalls}>
-        {(tc) => (
-          <ToolCallErrorBoundary>
-            <Switch fallback={<ToolCallRow toolCall={tc} />}>
-              <Match when={tc.name === 'bash' && tc}>
-                {(call) => <CommandOutputRow toolCall={call()} />}
-              </Match>
-              <Match when={tc.diff && tc.name !== 'bash' && tc}>
-                {(call) => <DiffRow toolCall={call()} />}
-              </Match>
-            </Switch>
-          </ToolCallErrorBoundary>
+      <For each={segments()}>
+        {(seg) => (
+          <Show
+            when={seg.kind === 'context'}
+            fallback={
+              <SingleToolCallRow
+                toolCall={
+                  (seg as ReturnType<typeof partitionByContext>[number] & { kind: 'single' }).call
+                }
+              />
+            }
+          >
+            {/* Context segment: group if >1 call, else render single */}
+            <Show
+              when={
+                (seg as ReturnType<typeof partitionByContext>[number] & { kind: 'context' }).calls
+                  .length > 1
+              }
+              fallback={
+                <SingleToolCallRow
+                  toolCall={
+                    (seg as ReturnType<typeof partitionByContext>[number] & { kind: 'context' })
+                      .calls[0]
+                  }
+                />
+              }
+            >
+              <ToolCallErrorBoundary>
+                <ContextGroupHeader
+                  calls={
+                    (seg as ReturnType<typeof partitionByContext>[number] & { kind: 'context' })
+                      .calls
+                  }
+                  isStreaming={props.isStreaming}
+                />
+              </ToolCallErrorBoundary>
+            </Show>
+          </Show>
         )}
+      </For>
+    </div>
+  )
+}
+
+// ============================================================================
+// Interleaved Thinking + Tools Renderer
+// ============================================================================
+
+/**
+ * Renders thinking segments interleaved with their associated tool calls.
+ * Used when `message.metadata.thinkingSegments` is present (thinking models with tool calls).
+ *
+ * Produces layout like:
+ *   💭 Thought for 2.3s
+ *     → Read CLAUDE.md
+ *     → Read docs/architecture/crate-map.md
+ *   💭 Thought for 1.1s
+ *   I need to give a concise overview...
+ */
+const InterleavedThinkingSegments: Component<{
+  segments: ThinkingSegment[]
+  toolCallsById: Map<string, ToolCall>
+}> = (props) => {
+  return (
+    <div class="flex flex-col gap-1.5">
+      <For each={props.segments}>
+        {(segment) => {
+          const segmentTools = () =>
+            segment.toolCallIds
+              .map((id) => props.toolCallsById.get(id))
+              .filter((tc): tc is ToolCall => tc !== undefined)
+
+          return (
+            <div class="flex flex-col gap-1">
+              {/* Thinking block for this segment */}
+              <Show when={segment.thinking}>
+                <ThinkingRow thinking={segment.thinking} isStreaming={false} />
+              </Show>
+
+              {/* Tool calls that happened after this thinking block */}
+              <Show when={segmentTools().length > 0}>
+                <div class="flex flex-col gap-1.5 ml-2 my-0.5">
+                  <For each={segmentTools()}>
+                    {(tc) => (
+                      <ToolCallErrorBoundary>
+                        <Switch fallback={<ToolCallRow toolCall={tc} />}>
+                          <Match when={tc.name === 'bash' && tc}>
+                            {(call) => <CommandOutputRow toolCall={call()} />}
+                          </Match>
+                          <Match when={tc.diff && tc.name !== 'bash' && tc}>
+                            {(call) => <DiffRow toolCall={call()} />}
+                          </Match>
+                        </Switch>
+                      </ToolCallErrorBoundary>
+                    )}
+                  </For>
+                </div>
+              </Show>
+            </div>
+          )
+        }}
       </For>
     </div>
   )
@@ -233,6 +345,23 @@ export const MessageBubble: Component<MessageBubbleProps> = (props) => {
     if (isActiveStreaming()) return null
     if (!hasToolCalls() && !props.message.content) return null
     return segmentMessage(props.message.content, effectiveToolCalls())
+  })
+
+  /** Interleaved thinking segments from metadata (present when thinking model used tools) */
+  const thinkingSegments = createMemo((): ThinkingSegment[] | null => {
+    if (isUser()) return null
+    const segs = props.message.metadata?.thinkingSegments
+    if (!segs || !Array.isArray(segs) || (segs as ThinkingSegment[]).length <= 1) return null
+    return segs as ThinkingSegment[]
+  })
+
+  /** Map from tool call ID to ToolCall for interleaved rendering */
+  const toolCallsById = createMemo((): Map<string, ToolCall> => {
+    const map = new Map<string, ToolCall>()
+    for (const tc of effectiveToolCalls() ?? []) {
+      map.set(tc.id, tc)
+    }
+    return map
   })
 
   const ImagesBlock = () => (
@@ -359,12 +488,23 @@ export const MessageBubble: Component<MessageBubbleProps> = (props) => {
                 <DirectorLabel />
               </Show>
 
+              {/* Interleaved thinking+tools (thinking model with tool calls) */}
+              <Show when={thinkingSegments()}>
+                {(segs) => (
+                  <InterleavedThinkingSegments segments={segs()} toolCallsById={toolCallsById()} />
+                )}
+              </Show>
+
+              {/* Fallback: single thinking block (no interleaving needed) */}
               <Show
-                when={(() => {
-                  const t = props.message.metadata?.thinking as string
-                  if (t) debugLog('thinking', 'message metadata: yes', 'msgId:', props.message.id)
-                  return t
-                })()}
+                when={
+                  !thinkingSegments() &&
+                  (() => {
+                    const t = props.message.metadata?.thinking as string
+                    if (t) debugLog('thinking', 'message metadata: yes', 'msgId:', props.message.id)
+                    return t
+                  })()
+                }
               >
                 <ThinkingRow
                   thinking={props.message.metadata!.thinking as string}
@@ -405,48 +545,64 @@ export const MessageBubble: Component<MessageBubbleProps> = (props) => {
               <Show when={!isActiveStreaming()}>
                 {/* When content is a lead question, skip normal rendering (card handles it) */}
                 <Show when={!leadQuestion()}>
-                  <Show when={segments()}>
-                    {(segs) => (
-                      <For each={segs()}>
-                        {(seg) => (
-                          <Switch>
-                            <Match when={seg.type === 'text' && seg}>
-                              {(textSeg) => (
-                                <div class="w-full mb-1">
-                                  <MarkdownContent
-                                    content={
-                                      (textSeg() as MessageSegment & { type: 'text' }).content
-                                    }
-                                    messageRole="assistant"
-                                    isStreaming={false}
-                                  />
-                                </div>
-                              )}
-                            </Match>
-                            <Match when={seg.type === 'tools' && seg}>
-                              {(toolSeg) => (
-                                <ToolSegmentDispatch
-                                  toolCalls={
-                                    (toolSeg() as MessageSegment & { type: 'tools' }).toolCalls
-                                  }
-                                  isStreaming={false}
-                                />
-                              )}
-                            </Match>
-                          </Switch>
-                        )}
-                      </For>
-                    )}
+                  {/* When interleaved thinking segments handle tools, only render text segments */}
+                  <Show when={thinkingSegments()}>
+                    <Show when={props.message.content}>
+                      <div class="w-full mb-1">
+                        <MarkdownContent
+                          content={props.message.content}
+                          messageRole="assistant"
+                          isStreaming={false}
+                        />
+                      </div>
+                    </Show>
                   </Show>
 
-                  <Show when={!segments() && props.message.content}>
-                    <div class="w-full">
-                      <MarkdownContent
-                        content={props.message.content}
-                        messageRole="assistant"
-                        isStreaming={false}
-                      />
-                    </div>
+                  {/* Normal rendering (no interleaved thinking segments) */}
+                  <Show when={!thinkingSegments()}>
+                    <Show when={segments()}>
+                      {(segs) => (
+                        <For each={segs()}>
+                          {(seg) => (
+                            <Switch>
+                              <Match when={seg.type === 'text' && seg}>
+                                {(textSeg) => (
+                                  <div class="w-full mb-1">
+                                    <MarkdownContent
+                                      content={
+                                        (textSeg() as MessageSegment & { type: 'text' }).content
+                                      }
+                                      messageRole="assistant"
+                                      isStreaming={false}
+                                    />
+                                  </div>
+                                )}
+                              </Match>
+                              <Match when={seg.type === 'tools' && seg}>
+                                {(toolSeg) => (
+                                  <ToolSegmentDispatch
+                                    toolCalls={
+                                      (toolSeg() as MessageSegment & { type: 'tools' }).toolCalls
+                                    }
+                                    isStreaming={false}
+                                  />
+                                )}
+                              </Match>
+                            </Switch>
+                          )}
+                        </For>
+                      )}
+                    </Show>
+
+                    <Show when={!segments() && props.message.content}>
+                      <div class="w-full">
+                        <MarkdownContent
+                          content={props.message.content}
+                          messageRole="assistant"
+                          isStreaming={false}
+                        />
+                      </div>
+                    </Show>
                   </Show>
                 </Show>
               </Show>

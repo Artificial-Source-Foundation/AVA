@@ -2,11 +2,12 @@
  * Diff Row
  *
  * File diff summary showing add/delete counts with expandable diff view.
- * Collapsed by default; shows file name and +/- line counts.
+ * Auto-expands for small diffs (< SMALL_DIFF_LINE_THRESHOLD changed lines).
+ * For write/create tools with empty old content, shows "+N lines" new file badge.
  */
 
-import { ChevronRight, FileDiff } from 'lucide-solid'
-import { type Component, createMemo, createSignal, Show } from 'solid-js'
+import { ChevronRight, FileDiff, FilePlus } from 'lucide-solid'
+import { type Component, createEffect, createMemo, createSignal, Show } from 'solid-js'
 import type { ToolCall } from '../../../types'
 import { DiffViewer } from '../../ui/DiffViewer'
 
@@ -17,7 +18,15 @@ interface DiffRowProps {
 interface DiffStats {
   additions: number
   deletions: number
+  /** Total unified diff lines (add + remove, not unchanged) */
+  changedLines: number
 }
+
+/**
+ * Threshold for auto-expanding the diff view.
+ * Diffs with fewer changed lines expand by default.
+ */
+const SMALL_DIFF_LINE_THRESHOLD = 30
 
 function computeDiffStats(oldContent: string, newContent: string): DiffStats {
   const oldLines = oldContent.split('\n')
@@ -45,7 +54,7 @@ function computeDiffStats(oldContent: string, newContent: string): DiffStats {
     if (count > next) deletions += count - next
   }
 
-  return { additions, deletions }
+  return { additions, deletions, changedLines: additions + deletions }
 }
 
 function shortFileName(filePath?: string): string {
@@ -55,16 +64,37 @@ function shortFileName(filePath?: string): string {
 }
 
 export const DiffRow: Component<DiffRowProps> = (props) => {
-  const [expanded, setExpanded] = createSignal(false)
-
   const hasDiff = (): boolean =>
     !!(
       props.toolCall.diff?.oldContent !== undefined && props.toolCall.diff?.newContent !== undefined
     )
 
+  /** True when old content is empty — this is a new file write */
+  const isNewFile = (): boolean => hasDiff() && props.toolCall.diff!.oldContent === ''
+
   const stats = createMemo((): DiffStats => {
-    if (!hasDiff()) return { additions: 0, deletions: 0 }
+    if (!hasDiff()) return { additions: 0, deletions: 0, changedLines: 0 }
     return computeDiffStats(props.toolCall.diff!.oldContent, props.toolCall.diff!.newContent)
+  })
+
+  /** For new files, count lines in the new content */
+  const newFileLineCount = createMemo((): number => {
+    if (!isNewFile()) return 0
+    const content = props.toolCall.diff!.newContent
+    return content ? content.split('\n').length : 0
+  })
+
+  const isSmallDiff = createMemo(() =>
+    isNewFile()
+      ? newFileLineCount() <= SMALL_DIFF_LINE_THRESHOLD
+      : stats().changedLines <= SMALL_DIFF_LINE_THRESHOLD
+  )
+
+  const [expanded, setExpanded] = createSignal(false)
+
+  // Auto-expand small diffs once stats are computed
+  createEffect(() => {
+    if (isSmallDiff()) setExpanded(true)
   })
 
   const fileName = (): string => shortFileName(props.toolCall.filePath)
@@ -87,21 +117,37 @@ export const DiffRow: Component<DiffRowProps> = (props) => {
             }
           }}
         >
-          <FileDiff class="w-4 h-4 text-[var(--text-muted)] flex-shrink-0" />
+          {/* Icon: FilePlus for new file, FileDiff for edits */}
+          <Show
+            when={isNewFile()}
+            fallback={<FileDiff class="w-4 h-4 text-[var(--text-muted)] flex-shrink-0" />}
+          >
+            <FilePlus class="w-4 h-4 text-[var(--success)] flex-shrink-0" />
+          </Show>
+
           <span class="text-[var(--text-secondary)] truncate">{fileName()}</span>
 
           <span class="flex-1" />
 
-          {/* +/- counts */}
-          <Show when={stats().additions > 0}>
+          {/* New file: show line count badge */}
+          <Show when={isNewFile()}>
             <span class="text-[11px] text-[var(--success)] tabular-nums font-mono">
-              +{stats().additions}
+              +{newFileLineCount()} lines
             </span>
           </Show>
-          <Show when={stats().deletions > 0}>
-            <span class="text-[11px] text-[var(--error)] tabular-nums font-mono">
-              -{stats().deletions}
-            </span>
+
+          {/* Edit: show +/- diff counts */}
+          <Show when={!isNewFile()}>
+            <Show when={stats().additions > 0}>
+              <span class="text-[11px] text-[var(--success)] tabular-nums font-mono">
+                +{stats().additions}
+              </span>
+            </Show>
+            <Show when={stats().deletions > 0}>
+              <span class="text-[11px] text-[var(--error)] tabular-nums font-mono">
+                -{stats().deletions}
+              </span>
+            </Show>
           </Show>
 
           <ChevronRight

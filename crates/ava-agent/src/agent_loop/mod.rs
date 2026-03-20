@@ -25,7 +25,7 @@ use tracing::{debug, info, instrument, trace, warn};
 use crate::llm_trait::LLMProvider;
 use crate::message_queue::MessageQueue;
 use crate::stuck::{StuckAction, StuckDetector};
-use crate::system_prompt::build_system_prompt;
+use crate::system_prompt::{build_system_prompt, provider_prompt_suffix};
 
 use repetition::RepetitionDetector;
 
@@ -310,6 +310,12 @@ impl AgentLoop {
             let tool_defs = self.active_tool_defs();
             build_system_prompt(&tool_defs, native)
         };
+        // Append provider-specific instructions (additive — does not replace the base prompt).
+        let provider_kind = self.llm.provider_kind();
+        if let Some(p_suffix) = provider_prompt_suffix(provider_kind, &self.config.model) {
+            system.push_str("\n\n");
+            system.push_str(&p_suffix);
+        }
         if let Some(ref suffix) = self.config.system_prompt_suffix {
             system.push_str("\n\n");
             system.push_str(suffix);

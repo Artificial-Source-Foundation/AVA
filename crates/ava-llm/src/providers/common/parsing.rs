@@ -646,14 +646,107 @@ pub fn parse_gemini_tool_calls(payload: &Value) -> Vec<ToolCall> {
 }
 
 /// Convert AVA tool definitions to the Gemini function calling format.
+/// Transform a JSON Schema for a specific provider family.
+///
+/// Different providers have quirks in how they handle tool schemas:
+/// - **Gemini**: Integer enums must be represented as string enums. Arrays must have
+///   an `items` field (Gemini rejects bare `{"type":"array"}` without `items`).
+/// - **OpenAI Responses API**: Requires strict mode (handled separately in
+///   `tools_to_responses_api_format` via `make_strict_schema`).
+/// - **Anthropic**: No transform needed (works as-is).
+///
+/// This function applies in-place transformations for the given provider string.
+pub fn transform_schema_for_provider(provider: &str, mut schema: Value) -> Value {
+    match provider {
+        "gemini" => {
+            transform_schema_gemini(&mut schema);
+            schema
+        }
+        // OpenAI strict transforms are handled in tools_to_responses_api_format
+        // Anthropic, OpenRouter, Ollama, Copilot, Inception: no transform needed
+        _ => schema,
+    }
+}
+
+/// Recursively transform a JSON Schema for Gemini compatibility.
+///
+/// Gemini-specific transformations:
+/// 1. Convert `integer` enum values to `string` enums (Gemini rejects integer enums
+///    in function declarations).
+/// 2. Add `items: {"type": "string"}` to arrays that have no `items` field (Gemini
+///    rejects `{"type": "array"}` without an `items` specification).
+fn transform_schema_gemini(schema: &mut Value) {
+    let Some(obj) = schema.as_object_mut() else {
+        return;
+    };
+
+    let schema_type = obj
+        .get("type")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+
+    // Fix 1: Convert integer enum to string enum.
+    // Gemini's functionDeclarations schema doesn't support integer enums.
+    if schema_type == "integer" {
+        if let Some(enum_vals) = obj.get("enum") {
+            if enum_vals.as_array().is_some() {
+                // Convert type to string and stringify all enum values
+                obj.insert("type".to_string(), Value::String("string".to_string()));
+                if let Some(Value::Array(vals)) = obj.get_mut("enum") {
+                    let stringified: Vec<Value> = vals
+                        .iter()
+                        .map(|v| {
+                            Value::String(match v {
+                                Value::Number(n) => n.to_string(),
+                                Value::String(s) => s.clone(),
+                                other => other.to_string(),
+                            })
+                        })
+                        .collect();
+                    *vals = stringified;
+                }
+            }
+        }
+    }
+
+    // Fix 2: Ensure arrays have an `items` field.
+    if schema_type == "array" && !obj.contains_key("items") {
+        obj.insert("items".to_string(), json!({"type": "string"}));
+    }
+
+    // Recurse into properties
+    if let Some(Value::Object(props)) = obj.get_mut("properties") {
+        for prop_schema in props.values_mut() {
+            transform_schema_gemini(prop_schema);
+        }
+    }
+
+    // Recurse into items
+    if let Some(items) = obj.get_mut("items") {
+        transform_schema_gemini(items);
+    }
+
+    // Recurse into anyOf / oneOf / allOf
+    for key in &["anyOf", "oneOf", "allOf"] {
+        if let Some(Value::Array(variants)) = obj.get_mut(*key) {
+            for variant in variants.iter_mut() {
+                transform_schema_gemini(variant);
+            }
+        }
+    }
+}
+
 pub fn tools_to_gemini_format(tools: &[Tool]) -> Vec<Value> {
     let declarations: Vec<Value> = tools
         .iter()
         .map(|tool| {
+            let mut params = tool.parameters.clone();
+            transform_schema_gemini(&mut params);
             json!({
                 "name": tool.name,
                 "description": tool.description,
-                "parameters": tool.parameters,
+                "parameters": params,
             })
         })
         .collect();
@@ -2640,5 +2733,106 @@ mod tests {
         });
         let (_content, _, _, thinking) = parse_responses_api_payload(&payload);
         assert!(thinking.is_none());
+    }
+
+    // ── transform_schema_for_provider / Gemini schema transforms ──────
+
+    #[test]
+    fn gemini_transform_integer_enum_to_string() {
+        let schema = json!({
+            "type": "integer",
+            "enum": [0, 1, 2],
+            "description": "A level"
+        });
+        let result = transform_schema_for_provider("gemini", schema);
+        assert_eq!(result["type"], "string");
+        let enums = result["enum"].as_array().unwrap();
+        assert_eq!(enums[0], json!("0"));
+        assert_eq!(enums[1], json!("1"));
+        assert_eq!(enums[2], json!("2"));
+    }
+
+    #[test]
+    fn gemini_transform_array_without_items_gets_items() {
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "paths": {"type": "array"}
+            },
+            "required": ["paths"]
+        });
+        let result = transform_schema_for_provider("gemini", schema);
+        let items = &result["properties"]["paths"]["items"];
+        assert!(
+            !items.is_null(),
+            "array without items should get items field"
+        );
+        assert_eq!(items["type"], "string");
+    }
+
+    #[test]
+    fn gemini_transform_array_with_items_unchanged() {
+        let schema = json!({
+            "type": "array",
+            "items": {"type": "integer"}
+        });
+        let result = transform_schema_for_provider("gemini", schema);
+        // Already has items, should not be replaced
+        assert_eq!(result["items"]["type"], "integer");
+    }
+
+    #[test]
+    fn gemini_transform_non_enum_integer_unchanged() {
+        // Integer without enum should remain integer
+        let schema = json!({
+            "type": "integer",
+            "minimum": 0
+        });
+        let result = transform_schema_for_provider("gemini", schema);
+        assert_eq!(result["type"], "integer");
+    }
+
+    #[test]
+    fn non_gemini_provider_schema_unchanged() {
+        let schema = json!({
+            "type": "integer",
+            "enum": [1, 2, 3]
+        });
+        let result = transform_schema_for_provider("anthropic", schema.clone());
+        assert_eq!(result, schema);
+
+        let result = transform_schema_for_provider("openai", schema.clone());
+        assert_eq!(result, schema);
+    }
+
+    #[test]
+    fn tools_to_gemini_format_applies_schema_transform() {
+        let tools = vec![Tool {
+            name: "set_level".to_string(),
+            description: "Set the level".to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "level": {
+                        "type": "integer",
+                        "enum": [0, 1, 2],
+                        "description": "The verbosity level"
+                    },
+                    "tags": {
+                        "type": "array",
+                        "description": "Tags to apply"
+                    }
+                },
+                "required": ["level"]
+            }),
+        }];
+        let result = tools_to_gemini_format(&tools);
+        let decls = result[0]["functionDeclarations"].as_array().unwrap();
+        let params = &decls[0]["parameters"];
+
+        // Integer enum should be converted to string enum
+        assert_eq!(params["properties"]["level"]["type"], "string");
+        // Array should have items
+        assert!(!params["properties"]["tags"]["items"].is_null());
     }
 }

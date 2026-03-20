@@ -207,6 +207,170 @@ export function summarizeAction(name: string, args: Record<string, unknown>): st
   }
 }
 
+/**
+ * Build a human-readable Title-cased tool description for display.
+ * Follows the Goose/OpenCode pattern: "Reading {path}", "Running `{cmd}`", etc.
+ */
+export function getToolDescription(name: string, args: Record<string, unknown>): string {
+  const path = (args.path ?? args.filePath ?? args.file_path) as string | undefined
+  const shortPath = path ? path.split('/').slice(-3).join('/') : ''
+
+  switch (name) {
+    case 'read_file':
+    case 'read': {
+      if (!shortPath) return 'Reading file'
+      const offset = args.offset as number | undefined
+      const limit = args.limit as number | undefined
+      if (offset !== undefined && limit !== undefined) {
+        return `Reading ${shortPath} [lines ${offset}–${offset + limit}]`
+      }
+      return `Reading ${shortPath}`
+    }
+    case 'write_file':
+    case 'write':
+      return shortPath ? `Writing ${shortPath}` : 'Writing file'
+    case 'create_file':
+    case 'create':
+      return shortPath ? `Creating ${shortPath}` : 'Creating file'
+    case 'edit':
+    case 'apply_patch':
+    case 'multiedit':
+      return shortPath ? `Editing ${shortPath}` : 'Editing file'
+    case 'delete_file':
+    case 'delete':
+      return shortPath ? `Deleting ${shortPath}` : 'Deleting file'
+    case 'bash': {
+      const cmd = String(args.command ?? '')
+      const short = cmd.length > 60 ? `${cmd.slice(0, 57)}...` : cmd
+      return short ? `Running \`${short}\`` : 'Running command'
+    }
+    case 'grep': {
+      const pattern = String(args.pattern ?? '')
+      const inPath = (args.path as string | undefined) ?? ''
+      const inShort = inPath ? inPath.split('/').slice(-3).join('/') : ''
+      if (pattern && inShort) return `Searching for '${pattern}' in ${inShort}`
+      if (pattern) return `Searching for '${pattern}'`
+      return 'Searching files'
+    }
+    case 'glob':
+      return args.pattern ? `Searching for ${args.pattern}` : 'Finding files'
+    case 'ls':
+      return shortPath ? `Listing ${shortPath}` : 'Listing directory'
+    case 'websearch':
+    case 'web_search':
+      return args.query ? `Searching '${args.query}'` : 'Searching the web'
+    case 'webfetch':
+    case 'web_fetch': {
+      const url = String(args.url ?? '')
+      const shortUrl = url.length > 60 ? `${url.slice(0, 57)}...` : url
+      return shortUrl ? `Fetching ${shortUrl}` : 'Fetching web page'
+    }
+    case 'git':
+    case 'git_read': {
+      const cmd = String(args.command ?? args.subcommand ?? '')
+      return cmd ? `Git: ${cmd}` : 'Git operation'
+    }
+    case 'task': {
+      const goal = String(args.goal ?? args.description ?? args.prompt ?? '')
+      const short = goal.length > 60 ? `${goal.slice(0, 57)}...` : goal
+      return short ? `Delegating: ${short}` : 'Delegating task'
+    }
+    case 'delegate_coder':
+    case 'delegate_reviewer':
+    case 'delegate_researcher':
+    case 'delegate_explorer': {
+      const worker = name.replace('delegate_', '')
+      const task = String(args.task ?? args.description ?? '')
+      const shortTask = task.length > 60 ? `${task.slice(0, 57)}...` : task
+      return shortTask ? `Delegating to ${worker}: ${shortTask}` : `Delegating to ${worker}`
+    }
+    default:
+      return shortPath ? `${name} ${shortPath}` : name
+  }
+}
+
+// ============================================================================
+// Context tool grouping (OpenCode pattern)
+// ============================================================================
+
+/** Tools that count as "gathering context" — reads, searches, lookups */
+export const CONTEXT_TOOL_NAMES = new Set([
+  'read',
+  'read_file',
+  'glob',
+  'grep',
+  'ls',
+  'git_read',
+  'web_fetch',
+  'webfetch',
+  'web_search',
+  'websearch',
+])
+
+/** Returns true when a tool is a context-gathering (read-only) tool */
+export function isContextTool(name: string): boolean {
+  return CONTEXT_TOOL_NAMES.has(name)
+}
+
+/** A segment in the context-aware grouping pass */
+export type ContextSegment =
+  | { kind: 'context'; calls: ToolCall[] }
+  | { kind: 'single'; call: ToolCall }
+
+/**
+ * Partition a flat list of tool calls into context groups and individual calls.
+ * Consecutive context tools (read/glob/grep/…) are merged into a single segment.
+ * Non-context tools (write, edit, bash) are always individual.
+ */
+export function partitionByContext(toolCalls: ToolCall[]): ContextSegment[] {
+  const segments: ContextSegment[] = []
+
+  for (const call of toolCalls) {
+    if (isContextTool(call.name)) {
+      const last = segments[segments.length - 1]
+      if (last?.kind === 'context') {
+        last.calls.push(call)
+      } else {
+        segments.push({ kind: 'context', calls: [call] })
+      }
+    } else {
+      segments.push({ kind: 'single', call })
+    }
+  }
+
+  return segments
+}
+
+/**
+ * Build a summary for a completed context group, e.g.:
+ * "Gathered context (3 files read, 2 searches)"
+ */
+export function describeContextGroup(calls: ToolCall[]): string {
+  let filesRead = 0
+  let searches = 0
+  let other = 0
+
+  for (const c of calls) {
+    if (c.name === 'read' || c.name === 'read_file') filesRead++
+    else if (
+      c.name === 'grep' ||
+      c.name === 'glob' ||
+      c.name === 'web_search' ||
+      c.name === 'websearch'
+    )
+      searches++
+    else other++
+  }
+
+  const parts: string[] = []
+  if (filesRead > 0) parts.push(`${filesRead} file${filesRead === 1 ? '' : 's'} read`)
+  if (searches > 0) parts.push(`${searches} search${searches === 1 ? '' : 'es'}`)
+  if (other > 0) parts.push(`${other} other`)
+
+  if (parts.length === 0) return `Gathered context (${calls.length})`
+  return `Gathered context (${parts.join(', ')})`
+}
+
 // ============================================================================
 // Duration / elapsed formatting
 // ============================================================================

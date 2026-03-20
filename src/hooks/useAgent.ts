@@ -419,6 +419,7 @@ function createAgentStore() {
           const partialThinking = rustAgent.thinkingContent()
           const elapsedMs = Date.now() - runStartedAt
           if (partialContent || partialThinking) {
+            const partialSegments = rustAgent.thinkingSegments()
             const cancelledMsg: Message = {
               id: generateMessageId('asst'),
               sessionId,
@@ -436,6 +437,7 @@ function createAgentStore() {
                 elapsedMs,
                 cancelled: true,
                 ...(partialThinking ? { thinking: partialThinking } : {}),
+                ...(partialSegments.length > 1 ? { thinkingSegments: partialSegments } : {}),
               },
             }
             session.addMessage(cancelledMsg)
@@ -474,10 +476,12 @@ function createAgentStore() {
       if (content) {
         const elapsedMs = Date.now() - runStartedAt
         const thinking = rustAgent.thinkingContent()
+        const segments = rustAgent.thinkingSegments()
         debugLog(
           'thinking',
           'message metadata:',
-          thinking ? `yes (${thinking.length} chars)` : 'no'
+          thinking ? `yes (${thinking.length} chars)` : 'no',
+          segments.length > 0 ? `${segments.length} segments` : ''
         )
         const assistantMsg: Message = {
           id: generateMessageId('asst'),
@@ -497,6 +501,8 @@ function createAgentStore() {
             mode: isPlanMode() ? 'plan' : 'code',
             elapsedMs,
             ...(thinking ? { thinking } : {}),
+            // Store interleaved segments for post-completion rendering
+            ...(segments.length > 1 ? { thinkingSegments: segments } : {}),
           },
         }
         session.addMessage(assistantMsg)
@@ -727,6 +733,7 @@ function createAgentStore() {
     isStreaming: rustAgent.isRunning, // alias for backward compat
     activeToolCalls: rustAgent.activeToolCalls,
     streamingContent: rustAgent.streamingContent,
+    thinkingSegments: rustAgent.thinkingSegments,
     streamingTokenEstimate,
     streamingStartedAt,
     error,

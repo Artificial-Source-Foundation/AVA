@@ -1,0 +1,10 @@
+{
+  "status": "fixed",
+  "files_modified": [
+    "src/components/chat/tool-call-utils.ts",
+    "src/components/chat/ToolCallGroup.tsx",
+    "src/components/chat/MessageBubble.tsx"
+  ],
+  "summary": "Implemented two features: (1) getToolDescription() — a new exported function in tool-call-utils.ts that returns properly Title-cased, human-readable tool descriptions matching the spec (e.g. 'Reading src/foo.ts', 'Running `git status`', 'Searching for \\'pattern\\' in path', 'Fetching https://...'); (2) Context tool grouping — added partitionByContext(), isContextTool(), CONTEXT_TOOL_NAMES, and describeContextGroup() to tool-call-utils.ts; added ContextGroupHeader and ContextAwareToolList components to ToolCallGroup.tsx; updated ToolSegmentDispatch in MessageBubble.tsx to use partitionByContext() so consecutive read/glob/grep/ls/web_fetch calls are grouped under 'Gathering context...' with a count badge while streaming and 'Gathered context (N files read, M searches)' with a collapsible expand when done. Non-context tools (write, edit, bash) always render individually. Individual tool results remain viewable by expanding the group.",
+  "tsc_pass": true
+}

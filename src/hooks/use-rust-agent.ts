@@ -15,6 +15,17 @@ function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
   return apiInvoke<T>(cmd, args)
 }
 
+/**
+ * A thinking segment: thinking content that occurred before a group of tool calls.
+ * Used to reconstruct the interleaved thinking→tools→thinking→response sequence.
+ */
+export interface ThinkingSegment {
+  /** Accumulated thinking text for this segment */
+  thinking: string
+  /** IDs of tool calls that followed this thinking block (may be empty for final thinking) */
+  toolCallIds: string[]
+}
+
 export function useRustAgent() {
   const [isRunning, setIsRunning] = createSignal(false)
   const [streamingContent, setStreamingContent] = createSignal('')
@@ -31,6 +42,8 @@ export function useRustAgent() {
     maxBudgetUsd: number
   } | null>(null)
   const [pendingPlan, setPendingPlan] = createSignal<PlanData | null>(null)
+  // Interleaved thinking segments: each entry is a block of thinking + the tool calls that followed
+  const [thinkingSegments, setThinkingSegments] = createSignal<ThinkingSegment[]>([])
 
   let unlisten: UnlistenFn | null = null
   let eventSocket: WebSocket | null = null
@@ -68,8 +81,21 @@ export function useRustAgent() {
       case 'thinking':
         debugLog('thinking', 'received:', (event.content as string)?.length ?? 0, 'chars')
         setThinkingContent((prev) => prev + event.content)
+        // Track for interleaved segments: accumulate into current block or start new one
+        setThinkingSegments((prev) => {
+          const last = prev[prev.length - 1]
+          if (last && last.toolCallIds.length === 0) {
+            // Still accumulating into the same thinking block (no tools have been called yet for this block)
+            return [
+              ...prev.slice(0, -1),
+              { thinking: last.thinking + (event.content as string), toolCallIds: [] },
+            ]
+          }
+          // New thinking block (after tool calls or at start)
+          return [...prev, { thinking: event.content as string, toolCallIds: [] }]
+        })
         break
-      case 'tool_call':
+      case 'tool_call': {
         log.info('tools', 'Tool call started', { tool: event.name })
         debugLog(
           'tools',
@@ -77,17 +103,37 @@ export function useRustAgent() {
           (event as { name?: string }).name,
           (event as { args?: unknown }).args
         )
+        const newToolId = `${event.name}-${Date.now()}`
+        // Extract file path from args for file-modifying tools
+        const args = event.args as Record<string, unknown>
+        const filePath = (args.file_path ?? args.filePath ?? args.path ?? args.output_path) as
+          | string
+          | undefined
         setActiveToolCalls((prev) => [
           ...prev,
           {
-            id: `${event.name}-${Date.now()}`,
+            id: newToolId,
             name: event.name,
             args: event.args,
             status: 'running' as const,
             startedAt: Date.now(),
+            filePath,
           },
         ])
+        // Associate this tool call with the current thinking segment
+        setThinkingSegments((prev) => {
+          if (prev.length === 0) {
+            // Tool called before any thinking — add empty thinking segment
+            return [{ thinking: '', toolCallIds: [newToolId] }]
+          }
+          const last = prev[prev.length - 1]!
+          return [
+            ...prev.slice(0, -1),
+            { thinking: last.thinking, toolCallIds: [...last.toolCallIds, newToolId] },
+          ]
+        })
         break
+      }
       case 'tool_result': {
         debugLog(
           'tools',
@@ -111,6 +157,40 @@ export function useRustAgent() {
               durationMs,
             })
             log.debug('perf', 'Tool execution time', { tool: first.name, durationMs })
+
+            // Populate diff data for file-modifying tools from their args
+            if (!event.is_error) {
+              const toolArgs = first.args as Record<string, unknown>
+              if (
+                first.name === 'edit' ||
+                first.name === 'apply_patch' ||
+                first.name === 'multiedit'
+              ) {
+                // For edit tools: build diff from old_text/new_text args (Rust tool schema)
+                // Also handle old_string/new_string variants for compatibility
+                const oldStr = (toolArgs.old_text ??
+                  toolArgs.old_string ??
+                  toolArgs.old_content ??
+                  '') as string
+                const newStr = (toolArgs.new_text ??
+                  toolArgs.new_string ??
+                  toolArgs.new_content ??
+                  '') as string
+                if (oldStr || newStr) {
+                  first.diff = { oldContent: oldStr, newContent: newStr }
+                }
+              } else if (
+                first.name === 'write' ||
+                first.name === 'write_file' ||
+                first.name === 'create_file'
+              ) {
+                // For write tools: treat as new file creation (empty old content)
+                const content = (toolArgs.content ?? toolArgs.new_content ?? '') as string
+                if (content) {
+                  first.diff = { oldContent: '', newContent: content }
+                }
+              }
+            }
           }
           return updated
         })
@@ -308,6 +388,7 @@ export function useRustAgent() {
       setProgressMessage(null)
       setBudgetWarning(null)
       setPendingPlan(null)
+      setThinkingSegments([])
     })
   }
 
@@ -468,6 +549,7 @@ export function useRustAgent() {
     streamingContent,
     thinkingContent,
     activeToolCalls,
+    thinkingSegments,
     error,
     lastResult,
     tokenUsage,

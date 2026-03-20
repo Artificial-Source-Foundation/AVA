@@ -36,10 +36,10 @@ pub async fn run_review(args: ReviewArgs) -> Result<()> {
     };
 
     // 3. Collect diff
-    eprintln!("[review] Collecting diff...");
+    tracing::info!("[review] Collecting diff...");
     let review_context = collect_diff(&mode).await.map_err(|e| eyre!("{e}"))?;
 
-    eprintln!(
+    tracing::info!(
         "[review] {} file(s) changed, {} bytes of diff",
         review_context.stats.len(),
         review_context.diff.len()
@@ -71,7 +71,7 @@ pub async fn run_review(args: ReviewArgs) -> Result<()> {
         .route_required(&provider_name, &model_name)
         .await?;
 
-    eprintln!("[review] Using {provider_name}/{model_name}");
+    tracing::info!("[review] Using {provider_name}/{model_name}");
 
     // 5. Build system prompt and run agent
     let system_prompt = build_review_system_prompt(&args.focus);

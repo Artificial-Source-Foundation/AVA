@@ -175,6 +175,26 @@ pub(super) fn check_blocked_patterns(lower: &str, _original: &str) -> Option<Str
         return Some("Fork bomb detected".to_string());
     }
 
+    // find -exec rm -rf / find -delete — semantic bypass of the rm block
+    // e.g. `find / -exec rm -rf {} +`  or  `find /etc -delete`
+    if lower.starts_with("find ") {
+        // -delete flag recursively removes every matched file/directory
+        let tokens: Vec<&str> = lower.split_ascii_whitespace().collect();
+        if tokens.contains(&"-delete") {
+            return Some("find -delete can recursively delete files".to_string());
+        }
+        // -exec rm with recursive+force is equivalent to rm -rf
+        if lower.contains("-exec") && lower.contains(" rm ") {
+            let rm_idx = tokens.iter().position(|t| *t == "rm");
+            if let Some(idx) = rm_idx {
+                let flags = collect_flags(&tokens[idx..]);
+                if has_recursive_force(&flags) {
+                    return Some("find -exec rm -rf is equivalent to rm -rf".to_string());
+                }
+            }
+        }
+    }
+
     // chmod 777 / or chown root /
     if lower.contains("chmod") && lower.contains("777") && lower.contains(" /") {
         let after_777 = lower.split("777").nth(1).unwrap_or("").trim();

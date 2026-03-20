@@ -22,7 +22,7 @@ use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 use std::time::Instant;
 
 use ava_agent::stack::{AgentStack, AgentStackConfig};
@@ -898,6 +898,15 @@ async fn run_tier2_javascript(
     run_script("node", &full_source, "js", harness.test_count).await
 }
 
+/// Compiled regex for stripping `func main()` bodies from model-generated Go code.
+///
+/// Using `LazyLock` ensures the pattern is validated at first use (in tests)
+/// rather than panicking at runtime with `.unwrap()`.
+static RE_GO_MAIN: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?s)func\s+main\s*\(\s*\)\s*\{[^}]*\}")
+        .expect("RE_GO_MAIN: static regex pattern is invalid — this is a compile-time bug")
+});
+
 /// Tier 2 validation for Go: wrap extracted code in package main with imports, run with `go run`.
 async fn run_tier2_go(
     model_output: &str,
@@ -969,8 +978,7 @@ async fn run_tier2_go(
     }
 
     // Remove any `func main()` from the model code since the test harness provides one
-    let re_main = Regex::new(r"(?s)func\s+main\s*\(\s*\)\s*\{[^}]*\}").unwrap();
-    let source_without_main = re_main.replace_all(&full_source, "").to_string();
+    let source_without_main = RE_GO_MAIN.replace_all(&full_source, "").to_string();
 
     let final_source = format!("{}\n{}", source_without_main, harness.test_code);
     run_script("go", &final_source, "go", harness.test_count).await
@@ -1908,7 +1916,7 @@ async fn save_results_json(report: &BenchmarkReport) -> Result<()> {
         .await
         .map_err(|e| eyre!("Failed to write results: {}", e))?;
 
-    eprintln!("[benchmark] Results saved to {}", path.display());
+    tracing::info!("[benchmark] Results saved to {}", path.display());
 
     Ok(())
 }
@@ -2006,5 +2014,15 @@ mod tests {
     fn test_parse_judge_specs_empty() {
         let specs = parse_judge_specs(None).unwrap();
         assert!(specs.is_empty());
+    }
+
+    /// Verify all static regexes compile successfully.
+    /// Catches any future regex mutation that would otherwise panic at runtime.
+    #[test]
+    fn regexes_compile() {
+        // Force initialisation of the LazyLock; panics here rather than at runtime if invalid.
+        let _ = &*RE_GO_MAIN;
+        assert!(RE_GO_MAIN.is_match("func main() { return }"));
+        assert!(!RE_GO_MAIN.is_match("func helper() { return }"));
     }
 }

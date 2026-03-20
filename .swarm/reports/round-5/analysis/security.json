@@ -1,0 +1,95 @@
+{
+  "domain": "security-r5",
+  "audited_at": "2026-03-20",
+  "severity_counts": {
+    "critical": 0,
+    "warning": 3,
+    "suggestion": 4
+  },
+  "findings": [
+    {
+      "id": "R5-W1",
+      "severity": "warning",
+      "title": "Sandbox executor debug log exposes full args including env var values",
+      "file": "crates/ava-sandbox/src/executor.rs",
+      "line": 20,
+      "detail": "Line 20: `tracing::debug!(\"Sandbox executing: {} {:?}\", plan.program, plan.args)`. For install-class commands that use /usr/bin/env, the plan.args vector contains the full `KEY=VALUE` env entries passed to the sandbox (built in macos.rs lines 66-68 and linux.rs lines 53-57). If a user has set e.g. CARGO_HOME or HOME to a path that embeds a secret, or if future callers populate plan.args with credentials, those values will appear in debug-level trace logs. The `filtered_env()` allow-list restricts what goes into env (PATH, HOME, USER, SHELL, LANG, LC_ALL, LC_CTYPE, TERM, CARGO_HOME, RUSTUP_HOME), so the risk is low today, but the pattern is structurally unsafe: any future code that adds sensitive env vars to SandboxRequest.env will silently log them at debug level.",
+      "recommendation": "Replace the debug log with a redacted form that prints env variable names but not values: log `plan.args` with values masked for env-style tokens (`KEY=...` format detection). At minimum, add a comment warning that env values appear in the debug output."
+    },
+    {
+      "id": "R5-W2",
+      "severity": "warning",
+      "title": "OAuth state parameter not verified against PKCE state before code exchange",
+      "file": "crates/ava-auth/src/callback.rs",
+      "line": 65,
+      "detail": "The callback server extracts both `code` and `state` from the redirect (lines 65-105) and returns them to the caller as `OAuthCallback { code, state }`. However, `callback.rs` itself does not compare `state` against the PKCE `state` that was generated before the auth redirect. The responsibility is delegated to the caller (crates/ava-tui/src/auth.rs). If any call site omits or incorrectly implements this comparison, CSRF attacks on the OAuth flow become possible. A malicious page that initiates a concurrent auth flow could substitute its own authorization code.",
+      "recommendation": "Accept the expected `state` value as a parameter to `listen_for_callback()` and reject the callback with `AuthError` if state does not match. This makes CSRF protection structural and eliminates the risk of call-site omission."
+    },
+    {
+      "id": "R5-W3",
+      "severity": "warning",
+      "title": "rm-classifier bypass via `find -exec rm -rf`",
+      "file": "crates/ava-permissions/src/classifier/rules.rs",
+      "line": 132,
+      "detail": "The `check_blocked_patterns` function only inspects commands whose first token (lowercased) is `rm`. A command such as `find / -exec rm -rf {} +` or `find /etc -delete` would bypass the critical-path rm block entirely: `find` is not in the block list, and neither is the `-delete` flag or `exec rm`. The whole-command lowercase check and the per-part POSIX tokenizer would both classify this as Low risk. This represents a semantic bypass of the rm protection that has already had four rounds of hardening.",
+      "recommendation": "Add `find` with `-exec rm` and `-delete` to `check_blocked_patterns`. At minimum, scan all command parts for any `rm -rf`-equivalent sub-invocations even when the leading command word is not `rm`."
+    },
+    {
+      "id": "R5-S1",
+      "severity": "suggestion",
+      "title": "SBPL escape does not reject newlines or NUL bytes",
+      "file": "crates/ava-sandbox/src/macos.rs",
+      "line": 10,
+      "detail": "The `escape_sbpl_path` function rejects `\"`, `\\`, `(`, and `)`. It does not reject `\\n` (newline), `\\r`, or `\\0` (NUL). SBPL is whitespace-delimited; a path containing a newline could potentially inject a new SBPL rule on a separate line. Paths containing NUL bytes can cause OS-level issues with C string handling in sandbox-exec. In practice macOS rejects NUL-containing paths at the filesystem level, so severity is low, but the function's intent is to be a strict allowlist.",
+      "recommendation": "Add a check for any character with ASCII value < 0x20 (control characters including NUL, LF, CR, TAB) in addition to the existing rejections."
+    },
+    {
+      "id": "R5-S2",
+      "severity": "suggestion",
+      "title": "Secret redaction does not cover Anthropic or OpenRouter key formats",
+      "file": "crates/ava-tools/src/core/secret_redaction.rs",
+      "line": 29,
+      "detail": "The `PATTERNS` block covers: sk-proj-*, sk-*, AKIA*, AWS secret assignments, Bearer tokens, gh[ps]_*, github_pat_*, and generic `secret|password|token|api_key|auth` assignments. Anthropic API keys use the format `sk-ant-api03-...`, which starts with `sk-` and would be caught by the `sk_key` pattern. However, OpenRouter keys use the format `sk-or-v1-...`, which is also caught. This appears safe. The gap is Gemini API keys (format `AIza[A-Za-z0-9-_]{35}`) and Inception keys, which share no common prefix with covered patterns and would only be caught by the generic assignment pattern if the variable name contains `api_key`/`token`/etc. A bare Gemini key printed in command output would not be redacted.",
+      "recommendation": "Add a pattern for `AIza[A-Za-z0-9\\-_]{35}` to cover Gemini API keys."
+    },
+    {
+      "id": "R5-S3",
+      "severity": "suggestion",
+      "title": "Session JSONL logger does not redact message content before writing to disk",
+      "file": "crates/ava-agent/src/session_logger.rs",
+      "line": 65,
+      "detail": "The `TurnLogEntry` written to `~/.ava/log/{session_id}.jsonl` includes `tool_calls: Vec<TurnToolCall>` which only stores tool name and call ID, not arguments. Content is not logged. However, the future evolution risk is real: if `TurnLogEntry` is extended to include tool arguments or response content, those will be written verbatim to disk. No redaction step is applied at the logger boundary. The `redact_secrets()` function exists in `ava-tools` but is not imported here.",
+      "recommendation": "Document in a code comment that `TurnLogEntry` must never include raw tool arguments or LLM response content. If content logging is added in future, pipe it through `redact_secrets()` before writing."
+    },
+    {
+      "id": "R5-S4",
+      "severity": "suggestion",
+      "title": "Sub-agent spawner inherits extended_tools=true without permission middleware",
+      "file": "crates/ava-agent/src/stack/stack_run.rs",
+      "line": 687,
+      "detail": "At line 687, `AgentTaskSpawner::spawn_named()` sets `extended_tools: true` in the sub-agent `AgentConfig`. The sub-agent's `ToolRegistry` is built with `register_core_tools()` only (line 655-656), without attaching the permission middleware that the parent agent has (approval bridge, permission inspector, etc.). This means sub-agents run with extended tool access but without the parent's safety gates: no approval prompts, no command classification, no `filtered_env()` call for bash commands executed by a sub-agent. The sub-agent's bash tool will use the process's full environment (not scrubbed) unless the platform's LocalShell happens to be called with scrub_env=true, which depends on the BashTool implementation within the sub-agent's tool set.",
+      "recommendation": "Pass the parent's permission inspector and approval bridge to sub-agent tool registries, or explicitly document and test that sub-agents are constrained to a safe subset of tools. Verify that the BashTool used by sub-agents calls execute_with_options with scrub_env=true."
+    }
+  ],
+  "verification_of_previous_fixes": {
+    "sbpl_injection": {
+      "status": "FIXED_AND_SOLID",
+      "detail": "escape_sbpl_path() at macos.rs:9-16 rejects paths containing '\"', '\\\\', '(', ')'. Test at line 96 covers the injection pattern. The fix is correct. One minor gap exists (control chars, see R5-S1) but it does not affect known SBPL injection vectors."
+    },
+    "env_scrubbing": {
+      "status": "FIXED_AND_SOLID",
+      "detail": "Both execution paths in bash.rs call filtered_env() and pass scrub_env:true. The sandbox path (lines 87-88) uses filtered_env() in the SandboxRequest.env field, and the non-sandbox path (lines 122-124) passes filtered_env() and scrub_env:true to execute_with_options. The LocalShell implementation honors scrub_env correctly at shell.rs:84-87 and 159-162. No missing path found."
+    },
+    "rm_rf_blocklist": {
+      "status": "FIXED_WITH_KNOWN_GAP",
+      "detail": "The POSIX tokenizer + collect_flags() correctly handles -rf, -fr, -r -f, -f -r, quoted paths, and double-slash normalization. 17 critical path prefixes are protected. Wildcard top-level globs (/etc/*) are blocked. Legitimate paths under prefixes (/home/user/project) are correctly allowed. Gap: find -exec rm and find -delete are not covered (see R5-W3)."
+    }
+  },
+  "credential_handling_assessment": {
+    "Debug_format_for_ProviderCredential": "SAFE — custom Debug impl at credentials.rs:41-78 redacts api_key, oauth_token, oauth_refresh_token.",
+    "API_keys_in_provider_structs": "SAFE — api_key fields are used only in HTTP header construction; no tracing calls log them.",
+    "OAuth_PKCE_state": "AT_RISK — state comparison is delegated to call sites; not enforced at callback boundary (see R5-W2).",
+    "Credential_file_permissions": "NOT_AUDITED — write_file_atomic at credentials.rs:170 saves to ~/.ava/credentials.json but file mode (0600 vs 0644) not visible in this audit scope.",
+    "Env_var_API_keys": "SAFE — env_override_credential() reads standard env vars but never logs them; the placeholder check prevents dummy values from leaking as credentials."
+  }
+}

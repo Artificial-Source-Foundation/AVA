@@ -228,6 +228,11 @@ impl AgentStack {
             prompt_caching: true,
         };
 
+        // Surface any panic from the background indexing task before we read
+        // the index.  If the task panicked the index will be None (empty), and
+        // `check_index_status` will have already logged an actionable error.
+        self.check_index_status().await;
+
         let enriched_goal = self.enrich_goal_with_memories(goal).await;
         let relevance_scores = {
             let guard = self.codebase_index.read().await;

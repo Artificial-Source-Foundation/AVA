@@ -546,12 +546,10 @@ impl AgentState {
         self.thinking_level = level;
         if let Some(stack) = &self.stack {
             let stack = stack.clone();
-            let handle = tokio::spawn(async move {
-                stack.set_thinking_level(level).await;
-            });
             tokio::spawn(async move {
-                if let Err(e) = handle.await {
-                    warn!("set_thinking_level task panicked: {e}");
+                match stack.set_thinking_level(level).await {
+                    Ok(()) => {}
+                    Err(e) => warn!("set_thinking_level failed: {e}"),
                 }
             });
         }
@@ -569,12 +567,10 @@ impl AgentState {
         if let Some(stack) = &self.stack {
             let stack = stack.clone();
             let level = self.thinking_level;
-            let handle = tokio::spawn(async move {
-                stack.set_thinking_level(level).await;
-            });
             tokio::spawn(async move {
-                if let Err(e) = handle.await {
-                    warn!("cycle_thinking task panicked: {e}");
+                match stack.set_thinking_level(level).await {
+                    Ok(()) => {}
+                    Err(e) => warn!("cycle_thinking: set_thinking_level failed: {e}"),
                 }
             });
         }
@@ -645,13 +641,12 @@ impl AgentState {
         let is_plan = matches!(mode, AgentMode::Plan);
         if let Some(stack) = &self.stack {
             let stack = stack.clone();
-            let handle = tokio::spawn(async move {
-                stack.set_mode_prompt_suffix(suffix).await;
-                stack.set_plan_mode(is_plan).await;
-            });
             tokio::spawn(async move {
-                if let Err(e) = handle.await {
-                    warn!("set_mode task panicked: {e}");
+                if let Err(e) = stack.set_mode_prompt_suffix(suffix).await {
+                    warn!("set_mode: set_mode_prompt_suffix failed: {e}");
+                }
+                if let Err(e) = stack.set_plan_mode(is_plan).await {
+                    warn!("set_mode: set_plan_mode failed: {e}");
                 }
             });
         }

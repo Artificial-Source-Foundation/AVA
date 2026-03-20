@@ -4,10 +4,14 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use ava_agent::agent_loop::{AgentConfig, AgentEvent, AgentLoop, PostEditValidationConfig};
+use ava_agent::message_queue::MessageQueue;
 use ava_agent::LLMProvider;
 use ava_context::ContextManager;
 use ava_tools::registry::{Tool, ToolRegistry};
-use ava_types::{AvaError, Message, ToolResult};
+use ava_types::{
+    AvaError, Message, MessageTier, QueuedMessage, StreamChunk, ThinkingLevel, TokenUsage,
+    ToolResult,
+};
 use futures::{Stream, StreamExt};
 use serde_json::{json, Value};
 
@@ -138,6 +142,57 @@ impl Tool for RecordingTool {
             .expect("recording tool lock poisoned")
             .push(args);
         Ok(self.result.clone())
+    }
+}
+
+/// A mock provider that emits a `TokenUsage` chunk alongside each response.
+#[derive(Clone)]
+struct UsageMockProvider {
+    responses: Arc<Mutex<VecDeque<String>>>,
+    usage: TokenUsage,
+}
+
+impl UsageMockProvider {
+    fn new(responses: Vec<String>, usage: TokenUsage) -> Self {
+        Self {
+            responses: Arc::new(Mutex::new(responses.into())),
+            usage,
+        }
+    }
+}
+
+#[async_trait]
+impl LLMProvider for UsageMockProvider {
+    async fn generate(&self, _messages: &[Message]) -> ava_types::Result<String> {
+        let mut lock = self
+            .responses
+            .lock()
+            .map_err(|_| AvaError::ToolError("mock lock poisoned".to_string()))?;
+        lock.pop_front()
+            .ok_or_else(|| AvaError::NotFound("no mock response available".to_string()))
+    }
+
+    async fn generate_stream(
+        &self,
+        messages: &[Message],
+    ) -> ava_types::Result<Pin<Box<dyn Stream<Item = StreamChunk> + Send>>> {
+        let text = self.generate(messages).await?;
+        Ok(Box::pin(futures::stream::iter(vec![
+            StreamChunk::text(text),
+            StreamChunk::with_usage(self.usage.clone()),
+        ])))
+    }
+
+    fn model_name(&self) -> &str {
+        "mock-usage-model"
+    }
+
+    fn estimate_tokens(&self, input: &str) -> usize {
+        (input.len() / 4).max(1)
+    }
+
+    fn estimate_cost(&self, input_tokens: usize, output_tokens: usize) -> f64 {
+        (input_tokens + output_tokens) as f64 / 1_000_000.0
     }
 }
 
@@ -580,5 +635,478 @@ async fn post_edit_validation_scopes_lint_for_apply_patch_paths() {
     assert_eq!(
         calls[0].get("path").and_then(Value::as_str),
         Some("src/lib.rs")
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Integration tests for run_unified() — the 325-line core execution path
+// ---------------------------------------------------------------------------
+
+/// Build a minimal AgentConfig with sensible defaults for integration tests.
+fn test_config(max_turns: usize) -> AgentConfig {
+    AgentConfig {
+        max_turns,
+        token_limit: 10_000,
+        model: "mock-model".to_string(),
+        max_budget_usd: 0.0,
+        max_cost_usd: 10.0,
+        loop_detection: true,
+        custom_system_prompt: None,
+        thinking_level: ThinkingLevel::Off,
+        thinking_budget_tokens: None,
+        system_prompt_suffix: None,
+        extended_tools: false,
+        plan_mode: false,
+        post_edit_validation: None,
+        auto_compact: true,
+        stream_timeout_secs: 90,
+        prompt_caching: true,
+    }
+}
+
+/// Single-turn run: verify `run()` returns `Ok(Session)` and session contains
+/// both the user goal message and the assistant reply.
+#[tokio::test]
+async fn single_turn_headless_run_produces_session() {
+    let mut loop_engine = build_loop(vec!["Task complete.".to_string()], 10_000, 5);
+    let session = loop_engine
+        .run("hello world")
+        .await
+        .expect("run should succeed");
+
+    // Session must contain the user goal message
+    let user_msgs: Vec<_> = session
+        .messages
+        .iter()
+        .filter(|m| m.role == ava_types::Role::User)
+        .collect();
+    assert!(
+        !user_msgs.is_empty(),
+        "session should have at least one user message"
+    );
+    assert!(
+        user_msgs.iter().any(|m| m.content.contains("hello world")),
+        "goal message should appear in session"
+    );
+
+    // Session must contain the assistant reply
+    let assistant_msgs: Vec<_> = session
+        .messages
+        .iter()
+        .filter(|m| m.role == ava_types::Role::Assistant)
+        .collect();
+    assert_eq!(
+        assistant_msgs.len(),
+        1,
+        "should have exactly one assistant message"
+    );
+    assert_eq!(assistant_msgs[0].content, "Task complete.");
+}
+
+/// Streaming single-turn run: verify `run_streaming()` emits a `Complete` event
+/// and that the event's session contains the expected messages.
+#[tokio::test]
+async fn streaming_run_emits_complete_event() {
+    let mut loop_engine = build_loop(vec!["All done!".to_string()], 10_000, 5);
+    let stream = loop_engine.run_streaming("do something").await;
+    let events: Vec<AgentEvent> = stream.collect().await;
+
+    // Must have a Complete event
+    let complete_event = events.iter().find(|e| matches!(e, AgentEvent::Complete(_)));
+    assert!(
+        complete_event.is_some(),
+        "streaming run should emit Complete event"
+    );
+
+    // The Complete event's session should contain the assistant reply
+    if let Some(AgentEvent::Complete(session)) = complete_event {
+        let assistant_msgs: Vec<_> = session
+            .messages
+            .iter()
+            .filter(|m| m.role == ava_types::Role::Assistant)
+            .collect();
+        assert_eq!(assistant_msgs.len(), 1);
+        assert_eq!(assistant_msgs[0].content, "All done!");
+    }
+}
+
+/// Streaming run emits Token events before the Complete event.
+#[tokio::test]
+async fn streaming_run_emits_token_events() {
+    let mut loop_engine = build_loop(vec!["Token output here.".to_string()], 10_000, 5);
+    let stream = loop_engine.run_streaming("generate tokens").await;
+    let events: Vec<AgentEvent> = stream.collect().await;
+
+    let token_events: Vec<_> = events
+        .iter()
+        .filter(|e| matches!(e, AgentEvent::Token(_)))
+        .collect();
+    assert!(
+        !token_events.is_empty(),
+        "should emit at least one Token event"
+    );
+
+    // Tokens should come before Complete
+    let token_idx = events
+        .iter()
+        .position(|e| matches!(e, AgentEvent::Token(_)))
+        .unwrap();
+    let complete_idx = events
+        .iter()
+        .position(|e| matches!(e, AgentEvent::Complete(_)))
+        .unwrap();
+    assert!(
+        token_idx < complete_idx,
+        "Token events should precede Complete"
+    );
+}
+
+/// Max-turns enforcement: when `max_turns = 1` and the LLM keeps returning tool
+/// calls, the loop must stop after the configured limit and still produce a
+/// valid session (via the force_summary path).
+#[tokio::test]
+async fn max_turns_limit_halts_loop() {
+    let mut tools = ToolRegistry::new();
+    tools.register(NoopTool { name: "echo" });
+    tools.register(NoopTool {
+        name: "attempt_completion",
+    });
+
+    // Provide enough responses that without a turn limit the loop would keep going.
+    // With max_turns=1, the second response should never be consumed.
+    let responses = vec![
+        json!({"tool_call": {"name": "echo", "arguments": {"msg": "first"}}}).to_string(),
+        // Force-summary call (when max_turns is hit) will consume this
+        "Summary: I've done what I can.".to_string(),
+        // These should never be consumed
+        json!({"tool_call": {"name": "echo", "arguments": {"msg": "should not run"}}}).to_string(),
+    ];
+
+    let mut loop_engine = AgentLoop::new(
+        Box::new(MockLLMProvider::new(responses)),
+        tools,
+        ContextManager::new(10_000),
+        test_config(1),
+    );
+
+    let session = loop_engine
+        .run("keep running")
+        .await
+        .expect("run should succeed even when turn limit hit");
+
+    // The loop should have emitted a Progress event and then a summary
+    // Session should exist (not an error)
+    assert!(
+        !session.messages.is_empty(),
+        "session should have messages even when turn limit enforced"
+    );
+}
+
+/// Max-turns via streaming: verify Progress("turn limit reached") is emitted
+/// before the Complete event.
+#[tokio::test]
+async fn max_turns_streaming_emits_progress_and_complete() {
+    let mut tools = ToolRegistry::new();
+    tools.register(NoopTool { name: "echo" });
+    tools.register(NoopTool {
+        name: "attempt_completion",
+    });
+
+    let responses = vec![
+        json!({"tool_call": {"name": "echo", "arguments": {}}}).to_string(),
+        "Summary done.".to_string(),
+    ];
+
+    let mut loop_engine = AgentLoop::new(
+        Box::new(MockLLMProvider::new(responses)),
+        tools,
+        ContextManager::new(10_000),
+        test_config(1),
+    );
+
+    let stream = loop_engine.run_streaming("limited run").await;
+    let events: Vec<AgentEvent> = stream.collect().await;
+
+    // Should see turn-limit progress event
+    let has_turn_limit_progress = events
+        .iter()
+        .any(|e| matches!(e, AgentEvent::Progress(msg) if msg.contains("turn limit reached")));
+    assert!(
+        has_turn_limit_progress,
+        "should emit turn limit progress event"
+    );
+
+    // Should still end with Complete
+    assert!(
+        events.iter().any(|e| matches!(e, AgentEvent::Complete(_))),
+        "should emit Complete even after turn limit"
+    );
+}
+
+/// Tool dispatch success: run with a successful tool call, verify the session
+/// contains both the tool call and the tool result message.
+#[tokio::test]
+async fn successful_tool_call_recorded_in_session() {
+    let recording_calls = Arc::new(Mutex::new(Vec::new()));
+    let mut tools = ToolRegistry::new();
+    tools.register(RecordingTool {
+        name: "my_tool",
+        calls: recording_calls.clone(),
+        result: ToolResult {
+            call_id: "call_001".to_string(),
+            content: "tool output data".to_string(),
+            is_error: false,
+        },
+    });
+    tools.register(NoopTool {
+        name: "attempt_completion",
+    });
+
+    let mut loop_engine = AgentLoop::new(
+        Box::new(MockLLMProvider::new(vec![
+            json!({"tool_call": {"name": "my_tool", "arguments": {"key": "value"}}}).to_string(),
+            json!({"tool_call": {"name": "attempt_completion", "arguments": {}}}).to_string(),
+        ])),
+        tools,
+        ContextManager::new(10_000),
+        test_config(5),
+    );
+
+    let session = loop_engine
+        .run("use the tool")
+        .await
+        .expect("run should succeed");
+
+    // The tool should have been invoked with the provided arguments
+    let calls = recording_calls.lock().expect("calls lock poisoned");
+    assert_eq!(calls.len(), 1, "tool should be called exactly once");
+    assert_eq!(
+        calls[0].get("key").and_then(Value::as_str),
+        Some("value"),
+        "tool should receive correct arguments"
+    );
+
+    // Session should contain a Tool role message with the tool output
+    let tool_messages: Vec<_> = session
+        .messages
+        .iter()
+        .filter(|m| m.role == ava_types::Role::Tool)
+        .collect();
+    assert!(
+        !tool_messages.is_empty(),
+        "session should have tool result messages"
+    );
+    assert!(
+        tool_messages
+            .iter()
+            .any(|m| m.content.contains("tool output data")),
+        "session should contain tool output content"
+    );
+}
+
+/// Tool dispatch: streaming mode emits ToolCall and ToolResult events.
+#[tokio::test]
+async fn streaming_run_emits_tool_call_and_result_events() {
+    let mut tools = ToolRegistry::new();
+    tools.register(NoopTool { name: "echo" });
+    tools.register(NoopTool {
+        name: "attempt_completion",
+    });
+
+    let mut loop_engine = AgentLoop::new(
+        Box::new(MockLLMProvider::new(vec![
+            json!({"tool_call": {"name": "echo", "arguments": {}}}).to_string(),
+            json!({"tool_call": {"name": "attempt_completion", "arguments": {}}}).to_string(),
+        ])),
+        tools,
+        ContextManager::new(10_000),
+        test_config(5),
+    );
+
+    let stream = loop_engine.run_streaming("invoke a tool").await;
+    let events: Vec<AgentEvent> = stream.collect().await;
+
+    assert!(
+        events.iter().any(|e| matches!(e, AgentEvent::ToolCall(_))),
+        "streaming run should emit ToolCall event"
+    );
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, AgentEvent::ToolResult(_))),
+        "streaming run should emit ToolResult event"
+    );
+}
+
+/// Token usage event: a provider that emits usage chunks should cause the agent
+/// loop to emit an `AgentEvent::TokenUsage` during streaming.
+#[tokio::test]
+async fn streaming_run_emits_token_usage_event() {
+    let mut tools = ToolRegistry::new();
+    tools.register(NoopTool {
+        name: "attempt_completion",
+    });
+
+    let usage = TokenUsage {
+        input_tokens: 100,
+        output_tokens: 50,
+        cache_read_tokens: 0,
+        cache_creation_tokens: 0,
+    };
+
+    let mut loop_engine = AgentLoop::new(
+        Box::new(UsageMockProvider::new(
+            vec![json!({"tool_call": {"name": "attempt_completion", "arguments": {}}}).to_string()],
+            usage,
+        )),
+        tools,
+        ContextManager::new(10_000),
+        test_config(5),
+    );
+
+    let stream = loop_engine.run_streaming("track tokens").await;
+    let events: Vec<AgentEvent> = stream.collect().await;
+
+    let usage_event = events
+        .iter()
+        .find(|e| matches!(e, AgentEvent::TokenUsage { .. }));
+    assert!(
+        usage_event.is_some(),
+        "streaming run should emit TokenUsage event"
+    );
+
+    if let Some(AgentEvent::TokenUsage {
+        input_tokens,
+        output_tokens,
+        ..
+    }) = usage_event
+    {
+        assert_eq!(*input_tokens, 100);
+        assert_eq!(*output_tokens, 50);
+    }
+}
+
+/// Steering queue: when a steering message is injected into the MessageQueue
+/// before a write tool executes, it should appear in the session as a user
+/// steering message on the next turn.
+#[tokio::test]
+async fn steering_message_injected_into_session() {
+    let mut tools = ToolRegistry::new();
+    // Use a write (non-read-only) tool so steering can interrupt between calls
+    tools.register(NoopTool { name: "write" });
+    tools.register(NoopTool {
+        name: "attempt_completion",
+    });
+
+    let (queue, sender) = MessageQueue::new();
+    // Pre-load the queue with a steering message before the run starts
+    sender
+        .send(QueuedMessage {
+            tier: MessageTier::Steering,
+            text: "steer me now".to_string(),
+        })
+        .expect("should enqueue steering");
+
+    let mut loop_engine = AgentLoop::new(
+        Box::new(MockLLMProvider::new(vec![
+            json!({"tool_call": {"name": "write", "arguments": {"path": "x.txt", "content": "x"}}})
+                .to_string(),
+            // After steering, agent gets one more turn to complete
+            json!({"tool_call": {"name": "attempt_completion", "arguments": {}}}).to_string(),
+        ])),
+        tools,
+        ContextManager::new(10_000),
+        test_config(5),
+    )
+    .with_message_queue(queue);
+
+    let session = loop_engine
+        .run("do a task with steering")
+        .await
+        .expect("run should succeed");
+
+    // Steering message should appear as a user message with [User steering] prefix
+    let has_steering = session
+        .messages
+        .iter()
+        .any(|m| m.role == ava_types::Role::User && m.content.contains("[User steering]"));
+    assert!(
+        has_steering,
+        "steering message should be injected into session as user message"
+    );
+}
+
+/// Conversation history: messages passed via `with_history` should appear in
+/// the session before the goal message.
+#[tokio::test]
+async fn history_prepended_before_goal() {
+    let history = vec![
+        Message::new(ava_types::Role::User, "previous question".to_string()),
+        Message::new(ava_types::Role::Assistant, "previous answer".to_string()),
+    ];
+
+    let mut loop_engine = build_loop(vec!["response".to_string()], 10_000, 5).with_history(history);
+
+    let session = loop_engine
+        .run("new goal")
+        .await
+        .expect("run should succeed");
+
+    // History messages should appear before the new goal
+    let user_msgs: Vec<_> = session
+        .messages
+        .iter()
+        .filter(|m| m.role == ava_types::Role::User)
+        .collect();
+    assert!(
+        user_msgs.len() >= 2,
+        "session should have history user message plus goal"
+    );
+    assert!(
+        user_msgs[0].content.contains("previous question"),
+        "first user message should be from history"
+    );
+    assert!(
+        user_msgs.iter().any(|m| m.content.contains("new goal")),
+        "goal message should be present"
+    );
+}
+
+/// Progress events: `run_streaming()` should emit Progress("turn N") at the
+/// start of each turn.
+#[tokio::test]
+async fn streaming_run_emits_turn_progress_event() {
+    let mut loop_engine = build_loop(vec!["done".to_string()], 10_000, 5);
+    let stream = loop_engine.run_streaming("test progress").await;
+    let events: Vec<AgentEvent> = stream.collect().await;
+
+    let has_turn_progress = events
+        .iter()
+        .any(|e| matches!(e, AgentEvent::Progress(msg) if msg.starts_with("turn ")));
+    assert!(
+        has_turn_progress,
+        "should emit at least one 'turn N' progress event"
+    );
+}
+
+/// ToolStats event: `Complete` should be preceded by a `ToolStats` event.
+#[tokio::test]
+async fn streaming_run_emits_tool_stats_before_complete() {
+    let mut loop_engine = build_loop(vec!["result".to_string()], 10_000, 5);
+    let stream = loop_engine.run_streaming("check stats").await;
+    let events: Vec<AgentEvent> = stream.collect().await;
+
+    let stats_idx = events
+        .iter()
+        .position(|e| matches!(e, AgentEvent::ToolStats(_)));
+    let complete_idx = events
+        .iter()
+        .position(|e| matches!(e, AgentEvent::Complete(_)));
+
+    assert!(stats_idx.is_some(), "should emit ToolStats event");
+    assert!(complete_idx.is_some(), "should emit Complete event");
+    assert!(
+        stats_idx.unwrap() < complete_idx.unwrap(),
+        "ToolStats should precede Complete"
     );
 }

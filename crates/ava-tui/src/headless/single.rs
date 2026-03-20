@@ -40,7 +40,9 @@ pub(super) async fn run_single_agent(cli: CliArgs, goal: &str) -> Result<()> {
         _ => ava_types::ThinkingLevel::Off,
     };
     if thinking_level != ava_types::ThinkingLevel::Off {
-        stack.set_thinking_level(thinking_level).await;
+        if let Err(e) = stack.set_thinking_level(thinking_level).await {
+            tracing::warn!("Failed to set thinking level: {e}");
+        }
     }
 
     let (message_queue, message_tx) = MessageQueue::new();

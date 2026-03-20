@@ -561,7 +561,8 @@ instructions: []
 
     stack
         .set_thinking_level(ava_types::ThinkingLevel::High)
-        .await;
+        .await
+        .expect("set_thinking_level should succeed");
     let (event_tx, mut event_rx) = mpsc::unbounded_channel();
     let result = stack
         .run(

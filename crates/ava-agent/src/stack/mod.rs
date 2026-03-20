@@ -32,7 +32,7 @@ use ava_tools::permission_middleware::{convert_tool_source, ApprovalBridge, Shar
 use ava_tools::registry::{ToolRegistry, ToolSource};
 use ava_types::{AvaError, PlanState, QueuedMessage, Result, ThinkingLevel, TodoState};
 use tokio::sync::{mpsc, RwLock};
-use tracing::{info, instrument, warn};
+use tracing::{error, info, instrument, warn};
 
 use stack_tools::{
     build_tool_registry, init_mcp, init_mcp_with_disabled, resolve_workspace_roots, MCPRuntime,
@@ -91,6 +91,10 @@ pub struct AgentStack {
     pub parent_session_id: RwLock<Option<String>>,
     /// Plugin manager for power plugin lifecycle and hook dispatch.
     pub plugin_manager: Arc<tokio::sync::Mutex<PluginManager>>,
+    /// JoinHandle for the background codebase indexing task.
+    /// Stored so we can detect task panics and surface them to the caller.
+    /// Wrapped in `std::sync::Mutex` so the field is `Send` (JoinHandle is Send).
+    index_task: std::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
 
 impl AgentStack {
@@ -138,7 +142,7 @@ impl AgentStack {
         let index_clone = codebase_index.clone();
         let project_root = effective_cwd.clone();
         let workspace_roots_for_task = workspace_roots.clone();
-        tokio::spawn(async move {
+        let index_handle = tokio::spawn(async move {
             let index_result = if workspace_roots_for_task.len() > 1 {
                 index_workspace(&workspace_roots_for_task).await
             } else {
@@ -321,6 +325,7 @@ impl AgentStack {
                 auto_compact: config.auto_compact,
                 parent_session_id: RwLock::new(None),
                 plugin_manager,
+                index_task: std::sync::Mutex::new(Some(index_handle)),
             },
             question_rx,
             approval_rx,
@@ -540,6 +545,41 @@ impl AgentStack {
     }
 
     // ========================================================================
+    // Codebase index health
+    // ========================================================================
+
+    /// Check whether the background codebase indexing task completed without panicking.
+    ///
+    /// - If the task is still running, returns immediately (no-op).
+    /// - If the task finished successfully, clears the stored handle.
+    /// - If the task panicked, logs an `error!` and clears the handle so the
+    ///   panic is surfaced exactly once (subsequent calls are no-ops).
+    pub async fn check_index_status(&self) {
+        // Take the handle only if it has already finished, to avoid blocking.
+        let handle = {
+            let mut guard = self.index_task.lock().unwrap_or_else(|e| e.into_inner());
+            match guard.as_ref() {
+                Some(h) if h.is_finished() => guard.take(),
+                _ => None, // still running or already consumed
+            }
+        };
+        if let Some(handle) = handle {
+            match handle.await {
+                Ok(()) => {} // task logged its own errors/warnings
+                Err(join_err) if join_err.is_panic() => {
+                    error!(
+                        "Codebase indexing task panicked — \
+                         codebase_search will return empty results until the next restart"
+                    );
+                }
+                Err(join_err) => {
+                    warn!("Codebase indexing task was cancelled: {join_err}");
+                }
+            }
+        }
+    }
+
+    // ========================================================================
     // Model and mode switching
     // ========================================================================
 
@@ -557,16 +597,19 @@ impl AgentStack {
         Ok(())
     }
 
-    pub async fn set_mode_prompt_suffix(&self, suffix: Option<String>) {
+    pub async fn set_mode_prompt_suffix(&self, suffix: Option<String>) -> Result<()> {
         *self.mode_prompt_suffix.write().await = suffix;
+        Ok(())
     }
 
-    pub async fn set_plan_mode(&self, enabled: bool) {
+    pub async fn set_plan_mode(&self, enabled: bool) -> Result<()> {
         *self.plan_mode.write().await = enabled;
+        Ok(())
     }
 
-    pub async fn set_thinking_level(&self, level: ThinkingLevel) {
+    pub async fn set_thinking_level(&self, level: ThinkingLevel) -> Result<()> {
         *self.thinking_level.write().await = level;
+        Ok(())
     }
 
     pub async fn cycle_thinking(&self) -> &'static str {

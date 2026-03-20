@@ -291,7 +291,9 @@ pub async fn submit_goal(
             "max" | "xhigh" => ava_types::ThinkingLevel::Max,
             _ => ava_types::ThinkingLevel::Off,
         };
-        bridge.stack.set_thinking_level(level).await;
+        if let Err(e) = bridge.stack.set_thinking_level(level).await {
+            tracing::warn!("Failed to set thinking level: {e}");
+        }
     }
 
     // Load conversation history from the previous session (if any) so the

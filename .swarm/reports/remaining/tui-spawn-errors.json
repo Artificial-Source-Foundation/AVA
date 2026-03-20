@@ -1,0 +1,13 @@
+{
+  "status": "fixed",
+  "files_modified": [
+    "crates/ava-agent/src/stack/mod.rs",
+    "crates/ava-tui/src/state/agent.rs",
+    "crates/ava-tui/src/headless/single.rs",
+    "src-tauri/src/commands/agent_commands.rs",
+    "crates/ava-agent/tests/stack_test.rs"
+  ],
+  "summary": "Changed AgentStack::set_thinking_level, set_mode_prompt_suffix, and set_plan_mode to return Result<(), AvaError> instead of (). Updated all three spawn sites in crates/ava-tui/src/state/agent.rs (set_thinking_level, cycle_thinking, set_mode) to collapse the double-spawn pattern into a single tokio::spawn that matches on Ok/Err and logs errors via tracing::warn!. Updated remaining call sites (headless/single.rs, src-tauri agent_commands, and the integration test) to handle the new Result return type. Since tokio RwLock never poisons (unlike std), these methods will always return Ok(()); the change establishes the correct error-propagation infrastructure so future callers that do real work can propagate failures.",
+  "cargo_check_pass": true,
+  "cargo_test_pass": true
+}

@@ -1345,9 +1345,8 @@ pub async fn update_message(
     let session_uuid = uuid::Uuid::parse_str(&id).map_err(|e| {
         error_response(StatusCode::BAD_REQUEST, &format!("Invalid session ID: {e}"))
     })?;
-    let msg_uuid = uuid::Uuid::parse_str(&msg_id).map_err(|e| {
-        error_response(StatusCode::BAD_REQUEST, &format!("Invalid message ID: {e}"))
-    })?;
+    // Accept both UUID and custom string IDs (frontend uses "asst-{timestamp}-{random}")
+    let msg_uuid_opt = uuid::Uuid::parse_str(&msg_id).ok();
 
     let mut session = state
         .inner
@@ -1360,7 +1359,13 @@ pub async fn update_message(
     let msg = session
         .messages
         .iter_mut()
-        .find(|m| m.id == msg_uuid)
+        .find(|m| {
+            if let Some(ref uuid) = msg_uuid_opt {
+                m.id == *uuid
+            } else {
+                m.id.to_string() == msg_id
+            }
+        })
         .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "Message not found"))?;
 
     if let Some(content) = req.content {

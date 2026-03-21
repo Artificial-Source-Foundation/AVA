@@ -904,6 +904,21 @@ pub struct MessageSummary {
     pub role: String,
     pub content: String,
     pub timestamp: String,
+    /// Tool calls associated with this message (serialised as JSON array or null).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_calls: Option<serde_json::Value>,
+    /// Metadata blob (arbitrary JSON object).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<serde_json::Value>,
+    /// Token cost for this message.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tokens_used: Option<u32>,
+    /// USD cost for this message.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cost_usd: Option<f64>,
+    /// Model that generated this message.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
 }
 
 /// Create a new session.
@@ -994,6 +1009,11 @@ pub async fn get_session(
             role: format!("{:?}", m.role).to_lowercase(),
             content: m.content.clone(),
             timestamp: m.timestamp.to_rfc3339(),
+            tool_calls: None,
+            metadata: None,
+            tokens_used: None,
+            cost_usd: None,
+            model: None,
         })
         .collect();
 
@@ -1035,6 +1055,11 @@ pub async fn get_session_messages(
             role: format!("{:?}", m.role).to_lowercase(),
             content: m.content.clone(),
             timestamp: m.timestamp.to_rfc3339(),
+            tool_calls: None,
+            metadata: None,
+            tokens_used: None,
+            cost_usd: None,
+            model: None,
         })
         .collect();
 
@@ -1211,6 +1236,11 @@ pub struct AddMessageRequest {
     pub content: String,
     #[serde(default = "default_role")]
     pub role: String,
+    /// Optional client-generated UUID for the message.
+    /// When provided, the server uses this ID so that subsequent PATCH
+    /// requests from the client can target the correct message row.
+    #[serde(default)]
+    pub id: Option<String>,
 }
 
 fn default_role() -> String {
@@ -1248,12 +1278,24 @@ pub async fn add_message(
         .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?
         .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "Session not found"))?;
 
-    let message = ava_types::Message::new(role, &req.content);
+    // Use the client-provided ID when available so that subsequent PATCH
+    // requests (updateMessage) can locate the correct row by the same UUID.
+    let mut message = ava_types::Message::new(role, &req.content);
+    if let Some(ref client_id) = req.id {
+        if let Ok(parsed) = uuid::Uuid::parse_str(client_id) {
+            message.id = parsed;
+        }
+    }
     let summary = MessageSummary {
         id: message.id.to_string(),
         role: req.role.clone(),
         content: message.content.clone(),
         timestamp: message.timestamp.to_rfc3339(),
+        tool_calls: None,
+        metadata: None,
+        tokens_used: None,
+        cost_usd: None,
+        model: None,
     };
 
     session.messages.push(message);
@@ -1267,6 +1309,78 @@ pub async fn add_message(
         .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
 
     Ok(Json(summary))
+}
+
+// ── Update message ────────────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+pub struct UpdateMessageRequest {
+    /// Updated text content (optional — omit to leave unchanged).
+    #[serde(default)]
+    pub content: Option<String>,
+    /// Opaque metadata blob from the frontend (tool calls, thinking, etc.)
+    #[serde(default)]
+    pub metadata: Option<serde_json::Value>,
+    /// Token count for this message.
+    #[serde(default)]
+    pub tokens_used: Option<u32>,
+    /// USD cost for this message.
+    #[serde(default)]
+    pub cost_usd: Option<f64>,
+    /// Model that generated this message.
+    #[serde(default)]
+    pub model: Option<String>,
+}
+
+/// Update an existing message within a session.
+///
+/// Accepts a PATCH to `/api/sessions/{id}/messages/{msg_id}` and updates
+/// the matching message in the session manager.  Only fields that are present
+/// in the JSON body are changed; absent fields are left as-is.
+pub async fn update_message(
+    State(state): State<WebState>,
+    Path((id, msg_id)): Path<(String, String)>,
+    Json(req): Json<UpdateMessageRequest>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ErrorResponse>)> {
+    let session_uuid = uuid::Uuid::parse_str(&id).map_err(|e| {
+        error_response(StatusCode::BAD_REQUEST, &format!("Invalid session ID: {e}"))
+    })?;
+    let msg_uuid = uuid::Uuid::parse_str(&msg_id).map_err(|e| {
+        error_response(StatusCode::BAD_REQUEST, &format!("Invalid message ID: {e}"))
+    })?;
+
+    let mut session = state
+        .inner
+        .stack
+        .session_manager
+        .get(session_uuid)
+        .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?
+        .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "Session not found"))?;
+
+    let msg = session
+        .messages
+        .iter_mut()
+        .find(|m| m.id == msg_uuid)
+        .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "Message not found"))?;
+
+    if let Some(content) = req.content {
+        msg.content = content;
+    }
+
+    // Metadata, tokens, cost, model are frontend-only fields not stored in
+    // ava_types::Message.  We persist the content update in the backend
+    // session (for LLM context) and return success; the frontend's in-memory
+    // store holds the rich metadata for its own display needs.
+    session.updated_at = chrono::Utc::now();
+
+    state
+        .inner
+        .stack
+        .session_manager
+        .save(&session)
+        .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
+
+    Ok(Json(serde_json::json!({ "ok": true })))
 }
 
 // ============================================================================

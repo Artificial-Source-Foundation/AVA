@@ -31,6 +31,7 @@
 //! | DELETE | `/api/sessions/{id}`              | Delete a session                          |
 //! | GET    | `/api/sessions/{id}/messages`     | List all messages for a session           |
 //! | POST   | `/api/sessions/{id}/message`      | Add a message to a session                |
+//! | PATCH  | `/api/sessions/{id}/messages/{msg_id}` | Update an existing message (content/metadata) |
 //! | GET    | `/api/sessions/{id}/agents`       | List agents for a session (stub)          |
 //! | GET    | `/api/sessions/{id}/files`        | List file operations (stub)               |
 //! | GET    | `/api/sessions/{id}/terminal`     | List terminal executions (stub)           |
@@ -60,7 +61,7 @@ pub mod ws;
 use std::path::PathBuf;
 
 use axum::http::Method;
-use axum::routing::{get, post};
+use axum::routing::{get, patch, post};
 use axum::Router;
 use color_eyre::Result;
 use tower_http::cors::{Any, CorsLayer};
@@ -72,7 +73,14 @@ use self::state::WebState;
 fn build_router(state: WebState) -> Router {
     let cors = CorsLayer::new()
         .allow_origin(Any)
-        .allow_methods([Method::GET, Method::POST, Method::DELETE, Method::OPTIONS])
+        .allow_methods([
+            Method::GET,
+            Method::POST,
+            Method::PUT,
+            Method::PATCH,
+            Method::DELETE,
+            Method::OPTIONS,
+        ])
         .allow_headers(Any);
 
     Router::new()
@@ -110,6 +118,10 @@ fn build_router(state: WebState) -> Router {
             get(api::get_session_messages),
         )
         .route("/api/sessions/{id}/message", post(api::add_message))
+        .route(
+            "/api/sessions/{id}/messages/{msg_id}",
+            patch(api::update_message),
+        )
         // Session sub-resource stubs (web DB parity)
         .route("/api/sessions/{id}/agents", get(api::list_session_agents))
         .route("/api/sessions/{id}/files", get(api::list_session_files))

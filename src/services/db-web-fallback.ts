@@ -23,6 +23,14 @@ interface WebDatabase {
 }
 
 /**
+ * In-memory index that maps message ID → session ID.
+ * Populated during INSERT so that subsequent UPDATE calls can build the
+ * correct PATCH URL without an extra round-trip to the server.
+ * Kept outside the factory so it persists across the single adapter instance.
+ */
+const _msgSessionIndex = new Map<string, string>()
+
+/**
  * Create a web-mode database adapter that routes operations through HTTP.
  */
 export function createWebDatabase(): WebDatabase {
@@ -73,6 +81,14 @@ export function createWebDatabase(): WebDatabase {
           console.warn('[db-web] Failed to list sessions:', e)
           return [] as unknown as T
         }
+      }
+
+      // Single-message metadata fetch (used by updateMessage to merge metadata before UPDATE)
+      // SQL: SELECT metadata FROM messages WHERE id = ?
+      // In web mode we have no per-message metadata store, so return an empty row.
+      // updateMessage will treat this as no existing metadata (merge from empty object).
+      if (q.includes('from messages') && q.includes('where id')) {
+        return [] as unknown as T
       }
 
       // Message listing for a session
@@ -271,20 +287,72 @@ export function createWebDatabase(): WebDatabase {
       }
 
       // Insert message
+      // SQL: INSERT INTO messages (id, session_id, role, content, agent_id, created_at, tokens_used, metadata, cost_usd, model)
+      // Params positional:          [0]  [1]         [2]  [3]      [4]       [5]          [6]           [7]       [8]       [9]
       if (q.includes('insert into messages')) {
+        const msgId = params?.[0] as string
         const sessionId = params?.[1] as string
         const role = params?.[2] as string
         const content = params?.[3] as string
+        // Register the msgId → sessionId mapping so UPDATE can build the PATCH URL.
+        if (msgId && sessionId) {
+          _msgSessionIndex.set(msgId, sessionId)
+        }
         if (sessionId && content) {
           try {
             await fetch(`${API_BASE}/api/sessions/${sessionId}/message`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ content, role: role || 'user' }),
+              // Pass the client-generated ID so PATCH updates can match by UUID.
+              body: JSON.stringify({ id: msgId || undefined, content, role: role || 'user' }),
             })
           } catch (e) {
             console.warn('[db-web] Failed to add message:', e)
           }
+        }
+        return { rowsAffected: 1 }
+      }
+
+      // Update message
+      // SQL: UPDATE messages SET content = ?, ... WHERE id = ?
+      // The WHERE id is always the last param.
+      if (q.includes('update messages set')) {
+        const msgId = params?.[params.length - 1] as string
+        if (!msgId) return { rowsAffected: 0 }
+
+        // We need the session ID to build the PATCH URL.
+        // Parse it from the SELECT metadata cache or try to infer it from
+        // the query. As a pragmatic approach, we perform a GET to find which
+        // session owns this message. However, that is expensive and racy.
+        // Instead, we store a lightweight msgId→sessionId mapping in memory
+        // that is populated during the INSERT phase above.
+        const sessionId = _msgSessionIndex.get(msgId)
+        if (!sessionId) {
+          // No session context available for this message — no-op.
+          if (import.meta.env.DEV) {
+            console.warn('[db-web] UPDATE messages: no session context for msg', msgId)
+          }
+          return { rowsAffected: 0 }
+        }
+
+        // Extract content if present (first clause after SET, before any comma)
+        let content: string | undefined
+        const contentIdx = q.indexOf('content = ?')
+        if (contentIdx !== -1) {
+          // Count how many '?' appear before the content placeholder
+          const beforeContent = q.slice(0, contentIdx)
+          const placeholdersBefore = (beforeContent.match(/\?/g) || []).length
+          content = params?.[placeholdersBefore] as string | undefined
+        }
+
+        try {
+          await fetch(`${API_BASE}/api/sessions/${sessionId}/messages/${msgId}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ content }),
+          })
+        } catch (e) {
+          console.warn('[db-web] Failed to update message:', e)
         }
         return { rowsAffected: 1 }
       }

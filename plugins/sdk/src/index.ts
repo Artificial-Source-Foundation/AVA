@@ -9,7 +9,7 @@
  *   createPlugin({ "tool.before": async (ctx, params) => { ... } });
  */
 
-import * as fs from 'fs'
+import * as fs from 'node:fs'
 
 // -- Public types --
 
@@ -22,7 +22,63 @@ export interface PluginContext {
 export type HookHandler = (
   ctx: PluginContext,
   params: Record<string, unknown>
-) => Promise<Record<string, unknown> | void>
+) => Promise<Record<string, unknown> | undefined>
+
+// -- Typed params/result shapes for the 4 new hooks --
+
+/**
+ * Params for the `tool.definition` hook.
+ * Plugins receive the full list of tool definitions and may return a modified list.
+ */
+export interface ToolDefinitionParams {
+  tools: Array<{ name: string; description: string; parameters: unknown }>
+}
+
+export interface ToolDefinitionResult {
+  tools: Array<{ name: string; description: string; parameters: unknown }>
+}
+
+/**
+ * Params for the `chat.params` hook.
+ * Plugins may override any field; returned object is merged into the call config.
+ */
+export interface ChatParamsPayload {
+  model: string
+  max_tokens?: number
+  thinking_level?: string
+  thinking_budget_tokens?: number | null
+  [key: string]: unknown
+}
+
+/**
+ * Params for the `permission.ask` hook.
+ * Return `{action: "allow"}` to approve, `{action: "deny", reason: "..."}` to reject.
+ * Return nothing (or `null`) to defer to the interactive approval flow.
+ */
+export interface PermissionAskParams {
+  tool: string
+  arguments: Record<string, unknown>
+  risk_level: string
+  reason: string
+}
+
+export interface PermissionAskResult {
+  action: 'allow' | 'deny'
+  reason?: string
+}
+
+/**
+ * Params for the `chat.system` hook.
+ * Return `{inject: "..."}` to append text to the system prompt.
+ */
+export interface ChatSystemParams {
+  model: string
+  provider: string
+}
+
+export interface ChatSystemResult {
+  inject: string
+}
 
 export interface PluginHooks {
   auth?: HookHandler
@@ -30,6 +86,39 @@ export interface PluginHooks {
   'request.headers'?: HookHandler
   'tool.before'?: HookHandler
   'tool.after'?: HookHandler
+  /**
+   * Modify tool definitions (description/schema) before they are sent to the LLM.
+   * Return `{ tools: [...] }` with the (possibly modified) list.
+   */
+  'tool.definition'?: (
+    ctx: PluginContext,
+    params: ToolDefinitionParams
+  ) => Promise<ToolDefinitionResult | undefined>
+  /**
+   * Modify LLM call parameters (max_tokens, thinking_budget_tokens, etc.) per call.
+   * Return an object with any fields to override — it is merged into the call config.
+   */
+  'chat.params'?: (
+    ctx: PluginContext,
+    params: ChatParamsPayload
+  ) => Promise<Partial<ChatParamsPayload> | undefined>
+  /**
+   * Programmatically approve or deny a permission request.
+   * Return `{action: "allow"}` or `{action: "deny", reason: "..."}`.
+   * Return nothing to defer to the interactive approval flow.
+   */
+  'permission.ask'?: (
+    ctx: PluginContext,
+    params: PermissionAskParams
+  ) => Promise<PermissionAskResult | undefined>
+  /**
+   * Inject text into the system prompt before each agent run.
+   * Return `{inject: "<text>"}` to append the text.
+   */
+  'chat.system'?: (
+    ctx: PluginContext,
+    params: ChatSystemParams
+  ) => Promise<ChatSystemResult | undefined>
   'agent.before'?: HookHandler
   'agent.after'?: HookHandler
   'session.start'?: HookHandler
@@ -129,9 +218,13 @@ export function createPlugin(hooks: PluginHooks): void {
     }
 
     // -- hook/* dispatch --
-    if (method && method.startsWith('hook/')) {
+    if (method?.startsWith('hook/')) {
       const hookName = method.slice(5) as keyof PluginHooks
-      const handler = hooks[hookName]
+      // Use a generic function type so all hook handler shapes (HookHandler and
+      // the strongly-typed new hooks) are callable in a uniform way.
+      const handler = hooks[hookName] as
+        | ((ctx: PluginContext, params: unknown) => Promise<unknown>)
+        | undefined
 
       if (!handler) {
         if (id !== undefined && id !== null) {
@@ -141,7 +234,7 @@ export function createPlugin(hooks: PluginHooks): void {
       }
 
       try {
-        const result = await handler(context, (params ?? {}) as Record<string, unknown>)
+        const result = await handler(context, params ?? {})
         if (id !== undefined && id !== null) {
           sendResult(id, result ?? null)
         }

@@ -121,6 +121,57 @@ impl AgentLoop {
         }
     }
 
+    /// Return tool definitions after applying the `tool.definition` plugin hook.
+    ///
+    /// Calls `active_tool_defs()` to get the base list, serialises each definition
+    /// to JSON, passes them through any subscribed `tool.definition` plugins, then
+    /// deserialises the (possibly modified) result back to `ava_types::Tool`.
+    /// Definitions that fail to deserialise after a plugin modifies them are silently
+    /// dropped.
+    pub(super) async fn active_tool_defs_with_hooks(&self) -> Vec<ava_types::Tool> {
+        let base = self.active_tool_defs();
+
+        let Some(ref pm) = self.plugin_manager else {
+            return base;
+        };
+
+        // Serialise to JSON so the plugin hook can inspect/modify them as plain data.
+        let tool_json: Vec<serde_json::Value> = base
+            .iter()
+            .map(|t| {
+                serde_json::json!({
+                    "name": t.name,
+                    "description": t.description,
+                    "parameters": t.parameters,
+                })
+            })
+            .collect();
+
+        let modified = pm.lock().await.apply_tool_definition_hook(tool_json).await;
+
+        // Deserialise back to Tool structs.
+        modified
+            .into_iter()
+            .filter_map(|v| {
+                let name = v.get("name")?.as_str()?.to_string();
+                let description = v
+                    .get("description")
+                    .and_then(|d| d.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let parameters = v
+                    .get("parameters")
+                    .cloned()
+                    .unwrap_or(serde_json::json!({}));
+                Some(ava_types::Tool {
+                    name,
+                    description,
+                    parameters,
+                })
+            })
+            .collect()
+    }
+
     /// Generate a response, using native tool calling when the provider supports it.
     /// Returns (response_text, tool_calls, usage).
     pub(super) async fn generate_response(
@@ -145,7 +196,7 @@ impl AgentLoop {
 
         let timeout_secs = self.config.stream_timeout_secs;
         let result = if self.llm.supports_tools() {
-            let tool_defs = self.active_tool_defs();
+            let tool_defs = self.active_tool_defs_with_hooks().await;
             let fut = self.llm.generate_with_tools(messages, &tool_defs);
             let response = if timeout_secs > 0 {
                 tokio::time::timeout(Duration::from_secs(timeout_secs), fut)
@@ -223,7 +274,7 @@ impl AgentLoop {
 
         let timeout_secs = self.config.stream_timeout_secs;
         let result = if self.llm.supports_tools() {
-            let tool_defs = self.active_tool_defs();
+            let tool_defs = self.active_tool_defs_with_hooks().await;
             let thinking = ThinkingConfig::new(
                 self.config.thinking_level,
                 self.config.thinking_budget_tokens,

@@ -90,6 +90,31 @@ pub enum HookEvent {
     ToolBefore,
     /// Intercept tool result after execution.
     ToolAfter,
+    /// Modify tool definitions (description/schema) before they are sent to the LLM.
+    ///
+    /// Params: `{"tools": [{"name": "...", "description": "...", "parameters": {...}}, ...]}`
+    /// Response: `{"tools": [...]}` (same structure, with modifications applied).
+    /// This is a request/response hook (blocking).
+    ToolDefinition,
+    /// Modify LLM call parameters (temperature, max_tokens, etc.) before each call.
+    ///
+    /// Params: `{"model": "...", "temperature": 0.7, "max_tokens": 4096, ...}`
+    /// Response: same structure with any fields overridden.
+    /// This is a request/response hook (blocking).
+    ChatParams,
+    /// Allow plugins to programmatically approve or deny a permission request.
+    ///
+    /// Params: `{"tool": "...", "arguments": {...}, "risk_level": "...", "reason": "..."}`
+    /// Response: `{"action": "allow" | "deny", "reason": "..."}`.
+    /// This is a request/response hook (blocking). If no plugin responds, the normal
+    /// approval flow continues.
+    PermissionAsk,
+    /// Inject additional text into the system prompt before each agent run.
+    ///
+    /// Params: `{"model": "...", "provider": "..."}`
+    /// Response: `{"inject": "..."}` — text to append to the system prompt.
+    /// This is a request/response hook (blocking).
+    ChatSystem,
     /// Agent turn starting (notification — no response expected).
     AgentBefore,
     /// Agent turn completed (notification — no response expected).
@@ -117,6 +142,10 @@ impl HookEvent {
             Self::RequestHeaders => "request.headers",
             Self::ToolBefore => "tool.before",
             Self::ToolAfter => "tool.after",
+            Self::ToolDefinition => "tool.definition",
+            Self::ChatParams => "chat.params",
+            Self::PermissionAsk => "permission.ask",
+            Self::ChatSystem => "chat.system",
             Self::AgentBefore => "agent.before",
             Self::AgentAfter => "agent.after",
             Self::SessionStart => "session.start",
@@ -137,6 +166,10 @@ impl HookEvent {
             "request.headers" => Some(Self::RequestHeaders),
             "tool.before" => Some(Self::ToolBefore),
             "tool.after" => Some(Self::ToolAfter),
+            "tool.definition" => Some(Self::ToolDefinition),
+            "chat.params" => Some(Self::ChatParams),
+            "permission.ask" => Some(Self::PermissionAsk),
+            "chat.system" => Some(Self::ChatSystem),
             "agent.before" => Some(Self::AgentBefore),
             "agent.after" => Some(Self::AgentAfter),
             "session.start" => Some(Self::SessionStart),
@@ -346,6 +379,10 @@ mod tests {
             HookEvent::RequestHeaders,
             HookEvent::ToolBefore,
             HookEvent::ToolAfter,
+            HookEvent::ToolDefinition,
+            HookEvent::ChatParams,
+            HookEvent::PermissionAsk,
+            HookEvent::ChatSystem,
             HookEvent::AgentBefore,
             HookEvent::AgentAfter,
             HookEvent::SessionStart,
@@ -377,6 +414,39 @@ mod tests {
         assert!(!HookEvent::Auth.is_notification());
         assert!(!HookEvent::ToolBefore.is_notification());
         assert!(!HookEvent::Config.is_notification());
+        // New hooks are request/response (not notifications)
+        assert!(!HookEvent::ToolDefinition.is_notification());
+        assert!(!HookEvent::ChatParams.is_notification());
+        assert!(!HookEvent::PermissionAsk.is_notification());
+        assert!(!HookEvent::ChatSystem.is_notification());
+    }
+
+    #[test]
+    fn new_hook_wire_names() {
+        assert_eq!(HookEvent::ToolDefinition.wire_name(), "tool.definition");
+        assert_eq!(HookEvent::ChatParams.wire_name(), "chat.params");
+        assert_eq!(HookEvent::PermissionAsk.wire_name(), "permission.ask");
+        assert_eq!(HookEvent::ChatSystem.wire_name(), "chat.system");
+    }
+
+    #[test]
+    fn new_hook_from_wire_name() {
+        assert_eq!(
+            HookEvent::from_wire_name("tool.definition"),
+            Some(HookEvent::ToolDefinition)
+        );
+        assert_eq!(
+            HookEvent::from_wire_name("chat.params"),
+            Some(HookEvent::ChatParams)
+        );
+        assert_eq!(
+            HookEvent::from_wire_name("permission.ask"),
+            Some(HookEvent::PermissionAsk)
+        );
+        assert_eq!(
+            HookEvent::from_wire_name("chat.system"),
+            Some(HookEvent::ChatSystem)
+        );
     }
 
     #[test]

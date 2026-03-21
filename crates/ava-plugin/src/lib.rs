@@ -22,6 +22,7 @@ pub use hooks::{
     AuthCredentials, AuthMethod, AuthMethodsResponse, HookDispatcher, HookEvent, HookRequest,
     HookResponse,
 };
+pub use manager::PluginPermissionDecision;
 pub use manager::{PluginInfo, PluginManager, PluginStatus};
 pub use manifest::{HookSubscriptions, PluginManifest, RuntimeConfig};
 pub use runtime::PluginProcess;

@@ -466,6 +466,17 @@ impl App {
                     .messages
                     .push(UiMessage::new(MessageKind::ToolResult, summary));
             }
+            ava_agent::AgentEvent::MCPToolsChanged {
+                server_name,
+                tool_count,
+            } => {
+                let msg =
+                    format!("MCP server '{server_name}' tool list refreshed ({tool_count} tools)");
+                info!("{}", msg);
+                self.state
+                    .messages
+                    .push(UiMessage::new(MessageKind::ToolResult, msg));
+            }
             ava_agent::AgentEvent::Error(err) => {
                 info!(error = %err, "TUI received AgentEvent::Error");
                 self.finalize_assistant_stream();

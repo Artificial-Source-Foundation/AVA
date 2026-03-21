@@ -131,6 +131,12 @@ pub(super) async fn run_single_agent(cli: CliArgs, goal: &str) -> Result<()> {
                 } => {
                     serde_json::json!({"type": "diff_preview", "file": file.display().to_string(), "diff": diff_text, "additions": additions, "deletions": deletions})
                 }
+                AgentEvent::MCPToolsChanged {
+                    server_name,
+                    tool_count,
+                } => {
+                    serde_json::json!({"type": "mcp_tools_changed", "server_name": server_name, "tool_count": tool_count})
+                }
             };
             println!("{json}");
         }
@@ -193,7 +199,8 @@ pub(super) async fn run_single_agent(cli: CliArgs, goal: &str) -> Result<()> {
                 ),
                 AgentEvent::ToolStats(_)
                 | AgentEvent::TokenUsage { .. }
-                | AgentEvent::SubAgentComplete { .. } => {}
+                | AgentEvent::SubAgentComplete { .. }
+                | AgentEvent::MCPToolsChanged { .. } => {}
                 AgentEvent::DiffPreview {
                     file,
                     additions,

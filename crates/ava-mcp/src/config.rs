@@ -5,6 +5,35 @@ use ava_types::{AvaError, Result};
 use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------------------
+// OAuth configuration for remote MCP servers
+// ---------------------------------------------------------------------------
+
+/// OAuth authentication configuration for a remote MCP server.
+///
+/// Used when an MCP server requires OAuth 2.0 authentication (PKCE flow).
+/// Tokens are stored in `~/.ava/credentials.json` under a key derived from
+/// the server name (`mcp:{server_name}`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpOAuthConfig {
+    /// OAuth 2.0 authorization endpoint.
+    pub auth_url: String,
+    /// OAuth 2.0 token endpoint.
+    pub token_url: String,
+    /// OAuth client ID registered with the authorization server.
+    pub client_id: String,
+    /// OAuth scopes to request (defaults to empty — server defines required scopes).
+    #[serde(default)]
+    pub scopes: Vec<String>,
+    /// Local TCP port for the PKCE redirect callback listener (defaults to 9876).
+    #[serde(default = "default_redirect_port")]
+    pub redirect_port: u16,
+}
+
+fn default_redirect_port() -> u16 {
+    9876
+}
+
+// ---------------------------------------------------------------------------
 // MCP server configuration
 // ---------------------------------------------------------------------------
 
@@ -49,7 +78,20 @@ pub enum TransportType {
         env: HashMap<String, String>,
     },
     #[serde(rename = "http")]
-    Http { url: String },
+    Http {
+        url: String,
+        /// Optional OAuth configuration. When present, the HTTP transport will
+        /// automatically perform the PKCE flow on first connect and on 401 responses.
+        #[serde(default)]
+        auth: Option<McpOAuthConfig>,
+        /// Optional static Bearer token. Mutually exclusive with `auth`.
+        /// Use for servers that issue long-lived API keys.
+        #[serde(default)]
+        bearer_token: Option<String>,
+        /// HTTP headers to include on every request (e.g., custom API keys).
+        #[serde(default)]
+        headers: HashMap<String, String>,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -195,8 +237,77 @@ mod tests {
         let configs = parse_mcp_config(json).unwrap();
         assert_eq!(configs.len(), 1);
         match &configs[0].transport {
-            TransportType::Http { url } => {
+            TransportType::Http {
+                url,
+                auth,
+                bearer_token,
+                headers,
+            } => {
                 assert_eq!(url, "http://localhost:8080");
+                assert!(auth.is_none());
+                assert!(bearer_token.is_none());
+                assert!(headers.is_empty());
+            }
+            _ => panic!("expected http transport"),
+        }
+    }
+
+    #[test]
+    fn parse_http_config_with_oauth() {
+        let json = r#"{
+            "servers": [
+                {
+                    "name": "slack",
+                    "transport": {
+                        "type": "http",
+                        "url": "https://mcp.slack.com/api",
+                        "auth": {
+                            "auth_url": "https://slack.com/oauth/v2/authorize",
+                            "token_url": "https://slack.com/api/oauth.v2.access",
+                            "client_id": "my-client-id",
+                            "scopes": ["channels:read", "chat:write"]
+                        }
+                    }
+                }
+            ]
+        }"#;
+
+        let configs = parse_mcp_config(json).unwrap();
+        assert_eq!(configs.len(), 1);
+        match &configs[0].transport {
+            TransportType::Http { url, auth, .. } => {
+                assert_eq!(url, "https://mcp.slack.com/api");
+                let oauth = auth.as_ref().expect("expected oauth config");
+                assert_eq!(oauth.client_id, "my-client-id");
+                assert_eq!(oauth.scopes, vec!["channels:read", "chat:write"]);
+                assert_eq!(oauth.redirect_port, 9876); // default
+            }
+            _ => panic!("expected http transport"),
+        }
+    }
+
+    #[test]
+    fn parse_http_config_with_bearer_token() {
+        let json = r#"{
+            "servers": [
+                {
+                    "name": "linear",
+                    "transport": {
+                        "type": "http",
+                        "url": "https://mcp.linear.app/sse",
+                        "bearer_token": "lin_api_abc123"
+                    }
+                }
+            ]
+        }"#;
+
+        let configs = parse_mcp_config(json).unwrap();
+        match &configs[0].transport {
+            TransportType::Http {
+                bearer_token, auth, ..
+            } => {
+                assert_eq!(bearer_token.as_deref(), Some("lin_api_abc123"));
+                assert!(auth.is_none());
             }
             _ => panic!("expected http transport"),
         }
@@ -228,6 +339,8 @@ mod tests {
         assert!(configs[0].enabled);
         assert!(!configs[1].enabled);
         assert!(configs[2].enabled); // default true
+                                     // http variant compiles correctly
+        assert!(matches!(configs[2].transport, TransportType::Http { .. }));
     }
 
     #[test]
@@ -339,20 +452,42 @@ mod tests {
     #[test]
     fn roundtrip_serialization() {
         let config = MCPConfigFile {
-            servers: vec![MCPServerConfig {
-                name: "test".to_string(),
-                transport: TransportType::Stdio {
-                    command: "echo".to_string(),
-                    args: vec!["hello".to_string()],
-                    env: HashMap::new(),
+            servers: vec![
+                MCPServerConfig {
+                    name: "test".to_string(),
+                    transport: TransportType::Stdio {
+                        command: "echo".to_string(),
+                        args: vec!["hello".to_string()],
+                        env: HashMap::new(),
+                    },
+                    enabled: true,
                 },
-                enabled: true,
-            }],
+                MCPServerConfig {
+                    name: "remote".to_string(),
+                    transport: TransportType::Http {
+                        url: "https://example.com/mcp".to_string(),
+                        auth: None,
+                        bearer_token: Some("tok".to_string()),
+                        headers: HashMap::new(),
+                    },
+                    enabled: true,
+                },
+            ],
         };
 
         let json = serde_json::to_string(&config).unwrap();
         let parsed: MCPConfigFile = serde_json::from_str(&json).unwrap();
-        assert_eq!(parsed.servers.len(), 1);
+        assert_eq!(parsed.servers.len(), 2);
         assert_eq!(parsed.servers[0].name, "test");
+        assert_eq!(parsed.servers[1].name, "remote");
+        match &parsed.servers[1].transport {
+            TransportType::Http {
+                url, bearer_token, ..
+            } => {
+                assert_eq!(url, "https://example.com/mcp");
+                assert_eq!(bearer_token.as_deref(), Some("tok"));
+            }
+            _ => panic!("expected http"),
+        }
     }
 }

@@ -430,11 +430,22 @@ dependencies = [
  "async-trait",
  "ava-tools",
  "ava-types",
+ "base64",
+ "bytes",
+ "dirs",
+ "futures",
+ "open",
+ "rand 0.9.2",
+ "reqwest",
  "serde",
  "serde_json",
+ "sha2",
  "tempfile",
  "tokio",
+ "tokio-stream",
  "tracing",
+ "url",
+ "urlencoding",
 ]
 
 [[package]]

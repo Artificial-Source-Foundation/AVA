@@ -62,7 +62,8 @@ async fn main() -> Result<()> {
             | AgentEvent::ToolStats(_)
             | AgentEvent::TokenUsage { .. }
             | AgentEvent::SubAgentComplete { .. }
-            | AgentEvent::DiffPreview { .. } => {}
+            | AgentEvent::DiffPreview { .. }
+            | AgentEvent::MCPToolsChanged { .. } => {}
             AgentEvent::Error(e) => {
                 eprintln!("[error: {e}]");
                 break;

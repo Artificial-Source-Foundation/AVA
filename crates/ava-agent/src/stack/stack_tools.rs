@@ -195,12 +195,19 @@ pub(crate) fn build_tool_registry_with_plugins(
     plugin_manager: Option<Arc<tokio::sync::Mutex<PluginManager>>>,
 ) -> (ToolRegistry, SharedToolSources) {
     let mut registry = ToolRegistry::new();
-    register_default_tools_with_plugins(&mut registry, platform, plugin_manager);
+    register_default_tools_with_plugins(&mut registry, platform, plugin_manager.clone());
     let middleware = PermissionMiddleware::new(
         permission_inspector,
         permission_context,
         Some(approval_bridge),
     );
+    // Wire the permission.ask hook: attach the plugin manager so plugins can
+    // approve/deny tool calls before the interactive TUI bridge is invoked.
+    let middleware = if let Some(pm) = plugin_manager {
+        middleware.with_plugin_manager(pm)
+    } else {
+        middleware
+    };
     let shared_sources = middleware.tool_sources();
     registry.add_middleware(middleware);
     (registry, shared_sources)

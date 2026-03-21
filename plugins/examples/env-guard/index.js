@@ -2,7 +2,7 @@ Object.defineProperty(exports, '__esModule', { value: true })
 const plugin_1 = require('@ava-ai/plugin')
 const BLOCKED_PATTERNS = ['.env', 'credentials.json', '.secret', 'id_rsa', '.pem']
 ;(0, plugin_1.createPlugin)({
-  'tool.before': async (ctx, params) => {
+  'tool.before': async (_ctx, params) => {
     const tool = params.tool
     const args = params.args ?? {}
     if (tool === 'read' || tool === 'edit' || tool === 'write') {

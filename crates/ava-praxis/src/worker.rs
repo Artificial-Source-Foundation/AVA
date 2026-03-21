@@ -89,7 +89,8 @@ pub(crate) async fn run_worker(
             | AgentEvent::BudgetWarning { .. }
             | AgentEvent::TokenUsage { .. }
             | AgentEvent::SubAgentComplete { .. }
-            | AgentEvent::DiffPreview { .. } => {}
+            | AgentEvent::DiffPreview { .. }
+            | AgentEvent::MCPToolsChanged { .. } => {}
         }
     }
 

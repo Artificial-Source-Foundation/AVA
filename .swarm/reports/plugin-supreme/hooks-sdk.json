@@ -1,0 +1,87 @@
+{
+  "status": "fixed",
+  "hooks_added": [
+    {
+      "name": "tool.definition",
+      "variant": "ToolDefinition",
+      "type": "request",
+      "description": "Allow plugins to modify tool descriptions/schemas before sending to the LLM. Chained: each plugin receives the output of the previous.",
+      "wire_sites": [
+        "crates/ava-agent/src/agent_loop/response.rs:active_tool_defs_with_hooks()",
+        "crates/ava-agent/src/agent_loop/mod.rs:inject_system_prompt() (async)",
+        "crates/ava-agent/src/agent_loop/mod.rs:generate_turn_streaming()",
+        "crates/ava-agent/src/agent_loop/response.rs:generate_response()",
+        "crates/ava-agent/src/agent_loop/response.rs:generate_response_with_thinking()"
+      ]
+    },
+    {
+      "name": "chat.params",
+      "variant": "ChatParams",
+      "type": "request",
+      "description": "Allow plugins to modify LLM call parameters (max_tokens, thinking_budget_tokens) per call. Applied just before each generate_turn_response() call.",
+      "wire_sites": [
+        "crates/ava-agent/src/agent_loop/mod.rs:generate_turn_response() — applied before streaming/non-streaming dispatch"
+      ]
+    },
+    {
+      "name": "permission.ask",
+      "variant": "PermissionAsk",
+      "type": "request",
+      "description": "Allow plugins to programmatically approve or deny permission requests. First plugin returning {action: allow|deny} wins. If no plugin decides, normal interactive approval flow continues.",
+      "wire_sites": [
+        "crates/ava-tools/src/permission_middleware.rs:PermissionMiddleware::before() — consulted before ApprovalBridge",
+        "crates/ava-agent/src/stack/stack_tools.rs:build_tool_registry_with_plugins() — wires plugin_manager into PermissionMiddleware"
+      ]
+    },
+    {
+      "name": "chat.system",
+      "variant": "ChatSystem",
+      "type": "request",
+      "description": "Allow plugins to inject text into the system prompt. All non-empty injections are concatenated and appended after the base system prompt.",
+      "wire_sites": [
+        "crates/ava-agent/src/agent_loop/mod.rs:inject_system_prompt() — appended after all other suffixes"
+      ]
+    }
+  ],
+  "sdk_changes": {
+    "file": "plugins/sdk/src/index.ts",
+    "changes": [
+      "Added ToolDefinitionParams, ToolDefinitionResult types",
+      "Added ChatParamsPayload type",
+      "Added PermissionAskParams, PermissionAskResult types",
+      "Added ChatSystemParams, ChatSystemResult types",
+      "Added 4 strongly-typed hook signatures to PluginHooks interface",
+      "Updated hook dispatch cast to accept all handler shapes uniformly"
+    ]
+  },
+  "files_modified": [
+    "crates/ava-plugin/src/hooks.rs",
+    "crates/ava-plugin/src/manager.rs",
+    "crates/ava-plugin/src/lib.rs",
+    "crates/ava-agent/src/agent_loop/mod.rs",
+    "crates/ava-agent/src/agent_loop/response.rs",
+    "crates/ava-tools/src/permission_middleware.rs",
+    "crates/ava-agent/src/stack/stack_tools.rs",
+    "plugins/sdk/src/index.ts"
+  ],
+  "tests_added": {
+    "ava-plugin/hooks.rs": [
+      "new_hook_wire_names — verifies all 4 wire names",
+      "new_hook_from_wire_name — verifies round-trip parsing",
+      "notification_hooks (extended) — verifies new hooks are not notifications"
+    ],
+    "ava-plugin/manager.rs": [
+      "apply_tool_definition_hook_no_plugins",
+      "apply_chat_params_hook_no_plugins",
+      "ask_permission_no_plugins",
+      "collect_system_injections_no_plugins"
+    ]
+  },
+  "cargo_check_pass": true,
+  "cargo_test_pass": true,
+  "test_counts": {
+    "before": 1798,
+    "after": 1807,
+    "new": 9
+  }
+}

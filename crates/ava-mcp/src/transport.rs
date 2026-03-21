@@ -2,6 +2,8 @@ use std::collections::HashMap;
 
 use async_trait::async_trait;
 use ava_types::{AvaError, Result};
+use futures::StreamExt;
+use reqwest::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader};
@@ -269,48 +271,319 @@ impl MCPTransport for StdioTransport {
 }
 
 // ---------------------------------------------------------------------------
-// HttpTransport — connects to an HTTP MCP server
+// HttpTransport — connects to a remote HTTP/SSE MCP server
 // ---------------------------------------------------------------------------
 
-// WARNING: HTTP transport is intentionally incomplete and should not be used
-// in production. Only stdio transport is supported. This module exists as a
-// placeholder for future SSE-based MCP transport support.
+/// HTTP transport configuration for a remote MCP server.
+#[derive(Debug, Clone, Default)]
+pub struct HttpTransportConfig {
+    /// Bearer token for `Authorization: Bearer <token>` header.
+    pub bearer_token: Option<String>,
+    /// Additional headers sent on every request.
+    pub headers: HashMap<String, String>,
+}
 
+/// HTTP/SSE transport for remote MCP servers.
+///
+/// Protocol:
+/// - Tool calls (JSON-RPC requests/notifications): HTTP POST to `<base_url>/`
+///   with `Content-Type: application/json`.
+/// - Responses: HTTP POST returns the JSON-RPC response directly (for requests)
+///   OR the server uses SSE for server-initiated messages.
+/// - SSE stream: GET `<base_url>/sse` with `Accept: text/event-stream` for
+///   server-push notifications and streaming responses.
+///
+/// This implementation buffers incoming SSE messages so that `receive()` can
+/// be called after `send()` in the standard request-response pattern used by
+/// `MCPClient`. A background task reads the SSE stream and places parsed
+/// messages into a channel.
 pub struct HttpTransport {
-    #[allow(dead_code)]
     base_url: String,
-    #[allow(dead_code)]
+    client: reqwest::Client,
+    config: HttpTransportConfig,
+    /// Session ID negotiated during the SSE handshake (`Mcp-Session-Id` header).
     session_id: Option<String>,
+    /// Buffered incoming messages from the SSE stream or direct POST responses.
+    incoming: tokio::sync::mpsc::UnboundedReceiver<JsonRpcMessage>,
+    /// Sender half — kept alive so the channel stays open.
+    incoming_tx: tokio::sync::mpsc::UnboundedSender<JsonRpcMessage>,
+    /// Whether the SSE background listener has been started.
+    sse_started: bool,
+    /// Handle to the SSE listener task for cancellation on close.
+    sse_task: Option<tokio::task::JoinHandle<()>>,
 }
 
 impl HttpTransport {
+    /// Create a new HTTP transport.
+    ///
+    /// Call `connect_sse()` before using if the server requires SSE for responses.
     pub fn new(base_url: &str) -> Self {
+        Self::with_config(base_url, HttpTransportConfig::default())
+    }
+
+    /// Create a new HTTP transport with authentication configuration.
+    pub fn with_config(base_url: &str, config: HttpTransportConfig) -> Self {
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(30))
+            .connect_timeout(std::time::Duration::from_secs(10))
+            .build()
+            .expect("failed to build HTTP client for MCP transport");
+
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         Self {
             base_url: base_url.trim_end_matches('/').to_string(),
+            client,
+            config,
             session_id: None,
+            incoming: rx,
+            incoming_tx: tx,
+            sse_started: false,
+            sse_task: None,
         }
     }
+
+    /// Set (or replace) the bearer token after construction.
+    pub fn set_bearer_token(&mut self, token: impl Into<String>) {
+        self.config.bearer_token = Some(token.into());
+    }
+
+    /// Start a background SSE listener that pushes incoming messages into the
+    /// internal channel. Must be called before `receive()` if the server streams
+    /// responses over SSE rather than returning them in the POST response body.
+    pub async fn connect_sse(&mut self) -> Result<()> {
+        if self.sse_started {
+            return Ok(());
+        }
+
+        let sse_url = format!("{}/sse", self.base_url);
+        let mut req = self
+            .client
+            .get(&sse_url)
+            .header(ACCEPT, "text/event-stream");
+
+        if let Some(token) = &self.config.bearer_token {
+            req = req.header(AUTHORIZATION, format!("Bearer {token}"));
+        }
+        for (k, v) in &self.config.headers {
+            req = req.header(k.as_str(), v.as_str());
+        }
+        if let Some(sid) = &self.session_id {
+            req = req.header("Mcp-Session-Id", sid.as_str());
+        }
+
+        let response = req
+            .send()
+            .await
+            .map_err(|e| AvaError::ToolError(format!("MCP SSE connect failed: {e}")))?;
+
+        let status = response.status();
+        if !status.is_success() {
+            let body = response.text().await.unwrap_or_default();
+            return Err(AvaError::ToolError(format!(
+                "MCP SSE endpoint returned {status}: {}",
+                &body[..body.len().min(300)]
+            )));
+        }
+
+        // Capture session ID from response headers if server set one
+        if let Some(sid) = response.headers().get("Mcp-Session-Id") {
+            if let Ok(s) = sid.to_str() {
+                self.session_id = Some(s.to_string());
+            }
+        }
+
+        let tx = self.incoming_tx.clone();
+        let stream = response.bytes_stream();
+
+        let task = tokio::spawn(async move {
+            parse_sse_stream(stream, tx).await;
+        });
+
+        self.sse_task = Some(task);
+        self.sse_started = true;
+        Ok(())
+    }
+
+    /// Build a POST request to the MCP endpoint with auth headers applied.
+    fn build_post(&self, body: String) -> reqwest::RequestBuilder {
+        let mut req = self
+            .client
+            .post(&self.base_url)
+            .header(CONTENT_TYPE, "application/json")
+            .header(ACCEPT, "application/json, text/event-stream")
+            .body(body);
+
+        if let Some(token) = &self.config.bearer_token {
+            req = req.header(AUTHORIZATION, format!("Bearer {token}"));
+        }
+        for (k, v) in &self.config.headers {
+            req = req.header(k.as_str(), v.as_str());
+        }
+        if let Some(sid) = &self.session_id {
+            req = req.header("Mcp-Session-Id", sid.as_str());
+        }
+        req
+    }
+}
+
+/// Parse an SSE byte stream, extracting `data:` lines and pushing parsed
+/// JSON-RPC messages into `tx`.
+///
+/// SSE format (RFC 8607):
+/// ```text
+/// data: {"jsonrpc":"2.0","id":1,"result":{...}}\n\n
+/// ```
+/// Each event is separated by a blank line. Lines starting with `:` are
+/// comment/heartbeat lines and are ignored. Lines starting with `data: `
+/// contain the event payload. A `data: [DONE]` sentinel ends the stream.
+async fn parse_sse_stream(
+    stream: impl futures::Stream<Item = std::result::Result<bytes::Bytes, reqwest::Error>> + Unpin,
+    tx: tokio::sync::mpsc::UnboundedSender<JsonRpcMessage>,
+) {
+    let mut stream = Box::pin(stream);
+    let mut buf = String::new();
+    let mut event_data = String::new();
+
+    while let Some(chunk) = stream.next().await {
+        let bytes = match chunk {
+            Ok(b) => b,
+            Err(e) => {
+                tracing::debug!("MCP SSE stream error: {e}");
+                break;
+            }
+        };
+
+        let Ok(text) = std::str::from_utf8(&bytes) else {
+            continue;
+        };
+
+        buf.push_str(text);
+
+        // Process complete lines
+        while let Some(newline_pos) = buf.find('\n') {
+            let line = buf[..newline_pos].trim_end_matches('\r').to_string();
+            buf.drain(..=newline_pos);
+
+            if line.is_empty() {
+                // Blank line = end of SSE event
+                if !event_data.is_empty() {
+                    let data = event_data.trim();
+                    if data != "[DONE]" {
+                        match serde_json::from_str::<JsonRpcMessage>(data) {
+                            Ok(msg) => {
+                                if tx.send(msg).is_err() {
+                                    return; // receiver dropped
+                                }
+                            }
+                            Err(e) => {
+                                tracing::debug!(
+                                    "MCP SSE: failed to parse event data: {e} — data={data}"
+                                );
+                            }
+                        }
+                    }
+                    event_data.clear();
+                }
+            } else if let Some(data) = line.strip_prefix("data:") {
+                let stripped = data.trim_start();
+                if !event_data.is_empty() {
+                    event_data.push('\n');
+                }
+                event_data.push_str(stripped);
+            } else if line.starts_with(':')
+                || line.starts_with("event:")
+                || line.starts_with("id:")
+                || line.starts_with("retry:")
+            {
+                // Comment / event type / ID / retry — ignore for MCP purposes
+            }
+        }
+    }
+
+    tracing::debug!("MCP SSE stream ended");
 }
 
 #[async_trait]
 impl MCPTransport for HttpTransport {
-    async fn send(&mut self, _message: &JsonRpcMessage) -> Result<()> {
-        // HTTP/SSE transport is not yet implemented. Fail loudly so callers
-        // discover the gap immediately rather than silently losing messages.
-        // A full implementation would POST to `self.base_url` and use SSE for
-        // server-to-client messages. Tracked in the backlog.
-        Err(AvaError::ToolError(
-            "HTTP MCP transport is not yet implemented — use stdio transport instead".to_string(),
-        ))
+    async fn send(&mut self, message: &JsonRpcMessage) -> Result<()> {
+        let payload = serde_json::to_string(message)
+            .map_err(|e| AvaError::SerializationError(e.to_string()))?;
+
+        let response = self
+            .build_post(payload)
+            .send()
+            .await
+            .map_err(|e| AvaError::ToolError(format!("MCP HTTP request failed: {e}")))?;
+
+        let status = response.status();
+
+        // 401 → token expired; caller should refresh and retry
+        if status == reqwest::StatusCode::UNAUTHORIZED {
+            return Err(AvaError::ToolError(
+                "MCP server returned 401 Unauthorized — refresh OAuth token and retry".to_string(),
+            ));
+        }
+
+        if !status.is_success() {
+            let body = response.text().await.unwrap_or_default();
+            return Err(AvaError::ToolError(format!(
+                "MCP server returned {status}: {}",
+                &body[..body.len().min(500)]
+            )));
+        }
+
+        // Capture session ID if server set one
+        if let Some(sid) = response.headers().get("Mcp-Session-Id") {
+            if let Ok(s) = sid.to_str() {
+                self.session_id = Some(s.to_string());
+            }
+        }
+
+        let content_type = response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .to_string();
+
+        if content_type.contains("text/event-stream") {
+            // Server responded with an inline SSE stream for this request
+            // (Streamable HTTP pattern). Parse it and buffer messages.
+            let tx = self.incoming_tx.clone();
+            let stream = response.bytes_stream();
+            parse_sse_stream(stream, tx).await;
+        } else if content_type.contains("application/json") || !content_type.is_empty() {
+            // Direct JSON response — parse and buffer it
+            let body = response
+                .text()
+                .await
+                .map_err(|e| AvaError::ToolError(format!("MCP HTTP read body failed: {e}")))?;
+
+            // The server may return nothing for notifications (202/204)
+            if !body.trim().is_empty() {
+                let msg: JsonRpcMessage = serde_json::from_str(&body).map_err(|e| {
+                    AvaError::SerializationError(format!("MCP HTTP response parse failed: {e}"))
+                })?;
+                let _ = self.incoming_tx.send(msg);
+            }
+        }
+        // else: 202 Accepted with no body — response will arrive via SSE listener
+
+        Ok(())
     }
 
     async fn receive(&mut self) -> Result<JsonRpcMessage> {
-        Err(AvaError::ToolError(
-            "HTTP MCP transport is not yet implemented — use stdio transport instead".to_string(),
-        ))
+        // Try to receive from the buffered channel with a timeout
+        tokio::time::timeout(std::time::Duration::from_secs(90), self.incoming.recv())
+            .await
+            .map_err(|_| AvaError::ToolError("MCP HTTP receive timed out after 90s".to_string()))?
+            .ok_or_else(|| AvaError::ToolError("MCP HTTP transport channel closed".to_string()))
     }
 
     async fn close(&mut self) -> Result<()> {
+        if let Some(task) = self.sse_task.take() {
+            task.abort();
+        }
         Ok(())
     }
 }
@@ -508,30 +781,55 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn http_transport_send_fails_loudly() {
-        // HttpTransport must not silently discard messages — it must return an
-        // error so callers discover the gap immediately rather than losing data.
-        let mut transport = HttpTransport::new("http://localhost:9999");
+    async fn http_transport_send_returns_error_on_connection_refused() {
+        // Sending to a port that refuses connections must fail with a transport error,
+        // not a silent discard.
+        let mut transport = HttpTransport::new("http://127.0.0.1:19999");
         let msg = JsonRpcMessage::request(1, "test", serde_json::json!({}));
         let result = transport.send(&msg).await;
         assert!(
             result.is_err(),
-            "HttpTransport::send must return Err — silent data loss is not acceptable"
+            "HttpTransport::send must return Err on network failure"
         );
         let err_msg = result.unwrap_err().to_string();
+        // Either "connection refused" or a timeout/network message
         assert!(
-            err_msg.contains("not yet implemented") || err_msg.contains("stdio"),
-            "Error should guide caller to stdio transport: {err_msg}"
+            err_msg.contains("request failed")
+                || err_msg.contains("connect")
+                || err_msg.contains("refused")
+                || err_msg.contains("HTTP request"),
+            "Error should describe the network failure: {err_msg}"
         );
     }
 
     #[tokio::test]
-    async fn http_transport_receive_fails_loudly() {
-        let mut transport = HttpTransport::new("http://localhost:9999");
-        let result = transport.receive().await;
-        assert!(
-            result.is_err(),
-            "HttpTransport::receive must return Err — it is not implemented"
+    async fn http_transport_receive_times_out_with_no_messages() {
+        // With no SSE listener and no buffered messages, receive() should eventually
+        // time out. We test with a very short timeout by using `tokio::time::timeout`.
+        let mut transport = HttpTransport::new("http://127.0.0.1:19999");
+        let result =
+            tokio::time::timeout(std::time::Duration::from_millis(100), transport.receive()).await;
+        // We expect either a timeout or a channel-closed error
+        assert!(result.is_err() || result.unwrap().is_err());
+    }
+
+    #[test]
+    fn http_transport_with_config_applies_bearer_token() {
+        let config = HttpTransportConfig {
+            bearer_token: Some("my-secret-token".to_string()),
+            headers: HashMap::new(),
+        };
+        let transport = HttpTransport::with_config("https://example.com/mcp", config);
+        assert_eq!(
+            transport.config.bearer_token.as_deref(),
+            Some("my-secret-token")
         );
+        assert_eq!(transport.base_url, "https://example.com/mcp");
+    }
+
+    #[test]
+    fn http_transport_trims_trailing_slash() {
+        let transport = HttpTransport::new("https://example.com/mcp/");
+        assert_eq!(transport.base_url, "https://example.com/mcp");
     }
 }

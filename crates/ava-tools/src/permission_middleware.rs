@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use ava_permissions::inspector::{InspectionContext, InspectionResult, PermissionInspector};
+use ava_plugin::{PluginManager, PluginPermissionDecision};
 use ava_types::{AvaError, Result, ToolCall, ToolResult};
 use tokio::sync::{mpsc, oneshot, RwLock};
 
@@ -92,6 +93,9 @@ pub struct PermissionMiddleware {
     context: Arc<RwLock<InspectionContext>>,
     approval_bridge: Option<ApprovalBridge>,
     tool_sources: SharedToolSources,
+    /// Optional plugin manager for the `permission.ask` hook.
+    /// When set, plugins are consulted before the interactive bridge is invoked.
+    plugin_manager: Option<Arc<tokio::sync::Mutex<PluginManager>>>,
 }
 
 impl PermissionMiddleware {
@@ -105,7 +109,14 @@ impl PermissionMiddleware {
             context,
             approval_bridge,
             tool_sources: Arc::new(std::sync::RwLock::new(HashMap::new())),
+            plugin_manager: None,
         }
+    }
+
+    /// Attach a plugin manager to enable the `permission.ask` hook.
+    pub fn with_plugin_manager(mut self, pm: Arc<tokio::sync::Mutex<PluginManager>>) -> Self {
+        self.plugin_manager = Some(pm);
+        self
     }
 
     /// Return a shared handle to the tool-source map.
@@ -143,6 +154,28 @@ impl Middleware for PermissionMiddleware {
             ava_permissions::Action::Allow => Ok(()),
             ava_permissions::Action::Deny => Err(AvaError::PermissionDenied(result.reason)),
             ava_permissions::Action::Ask => {
+                // permission.ask hook: consult plugins before interrupting the user.
+                if let Some(ref pm) = self.plugin_manager {
+                    let risk_str = format!("{:?}", result.risk_level).to_lowercase();
+                    let plugin_decision = pm
+                        .lock()
+                        .await
+                        .ask_permission(
+                            &tool_call.name,
+                            &tool_call.arguments,
+                            &risk_str,
+                            &result.reason,
+                        )
+                        .await;
+                    match plugin_decision {
+                        Some(PluginPermissionDecision::Allow) => return Ok(()),
+                        Some(PluginPermissionDecision::Deny { reason }) => {
+                            return Err(AvaError::PermissionDenied(reason));
+                        }
+                        None => {} // No plugin decision — fall through to normal flow
+                    }
+                }
+
                 let Some(approval_bridge) = &self.approval_bridge else {
                     return Err(AvaError::PermissionDenied(format!(
                         "Tool '{}' requires approval: {} (risk: {:?})",

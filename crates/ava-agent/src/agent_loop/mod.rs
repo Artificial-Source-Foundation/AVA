@@ -201,6 +201,15 @@ pub enum AgentEvent {
         additions: usize,
         deletions: usize,
     },
+    /// An MCP server sent a `notifications/tools/list_changed` notification and
+    /// AVA has successfully re-fetched its tool list. The UI should refresh any
+    /// displayed tool list and inform the user.
+    MCPToolsChanged {
+        /// Name of the MCP server whose tool list changed.
+        server_name: String,
+        /// Number of tools now registered from that server.
+        tool_count: usize,
+    },
     /// A sub-agent has completed its run. Contains the full conversation for
     /// display/storage by the TUI.
     SubAgentComplete {
@@ -293,7 +302,10 @@ impl AgentLoop {
 
     /// Inject the system prompt into the context before the first turn.
     /// Idempotent: calling this multiple times (e.g., follow-up runs) is safe.
-    fn inject_system_prompt(&mut self) {
+    ///
+    /// Fires the `chat.system` plugin hook to allow plugins to append text to
+    /// the system prompt before it is committed to the context.
+    async fn inject_system_prompt(&mut self) {
         // Skip if system prompt already present (follow-up / post-complete reuse the context)
         if self
             .context
@@ -307,7 +319,7 @@ impl AgentLoop {
             custom.clone()
         } else {
             let native = self.llm.supports_tools();
-            let tool_defs = self.active_tool_defs();
+            let tool_defs = self.active_tool_defs_with_hooks().await;
             build_system_prompt(&tool_defs, native)
         };
         // Append provider-specific instructions (additive — does not replace the base prompt).
@@ -319,6 +331,19 @@ impl AgentLoop {
         if let Some(ref suffix) = self.config.system_prompt_suffix {
             system.push_str("\n\n");
             system.push_str(suffix);
+        }
+        // chat.system hook: let plugins inject text into the system prompt.
+        if let Some(ref pm) = self.plugin_manager.clone() {
+            let provider_name = format!("{:?}", provider_kind).to_lowercase();
+            let injection = pm
+                .lock()
+                .await
+                .collect_system_injections(&self.config.model, &provider_name)
+                .await;
+            if let Some(text) = injection {
+                system.push_str("\n\n");
+                system.push_str(&text);
+            }
         }
         self.context.add_message(Message::new(Role::System, system));
     }
@@ -383,6 +408,28 @@ impl AgentLoop {
             }
         }
 
+        // chat.params hook: allow plugins to modify per-call LLM parameters.
+        if let Some(ref pm) = self.plugin_manager.clone() {
+            let params = serde_json::json!({
+                "model": self.config.model,
+                "max_tokens": self.config.token_limit,
+                "thinking_level": format!("{:?}", self.config.thinking_level).to_lowercase(),
+                "thinking_budget_tokens": self.config.thinking_budget_tokens,
+            });
+            let modified = pm.lock().await.apply_chat_params_hook(params).await;
+            // Apply supported overrides back to config.
+            if let Some(v) = modified.get("max_tokens").and_then(|v| v.as_u64()) {
+                self.config.token_limit = v as usize;
+            }
+            if let Some(v) = modified.get("thinking_budget_tokens") {
+                if v.is_null() {
+                    self.config.thinking_budget_tokens = None;
+                } else if let Some(n) = v.as_u64() {
+                    self.config.thinking_budget_tokens = Some(n as u32);
+                }
+            }
+        }
+
         let streaming = event_tx.is_some();
 
         let result = if streaming {
@@ -423,7 +470,7 @@ impl AgentLoop {
         );
 
         let stream_result = if native_tools {
-            let tool_defs = self.active_tool_defs();
+            let tool_defs = self.active_tool_defs_with_hooks().await;
             if self.config.thinking_level != ThinkingLevel::Off {
                 let thinking = ThinkingConfig::new(
                     self.config.thinking_level,
@@ -747,7 +794,7 @@ impl AgentLoop {
         let is_subscription = self.llm.capabilities().is_subscription;
 
         // --- Setup ---
-        self.inject_system_prompt();
+        self.inject_system_prompt().await;
 
         // Inject conversation history from previous turns
         for msg in std::mem::take(&mut self.history) {

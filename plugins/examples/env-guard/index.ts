@@ -3,7 +3,7 @@ import { createPlugin } from '@ava-ai/plugin'
 const BLOCKED_PATTERNS = ['.env', 'credentials.json', '.secret', 'id_rsa', '.pem']
 
 createPlugin({
-  'tool.before': async (ctx, params) => {
+  'tool.before': async (_ctx, params) => {
     const tool = params.tool as string
     const args = (params.args ?? {}) as Record<string, unknown>
 

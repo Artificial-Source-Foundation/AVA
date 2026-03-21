@@ -34,6 +34,13 @@ pub struct PluginInfo {
     pub hooks: Vec<String>,
 }
 
+/// Decision returned by a plugin for the `permission.ask` hook.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PluginPermissionDecision {
+    Allow,
+    Deny { reason: String },
+}
+
 /// Manages the lifecycle of all power plugins.
 pub struct PluginManager {
     /// Running plugin processes, keyed by plugin name.
@@ -262,6 +269,233 @@ impl PluginManager {
         None
     }
 
+    // -----------------------------------------------------------------------
+    // tool.definition — modify tool definitions before sending to the LLM
+    // -----------------------------------------------------------------------
+
+    /// Run the `tool.definition` hook, allowing plugins to modify tool definitions.
+    ///
+    /// Passes all tool definitions as a JSON array to subscribed plugins. Each plugin
+    /// may return a modified version. Plugins are applied in subscription order; each
+    /// plugin receives the output of the previous one (chain). Tools returned by
+    /// a plugin that lack a `name` field are silently discarded.
+    ///
+    /// Returns the (possibly modified) list of tool definitions as JSON values.
+    pub async fn apply_tool_definition_hook(&mut self, tools: Vec<Value>) -> Vec<Value> {
+        let subscribers = self
+            .dispatcher
+            .subscribers(&HookEvent::ToolDefinition)
+            .to_vec();
+        if subscribers.is_empty() {
+            return tools;
+        }
+
+        let mut current_tools = tools;
+        for _plugin_name in &subscribers {
+            let params = serde_json::json!({ "tools": current_tools });
+            let responses = self
+                .dispatcher
+                .dispatch(&HookEvent::ToolDefinition, &params, &mut self.processes)
+                .await;
+
+            for resp in responses {
+                if let Some(ref e) = resp.error {
+                    warn!(
+                        plugin = resp.plugin_name,
+                        error = %e,
+                        "tool.definition hook failed, keeping current definitions"
+                    );
+                    continue;
+                }
+                if let Some(arr) = resp.result.get("tools").and_then(|v| v.as_array()) {
+                    // Only keep entries that have a "name" field (minimal validity check).
+                    current_tools = arr
+                        .iter()
+                        .filter(|t| t.get("name").and_then(|n| n.as_str()).is_some())
+                        .cloned()
+                        .collect();
+                } else {
+                    warn!(
+                        plugin = resp.plugin_name,
+                        "tool.definition hook returned no 'tools' array, ignoring"
+                    );
+                }
+            }
+        }
+
+        current_tools
+    }
+
+    // -----------------------------------------------------------------------
+    // chat.params — modify LLM call parameters before each call
+    // -----------------------------------------------------------------------
+
+    /// Run the `chat.params` hook, allowing plugins to modify LLM call parameters.
+    ///
+    /// `params` should be a JSON object with fields like `model`, `temperature`,
+    /// `max_tokens`, etc. Each subscribed plugin may override any field. Plugins
+    /// are applied in subscription order (chain). Returns the (possibly modified)
+    /// params object.
+    pub async fn apply_chat_params_hook(&mut self, params: Value) -> Value {
+        let subscribers = self.dispatcher.subscribers(&HookEvent::ChatParams).to_vec();
+        if subscribers.is_empty() {
+            return params;
+        }
+
+        let mut current = params;
+        let responses = self
+            .dispatcher
+            .dispatch(&HookEvent::ChatParams, &current, &mut self.processes)
+            .await;
+
+        for resp in responses {
+            if let Some(ref e) = resp.error {
+                warn!(
+                    plugin = resp.plugin_name,
+                    error = %e,
+                    "chat.params hook failed, keeping current params"
+                );
+                continue;
+            }
+            if resp.result.is_object() {
+                // Merge: plugin response fields override current fields.
+                if let (Value::Object(current_map), Value::Object(overrides)) =
+                    (&mut current, resp.result)
+                {
+                    for (k, v) in overrides {
+                        current_map.insert(k, v);
+                    }
+                }
+            } else {
+                warn!(
+                    plugin = resp.plugin_name,
+                    "chat.params hook did not return an object, ignoring"
+                );
+            }
+        }
+
+        current
+    }
+
+    // -----------------------------------------------------------------------
+    // permission.ask — programmatic approve/deny of permission requests
+    // -----------------------------------------------------------------------
+
+    /// Run the `permission.ask` hook for a tool call awaiting approval.
+    ///
+    /// Parameters passed to plugins:
+    /// ```json
+    /// {"tool": "<name>", "arguments": {...}, "risk_level": "<str>", "reason": "<str>"}
+    /// ```
+    ///
+    /// The first plugin that returns `{"action": "allow"}` or `{"action": "deny"}`
+    /// wins. If no plugin returns a decision, `None` is returned and the normal
+    /// interactive approval flow continues.
+    pub async fn ask_permission(
+        &mut self,
+        tool_name: &str,
+        arguments: &Value,
+        risk_level: &str,
+        reason: &str,
+    ) -> Option<PluginPermissionDecision> {
+        let params = serde_json::json!({
+            "tool": tool_name,
+            "arguments": arguments,
+            "risk_level": risk_level,
+            "reason": reason,
+        });
+        let responses = self
+            .dispatcher
+            .dispatch(&HookEvent::PermissionAsk, &params, &mut self.processes)
+            .await;
+
+        for resp in responses {
+            if let Some(ref e) = resp.error {
+                warn!(
+                    plugin = resp.plugin_name,
+                    tool = tool_name,
+                    error = %e,
+                    "permission.ask hook failed"
+                );
+                continue;
+            }
+            if let Some(action) = resp.result.get("action").and_then(|a| a.as_str()) {
+                match action {
+                    "allow" => return Some(PluginPermissionDecision::Allow),
+                    "deny" => {
+                        let reason = resp
+                            .result
+                            .get("reason")
+                            .and_then(|r| r.as_str())
+                            .unwrap_or("denied by plugin")
+                            .to_string();
+                        return Some(PluginPermissionDecision::Deny { reason });
+                    }
+                    _ => {
+                        warn!(
+                            plugin = resp.plugin_name,
+                            action, "permission.ask returned unknown action, ignoring"
+                        );
+                    }
+                }
+            }
+        }
+
+        None // No plugin made a decision — continue normal approval flow
+    }
+
+    // -----------------------------------------------------------------------
+    // chat.system — inject text into the system prompt
+    // -----------------------------------------------------------------------
+
+    /// Run the `chat.system` hook, collecting system prompt injections from plugins.
+    ///
+    /// Passes `{"model": "<name>", "provider": "<name>"}` to subscribed plugins.
+    /// Each plugin may return `{"inject": "<text to append>"}`. All non-empty
+    /// injections are concatenated with `\n\n` separators and returned.
+    ///
+    /// Returns `None` if no plugins are subscribed or no injections are provided.
+    pub async fn collect_system_injections(
+        &mut self,
+        model: &str,
+        provider: &str,
+    ) -> Option<String> {
+        let subscribers = self.dispatcher.subscribers(&HookEvent::ChatSystem).to_vec();
+        if subscribers.is_empty() {
+            return None;
+        }
+
+        let params = serde_json::json!({ "model": model, "provider": provider });
+        let responses = self
+            .dispatcher
+            .dispatch(&HookEvent::ChatSystem, &params, &mut self.processes)
+            .await;
+
+        let mut injections: Vec<String> = Vec::new();
+        for resp in responses {
+            if let Some(ref e) = resp.error {
+                warn!(
+                    plugin = resp.plugin_name,
+                    error = %e,
+                    "chat.system hook failed"
+                );
+                continue;
+            }
+            if let Some(text) = resp.result.get("inject").and_then(|v| v.as_str()) {
+                let trimmed = text.trim();
+                if !trimmed.is_empty() {
+                    injections.push(trimmed.to_string());
+                }
+            }
+        }
+
+        if injections.is_empty() {
+            None
+        } else {
+            Some(injections.join("\n\n"))
+        }
+    }
+
     /// Gracefully shut down all running plugin processes.
     pub async fn shutdown_all(&mut self) {
         info!(count = self.processes.len(), "shutting down all plugins");
@@ -364,6 +598,47 @@ mod tests {
         let mut manager = PluginManager::new();
         let creds = manager.refresh_auth("copilot", "old-token").await;
         assert!(creds.is_none(), "no plugins = no refresh");
+    }
+
+    #[tokio::test]
+    async fn apply_tool_definition_hook_no_plugins() {
+        let mut manager = PluginManager::new();
+        let tools = vec![
+            serde_json::json!({"name": "read", "description": "Read a file", "parameters": {}}),
+        ];
+        let result = manager.apply_tool_definition_hook(tools.clone()).await;
+        assert_eq!(result, tools, "no plugins = unchanged tool definitions");
+    }
+
+    #[tokio::test]
+    async fn apply_chat_params_hook_no_plugins() {
+        let mut manager = PluginManager::new();
+        let params = serde_json::json!({ "model": "claude-sonnet-4", "temperature": 0.7 });
+        let result = manager.apply_chat_params_hook(params.clone()).await;
+        assert_eq!(result, params, "no plugins = unchanged params");
+    }
+
+    #[tokio::test]
+    async fn ask_permission_no_plugins() {
+        let mut manager = PluginManager::new();
+        let result = manager
+            .ask_permission(
+                "bash",
+                &serde_json::json!({"command": "ls"}),
+                "medium",
+                "needs approval",
+            )
+            .await;
+        assert!(result.is_none(), "no plugins = no decision");
+    }
+
+    #[tokio::test]
+    async fn collect_system_injections_no_plugins() {
+        let mut manager = PluginManager::new();
+        let result = manager
+            .collect_system_injections("claude-sonnet-4", "anthropic")
+            .await;
+        assert!(result.is_none(), "no plugins = no injections");
     }
 
     #[test]

@@ -1,0 +1,12 @@
+[plugin]
+name = "code-stats"
+version = "0.1.0"
+description = "Logs tool call timings to .ava/code-stats.log and prints a session summary"
+author = "ASF Group"
+
+[runtime]
+command = "node"
+args = ["index.js"]
+
+[hooks]
+subscribe = ["tool.before", "tool.after", "session.end"]

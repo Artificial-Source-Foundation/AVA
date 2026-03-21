@@ -6,9 +6,12 @@ use serde_json::Value;
 use tokio::sync::Mutex;
 use tracing::{info, warn};
 
-use crate::client::{MCPClient, MCPTool};
+use crate::client::{
+    MCPClient, MCPPrompt, MCPPromptResult, MCPResource, MCPResourceContent, MCPTool,
+};
 use crate::config::{MCPServerConfig, TransportType};
-use crate::transport::{HttpTransport, StdioTransport};
+use crate::oauth::McpOAuthManager;
+use crate::transport::{HttpTransport, HttpTransportConfig, StdioTransport};
 
 // ---------------------------------------------------------------------------
 // ExtensionManager — connects to MCP servers and aggregates their tools
@@ -59,7 +62,37 @@ impl ExtensionManager {
             TransportType::Stdio { command, args, env } => {
                 Box::new(StdioTransport::spawn(command, args, env).await?)
             }
-            TransportType::Http { url } => Box::new(HttpTransport::new(url)),
+            TransportType::Http {
+                url,
+                auth,
+                bearer_token,
+                headers,
+            } => {
+                // Build transport config from config fields
+                let http_config = HttpTransportConfig {
+                    bearer_token: bearer_token.clone(),
+                    headers: headers.clone(),
+                };
+                let mut transport = HttpTransport::with_config(url, http_config);
+
+                // If OAuth is configured, acquire a token before connecting
+                if let Some(oauth_cfg) = auth {
+                    let mut oauth_mgr = McpOAuthManager::new(&config.name, oauth_cfg.clone());
+                    let token = oauth_mgr.get_access_token().await?;
+                    transport.set_bearer_token(token);
+                }
+
+                // Attempt SSE connection (best-effort — some servers use POST-only)
+                if let Err(e) = transport.connect_sse().await {
+                    tracing::debug!(
+                        server = %config.name,
+                        error = %e,
+                        "MCP SSE connect failed (may not be an SSE server, will use POST-only)"
+                    );
+                }
+
+                Box::new(transport)
+            }
         };
 
         let mut client = MCPClient::new(transport, &config.name);
@@ -138,6 +171,82 @@ impl ExtensionManager {
             content,
             is_error,
         })
+    }
+
+    /// Re-fetch the tool list from a single server and update the registry.
+    ///
+    /// Called when the server sends a `notifications/tools/list_changed` notification.
+    /// Returns the updated list of tools for that server, or an error if the server
+    /// is not connected.
+    pub async fn reload_server_tools(&mut self, server_name: &str) -> Result<Vec<MCPTool>> {
+        let client = self.clients.get(server_name).ok_or_else(|| {
+            AvaError::ToolError(format!(
+                "MCP server '{server_name}' is not connected — cannot reload tools"
+            ))
+        })?;
+
+        let new_tools = client.lock().await.list_tools().await?;
+
+        // Remove all existing tools registered for this server.
+        self.tools.retain(|(srv, _)| srv != server_name);
+
+        // Insert the freshly fetched tools.
+        for tool in &new_tools {
+            self.tools.push((server_name.to_string(), tool.clone()));
+        }
+
+        info!(
+            server = %server_name,
+            tool_count = new_tools.len(),
+            "MCP tools reloaded after list_changed notification"
+        );
+
+        Ok(new_tools)
+    }
+
+    /// List all resources available on a specific MCP server.
+    ///
+    /// Returns an error if the server is not connected or does not support resources.
+    pub async fn list_resources(&self, server_name: &str) -> Result<Vec<MCPResource>> {
+        let client = self.clients.get(server_name).ok_or_else(|| {
+            AvaError::ToolError(format!("MCP server '{server_name}' is not connected"))
+        })?;
+        client.lock().await.list_resources().await
+    }
+
+    /// Read the content of a resource by URI from a specific MCP server.
+    pub async fn read_resource(
+        &self,
+        server_name: &str,
+        uri: &str,
+    ) -> Result<Vec<MCPResourceContent>> {
+        let client = self.clients.get(server_name).ok_or_else(|| {
+            AvaError::ToolError(format!("MCP server '{server_name}' is not connected"))
+        })?;
+        client.lock().await.read_resource(uri).await
+    }
+
+    /// List all prompt templates available on a specific MCP server.
+    pub async fn list_prompts(&self, server_name: &str) -> Result<Vec<MCPPrompt>> {
+        let client = self.clients.get(server_name).ok_or_else(|| {
+            AvaError::ToolError(format!("MCP server '{server_name}' is not connected"))
+        })?;
+        client.lock().await.list_prompts().await
+    }
+
+    /// Retrieve and render a prompt template from a specific MCP server.
+    ///
+    /// `arguments` should be a JSON object mapping argument names to string values.
+    pub async fn get_prompt(
+        &self,
+        server_name: &str,
+        prompt_name: &str,
+        arguments: serde_json::Value,
+    ) -> Result<MCPPromptResult> {
+        let client = self.clients.get(server_name).ok_or_else(|| {
+            AvaError::ToolError(format!("MCP server '{server_name}' is not connected"))
+        })?;
+        client.lock().await.get_prompt(prompt_name, arguments).await
     }
 
     /// Disconnect all servers.

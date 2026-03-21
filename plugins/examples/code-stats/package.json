@@ -1,0 +1,16 @@
+{
+  "name": "code-stats",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AVA plugin: logs tool call timings per session",
+  "main": "index.js",
+  "scripts": {
+    "build": "tsc"
+  },
+  "dependencies": {
+    "@ava-ai/plugin": "file:../../sdk"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  }
+}

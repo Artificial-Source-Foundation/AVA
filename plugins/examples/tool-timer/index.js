@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 const fs = require('node:fs')
 
-let context = null
+let _context = null
 const hooks = ['session.start', 'session.end', 'tool.before', 'tool.after']
 const toolTimings = {}
 const toolStarts = {}
@@ -26,7 +26,7 @@ function sendMessage(msg) {
 
 function handleMessage(msg) {
   if (msg.method === 'initialize') {
-    context = msg.params || {}
+    _context = msg.params || {}
     process.stderr.write('[tool-timer] Plugin initialized\n')
     sendMessage({ jsonrpc: '2.0', id: msg.id, result: { hooks } })
     return

@@ -11,7 +11,7 @@ function getLogPath(projectDir: string): string {
 }
 
 function appendLog(logPath: string, entry: Record<string, unknown>): void {
-  const line = JSON.stringify(entry) + '\n'
+  const line = `${JSON.stringify(entry)}\n`
   fs.appendFileSync(logPath, line, 'utf-8')
 }
 

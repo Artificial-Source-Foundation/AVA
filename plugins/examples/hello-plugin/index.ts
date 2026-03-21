@@ -6,7 +6,7 @@ createPlugin({
     process.stderr.write(`[hello] Session ${sessionId} started in ${ctx.project.directory}\n`)
   },
 
-  'session.end': async (ctx, params) => {
+  'session.end': async (_ctx, params) => {
     const sessionId = params.session_id ?? 'unknown'
     process.stderr.write(`[hello] Session ${sessionId} ended\n`)
   },

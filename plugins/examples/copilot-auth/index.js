@@ -287,9 +287,7 @@ async function exchangeCopilotToken(accessToken) {
 
   // Resolve API endpoint: response > token string > default
   let apiEndpoint =
-    (data.endpoints && data.endpoints.api) ||
-    extractEndpointFromToken(data.token) ||
-    DEFAULT_COPILOT_ENDPOINT
+    data.endpoints?.api || extractEndpointFromToken(data.token) || DEFAULT_COPILOT_ENDPOINT
 
   if (!validateCopilotEndpoint(apiEndpoint)) {
     log(`Untrusted Copilot endpoint "${apiEndpoint}", falling back to default`)
@@ -500,7 +498,7 @@ async function handleMessage(msg) {
     log('Plugin initialized')
 
     // Check if a GitHub token was provided in config (pre-seeded credentials).
-    if (context.config && context.config.github_token) {
+    if (context.config?.github_token) {
       githubAccessToken = context.config.github_token
       log('Using pre-seeded GitHub token from config')
     }
@@ -517,7 +515,7 @@ async function handleMessage(msg) {
   }
 
   // --- hook dispatch ---
-  if (msg.method && msg.method.startsWith('hook/')) {
+  if (msg.method?.startsWith('hook/')) {
     const hook = msg.method.slice(5)
     const params = msg.params || {}
 

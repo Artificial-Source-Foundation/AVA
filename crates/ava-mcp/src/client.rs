@@ -35,6 +35,102 @@ pub struct MCPTool {
 }
 
 // ---------------------------------------------------------------------------
+// Resource types returned by resources/list and resources/read
+// ---------------------------------------------------------------------------
+
+/// A resource available on an MCP server (file, doc, database record, etc.).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MCPResource {
+    /// Unique URI identifying the resource (e.g., "file:///path/to/file").
+    pub uri: String,
+    /// Human-readable name for the resource.
+    #[serde(default)]
+    pub name: String,
+    /// Optional description of the resource.
+    #[serde(default)]
+    pub description: String,
+    /// MIME type of the resource content (e.g., "text/plain", "application/json").
+    #[serde(rename = "mimeType", default)]
+    pub mime_type: String,
+}
+
+/// A single content block in a resource read response.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MCPResourceContent {
+    /// The URI of the resource that was read.
+    pub uri: String,
+    /// MIME type of this content block.
+    #[serde(rename = "mimeType", default)]
+    pub mime_type: String,
+    /// Text content (present when mimeType is text/*, application/json, etc.).
+    #[serde(default)]
+    pub text: Option<String>,
+    /// Binary content as base64 (present when mimeType is binary).
+    #[serde(default)]
+    pub blob: Option<String>,
+}
+
+// ---------------------------------------------------------------------------
+// Prompt types returned by prompts/list and prompts/get
+// ---------------------------------------------------------------------------
+
+/// A prompt template available on an MCP server.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MCPPrompt {
+    /// Unique name for the prompt.
+    pub name: String,
+    /// Human-readable description of what the prompt does.
+    #[serde(default)]
+    pub description: String,
+    /// Input arguments accepted by this prompt template.
+    #[serde(default)]
+    pub arguments: Vec<MCPPromptArgument>,
+}
+
+/// An argument accepted by a prompt template.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MCPPromptArgument {
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub required: bool,
+}
+
+/// The result of a prompts/get request — the rendered prompt messages.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MCPPromptResult {
+    /// Optional description of this prompt invocation.
+    #[serde(default)]
+    pub description: String,
+    /// The rendered prompt messages ready to inject into a conversation.
+    pub messages: Vec<MCPPromptMessage>,
+}
+
+/// A single message in a rendered prompt.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MCPPromptMessage {
+    /// "user" or "assistant".
+    pub role: String,
+    /// The content of the message (text or embedded resource).
+    pub content: MCPPromptContent,
+}
+
+/// Content within a prompt message — text or an embedded resource.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "lowercase")]
+pub enum MCPPromptContent {
+    Text {
+        text: String,
+    },
+    Resource {
+        resource: MCPResourceContent,
+    },
+    #[serde(other)]
+    Unknown,
+}
+
+// ---------------------------------------------------------------------------
 // MCPClient — communicates with a single MCP server
 // ---------------------------------------------------------------------------
 
@@ -148,6 +244,143 @@ impl MCPClient {
         })?;
 
         serde_json::from_value::<Vec<MCPTool>>(tools_value)
+            .map_err(|e| AvaError::SerializationError(e.to_string()))
+    }
+
+    /// Poll for an incoming notification from the server without sending a request.
+    ///
+    /// Returns `Some(method)` if a notification was available, `None` if the transport
+    /// had no pending message. This is a non-blocking best-effort check: callers should
+    /// use it between request/response cycles, not concurrently with other send/receive
+    /// calls on the same client.
+    ///
+    /// The only notification currently acted on by AVA is
+    /// `notifications/tools/list_changed`, which triggers a `list_tools` re-fetch.
+    pub async fn poll_notification(&mut self) -> Option<String> {
+        // The MCP spec allows servers to send notifications at any time.
+        // We use a short-timeout receive here so callers don't block.
+        use tokio::time::{timeout, Duration};
+        match timeout(Duration::from_millis(1), self.transport.receive()).await {
+            Ok(Ok(msg)) if msg.id.is_none() => {
+                // No id → this is a notification (not a response to a request).
+                msg.method
+            }
+            _ => None,
+        }
+    }
+
+    /// List available resources from the server.
+    ///
+    /// MCP method: `resources/list`
+    /// Returns an empty list when the server does not advertise resource support.
+    pub async fn list_resources(&mut self) -> Result<Vec<MCPResource>> {
+        let id = self.next_id();
+        let request = JsonRpcMessage::request(id, "resources/list", json!({}));
+        self.transport.send(&request).await?;
+        let response = self.transport.receive().await?;
+        Self::verify_response_id(id, &response)?;
+
+        if let Some(err) = &response.error {
+            return Err(AvaError::ToolError(format!(
+                "MCP server '{}' resources/list failed: {}",
+                self.server_name, err.message
+            )));
+        }
+
+        let result = response.result.ok_or_else(|| {
+            AvaError::SerializationError("missing result in resources/list response".to_string())
+        })?;
+
+        let resources_value = result.get("resources").cloned().unwrap_or(json!([]));
+        serde_json::from_value::<Vec<MCPResource>>(resources_value)
+            .map_err(|e| AvaError::SerializationError(e.to_string()))
+    }
+
+    /// Read the content of a specific resource by URI.
+    ///
+    /// MCP method: `resources/read`
+    pub async fn read_resource(&mut self, uri: &str) -> Result<Vec<MCPResourceContent>> {
+        let id = self.next_id();
+        let request = JsonRpcMessage::request(id, "resources/read", json!({ "uri": uri }));
+        self.transport.send(&request).await?;
+        let response = self.transport.receive().await?;
+        Self::verify_response_id(id, &response)?;
+
+        if let Some(err) = &response.error {
+            return Err(AvaError::ToolError(format!(
+                "MCP server '{}' resources/read failed for '{}': {}",
+                self.server_name, uri, err.message
+            )));
+        }
+
+        let result = response.result.ok_or_else(|| {
+            AvaError::SerializationError("missing result in resources/read response".to_string())
+        })?;
+
+        let contents_value = result.get("contents").cloned().unwrap_or(json!([]));
+        serde_json::from_value::<Vec<MCPResourceContent>>(contents_value)
+            .map_err(|e| AvaError::SerializationError(e.to_string()))
+    }
+
+    /// List available prompt templates from the server.
+    ///
+    /// MCP method: `prompts/list`
+    /// Returns an empty list when the server does not advertise prompt support.
+    pub async fn list_prompts(&mut self) -> Result<Vec<MCPPrompt>> {
+        let id = self.next_id();
+        let request = JsonRpcMessage::request(id, "prompts/list", json!({}));
+        self.transport.send(&request).await?;
+        let response = self.transport.receive().await?;
+        Self::verify_response_id(id, &response)?;
+
+        if let Some(err) = &response.error {
+            return Err(AvaError::ToolError(format!(
+                "MCP server '{}' prompts/list failed: {}",
+                self.server_name, err.message
+            )));
+        }
+
+        let result = response.result.ok_or_else(|| {
+            AvaError::SerializationError("missing result in prompts/list response".to_string())
+        })?;
+
+        let prompts_value = result.get("prompts").cloned().unwrap_or(json!([]));
+        serde_json::from_value::<Vec<MCPPrompt>>(prompts_value)
+            .map_err(|e| AvaError::SerializationError(e.to_string()))
+    }
+
+    /// Retrieve and render a specific prompt template with the provided arguments.
+    ///
+    /// MCP method: `prompts/get`
+    ///
+    /// `arguments` is a map of argument names to string values, passed directly
+    /// to the MCP server for template interpolation.
+    pub async fn get_prompt(&mut self, name: &str, arguments: Value) -> Result<MCPPromptResult> {
+        let id = self.next_id();
+        let request = JsonRpcMessage::request(
+            id,
+            "prompts/get",
+            json!({
+                "name": name,
+                "arguments": arguments
+            }),
+        );
+        self.transport.send(&request).await?;
+        let response = self.transport.receive().await?;
+        Self::verify_response_id(id, &response)?;
+
+        if let Some(err) = &response.error {
+            return Err(AvaError::ToolError(format!(
+                "MCP server '{}' prompts/get failed for '{}': {}",
+                self.server_name, name, err.message
+            )));
+        }
+
+        let result = response.result.ok_or_else(|| {
+            AvaError::SerializationError("missing result in prompts/get response".to_string())
+        })?;
+
+        serde_json::from_value::<MCPPromptResult>(result)
             .map_err(|e| AvaError::SerializationError(e.to_string()))
     }
 

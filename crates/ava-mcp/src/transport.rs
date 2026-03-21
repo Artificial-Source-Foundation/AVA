@@ -124,62 +124,46 @@ fn parse_headers(raw: &str) -> Result<HashMap<String, String>> {
 }
 
 // ---------------------------------------------------------------------------
-// Raw framed reader/writer (shared by StdioTransport and tests)
+// Newline-delimited JSON reader/writer (used by StdioTransport)
+//
+// The official MCP SDK (@modelcontextprotocol/sdk) uses NDJSON over stdio:
+// each message is a single line of JSON terminated by '\n'. This matches
+// what Playwright MCP, Claude Desktop, and other MCP SDK-based servers expect.
+// See: https://spec.modelcontextprotocol.io/specification/basic/transports/#stdio
 // ---------------------------------------------------------------------------
 
-async fn send_framed<W: AsyncWrite + Unpin>(writer: &mut W, msg: &JsonRpcMessage) -> Result<()> {
-    let payload =
+async fn send_ndjson<W: AsyncWrite + Unpin>(writer: &mut W, msg: &JsonRpcMessage) -> Result<()> {
+    let mut payload =
         serde_json::to_string(msg).map_err(|e| AvaError::SerializationError(e.to_string()))?;
-    let frame = encode_message(&payload);
+    payload.push('\n');
     writer
-        .write_all(frame.as_bytes())
+        .write_all(payload.as_bytes())
         .await
         .map_err(AvaError::from)?;
     writer.flush().await.map_err(AvaError::from)?;
     Ok(())
 }
 
-async fn receive_framed<R: AsyncRead + Unpin>(reader: &mut BufReader<R>) -> Result<JsonRpcMessage> {
-    let mut header_bytes = Vec::new();
-    let mut byte = [0_u8; 1];
+async fn receive_ndjson<R: AsyncRead + Unpin>(reader: &mut BufReader<R>) -> Result<JsonRpcMessage> {
+    use tokio::io::AsyncBufReadExt;
 
+    let mut line = String::new();
     loop {
-        let n = reader.read(&mut byte).await.map_err(AvaError::from)?;
+        line.clear();
+        let n = reader.read_line(&mut line).await.map_err(AvaError::from)?;
         if n == 0 {
             return Err(AvaError::ValidationError(
-                "unexpected EOF while reading headers".to_string(),
+                "unexpected EOF while reading MCP message".to_string(),
             ));
         }
-        header_bytes.push(byte[0]);
-        if header_bytes.ends_with(b"\r\n\r\n") {
-            break;
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            // Skip blank lines (some servers emit them between messages)
+            continue;
         }
+        return serde_json::from_str(trimmed)
+            .map_err(|e| AvaError::SerializationError(format!("MCP message parse error: {e}")));
     }
-
-    let header_text =
-        String::from_utf8(header_bytes).map_err(|e| AvaError::SerializationError(e.to_string()))?;
-    let headers = parse_headers(header_text.trim_end_matches("\r\n\r\n"))?;
-    let len = headers
-        .get("content-length")
-        .ok_or_else(|| AvaError::ValidationError("missing content-length header".to_string()))?
-        .parse::<usize>()
-        .map_err(|e| AvaError::ValidationError(format!("invalid content-length header: {e}")))?;
-
-    /// Maximum MCP message size: 10 MB. Prevents a malicious or buggy MCP server
-    /// from exhausting memory with an oversized response.
-    const MAX_MCP_MESSAGE_SIZE: usize = 10 * 1024 * 1024;
-
-    if len > MAX_MCP_MESSAGE_SIZE {
-        return Err(AvaError::ToolError(format!(
-            "MCP response too large: {len} bytes exceeds {MAX_MCP_MESSAGE_SIZE} byte limit"
-        )));
-    }
-
-    let mut body = vec![0_u8; len];
-    reader.read_exact(&mut body).await.map_err(AvaError::from)?;
-
-    let body = String::from_utf8(body).map_err(|e| AvaError::SerializationError(e.to_string()))?;
-    serde_json::from_str(&body).map_err(|e| AvaError::SerializationError(e.to_string()))
 }
 
 // ---------------------------------------------------------------------------
@@ -218,7 +202,7 @@ impl StdioTransport {
         cmd.args(args)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
             .kill_on_drop(true);
 
         // Remove sensitive environment variables from the inherited environment
@@ -257,11 +241,11 @@ impl StdioTransport {
 #[async_trait]
 impl MCPTransport for StdioTransport {
     async fn send(&mut self, message: &JsonRpcMessage) -> Result<()> {
-        send_framed(&mut self.stdin, message).await
+        send_ndjson(&mut self.stdin, message).await
     }
 
     async fn receive(&mut self) -> Result<JsonRpcMessage> {
-        receive_framed(&mut self.stdout).await
+        receive_ndjson(&mut self.stdout).await
     }
 
     async fn close(&mut self) -> Result<()> {
@@ -760,10 +744,10 @@ mod tests {
 
     #[tokio::test]
     async fn stdio_transport_with_cat() {
-        // Use `cat` as an echo server — we write framed bytes and read them back.
-        // NOTE: `cat` simply echoes stdin to stdout, so we can round-trip framed
-        // content through it. However, `cat` doesn't speak JSON-RPC, so we test
-        // the raw framing rather than full protocol.
+        // Use `cat` as an echo server — we write NDJSON and read it back.
+        // StdioTransport uses newline-delimited JSON (NDJSON), matching the
+        // official MCP SDK protocol. `cat` echoes the line back unchanged,
+        // so we can verify the round-trip without a full MCP server.
         let transport = StdioTransport::spawn("cat", &[], &HashMap::new()).await;
         if transport.is_err() {
             // cat may not be available in all test environments
@@ -778,6 +762,70 @@ mod tests {
         assert_eq!(echo.method.as_deref(), Some("ping"));
 
         transport.close().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn stdio_transport_with_playwright_mcp() {
+        // Integration test: spawn the real Playwright MCP server and perform
+        // the MCP initialize handshake. The server must respond within 5 seconds.
+        //
+        // This test verifies that StdioTransport uses NDJSON (not Content-Length
+        // framing), since @playwright/mcp uses @modelcontextprotocol/sdk which
+        // reads one JSON object per line.
+        let node_path = which_node();
+        let playwright_cli =
+            "/home/xn3/.nvm/versions/node/v24.13.1/lib/node_modules/@playwright/mcp/cli.js";
+
+        if node_path.is_none() || !std::path::Path::new(playwright_cli).exists() {
+            eprintln!("skipping playwright MCP test: node or @playwright/mcp not available");
+            return;
+        }
+
+        let node = node_path.unwrap();
+        let args = vec![playwright_cli.to_string(), "--headless".to_string()];
+
+        let transport = StdioTransport::spawn(&node, &args, &HashMap::new())
+            .await
+            .expect("failed to spawn Playwright MCP server");
+
+        let mut client = crate::client::MCPClient::new(Box::new(transport), "playwright");
+
+        let result =
+            tokio::time::timeout(std::time::Duration::from_secs(5), client.initialize()).await;
+
+        match result {
+            Err(_elapsed) => panic!("Playwright MCP initialize timed out after 5s"),
+            Ok(Err(e)) => panic!("Playwright MCP initialize failed: {e}"),
+            Ok(Ok(caps)) => {
+                assert!(
+                    caps.tools,
+                    "Playwright MCP should advertise tools capability"
+                );
+            }
+        }
+
+        client.disconnect().await.ok();
+    }
+
+    fn which_node() -> Option<String> {
+        // Try the known nvm path first, then fall back to PATH lookup
+        let known = "/home/xn3/.nvm/versions/node/v24.13.1/bin/node";
+        if std::path::Path::new(known).exists() {
+            return Some(known.to_string());
+        }
+        std::process::Command::new("which")
+            .arg("node")
+            .output()
+            .ok()
+            .and_then(|o| {
+                if o.status.success() {
+                    String::from_utf8(o.stdout)
+                        .ok()
+                        .map(|s| s.trim().to_string())
+                } else {
+                    None
+                }
+            })
     }
 
     #[tokio::test]

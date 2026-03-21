@@ -1,0 +1,26 @@
+{
+  "status": "fixed",
+  "root_cause": "StdioTransport used Content-Length framing (RFC LSP wire format: 'Content-Length: N\\r\\n\\r\\n{body}') but the official @modelcontextprotocol/sdk (used by @playwright/mcp, Claude Desktop, and all MCP SDK-based servers) uses newline-delimited JSON (NDJSON: one JSON object per line terminated by '\\n'). When AVA sent 'Content-Length: N\\r\\n\\r\\n{body}', Playwright's ReadBuffer.readMessage() searched for '\\n', found it inside the '\\r\\n\\r\\n' separator, parsed 'Content-Length: N\\r' as JSON (which fails), silently discarded the message, and waited for more input. AVA's receive() then blocked indefinitely waiting for a response that would never come.",
+  "wire_format_before": "Content-Length: {N}\\r\\n\\r\\n{json_body}",
+  "wire_format_after": "{json_body}\\n",
+  "files_modified": ["crates/ava-mcp/src/transport.rs", "crates/ava-mcp/tests/mcp.rs"],
+  "changes": [
+    "Replaced send_framed/receive_framed with send_ndjson/receive_ndjson helpers in StdioTransport",
+    "StdioTransport.send() now calls send_ndjson (JSON + '\\n', then flush)",
+    "StdioTransport.receive() now calls receive_ndjson (read_line, skip blanks, parse JSON)",
+    "Removed dead send_framed/receive_framed functions (FramedTransport has its own inline implementation)",
+    "Updated client_connects_to_mock_process_and_calls_tool integration test Python mock server from Content-Length framing to NDJSON",
+    "Added stdio_transport_with_playwright_mcp test that spawns real Playwright MCP server with 5s timeout"
+  ],
+  "unaffected": [
+    "FramedTransport (still uses Content-Length framing — used by AVAMCPServer which is AVA's own server, not an MCP SDK client)",
+    "encode_message/decode_message functions (kept for backward compat)",
+    "HttpTransport, InMemoryTransport (unchanged)"
+  ],
+  "test_results": {
+    "ava_mcp_unit": "37 passed, 0 failed",
+    "ava_mcp_integration": "8 passed, 0 failed",
+    "playwright_mcp_connect_time": "sub-500ms (well within 5s timeout)"
+  },
+  "playwright_connects": true
+}

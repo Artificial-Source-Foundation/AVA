@@ -214,28 +214,21 @@ async fn client_protocol_with_mock_transport() {
 
 #[tokio::test]
 async fn client_connects_to_mock_process_and_calls_tool() {
+    // NOTE: StdioTransport uses NDJSON (newline-delimited JSON), matching the
+    // official @modelcontextprotocol/sdk used by Playwright MCP and other servers.
+    // One JSON object per line, no Content-Length framing.
     let script = r#"
 import sys, json
 
 def read_msg():
-    headers = {}
-    while True:
-        line = sys.stdin.buffer.readline()
-        if not line:
-            return None
-        if line == b"\r\n":
-            break
-        key, value = line.decode().split(":", 1)
-        headers[key.lower().strip()] = value.strip()
-    length = int(headers["content-length"])
-    body = sys.stdin.buffer.read(length)
-    return json.loads(body.decode())
+    line = sys.stdin.readline()
+    if not line:
+        return None
+    return json.loads(line.strip())
 
 def write_msg(payload):
-    encoded = json.dumps(payload).encode()
-    sys.stdout.buffer.write(f"Content-Length: {len(encoded)}\r\n\r\n".encode())
-    sys.stdout.buffer.write(encoded)
-    sys.stdout.buffer.flush()
+    sys.stdout.write(json.dumps(payload) + "\n")
+    sys.stdout.flush()
 
 while True:
     req = read_msg()

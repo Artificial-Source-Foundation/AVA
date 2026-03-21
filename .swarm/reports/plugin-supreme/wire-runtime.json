@@ -1,0 +1,49 @@
+{
+  "status": "fixed",
+  "hooks_now_wired": [
+    "Auth",
+    "RequestHeaders",
+    "ToolBefore",
+    "ToolAfter",
+    "AgentBefore",
+    "AgentAfter",
+    "SessionStart",
+    "SessionEnd",
+    "Config",
+    "Event",
+    "ShellEnv",
+    "ChatMessage",
+    "TextComplete"
+  ],
+  "total_wired": 13,
+  "findings": {
+    "already_wired_before_this_task": [
+      "Auth (dedicated methods in PluginManager; used by auth flows)",
+      "RequestHeaders (anthropic.rs line ~282, and via ModelRouter.set_plugin_manager)",
+      "ToolBefore (tool_execution.rs line ~270)",
+      "ToolAfter (tool_execution.rs line ~344)",
+      "AgentBefore (agent_loop/mod.rs run_unified)",
+      "AgentAfter (agent_loop/mod.rs run_unified)",
+      "SessionStart (stack_run.rs line ~122)",
+      "SessionEnd (stack_run.rs lines ~541 and ~569)",
+      "Config (stack/mod.rs line ~254 during init)",
+      "ShellEnv (ava-tools/src/core/bash.rs via register_default_tools_with_plugins)",
+      "ChatMessage (agent_loop/mod.rs run_unified)",
+      "TextComplete (agent_loop/mod.rs generate_turn_streaming)",
+      "ChatSystem (agent_loop/mod.rs inject_system_prompt)",
+      "ChatParams (agent_loop/mod.rs generate_turn_response)",
+      "ChatMessagesTransform (agent_loop/mod.rs apply_messages_transform)",
+      "ToolDefinition (agent_loop/mod.rs active_tool_defs_with_hooks)",
+      "PermissionAsk (permission middleware)",
+      "SessionCompacting (agent_loop/mod.rs run_unified)"
+    ],
+    "newly_wired_in_this_task": [
+      "Event — added broadcast_event_to_plugins() helper method that serializes AgentEvent to JSON and fires HookEvent::Event (notification, fire-and-forget) to all subscribed plugins. Called at: AgentEvent::Error (generation failure), AgentEvent::Complete (natural completion, attempt_completion, and cleanup path)."
+    ],
+    "note": "The original claim that 13 hooks were dead code was incorrect. 12 of 13 were already wired across ava-agent/src/agent_loop/mod.rs, ava-agent/src/agent_loop/tool_execution.rs, ava-agent/src/stack/stack_run.rs, ava-agent/src/stack/mod.rs, ava-tools/src/core/bash.rs, and crates/ava-llm/src/providers/anthropic.rs. Only HookEvent::Event was not wired."
+  },
+  "files_modified": ["crates/ava-agent/src/agent_loop/mod.rs"],
+  "cargo_check_pass": true,
+  "cargo_test_pass": true,
+  "test_summary": "All workspace tests pass (0 failures)"
+}

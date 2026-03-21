@@ -300,6 +300,24 @@ impl AgentLoop {
         }
     }
 
+    /// Broadcast an agent event to subscribed plugins via the `event` hook.
+    ///
+    /// Serializes the event as JSON and fires `HookEvent::Event` (notification —
+    /// fire-and-forget). Plugins that subscribe to `event` can observe the full
+    /// agent event stream without blocking execution.
+    async fn broadcast_event_to_plugins(&self, event: &AgentEvent) {
+        let Some(ref pm) = self.plugin_manager else {
+            return;
+        };
+        let Ok(payload) = serde_json::to_value(event) else {
+            return;
+        };
+        pm.lock()
+            .await
+            .trigger_hook(ava_plugin::HookEvent::Event, payload)
+            .await;
+    }
+
     /// Inject the system prompt into the context before the first turn.
     /// Idempotent: calling this multiple times (e.g., follow-up runs) is safe.
     ///
@@ -971,7 +989,9 @@ impl AgentLoop {
                 match self.generate_turn_response(&event_tx).await {
                     Ok(result) => result,
                     Err(error) => {
-                        Self::emit(&event_tx, AgentEvent::Error(error.to_string()));
+                        let err_event = AgentEvent::Error(error.to_string());
+                        Self::emit(&event_tx, err_event.clone());
+                        self.broadcast_event_to_plugins(&err_event).await;
                         return Err(error);
                     }
                 };
@@ -1122,7 +1142,9 @@ impl AgentLoop {
                     &event_tx,
                     AgentEvent::ToolStats(detector.tool_monitor().stats()),
                 );
-                Self::emit(&event_tx, AgentEvent::Complete(session.clone()));
+                let complete_event = AgentEvent::Complete(session.clone());
+                Self::emit(&event_tx, complete_event.clone());
+                self.broadcast_event_to_plugins(&complete_event).await;
                 return Ok(session);
             }
 
@@ -1213,7 +1235,9 @@ impl AgentLoop {
                     &event_tx,
                     AgentEvent::ToolStats(detector.tool_monitor().stats()),
                 );
-                Self::emit(&event_tx, AgentEvent::Complete(session.clone()));
+                let complete_event = AgentEvent::Complete(session.clone());
+                Self::emit(&event_tx, complete_event.clone());
+                self.broadcast_event_to_plugins(&complete_event).await;
                 return Ok(session);
             }
         }
@@ -1225,7 +1249,9 @@ impl AgentLoop {
             &event_tx,
             AgentEvent::ToolStats(detector.tool_monitor().stats()),
         );
-        Self::emit(&event_tx, AgentEvent::Complete(session.clone()));
+        let complete_event = AgentEvent::Complete(session.clone());
+        Self::emit(&event_tx, complete_event.clone());
+        self.broadcast_event_to_plugins(&complete_event).await;
         Ok(session)
     }
 

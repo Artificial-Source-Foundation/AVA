@@ -1,0 +1,18 @@
+{
+  "status": "fixed",
+  "root_cause": "No dedicated GET /api/sessions/{id}/messages endpoint existed. The web fallback (db-web-fallback.ts) for the 'SELECT * FROM messages WHERE session_id = ?' query was calling GET /api/sessions/{id} (the full session detail endpoint) and extracting detail.messages, but this approach is fragile: any 404 or unexpected response shape silently returns an empty array. A dedicated /messages endpoint is cleaner, returns a flat array directly, and avoids loading the full session object just to get its messages.",
+  "files_modified": [
+    "crates/ava-tui/src/web/api.rs",
+    "crates/ava-tui/src/web/mod.rs",
+    "src/services/db-web-fallback.ts",
+    "src/lib/api-client.ts"
+  ],
+  "changes": {
+    "crates/ava-tui/src/web/api.rs": "Added get_session_messages() handler: GET /api/sessions/{id}/messages returns Vec<MessageSummary> as a flat JSON array",
+    "crates/ava-tui/src/web/mod.rs": "Registered .route(\"/api/sessions/{id}/messages\", get(api::get_session_messages)) and updated doc comment",
+    "src/services/db-web-fallback.ts": "Updated 'from messages where session_id' branch to call GET /api/sessions/{id}/messages (dedicated endpoint) with fallback to GET /api/sessions/{id} for older servers",
+    "src/lib/api-client.ts": "Added get_session_messages to COMMAND_TO_ENDPOINT map pointing to /api/sessions/{id}/messages"
+  },
+  "cargo_check_pass": true,
+  "tsc_pass": true
+}

@@ -40,6 +40,7 @@ const COMMAND_TO_ENDPOINT: Record<string, { path: string; method: 'GET' | 'POST'
   list_session_terminal: { path: '/api/sessions/{id}/terminal', method: 'GET' },
   list_session_memory: { path: '/api/sessions/{id}/memory', method: 'GET' },
   list_session_checkpoints: { path: '/api/sessions/{id}/checkpoints', method: 'GET' },
+  get_session_messages: { path: '/api/sessions/{id}/messages', method: 'GET' },
   load_session: { path: '/api/sessions/load', method: 'POST' },
   create_session: { path: '/api/sessions/create', method: 'POST' },
   delete_session: { path: '/api/sessions/delete', method: 'POST' }, // handled specially below

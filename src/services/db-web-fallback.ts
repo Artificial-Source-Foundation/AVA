@@ -81,15 +81,32 @@ export function createWebDatabase(): WebDatabase {
         const sessionId = params[0] as string
         if (!sessionId) return [] as unknown as T
         try {
-          const res = await fetch(`${API_BASE}/api/sessions/${sessionId}`)
-          if (!res.ok) {
-            console.warn('[db-web] Failed to load session messages:', res.status, sessionId)
+          // Use the dedicated messages endpoint for a flat array of MessageSummary objects.
+          // Fall back to the session detail endpoint if the dedicated endpoint is unavailable.
+          let msgs: Record<string, unknown>[] = []
+          const msgsRes = await fetch(`${API_BASE}/api/sessions/${sessionId}/messages`)
+          if (msgsRes.ok) {
+            const data = await msgsRes.json()
+            msgs = Array.isArray(data) ? data : []
+          } else if (msgsRes.status === 404) {
+            // Older server: fall back to session detail endpoint
+            const detailRes = await fetch(`${API_BASE}/api/sessions/${sessionId}`)
+            if (detailRes.ok) {
+              const detail = await detailRes.json()
+              msgs = Array.isArray(detail.messages)
+                ? (detail.messages as Record<string, unknown>[])
+                : []
+            } else {
+              console.warn('[db-web] Failed to load session messages:', detailRes.status, sessionId)
+              return [] as unknown as T
+            }
+          } else {
+            console.warn('[db-web] Failed to load session messages:', msgsRes.status, sessionId)
             return [] as unknown as T
           }
-          const detail = await res.json()
           // Map to db row format expected by mapDbMessages.
           // Handle both `timestamp` and `created_at` field names.
-          return (detail.messages ?? []).map((m: Record<string, unknown>) => ({
+          return msgs.map((m: Record<string, unknown>) => ({
             id: m.id,
             session_id: sessionId,
             role: m.role,

@@ -29,6 +29,7 @@
 //! | GET    | `/api/sessions/{id}`              | Get session with messages                 |
 //! | POST   | `/api/sessions/{id}/rename`       | Rename a session                          |
 //! | DELETE | `/api/sessions/{id}`              | Delete a session                          |
+//! | GET    | `/api/sessions/{id}/messages`     | List all messages for a session           |
 //! | POST   | `/api/sessions/{id}/message`      | Add a message to a session                |
 //! | GET    | `/api/sessions/{id}/agents`       | List agents for a session (stub)          |
 //! | GET    | `/api/sessions/{id}/files`        | List file operations (stub)               |
@@ -103,7 +104,11 @@ fn build_router(state: WebState) -> Router {
             get(api::get_session).delete(api::delete_session),
         )
         .route("/api/sessions/{id}/rename", post(api::rename_session))
-        // Message endpoint
+        // Message endpoints
+        .route(
+            "/api/sessions/{id}/messages",
+            get(api::get_session_messages),
+        )
         .route("/api/sessions/{id}/message", post(api::add_message))
         // Session sub-resource stubs (web DB parity)
         .route("/api/sessions/{id}/agents", get(api::list_session_agents))

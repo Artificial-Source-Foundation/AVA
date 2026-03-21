@@ -1007,6 +1007,40 @@ pub async fn get_session(
     }))
 }
 
+/// Get all messages for a session (dedicated endpoint, avoids loading the full session object).
+///
+/// Returns a flat JSON array of `MessageSummary` objects compatible with the
+/// frontend's `db-web-fallback.ts` message mapper.
+pub async fn get_session_messages(
+    State(state): State<WebState>,
+    Path(id): Path<String>,
+) -> Result<Json<Vec<MessageSummary>>, (StatusCode, Json<ErrorResponse>)> {
+    let uuid = uuid::Uuid::parse_str(&id).map_err(|e| {
+        error_response(StatusCode::BAD_REQUEST, &format!("Invalid session ID: {e}"))
+    })?;
+
+    let session = state
+        .inner
+        .stack
+        .session_manager
+        .get(uuid)
+        .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?
+        .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "Session not found"))?;
+
+    let messages: Vec<MessageSummary> = session
+        .messages
+        .iter()
+        .map(|m| MessageSummary {
+            id: m.id.to_string(),
+            role: format!("{:?}", m.role).to_lowercase(),
+            content: m.content.clone(),
+            timestamp: m.timestamp.to_rfc3339(),
+        })
+        .collect();
+
+    Ok(Json(messages))
+}
+
 #[derive(Deserialize)]
 pub struct RenameSessionRequest {
     pub name: String,

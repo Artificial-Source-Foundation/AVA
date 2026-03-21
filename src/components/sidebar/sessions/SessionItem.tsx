@@ -28,12 +28,23 @@ export const SessionItem: Component<SessionItemProps> = (props) => {
   const [isConfirmingDelete, setIsConfirmingDelete] = createSignal(false)
   const [lastHandledRenameRequest, setLastHandledRenameRequest] = createSignal(0)
 
+  // Tracks whether the current rename was cancelled via Escape so that the
+  // subsequent onBlur event does not save the unwanted value.
+  let renameCancelled = false
+
   const startRename = (): void => {
+    renameCancelled = false
     setIsRenaming(true)
     setRenameValue(props.session.name)
   }
 
+  const cancelRename = (): void => {
+    renameCancelled = true
+    setIsRenaming(false)
+  }
+
   const submitRename = (): void => {
+    if (renameCancelled) return
     const newName = renameValue().trim()
     if (newName) props.onRename(props.session.id, newName)
     setIsRenaming(false)
@@ -94,7 +105,7 @@ export const SessionItem: Component<SessionItemProps> = (props) => {
               onInput={(e) => setRenameValue(e.currentTarget.value)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') submitRename()
-                if (e.key === 'Escape') setIsRenaming(false)
+                if (e.key === 'Escape') cancelRename()
               }}
               onBlur={() => submitRename()}
               autofocus

@@ -270,6 +270,9 @@ export function getToolDescription(name: string, args: Record<string, unknown>):
       const cmd = String(args.command ?? args.subcommand ?? '')
       return cmd ? `Git: ${cmd}` : 'Git operation'
     }
+    case 'todo_write':
+    case 'todo_read':
+      return 'Updating checklist'
     case 'task': {
       const goal = String(args.goal ?? args.description ?? args.prompt ?? '')
       const short = goal.length > 60 ? `${goal.slice(0, 57)}...` : goal
@@ -284,8 +287,11 @@ export function getToolDescription(name: string, args: Record<string, unknown>):
       const shortTask = task.length > 60 ? `${task.slice(0, 57)}...` : task
       return shortTask ? `Delegating to ${worker}: ${shortTask}` : `Delegating to ${worker}`
     }
-    default:
-      return shortPath ? `${name} ${shortPath}` : name
+    default: {
+      // Title-case the tool name for unknown tools (e.g. "todo_write" → "Todo Write")
+      const titleCased = name.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+      return shortPath ? `${titleCased} ${shortPath}` : titleCased
+    }
   }
 }
 

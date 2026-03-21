@@ -26,7 +26,6 @@ import {
   getGroupStatus,
   getToolDescription,
   groupToolCalls,
-  summarizeAction,
   type ToolCallGroupData,
 } from './tool-call-utils'
 
@@ -62,12 +61,12 @@ const GroupHeader: Component<GroupHeaderProps> = (props) => {
     return ms !== null ? formatDuration(ms) : null
   }
 
-  // Show the currently-running call's file path as a subtitle
+  // Show the currently-running call's description as a subtitle
   const activeSubtitle = () => {
     if (!props.group.isActive) return null
     const running = props.group.calls.find((c) => c.status === 'running')
     if (!running) return null
-    return summarizeAction(running.name, running.args)
+    return getToolDescription(running.name, running.args)
   }
 
   return (

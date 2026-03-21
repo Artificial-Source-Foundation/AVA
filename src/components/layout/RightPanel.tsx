@@ -1,4 +1,13 @@
-import { Bot, CheckSquare, FolderOpen, GitCompareArrows, Route, Users, X } from 'lucide-solid'
+import {
+  Bot,
+  CheckSquare,
+  FileDiff,
+  FolderOpen,
+  GitCompareArrows,
+  Route,
+  Users,
+  X,
+} from 'lucide-solid'
 import { createMemo, Show } from 'solid-js'
 import { useRustAgent } from '../../hooks/use-rust-agent'
 import { useAgent } from '../../hooks/useAgent'
@@ -9,6 +18,7 @@ import { useTeam } from '../../stores/team'
 import { AgentActivityPanel } from '../panels/AgentActivityPanel'
 import { DiffReviewPanel } from '../panels/DiffReviewPanel'
 import { FileOperationsPanel } from '../panels/FileOperationsPanel'
+import { SessionDiffPanel } from '../panels/SessionDiffPanel'
 import { TeamPanel } from '../panels/TeamPanel'
 import { TodoPanel } from '../panels/TodoPanel'
 import { TrajectoryInspector } from '../panels/TrajectoryInspector'
@@ -21,7 +31,7 @@ interface RightPanelProps {
 
 export function RightPanel(props: RightPanelProps) {
   const { settings } = useSettings()
-  const { currentSession } = useSession()
+  const { currentSession, messages } = useSession()
   const agent = useAgent()
   const team = useTeam()
   const rustAgent = useRustAgent()
@@ -36,6 +46,25 @@ export function RightPanel(props: RightPanelProps) {
   const todoCount = createMemo(() => {
     const todos = rustAgent.todos()
     return todos.filter((t) => t.status === 'pending' || t.status === 'in_progress').length
+  })
+
+  /** Count of unique files modified in the current session (via tool calls) */
+  const changesCount = createMemo(() => {
+    const FILE_WRITE_TOOLS = new Set(['write', 'edit', 'apply_patch', 'multiedit'])
+    const seen = new Set<string>()
+    for (const msg of messages()) {
+      if (!msg.toolCalls) continue
+      for (const tc of msg.toolCalls) {
+        if (!FILE_WRITE_TOOLS.has(tc.name)) continue
+        if (tc.status !== 'success') continue
+        const fp =
+          tc.filePath ??
+          (typeof tc.args.path === 'string' ? tc.args.path : null) ??
+          (typeof tc.args.file_path === 'string' ? tc.args.file_path : null)
+        if (fp) seen.add(fp)
+      }
+    }
+    return seen.size
   })
 
   /** Stop all working team members */
@@ -154,6 +183,25 @@ export function RightPanel(props: RightPanelProps) {
                 </span>
               </Show>
             </button>
+            <button
+              type="button"
+              onClick={() => switchRightPanelTab('changes')}
+              class="flex items-center gap-1.5 px-3 h-full text-[10px] font-semibold uppercase tracking-wider transition-colors"
+              classList={{
+                'text-[var(--accent)] border-b border-[var(--accent)]':
+                  rightPanelTab() === 'changes',
+                'text-[var(--text-muted)] hover:text-[var(--text-secondary)]':
+                  rightPanelTab() !== 'changes',
+              }}
+            >
+              <FileDiff class="w-3 h-3" />
+              Changes
+              <Show when={changesCount() > 0}>
+                <span class="ml-1 px-1 py-0.5 rounded-full bg-[var(--accent-muted)] text-[var(--accent)] text-[9px] font-bold leading-none">
+                  {changesCount()}
+                </span>
+              </Show>
+            </button>
             <div class="flex-1" />
             <button
               type="button"
@@ -199,6 +247,11 @@ export function RightPanel(props: RightPanelProps) {
             <Show when={rightPanelTab() === 'todos'}>
               <PanelErrorBoundary panelName="Todos">
                 <TodoPanel />
+              </PanelErrorBoundary>
+            </Show>
+            <Show when={rightPanelTab() === 'changes'}>
+              <PanelErrorBoundary panelName="Session Changes">
+                <SessionDiffPanel />
               </PanelErrorBoundary>
             </Show>
           </div>

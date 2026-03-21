@@ -3,18 +3,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ApprovalRequest } from '../../hooks/useAgent'
 import { ApprovalDock } from './ApprovalDock'
 
-// Mock Checkbox since it may depend on UI internals
-vi.mock('../ui/Checkbox', () => ({
-  Checkbox: (props: { id?: string; checked?: boolean; onChange?: (v: boolean) => void }) => (
-    <input
-      type="checkbox"
-      id={props.id}
-      checked={props.checked}
-      onChange={(e) => props.onChange?.(e.currentTarget.checked)}
-    />
-  ),
-}))
-
 function makeRequest(overrides: Partial<ApprovalRequest> = {}): ApprovalRequest {
   return {
     id: 'test-1',
@@ -59,16 +47,43 @@ describe('ApprovalDock', () => {
     expect(container.textContent).toContain('Medium')
   })
 
-  it('calls onResolve(true) when Approve is clicked', () => {
+  it('shows three action buttons: Deny, Allow Once, Always Allow', () => {
     const onResolve = vi.fn()
     dispose = render(
       () => <ApprovalDock request={makeRequest()} onResolve={onResolve} />,
       container
     )
-    const approveBtn = container.querySelector('button:last-child') as HTMLButtonElement
-    expect(approveBtn.textContent).toContain('Approve')
-    approveBtn.click()
+    const buttons = Array.from(container.querySelectorAll('button'))
+    const labels = buttons.map((b) => b.textContent?.trim())
+    expect(labels).toContain('Deny')
+    expect(labels.some((l) => l?.includes('Allow Once'))).toBe(true)
+    expect(labels.some((l) => l?.includes('Always Allow'))).toBe(true)
+  })
+
+  it('calls onResolve(true, false) when Allow Once is clicked', () => {
+    const onResolve = vi.fn()
+    dispose = render(
+      () => <ApprovalDock request={makeRequest()} onResolve={onResolve} />,
+      container
+    )
+    const buttons = Array.from(container.querySelectorAll('button'))
+    const allowOnceBtn = buttons.find((b) => b.textContent?.includes('Allow Once'))
+    expect(allowOnceBtn).toBeDefined()
+    allowOnceBtn!.click()
     expect(onResolve).toHaveBeenCalledWith(true, false)
+  })
+
+  it('calls onResolve(true, true) when Always Allow is clicked', () => {
+    const onResolve = vi.fn()
+    dispose = render(
+      () => <ApprovalDock request={makeRequest()} onResolve={onResolve} />,
+      container
+    )
+    const buttons = Array.from(container.querySelectorAll('button'))
+    const alwaysBtn = buttons.find((b) => b.textContent?.includes('Always Allow'))
+    expect(alwaysBtn).toBeDefined()
+    alwaysBtn!.click()
+    expect(onResolve).toHaveBeenCalledWith(true, true)
   })
 
   it('calls onResolve(false) when Deny is clicked', () => {
@@ -78,14 +93,13 @@ describe('ApprovalDock', () => {
       container
     )
     const buttons = container.querySelectorAll('button')
-    // Find the Deny button
     const denyBtn = Array.from(buttons).find((b) => b.textContent?.includes('Deny'))
     expect(denyBtn).toBeDefined()
     denyBtn!.click()
     expect(onResolve).toHaveBeenCalledWith(false)
   })
 
-  it('handles Enter key to approve', () => {
+  it('handles Enter key to allow once', () => {
     const onResolve = vi.fn()
     dispose = render(
       () => <ApprovalDock request={makeRequest()} onResolve={onResolve} />,
@@ -93,6 +107,16 @@ describe('ApprovalDock', () => {
     )
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }))
     expect(onResolve).toHaveBeenCalledWith(true, false)
+  })
+
+  it('handles Shift+Enter key to always allow', () => {
+    const onResolve = vi.fn()
+    dispose = render(
+      () => <ApprovalDock request={makeRequest()} onResolve={onResolve} />,
+      container
+    )
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', shiftKey: true }))
+    expect(onResolve).toHaveBeenCalledWith(true, true)
   })
 
   it('handles Escape key to deny', () => {
@@ -115,16 +139,28 @@ describe('ApprovalDock', () => {
     expect(container.textContent).toContain('High-risk operation')
   })
 
-  it('auto-expands for critical risk and hides always-allow', () => {
+  it('auto-expands for critical risk and hides Always Allow button', () => {
     const onResolve = vi.fn()
     dispose = render(
       () => <ApprovalDock request={makeRequest({ riskLevel: 'critical' })} onResolve={onResolve} />,
       container
     )
     expect(container.textContent).toContain('Critical operation')
-    // Should not have always-allow checkbox
-    const checkbox = container.querySelector('#dock-always-allow')
-    expect(checkbox).toBeNull()
+    // Should not have Always Allow button for critical risk
+    const buttons = Array.from(container.querySelectorAll('button'))
+    const alwaysBtn = buttons.find((b) => b.textContent?.includes('Always Allow'))
+    expect(alwaysBtn).toBeUndefined()
+  })
+
+  it('does not call always allow via Shift+Enter for critical risk', () => {
+    const onResolve = vi.fn()
+    dispose = render(
+      () => <ApprovalDock request={makeRequest({ riskLevel: 'critical' })} onResolve={onResolve} />,
+      container
+    )
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', shiftKey: true }))
+    // Shift+Enter should do nothing for critical (no always-allow)
+    expect(onResolve).not.toHaveBeenCalled()
   })
 
   it('defaults riskLevel to medium when undefined', () => {

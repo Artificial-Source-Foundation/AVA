@@ -8,6 +8,7 @@ import {
   deleteMessageFromDb as dbDeleteMessage,
   deleteMessagesFromTimestamp as dbDeleteMessagesFromTimestamp,
   insertMessages as dbInsertMessages,
+  updateMessage as dbUpdateMessage,
   getMessages,
 } from '../../services/database'
 import { logError } from '../../services/logger'
@@ -79,6 +80,16 @@ export function updateMessage(id: string, updates: Partial<Message>): void {
     next[idx] = { ...prev[idx], ...updates }
     return next
   })
+
+  // Persist to database (fire-and-forget, same pattern as addMessage)
+  dbUpdateMessage(id, {
+    content: updates.content,
+    tokensUsed: updates.tokensUsed,
+    costUSD: updates.costUSD,
+    toolCalls: updates.toolCalls,
+    error: updates.error,
+    metadata: updates.metadata,
+  }).catch((err: unknown) => logError('Session', 'Failed to persist message update', err))
 }
 
 export function setMessageError(messageId: string, error: MessageError | null): void {

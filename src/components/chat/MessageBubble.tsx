@@ -31,6 +31,8 @@ interface MessageBubbleProps {
   streamingToolCalls?: ToolCall[]
   /** Live content signal — avoids store updates during streaming */
   streamingContent?: Accessor<string>
+  /** Live thinking segments during streaming — enables real-time thinking display */
+  streamingThinkingSegments?: ThinkingSegment[]
   onStartEdit: () => void
   onCancelEdit: () => void
   onSaveEdit: (content: string) => Promise<void>
@@ -543,12 +545,36 @@ export const MessageBubble: Component<MessageBubbleProps> = (props) => {
               <Show when={leadQuestion()}>{(q) => <LeadQuestionCard question={q()} />}</Show>
 
               <Show when={isActiveStreaming()}>
-                <Show when={hasToolCalls()}>
-                  <ToolCallErrorBoundary>
-                    <ToolSegmentDispatch toolCalls={effectiveToolCalls()!} isStreaming={true} />
-                  </ToolCallErrorBoundary>
+                {/* Interleaved thinking segments during streaming (thinking model with tool calls) */}
+                <Show
+                  when={
+                    props.streamingThinkingSegments &&
+                    props.streamingThinkingSegments.length > 0 &&
+                    props.streamingThinkingSegments
+                  }
+                >
+                  {(segs) => (
+                    <InterleavedThinkingSegments
+                      segments={segs()}
+                      toolCallsById={toolCallsById()}
+                    />
+                  )}
                 </Show>
-                <ToolPreview toolCalls={effectiveToolCalls()} isStreaming={true} />
+
+                {/* Fallback tool calls when no interleaved thinking segments */}
+                <Show
+                  when={
+                    !props.streamingThinkingSegments || props.streamingThinkingSegments.length === 0
+                  }
+                >
+                  <Show when={hasToolCalls()}>
+                    <ToolCallErrorBoundary>
+                      <ToolSegmentDispatch toolCalls={effectiveToolCalls()!} isStreaming={true} />
+                    </ToolCallErrorBoundary>
+                  </Show>
+                  <ToolPreview toolCalls={effectiveToolCalls()} isStreaming={true} />
+                </Show>
+
                 <Show when={displayContent()}>
                   <div class="w-full">
                     <MarkdownContent
@@ -556,6 +582,25 @@ export const MessageBubble: Component<MessageBubbleProps> = (props) => {
                       messageRole="assistant"
                       isStreaming={true}
                     />
+                  </div>
+                </Show>
+
+                {/* Typing indicator when nothing has arrived yet */}
+                <Show
+                  when={
+                    !displayContent() &&
+                    !hasToolCalls() &&
+                    (!props.streamingThinkingSegments ||
+                      props.streamingThinkingSegments.length === 0)
+                  }
+                >
+                  <div class="flex items-center gap-2 text-xs text-[var(--text-secondary)] py-2">
+                    <div class="flex items-center gap-[5px]">
+                      <span class="typing-dot" style={{ 'animation-delay': '0ms' }} />
+                      <span class="typing-dot" style={{ 'animation-delay': '160ms' }} />
+                      <span class="typing-dot" style={{ 'animation-delay': '320ms' }} />
+                    </div>
+                    <span class="font-[var(--font-ui-mono)] tracking-wide">ava is thinking...</span>
                   </div>
                 </Show>
               </Show>

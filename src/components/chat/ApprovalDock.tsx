@@ -5,15 +5,21 @@
  * and MessageInput in the chat area. Compact by default (one row),
  * expandable for details. Replaces the old full-screen ToolApprovalDialog.
  *
- * Keyboard: Enter = Approve, Escape = Deny
+ * Three explicit action buttons:
+ *   Allow Once   — approve this specific call only        (green outline)
+ *   Always Allow — approve this tool for the session     (green filled)
+ *   Deny         — reject the call                       (red outline)
+ *
+ * Keyboard: Enter = Allow Once, Shift+Enter = Always Allow, Escape = Deny
  */
 
-import { Check, ChevronDown, ChevronUp, X } from 'lucide-solid'
+import { Check, CheckCheck, ChevronDown, ChevronUp, X } from 'lucide-solid'
 import { type Component, createEffect, createSignal, onCleanup, Show } from 'solid-js'
 import { Dynamic } from 'solid-js/web'
 import type { ApprovalRequest } from '../../hooks/useAgent'
 import { ApprovalExpandedDetails } from './approval-dock/ApprovalExpandedDetails'
 import { riskConfig, toolTypeConfig } from './approval-dock/approval-dock-config'
+import { getToolDescription } from './tool-call-utils'
 
 // ============================================================================
 // Types
@@ -30,7 +36,6 @@ export interface ApprovalDockProps {
 
 export const ApprovalDock: Component<ApprovalDockProps> = (props) => {
   const [expanded, setExpanded] = createSignal(false)
-  const [alwaysAllow, setAlwaysAllow] = createSignal(false)
 
   const riskLevel = () => props.request?.riskLevel ?? 'medium'
   const toolConfig = () => {
@@ -39,23 +44,20 @@ export const ApprovalDock: Component<ApprovalDockProps> = (props) => {
   }
   const risk = () => riskConfig[riskLevel()]
 
-  // Auto-expand for high/critical risk
+  // Auto-expand for high/critical risk; reset when request changes
   createEffect(() => {
     if (!props.request) {
       setExpanded(false)
-      setAlwaysAllow(false)
       return
     }
     const level = riskLevel()
-    if (level === 'high' || level === 'critical') {
-      setExpanded(true)
-    } else {
-      setExpanded(false)
-    }
-    setAlwaysAllow(false)
+    setExpanded(level === 'high' || level === 'critical')
   })
 
-  // Keyboard shortcuts (Enter=approve, Escape=deny)
+  // Keyboard shortcuts:
+  //   Enter           → Allow Once
+  //   Shift+Enter     → Always Allow (skipped for critical risk)
+  //   Escape          → Deny
   createEffect(() => {
     if (!props.request) return
 
@@ -63,9 +65,12 @@ export const ApprovalDock: Component<ApprovalDockProps> = (props) => {
       const target = e.target
       if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) return
 
-      if (e.key === 'Enter' && !e.shiftKey) {
+      if (e.key === 'Enter' && e.shiftKey && riskLevel() !== 'critical') {
         e.preventDefault()
-        props.onResolve(true, alwaysAllow())
+        props.onResolve(true, true)
+      } else if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault()
+        props.onResolve(true, false)
       } else if (e.key === 'Escape') {
         e.preventDefault()
         props.onResolve(false)
@@ -101,12 +106,12 @@ export const ApprovalDock: Component<ApprovalDockProps> = (props) => {
             </Show>
           </div>
 
-          {/* Tool name */}
+          {/* Tool description */}
           <span
             id="approval-dock-title"
             class="text-sm font-medium text-[var(--text-primary)] truncate"
           >
-            {props.request!.toolName}
+            {getToolDescription(props.request!.toolName, props.request!.args)}
           </span>
 
           {/* Risk badge */}
@@ -133,43 +138,55 @@ export const ApprovalDock: Component<ApprovalDockProps> = (props) => {
             </Show>
           </button>
 
-          {/* Deny */}
+          {/* ── Three-button action row ── */}
+
+          {/* Deny — red outline */}
           <button
             type="button"
             onClick={() => props.onResolve(false)}
-            class="inline-flex items-center gap-1 rounded-[var(--radius-sm)] border border-[var(--border-default)] bg-[var(--surface)] px-2 py-1 text-[11px] font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-raised)] transition-colors"
+            class="inline-flex items-center gap-1 rounded-[var(--radius-sm)] border border-[var(--error)] px-2 py-1 text-[11px] font-medium text-[var(--error)] hover:bg-[var(--error)] hover:text-white transition-colors"
+            title="Deny (Esc)"
           >
             <X class="w-3 h-3" />
             Deny
           </button>
 
-          {/* Approve */}
+          {/* Allow Once — green outline for normal risk, error colour for critical */}
           <button
             type="button"
-            onClick={() => props.onResolve(true, alwaysAllow())}
-            class="inline-flex items-center gap-1 rounded-[var(--radius-sm)] px-2 py-1 text-[11px] font-medium transition-colors"
+            onClick={() => props.onResolve(true, false)}
+            class="inline-flex items-center gap-1 rounded-[var(--radius-sm)] border px-2 py-1 text-[11px] font-medium transition-colors"
             classList={{
-              'border border-[var(--error)] text-[var(--error)] hover:bg-[var(--error)] hover:text-white':
+              'border-[var(--error)] text-[var(--error)] hover:bg-[var(--error)] hover:text-white':
                 riskLevel() === 'critical',
-              'border border-[var(--warning)] text-[var(--warning)] hover:bg-[var(--warning)] hover:text-white':
+              'border-[var(--warning)] text-[var(--warning)] hover:bg-[var(--warning)] hover:text-white':
                 riskLevel() === 'high',
-              'border border-[var(--success)] text-[var(--success)] hover:bg-[var(--success)] hover:text-white':
+              'border-[var(--success)] text-[var(--success)] hover:bg-[var(--success)] hover:text-white':
                 riskLevel() !== 'critical' && riskLevel() !== 'high',
             }}
+            title="Allow for this call only (Enter)"
           >
             <Check class="w-3 h-3" />
-            Approve
+            Allow Once
           </button>
+
+          {/* Always Allow — green filled. Hidden for critical risk. */}
+          <Show when={riskLevel() !== 'critical'}>
+            <button
+              type="button"
+              onClick={() => props.onResolve(true, true)}
+              class="inline-flex items-center gap-1 rounded-[var(--radius-sm)] bg-[var(--success)] px-2 py-1 text-[11px] font-medium text-white hover:opacity-90 transition-opacity"
+              title="Always allow this tool for the session (Shift+Enter)"
+            >
+              <CheckCheck class="w-3 h-3" />
+              Always Allow
+            </button>
+          </Show>
         </div>
 
         {/* Expanded section */}
         <Show when={expanded()}>
-          <ApprovalExpandedDetails
-            request={props.request!}
-            riskLevel={riskLevel()}
-            alwaysAllow={alwaysAllow()}
-            onAlwaysAllowChange={setAlwaysAllow}
-          />
+          <ApprovalExpandedDetails request={props.request!} riskLevel={riskLevel()} />
         </Show>
       </div>
     </Show>

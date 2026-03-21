@@ -1,5 +1,6 @@
 import { Bookmark } from 'lucide-solid'
 import { type Accessor, type Component, Show } from 'solid-js'
+import type { ThinkingSegment } from '../../../hooks/use-rust-agent'
 import type { Message, ToolCall } from '../../../types'
 import { MessageBubble } from '../MessageBubble'
 
@@ -18,6 +19,8 @@ interface MessageRowProps {
   streamingToolCalls?: ToolCall[]
   /** Live content signal — avoids store updates during streaming */
   streamingContent?: Accessor<string>
+  /** Live thinking segments during streaming */
+  streamingThinkingSegments?: ThinkingSegment[]
   onStartEdit: () => void
   onCancelEdit: () => void
   onSaveEdit: (content: string) => Promise<void>
@@ -61,6 +64,7 @@ export const MessageRow: Component<MessageRowProps> = (props) => (
       isLastMessage={props.isLastMessage}
       streamingToolCalls={props.streamingToolCalls}
       streamingContent={props.streamingContent}
+      streamingThinkingSegments={props.streamingThinkingSegments}
       onStartEdit={props.onStartEdit}
       onCancelEdit={props.onCancelEdit}
       onSaveEdit={props.onSaveEdit}

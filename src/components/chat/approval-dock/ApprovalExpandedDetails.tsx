@@ -1,20 +1,18 @@
 /**
  * Approval Dock Expanded Details
  *
- * Shows description, arguments, risk warnings, always-allow option,
- * and keyboard hints when the approval dock is expanded.
+ * Shows description, arguments, and risk warnings when the approval dock is
+ * expanded. The always-allow checkbox has been replaced by the top-level
+ * "Always Allow" button in ApprovalDock, so it is no longer needed here.
  */
 
 import { AlertTriangle } from 'lucide-solid'
 import { type Component, For, Show } from 'solid-js'
 import type { ApprovalRequest } from '../../../hooks/useAgent'
-import { Checkbox } from '../../ui/Checkbox'
 
 export interface ApprovalExpandedDetailsProps {
   request: ApprovalRequest
   riskLevel: string
-  alwaysAllow: boolean
-  onAlwaysAllowChange: (value: boolean) => void
 }
 
 export const ApprovalExpandedDetails: Component<ApprovalExpandedDetailsProps> = (props) => {
@@ -68,28 +66,20 @@ export const ApprovalExpandedDetails: Component<ApprovalExpandedDetailsProps> = 
         </div>
       </Show>
 
-      {/* Always allow + keyboard hints */}
-      <div class="flex items-center justify-between pt-1">
-        <Show when={props.riskLevel !== 'critical'}>
-          <div class="flex items-center gap-2">
-            <Checkbox
-              id="dock-always-allow"
-              checked={props.alwaysAllow}
-              onChange={props.onAlwaysAllowChange}
-            />
-            <label
-              for="dock-always-allow"
-              class="text-[11px] text-[var(--text-secondary)] cursor-pointer"
-            >
-              Always allow <span class="font-medium">{props.request.toolName}</span> this session
-            </label>
-          </div>
-        </Show>
-        <div class="text-[10px] text-[var(--text-tertiary)] ml-auto">
+      {/* Keyboard hints */}
+      <div class="flex items-center justify-end pt-1">
+        <div class="text-[10px] text-[var(--text-tertiary)]">
           <kbd class="px-1 py-0.5 bg-[var(--surface)] border border-[var(--border-subtle)] rounded text-[9px] font-mono">
             Enter
           </kbd>{' '}
-          approve{' '}
+          allow once
+          <Show when={props.riskLevel !== 'critical'}>
+            {' '}
+            <kbd class="px-1 py-0.5 bg-[var(--surface)] border border-[var(--border-subtle)] rounded text-[9px] font-mono">
+              Shift+Enter
+            </kbd>{' '}
+            always allow
+          </Show>{' '}
           <kbd class="px-1 py-0.5 bg-[var(--surface)] border border-[var(--border-subtle)] rounded text-[9px] font-mono">
             Esc
           </kbd>{' '}

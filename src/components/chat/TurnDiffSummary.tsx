@@ -43,16 +43,27 @@ interface FileDiffStats {
   additions: number
   deletions: number
   isNewFile: boolean
+  isLargeDiff?: boolean
 }
 
 // ============================================================================
 // Diff computation
 // ============================================================================
 
+const DIFF_SIZE_LIMIT_BYTES = 200_000
+
 function computeLineDiff(
   oldContent: string,
   newContent: string
-): { additions: number; deletions: number } {
+): { additions: number; deletions: number; largeDiff?: true } {
+  // Bail out early for very large content to avoid blocking the main thread
+  if (oldContent.length + newContent.length > DIFF_SIZE_LIMIT_BYTES) {
+    const oldLineCount = oldContent.split('\n').length
+    const newLineCount = newContent.split('\n').length
+    const changed = Math.abs(newLineCount - oldLineCount) || Math.max(oldLineCount, newLineCount)
+    return { additions: changed, deletions: 0, largeDiff: true }
+  }
+
   const oldLines = oldContent.split('\n')
   const newLines = newContent.split('\n')
 
@@ -114,6 +125,7 @@ function extractFileDiffs(toolCalls: ToolCall[]): FileDiffStats[] {
         additions: stats.additions,
         deletions: stats.deletions,
         isNewFile,
+        isLargeDiff: (stats as { largeDiff?: true }).largeDiff === true,
       })
     } else {
       // No diff data — record the file with zero counts so it still appears
@@ -322,16 +334,25 @@ export const TurnDiffSummary: Component<TurnDiffSummaryProps> = (props) => {
                       <span class="text-[var(--text-secondary)]">{name}</span>
                     </span>
 
-                    {/* +/- counts */}
+                    {/* +/- counts (or large-diff notice) */}
                     <div class="flex items-center gap-1.5 flex-shrink-0 font-mono tabular-nums">
-                      <Show when={file.additions > 0}>
-                        <span class="text-[var(--success)]">+{file.additions}</span>
-                      </Show>
-                      <Show when={file.deletions > 0}>
-                        <span class="text-[var(--error)]">-{file.deletions}</span>
-                      </Show>
-                      <Show when={file.additions === 0 && file.deletions === 0}>
-                        <span class="text-[var(--text-muted)]">modified</span>
+                      <Show
+                        when={!file.isLargeDiff}
+                        fallback={
+                          <span class="text-[var(--text-muted)] font-sans">
+                            Large diff (~{file.additions} lines)
+                          </span>
+                        }
+                      >
+                        <Show when={file.additions > 0}>
+                          <span class="text-[var(--success)]">+{file.additions}</span>
+                        </Show>
+                        <Show when={file.deletions > 0}>
+                          <span class="text-[var(--error)]">-{file.deletions}</span>
+                        </Show>
+                        <Show when={file.additions === 0 && file.deletions === 0}>
+                          <span class="text-[var(--text-muted)]">modified</span>
+                        </Show>
                       </Show>
                     </div>
                   </div>

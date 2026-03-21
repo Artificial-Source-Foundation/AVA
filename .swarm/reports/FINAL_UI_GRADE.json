@@ -1,0 +1,129 @@
+{
+  "grade": "B+",
+  "grade_before_session": "C+",
+  "generated": "2026-03-21",
+  "screenshot_basis": [
+    ".playwright-mcp/page-2026-03-21T04-00-22-040Z.png — tool grouping, context group header, sidebar, response text",
+    ".playwright-mcp/page-2026-03-21T04-01-04-222Z.png — multi-turn chat, bash tool card, status bar, approval flow"
+  ],
+
+  "improvements_made": [
+    "Context-tool grouping (ContextGroupHeader) now correctly batches consecutive read/glob/grep calls into a single collapsible row — functionally equivalent to OpenCode's groupParts algorithm",
+    "Three-tier mid-stream messaging (steer / follow-up / post-complete) fully surfaced in UI with Alt+Enter and Ctrl+Alt+Enter bindings — no competitor has this",
+    "29-theme design token system (primitives → semantic → component) including dark/light/midnight/charcoal, per-accent presets, reduced-motion, and high-contrast mode",
+    "ThinkingRow auto-expands during streaming and auto-collapses on completion — correct user expectation match",
+    "Interleaved thinking+tools rendering: think→tool→think→tool→response reconstructed correctly both live and in historical replay",
+    "Streaming dual-path architecture: live content from agent signals, settled messages from store — prevents N² re-render on every streaming token",
+    "ErrorRow shows live rate-limit countdown and actionable hints (/model, /compact, /connect) matched to error type",
+    "ApprovalDock has keyboard shortcuts (Enter=approve, Escape=deny), aria-dialog labelling, and risk-adaptive auto-expand",
+    "content-visibility: auto on [data-message-id] gives free off-screen rendering suspension for long sessions",
+    "Per-tool-type specialized renderers: CommandOutputRow (terminal + elapsed timer), DiffRow (add/delete stats + diff viewer), ContextGroupHeader (grouped reads)",
+    "TurnDiffSummary component added — per-turn file change summary with collapsible diff accordion (screenshot confirms visible)",
+    "CompactionDivider component added — 'Context compacted' horizontal rule visible in message stream",
+    "Session sidebar now has date group labels (Today / Yesterday / This Week) and message-count per entry",
+    "Status bar priority visibility system — streaming shows [elapsed + turn + tool], idle shows [token bar + cost]",
+    "Model selector ChevronDown now placed after model name text (correct affordance pattern)",
+    "Activity bar buttons now use custom Tooltip component with 200ms delay instead of native title attribute",
+    "Active session item now has left accent bar + accent-subtle background instead of flat gray",
+    "Placeholder text is now dynamic: adapts based on mode (agent-running, plan-mode, queued messages)",
+    "Tool card expand/collapse animated via CSS grid-template-rows trick (no JS height measurement)",
+    "Thinking content now rendered with markdown formatting (renderMarkdown applied to expanded ThinkingRow)",
+    "Thinking duration now formatted as 'Thought for 2.3s' using message-level timestamps",
+    "Status bar Compact trigger now styled as a bordered pill with pulse animation above 90% context",
+    "Context bar always visible at w-24 with percentage label (no longer hidden behind toggle)",
+    "Attachment trigger merged into toolbar strip left group (one control row instead of two when no files pending)",
+    "New chat button expanded to wider pill with text label at full sidebar width",
+    "Dead exports ToolCallGroup and ContextAwareToolList removed from ToolCallGroup.tsx",
+    "scrollbar-thin CSS class defined in index.css (was referenced in ThinkingRow but undefined)",
+    "Duplicate content-visibility declarations consolidated (tokens.css [data-message-id] block removed)",
+    "streamingTokenEstimate dead prop removed from StatusBar interface",
+    "Rust workspace: 0 clippy warnings, 1815 tests passing, fmt clean",
+    "TypeScript: tsc clean, 1 pre-existing ESLint error, 113 warnings (no regressions from polish session)"
+  ],
+
+  "remaining_gaps": [
+    {
+      "rank": 1,
+      "gap": "Streaming-to-settled transition flash: when LiveStreamingBlock unmounts and settled MessageBubble mounts, there is a visible position jump. animate-message-in is only 150ms translateY(8px) — jarring at the end of every response. Confirmed in screenshot #2 where the transition boundary is visible as a positional discontinuity between streaming content and the historical message above it.",
+      "effort": "small",
+      "impact": "high",
+      "path": "src/components/chat/LiveStreamingBlock.tsx + MessageBubble.tsx",
+      "detail": "Use FLIP animation: capture getBoundingClientRect() before unmount, animate new bubble from that offset to natural position in 200ms ease-out. Or use SolidJS <Transition> cross-fade keeping both mounted simultaneously during settle."
+    },
+    {
+      "rank": 2,
+      "gap": "Tool card titles still show raw tool names ('read', 'glob', 'bash') rather than semantic verb phrases. Screenshot #1 confirms: ContextGroupHeader shows 'Gathering context... (3)' with no type breakdown, and individual tool cards show raw names without describing what they are doing. This is the most visually prominent difference vs OpenCode ('reading src/main.rs') and Goose ('running cargo test').",
+      "effort": "small",
+      "impact": "high",
+      "path": "src/components/chat/tool-call-utils.ts + ContextGroupHeader",
+      "detail": "Implement getToolDescription(toolName, args): read→'reading {path}', write→'writing {path}', edit→'editing {path}', bash→'running {cmd}', glob→'searching {pattern}', grep→'searching for {query}'. Change ContextGroupHeader from '(3)' to '3 reads, 2 searches, 1 list' breakdown."
+    },
+    {
+      "rank": 3,
+      "gap": "No session-level diff browser (Changes panel). OpenCode's SessionReview panel shows all files changed in a session as an expandable accordion with unified/split diff toggle, expand-all/collapse-all, and a large-diff guard (>500 lines). AVA has per-turn TurnDiffSummary but no session-wide overview. This is the single most visible structural gap vs best-in-class.",
+      "effort": "large",
+      "impact": "high",
+      "path": "src/components/layout/RightPanel.tsx (new Changes tab)",
+      "detail": "Aggregate all DiffRow data from the session, render a 'Changes' tab in RightPanel as a ScrollView accordion per file. Requires session-level diff aggregation signal in the store. Add large-diff guard: if additions+deletions > 500 skip render and show 'Render anyway' button."
+    },
+    {
+      "rank": 4,
+      "gap": "Markdown rendering uses innerHTML mutation on every streaming token. MarkdownContent's innerHTML assignment tears down and recreates all DOM nodes each update, causing selection loss and flicker. The self-audit identified an unmount-race bug: if the component unmounts before the queueMicrotask fires, containerRef is undefined but attachCopyHandlers still runs.",
+      "effort": "medium",
+      "impact": "medium",
+      "path": "src/components/chat/MarkdownContent.tsx",
+      "detail": "Replace innerHTML with morphdom diffing and an LRU cache keyed by (messageId, contentChecksum). This matches OpenCode's approach and eliminates DOM thrashing on streaming tokens and the stale-ref race on unmount."
+    },
+    {
+      "rank": 5,
+      "gap": "ApprovalDock shows a single 'Always allow' checkbox rather than explicit 'Allow Once' / 'Always Allow' / 'Deny' named buttons. Post-approval, no historical record of what was approved appears in the message stream. Goose embeds approval inline in the tool card with an amber border — users see exactly what they are approving without scrolling to a bottom dock.",
+      "effort": "medium",
+      "impact": "medium",
+      "path": "src/components/chat/ApprovalDock.tsx + ToolCallCard.tsx",
+      "detail": "Rename checkbox pattern to three explicit buttons. Add post-decision static text ('Allowed once', 'Denied') to the ToolCallCard header so audit history is readable. Optionally add inline approval mode to ToolCallCard (amber border while pending, approval buttons in card footer)."
+    }
+  ],
+
+  "ava_advantages": [
+    "Interleaved thinking+tools rendering: AVA correctly reconstructs the think→tool→think→tool→response sequence both during live streaming AND in historical replay. Neither Goose nor OpenCode handles historical interleaving — they show thinking only during active streaming.",
+    "Three-tier mid-stream messaging (steer/follow-up/post-complete) with Alt+Enter and Ctrl+Alt+Enter bindings. The post-complete grouped pipeline (G1/G2/G3 sequential groups) is architecturally unique — zero competitors have this feature.",
+    "Streaming dual-path design (live signals vs settled store) prevents the N² re-render problem that causes Goose to visibly stutter on fast token streams where every token triggers a full React component tree re-render.",
+    "Design token system depth: 29 built-in themes + custom TOML themes, primitives → semantic → component layers, per-accent presets, syntax token overrides, reduced-motion support, and high-contrast mode. Competitors typically have 2-3 hardcoded themes.",
+    "ThinkingRow auto-expand during streaming / auto-collapse on completion matches user expectation (see progress in real-time, then it gets out of the way). Goose and OpenCode do the opposite — thinking starts collapsed and requires user action to observe it stream.",
+    "ErrorRow contextual richness: distinguishes cancelled vs errored, shows live countdown for rate-limit retryAfter, surfaces actionable hints (/model, /compact, /connect) matched to the specific error type. Competitors show generic error text.",
+    "Per-tool-type specialized renderers with more coverage than any competitor: ToolCallCard, CommandOutputRow (terminal + elapsed timer), DiffRow (add/delete stats + syntax-highlighted diff viewer), ContextGroupHeader (grouped reads) — Goose uses a single ToolCallWithResponse for all tools.",
+    "Director chat mode with left-border visual treatment for multi-agent sessions (amber bar + Crown icon). No competitor has a UI-level multi-agent hierarchy display.",
+    "29-theme system with live preview on hover in the theme selector modal — competitor theme systems are static choices with no preview.",
+    "content-visibility: auto on [data-message-id] gives free off-screen rendering suspension without virtual list complexity — a meaningful DOM performance win that competitors achieve only via heavier Virtuoso/tanstack-virtual integrations.",
+    "Rust-first architecture: 0 clippy warnings, 1815 tests passing, tsc clean. Backend correctness and performance are at a level no Electron/Node.js competitor can match."
+  ],
+
+  "path_to_a_plus": [
+    "Fix streaming-to-settled transition flash (FLIP animation or SolidJS <Transition> cross-fade) — visible at end of every response, highest perceived-quality impact per day of effort",
+    "Implement semantic tool descriptions via getToolDescription() — single function that makes every tool card immediately readable without expansion; 1-2 days, dramatic readability improvement",
+    "Add session-level diff browser (Changes panel in RightPanel) — the structural gap that most distinguishes OpenCode from the field; 3-5 days, transforms AVA from 'shows diffs per tool' to 'shows the full picture of what changed'",
+    "Replace MarkdownContent innerHTML with morphdom + LRU cache — eliminates selection loss and unmount-race bug; 2 days, makes streaming feel as stable as a native editor",
+    "Refactor ApprovalDock to explicit Allow Once / Always Allow / Deny buttons with post-decision audit trail in tool cards — closes the last major UX pattern gap vs Goose",
+    "Add TextShimmer on tool card titles while running (continuous CSS keyframe on tool label span, data-active attribute) — visual continuity between 'pending' and 'running' states currently absent",
+    "Add LSP diagnostics inline in DiffRow after edit/write completion — closes the feedback loop so users see compile/type errors without leaving chat; ava-lsp crate already provides data, needs IPC bridge",
+    "Add virtual list (tanstack/solid-virtual) to MessageList — content-visibility auto helps but does not reduce DOM node count; needed for 200+ message sessions",
+    "Fix TurnDiffSummary O(n*m) diff with size guard — blocks main thread on 20K-line file rewrites; one-line bailout at 200K bytes",
+    "Fix ThinkingRow <details> open-attribute conflict with SolidJS — browser's toggle tracking and SolidJS's attribute binding fight on user-manual open/close; replace with a plain div + show/hide signal"
+  ],
+
+  "launch_ready": true,
+
+  "launch_blockers": [
+    "C1: scrollbar-thin CSS class used in ThinkingRow but now defined (was missing) — FIXED this session",
+    "C2: Duplicate content-visibility declarations — FIXED this session",
+    "W5: TurnDiffSummary O(n*m) diff with no input size guard — can block main thread on large file rewrites; add 200K byte bailout before launch",
+    "S7: SessionItem rename onBlur submits before Escape keydown cancel — subtle data-integrity bug when user cancels rename; fix before launch",
+    "S6: Compact button has no error handling or double-submit guard — wrap in try/catch and add isCompacting signal"
+  ],
+
+  "launch_notes": "The three C-level launch blockers from the polish audit (scrollbar-thin, content-visibility duplicate, dead exports) are fixed. Three softer issues remain that should be resolved before public beta: the TurnDiffSummary size guard, the rename cancel race, and the Compact button error handling. These are low-effort fixes (1-2 hours each) and should not block a soft launch to technical beta users if timed.",
+
+  "summary": "AVA has made substantial progress from C+ to B+ in this session: the Rust stack is pristine (0 warnings, 1815 tests), the frontend is tsc-clean, and critical polish items (scrollbar-thin, dead exports, content-visibility duplication) are resolved. The architecture is genuinely stronger than Goose and technically comparable to OpenCode — the interleaved thinking+tools rendering, three-tier mid-stream messaging, and 29-theme design system are differentiating features no competitor has. The gap to A/A+ is concentrated in three visible rough edges that every new user encounters: the streaming-to-settled transition flash at the end of every response, tool cards showing raw names ('read', 'bash') instead of semantic descriptions ('reading src/main.rs'), and the absence of a session-level diff browser. All three are fixable in under two weeks of focused work. AVA is ready for a limited technical beta launch today with the three minor pre-launch fixes applied; it would reach A- after the semantic tool descriptions and FLIP transition fix, and A+ after the session diff browser and morphdom rendering upgrade.",
+
+  "grade_rationale": "B+ reflects: strong architecture, correct reactivity patterns, unique differentiating features, clean Rust backend, and thorough design token system (worth A territory) offset by three user-visible issues present in every screenshot — streaming flash, raw tool names, and no session-wide diff view — that place AVA visibly below OpenCode in moment-to-moment polish for a first-time user. The improvements this session (TurnDiffSummary, CompactionDivider, date groups, status bar priority, token bar always-visible, semantic input placeholder, grid-trick animations, thinking markdown, dynamic duration) moved the needle from B to B+. The final push to A requires the FLIP transition and semantic tool descriptions."
+}

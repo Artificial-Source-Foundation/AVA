@@ -9,7 +9,8 @@
  */
 
 import { Activity, AlertCircle, AlertTriangle, Archive, Loader2, MessageSquare } from 'lucide-solid'
-import { type Accessor, type Component, createMemo, Show } from 'solid-js'
+import { type Accessor, type Component, createMemo, createSignal, Show } from 'solid-js'
+import { useNotification } from '../../../contexts/notification'
 import { useAgent } from '../../../hooks/useAgent'
 import { useElapsedTimer } from '../../../hooks/useElapsedTimer'
 import { formatCost } from '../../../lib/cost'
@@ -45,6 +46,8 @@ export const StatusBar: Component<StatusBarProps> = (props) => {
   const { settings, updateSettings } = useSettings()
   const { diagnostics, hasDiagnostics } = useDiagnostics()
   const agent = useAgent()
+  const notify = useNotification()
+  const [isCompacting, setIsCompacting] = createSignal(false)
 
   const { contextUsage, sessionTokenStats, messages } = sessionStore
 
@@ -207,35 +210,47 @@ export const StatusBar: Component<StatusBarProps> = (props) => {
         <Show when={percentage() >= settings().generation.compactionThreshold}>
           <button
             type="button"
+            disabled={isCompacting()}
             onClick={async () => {
-              const budget = getCoreBudget()
-              if (!budget) return
-              const msgs = messages()
-              if (msgs.length <= 4) return
-              const coreMessages = msgs.map((m) => ({
-                id: m.id,
-                role: m.role as 'user' | 'assistant' | 'system',
-                content: m.content,
-              }))
-              const result = await budget.compact(coreMessages)
-              if (result.tokensSaved === 0) return
-              const keptIds = new Set(result.messages.map((m) => m.id))
-              sessionStore.setMessages(msgs.filter((m) => keptIds.has(m.id)))
-              budget.clear()
-              for (const m of result.messages) budget.addMessage(m.id, m.content)
-              window.dispatchEvent(
-                new CustomEvent('ava:compacted', {
-                  detail: {
-                    removed: result.originalCount - result.compactedCount,
-                    tokensSaved: result.tokensSaved,
-                  },
-                })
-              )
+              if (isCompacting()) return
+              setIsCompacting(true)
+              try {
+                const budget = getCoreBudget()
+                if (!budget) return
+                const msgs = messages()
+                if (msgs.length <= 4) return
+                const coreMessages = msgs.map((m) => ({
+                  id: m.id,
+                  role: m.role as 'user' | 'assistant' | 'system',
+                  content: m.content,
+                }))
+                const result = await budget.compact(coreMessages)
+                if (result.tokensSaved === 0) return
+                const keptIds = new Set(result.messages.map((m) => m.id))
+                sessionStore.setMessages(msgs.filter((m) => keptIds.has(m.id)))
+                budget.clear()
+                for (const m of result.messages) budget.addMessage(m.id, m.content)
+                window.dispatchEvent(
+                  new CustomEvent('ava:compacted', {
+                    detail: {
+                      removed: result.originalCount - result.compactedCount,
+                      tokensSaved: result.tokensSaved,
+                    },
+                  })
+                )
+              } catch (err) {
+                const msg = err instanceof Error ? err.message : 'Unknown error'
+                notify.error('Compaction failed', msg)
+              } finally {
+                setIsCompacting(false)
+              }
             }}
-            class="px-2 py-0.5 text-[11px] border border-[var(--warning)] rounded-full bg-[var(--warning-subtle,rgba(234,179,8,0.1))] text-[var(--warning)] hover:text-[var(--accent)] transition-colors"
+            class="px-2 py-0.5 text-[11px] border border-[var(--warning)] rounded-full bg-[var(--warning-subtle,rgba(234,179,8,0.1))] text-[var(--warning)] hover:text-[var(--accent)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             title="Compact context now"
           >
-            Compact
+            <Show when={isCompacting()} fallback="Compact">
+              <Loader2 class="w-2.5 h-2.5 animate-spin inline" />
+            </Show>
           </button>
         </Show>
 

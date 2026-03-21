@@ -6,16 +6,51 @@
  * - Human-readable action summary
  * - Live elapsed timer while running
  * - Rich expanded output (syntax-highlighted, diff view, error categorization)
+ * - Post-decision approval audit badge (Approved / Auto-approved / Denied)
  */
 
-import { ChevronRight } from 'lucide-solid'
+import { Check, CheckCheck, ChevronRight, X } from 'lucide-solid'
 import { type Component, createEffect, createSignal, onCleanup, Show } from 'solid-js'
 import { useSettings } from '../../stores/settings'
 import type { ToolCall } from '../../types'
 import { SubagentCard } from './SubagentCard'
 import { ToolIcon } from './tool-call-icon'
 import { ToolCallOutput } from './tool-call-output'
-import { formatDuration, formatElapsed, summarizeAction } from './tool-call-utils'
+import { formatDuration, formatElapsed, getToolDescription } from './tool-call-utils'
+
+// ============================================================================
+// Approval Audit Badge
+// ============================================================================
+
+/**
+ * Small inline badge shown in the tool card header after the user acts on
+ * the ApprovalDock. Lets users scroll back and see what they approved.
+ */
+const ApprovalBadge: Component<{ decision: 'once' | 'always' | 'denied' }> = (props) => {
+  if (props.decision === 'denied') {
+    return (
+      <span class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-[var(--error)]/10 text-[var(--error)] border border-[var(--error)]/30 flex-shrink-0">
+        <X class="w-2.5 h-2.5" />
+        Denied
+      </span>
+    )
+  }
+  if (props.decision === 'always') {
+    return (
+      <span class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-[var(--success)]/10 text-[var(--success)] border border-[var(--success)]/30 flex-shrink-0">
+        <CheckCheck class="w-2.5 h-2.5" />
+        Auto-approved
+      </span>
+    )
+  }
+  // 'once'
+  return (
+    <span class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-[var(--success)]/10 text-[var(--success)] border border-[var(--success)]/30 flex-shrink-0">
+      <Check class="w-2.5 h-2.5" />
+      Approved
+    </span>
+  )
+}
 
 // ============================================================================
 // Component
@@ -41,7 +76,7 @@ export const ToolCallCard: Component<ToolCallCardProps> = (props) => {
   const [expanded, setExpanded] = createSignal(defaultExpanded())
   const [elapsed, setElapsed] = createSignal('')
 
-  const summary = () => summarizeAction(props.toolCall.name, props.toolCall.args)
+  const summary = () => getToolDescription(props.toolCall.name, props.toolCall.args)
   const isRunning = () => props.toolCall.status === 'running' || props.toolCall.status === 'pending'
   const hasOutput = () => !!(props.toolCall.output || props.toolCall.error || props.toolCall.diff)
   const hasStreamingOutput = () => isRunning() && !!props.toolCall.streamingOutput
@@ -105,6 +140,11 @@ export const ToolCallCard: Component<ToolCallCardProps> = (props) => {
         </span>
 
         <span class="flex-1" />
+
+        {/* Post-decision approval audit badge */}
+        <Show when={props.toolCall.approvalDecision}>
+          <ApprovalBadge decision={props.toolCall.approvalDecision!} />
+        </Show>
 
         {/* Live elapsed / completed duration */}
         <Show when={duration() || (isRunning() && elapsed())}>

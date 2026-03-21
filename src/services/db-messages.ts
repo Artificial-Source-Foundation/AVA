@@ -73,11 +73,16 @@ export async function duplicateSessionMessages(
 }
 
 /**
- * Update a message
+ * Update a message — supports content, tokensUsed, costUSD, toolCalls, error, and metadata.
+ *
+ * toolCalls are merged into the metadata JSON column (same convention as insertMessages) so
+ * they survive session reload.  error is also stored in metadata under `_error`.
  */
 export async function updateMessage(
   id: string,
-  updates: Partial<Pick<Message, 'content' | 'tokensUsed' | 'metadata'>>
+  updates: Partial<
+    Pick<Message, 'content' | 'tokensUsed' | 'costUSD' | 'toolCalls' | 'error' | 'metadata'>
+  >
 ): Promise<void> {
   const database = await initDatabase()
 
@@ -92,9 +97,36 @@ export async function updateMessage(
     setClauses.push('tokens_used = ?')
     values.push(updates.tokensUsed)
   }
-  if (updates.metadata !== undefined) {
+  if (updates.costUSD !== undefined) {
+    setClauses.push('cost_usd = ?')
+    values.push(updates.costUSD)
+  }
+
+  // toolCalls and error are stored inside the metadata JSON column
+  if (
+    updates.metadata !== undefined ||
+    updates.toolCalls !== undefined ||
+    updates.error !== undefined
+  ) {
+    // We need to merge with existing metadata — fetch current metadata first
+    const rows = await database.select<Array<{ metadata: string | null }>>(
+      'SELECT metadata FROM messages WHERE id = ?',
+      [id]
+    )
+    const existing: Record<string, unknown> = rows[0]?.metadata
+      ? (JSON.parse(rows[0].metadata) as Record<string, unknown>)
+      : {}
+
+    const merged: Record<string, unknown> = { ...existing, ...(updates.metadata ?? {}) }
+    if (updates.toolCalls && updates.toolCalls.length > 0) {
+      merged.toolCalls = updates.toolCalls
+    }
+    if (updates.error !== undefined) {
+      merged._error = updates.error
+    }
+
     setClauses.push('metadata = ?')
-    values.push(JSON.stringify(updates.metadata))
+    values.push(JSON.stringify(merged))
   }
 
   if (setClauses.length === 0) return

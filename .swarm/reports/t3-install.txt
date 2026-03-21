@@ -1,0 +1,48 @@
+T3 Chat Reference Code Search Report
+=====================================
+Date: 2026-03-20
+
+RESULT: T3 Chat (t3.chat) is NOT open source. No clone was performed.
+
+FINDINGS
+--------
+T3 Chat (https://t3.chat) is a proprietary, closed-source AI chat application
+built by Theo (t3dotgg). As of 2026-03-20, there is no official public source
+repository under t3dotgg, t3-oss, or any related GitHub org.
+
+Evidence that it is closed-source:
+- No public repo found under t3dotgg or t3-oss for "t3-chat" or "t3.chat"
+- Theo ran a "T3 Chat Cloneathon" (https://cloneathon.t3.chat/) where community
+  developers were invited to BUILD clones of t3.chat — this presupposes the
+  original is not open source.
+- All related GitHub repos are community clones, not the original product.
+
+COMMUNITY CLONES FOUND (not cloned — these are unofficial third-party projects)
+---
+1. Praashh/t3.chat (29 stars)
+   "An open-source version of t3.chat"
+   https://github.com/Praashh/t3.chat
+
+2. TGlide/thom-chat (109 stars)
+   "Open-source T3 chat alternative" — built with SvelteKit
+   https://github.com/TGlide/thom-chat
+
+3. shaltielshmid/NotT3Chat (31 stars)
+   "Definitely not t3.chat but open source"
+   https://github.com/shaltielshmid/NotT3Chat
+
+4. HappyCoderHackathons/t3chatclone (cloneathon submission)
+   Full-featured AI chat with 70+ models, Supabase Auth, Vercel AI SDK
+   https://github.com/HappyCoderHackathons/t3chatclone
+
+ACTION TAKEN
+------------
+No clone was performed. The docs/reference-code/t3-chat/ directory was NOT
+created because there is no official open-source T3 Chat repository to clone.
+
+If reference code from a community clone is desired, recommend:
+  git clone --depth 1 https://github.com/TGlide/thom-chat docs/reference-code/t3-chat/
+(thom-chat is the most polished open-source alternative, 109 stars, SvelteKit)
+
+Or for a Next.js-based clone more similar to the original stack:
+  git clone --depth 1 https://github.com/HappyCoderHackathons/t3chatclone docs/reference-code/t3-chat/

@@ -91,6 +91,13 @@ function createAgentStore() {
   const [streamingTokenEstimate, setStreamingTokenEstimate] = createSignal(0)
   const [streamingStartedAt, setStreamingStartedAt] = createSignal<number | null>(null)
   const [messageQueue, setMessageQueue] = createSignal<QueuedMessage[]>([])
+  /**
+   * ID of the placeholder assistant message that is added to the session store at
+   * the START of each run, before any tokens arrive.  The same DOM node stays alive
+   * throughout streaming (no flash on unmount) and is filled-in / replaced with the
+   * final metadata when streaming ends.  Null when no run is in progress.
+   */
+  const [liveMessageId, setLiveMessageId] = createSignal<string | null>(null)
 
   // Map Rust agent error signal to StreamError shape
   const error = (): StreamError | null => {
@@ -337,11 +344,29 @@ function createAgentStore() {
       )
     }
 
+    // Resolve model/provider now so we can embed it in the placeholder message.
+    const selectedModelId = config?.model || session.selectedModel()
+    const selectedProviderId = config?.provider || session.selectedProvider() || undefined
+
+    // ── Pre-add assistant placeholder ──────────────────────────────────
+    // Add an empty assistant message to the store BEFORE streaming begins so the
+    // <For> list has a stable DOM node that persists through the entire stream.
+    // When streaming ends we UPDATE this same message (same ID → same DOM node),
+    // which means no unmount/remount and therefore no visible flash.
+    const assistantMsgId = generateMessageId('asst')
+    const placeholderMsg: Message = {
+      id: assistantMsgId,
+      sessionId,
+      role: 'assistant',
+      content: '',
+      createdAt: Date.now(),
+      model: selectedModelId,
+    }
+    session.addMessage(placeholderMsg)
+    setLiveMessageId(assistantMsgId)
+
     try {
       log.info('agent', 'Run started', { goal: goal.slice(0, 120), sessionId })
-      // Resolve the model/provider from the frontend's selection
-      const selectedModelId = config?.model || session.selectedModel()
-      const selectedProviderId = config?.provider || session.selectedProvider() || undefined
       const runStartedAt = Date.now()
       // Get the thinking/reasoning level from frontend settings
       const reasoningEffort = settingsRef.settings().generation.reasoningEffort
@@ -377,15 +402,11 @@ function createAgentStore() {
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err)
           log.error('agent', 'Praxis failed', { error: msg })
-          const errorMsg: Message = {
-            id: generateMessageId('err'),
-            sessionId,
-            role: 'assistant',
+          // Reuse the placeholder slot for the error
+          session.updateMessage(assistantMsgId, {
             content: '',
-            createdAt: Date.now(),
             error: { type: 'unknown', message: msg, timestamp: Date.now() },
-          }
-          session.addMessage(errorMsg)
+          })
         }
         return null
       }
@@ -411,15 +432,11 @@ function createAgentStore() {
           const elapsedMs = Date.now() - runStartedAt
           if (partialContent || partialThinking) {
             const partialSegments = rustAgent.thinkingSegments()
-            const cancelledMsg: Message = {
-              id: generateMessageId('asst'),
-              sessionId,
-              role: 'assistant',
+            // Fill in the placeholder with the partial content
+            session.updateMessage(assistantMsgId, {
               content: partialContent,
-              createdAt: Date.now(),
               tokensUsed: rustAgent.tokenUsage().output,
               costUSD: rustAgent.tokenUsage().cost || undefined,
-              model: selectedModelId,
               toolCalls: rustAgent.activeToolCalls(),
               metadata: {
                 provider: selectedProviderId,
@@ -430,8 +447,10 @@ function createAgentStore() {
                 ...(partialThinking ? { thinking: partialThinking } : {}),
                 ...(partialSegments.length > 1 ? { thinkingSegments: partialSegments } : {}),
               },
-            }
-            session.addMessage(cancelledMsg)
+            })
+          } else {
+            // Nothing to show — remove the empty placeholder
+            session.deleteMessage(assistantMsgId)
           }
           // Add a subtle system-level cancellation note
           const cancelNote: Message = {
@@ -448,43 +467,34 @@ function createAgentStore() {
         }
 
         log.error('agent', 'Run failed', { error: errorText })
-        // Only set the `error` field — the ErrorRow component renders it.
-        // Do NOT duplicate the error in `content` (that caused double display).
-        const errorMsg: Message = {
-          id: generateMessageId('err'),
-          sessionId,
-          role: 'assistant',
+        // Fill the placeholder with just an error (no content body)
+        session.updateMessage(assistantMsgId, {
           content: '',
-          createdAt: Date.now(),
           error: { type: 'unknown', message: errorText, timestamp: Date.now() },
-        }
-        session.addMessage(errorMsg)
+        })
         return null
       }
 
-      // Add the assistant response from streamed tokens
+      // Settle the assistant response into the placeholder
       const content = rustAgent.streamingContent()
+      const elapsedMs = Date.now() - runStartedAt
+      const thinking = rustAgent.thinkingContent()
+      const segments = rustAgent.thinkingSegments()
+      debugLog(
+        'thinking',
+        'message metadata:',
+        thinking ? `yes (${thinking.length} chars)` : 'no',
+        segments.length > 0 ? `${segments.length} segments` : ''
+      )
+
       if (content) {
-        const elapsedMs = Date.now() - runStartedAt
-        const thinking = rustAgent.thinkingContent()
-        const segments = rustAgent.thinkingSegments()
-        debugLog(
-          'thinking',
-          'message metadata:',
-          thinking ? `yes (${thinking.length} chars)` : 'no',
-          segments.length > 0 ? `${segments.length} segments` : ''
-        )
-        const assistantMsg: Message = {
-          id: generateMessageId('asst'),
-          sessionId,
-          role: 'assistant',
+        // Update the stable placeholder in-place — same ID → same DOM node → no flash
+        session.updateMessage(assistantMsgId, {
           content,
-          createdAt: Date.now(),
           tokensUsed: rustAgent.tokenUsage().output,
           // Hide cost for subscription providers (OAuth) — Rust returns 0.0 for these,
           // but use undefined so the UI hides the field entirely
           costUSD: rustAgent.tokenUsage().cost || undefined,
-          model: selectedModelId,
           toolCalls: rustAgent.activeToolCalls(),
           metadata: {
             provider: selectedProviderId,
@@ -495,8 +505,11 @@ function createAgentStore() {
             // Store interleaved segments for post-completion rendering
             ...(segments.length > 1 ? { thinkingSegments: segments } : {}),
           },
-        }
-        session.addMessage(assistantMsg)
+        })
+      } else {
+        // Agent produced no text output — remove the empty placeholder so it doesn't
+        // linger as a blank bubble (tool-only responses, errors, etc.)
+        session.deleteMessage(assistantMsgId)
       }
 
       log.info('agent', 'Run completed', {
@@ -511,19 +524,15 @@ function createAgentStore() {
       // Unexpected error (not from rustAgent internals)
       const msg = err instanceof Error ? err.message : String(err)
       log.error('agent', 'Unexpected agent error', { error: msg })
-      const errorMsg: Message = {
-        id: generateMessageId('err'),
-        sessionId,
-        role: 'assistant',
+      session.updateMessage(assistantMsgId, {
         content: `**Error:** ${msg}`,
-        createdAt: Date.now(),
         error: { type: 'unknown', message: msg, timestamp: Date.now() },
-      }
-      session.addMessage(errorMsg)
+      })
       return null
     } finally {
       batch(() => {
         setStreamingStartedAt(null)
+        setLiveMessageId(null)
       })
       // Process queue
       const queue = messageQueue()
@@ -586,6 +595,16 @@ function createAgentStore() {
 
   function resolveApproval(approved: boolean, alwaysAllow?: boolean): void {
     log.info('tools', 'Approval resolved', { approved, alwaysAllow: alwaysAllow ?? false })
+    // Tag the tool call with the audit decision before clearing pending approval
+    const current = pendingApproval()
+    if (current) {
+      const decision: 'once' | 'always' | 'denied' = !approved
+        ? 'denied'
+        : alwaysAllow
+          ? 'always'
+          : 'once'
+      rustAgent.markToolApproval(current.toolName, decision)
+    }
     setPendingApproval(null)
     void rustAgentBridge.resolveApproval(approved, alwaysAllow ?? false).catch((err) => {
       log.error('error', 'Failed to resolve approval', { error: String(err) })
@@ -730,6 +749,13 @@ function createAgentStore() {
     error,
     messageQueue,
     queuedCount: () => messageQueue().length,
+    /**
+     * ID of the placeholder message that was pre-added to the session store at the
+     * start of the current run.  The MessageList uses this to identify which message
+     * row is the live streaming bubble so it can pass live signals down to it.
+     * Null when no run is in progress.
+     */
+    liveMessageId,
 
     // ── Actions ──────────────────────────────────────────────────────
     run,

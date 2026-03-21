@@ -83,6 +83,14 @@ export interface ToolCall {
   uiResource?: { type: 'table' | 'form' | 'chart' | 'image' | 'markdown'; data: unknown }
   /** Position in accumulated content where this tool was called (for inline rendering) */
   contentOffset?: number
+  /**
+   * Post-decision audit trail.
+   * Set after the user makes an approval decision so it's visible when scrolling back.
+   * - 'once'   — approved for this specific call only (Allow Once)
+   * - 'always' — approved for the rest of the session (Always Allow)
+   * - 'denied' — user denied the call
+   */
+  approvalDecision?: 'once' | 'always' | 'denied'
 }
 
 export interface Agent {

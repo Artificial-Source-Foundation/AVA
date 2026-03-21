@@ -244,6 +244,22 @@ export interface PlanCreatedEvent {
 
 export type PlanResponse = 'approved' | 'rejected' | 'modified'
 
+// ── Todo events ───────────────────────────────────────────────────────
+
+export type TodoStatus = 'pending' | 'in_progress' | 'completed' | 'cancelled'
+export type TodoPriority = 'high' | 'medium' | 'low'
+
+export interface TodoItem {
+  content: string
+  status: TodoStatus
+  priority: TodoPriority
+}
+
+export interface TodoUpdateEvent {
+  type: 'todo_update'
+  todos: TodoItem[]
+}
+
 export interface ResolvePlanArgs {
   response: PlanResponse
   modifiedPlan?: PlanData | null
@@ -278,6 +294,7 @@ export type AgentEvent =
   | ApprovalRequestEvent
   | QuestionRequestEvent
   | PlanCreatedEvent
+  | TodoUpdateEvent
   | PraxisEvent
 
 export interface ComputeGrepMatch {

@@ -5,7 +5,14 @@ import { apiInvoke, createEventSocket } from '../lib/api-client'
 import { debugLog } from '../lib/debug-log'
 import { log } from '../lib/logger'
 import type { ToolCall } from '../types'
-import type { AgentEvent, PlanCreatedEvent, PlanData, SubmitGoalResult } from '../types/rust-ipc'
+import type {
+  AgentEvent,
+  PlanCreatedEvent,
+  PlanData,
+  SubmitGoalResult,
+  TodoItem,
+  TodoUpdateEvent,
+} from '../types/rust-ipc'
 
 /** Invoke the backend — Tauri IPC or HTTP API depending on runtime. */
 function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
@@ -44,6 +51,8 @@ export function useRustAgent() {
   const [pendingPlan, setPendingPlan] = createSignal<PlanData | null>(null)
   // Interleaved thinking segments: each entry is a block of thinking + the tool calls that followed
   const [thinkingSegments, setThinkingSegments] = createSignal<ThinkingSegment[]>([])
+  // Current todo list — updated whenever the agent calls todo_write
+  const [todos, setTodos] = createSignal<TodoItem[]>([])
 
   let unlisten: UnlistenFn | null = null
   let eventSocket: WebSocket | null = null
@@ -292,6 +301,13 @@ export function useRustAgent() {
         break
       }
 
+      case 'todo_update': {
+        const todoEvent = event as TodoUpdateEvent
+        debugLog('todo', 'todo_update event', todoEvent.todos.length, 'items')
+        setTodos(todoEvent.todos)
+        break
+      }
+
       // Praxis events — pass through to events signal for team bridge consumption
       case 'praxis_worker_started':
       case 'praxis_worker_progress':
@@ -418,6 +434,7 @@ export function useRustAgent() {
       setBudgetWarning(null)
       setPendingPlan(null)
       setThinkingSegments([])
+      setTodos([])
     })
   }
 
@@ -586,6 +603,7 @@ export function useRustAgent() {
     progressMessage,
     budgetWarning,
     pendingPlan,
+    todos,
     run,
     cancel,
     clearError,

@@ -1,5 +1,6 @@
-import { Bot, FolderOpen, GitCompareArrows, Route, Users, X } from 'lucide-solid'
-import { Show } from 'solid-js'
+import { Bot, CheckSquare, FolderOpen, GitCompareArrows, Route, Users, X } from 'lucide-solid'
+import { createMemo, Show } from 'solid-js'
+import { useRustAgent } from '../../hooks/use-rust-agent'
 import { useAgent } from '../../hooks/useAgent'
 import { useLayout } from '../../stores/layout'
 import { useSession } from '../../stores/session'
@@ -9,6 +10,7 @@ import { AgentActivityPanel } from '../panels/AgentActivityPanel'
 import { DiffReviewPanel } from '../panels/DiffReviewPanel'
 import { FileOperationsPanel } from '../panels/FileOperationsPanel'
 import { TeamPanel } from '../panels/TeamPanel'
+import { TodoPanel } from '../panels/TodoPanel'
 import { TrajectoryInspector } from '../panels/TrajectoryInspector'
 import { WorkerDetail } from '../panels/team/WorkerDetail'
 import { PanelErrorBoundary } from '../ui/PanelErrorBoundary'
@@ -22,6 +24,7 @@ export function RightPanel(props: RightPanelProps) {
   const { currentSession } = useSession()
   const agent = useAgent()
   const team = useTeam()
+  const rustAgent = useRustAgent()
   const {
     rightPanelVisible,
     rightPanelWidth,
@@ -29,6 +32,11 @@ export function RightPanel(props: RightPanelProps) {
     switchRightPanelTab,
     setRightPanelVisible,
   } = useLayout()
+
+  const todoCount = createMemo(() => {
+    const todos = rustAgent.todos()
+    return todos.filter((t) => t.status === 'pending' || t.status === 'in_progress').length
+  })
 
   /** Stop all working team members */
   const handleStopAll = (): void => {
@@ -128,6 +136,24 @@ export function RightPanel(props: RightPanelProps) {
                 Team
               </button>
             </Show>
+            <button
+              type="button"
+              onClick={() => switchRightPanelTab('todos')}
+              class="flex items-center gap-1.5 px-3 h-full text-[10px] font-semibold uppercase tracking-wider transition-colors"
+              classList={{
+                'text-[var(--accent)] border-b border-[var(--accent)]': rightPanelTab() === 'todos',
+                'text-[var(--text-muted)] hover:text-[var(--text-secondary)]':
+                  rightPanelTab() !== 'todos',
+              }}
+            >
+              <CheckSquare class="w-3 h-3" />
+              Todos
+              <Show when={todoCount() > 0}>
+                <span class="ml-1 px-1 py-0.5 rounded-full bg-[var(--accent-muted)] text-[var(--accent)] text-[9px] font-bold leading-none">
+                  {todoCount()}
+                </span>
+              </Show>
+            </button>
             <div class="flex-1" />
             <button
               type="button"
@@ -168,6 +194,11 @@ export function RightPanel(props: RightPanelProps) {
                 >
                   <TeamPanel onStopAgent={(id) => agent.stopAgent(id)} onStopAll={handleStopAll} />
                 </Show>
+              </PanelErrorBoundary>
+            </Show>
+            <Show when={rightPanelTab() === 'todos'}>
+              <PanelErrorBoundary panelName="Todos">
+                <TodoPanel />
               </PanelErrorBoundary>
             </Show>
           </div>

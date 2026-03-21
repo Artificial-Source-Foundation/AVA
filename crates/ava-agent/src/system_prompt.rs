@@ -102,6 +102,7 @@ pub fn build_system_prompt(tools: &[Tool], native_tools: bool) -> String {
     prompt.push_str("- Prefer native tools (read, edit, glob, grep) over bash equivalents — they are faster, sandboxed, and produce structured output.\n");
     prompt.push_str("- When calling multiple tools with no dependencies between them, make all independent calls in parallel.\n");
     prompt.push_str("- Run tests after making changes when a test suite exists.\n");
+    prompt.push_str("- For multi-step tasks, use `todo_write` to track progress. Mark items `in_progress` as you start them and `completed` when done.\n");
     prompt.push_str("- When your task is complete, call `attempt_completion` with a result describing what you did.\n\n");
 
     // Anti-over-engineering

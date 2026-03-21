@@ -72,7 +72,10 @@ async fn run_agent_inner(
 
     // Clone the Arc-wrapped edit history so the forwarder can record file edits
     let edit_history = bridge.edit_history.clone();
+    // Clone the todo state so the forwarder can emit todo updates
+    let todo_state = bridge.stack.todo_state.clone();
     let forwarder = tokio::spawn(async move {
+        let mut last_tool_was_todo_write = false;
         while let Some(event) = rx.recv().await {
             // Track write/edit tool calls for undo support
             if let ava_agent::agent_loop::AgentEvent::ToolCall(ref tc) = event {
@@ -95,6 +98,25 @@ async fn run_agent_inner(
                         }
                     }
                 }
+                // Track when todo_write is called so we emit a todo_update after its result
+                last_tool_was_todo_write = tc.name == "todo_write";
+            } else if let ava_agent::agent_loop::AgentEvent::ToolResult(_) = event {
+                // After a todo_write result, emit the updated todo list
+                if last_tool_was_todo_write {
+                    last_tool_was_todo_write = false;
+                    let items = todo_state.get();
+                    let todos = items
+                        .iter()
+                        .map(|item| crate::events::TodoItemPayload {
+                            content: item.content.clone(),
+                            status: item.status.to_string(),
+                            priority: item.priority.to_string(),
+                        })
+                        .collect();
+                    let _ = app_clone.emit("agent-event", AgentEvent::TodoUpdate { todos });
+                }
+            } else {
+                last_tool_was_todo_write = false;
             }
             emit_backend_event(&app_clone, &event);
         }

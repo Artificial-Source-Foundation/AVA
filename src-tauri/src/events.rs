@@ -3,6 +3,14 @@ use serde_json::Value;
 use tauri::{Emitter, Window};
 
 #[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TodoItemPayload {
+    pub content: String,
+    pub status: String,
+    pub priority: String,
+}
+
+#[derive(Clone, Serialize)]
 #[serde(tag = "type")]
 pub enum AgentEvent {
     #[serde(rename = "token")]
@@ -19,6 +27,8 @@ pub enum AgentEvent {
     Complete { session: Value },
     #[serde(rename = "error")]
     Error { message: String },
+    #[serde(rename = "todo_update")]
+    TodoUpdate { todos: Vec<TodoItemPayload> },
     #[serde(rename = "token_usage")]
     TokenUsage {
         input_tokens: usize,

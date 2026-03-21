@@ -1,0 +1,16 @@
+{
+  "status": "fixed",
+  "files_modified": [
+    "src-tauri/src/events.rs",
+    "src-tauri/src/commands/agent_commands.rs",
+    "src/types/rust-ipc.ts",
+    "src/hooks/use-rust-agent.ts",
+    "src/components/panels/TodoPanel.tsx",
+    "src/components/panels/index.ts",
+    "src/stores/layout-dialogs.ts",
+    "src/components/layout/RightPanel.tsx",
+    "crates/ava-agent/src/system_prompt.rs"
+  ],
+  "summary": "Implemented full todo panel pipeline: (1) Added TodoItemPayload struct and TodoUpdate event variant to Rust AgentEvent enum in events.rs. (2) In agent_commands.rs forwarder task, detect when todo_write tool completes and emit a todo_update event containing the serialized todo list from bridge.stack.todo_state. (3) Added TodoUpdateEvent interface and TodoItem/TodoStatus/TodoPriority types to src/types/rust-ipc.ts, expanded AgentEvent union type. (4) Added todos signal to use-rust-agent.ts, handle todo_update in the event switch, reset todos on new run start, expose todos in return object. (5) Created src/components/panels/TodoPanel.tsx — clean checklist with status icons (CircleDashed=pending, yellow filled Circle=in_progress, CheckCircle2=completed, XCircle=cancelled), strikethrough for completed/cancelled, ! prefix for high-priority items, progress bar, ordered by urgency. (6) Exported TodoPanel from panels/index.ts. (7) Added 'todos' to RightPanelTab union type in layout-dialogs.ts. (8) Wired Todos tab into RightPanel.tsx with CheckSquare icon and live badge showing incomplete count. (9) Added one-line todo guidance to system prompt in system_prompt.rs instructing the agent to use todo_write to track multi-step task progress.",
+  "tsc_pass": true
+}

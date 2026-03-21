@@ -412,7 +412,7 @@ export const MessageBubble: Component<MessageBubbleProps> = (props) => {
       <div class={`relative h-[20px] flex ${align === 'right' ? 'justify-end' : 'justify-start'}`}>
         <Show when={!props.isStreaming}>
           <div
-            class={`font-[var(--font-ui-mono)] text-[11px] tracking-wide text-[var(--gray-6)] pt-1 transition-all duration-200 group-hover:-translate-y-3 group-hover:opacity-0 tabular-nums`}
+            class={`font-[var(--font-ui-mono)] text-[11px] tracking-wide text-[var(--gray-7)] pt-1 transition-all duration-200 group-hover:-translate-y-3 group-hover:opacity-0 tabular-nums`}
           >
             {formatTimestamp(props.message)}
             <Show when={!isUser() && props.message.model}>
@@ -473,7 +473,7 @@ export const MessageBubble: Component<MessageBubbleProps> = (props) => {
         <Show when={isUser()}>
           <div class="relative group" style={{ 'max-width': 'min(85%, 68ch)' }}>
             <div class="flex flex-col">
-              <div class="bg-[var(--chat-user-bg)] text-[var(--chat-user-text)] rounded-[var(--radius-2xl)] rounded-br-[var(--radius-sm)] py-2.5 px-4 shadow-[var(--shadow-sm)]">
+              <div class="chat-user-bubble bg-[var(--chat-user-bg)] text-[var(--chat-user-text)] rounded-[var(--radius-2xl)] rounded-br-[var(--radius-sm)] py-2.5 px-4">
                 <ImagesBlock />
                 <Show when={props.message.content}>
                   <MarkdownContent

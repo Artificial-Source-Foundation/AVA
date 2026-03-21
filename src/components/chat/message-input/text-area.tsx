@@ -86,8 +86,9 @@ export const InputTextArea: Component<InputTextAreaProps> = (props) => (
       disabled={props.disabled()}
       rows={1}
       class="
+        message-composer-textarea
         w-full px-[18px] py-3.5 pr-[110px]
-        bg-[var(--gray-3)] text-[var(--text-primary)]
+        bg-[var(--gray-2)] text-[var(--text-primary)]
         placeholder-[var(--gray-7)]
         border border-[var(--gray-5)] rounded-[var(--radius-2xl)]
         resize-none transition-colors

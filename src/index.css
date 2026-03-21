@@ -848,6 +848,31 @@ button {
   box-shadow: 0 0 0 2px var(--accent-subtle);
 }
 
+/* ========================================
+   COMPOSER TEXTAREA FOCUS GLOW
+   Premium feel: soft accent ring on focus matching ChatGPT/Claude.ai
+   ======================================== */
+
+.message-composer-textarea:focus {
+  outline: none;
+  border-color: var(--accent) !important;
+  box-shadow:
+    0 0 0 3px var(--accent-subtle),
+    0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+/* ========================================
+   USER BUBBLE INNER HIGHLIGHT
+   Subtle top-edge shimmer (Arc/Vercel style) for premium feel.
+   Applied to the chat user bubble via a CSS class hook.
+   ======================================== */
+
+.chat-user-bubble {
+  box-shadow:
+    var(--shadow-sm),
+    inset 0 1px 0 rgba(255, 255, 255, 0.18);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .onboarding-bg *,
   .onboarding-bg *::before,
@@ -1021,7 +1046,7 @@ button {
 
 .message-content p {
   margin: 0.5em 0;
-  line-height: 1.6;
+  line-height: 1.65;
 }
 
 .message-content p:first-child {
@@ -1122,7 +1147,7 @@ button {
   margin: 0.75em 0;
   border-radius: var(--radius-lg);
   overflow: hidden;
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--border-default);
 }
 
 .message-content .code-header {
@@ -1130,8 +1155,8 @@ button {
   align-items: center;
   justify-content: space-between;
   padding: 6px 12px;
-  background: var(--alpha-white-5);
-  border-bottom: 1px solid var(--border-subtle);
+  background: var(--alpha-white-8);
+  border-bottom: 1px solid var(--border-default);
 }
 
 .message-content .code-lang {
@@ -1270,6 +1295,7 @@ button {
 .message-content code:not(pre code) {
   padding: 2px 6px;
   background: var(--code-background);
+  border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
   font-size: 0.88em;
   font-family: var(--font-mono);

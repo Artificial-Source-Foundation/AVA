@@ -104,7 +104,7 @@ export const ToolCallCard: Component<ToolCallCardProps> = (props) => {
       classList={{
         'border-[var(--error)]/30': props.toolCall.status === 'error',
         'border-[var(--accent)]/30': isRunning(),
-        'border-[var(--border-subtle)]': !isRunning() && props.toolCall.status !== 'error',
+        'border-[var(--border-default)]': !isRunning() && props.toolCall.status !== 'error',
       }}
     >
       {/* Single-line header */}

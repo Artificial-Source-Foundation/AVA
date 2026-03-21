@@ -151,7 +151,7 @@ export const ThinkingRow: Component<ThinkingRowProps> = (props) => {
         class="mb-2 animate-fade-in"
         open={isOpen()}
         style={{
-          'border-left': '2px solid var(--border-subtle, rgba(127,127,127,0.2))',
+          'border-left': '2px solid var(--border-default, rgba(255,255,255,0.1))',
           'padding-left': '10px',
         }}
       >
@@ -174,10 +174,10 @@ export const ThinkingRow: Component<ThinkingRowProps> = (props) => {
           <div
             class={`scroll-fade-mask mt-1 max-h-[300px] overflow-y-auto scrollbar-thin message-content thinking-content`}
             style={{
-              color: 'var(--text-tertiary, var(--text-muted))',
-              'font-size': '12px',
-              opacity: '0.7',
-              'line-height': '1.5',
+              color: 'var(--text-secondary)',
+              'font-size': '12.5px',
+              opacity: '0.8',
+              'line-height': '1.6',
             }}
           >
             <div ref={contentRef} class="message-content" />

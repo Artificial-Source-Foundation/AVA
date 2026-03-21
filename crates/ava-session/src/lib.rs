@@ -176,7 +176,7 @@ impl SessionManager {
 
         for message in &session.messages {
             tx.execute(
-                "INSERT INTO messages (id, session_id, role, content, timestamp, tool_calls, tool_results, tool_call_id, images, parent_id)
+                "INSERT OR REPLACE INTO messages (id, session_id, role, content, timestamp, tool_calls, tool_results, tool_call_id, images, parent_id)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
                 params![
                     message.id.to_string(),

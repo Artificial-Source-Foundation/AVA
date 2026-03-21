@@ -1,0 +1,8 @@
+{
+  "status": "fixed",
+  "root_cause": "SessionManager::save() used plain INSERT INTO messages after DELETE, making it non-idempotent against concurrent or rapid-succession saves. In web mode, the frontend's addMessage() calls POST /api/sessions/{id}/message (via db-web-fallback.ts) which triggers save() via the add_message handler, and then the agent completion also calls save(). Under concurrent timing (both paths racing to acquire the SQLite Mutex), if session.messages in memory somehow contains a duplicate UUID (or if two saves overlap at the load-then-save level), the INSERT would fail with UNIQUE constraint. The fix changes INSERT INTO messages to INSERT OR REPLACE INTO messages in save(), making all message writes idempotent. The existing DELETE step is retained to purge orphaned/pruned messages, and the REPLACE handles any duplicate IDs defensively.",
+  "files_modified": ["crates/ava-session/src/lib.rs"],
+  "change": "Line 179: changed 'INSERT INTO messages' to 'INSERT OR REPLACE INTO messages' in SessionManager::save(). The save_incremental() method already used ON CONFLICT DO UPDATE (UPSERT) for the same reason; save() is now consistent.",
+  "cargo_check_pass": true,
+  "cargo_test_pass": true
+}

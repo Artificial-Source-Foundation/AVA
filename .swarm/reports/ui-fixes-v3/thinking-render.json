@@ -1,0 +1,6 @@
+{
+  "status": "fixed",
+  "files_modified": ["src/components/chat/message-rows/ThinkingRow.tsx"],
+  "summary": "Fixed two bugs in ThinkingRow. Bug 1: Thinking content now renders markdown via renderMarkdown/renderMarkdownStreaming (from src/lib/markdown.ts) instead of plain text — bold, italic, code, lists etc. all render correctly. Implemented the same throttled streaming pattern used by MarkdownContent (150ms interval, pendingContent tracking, onCleanup timer cancellation). The rendered HTML is injected via innerHTML into a ref'd div with the 'message-content' class. Bug 2: Removed font-style:italic from the <summary> element — the label now reads 'Thinking...' during streaming and 'Thought for Ns' when done without the old italic styling. The <details>/<summary> Goose-style collapsible pattern, muted left-border styling, and streaming/completed open state were already correct and preserved unchanged.",
+  "tsc_pass": true
+}

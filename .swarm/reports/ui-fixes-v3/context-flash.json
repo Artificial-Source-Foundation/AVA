@@ -1,0 +1,11 @@
+{
+  "status": "fixed",
+  "files_modified": [
+    "src/lib/context-budget.ts",
+    "src/services/core-bridge.ts",
+    "src/components/chat/message-input/use-model-state.ts",
+    "src/components/chat/MessageList.tsx"
+  ],
+  "summary": "BUG 1 (context window %): ContextBudget was initialized with a hardcoded 200,000 token limit regardless of the selected model. Added setLimit() to ContextBudget, added updateCoreBudgetLimit() to core-bridge.ts, and wired a createEffect in useModelState that watches selectedModel/selectedProvider and syncs the budget limit to the model's actual contextWindow (checked in order: provider model list → models.dev catalog). For GPT-5.4 (1,048,576 tokens) the status bar will now show ~6.5% at 65K tokens instead of 33%. The Rust registry already had the correct context_window:1048576 for gpt-5.4. BUG 2 (streaming flash): LiveStreamingBlock was abruptly unmounted the instant isRunning() became false, before the browser could paint the settled MessageRow, causing a visible flash. Fixed by adding a streamingLinger signal (80ms delayed unmount) in MessageList so the streaming block stays in DOM briefly after the agent stops. A CSS opacity transition (60ms ease-out) fades it out while the completed message renders underneath, making the transition invisible to the user.",
+  "tsc_pass": true
+}

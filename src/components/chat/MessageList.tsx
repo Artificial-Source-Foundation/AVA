@@ -12,7 +12,7 @@
  * - Delete/rollback with confirmation dialog
  */
 
-import { type Component, createSignal, For, Show } from 'solid-js'
+import { type Component, createEffect, createSignal, For, onCleanup, Show } from 'solid-js'
 import { useNotification } from '../../contexts/notification'
 import { useAgent } from '../../hooks/useAgent'
 import { useChat } from '../../hooks/useChat'
@@ -83,6 +83,23 @@ export const MessageList: Component = () => {
     branchAtMessage,
     revertFilesAfter,
     notifySuccess,
+  })
+
+  // ── Streaming linger for smooth transition ─────────────────────────────
+  // Keep LiveStreamingBlock visible for a brief moment after the agent finishes
+  // so the completed MessageRow can render and paint before we unmount the
+  // streaming block. This prevents the visible flash / layout jump.
+  const [streamingLinger, setStreamingLinger] = createSignal(false)
+  createEffect(() => {
+    const active = isStreaming() || agent.isRunning()
+    if (active) {
+      setStreamingLinger(true)
+    } else {
+      // Delay unmount by two animation frames + a small buffer so the browser
+      // has time to paint the settled MessageRow before hiding the streaming block.
+      const id = setTimeout(() => setStreamingLinger(false), 80)
+      onCleanup(() => clearTimeout(id))
+    }
   })
 
   const handleSearchHighlight = (matchIds: Set<string>, currentId: string | null) => {
@@ -192,9 +209,19 @@ export const MessageList: Component = () => {
               }}
             </For>
 
-            {/* Live streaming block — shows thinking, tool calls, and content in real-time */}
-            <div aria-live="polite" aria-atomic="true">
-              <Show when={isStreaming() || agent.isRunning()}>
+            {/* Live streaming block — shows thinking, tool calls, and content in real-time.
+                Uses streamingLinger (80ms delay after agent stops) so the browser can
+                paint the settled MessageRow before this unmounts, preventing the flash. */}
+            <div
+              aria-live="polite"
+              aria-atomic="true"
+              style={{
+                opacity: isStreaming() || agent.isRunning() ? '1' : '0',
+                transition: 'opacity 60ms ease-out',
+                'pointer-events': isStreaming() || agent.isRunning() ? undefined : 'none',
+              }}
+            >
+              <Show when={streamingLinger()}>
                 <LiveStreamingBlock />
               </Show>
             </div>

@@ -6,6 +6,7 @@
  */
 
 import { type Accessor, createEffect, createMemo } from 'solid-js'
+import { updateCoreBudgetLimit } from '../../../services/core-bridge'
 import { getModelFromCatalog } from '../../../services/providers/models-dev-catalog'
 import { useSession } from '../../../stores/session'
 import { useSettings } from '../../../stores/settings'
@@ -48,6 +49,38 @@ export function useModelState(): ModelState {
       const first = providers[0]
       const defaultModel = first.defaultModel || first.models[0]?.id
       if (defaultModel) setSelectedModel(defaultModel)
+    }
+  })
+
+  // Sync the context budget limit to the selected model's actual context window.
+  // This ensures the status bar percentage is calculated against the real context size
+  // (e.g. GPT-5.4 = 1M tokens) rather than the default 200K fallback.
+  createEffect(() => {
+    const modelId = selectedModel()
+    const provId = selectedProvider()
+
+    // 1. Try the provider model list first (most specific)
+    if (provId) {
+      const provider = settings().providers.find((p) => p.id === provId)
+      const model = provider?.models.find((m) => m.id === modelId)
+      if (model?.contextWindow && model.contextWindow > 0) {
+        updateCoreBudgetLimit(model.contextWindow)
+        return
+      }
+    }
+    for (const provider of settings().providers) {
+      const model = provider.models.find((m) => m.id === modelId)
+      if (model?.contextWindow && model.contextWindow > 0) {
+        updateCoreBudgetLimit(model.contextWindow)
+        return
+      }
+    }
+
+    // 2. Fall back to the models.dev catalog (raw entry uses limit.context)
+    const catalogModel = getModelFromCatalog(modelId, provId as LLMProvider | undefined)
+    const catalogContextWindow = catalogModel?.limit?.context
+    if (catalogContextWindow && catalogContextWindow > 0) {
+      updateCoreBudgetLimit(catalogContextWindow)
     }
   })
 

@@ -37,6 +37,20 @@ export async function initCoreBridge(opts: CoreBridgeOptions = {}): Promise<() =
   return _cleanup
 }
 
+/**
+ * Update the context budget's limit to match the selected model's context window.
+ * Called whenever the active model changes so the status bar percentage is accurate.
+ */
+export function updateCoreBudgetLimit(contextWindow: number): void {
+  if (_budget && contextWindow > 0) {
+    _budget.setLimit(contextWindow)
+    // Trigger reactive re-compute in session-state contextUsage memo
+    window.dispatchEvent(
+      new CustomEvent('ava:core-settings-changed', { detail: { category: 'context' } })
+    )
+  }
+}
+
 export function notifySessionOpened(_sessionId: string, _workingDirectory: string): void {
   // No-op — Rust backend handles session lifecycle
 }

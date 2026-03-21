@@ -48,7 +48,7 @@ export class ContextBudget {
   private messages = new Map<string, number>()
   private total = 0
 
-  constructor(private readonly limit: number) {}
+  constructor(private limit: number) {}
 
   /** Add a message and its estimated tokens */
   addMessage(id: string, content: string): void {
@@ -70,6 +70,11 @@ export class ContextBudget {
   /** Set the total token usage directly (used for external sync from agent events) */
   setUsed(tokens: number): void {
     this.total = tokens
+  }
+
+  /** Update the context window limit (e.g. when the selected model changes) */
+  setLimit(newLimit: number): void {
+    this.limit = newLimit
   }
 
   /** Clear all tracked messages */

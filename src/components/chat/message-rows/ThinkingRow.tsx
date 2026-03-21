@@ -172,7 +172,7 @@ export const ThinkingRow: Component<ThinkingRowProps> = (props) => {
         </summary>
         <Show when={props.thinking}>
           <div
-            class={`mt-1 max-h-[300px] overflow-y-auto scrollbar-thin thinking-content ${props.isStreaming ? 'thinking-shimmer' : ''}`}
+            class={`scroll-fade-mask mt-1 max-h-[300px] overflow-y-auto scrollbar-thin thinking-content`}
             style={{
               color: 'var(--text-tertiary, var(--text-muted))',
               'font-size': '12px',

@@ -1,0 +1,12 @@
+{
+  "status": "fixed",
+  "files_modified": [
+    "src/components/chat/message-input/status-bar.tsx",
+    "src/components/sidebar/sessions/SessionItem.tsx",
+    "src/components/sidebar/sessions/SessionsToolbar.tsx",
+    "src/components/chat/message-input/text-area.tsx",
+    "src/components/chat/MessageBubble.tsx"
+  ],
+  "summary": "1) Status bar refactored to priority-based two-state layout: during streaming shows ≤5 items (elapsed+spinner · turn · tool · queued · context bar); at idle shows ≤5 items (token count · cost · context bar+% · compact pill · diagnostics). Font bumped from 10px to 11px throughout. Compact button restyled as a bordered pill with warning color. Stash indicator persists across both states. Removed streaming token estimate and message count as separate items to stay under the 5-item cap. 2) Active session now has a 2px left accent bar (border-l-2 border-[var(--accent)]) and accent-tinted background (--accent-subtle fallback rgba(139,92,246,0.08)) replacing the flat gray-3. Inactive sessions retain the transparent border for stable padding. 3) New chat button replaced from 26×26 icon-only square to a full pill (h-26, px-3, rounded-full) with a Plus icon and 'New' label in 12px, using --accent background as the primary CTA. 4) Textarea gets transition: height 100ms ease so auto-resize height changes animate smoothly. 5) Timestamp line font increased from 10px to 11px; model name wrapped in <span class='font-semibold'> for semi-bold rendering in the metadata line.",
+  "tsc_pass": true
+}

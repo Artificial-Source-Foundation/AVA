@@ -94,7 +94,12 @@ export const InputTextArea: Component<InputTextAreaProps> = (props) => (
         focus:outline-none focus:border-[var(--accent)]
         disabled:opacity-50
       "
-      style={{ 'min-height': '44px', 'max-height': '200px', 'font-size': 'var(--chat-font-size)' }}
+      style={{
+        'min-height': '44px',
+        'max-height': '200px',
+        'font-size': 'var(--chat-font-size)',
+        transition: 'height 100ms ease, border-color 150ms ease',
+      }}
     />
 
     {/* Send / Cancel / Streaming — inside textarea, vertically centered right */}

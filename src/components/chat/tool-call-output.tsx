@@ -180,7 +180,7 @@ export const ToolCallOutput: Component<ToolCallOutputProps> = (props) => {
 
       {/* Diff view for edit/write tools */}
       <Show when={hasDiff() && !hasError()}>
-        <div class="max-h-[320px] overflow-auto" data-scrollable>
+        <div class="scroll-fade-mask max-h-[320px] overflow-auto" data-scrollable>
           <DiffViewer
             oldContent={props.toolCall.diff!.oldContent}
             newContent={props.toolCall.diff!.newContent}
@@ -199,7 +199,7 @@ export const ToolCallOutput: Component<ToolCallOutputProps> = (props) => {
 
       {/* Regular output with syntax highlighting */}
       <Show when={hasOutput() && !hasError() && !hasDiff() && !hasUIResource()}>
-        <div class="relative max-h-[320px] overflow-auto" data-scrollable>
+        <div class="scroll-fade-mask relative max-h-[320px] overflow-auto" data-scrollable>
           {/* Copy button (top-right) */}
           <button
             type="button"

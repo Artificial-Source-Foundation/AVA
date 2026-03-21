@@ -12,6 +12,8 @@ interface MessageRowProps {
   isLastMessage: boolean
   isSearchMatch?: boolean
   isCurrentSearchMatch?: boolean
+  /** Whether the previous message had a different role (user→assistant or vice versa) */
+  isRoleSwitch?: boolean
   checkpoint?: { id: string; description: string }
   streamingToolCalls?: ToolCall[]
   /** Live content signal — avoids store updates during streaming */
@@ -34,6 +36,8 @@ export const MessageRow: Component<MessageRowProps> = (props) => (
       'bg-[var(--accent-subtle)] rounded-[var(--radius-md)]': props.isCurrentSearchMatch,
       'bg-[var(--alpha-white-3)] rounded-[var(--radius-md)]':
         !!props.isSearchMatch && !props.isCurrentSearchMatch,
+      'mt-[4px]': props.isRoleSwitch === false,
+      'mt-3': !!props.isRoleSwitch,
     }}
     data-message-id={props.message.id}
     style={{

@@ -1,0 +1,18 @@
+{
+  "status": "fixed",
+  "files_modified": [
+    "src/index.css",
+    "src/styles/tokens.css",
+    "src/components/chat/ToolCallCard.tsx",
+    "src/components/chat/tool-call-output.tsx",
+    "src/components/chat/message-rows/ThinkingRow.tsx"
+  ],
+  "summary": "1. Tool card expand animation: replaced bare Show-based pop-in with CSS grid row trick (grid-template-rows: 0fr → 1fr, 200ms ease-out). Added .tool-card-body-grid and .tool-card-body-inner classes in index.css; ToolCallCard.tsx wraps ToolCallOutput in these. ToolCallOutput is always mounted when hasOutput() so contents are preserved — only the visual height is animated. 2. Scroll gradient fades: added .scroll-fade-mask utility class in index.css using mask-image/webkit-mask-image linear-gradient pattern (transparent at 0px, opaque at 16px, opaque at calc(100% - 16px), transparent at 100%). Applied to: streaming output pre in ToolCallCard, overflow diff div and regular output div in ToolCallOutput, thinking content div in ThinkingRow. 3. Tool status dot: already fully implemented in a prior sprint — tool-call-icon.tsx has the dot overlay with .tool-status-dot-wrapper/.tool-status-dot--{pending,running,success,error} classes, and index.css has the full CSS including yellow-pulse animation for running state. No changes needed. 4. Thinking shimmer upgrade: replaced the simple opacity-pulse .thinking-shimmer animation in tokens.css with a background-clip:text gradient sweep (currentColor → var(--accent) → currentColor, 200% background-size, 2s linear infinite). Applied to the <summary> element only (not the content area, which uses scroll-fade-mask instead).",
+  "tsc_pass": true,
+  "notes": {
+    "item_3_already_done": "Tool status dot was already implemented. tool-call-icon.tsx exports ToolIcon which renders .tool-status-dot-wrapper with a child .tool-status-dot div using dotClass() to pick the status variant. CSS for all 4 states plus the pulse keyframe for running state already existed in index.css lines 702-746.",
+    "grid_trick_rationale": "max-height transition causes layout thrash as the browser must calculate max-height on each frame. The CSS grid-template-rows trick only animates a unitless ratio, which is composited on the GPU. The inner element needs overflow:hidden so the grid row clamps render output.",
+    "mask_image_note": "mask-image requires -webkit- prefix for WebKitGTK (Tauri on Linux). Both prefixes are included in .scroll-fade-mask.",
+    "thinking_shimmer_note": "The inline color style on the <summary> element is overridden by -webkit-text-fill-color:transparent in .thinking-shimmer, which takes precedence per CSS spec. When not streaming, the class is absent and the element uses its inline color normally."
+  }
+}

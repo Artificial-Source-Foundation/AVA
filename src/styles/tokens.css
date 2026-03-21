@@ -566,19 +566,25 @@
   animation: shimmer-text 2s ease-in-out infinite;
 }
 
-/* Subtle pulse for thinking blocks while streaming */
-@keyframes thinking-pulse {
-  0%,
-  100% {
-    opacity: 0.75;
+/* Thinking shimmer — sweeping gradient across summary text while streaming.
+   Uses background-clip:text for GPU-only compositing (no layout thrash). */
+@keyframes thinking-shimmer-sweep {
+  0% {
+    background-position: 200% center;
   }
-  50% {
-    opacity: 0.5;
+  100% {
+    background-position: -200% center;
   }
 }
 
 .thinking-shimmer {
-  animation: thinking-pulse 2s ease-in-out infinite;
+  background: linear-gradient(90deg, currentColor 0%, var(--accent) 50%, currentColor 100%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  animation: thinking-shimmer-sweep 2s linear infinite;
 }
 
 /* ========================================

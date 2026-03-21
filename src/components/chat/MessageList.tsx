@@ -153,11 +153,19 @@ export const MessageList: Component = () => {
             </Show>
 
             <For each={data.visibleMessages()}>
-              {(msg) => {
+              {(msg, index) => {
                 const msgIndex = () => data.messageIndexById().get(msg.id) ?? -1
                 const modelChange = () => data.modelChangeById().get(msg.id)
                 const shouldAnimate = !animatedMessageIds.has(msg.id)
                 if (shouldAnimate) animatedMessageIds.add(msg.id)
+                // Determine whether this message's role differs from the previous message's role.
+                // Used to apply larger vertical margin between role transitions.
+                const isRoleSwitch = () => {
+                  const i = index()
+                  if (i === 0) return undefined
+                  const prev = data.visibleMessages()[i - 1]
+                  return prev ? prev.role !== msg.role : undefined
+                }
 
                 // Show divider before the first message that arrived after compaction.
                 // compactionIndex() === totalMessages at the time of compaction, so
@@ -182,6 +190,7 @@ export const MessageList: Component = () => {
                         shouldAnimate={shouldAnimate}
                         isEditing={editingMessageId() === msg.id}
                         isRetrying={retryingMessageId() === msg.id}
+                        isRoleSwitch={isRoleSwitch()}
                         isStreaming={
                           (isStreaming() || agent.isRunning()) &&
                           msg.id === data.lastMessageId() &&

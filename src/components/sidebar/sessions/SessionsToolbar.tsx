@@ -41,22 +41,23 @@ export function SessionsToolbar(props: SessionsToolbarProps): JSX.Element {
           </Show>
         </button>
 
-        {/* New session — purple accent button */}
+        {/* New chat — primary CTA pill with label */}
         <button
           type="button"
           onClick={() => props.onNewChat()}
           class="
-            flex items-center justify-center
-            w-[26px] h-[26px]
-            rounded-[var(--radius-lg)]
-            bg-[var(--violet-8)] hover:bg-[var(--accent)]
-            text-white
-            transition-colors
+            inline-flex items-center justify-center gap-1
+            h-[26px] px-3
+            rounded-full
+            bg-[var(--accent)] hover:opacity-90
+            text-white font-medium
+            transition-opacity
           "
           title="New chat (Ctrl+N)"
           aria-label="New chat"
         >
-          <Plus class="w-3.5 h-3.5" />
+          <Plus class="w-3 h-3 flex-shrink-0" />
+          <span class="text-[12px] leading-none">New</span>
         </button>
       </div>
     </div>

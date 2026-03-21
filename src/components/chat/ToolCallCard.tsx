@@ -125,15 +125,21 @@ export const ToolCallCard: Component<ToolCallCardProps> = (props) => {
       {/* Live streaming output while running */}
       <Show when={hasStreamingOutput()}>
         <div class="px-3 pb-2 border-t border-[var(--border-subtle)]">
-          <pre class="text-[11px] text-[var(--text-muted)] font-mono whitespace-pre-wrap break-all max-h-32 overflow-y-auto scrollbar-none leading-relaxed mt-1.5">
+          <pre class="scroll-fade-mask text-[11px] text-[var(--text-muted)] font-mono whitespace-pre-wrap break-all max-h-32 overflow-y-auto scrollbar-none leading-relaxed mt-1.5">
             {props.toolCall.streamingOutput!.slice(-2000)}
           </pre>
         </div>
       </Show>
 
-      {/* Expanded output — rich rendering */}
-      <Show when={expanded() && hasOutput()}>
-        <ToolCallOutput toolCall={props.toolCall} />
+      {/* Expanded output — smooth height reveal via CSS grid row trick.
+          Content is always mounted when hasOutput() so the grid animation
+          plays fully in both directions; overflow:hidden clips it. */}
+      <Show when={hasOutput()}>
+        <div class="tool-card-body-grid" data-expanded={expanded() ? 'true' : 'false'}>
+          <div class="tool-card-body-inner">
+            <ToolCallOutput toolCall={props.toolCall} />
+          </div>
+        </div>
       </Show>
     </div>
   )

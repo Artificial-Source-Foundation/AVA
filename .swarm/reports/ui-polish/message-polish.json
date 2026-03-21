@@ -1,0 +1,40 @@
+{
+  "status": "fixed",
+  "files_modified": [
+    "src/components/chat/MessageBubble.tsx",
+    "src/components/chat/message-list/message-row.tsx",
+    "src/components/chat/MessageList.tsx"
+  ],
+  "summary": "Fixed all 5 items. (1) User bubble width cap: replaced Tailwind max-w-[85%] with inline style max-width: min(85%, 68ch) so bubbles never exceed 68 characters wide on large screens. (2) TurnDiffSummary: already wired in MessageBubble.tsx (lines 628-636) from prior work — no changes needed, verified working. (3) CompactionDivider: already wired in MessageList.tsx (lines 173-175) with compaction-pre dimming on prior messages — no changes needed, verified working. (4) Code block copy button: already always-visible in code-header bar via .code-copy-btn CSS (lines 1085-1103 of index.css) with hover enhancement — no changes needed, verified working. (5) Message spacing: added isRoleSwitch prop to MessageRow (mt-[4px] for same-role = 16px total with density-py, mt-3 for role-switch = 24px total), computed isRoleSwitch() in MessageList For loop by comparing each message role to its predecessor.",
+  "item_details": {
+    "1_user_bubble_width_cap": {
+      "status": "fixed",
+      "file": "src/components/chat/MessageBubble.tsx",
+      "change": "class='relative group max-w-[85%]' → style={{ 'max-width': 'min(85%, 68ch)' }}"
+    },
+    "2_turn_diff_summary": {
+      "status": "already_wired",
+      "file": "src/components/chat/MessageBubble.tsx",
+      "notes": "TurnDiffSummary imported and rendered at lines 628-636 in MessageBubble. Shows after completed assistant messages with tool calls. Collapsible with 5-block DiffBar. No changes needed."
+    },
+    "3_compaction_divider": {
+      "status": "already_wired",
+      "file": "src/components/chat/MessageList.tsx",
+      "notes": "CompactionDivider rendered at lines 173-175 before messages at compactionIndex boundary. compaction-pre CSS class dims prior messages at 50% opacity. No changes needed."
+    },
+    "4_code_block_copy_button": {
+      "status": "already_present",
+      "file": "src/lib/markdown.ts + src/index.css",
+      "notes": "Copy button injected in code-header bar for every fenced code block. Always visible (not opacity-0 by default). Has hover state with border and background. copy-pop animation on success. No changes needed."
+    },
+    "5_message_spacing_consistency": {
+      "status": "fixed",
+      "files": [
+        "src/components/chat/message-list/message-row.tsx",
+        "src/components/chat/MessageList.tsx"
+      ],
+      "change": "Added isRoleSwitch?: boolean prop to MessageRowProps. classList applies mt-[4px] (same-role: 6+4+6=16px total) or mt-3 (role-switch: 6+12+6=24px total). MessageList computes isRoleSwitch() by comparing each message role to its predecessor in visibleMessages()."
+    }
+  },
+  "tsc_pass": true
+}

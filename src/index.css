@@ -663,6 +663,50 @@ button {
 }
 
 /* ========================================
+   TOOL CARD EXPAND ANIMATION
+   Smooth height reveal using CSS grid row trick — no max-height thrash.
+   Set data-expanded="true/false" on the wrapper to trigger the transition.
+   ======================================== */
+
+.tool-card-body-grid {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 200ms ease-out;
+}
+
+.tool-card-body-grid[data-expanded="true"] {
+  grid-template-rows: 1fr;
+}
+
+/* The inner element must have overflow:hidden so the grid row clamps it */
+.tool-card-body-inner {
+  overflow: hidden;
+}
+
+/* ========================================
+   SCROLL GRADIENT FADES
+   Top/bottom gradient mask for overflow-y-auto containers.
+   Apply .scroll-fade-mask to any vertically scrollable inner element.
+   ======================================== */
+
+.scroll-fade-mask {
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0px,
+    black 16px,
+    black calc(100% - 16px),
+    transparent 100%
+  );
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 0px,
+    black 16px,
+    black calc(100% - 16px),
+    transparent 100%
+  );
+}
+
+/* ========================================
    TOOL SHIMMER
    Sweeping highlight on running tool description text.
    Uses background-clip:text trick — pure GPU (no layout thrash).

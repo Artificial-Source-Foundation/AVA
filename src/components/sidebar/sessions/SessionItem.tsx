@@ -121,14 +121,14 @@ export const SessionItem: Component<SessionItemProps> = (props) => {
         }}
         onContextMenu={(e) => props.onContextMenu(e, props.session.id)}
         class={`
-          group flex items-center w-full
-          px-3 py-2.5 gap-2.5
+          group relative flex items-center w-full
+          py-2.5 gap-2.5
           rounded-[var(--radius-xl)]
           text-left transition-colors cursor-pointer
           ${
             props.isActive
-              ? 'bg-[var(--gray-3)] text-[var(--gray-12)]'
-              : 'text-[var(--gray-9)] hover:bg-[var(--alpha-white-5)] hover:text-[var(--text-primary)]'
+              ? 'bg-[var(--accent-subtle,rgba(139,92,246,0.08))] text-[var(--gray-12)] border-l-2 border-[var(--accent)] pl-[calc(0.75rem-2px)] pr-3'
+              : 'text-[var(--gray-9)] hover:bg-[var(--alpha-white-5)] hover:text-[var(--text-primary)] border-l-2 border-transparent pl-[calc(0.75rem-2px)] pr-3'
           }
         `}
       >

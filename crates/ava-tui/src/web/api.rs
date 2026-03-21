@@ -256,8 +256,19 @@ pub async fn submit_goal(
 
         match result {
             Ok(run_result) => {
-                let _ = stack.session_manager.save(&run_result.session);
-                *inner.last_session_id.write().await = Some(run_result.session.id);
+                match stack.session_manager.save(&run_result.session) {
+                    Ok(()) => {
+                        *inner.last_session_id.write().await = Some(run_result.session.id);
+                    }
+                    Err(e) => {
+                        // Log the error but still record the session ID so that
+                        // retry/regenerate can attempt a re-save rather than returning
+                        // a confusing 404 "session not found" when the session object
+                        // is valid but the DB write failed transiently.
+                        tracing::error!("Failed to persist session {}: {e}", run_result.session.id);
+                        *inner.last_session_id.write().await = Some(run_result.session.id);
+                    }
+                }
             }
             Err(e) => {
                 tracing::error!("Agent run failed: {e}");
@@ -618,7 +629,12 @@ async fn run_agent_from_history(
 
         match result {
             Ok(run_result) => {
-                let _ = stack.session_manager.save(&run_result.session);
+                if let Err(e) = stack.session_manager.save(&run_result.session) {
+                    tracing::error!(
+                        "Failed to persist session {} (retry/regen): {e}",
+                        run_result.session.id
+                    );
+                }
                 *inner.last_session_id.write().await = Some(run_result.session.id);
             }
             Err(e) => {

@@ -1,0 +1,6 @@
+{
+  "status": "fixed",
+  "files_modified": ["src/components/dialogs/ChangelogDialog.tsx"],
+  "summary": "Updated APP_VERSION from '0.1.0' to '2.1.0' to match Cargo.toml workspace version. Replaced the single changelog entry (v0.1.0, 2026-02-28) with a v2.1.0 entry (2026-03-08) containing 9 accurate bullet points: correct provider count (8), correct default tool count (9) with names, correct crate count (21), thinking+tool interleaving, Praxis multi-agent, three-tier mid-stream messaging, MCP support, persistent memory/session/codebase indexing, and 29 built-in themes. Removed outdated items (Dev Team system, 14 providers, 28 tools, Obsidian-style plugins). No hardcoded '0.1.0' strings found elsewhere in src/. TypeScript check passes with no errors.",
+  "tsc_pass": true
+}

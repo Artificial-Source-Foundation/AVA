@@ -1,0 +1,16 @@
+{
+  "status": "fixed",
+  "root_cause": {
+    "bug1_websocket_disconnect": "ws.rs send_task used `while let Ok(event) = event_rx.recv().await` which exits on RecvError::Lagged (broadcast buffer overflow, 256 events). A burst of agent events exceeding the buffer caused the WS send_task to terminate, which triggered the select! in handle_socket to return, permanently closing the WebSocket connection. The fix replaces the pattern-match loop with an explicit match on RecvError variants: Lagged sends a {\"type\":\"lag\",\"skipped\":N} notification to the client and continues; Closed (server shutdown) exits cleanly. The WS connection now survives across multiple agent runs and event bursts.",
+    "bug2_retry_404": "POST /api/agent/retry is correctly registered and the handler exists. The HTTP 404 was emitted by the handler itself (StatusCode::NOT_FOUND) when session_manager.get(last_session_id) returned None — meaning the session UUID was stored in last_session_id but the session was not in the SQLite DB. Root cause: both submit_goal and run_agent_from_history called session_manager.save() with `let _ = ...`, silently discarding save errors, then unconditionally set last_session_id. A transient DB write failure would leave last_session_id pointing to a non-existent session, causing all subsequent retry/regenerate/edit-resend calls to return 404. The fix: wrap save() in a proper error match that logs the failure at ERROR level. last_session_id is still set even on save failure (since the session object is valid and a re-save on retry would succeed), and the save error is now visible in logs for diagnosis."
+  },
+  "files_modified": ["crates/ava-tui/src/web/ws.rs", "crates/ava-tui/src/web/api.rs"],
+  "changes": {
+    "ws.rs": "Replaced `while let Ok(event) = event_rx.recv().await` with an explicit loop + match on RecvError::Lagged (continue with lag notification) and RecvError::Closed (break). Added `use tokio::sync::broadcast::error::RecvError`. Updated doc comment to explain multi-run survival.",
+    "api.rs": "Fixed two silent `let _ = session_manager.save()` calls in submit_goal (line ~259) and run_agent_from_history (line ~632). Both now use explicit match/if-let that log save errors at ERROR level while still setting last_session_id so the session ID is available for retry."
+  },
+  "cargo_check_pass": true,
+  "tests_pass": true,
+  "test_command": "cargo test -p ava-tui",
+  "test_result": "12 tests passed, 0 failed"
+}

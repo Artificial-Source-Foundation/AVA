@@ -17,6 +17,7 @@ use axum::extract::ws::{Message, WebSocket};
 use axum::extract::{State, WebSocketUpgrade};
 use axum::response::IntoResponse;
 use futures::{SinkExt, StreamExt};
+use tokio::sync::broadcast::error::RecvError;
 use tracing::{debug, warn};
 
 use super::api::convert_web_event;
@@ -32,6 +33,11 @@ pub async fn ws_handler(ws: WebSocketUpgrade, State(state): State<WebState>) -> 
 /// Subscribes to the broadcast channel and forwards all agent events as JSON
 /// text frames. Events are converted from the backend `AgentEvent` enum to the
 /// frontend-compatible `WebAgentEvent` format (with `"type"` tag).
+///
+/// The send loop survives across multiple agent runs — it only exits when the
+/// WebSocket client disconnects or the broadcast sender is dropped (server
+/// shutdown). `RecvError::Lagged` (buffer overflow) is handled by logging a
+/// warning and continuing so that a burst of events never closes the connection.
 async fn handle_socket(socket: WebSocket, state: WebState) {
     let (mut ws_tx, mut ws_rx) = socket.split();
 
@@ -40,9 +46,37 @@ async fn handle_socket(socket: WebSocket, state: WebState) {
 
     debug!("WebSocket client connected");
 
-    // Spawn a task that forwards broadcast events to the WebSocket
+    // Spawn a task that forwards broadcast events to the WebSocket.
+    //
+    // The loop explicitly matches on RecvError variants so that a Lagged error
+    // (broadcast buffer overflow) merely skips the dropped events rather than
+    // terminating the connection. Only RecvError::Closed (sender dropped on
+    // server shutdown) causes a clean exit.
     let send_task = tokio::spawn(async move {
-        while let Ok(event) = event_rx.recv().await {
+        loop {
+            let event = match event_rx.recv().await {
+                Ok(e) => e,
+                Err(RecvError::Lagged(skipped)) => {
+                    // The broadcast buffer overflowed; some events were dropped.
+                    // Notify the client and continue — do NOT close the connection.
+                    warn!("WebSocket broadcast lagged, skipped {skipped} events");
+                    let lag_msg = serde_json::json!({
+                        "type": "lag",
+                        "skipped": skipped,
+                    })
+                    .to_string();
+                    if ws_tx.send(Message::Text(lag_msg.into())).await.is_err() {
+                        // Client disconnected while we were recovering
+                        break;
+                    }
+                    continue;
+                }
+                Err(RecvError::Closed) => {
+                    // Broadcast sender was dropped — server is shutting down.
+                    break;
+                }
+            };
+
             // Convert backend event to frontend-compatible format
             let web_event = match convert_web_event(&event) {
                 Some(e) => e,

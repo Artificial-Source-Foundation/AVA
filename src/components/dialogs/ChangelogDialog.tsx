@@ -7,7 +7,7 @@
 import { Megaphone } from 'lucide-solid'
 import { type Component, For, Show } from 'solid-js'
 
-export const APP_VERSION = '0.1.0'
+export const APP_VERSION = '2.1.0'
 
 interface ChangelogEntry {
   version: string
@@ -17,17 +17,18 @@ interface ChangelogEntry {
 
 const CHANGELOG: ChangelogEntry[] = [
   {
-    version: '0.1.0',
-    date: '2026-02-28',
+    version: '2.1.0',
+    date: '2026-03-08',
     items: [
-      'Initial public release of AVA',
-      'Dev Team system: Team Lead delegates to Senior Leads and Junior Devs',
-      '14 LLM providers supported (Anthropic, OpenAI, Google, and more)',
-      'Plugin ecosystem with Obsidian-style skills and commands',
-      '28 built-in tools including code editing, search, and web access',
-      'Voice dictation with waveform visualization',
-      'Git integration with auto-commit and checkpoints',
-      'MCP protocol support for external tool servers',
+      '8 LLM providers: Anthropic, OpenAI, Gemini, Ollama, OpenRouter, Copilot, Inception, Mock',
+      '9 default tools: read, write, edit, bash, glob, grep, web_fetch, web_search, git_read',
+      '21 Rust crates powering the full agent, CLI, and desktop backend',
+      'Thinking + tool interleaving for reasoning-capable models',
+      'Multi-agent orchestration via Praxis (Director → Leads → Workers)',
+      'Three-tier mid-stream messaging: steer, follow-up, post-complete',
+      'MCP protocol support with hot-reload and per-project trust',
+      'Persistent memory, session history, and codebase indexing (BM25 + PageRank)',
+      '29 built-in themes with live preview and custom TOML theme support',
     ],
   },
 ]

@@ -525,10 +525,12 @@ function createAgentStore() {
       // After the run completes, fetch the authoritative message list from the
       // backend and replace the in-memory store so the UI reflects what was
       // actually saved (correct tool_calls, metadata, tokens, etc.).
-      if (!isTauri() && sessionId) {
+      // Use the backend's session ID (from the run result) — it may differ from the frontend's
+      const backendSessionId = result?.sessionId || sessionId
+      if (!isTauri() && backendSessionId) {
         try {
           const apiBase = (import.meta.env.VITE_API_URL as string) || ''
-          const res = await fetch(`${apiBase}/api/sessions/${sessionId}/messages`)
+          const res = await fetch(`${apiBase}/api/sessions/${backendSessionId}/messages`)
           if (res.ok) {
             const rawMsgs = (await res.json()) as Array<Record<string, unknown>>
             const backendMsgs: Message[] = rawMsgs.map((m) => {
@@ -539,7 +541,7 @@ function createAgentStore() {
                   : (metaRaw as Record<string, unknown> | undefined)
               return {
                 id: m.id as string,
-                sessionId,
+                sessionId: backendSessionId,
                 role: m.role as Message['role'],
                 content: (m.content as string) ?? '',
                 createdAt:
@@ -556,7 +558,10 @@ function createAgentStore() {
               }
             })
             session.replaceMessagesFromBackend(backendMsgs)
-            log.info('agent', 'Store synced from backend', { count: backendMsgs.length })
+            log.info('agent', 'Store synced from backend', {
+              count: backendMsgs.length,
+              backendSessionId,
+            })
           }
         } catch (syncErr) {
           log.warn('agent', 'Failed to sync messages from backend', { error: String(syncErr) })

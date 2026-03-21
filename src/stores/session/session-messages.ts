@@ -22,6 +22,21 @@ import {
 } from './session-state'
 
 // ============================================================================
+// Pending-insert registry
+//
+// addMessage() fires the DB INSERT asynchronously so it never blocks the UI.
+// However updateMessage() and deleteMessage() must not run their DB ops until
+// the INSERT for that message ID has settled — otherwise a fast agent could
+// issue an UPDATE/DELETE before the row even exists, turning it into a no-op
+// and leaving the empty placeholder in the DB forever.
+//
+// We store the in-flight INSERT promise (resolved to void) keyed by message ID
+// and await it inside updateMessage / deleteMessage before touching the DB.
+// ============================================================================
+
+const pendingInserts = new Map<string, Promise<void>>()
+
+// ============================================================================
 // Message Management
 // ============================================================================
 
@@ -45,10 +60,17 @@ export function addMessage(message: Message): void {
     sessionId: message.sessionId,
   })
 
-  // Persist to database (fire-and-forget, don't block UI)
-  dbInsertMessages([message]).catch((err: unknown) =>
-    logError('Session', 'Failed to persist message', err)
-  )
+  // Persist to database (fire-and-forget, don't block UI).
+  // Track the promise so that updateMessage/deleteMessage can await it before
+  // issuing their own DB ops — preventing a race where the UPDATE/DELETE lands
+  // before the INSERT and becomes a silent no-op.
+  const insertPromise = dbInsertMessages([message])
+    .catch((err: unknown) => logError('Session', 'Failed to persist message', err))
+    .finally(() => {
+      // Clean up registry once the INSERT has settled (success or failure)
+      pendingInserts.delete(message.id)
+    })
+  pendingInserts.set(message.id, insertPromise)
 
   // Update frontend state immediately
   setMessages((prev) => [...prev, message])
@@ -81,15 +103,30 @@ export function updateMessage(id: string, updates: Partial<Message>): void {
     return next
   })
 
-  // Persist to database (fire-and-forget, same pattern as addMessage)
-  dbUpdateMessage(id, {
-    content: updates.content,
-    tokensUsed: updates.tokensUsed,
-    costUSD: updates.costUSD,
-    toolCalls: updates.toolCalls,
-    error: updates.error,
-    metadata: updates.metadata,
-  }).catch((err: unknown) => logError('Session', 'Failed to persist message update', err))
+  // Persist to database (fire-and-forget, same pattern as addMessage).
+  // Await any in-flight INSERT for this ID first so we never lose a race
+  // where the UPDATE reaches SQLite before the INSERT has committed.
+  const pending = pendingInserts.get(id)
+  const persist = pending
+    ? pending.then(() =>
+        dbUpdateMessage(id, {
+          content: updates.content,
+          tokensUsed: updates.tokensUsed,
+          costUSD: updates.costUSD,
+          toolCalls: updates.toolCalls,
+          error: updates.error,
+          metadata: updates.metadata,
+        })
+      )
+    : dbUpdateMessage(id, {
+        content: updates.content,
+        tokensUsed: updates.tokensUsed,
+        costUSD: updates.costUSD,
+        toolCalls: updates.toolCalls,
+        error: updates.error,
+        metadata: updates.metadata,
+      })
+  persist.catch((err: unknown) => logError('Session', 'Failed to persist message update', err))
 }
 
 export function setMessageError(messageId: string, error: MessageError | null): void {
@@ -102,6 +139,10 @@ export async function deleteMessage(id: string): Promise<void> {
   log.debug('session', 'Message deleted', { id })
   setMessages((prev) => prev.filter((msg) => msg.id !== id))
   try {
+    // Await any in-flight INSERT for this ID before issuing the DELETE so we
+    // don't silently delete nothing and then have the INSERT land afterwards.
+    const pending = pendingInserts.get(id)
+    if (pending) await pending
     await dbDeleteMessage(id)
   } catch (err) {
     logError('Session', 'Failed to delete message from DB', err)

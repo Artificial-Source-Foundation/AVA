@@ -1050,16 +1050,42 @@ pub async fn get_session_messages(
     let messages: Vec<MessageSummary> = session
         .messages
         .iter()
-        .map(|m| MessageSummary {
-            id: m.id.to_string(),
-            role: format!("{:?}", m.role).to_lowercase(),
-            content: m.content.clone(),
-            timestamp: m.timestamp.to_rfc3339(),
-            tool_calls: None,
-            metadata: None,
-            tokens_used: None,
-            cost_usd: None,
-            model: None,
+        .map(|m| {
+            // Embed tool_calls inside the metadata JSON object under the "toolCalls" key
+            // so that the frontend mapper (metadata?.toolCalls) can reconstruct them on
+            // session restore — matching the convention used by db-messages.ts on desktop.
+            let metadata = if !m.tool_calls.is_empty() {
+                // Build minimal frontend-compatible ToolCall shape:
+                // { id, name, args, status: "success", startedAt: 0 }
+                let tc_json: Vec<serde_json::Value> = m
+                    .tool_calls
+                    .iter()
+                    .map(|tc| {
+                        serde_json::json!({
+                            "id": tc.id,
+                            "name": tc.name,
+                            "args": tc.arguments,
+                            "status": "success",
+                            "startedAt": 0,
+                        })
+                    })
+                    .collect();
+                Some(serde_json::json!({ "toolCalls": tc_json }))
+            } else {
+                None
+            };
+
+            MessageSummary {
+                id: m.id.to_string(),
+                role: format!("{:?}", m.role).to_lowercase(),
+                content: m.content.clone(),
+                timestamp: m.timestamp.to_rfc3339(),
+                tool_calls: None,
+                metadata,
+                tokens_used: None,
+                cost_usd: None,
+                model: None,
+            }
         })
         .collect();
 

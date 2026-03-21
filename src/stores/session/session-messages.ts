@@ -3,6 +3,7 @@
  * Add, update, delete, and rollback messages within a session.
  */
 
+import { isTauri } from '@tauri-apps/api/core'
 import { log } from '../../lib/logger'
 import {
   deleteMessageFromDb as dbDeleteMessage,
@@ -60,17 +61,22 @@ export function addMessage(message: Message): void {
     sessionId: message.sessionId,
   })
 
-  // Persist to database (fire-and-forget, don't block UI).
-  // Track the promise so that updateMessage/deleteMessage can await it before
-  // issuing their own DB ops — preventing a race where the UPDATE/DELETE lands
-  // before the INSERT and becomes a silent no-op.
-  const insertPromise = dbInsertMessages([message])
-    .catch((err: unknown) => logError('Session', 'Failed to persist message', err))
-    .finally(() => {
-      // Clean up registry once the INSERT has settled (success or failure)
-      pendingInserts.delete(message.id)
-    })
-  pendingInserts.set(message.id, insertPromise)
+  // In web mode the Rust agent is the single source of truth for persistence.
+  // Skip the DB insert here — messages will be loaded from the backend API
+  // after the agent run completes. Only write to DB in Tauri (desktop) mode.
+  if (isTauri()) {
+    // Persist to database (fire-and-forget, don't block UI).
+    // Track the promise so that updateMessage/deleteMessage can await it before
+    // issuing their own DB ops — preventing a race where the UPDATE/DELETE lands
+    // before the INSERT and becomes a silent no-op.
+    const insertPromise = dbInsertMessages([message])
+      .catch((err: unknown) => logError('Session', 'Failed to persist message', err))
+      .finally(() => {
+        // Clean up registry once the INSERT has settled (success or failure)
+        pendingInserts.delete(message.id)
+      })
+    pendingInserts.set(message.id, insertPromise)
+  }
 
   // Update frontend state immediately
   setMessages((prev) => [...prev, message])
@@ -103,13 +109,26 @@ export function updateMessage(id: string, updates: Partial<Message>): void {
     return next
   })
 
-  // Persist to database (fire-and-forget, same pattern as addMessage).
-  // Await any in-flight INSERT for this ID first so we never lose a race
-  // where the UPDATE reaches SQLite before the INSERT has committed.
-  const pending = pendingInserts.get(id)
-  const persist = pending
-    ? pending.then(() =>
-        dbUpdateMessage(id, {
+  // In web mode the Rust agent is the single source of truth for persistence.
+  // Skip the DB update — the backend will have the authoritative state.
+  // Only write to DB in Tauri (desktop) mode.
+  if (isTauri()) {
+    // Persist to database (fire-and-forget, same pattern as addMessage).
+    // Await any in-flight INSERT for this ID first so we never lose a race
+    // where the UPDATE reaches SQLite before the INSERT has committed.
+    const pending = pendingInserts.get(id)
+    const persist = pending
+      ? pending.then(() =>
+          dbUpdateMessage(id, {
+            content: updates.content,
+            tokensUsed: updates.tokensUsed,
+            costUSD: updates.costUSD,
+            toolCalls: updates.toolCalls,
+            error: updates.error,
+            metadata: updates.metadata,
+          })
+        )
+      : dbUpdateMessage(id, {
           content: updates.content,
           tokensUsed: updates.tokensUsed,
           costUSD: updates.costUSD,
@@ -117,16 +136,8 @@ export function updateMessage(id: string, updates: Partial<Message>): void {
           error: updates.error,
           metadata: updates.metadata,
         })
-      )
-    : dbUpdateMessage(id, {
-        content: updates.content,
-        tokensUsed: updates.tokensUsed,
-        costUSD: updates.costUSD,
-        toolCalls: updates.toolCalls,
-        error: updates.error,
-        metadata: updates.metadata,
-      })
-  persist.catch((err: unknown) => logError('Session', 'Failed to persist message update', err))
+    persist.catch((err: unknown) => logError('Session', 'Failed to persist message update', err))
+  }
 }
 
 export function setMessageError(messageId: string, error: MessageError | null): void {
@@ -154,6 +165,15 @@ export function deleteMessagesAfter(messageId: string): void {
     const index = prev.findIndex((m) => m.id === messageId)
     return index >= 0 ? prev.slice(0, index + 1) : prev
   })
+}
+
+/**
+ * Replace the entire in-memory message list with the authoritative list from
+ * the backend. Used in web mode after a run completes to sync the store with
+ * what the Rust agent actually persisted.
+ */
+export function replaceMessagesFromBackend(msgs: Message[]): void {
+  setMessages(msgs)
 }
 
 export async function rollbackToMessage(messageId: string): Promise<void> {

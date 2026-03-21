@@ -6,6 +6,7 @@
  * The TypeScript layer only manages UI state (approval bridge, plan mode, queuing).
  */
 
+import { isTauri } from '@tauri-apps/api/core'
 import { batch, createEffect, createSignal, on } from 'solid-js'
 
 import { DEFAULTS } from '../config/constants'
@@ -519,6 +520,49 @@ function createAgentStore() {
         toolCalls: rustAgent.activeToolCalls().length,
         contentLength: content?.length ?? 0,
       })
+
+      // In web mode the Rust agent is the single writer for session persistence.
+      // After the run completes, fetch the authoritative message list from the
+      // backend and replace the in-memory store so the UI reflects what was
+      // actually saved (correct tool_calls, metadata, tokens, etc.).
+      if (!isTauri() && sessionId) {
+        try {
+          const apiBase = (import.meta.env.VITE_API_URL as string) || ''
+          const res = await fetch(`${apiBase}/api/sessions/${sessionId}/messages`)
+          if (res.ok) {
+            const rawMsgs = (await res.json()) as Array<Record<string, unknown>>
+            const backendMsgs: Message[] = rawMsgs.map((m) => {
+              const metaRaw = m.metadata
+              const metadata =
+                typeof metaRaw === 'string'
+                  ? (JSON.parse(metaRaw) as Record<string, unknown>)
+                  : (metaRaw as Record<string, unknown> | undefined)
+              return {
+                id: m.id as string,
+                sessionId,
+                role: m.role as Message['role'],
+                content: (m.content as string) ?? '',
+                createdAt:
+                  typeof m.created_at === 'number'
+                    ? m.created_at
+                    : typeof m.timestamp === 'string'
+                      ? new Date(m.timestamp).getTime()
+                      : Date.now(),
+                tokensUsed: (m.tokens_used as number) || undefined,
+                costUSD: (m.cost_usd as number | null) ?? undefined,
+                model: (m.model as string | null) ?? undefined,
+                metadata,
+                toolCalls: (metadata?.toolCalls as Message['toolCalls']) ?? undefined,
+              }
+            })
+            session.replaceMessagesFromBackend(backendMsgs)
+            log.info('agent', 'Store synced from backend', { count: backendMsgs.length })
+          }
+        } catch (syncErr) {
+          log.warn('agent', 'Failed to sync messages from backend', { error: String(syncErr) })
+        }
+      }
+
       return result
     } catch (err) {
       // Unexpected error (not from rustAgent internals)

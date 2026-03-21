@@ -1,0 +1,12 @@
+{
+  "status": "fixed",
+  "files_modified": [
+    "src/stores/session/session-messages.ts",
+    "src/stores/session/index.ts",
+    "src/hooks/useAgent.ts",
+    "src/services/db-web-fallback.ts",
+    "crates/ava-tui/src/web/api.rs"
+  ],
+  "summary": "Web mode now uses the Rust agent as the single source of truth for message persistence. In addMessage() and updateMessage(), DB writes are gated behind isTauri() so they only happen in desktop mode. After rustAgent.run() completes in web mode, the frontend fetches /api/sessions/{id}/messages and replaces the in-memory store with the backend's authoritative list via replaceMessagesFromBackend(). The db-web-fallback.ts INSERT/UPDATE message handlers are now no-ops (removing the _msgSessionIndex map too). The get_session_messages API endpoint now populates metadata.toolCalls from the Rust message's tool_calls array using a frontend-compatible shape so tool calls survive session restore.",
+  "tsc_pass": true
+}

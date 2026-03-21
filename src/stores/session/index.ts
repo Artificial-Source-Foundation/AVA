@@ -107,6 +107,7 @@ export function useSession() {
     deleteMessage: msg.deleteMessage,
     deleteMessagesAfter: msg.deleteMessagesAfter,
     rollbackToMessage: msg.rollbackToMessage,
+    replaceMessagesFromBackend: msg.replaceMessagesFromBackend,
 
     // Agent Management
     addAgent: data.addAgent,

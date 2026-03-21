@@ -675,8 +675,8 @@ pub fn check_plan_mode_tool(tool_call: &ToolCall) -> Option<String> {
 /// Returns the corrected name if a match is found, or the original name if not.
 ///
 /// Also handles MCP namespace stripping: when the LLM calls a tool by its bare name
-/// (e.g. `"weather"`) but it is registered under a namespaced name
-/// (e.g. `"mcp.weather.weather"`), we match the last segment of the registered name.
+/// (e.g. `"browser_navigate"`) but it is registered under a namespaced name
+/// (e.g. `"mcp_playwright_browser_navigate"`), we match the tool part after the server prefix.
 /// If multiple MCP tools share the same bare name, the first match wins.
 pub fn repair_tool_name(name: &str, registry: &ToolRegistry) -> String {
     // Exact match — no repair needed
@@ -693,12 +693,17 @@ pub fn repair_tool_name(name: &str, registry: &ToolRegistry) -> String {
             return tool_name;
         }
 
-        // MCP namespace repair: registered name is "mcp.{server}.{tool}", LLM called "{tool}".
-        // Match when the last dot-separated segment equals the requested name (case-insensitive).
-        if mcp_match.is_none() {
-            if let Some(last_seg) = tool_name.rsplit('.').next() {
-                if last_seg.to_lowercase() == lower {
-                    mcp_match = Some(tool_name);
+        // MCP namespace repair: registered name is "mcp_{server}_{tool}", LLM called "{tool}".
+        // Match when the tool name ends with the requested name after the mcp_ prefix.
+        if mcp_match.is_none() && tool_name.starts_with("mcp_") {
+            // Extract the last segment: for "mcp_playwright_browser_navigate" → "browser_navigate"
+            // Try matching against the part after the second underscore (server name)
+            if let Some(rest) = tool_name.strip_prefix("mcp_") {
+                if let Some(pos) = rest.find('_') {
+                    let tool_part = &rest[pos + 1..];
+                    if tool_part.to_lowercase() == lower {
+                        mcp_match = Some(tool_name);
+                    }
                 }
             }
         }

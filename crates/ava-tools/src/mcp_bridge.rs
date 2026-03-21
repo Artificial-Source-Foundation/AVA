@@ -35,7 +35,8 @@ impl MCPBridgeTool {
         caller: Arc<dyn MCPToolCaller>,
         server_name: &str,
     ) -> Self {
-        let namespaced_name = format!("mcp.{}.{}", server_name, definition.name);
+        // Use underscores instead of dots — OpenAI requires tool names to match ^[a-zA-Z0-9_-]+$
+        let namespaced_name = format!("mcp_{}_{}", server_name, definition.name);
         let original_name = definition.name.clone();
         Self {
             namespaced_name,

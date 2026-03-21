@@ -4,7 +4,12 @@ use ava_types::Result;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::time::Duration;
 use tracing::{debug, info, warn};
+
+/// Maximum time allowed for a plugin's `initialize` call before it is
+/// considered hung and the plugin is marked as Failed.
+const PLUGIN_INIT_TIMEOUT_SECS: u64 = 10;
 
 use crate::discovery::discover_plugins;
 use crate::hooks::{AuthCredentials, AuthMethodsResponse, HookDispatcher, HookEvent, HookResponse};
@@ -82,17 +87,42 @@ impl PluginManager {
             debug!(plugin = %name, "spawning plugin process");
             match PluginProcess::spawn(&plugin.manifest, &plugin.path).await {
                 Ok(mut process) => {
-                    // Send initialize
+                    // Send initialize with a timeout to prevent hanging forever.
                     let init_params = serde_json::json!({
                         "plugin": name,
                         "version": version,
                     });
-                    match process.initialize(init_params).await {
-                        Ok(_caps) => {
+                    let init_timeout = Duration::from_secs(PLUGIN_INIT_TIMEOUT_SECS);
+                    let init_result =
+                        tokio::time::timeout(init_timeout, process.initialize(init_params)).await;
+
+                    match init_result {
+                        Ok(Ok(_caps)) => {
                             debug!(plugin = %name, "plugin initialized successfully");
                         }
-                        Err(e) => {
+                        Ok(Err(e)) => {
                             warn!(plugin = %name, error = %e, "plugin initialization failed, continuing anyway");
+                        }
+                        Err(_elapsed) => {
+                            warn!(
+                                plugin = %name,
+                                timeout_secs = PLUGIN_INIT_TIMEOUT_SECS,
+                                "plugin initialize timed out — marking as Failed"
+                            );
+                            // Kill the hung process and record as Failed.
+                            process.shutdown().await;
+                            self.plugin_info.insert(
+                                name.clone(),
+                                PluginInfo {
+                                    name,
+                                    version,
+                                    status: PluginStatus::Failed(format!(
+                                        "initialize timed out after {PLUGIN_INIT_TIMEOUT_SECS}s"
+                                    )),
+                                    hooks,
+                                },
+                            );
+                            continue;
                         }
                     }
 

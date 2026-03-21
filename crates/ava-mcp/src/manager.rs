@@ -1,10 +1,14 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 
 use ava_types::{AvaError, Result, ToolResult};
 use serde_json::Value;
 use tokio::sync::Mutex;
 use tracing::{info, warn};
+
+/// Default timeout for connecting to a single MCP server (including stdio spawn + initialize).
+const MCP_CONNECT_TIMEOUT_SECS: u64 = 15;
 
 use crate::client::{
     MCPClient, MCPPrompt, MCPPromptResult, MCPResource, MCPResourceContent, MCPTool,
@@ -41,15 +45,23 @@ impl ExtensionManager {
                 continue;
             }
 
-            match self.connect_server(&config).await {
-                Ok(()) => {
+            let timeout = Duration::from_secs(MCP_CONNECT_TIMEOUT_SECS);
+            match tokio::time::timeout(timeout, self.connect_server(&config)).await {
+                Ok(Ok(())) => {
                     info!(server = %config.name, "MCP server connected");
                 }
-                Err(e) => {
+                Ok(Err(e)) => {
                     warn!(
                         server = %config.name,
                         error = %e,
                         "Failed to connect MCP server, skipping"
+                    );
+                }
+                Err(_elapsed) => {
+                    warn!(
+                        server = %config.name,
+                        timeout_secs = MCP_CONNECT_TIMEOUT_SECS,
+                        "MCP server connection timed out, skipping"
                     );
                 }
             }

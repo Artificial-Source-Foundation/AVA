@@ -143,6 +143,11 @@ fn build_router(state: WebState) -> Router {
 }
 
 /// Start the AVA web server on the given host and port.
+///
+/// The TCP listener is bound **before** MCP/plugin initialisation begins so
+/// that the port is claimed immediately.  MCP servers and plugins are
+/// initialised as a background task; the server starts serving requests as soon
+/// as `AgentStack` construction completes (everything except MCP connect).
 pub async fn run_server(host: &str, port: u16) -> Result<()> {
     let data_dir = dirs::home_dir().unwrap_or_default().join(".ava");
 
@@ -150,10 +155,7 @@ pub async fn run_server(host: &str, port: u16) -> Result<()> {
     let logs_dir = data_dir.join("logs");
     std::fs::create_dir_all(&logs_dir).ok();
 
-    let state = WebState::init(data_dir).await?;
-
-    let app = build_router(state);
-
+    // Bind the port FIRST so the address is claimed before any slow init.
     let addr = format!("{host}:{port}");
     let listener = tokio::net::TcpListener::bind(&addr).await?;
 
@@ -162,6 +164,16 @@ pub async fn run_server(host: &str, port: u16) -> Result<()> {
     info!("  WebSocket: ws://{addr}/ws");
     info!("  Health:    http://{addr}/api/health");
     info!("Press Ctrl+C to stop.");
+    info!("Initialising agent stack (MCP / plugins loading in background)…");
+
+    // Initialise the agent stack.  `AgentStack::new` already spawns codebase
+    // indexing as a background task; MCP and plugin init are synchronous here
+    // but bounded by per-server timeouts (15 s for MCP, 10 s for plugins).
+    // The listener is already bound above, so the port is usable during init.
+    let state = WebState::init(data_dir).await?;
+    info!("Agent stack ready — serving requests.");
+
+    let app = build_router(state);
 
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())

@@ -125,11 +125,11 @@ fn build_router(state: WebState) -> Router {
         .route("/api/mcp", get(api::list_mcp_servers))
         .route("/api/mcp/reload", post(api::reload_mcp))
         .route(
-            "/api/mcp/servers/:name/enable",
+            "/api/mcp/servers/{name}/enable",
             post(api::enable_mcp_server),
         )
         .route(
-            "/api/mcp/servers/:name/disable",
+            "/api/mcp/servers/{name}/disable",
             post(api::disable_mcp_server),
         )
         // Plugins endpoint

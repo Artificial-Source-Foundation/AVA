@@ -41,12 +41,27 @@ pub(crate) struct MCPRuntime {
     pub(crate) server_scopes: HashMap<String, McpServerScope>,
 }
 
+/// Connection status of an individual MCP server.
+#[derive(Debug, Clone, PartialEq)]
+pub enum McpServerStatus {
+    /// Tools are available and the server is responding.
+    Connected,
+    /// Server was explicitly disabled (`enabled: false` in config or via `/mcp disable`).
+    Disabled,
+    /// The connection or `list_tools` call failed.
+    Failed(String),
+    /// Connection is in progress (shown while lazy init is running).
+    Connecting,
+}
+
 #[derive(Debug, Clone)]
 pub struct MCPServerInfo {
     pub name: String,
     pub tool_count: usize,
     pub scope: McpServerScope,
     pub enabled: bool,
+    /// Current connection status for UI display.
+    pub status: McpServerStatus,
 }
 
 /// Summarizer adapter for the LLM provider (used by context compaction).
@@ -59,14 +74,6 @@ impl ava_context::Summarizer for LlmSummarizer {
         let messages = vec![Message::new(Role::User, text.to_string())];
         self.0.generate(&messages).await.map_err(|e| e.to_string())
     }
-}
-
-pub(crate) async fn init_mcp(
-    global_config: &std::path::Path,
-    project_config: &std::path::Path,
-    registry: &mut ToolRegistry,
-) -> Option<MCPRuntime> {
-    init_mcp_with_disabled(global_config, project_config, registry, &HashSet::new()).await
 }
 
 pub(crate) async fn init_mcp_with_disabled(

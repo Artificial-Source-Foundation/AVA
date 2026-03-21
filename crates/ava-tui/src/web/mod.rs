@@ -144,10 +144,10 @@ fn build_router(state: WebState) -> Router {
 
 /// Start the AVA web server on the given host and port.
 ///
-/// The TCP listener is bound **before** MCP/plugin initialisation begins so
-/// that the port is claimed immediately.  MCP servers and plugins are
-/// initialised as a background task; the server starts serving requests as soon
-/// as `AgentStack` construction completes (everything except MCP connect).
+/// The TCP listener is bound **before** `AgentStack` construction so that the
+/// port is claimed immediately.  MCP servers connect lazily on the first API
+/// call (background task, 30 s timeout per server, all in parallel) — the web
+/// server never waits for MCP at startup.
 pub async fn run_server(host: &str, port: u16) -> Result<()> {
     let data_dir = dirs::home_dir().unwrap_or_default().join(".ava");
 
@@ -164,12 +164,11 @@ pub async fn run_server(host: &str, port: u16) -> Result<()> {
     info!("  WebSocket: ws://{addr}/ws");
     info!("  Health:    http://{addr}/api/health");
     info!("Press Ctrl+C to stop.");
-    info!("Initialising agent stack (MCP / plugins loading in background)…");
+    info!("Initialising agent stack (MCP connects lazily on first use)…");
 
-    // Initialise the agent stack.  `AgentStack::new` already spawns codebase
-    // indexing as a background task; MCP and plugin init are synchronous here
-    // but bounded by per-server timeouts (15 s for MCP, 10 s for plugins).
-    // The listener is already bound above, so the port is usable during init.
+    // Initialise the agent stack.  `AgentStack::new` spawns codebase indexing
+    // as a background task; MCP lazy-init fires on the first run() call.
+    // The listener is already bound above, so the port is usable immediately.
     let state = WebState::init(data_dir).await?;
     info!("Agent stack ready — serving requests.");
 

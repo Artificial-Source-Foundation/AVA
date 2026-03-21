@@ -1,0 +1,19 @@
+{
+  "status": "fixed",
+  "files_modified": [
+    "crates/ava-mcp/src/manager.rs",
+    "crates/ava-agent/src/stack/stack_tools.rs",
+    "crates/ava-agent/src/stack/mod.rs",
+    "crates/ava-agent/src/stack/stack_run.rs",
+    "crates/ava-tui/src/web/mod.rs"
+  ],
+  "summary": "Implemented OpenCode-style lazy MCP init. (1) Increased MCP_CONNECT_TIMEOUT_SECS from 15 to 30. (2) Refactored ExtensionManager::initialize() to connect all servers in parallel using futures::join_all — one slow server no longer blocks others. Extracted connect_server_standalone() as a free function so parallel futures don't fight over &mut self. (3) AgentStack::new() no longer calls init_mcp at startup; mcp field starts as None. Added mcp_init_done: Arc<AtomicBool> field. (4) Added ensure_mcp_initialized(&self) method that uses compare_exchange to guarantee exactly one background tokio::spawn — concurrent first-run() callers get a no-op on the second call. The background task connects all MCP servers in parallel, registers tools, and refreshes the permission middleware source map. (5) stack_run.rs run() calls self.ensure_mcp_initialized() at entry — first call spawns background init, subsequent calls are no-ops. (6) Added McpServerStatus enum (Connected/Disabled/Failed/Connecting) to MCPServerInfo. Status is set to Connected for active servers, Disabled for session-disabled servers, and Connecting when the lazy init has not yet completed (mcp_server_info_from_config path). (7) Web server run_server() comment updated to reflect that MCP no longer blocks startup at all — WebState::init calls AgentStack::new which returns immediately, and MCP connects lazily on the first /api/agent/submit call.",
+  "cargo_check_pass": true,
+  "cargo_test_pass": true,
+  "notes": {
+    "parallel_init": "join_all drives all server connects concurrently; each has independent 30s timeout via tokio::time::timeout",
+    "once_semantics": "AtomicBool compare_exchange(false, true, AcqRel, Acquire) guarantees exactly one spawn even under concurrent run() calls",
+    "disabled_set": "ensure_mcp_initialized snapshots disabled set as empty at spawn time; any post-spawn disable/enable is handled by reload_mcp() as before",
+    "backward_compat": "init_mcp wrapper removed (was unused); init_mcp_with_disabled kept and used by both lazy-init and reload_mcp"
+  }
+}

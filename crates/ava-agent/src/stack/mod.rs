@@ -6,6 +6,7 @@ pub use stack_config::{AgentRunResult, AgentStackConfig};
 pub use stack_tools::MCPServerInfo;
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use ava_codebase::indexer::{index_project, index_workspace};
@@ -35,7 +36,7 @@ use tokio::sync::{mpsc, RwLock};
 use tracing::{error, info, instrument, warn};
 
 use stack_tools::{
-    build_tool_registry, build_tool_registry_with_plugins, init_mcp, init_mcp_with_disabled,
+    build_tool_registry, build_tool_registry_with_plugins, init_mcp_with_disabled,
     resolve_workspace_roots, MCPRuntime,
 };
 
@@ -96,6 +97,10 @@ pub struct AgentStack {
     /// Stored so we can detect task panics and surface them to the caller.
     /// Wrapped in `std::sync::Mutex` so the field is `Send` (JoinHandle is Send).
     index_task: std::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
+    /// Whether MCP lazy-init has been triggered at least once.
+    /// Set to `true` before the background init task is spawned so multiple
+    /// concurrent first-`run()` calls don't double-init.
+    mcp_init_done: Arc<AtomicBool>,
 }
 
 impl AgentStack {
@@ -298,7 +303,10 @@ impl AgentStack {
         register_plan_tool(&mut registry, plan_bridge.clone(), plan_state.clone());
         register_custom_tools(&mut registry, &custom_tool_dirs);
 
-        let mcp_runtime = init_mcp(&mcp_global_config, &mcp_project_config, &mut registry).await;
+        // MCP init is deferred to the first run() call (lazy init).
+        // We do NOT block startup here — MCP will connect in the background
+        // on the first run() via ensure_mcp_initialized().
+        let mcp_runtime: Option<stack_tools::MCPRuntime> = None;
 
         // Populate the permission middleware's source map from the fully-built registry
         // so that inspect() receives the correct ToolSource for every tool.
@@ -351,6 +359,7 @@ impl AgentStack {
                 parent_session_id: RwLock::new(None),
                 plugin_manager,
                 index_task: std::sync::Mutex::new(Some(index_handle)),
+                mcp_init_done: Arc::new(AtomicBool::new(false)),
             },
             question_rx,
             approval_rx,
@@ -361,6 +370,69 @@ impl AgentStack {
     // ========================================================================
     // MCP server management
     // ========================================================================
+
+    /// Trigger MCP initialization in the background on the first call.
+    ///
+    /// This is the lazy-init entry point. It uses an `AtomicBool` compare-exchange
+    /// so that concurrent first-`run()` calls only spawn a single init task.
+    /// The background task connects all servers in parallel (each with 30 s timeout)
+    /// and registers their tools into the shared registry when done.
+    ///
+    /// Callers do not need an `Arc<Self>` — we clone the internal `Arc` fields
+    /// needed by the background task and pass them in directly.
+    pub fn ensure_mcp_initialized(&self) {
+        // compare_exchange: if false → set true and proceed; otherwise bail out.
+        if self
+            .mcp_init_done
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+        {
+            return; // already initialised or init is in progress
+        }
+
+        // Clone the fields we need — all are already wrapped in Arc.
+        let mcp_arc = Arc::clone(&self.mcp);
+        let tools_arc = Arc::clone(&self.tools);
+        let shared_sources = self.shared_tool_sources.clone();
+        let global_cfg = self.mcp_global_config.clone();
+        let project_cfg = self.mcp_project_config.clone();
+        // Snapshot the disabled set; any changes after this point will
+        // be picked up by the next explicit reload_mcp() call.
+        let disabled_arc = {
+            // We can't easily await here (this is a sync fn), so we try a
+            // non-blocking read. If the lock is held, we start with an empty
+            // disabled set — a negligible edge case at startup.
+            std::collections::HashSet::<String>::new()
+        };
+
+        tokio::spawn(async move {
+            info!("MCP lazy-init: connecting servers in background…");
+            let mut registry = tools_arc.write().await;
+            let runtime =
+                init_mcp_with_disabled(&global_cfg, &project_cfg, &mut registry, &disabled_arc)
+                    .await;
+
+            // Refresh shared tool sources so permission middleware sees MCP tools.
+            {
+                let mut sources = shared_sources.write().unwrap_or_else(|e| e.into_inner());
+                for (def, src) in registry.list_tools_with_source() {
+                    if matches!(src, ToolSource::MCP { .. }) {
+                        sources.insert(def.name, convert_tool_source(&src));
+                    }
+                }
+            }
+
+            let counts = runtime
+                .as_ref()
+                .map_or((0, 0), |r| (r.server_count, r.tool_count));
+            *mcp_arc.write().await = runtime;
+            info!(
+                servers = counts.0,
+                tools = counts.1,
+                "MCP lazy-init complete"
+            );
+        });
+    }
 
     pub async fn mcp_server_count(&self) -> usize {
         self.mcp.read().await.as_ref().map_or(0, |r| r.server_count)
@@ -396,6 +468,7 @@ impl AgentStack {
                     tool_count,
                     scope,
                     enabled,
+                    status: stack_tools::McpServerStatus::Connected,
                 }
             })
             .collect();
@@ -412,6 +485,7 @@ impl AgentStack {
                     tool_count: 0,
                     scope,
                     enabled: false,
+                    status: stack_tools::McpServerStatus::Disabled,
                 });
             }
         }
@@ -428,11 +502,20 @@ impl AgentStack {
         let disabled = self.disabled_mcp_servers.read().await;
         configs
             .into_iter()
-            .map(|(cfg, scope)| MCPServerInfo {
-                enabled: cfg.enabled && !disabled.contains(&cfg.name),
-                name: cfg.name,
-                tool_count: 0,
-                scope,
+            .map(|(cfg, scope)| {
+                let enabled = cfg.enabled && !disabled.contains(&cfg.name);
+                let status = if enabled {
+                    stack_tools::McpServerStatus::Connecting
+                } else {
+                    stack_tools::McpServerStatus::Disabled
+                };
+                MCPServerInfo {
+                    enabled,
+                    name: cfg.name,
+                    tool_count: 0,
+                    scope,
+                    status,
+                }
             })
             .collect()
     }

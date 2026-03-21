@@ -3,12 +3,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use ava_types::{AvaError, Result, ToolResult};
+use futures::future::join_all;
 use serde_json::Value;
 use tokio::sync::Mutex;
 use tracing::{info, warn};
 
 /// Default timeout for connecting to a single MCP server (including stdio spawn + initialize).
-const MCP_CONNECT_TIMEOUT_SECS: u64 = 15;
+const MCP_CONNECT_TIMEOUT_SECS: u64 = 30;
 
 use crate::client::{
     MCPClient, MCPPrompt, MCPPromptResult, MCPResource, MCPResourceContent, MCPTool,
@@ -38,91 +39,69 @@ impl ExtensionManager {
     }
 
     /// Connect to all enabled servers and discover their tools.
+    ///
+    /// All servers connect in parallel — each with an independent 30 s timeout.
+    /// One slow or failing server does NOT delay the others.
     pub async fn initialize(&mut self, configs: Vec<MCPServerConfig>) -> Result<()> {
-        for config in configs {
-            if !config.enabled {
-                info!(server = %config.name, "MCP server disabled, skipping");
-                continue;
-            }
+        let enabled: Vec<MCPServerConfig> = configs
+            .into_iter()
+            .filter(|c| {
+                if !c.enabled {
+                    info!(server = %c.name, "MCP server disabled, skipping");
+                    false
+                } else {
+                    true
+                }
+            })
+            .collect();
 
-            let timeout = Duration::from_secs(MCP_CONNECT_TIMEOUT_SECS);
-            match tokio::time::timeout(timeout, self.connect_server(&config)).await {
-                Ok(Ok(())) => {
-                    info!(server = %config.name, "MCP server connected");
+        if enabled.is_empty() {
+            return Ok(());
+        }
+
+        // Spawn all connections in parallel.
+        let timeout = Duration::from_secs(MCP_CONNECT_TIMEOUT_SECS);
+        let futures: Vec<_> = enabled
+            .iter()
+            .map(|cfg| {
+                let cfg = cfg.clone();
+                async move {
+                    let result =
+                        tokio::time::timeout(timeout, connect_server_standalone(&cfg)).await;
+                    (cfg.name.clone(), result)
+                }
+            })
+            .collect();
+
+        let results = join_all(futures).await;
+
+        for (server_name, result) in results {
+            match result {
+                Ok(Ok((client, mcp_tools))) => {
+                    info!(server = %server_name, tool_count = mcp_tools.len(), "MCP server connected");
+                    for tool in &mcp_tools {
+                        self.tools.push((server_name.clone(), tool.clone()));
+                    }
+                    self.clients
+                        .insert(server_name, Arc::new(Mutex::new(client)));
                 }
                 Ok(Err(e)) => {
                     warn!(
-                        server = %config.name,
+                        server = %server_name,
                         error = %e,
                         "Failed to connect MCP server, skipping"
                     );
                 }
                 Err(_elapsed) => {
                     warn!(
-                        server = %config.name,
+                        server = %server_name,
                         timeout_secs = MCP_CONNECT_TIMEOUT_SECS,
                         "MCP server connection timed out, skipping"
                     );
                 }
             }
         }
-        Ok(())
-    }
 
-    async fn connect_server(&mut self, config: &MCPServerConfig) -> Result<()> {
-        let transport: Box<dyn crate::transport::MCPTransport> = match &config.transport {
-            TransportType::Stdio { command, args, env } => {
-                Box::new(StdioTransport::spawn(command, args, env).await?)
-            }
-            TransportType::Http {
-                url,
-                auth,
-                bearer_token,
-                headers,
-            } => {
-                // Build transport config from config fields
-                let http_config = HttpTransportConfig {
-                    bearer_token: bearer_token.clone(),
-                    headers: headers.clone(),
-                };
-                let mut transport = HttpTransport::with_config(url, http_config);
-
-                // If OAuth is configured, acquire a token before connecting
-                if let Some(oauth_cfg) = auth {
-                    let mut oauth_mgr = McpOAuthManager::new(&config.name, oauth_cfg.clone());
-                    let token = oauth_mgr.get_access_token().await?;
-                    transport.set_bearer_token(token);
-                }
-
-                // Attempt SSE connection (best-effort — some servers use POST-only)
-                if let Err(e) = transport.connect_sse().await {
-                    tracing::debug!(
-                        server = %config.name,
-                        error = %e,
-                        "MCP SSE connect failed (may not be an SSE server, will use POST-only)"
-                    );
-                }
-
-                Box::new(transport)
-            }
-        };
-
-        let mut client = MCPClient::new(transport, &config.name);
-        client.initialize().await?;
-
-        let mcp_tools = client.list_tools().await?;
-        for tool in &mcp_tools {
-            self.tools.push((config.name.clone(), tool.clone()));
-        }
-
-        info!(
-            server = %config.name,
-            tool_count = mcp_tools.len(),
-            "Discovered MCP tools"
-        );
-
-        self.clients
-            .insert(config.name.clone(), Arc::new(Mutex::new(client)));
         Ok(())
     }
 
@@ -287,6 +266,62 @@ impl Default for ExtensionManager {
     fn default() -> Self {
         Self::new()
     }
+}
+
+// ---------------------------------------------------------------------------
+// Free-standing connect helper (used by parallel init)
+// ---------------------------------------------------------------------------
+
+/// Connect to a single MCP server and return the client + discovered tools.
+///
+/// This is a free function (not `&mut self`) so it can run in parallel for
+/// multiple servers without requiring exclusive access to `ExtensionManager`.
+async fn connect_server_standalone(config: &MCPServerConfig) -> Result<(MCPClient, Vec<MCPTool>)> {
+    let transport: Box<dyn crate::transport::MCPTransport> = match &config.transport {
+        TransportType::Stdio { command, args, env } => {
+            Box::new(StdioTransport::spawn(command, args, env).await?)
+        }
+        TransportType::Http {
+            url,
+            auth,
+            bearer_token,
+            headers,
+        } => {
+            let http_config = HttpTransportConfig {
+                bearer_token: bearer_token.clone(),
+                headers: headers.clone(),
+            };
+            let mut transport = HttpTransport::with_config(url, http_config);
+
+            if let Some(oauth_cfg) = auth {
+                let mut oauth_mgr = McpOAuthManager::new(&config.name, oauth_cfg.clone());
+                let token = oauth_mgr.get_access_token().await?;
+                transport.set_bearer_token(token);
+            }
+
+            if let Err(e) = transport.connect_sse().await {
+                tracing::debug!(
+                    server = %config.name,
+                    error = %e,
+                    "MCP SSE connect failed (may not be an SSE server, will use POST-only)"
+                );
+            }
+
+            Box::new(transport)
+        }
+    };
+
+    let mut client = MCPClient::new(transport, &config.name);
+    client.initialize().await?;
+    let mcp_tools = client.list_tools().await?;
+
+    info!(
+        server = %config.name,
+        tool_count = mcp_tools.len(),
+        "Discovered MCP tools"
+    );
+
+    Ok((client, mcp_tools))
 }
 
 /// Extract text content from an MCP tools/call result.

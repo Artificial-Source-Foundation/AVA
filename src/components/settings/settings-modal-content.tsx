@@ -29,6 +29,7 @@ interface SettingsModalContentProps {
   onTestProvider: (id: string) => Promise<void>
   onRemoveMcpServer: (id: string) => void
   onAddMcpServer: () => void
+  onRefreshMcpServers?: () => void
 }
 
 export const SettingsModalContent: Component<SettingsModalContentProps> = (props) => {
@@ -108,6 +109,7 @@ export const SettingsModalContent: Component<SettingsModalContentProps> = (props
           servers={props.mcpServers()}
           onRemove={props.onRemoveMcpServer}
           onAdd={props.onAddMcpServer}
+          onRefresh={props.onRefreshMcpServers}
         />
       </Show>
 

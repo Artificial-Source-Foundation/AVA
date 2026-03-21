@@ -460,11 +460,22 @@ export interface McpServerInfo {
   toolCount: number
   scope: string
   enabled: boolean
+  /** Connection status: "connected" | "disabled" | "failed" | "connecting" */
+  status?: string
 }
 
 export interface McpReloadResult {
   serverCount: number
   toolCount: number
+}
+
+export type PluginStatusValue = 'running' | 'stopped' | 'failed'
+
+export interface InstalledPluginInfo {
+  name: string
+  version: string
+  status: PluginStatusValue
+  hooks: string[]
 }
 
 export type PermissionLevelValue = 'standard' | 'autoApprove'

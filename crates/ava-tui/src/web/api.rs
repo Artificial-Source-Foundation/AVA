@@ -1338,6 +1338,142 @@ pub async fn get_config(
 }
 
 // ============================================================================
+// MCP Servers
+// ============================================================================
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpServerResponse {
+    pub name: String,
+    pub tool_count: usize,
+    pub scope: String,
+    pub enabled: bool,
+    pub status: String,
+}
+
+/// List all configured MCP servers with their connection status and tool count.
+pub async fn list_mcp_servers(State(state): State<WebState>) -> impl IntoResponse {
+    let servers = state.inner.stack.mcp_server_info().await;
+    let response: Vec<McpServerResponse> = servers
+        .into_iter()
+        .map(|s| {
+            let status = match &s.status {
+                ava_agent::stack::McpServerStatus::Connected => "connected",
+                ava_agent::stack::McpServerStatus::Disabled => "disabled",
+                ava_agent::stack::McpServerStatus::Failed(_) => "failed",
+                ava_agent::stack::McpServerStatus::Connecting => "connecting",
+            }
+            .to_string();
+            McpServerResponse {
+                name: s.name,
+                tool_count: s.tool_count,
+                scope: s.scope.to_string(),
+                enabled: s.enabled,
+                status,
+            }
+        })
+        .collect();
+    Json(response)
+}
+
+#[derive(Deserialize)]
+pub struct McpServerNamePath {
+    pub name: String,
+}
+
+/// Enable a previously disabled MCP server.
+pub async fn enable_mcp_server(
+    State(state): State<WebState>,
+    Path(name): Path<String>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ErrorResponse>)> {
+    let changed = state.inner.stack.mcp_enable_server(&name).await;
+    if changed {
+        Ok(Json(serde_json::json!({ "ok": true, "name": name })))
+    } else {
+        Err(error_response(
+            StatusCode::NOT_FOUND,
+            &format!("MCP server '{name}' is not known or was not disabled"),
+        ))
+    }
+}
+
+/// Disable an MCP server for this session.
+pub async fn disable_mcp_server(
+    State(state): State<WebState>,
+    Path(name): Path<String>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ErrorResponse>)> {
+    let changed = state.inner.stack.mcp_disable_server(&name).await;
+    if changed {
+        Ok(Json(serde_json::json!({ "ok": true, "name": name })))
+    } else {
+        Err(error_response(
+            StatusCode::NOT_FOUND,
+            &format!("MCP server '{name}' is not known"),
+        ))
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpReloadResponse {
+    pub server_count: usize,
+    pub tool_count: usize,
+}
+
+/// Reload MCP servers from config on disk.
+pub async fn reload_mcp(
+    State(state): State<WebState>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ErrorResponse>)> {
+    let (server_count, tool_count) = state
+        .inner
+        .stack
+        .reload_mcp()
+        .await
+        .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
+    Ok(Json(McpReloadResponse {
+        server_count,
+        tool_count,
+    }))
+}
+
+// ============================================================================
+// Plugins
+// ============================================================================
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginInfoResponse {
+    pub name: String,
+    pub version: String,
+    pub status: String,
+    pub hooks: Vec<String>,
+}
+
+/// List all loaded power plugins with their status and hook subscriptions.
+pub async fn list_plugins(State(state): State<WebState>) -> impl IntoResponse {
+    let mgr = state.inner.stack.plugin_manager.lock().await;
+    let infos = mgr.list_plugins();
+    let response: Vec<PluginInfoResponse> = infos
+        .into_iter()
+        .map(|p| {
+            let status = match &p.status {
+                ava_plugin::PluginStatus::Running => "running",
+                ava_plugin::PluginStatus::Stopped => "stopped",
+                ava_plugin::PluginStatus::Failed(_) => "failed",
+            }
+            .to_string();
+            PluginInfoResponse {
+                name: p.name,
+                version: p.version,
+                status,
+                hooks: p.hooks,
+            }
+        })
+        .collect();
+    Json(response)
+}
+
+// ============================================================================
 // Permission level
 // ============================================================================
 

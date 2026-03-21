@@ -3,7 +3,7 @@ mod stack_run;
 pub(crate) mod stack_tools;
 
 pub use stack_config::{AgentRunResult, AgentStackConfig};
-pub use stack_tools::MCPServerInfo;
+pub use stack_tools::{MCPServerInfo, McpServerStatus};
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};

@@ -65,6 +65,11 @@ const COMMAND_TO_ENDPOINT: Record<string, { path: string; method: 'GET' | 'POST'
   // MCP
   list_mcp_servers: { path: '/api/mcp', method: 'GET' },
   reload_mcp_servers: { path: '/api/mcp/reload', method: 'POST' },
+  enable_mcp_server: { path: '/api/mcp/servers/{name}/enable', method: 'POST' },
+  disable_mcp_server: { path: '/api/mcp/servers/{name}/disable', method: 'POST' },
+
+  // Plugins
+  list_installed_plugins: { path: '/api/plugins', method: 'GET' },
 
   // Permissions
   get_permission_level: { path: '/api/permissions', method: 'GET' },

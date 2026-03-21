@@ -5,6 +5,7 @@
 import { type Component, createEffect, createSignal, onCleanup, Show } from 'solid-js'
 import { useNotification } from '../../contexts/notification'
 import { fetchModels } from '../../services/providers/model-fetcher'
+import { rustBackend } from '../../services/rust-bridge'
 import { useLayout } from '../../stores/layout'
 import { useSettings } from '../../stores/settings'
 import { useShortcuts } from '../../stores/shortcuts'
@@ -28,15 +29,77 @@ export const SettingsModal: Component = () => {
   const [settingsSearch, setSettingsSearch] = createSignal('')
   const [editingKeybinding, setEditingKeybinding] = createSignal<Keybinding | null>(null)
   const [addMcpDialogOpen, setAddMcpDialogOpen] = createSignal(false)
+  const [backendMcpServers, setBackendMcpServers] = createSignal<MCPServer[] | null>(null)
 
-  const mcpServers = (): MCPServer[] =>
-    settings().mcpServers.map((s) => ({
+  /** Map backend status strings to MCPServer.status union. */
+  function mapMcpStatus(backendStatus: string | undefined, enabled: boolean): MCPServer['status'] {
+    switch (backendStatus) {
+      case 'connected':
+        return 'connected'
+      case 'connecting':
+        return 'connecting'
+      case 'failed':
+        return 'error'
+      case 'disabled':
+        return 'disconnected'
+      default:
+        return enabled ? 'connecting' : 'disconnected'
+    }
+  }
+
+  /** Build MCPServer list from a backend response, merging with local settings for URLs. */
+  function mapBackendMcpServers(
+    servers: import('../../types/rust-ipc').McpServerInfo[]
+  ): MCPServer[] {
+    return servers.map((s) => {
+      const local = settings().mcpServers.find((ls) => ls.name === s.name)
+      const url =
+        local?.url ??
+        (local?.command
+          ? `${local.command} ${(local.args ?? []).join(' ')}`.trim()
+          : `[${s.scope}]`)
+      return {
+        id: s.name,
+        name: s.name,
+        url,
+        status: mapMcpStatus(s.status, s.enabled),
+        description: `${s.toolCount} tool${s.toolCount !== 1 ? 's' : ''} · ${s.scope}`,
+      }
+    })
+  }
+
+  // Fetch real MCP server status from the Rust backend whenever the MCP tab is active.
+  createEffect(() => {
+    if (activeTab() !== 'mcp') return
+    rustBackend
+      .listMcpServers()
+      .then((servers) => setBackendMcpServers(mapBackendMcpServers(servers)))
+      .catch(() => {
+        // Fall back to local settings on error — backend may not be running
+        setBackendMcpServers(null)
+      })
+  })
+
+  const mcpServers = (): MCPServer[] => {
+    // Prefer live backend data when available; fall back to local settings.
+    const live = backendMcpServers()
+    if (live !== null) return live
+    return settings().mcpServers.map((s) => ({
       id: s.name,
       name: s.name,
       url: s.url ?? (s.command ? `${s.command} ${(s.args ?? []).join(' ')}` : 'stdio'),
       status: 'disconnected' as const,
       description: `${s.type} transport`,
     }))
+  }
+
+  const handleRefreshMcp = (): void => {
+    setBackendMcpServers(null)
+    rustBackend
+      .listMcpServers()
+      .then((servers) => setBackendMcpServers(mapBackendMcpServers(servers)))
+      .catch(() => setBackendMcpServers(null))
+  }
 
   const keybindings = () =>
     shortcuts().map((s) => ({
@@ -132,6 +195,7 @@ export const SettingsModal: Component = () => {
               onTestProvider={handleTestProvider}
               onRemoveMcpServer={removeMcpServer}
               onAddMcpServer={() => setAddMcpDialogOpen(true)}
+              onRefreshMcpServers={handleRefreshMcp}
             />
           </div>
         </div>

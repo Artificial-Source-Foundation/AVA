@@ -15,6 +15,7 @@ import type {
   ExtensionRegistrationResult,
   FuzzyReplaceResult,
   GitToolResult,
+  InstalledPluginInfo,
   JsonValue,
   McpReloadResult,
   McpServerInfo,
@@ -262,6 +263,11 @@ export const rustBackend = {
 
   listMcpServers: (): Promise<McpServerInfo[]> => invokeCommand('list_mcp_servers'),
   reloadMcpServers: (): Promise<McpReloadResult> => invokeCommand('reload_mcp_servers'),
+  enableMcpServer: (name: string): Promise<void> => invokeCommand('enable_mcp_server', { name }),
+  disableMcpServer: (name: string): Promise<void> => invokeCommand('disable_mcp_server', { name }),
+
+  listInstalledPlugins: (): Promise<InstalledPluginInfo[]> =>
+    invokeCommand('list_installed_plugins'),
 
   getPermissionLevel: (): Promise<PermissionLevelInfo> => invokeCommand('get_permission_level'),
   setPermissionLevel: (level: PermissionLevelValue): Promise<PermissionLevelInfo> =>

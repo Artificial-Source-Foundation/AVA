@@ -35,6 +35,11 @@
 //! | GET    | `/api/sessions/{id}/terminal`     | List terminal executions (stub)           |
 //! | GET    | `/api/sessions/{id}/memory`       | List memory items (stub)                  |
 //! | GET    | `/api/sessions/{id}/checkpoints`  | List checkpoints (stub)                   |
+//! | GET    | `/api/mcp`                        | List configured MCP servers               |
+//! | POST   | `/api/mcp/reload`                 | Reload MCP config from disk               |
+//! | POST   | `/api/mcp/servers/{name}/enable`  | Enable an MCP server                      |
+//! | POST   | `/api/mcp/servers/{name}/disable` | Disable an MCP server                     |
+//! | GET    | `/api/plugins`                    | List loaded power plugins                 |
 //! | GET    | `/api/models`                     | List available models                     |
 //! | GET    | `/api/models/current`             | Get the currently-active model            |
 //! | POST   | `/api/models/switch`              | Switch the active model                   |
@@ -116,6 +121,19 @@ fn build_router(state: WebState) -> Router {
         .route("/api/sessions/delete", post(api::delete_session_body))
         .route("/api/sessions/rename", post(api::rename_session_body))
         .route("/api/sessions/load", post(api::load_session_body))
+        // MCP endpoints
+        .route("/api/mcp", get(api::list_mcp_servers))
+        .route("/api/mcp/reload", post(api::reload_mcp))
+        .route(
+            "/api/mcp/servers/:name/enable",
+            post(api::enable_mcp_server),
+        )
+        .route(
+            "/api/mcp/servers/:name/disable",
+            post(api::disable_mcp_server),
+        )
+        // Plugins endpoint
+        .route("/api/plugins", get(api::list_plugins))
         // Model/provider endpoints
         .route("/api/models", get(api::list_models))
         .route("/api/models/current", get(api::get_current_model))

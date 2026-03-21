@@ -117,9 +117,9 @@ impl AgentStack {
     ) -> Result<AgentRunResult> {
         let raw_goal = goal.to_string();
 
-        // Trigger MCP lazy-init on the first run() call.
-        // This spawns a background task — subsequent calls are no-ops.
-        self.ensure_mcp_initialized();
+        // Ensure MCP is initialized before building the per-run tool registry.
+        // This awaits completion so MCP tools are available when we read self.mcp below.
+        self.ensure_mcp_initialized().await;
 
         // Fire SessionStart plugin hook
         {

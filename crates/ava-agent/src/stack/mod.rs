@@ -303,9 +303,9 @@ impl AgentStack {
         register_plan_tool(&mut registry, plan_bridge.clone(), plan_state.clone());
         register_custom_tools(&mut registry, &custom_tool_dirs);
 
-        // MCP init is deferred to the first run() call (lazy init).
-        // We do NOT block startup here — MCP will connect in the background
-        // on the first run() via ensure_mcp_initialized().
+        // MCP init is deferred to the first run() call via ensure_mcp_initialized().
+        // This avoids blocking startup on potentially-slow server connections while
+        // still guaranteeing MCP tools are registered before the agent runs.
         let mcp_runtime: Option<stack_tools::MCPRuntime> = None;
 
         // Populate the permission middleware's source map from the fully-built registry
@@ -371,67 +371,63 @@ impl AgentStack {
     // MCP server management
     // ========================================================================
 
-    /// Trigger MCP initialization in the background on the first call.
+    /// Ensure MCP is initialized, awaiting completion before returning.
     ///
-    /// This is the lazy-init entry point. It uses an `AtomicBool` compare-exchange
-    /// so that concurrent first-`run()` calls only spawn a single init task.
-    /// The background task connects all servers in parallel (each with 30 s timeout)
-    /// and registers their tools into the shared registry when done.
+    /// This is the lazy-init entry point. An `AtomicBool` compare-exchange
+    /// ensures only the first concurrent caller actually runs init; subsequent
+    /// callers return immediately once the flag is already set.
     ///
-    /// Callers do not need an `Arc<Self>` — we clone the internal `Arc` fields
-    /// needed by the background task and pass them in directly.
-    pub fn ensure_mcp_initialized(&self) {
+    /// The init runs **inline** (not in a background task) so that MCP tools
+    /// are guaranteed to be registered in the `ToolRegistry` by the time this
+    /// returns — fixing the race condition where `run()` would read an empty
+    /// `self.mcp` because the background task had not yet completed.
+    pub async fn ensure_mcp_initialized(&self) {
         // compare_exchange: if false → set true and proceed; otherwise bail out.
         if self
             .mcp_init_done
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
             .is_err()
         {
-            return; // already initialised or init is in progress
+            return; // already initialised
         }
 
-        // Clone the fields we need — all are already wrapped in Arc.
-        let mcp_arc = Arc::clone(&self.mcp);
-        let tools_arc = Arc::clone(&self.tools);
-        let shared_sources = self.shared_tool_sources.clone();
-        let global_cfg = self.mcp_global_config.clone();
-        let project_cfg = self.mcp_project_config.clone();
-        // Snapshot the disabled set; any changes after this point will
-        // be picked up by the next explicit reload_mcp() call.
-        let disabled_arc = {
-            // We can't easily await here (this is a sync fn), so we try a
-            // non-blocking read. If the lock is held, we start with an empty
-            // disabled set — a negligible edge case at startup.
-            std::collections::HashSet::<String>::new()
-        };
+        info!("MCP init: connecting servers…");
 
-        tokio::spawn(async move {
-            info!("MCP lazy-init: connecting servers in background…");
-            let mut registry = tools_arc.write().await;
-            let runtime =
-                init_mcp_with_disabled(&global_cfg, &project_cfg, &mut registry, &disabled_arc)
-                    .await;
+        let disabled = self.disabled_mcp_servers.read().await.clone();
 
-            // Refresh shared tool sources so permission middleware sees MCP tools.
-            {
-                let mut sources = shared_sources.write().unwrap_or_else(|e| e.into_inner());
-                for (def, src) in registry.list_tools_with_source() {
-                    if matches!(src, ToolSource::MCP { .. }) {
-                        sources.insert(def.name, convert_tool_source(&src));
-                    }
+        let mut registry = self.tools.write().await;
+        let runtime = init_mcp_with_disabled(
+            &self.mcp_global_config,
+            &self.mcp_project_config,
+            &mut registry,
+            &disabled,
+        )
+        .await;
+
+        // Refresh shared tool sources so permission middleware sees MCP tools.
+        {
+            let mut sources = self
+                .shared_tool_sources
+                .write()
+                .unwrap_or_else(|e| e.into_inner());
+            for (def, src) in registry.list_tools_with_source() {
+                if matches!(src, ToolSource::MCP { .. }) {
+                    sources.insert(def.name, convert_tool_source(&src));
                 }
             }
+        }
+        // Drop the registry write-lock before acquiring the mcp write-lock.
+        drop(registry);
 
-            let counts = runtime
-                .as_ref()
-                .map_or((0, 0), |r| (r.server_count, r.tool_count));
-            *mcp_arc.write().await = runtime;
-            info!(
-                servers = counts.0,
-                tools = counts.1,
-                "MCP lazy-init complete"
-            );
-        });
+        let counts = runtime
+            .as_ref()
+            .map_or((0, 0), |r| (r.server_count, r.tool_count));
+        *self.mcp.write().await = runtime;
+        info!(
+            servers = counts.0,
+            tools = counts.1,
+            "MCP init complete — tools now available"
+        );
     }
 
     pub async fn mcp_server_count(&self) -> usize {

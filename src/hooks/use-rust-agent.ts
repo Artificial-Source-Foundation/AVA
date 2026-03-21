@@ -321,14 +321,24 @@ export function useRustAgent() {
   }
 
   const attachListener = async (): Promise<void> => {
-    detachListener()
-
     if (isTauri()) {
+      // Tauri: always recreate the listener (cheap, event-based)
+      if (unlisten) {
+        unlisten()
+        unlisten = null
+      }
       unlisten = await listen<AgentEvent>('agent-event', (evt) => {
         handleAgentEvent(evt.payload)
       })
+    } else if (eventSocket && eventSocket.readyState === WebSocket.OPEN) {
+      // Browser: reuse existing open WebSocket connection
+      return
     } else {
-      // Browser mode — connect via WebSocket
+      // Browser mode — connect via WebSocket (first run or reconnect)
+      if (eventSocket) {
+        eventSocket.close()
+        eventSocket = null
+      }
       log.info('ws', 'Connecting to event WebSocket')
       const ws = createEventSocket()
       eventSocket = ws
@@ -376,11 +386,19 @@ export function useRustAgent() {
     }
   }
 
+  /** Detach Tauri listener only. WebSocket stays alive for reuse across runs. */
   const detachListener = (): void => {
     if (unlisten) {
       unlisten()
       unlisten = null
     }
+    // Don't close eventSocket here — it's reused across runs.
+    // Only closed on component cleanup (onCleanup).
+  }
+
+  /** Full cleanup — close everything including WebSocket. */
+  const destroyListener = (): void => {
+    detachListener()
     if (eventSocket) {
       eventSocket.close()
       eventSocket = null
@@ -552,7 +570,7 @@ export function useRustAgent() {
   }
 
   onCleanup(() => {
-    detachListener()
+    destroyListener()
   })
 
   return {

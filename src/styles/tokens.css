@@ -591,11 +591,7 @@
    LONG-SESSION RENDERING PERFORMANCE
    ======================================== */
 
-/* Skip rendering off-screen messages; auto-size preserves scroll position */
-[data-message-id] {
-  content-visibility: auto;
-  contain-intrinsic-size: auto 80px;
-}
+/* content-visibility for messages is set inline in message-row.tsx (120px estimate) */
 
 /* ========================================
    REDUCED MOTION

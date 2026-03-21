@@ -346,6 +346,20 @@ button {
   display: none;
 }
 
+.scrollbar-thin {
+  scrollbar-width: thin;
+}
+.scrollbar-thin::-webkit-scrollbar {
+  width: 4px;
+}
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: var(--gray-6, #555);
+  border-radius: 2px;
+}
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+
 .animate-spin {
   animation: spin 1s linear infinite;
 }
@@ -967,7 +981,8 @@ button {
 }
 
 /* Chat content should be selectable */
-.message-content {
+.message-content,
+.thinking-content {
   -webkit-user-select: text;
   user-select: text;
 }

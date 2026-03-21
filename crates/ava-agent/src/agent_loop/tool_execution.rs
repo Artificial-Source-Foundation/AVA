@@ -673,6 +673,11 @@ pub fn check_plan_mode_tool(tool_call: &ToolCall) -> Option<String> {
 /// Attempt to repair a misnamed tool call (e.g. "Read" → "read", "Bash" → "bash").
 ///
 /// Returns the corrected name if a match is found, or the original name if not.
+///
+/// Also handles MCP namespace stripping: when the LLM calls a tool by its bare name
+/// (e.g. `"weather"`) but it is registered under a namespaced name
+/// (e.g. `"mcp.weather.weather"`), we match the last segment of the registered name.
+/// If multiple MCP tools share the same bare name, the first match wins.
 pub fn repair_tool_name(name: &str, registry: &ToolRegistry) -> String {
     // Exact match — no repair needed
     if registry.has_tool(name) {
@@ -681,11 +686,31 @@ pub fn repair_tool_name(name: &str, registry: &ToolRegistry) -> String {
 
     // Case-insensitive match against all registered tool names
     let lower = name.to_lowercase();
+    let mut mcp_match: Option<String> = None;
     for tool_name in registry.tool_names() {
         if tool_name.to_lowercase() == lower {
             tracing::info!("Repaired tool name '{}' → '{}'", name, tool_name);
             return tool_name;
         }
+
+        // MCP namespace repair: registered name is "mcp.{server}.{tool}", LLM called "{tool}".
+        // Match when the last dot-separated segment equals the requested name (case-insensitive).
+        if mcp_match.is_none() {
+            if let Some(last_seg) = tool_name.rsplit('.').next() {
+                if last_seg.to_lowercase() == lower {
+                    mcp_match = Some(tool_name);
+                }
+            }
+        }
+    }
+
+    if let Some(repaired) = mcp_match {
+        tracing::info!(
+            "Repaired MCP tool name '{}' → '{}' (namespace expansion)",
+            name,
+            repaired
+        );
+        return repaired;
     }
 
     // No match — return original (will error in execute)

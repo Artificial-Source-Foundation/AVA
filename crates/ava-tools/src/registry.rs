@@ -271,6 +271,13 @@ impl ToolRegistry {
 
         let mut result = result?;
 
+        // Always normalise call_id to the LLM-assigned tool call ID so that
+        // downstream consumers (TUI, trajectory log, summarisation) see a
+        // consistent identifier regardless of what each tool implementation
+        // returns. MCP bridge tools, for example, emit a fabricated id of the
+        // form "mcp-{server}-{tool}" which would mismatch the real call id.
+        result.call_id = tool_call.id.clone();
+
         for middleware in &self.middleware {
             result = middleware.after(&tool_call, &result).await?;
         }

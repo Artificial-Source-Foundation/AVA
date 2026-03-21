@@ -23,6 +23,20 @@ interface WebDatabase {
 }
 
 /**
+ * Maps frontend session IDs to backend session IDs.
+ * The backend creates its own session during submit_goal, so the IDs diverge.
+ * When loading messages, we need to use the backend's ID.
+ */
+const _sessionIdMap = new Map<string, string>()
+
+/** Register a frontend→backend session ID mapping (called after agent run). */
+export function registerBackendSessionId(frontendId: string, backendId: string): void {
+  if (frontendId !== backendId) {
+    _sessionIdMap.set(frontendId, backendId)
+  }
+}
+
+/**
  * Create a web-mode database adapter that routes operations through HTTP.
  */
 export function createWebDatabase(): WebDatabase {
@@ -86,8 +100,10 @@ export function createWebDatabase(): WebDatabase {
       // Message listing for a session
       if (q.includes('from messages') && q.includes('session_id')) {
         const params = _params ?? []
-        const sessionId = params[0] as string
-        if (!sessionId) return [] as unknown as T
+        const frontendSessionId = params[0] as string
+        if (!frontendSessionId) return [] as unknown as T
+        // Use the backend session ID if we have a mapping (frontend and backend IDs diverge)
+        const sessionId = _sessionIdMap.get(frontendSessionId) || frontendSessionId
         try {
           // Use the dedicated messages endpoint for a flat array of MessageSummary objects.
           // Fall back to the session detail endpoint if the dedicated endpoint is unavailable.

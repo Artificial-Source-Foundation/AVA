@@ -16,6 +16,7 @@ import { log } from '../lib/logger'
 import { deriveSessionTitle } from '../lib/title-utils'
 import { checkAutoApproval as sharedCheckAutoApproval } from '../lib/tool-approval'
 import { getCoreBudget } from '../services/core-bridge'
+import { registerBackendSessionId } from '../services/db-web-fallback'
 import { rustAgent as rustAgentBridge, rustBackend } from '../services/rust-bridge'
 import { useSession } from '../stores/session'
 import { useSettings } from '../stores/settings'
@@ -558,6 +559,8 @@ function createAgentStore() {
               }
             })
             session.replaceMessagesFromBackend(backendMsgs)
+            // Register the ID mapping so session switching loads from the right backend session
+            registerBackendSessionId(sessionId, backendSessionId)
             log.info('agent', 'Store synced from backend', {
               count: backendMsgs.length,
               backendSessionId,

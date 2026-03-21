@@ -455,6 +455,77 @@ impl AgentLoop {
         result
     }
 
+    /// Apply the `chat.messages.transform` hook to the current context messages.
+    ///
+    /// Returns the (possibly modified) message list. If no plugins subscribe or the
+    /// hook returns unchanged content, the original context messages are returned as-is.
+    async fn apply_messages_transform(&mut self) -> Vec<Message> {
+        let messages = self.context.get_messages().to_vec();
+        let Some(ref pm) = self.plugin_manager.clone() else {
+            return messages;
+        };
+
+        // Serialize messages to JSON for the hook.
+        let json_messages: Vec<serde_json::Value> = messages
+            .iter()
+            .map(|m| {
+                let role_str = match m.role {
+                    Role::System => "system",
+                    Role::User => "user",
+                    Role::Assistant => "assistant",
+                    Role::Tool => "tool",
+                };
+                serde_json::json!({
+                    "role": role_str,
+                    "content": m.content,
+                })
+            })
+            .collect();
+
+        let transformed = pm
+            .lock()
+            .await
+            .apply_messages_transform_hook(json_messages)
+            .await;
+
+        // Map transformed JSON back to Message objects.
+        // For messages that still match by index, preserve the full original (with images,
+        // tool calls, etc.) but update `content` if changed. For new/extra messages, create
+        // minimal Message objects from the JSON.
+        let mut result: Vec<Message> = Vec::with_capacity(transformed.len());
+        for (i, json_msg) in transformed.iter().enumerate() {
+            let content = json_msg
+                .get("content")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let role_str = json_msg
+                .get("role")
+                .and_then(|v| v.as_str())
+                .unwrap_or("user");
+            if let Some(orig) = messages.get(i) {
+                // Preserve original message structure; only update content if changed.
+                if orig.content != content {
+                    let mut updated = orig.clone();
+                    updated.content = content;
+                    result.push(updated);
+                } else {
+                    result.push(orig.clone());
+                }
+            } else {
+                // New message injected by a plugin.
+                let role = match role_str {
+                    "assistant" => Role::Assistant,
+                    "system" => Role::System,
+                    "tool" => Role::Tool,
+                    _ => Role::User,
+                };
+                result.push(Message::new(role, content));
+            }
+        }
+        result
+    }
+
     /// Streaming LLM call: emits Token, Thinking, and TokenUsage events.
     async fn generate_turn_streaming(
         &mut self,
@@ -468,6 +539,9 @@ impl AgentLoop {
             messages = self.context.get_messages().len(),
             "starting LLM stream request"
         );
+
+        // --- chat.messages.transform hook (request/response) ---
+        let messages = self.apply_messages_transform().await;
 
         let stream_result = if native_tools {
             let tool_defs = self.active_tool_defs_with_hooks().await;
@@ -487,19 +561,15 @@ impl AgentLoop {
                     );
                 }
                 self.llm
-                    .generate_stream_with_thinking_config(
-                        self.context.get_messages(),
-                        &tool_defs,
-                        thinking,
-                    )
+                    .generate_stream_with_thinking_config(&messages, &tool_defs, thinking)
                     .await
             } else {
                 self.llm
-                    .generate_stream_with_tools(self.context.get_messages(), &tool_defs)
+                    .generate_stream_with_tools(&messages, &tool_defs)
                     .await
             }
         } else {
-            self.llm.generate_stream(self.context.get_messages()).await
+            self.llm.generate_stream(&messages).await
         };
 
         let mut stream = stream_result?;
@@ -592,6 +662,23 @@ impl AgentLoop {
             has_usage = last_usage.is_some(),
             "stream completed"
         );
+
+        // --- text.complete hook (notification) ---
+        if !full_text.is_empty() {
+            if let Some(ref pm) = self.plugin_manager {
+                let token_count = last_usage.as_ref().map(|u| u.output_tokens).unwrap_or(0);
+                let mut pm = pm.lock().await;
+                pm.trigger_hook(
+                    ava_plugin::HookEvent::TextComplete,
+                    serde_json::json!({
+                        "session_id": "",
+                        "content": full_text,
+                        "token_count": token_count,
+                    }),
+                )
+                .await;
+            }
+        }
 
         // Convert accumulated tool calls or parse from text
         let tool_calls = if native_tools && !accumulated_tool_calls.is_empty() {
@@ -809,7 +896,23 @@ impl AgentLoop {
             Message::new(Role::User, goal.to_string()).with_images(goal_images)
         };
         self.context.add_message(goal_message.clone());
-        session.add_message(goal_message);
+        session.add_message(goal_message.clone());
+
+        // --- chat.message hook (notification) ---
+        if let Some(ref pm) = self.plugin_manager {
+            let mut pm = pm.lock().await;
+            pm.trigger_hook(
+                ava_plugin::HookEvent::ChatMessage,
+                serde_json::json!({
+                    "session_id": session.id.to_string(),
+                    "message": {
+                        "role": "user",
+                        "content": goal,
+                    }
+                }),
+            )
+            .await;
+        }
 
         // max_turns == 0 means unlimited; use a very large sentinel
         let effective_max = if self.config.max_turns == 0 {
@@ -1074,6 +1177,25 @@ impl AgentLoop {
                 }
                 // If still over threshold after pruning, do full compaction.
                 if self.context.should_compact() {
+                    // --- session.compacting hook (request/response) ---
+                    if let Some(ref pm) = self.plugin_manager.clone() {
+                        let msg_count = self.context.get_messages().len();
+                        let token_count = self.context.token_count();
+                        let (extra_context, _custom_prompt) = pm
+                            .lock()
+                            .await
+                            .apply_session_compacting_hook(
+                                &session.id.to_string(),
+                                msg_count,
+                                token_count,
+                            )
+                            .await;
+                        // Inject extra context strings as system messages before compaction.
+                        for ctx_str in extra_context {
+                            self.context
+                                .add_message(Message::new(Role::System, ctx_str));
+                        }
+                    }
                     if let Err(error) = self.context.compact_async().await {
                         Self::emit(&event_tx, AgentEvent::Error(error.to_string()));
                         return Err(error.into());

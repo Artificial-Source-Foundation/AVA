@@ -496,6 +496,204 @@ impl PluginManager {
         }
     }
 
+    // -----------------------------------------------------------------------
+    // chat.messages.transform — rewrite conversation history before LLM call
+    // -----------------------------------------------------------------------
+
+    /// Run the `chat.messages.transform` hook, allowing plugins to rewrite the
+    /// message list before it is sent to the LLM.
+    ///
+    /// `messages` is a JSON array of `{"role": "...", "content": "..."}` objects.
+    /// Each subscribed plugin may return a modified array under the `"messages"` key.
+    /// Plugins are chained — each plugin receives the output of the previous one.
+    /// Messages returned by a plugin that lack a `role` field are silently discarded.
+    ///
+    /// Returns the (possibly modified) message list as JSON values.
+    pub async fn apply_messages_transform_hook(&mut self, messages: Vec<Value>) -> Vec<Value> {
+        let subscribers = self
+            .dispatcher
+            .subscribers(&HookEvent::ChatMessagesTransform)
+            .to_vec();
+        if subscribers.is_empty() {
+            return messages;
+        }
+
+        let mut current = messages;
+        for _plugin_name in &subscribers {
+            let params = serde_json::json!({ "messages": current });
+            let responses = self
+                .dispatcher
+                .dispatch(
+                    &HookEvent::ChatMessagesTransform,
+                    &params,
+                    &mut self.processes,
+                )
+                .await;
+
+            for resp in responses {
+                if let Some(ref e) = resp.error {
+                    warn!(
+                        plugin = resp.plugin_name,
+                        error = %e,
+                        "chat.messages.transform hook failed, keeping current messages"
+                    );
+                    continue;
+                }
+                if let Some(arr) = resp.result.get("messages").and_then(|v| v.as_array()) {
+                    // Only keep entries that have a "role" field.
+                    current = arr
+                        .iter()
+                        .filter(|m| m.get("role").and_then(|r| r.as_str()).is_some())
+                        .cloned()
+                        .collect();
+                } else {
+                    warn!(
+                        plugin = resp.plugin_name,
+                        "chat.messages.transform hook returned no 'messages' array, ignoring"
+                    );
+                }
+            }
+        }
+
+        current
+    }
+
+    // -----------------------------------------------------------------------
+    // session.compacting — inject context before compaction
+    // -----------------------------------------------------------------------
+
+    /// Run the `session.compacting` hook before context compaction starts.
+    ///
+    /// Parameters: `{"session_id": "...", "message_count": N, "token_count": N}`.
+    /// Each plugin may return:
+    /// - `"context"`: `Vec<String>` of extra context strings to inject.
+    /// - `"prompt"`: `String` custom compaction prompt (first non-empty wins).
+    ///
+    /// Returns `(extra_context, custom_prompt)`.
+    pub async fn apply_session_compacting_hook(
+        &mut self,
+        session_id: &str,
+        message_count: usize,
+        token_count: usize,
+    ) -> (Vec<String>, Option<String>) {
+        let subscribers = self
+            .dispatcher
+            .subscribers(&HookEvent::SessionCompacting)
+            .to_vec();
+        if subscribers.is_empty() {
+            return (Vec::new(), None);
+        }
+
+        let params = serde_json::json!({
+            "session_id": session_id,
+            "message_count": message_count,
+            "token_count": token_count,
+        });
+        let responses = self
+            .dispatcher
+            .dispatch(&HookEvent::SessionCompacting, &params, &mut self.processes)
+            .await;
+
+        let mut extra_context: Vec<String> = Vec::new();
+        let mut custom_prompt: Option<String> = None;
+
+        for resp in responses {
+            if let Some(ref e) = resp.error {
+                warn!(
+                    plugin = resp.plugin_name,
+                    error = %e,
+                    "session.compacting hook failed"
+                );
+                continue;
+            }
+            if let Some(ctx_arr) = resp.result.get("context").and_then(|v| v.as_array()) {
+                for item in ctx_arr {
+                    if let Some(s) = item.as_str() {
+                        let trimmed = s.trim();
+                        if !trimmed.is_empty() {
+                            extra_context.push(trimmed.to_string());
+                        }
+                    }
+                }
+            }
+            if custom_prompt.is_none() {
+                if let Some(p) = resp.result.get("prompt").and_then(|v| v.as_str()) {
+                    let trimmed = p.trim();
+                    if !trimmed.is_empty() {
+                        custom_prompt = Some(trimmed.to_string());
+                    }
+                }
+            }
+        }
+
+        (extra_context, custom_prompt)
+    }
+
+    // -----------------------------------------------------------------------
+    // command.execute.before — allow plugins to block slash commands
+    // -----------------------------------------------------------------------
+
+    /// Run the `command.execute.before` hook before a slash command executes.
+    ///
+    /// Parameters: `{"command": "<name without />", "arguments": "<rest of line>"}`.
+    /// The first plugin that returns `{"block": true}` wins and blocks execution.
+    ///
+    /// Returns `Some(reason)` if a plugin blocked the command, `None` otherwise.
+    pub async fn check_command_execute_before(
+        &mut self,
+        command: &str,
+        arguments: &str,
+    ) -> Option<String> {
+        let subscribers = self
+            .dispatcher
+            .subscribers(&HookEvent::CommandExecuteBefore)
+            .to_vec();
+        if subscribers.is_empty() {
+            return None;
+        }
+
+        let params = serde_json::json!({
+            "command": command,
+            "arguments": arguments,
+        });
+        let responses = self
+            .dispatcher
+            .dispatch(
+                &HookEvent::CommandExecuteBefore,
+                &params,
+                &mut self.processes,
+            )
+            .await;
+
+        for resp in responses {
+            if let Some(ref e) = resp.error {
+                warn!(
+                    plugin = resp.plugin_name,
+                    command,
+                    error = %e,
+                    "command.execute.before hook failed"
+                );
+                continue;
+            }
+            if resp
+                .result
+                .get("block")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false)
+            {
+                let reason = resp
+                    .result
+                    .get("reason")
+                    .and_then(|r| r.as_str())
+                    .unwrap_or("blocked by plugin")
+                    .to_string();
+                return Some(reason);
+            }
+        }
+
+        None // No plugin blocked the command
+    }
+
     /// Gracefully shut down all running plugin processes.
     pub async fn shutdown_all(&mut self) {
         info!(count = self.processes.len(), "shutting down all plugins");

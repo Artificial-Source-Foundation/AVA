@@ -41,6 +41,30 @@ impl App {
         let cmd = parts[0];
         let arg = parts.get(1).map(|s| s.trim());
 
+        // --- command.execute.before hook (request/response, blocking) ---
+        // Fires before ANY slash command executes. Plugins may block execution by
+        // returning `{"block": true, "reason": "..."}`.
+        if let Ok(stack) = self.state.agent.stack() {
+            let cmd_name = cmd.trim_start_matches('/').to_string();
+            let arguments = arg.unwrap_or("").to_string();
+            let pm = Arc::clone(&stack.plugin_manager);
+            let block_reason = tokio::task::block_in_place(|| {
+                tokio::runtime::Handle::current().block_on(async move {
+                    pm.lock()
+                        .await
+                        .check_command_execute_before(&cmd_name, &arguments)
+                        .await
+                })
+            });
+            if let Some(reason) = block_reason {
+                let cmd_name_display = cmd.trim_start_matches('/');
+                return Some((
+                    MessageKind::Error,
+                    format!("Command '{cmd_name_display}' blocked by plugin: {reason}"),
+                ));
+            }
+        }
+
         match cmd {
             "/model" | "/models" => {
                 if let Some(model_str) = arg {

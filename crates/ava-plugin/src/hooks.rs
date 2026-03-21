@@ -129,6 +129,31 @@ pub enum HookEvent {
     Event,
     /// Inject env vars into bash tool.
     ShellEnv,
+    /// Transform messages before sending to the LLM (request/response, blocking).
+    ///
+    /// Params: `{"messages": [{"role": "user|assistant", "content": "..."}]}`
+    /// Response: `{"messages": [...]}` — modified message array.
+    /// Lets plugins rewrite conversation history (add context, filter, translate).
+    ChatMessagesTransform,
+    /// Fires before context compaction starts (request/response, blocking).
+    ///
+    /// Params: `{"session_id": "...", "message_count": N, "token_count": N}`
+    /// Response: `{"context": ["extra context strings"], "prompt": "custom compaction prompt"}`
+    /// Lets plugins inject extra context or customize the compaction prompt.
+    SessionCompacting,
+    /// Fires on each new user message before the agent processes it (notification).
+    ///
+    /// Params: `{"session_id": "...", "message": {"role": "user", "content": "..."}}`
+    ChatMessage,
+    /// Fires when a text response finishes streaming (notification).
+    ///
+    /// Params: `{"session_id": "...", "content": "full response text", "token_count": N}`
+    TextComplete,
+    /// Fires before a slash command executes (request/response, blocking).
+    ///
+    /// Params: `{"command": "model", "arguments": "claude-sonnet-4"}`
+    /// Response: `{"block": true, "reason": "..."}` — can block execution.
+    CommandExecuteBefore,
 }
 
 impl HookEvent {
@@ -153,6 +178,11 @@ impl HookEvent {
             Self::Config => "config",
             Self::Event => "event",
             Self::ShellEnv => "shell.env",
+            Self::ChatMessagesTransform => "chat.messages.transform",
+            Self::SessionCompacting => "session.compacting",
+            Self::ChatMessage => "chat.message",
+            Self::TextComplete => "text.complete",
+            Self::CommandExecuteBefore => "command.execute.before",
         }
     }
 
@@ -177,6 +207,11 @@ impl HookEvent {
             "config" => Some(Self::Config),
             "event" => Some(Self::Event),
             "shell.env" => Some(Self::ShellEnv),
+            "chat.messages.transform" => Some(Self::ChatMessagesTransform),
+            "session.compacting" => Some(Self::SessionCompacting),
+            "chat.message" => Some(Self::ChatMessage),
+            "text.complete" => Some(Self::TextComplete),
+            "command.execute.before" => Some(Self::CommandExecuteBefore),
             _ => None,
         }
     }
@@ -190,6 +225,8 @@ impl HookEvent {
                 | Self::SessionStart
                 | Self::SessionEnd
                 | Self::Event
+                | Self::ChatMessage
+                | Self::TextComplete
         )
     }
 }
@@ -390,6 +427,11 @@ mod tests {
             HookEvent::Config,
             HookEvent::Event,
             HookEvent::ShellEnv,
+            HookEvent::ChatMessagesTransform,
+            HookEvent::SessionCompacting,
+            HookEvent::ChatMessage,
+            HookEvent::TextComplete,
+            HookEvent::CommandExecuteBefore,
         ];
         for event in &events {
             let wire = event.wire_name();
@@ -419,6 +461,12 @@ mod tests {
         assert!(!HookEvent::ChatParams.is_notification());
         assert!(!HookEvent::PermissionAsk.is_notification());
         assert!(!HookEvent::ChatSystem.is_notification());
+        // Final 5 hooks: 2 notifications, 3 request/response
+        assert!(HookEvent::ChatMessage.is_notification());
+        assert!(HookEvent::TextComplete.is_notification());
+        assert!(!HookEvent::ChatMessagesTransform.is_notification());
+        assert!(!HookEvent::SessionCompacting.is_notification());
+        assert!(!HookEvent::CommandExecuteBefore.is_notification());
     }
 
     #[test]

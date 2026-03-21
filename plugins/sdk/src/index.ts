@@ -80,6 +80,74 @@ export interface ChatSystemResult {
   inject: string
 }
 
+/**
+ * Params for the `chat.messages.transform` hook.
+ * Plugins may return a modified message array under `"messages"`.
+ * Each message must have a `role` field or it will be discarded.
+ * Plugins are chained — each receives the output of the previous one.
+ */
+export interface ChatMessagesTransformParams {
+  messages: Array<{ role: string; content: string }>
+}
+
+export interface ChatMessagesTransformResult {
+  messages: Array<{ role: string; content: string }>
+}
+
+/**
+ * Params for the `session.compacting` hook.
+ * Return `{context: [...], prompt: "..."}` to inject extra context strings
+ * or supply a custom compaction prompt (first non-empty `prompt` wins).
+ */
+export interface SessionCompactingParams {
+  session_id: string
+  message_count: number
+  token_count: number
+}
+
+export interface SessionCompactingResult {
+  /** Extra context strings to inject before compaction. */
+  context?: string[]
+  /** Custom compaction prompt (overrides default). */
+  prompt?: string
+}
+
+/**
+ * Params for the `chat.message` notification hook.
+ * Fired on each new user message before the agent processes it.
+ * No response expected (notification only).
+ */
+export interface ChatMessageParams {
+  session_id: string
+  message: { role: 'user'; content: string }
+}
+
+/**
+ * Params for the `text.complete` notification hook.
+ * Fired when a text response finishes streaming.
+ * No response expected (notification only).
+ */
+export interface TextCompleteParams {
+  session_id: string
+  content: string
+  token_count: number
+}
+
+/**
+ * Params for the `command.execute.before` hook.
+ * Return `{block: true, reason: "..."}` to prevent the command from running.
+ * Return nothing (or `{block: false}`) to allow execution.
+ */
+export interface CommandExecuteBeforeParams {
+  command: string
+  arguments: string
+}
+
+export interface CommandExecuteBeforeResult {
+  block: boolean
+  reason?: string
+}
+
 export interface PluginHooks {
   auth?: HookHandler
   'auth.refresh'?: HookHandler
@@ -126,6 +194,43 @@ export interface PluginHooks {
   config?: HookHandler
   event?: HookHandler
   'shell.env'?: HookHandler
+  /**
+   * Transform conversation messages before they are sent to the LLM.
+   * Return `{ messages: [...] }` with the (possibly modified) message list.
+   * Plugins are chained — each receives the output of the previous one.
+   * Messages lacking a `role` field are silently discarded.
+   */
+  'chat.messages.transform'?: (
+    ctx: PluginContext,
+    params: ChatMessagesTransformParams
+  ) => Promise<ChatMessagesTransformResult | undefined>
+  /**
+   * Fires before context compaction starts.
+   * Return `{context: [...], prompt: "..."}` to inject extra context strings
+   * or supply a custom compaction prompt.
+   */
+  'session.compacting'?: (
+    ctx: PluginContext,
+    params: SessionCompactingParams
+  ) => Promise<SessionCompactingResult | undefined>
+  /**
+   * Fires on each new user message before the agent processes it.
+   * Notification — no response expected.
+   */
+  'chat.message'?: (ctx: PluginContext, params: ChatMessageParams) => Promise<void>
+  /**
+   * Fires when a text response finishes streaming.
+   * Notification — no response expected.
+   */
+  'text.complete'?: (ctx: PluginContext, params: TextCompleteParams) => Promise<void>
+  /**
+   * Fires before a slash command executes.
+   * Return `{block: true, reason: "..."}` to prevent execution.
+   */
+  'command.execute.before'?: (
+    ctx: PluginContext,
+    params: CommandExecuteBeforeParams
+  ) => Promise<CommandExecuteBeforeResult | undefined>
 }
 
 // -- Internal types --

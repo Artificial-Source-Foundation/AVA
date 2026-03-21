@@ -162,16 +162,11 @@ export const LiveStreamingBlock: Component = () => {
                     />
                   </Show>
 
-                  {/* Completed tool calls — grouped by context (read/glob/grep collapse together) */}
+                  {/* All tool calls — grouped by context (read/glob/grep collapse together).
+                      Running/pending calls are included so groups appear immediately during streaming. */}
                   <Show when={hasToolCalls()}>
                     <div class="flex flex-col gap-1 my-1">
-                      <For
-                        each={partitionByContext(
-                          agent
-                            .activeToolCalls()
-                            .filter((tc) => tc.status === 'success' || tc.status === 'error')
-                        )}
-                      >
+                      <For each={partitionByContext(agent.activeToolCalls())}>
                         {(seg) => (
                           <Show
                             when={
@@ -216,8 +211,8 @@ export const LiveStreamingBlock: Component = () => {
                     </div>
                   </Show>
 
-                  {/* Active tool call preview */}
-                  <Show when={activeToolCall()}>
+                  {/* Active tool call preview — only shown when there are no completed/grouped calls yet */}
+                  <Show when={activeToolCall() && !hasToolCalls()}>
                     <ToolPreview toolCalls={agent.activeToolCalls()} isStreaming={true} />
                   </Show>
                 </>

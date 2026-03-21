@@ -42,15 +42,17 @@ export const ThinkingRow: Component<ThinkingRowProps> = (props) => {
     thinkingDisplay: displayMode(),
   })
 
-  const [wasStreaming, setWasStreaming] = createSignal(false)
+  // Track the timestamp when streaming first started (stable — never changes)
   const [startTime] = createSignal(Date.now())
-  // Track the elapsed time at the moment streaming ends
+  // Track the elapsed time at the moment streaming ends (set once, never updated again)
   const [completedDuration, setCompletedDuration] = createSignal<number | null>(null)
+  // Whether we've ever been in streaming state (so we know to show duration on completion)
+  const [wasStreaming, setWasStreaming] = createSignal(props.isStreaming)
 
   // Rendered markdown HTML for the thinking content
   const [renderedHtml, setRenderedHtml] = createSignal('')
 
-  // Throttled streaming render
+  // Throttled streaming render — avoids re-render of content on every token
   let streamRenderTimer: ReturnType<typeof setTimeout> | null = null
   let pendingContent = ''
   let lastRenderedContent = ''
@@ -59,7 +61,7 @@ export const ThinkingRow: Component<ThinkingRowProps> = (props) => {
     if (streamRenderTimer !== null) clearTimeout(streamRenderTimer)
   })
 
-  // Render thinking content as markdown
+  // Render thinking content as markdown (throttled while streaming)
   createEffect(
     on(
       () => [props.thinking, props.isStreaming] as const,
@@ -102,7 +104,8 @@ export const ThinkingRow: Component<ThinkingRowProps> = (props) => {
     )
   )
 
-  // Inject rendered HTML into the container div
+  // Inject rendered HTML into the container div (separate effect so it doesn't trigger re-renders
+  // of the outer component — only touches the DOM node directly)
   createEffect(
     on(renderedHtml, () => {
       if (!contentRef) return
@@ -110,34 +113,36 @@ export const ThinkingRow: Component<ThinkingRowProps> = (props) => {
     })
   )
 
-  const duration = createMemo(() => {
-    if (props.thinkingDuration) return props.thinkingDuration
-    if (!props.isStreaming) return completedDuration() ?? 0
-    return (Date.now() - startTime()) / 1000
-  })
+  // Capture the wall-clock duration exactly once when streaming finishes.
+  // Using `on` with defer:false so it fires on first eval too (handles pre-completed thinking).
+  createEffect(
+    on(
+      () => props.isStreaming,
+      (streaming) => {
+        if (streaming) {
+          setWasStreaming(true)
+        } else if (wasStreaming() && completedDuration() === null) {
+          // Snapshot the elapsed time exactly once when streaming stops
+          setCompletedDuration((Date.now() - startTime()) / 1000)
+          setWasStreaming(false)
+        }
+      }
+    )
+  )
 
-  // Capture elapsed duration the moment streaming finishes
-  createEffect(() => {
-    if (!props.isStreaming && wasStreaming()) {
-      setCompletedDuration((Date.now() - startTime()) / 1000)
-    }
-  })
-
-  createEffect(() => {
-    if (props.isStreaming && props.thinking) {
-      setWasStreaming(true)
-    }
-  })
-
-  createEffect(() => {
-    if (!props.isStreaming && wasStreaming()) {
-      setWasStreaming(false)
-    }
-  })
-
+  /**
+   * Stable summary text — only two states:
+   * - "Thinking..." (while streaming, never changes per-token)
+   * - "Thought for Ns" / "Thought" (after completion, computed once from completedDuration)
+   *
+   * The key insight: while streaming, we NEVER read `Date.now()` inside a reactive memo.
+   * That would re-run on every reactive push and cause the <summary> to flicker.
+   * Instead, we only show a static label, and capture elapsed time once on completion.
+   */
   const summaryText = createMemo(() => {
     if (props.isStreaming) return 'Thinking...'
-    const d = duration()
+    // Use the prop-provided duration first (for settled messages from metadata)
+    const d = props.thinkingDuration ?? completedDuration() ?? 0
     if (d > 0.5) return `Thought for ${d.toFixed(1)}s`
     return 'Thought'
   })
@@ -155,6 +160,11 @@ export const ThinkingRow: Component<ThinkingRowProps> = (props) => {
           'padding-left': '10px',
         }}
       >
+        {/*
+         * The <summary> must NOT read any signal that changes per-token (e.g. props.thinking
+         * directly, or Date.now()). summaryText() is stable while streaming — it only ever
+         * returns "Thinking..." — so the <summary> DOM node is not touched per-token.
+         */}
         <summary
           class={props.isStreaming ? 'thinking-shimmer' : ''}
           style={{
@@ -170,9 +180,10 @@ export const ThinkingRow: Component<ThinkingRowProps> = (props) => {
         >
           {summaryText()}
         </summary>
+
         <Show when={props.thinking}>
           <div
-            class={`scroll-fade-mask mt-1 max-h-[300px] overflow-y-auto scrollbar-thin message-content thinking-content`}
+            class={`scroll-fade-mask mt-1 max-h-[400px] overflow-y-auto scrollbar-thin message-content thinking-content`}
             style={{
               color: 'var(--text-secondary)',
               'font-size': '12.5px',

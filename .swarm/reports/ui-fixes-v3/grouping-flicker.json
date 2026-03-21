@@ -1,0 +1,9 @@
+{
+  "status": "fixed",
+  "files_modified": [
+    "src/components/chat/LiveStreamingBlock.tsx",
+    "src/components/chat/message-rows/ThinkingRow.tsx"
+  ],
+  "summary": "Fixed two UI bugs: (1) Tool call grouping now applies during live streaming — removed the .filter() that excluded running/pending tool calls from partitionByContext, so context tools (glob/grep/read) collapse into 'Gathering context (N)' immediately when the first call arrives. Also suppressed the duplicate ToolPreview when the grouped list already shows those calls. (2) Fixed thinking label flicker by ensuring summaryText() returns only the stable string 'Thinking...' while streaming, never reading Date.now() in a reactive memo. Elapsed duration is now captured exactly once when streaming ends via a createEffect(on(...)) that sets completedDuration a single time. Additionally added a first-line preview text below the <summary> that shows the first non-empty line of thinking content truncated to 72 chars, giving the user context without expanding the details block.",
+  "tsc_pass": true
+}

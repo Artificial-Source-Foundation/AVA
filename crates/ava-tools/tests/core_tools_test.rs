@@ -4,11 +4,9 @@ use std::sync::Arc;
 
 use ava_platform::StandardPlatform;
 use ava_tools::core::{
-    apply_patch::ApplyPatchTool, bash::BashTool, edit::EditTool, glob::GlobTool, grep::GrepTool,
-    hashline, multiedit::MultiEditTool, read::ReadTool, write::WriteTool,
+    bash::BashTool, edit::EditTool, glob::GlobTool, grep::GrepTool, hashline, read::ReadTool,
+    write::WriteTool,
 };
-// Note: apply_patch and multiedit are no longer registered by default; their tool structs
-// are still importable for direct use in tests.
 use ava_tools::registry::Tool;
 use serde_json::json;
 use tempfile::tempdir_in;
@@ -173,42 +171,6 @@ async fn edit_tool_uses_multi_strategy_fallback() {
 }
 
 #[tokio::test]
-async fn multiedit_reports_ghost_snapshot_count() {
-    let dir = tempdir_in(workspace_for_tests()).expect("tempdir");
-    run_git(dir.path(), &["init"]);
-
-    let path = dir.path().join("edit_multi.txt");
-    tokio::fs::write(&path, "alpha\nbeta\n")
-        .await
-        .expect("seed file");
-
-    let tool = MultiEditTool::new(Arc::new(StandardPlatform));
-    let result = tool
-        .execute(json!({
-            "edits": [
-                {
-                    "path": path.to_string_lossy().to_string(),
-                    "old_text": "alpha",
-                    "new_text": "gamma"
-                },
-                {
-                    "path": path.to_string_lossy().to_string(),
-                    "old_text": "beta",
-                    "new_text": "delta"
-                }
-            ]
-        }))
-        .await
-        .expect("multiedit executes");
-
-    assert!(result.content.contains("ghost snapshots: 1"));
-    assert_eq!(
-        tokio::fs::read_to_string(&path).await.expect("read back"),
-        "gamma\ndelta\n"
-    );
-}
-
-#[tokio::test]
 async fn edit_tool_errors_when_no_match_found() {
     let dir = tempdir_in(workspace_for_tests()).expect("tempdir");
     let path = dir.path().join("edit_none.txt");
@@ -351,88 +313,6 @@ async fn grep_tool_returns_empty_result() {
     assert!(result.content.trim().is_empty());
 }
 
-// --- Apply Patch Tool Tests ---
-
-#[tokio::test]
-async fn apply_patch_single_file() {
-    let dir = tempdir_in(workspace_for_tests()).expect("tempdir");
-    let file = dir.path().join("main.rs");
-    tokio::fs::write(&file, "fn main() {\n    println!(\"hello\");\n}\n")
-        .await
-        .unwrap();
-
-    let path = file.to_string_lossy();
-    let patch = format!(
-        "--- {path}\n+++ {path}\n@@ -1,3 +1,3 @@\n fn main() {{\n-    println!(\"hello\");\n+    println!(\"world\");\n }}\n",
-    );
-
-    let tool = ApplyPatchTool::new(Arc::new(StandardPlatform));
-    let result = tool
-        .execute(json!({ "patch": patch, "strip": 0 }))
-        .await
-        .expect("patch applies");
-
-    assert!(result.content.contains("Applied 1 hunks"));
-    let content = tokio::fs::read_to_string(&file).await.unwrap();
-    assert!(content.contains("println!(\"world\")"));
-}
-
-#[tokio::test]
-async fn apply_patch_multi_file() {
-    let dir = tempdir_in(workspace_for_tests()).expect("tempdir");
-    let file_a = dir.path().join("a.txt");
-    let file_b = dir.path().join("b.txt");
-    tokio::fs::write(&file_a, "alpha\nbeta\n").await.unwrap();
-    tokio::fs::write(&file_b, "one\ntwo\n").await.unwrap();
-
-    let a = file_a.to_string_lossy();
-    let b = file_b.to_string_lossy();
-    let patch = format!(
-        "--- {a}\n+++ {a}\n@@ -1,2 +1,2 @@\n alpha\n-beta\n+gamma\n--- {b}\n+++ {b}\n@@ -1,2 +1,2 @@\n one\n-two\n+three\n",
-    );
-
-    let tool = ApplyPatchTool::new(Arc::new(StandardPlatform));
-    let result = tool
-        .execute(json!({ "patch": patch, "strip": 0 }))
-        .await
-        .expect("patch applies");
-
-    assert!(result.content.contains("2 files"));
-    assert!(tokio::fs::read_to_string(&file_a)
-        .await
-        .unwrap()
-        .contains("gamma"));
-    assert!(tokio::fs::read_to_string(&file_b)
-        .await
-        .unwrap()
-        .contains("three"));
-}
-
-#[tokio::test]
-async fn apply_patch_fuzzy_offset() {
-    let dir = tempdir_in(workspace_for_tests()).expect("tempdir");
-    let file = dir.path().join("offset.txt");
-    // File has an extra line at the top vs what the patch expects
-    tokio::fs::write(&file, "extra line\nalpha\nbeta\ngamma\n")
-        .await
-        .unwrap();
-
-    let path = file.to_string_lossy();
-    let patch = format!("--- {path}\n+++ {path}\n@@ -1,3 +1,3 @@\n alpha\n-beta\n+BETA\n gamma\n",);
-
-    let tool = ApplyPatchTool::new(Arc::new(StandardPlatform));
-    let result = tool
-        .execute(json!({ "patch": patch, "strip": 0 }))
-        .await
-        .expect("fuzzy patch applies");
-
-    assert!(result.content.contains("Applied 1 hunks"));
-    assert!(tokio::fs::read_to_string(&file)
-        .await
-        .unwrap()
-        .contains("BETA"));
-}
-
 // --- Tool Registry Tests ---
 
 #[test]
@@ -501,54 +381,16 @@ fn default_tools_gives_9_tools() {
 }
 
 #[test]
-fn extended_registration_is_now_empty() {
-    use ava_tools::core::{register_default_tools, register_extended_tools};
+fn extended_tier_is_empty() {
+    use ava_tools::core::register_default_tools;
     use ava_tools::registry::{ToolRegistry, ToolTier};
 
     let mut registry = ToolRegistry::new();
     register_default_tools(&mut registry, Arc::new(StandardPlatform));
-    register_extended_tools(&mut registry, Arc::new(StandardPlatform), None);
 
-    // Extended tools are no longer registered by default — extended set is empty.
-    let all = registry.list_tools();
-    assert_eq!(
-        all.len(),
-        9,
-        "after register_extended_tools (no-op), should still have 9 tools, got: {:?}",
-        all.iter().map(|t| t.name.as_str()).collect::<Vec<_>>()
-    );
-
-    // Default tier only should give 9
-    let default_only = registry.list_tools_for_tiers(&[ToolTier::Default]);
-    assert_eq!(default_only.len(), 9);
-
-    // Extended tier should be empty
+    // Extended tier should be empty — extended tools were removed
     let extended_only = registry.list_tools_for_tiers(&[ToolTier::Extended]);
     assert_eq!(extended_only.len(), 0, "extended tier should be empty");
-}
-
-#[test]
-fn unregistered_extended_tools_return_not_found() {
-    use ava_tools::core::register_default_tools;
-    use ava_tools::registry::ToolRegistry;
-
-    let mut registry = ToolRegistry::new();
-    register_default_tools(&mut registry, Arc::new(StandardPlatform));
-
-    // apply_patch is no longer registered — calling it should return ToolNotFound
-    let tool_call = ava_types::ToolCall {
-        id: "call_1".to_string(),
-        name: "apply_patch".to_string(),
-        arguments: serde_json::json!({"patch": "invalid"}),
-    };
-    let result = tokio::runtime::Runtime::new()
-        .unwrap()
-        .block_on(registry.execute(tool_call));
-    let err = result.expect_err("unregistered tool should return an error");
-    assert!(
-        err.to_string().contains("not found"),
-        "expected 'not found' error for unregistered apply_patch, got: {err}"
-    );
 }
 
 #[tokio::test]

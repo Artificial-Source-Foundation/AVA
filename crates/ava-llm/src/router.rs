@@ -8,6 +8,7 @@ use ava_config::{
     model_catalog::registry::{registry, RegisteredModel},
     CredentialStore, RoutingConfig, RoutingProfile, RoutingTarget,
 };
+use ava_plugin::PluginManager;
 use ava_types::{AvaError, Result};
 use tokio::sync::{Mutex, RwLock};
 
@@ -119,6 +120,8 @@ pub struct ModelRouter {
     pool: Arc<ConnectionPool>,
     credentials_path: Option<PathBuf>,
     refresh_locks: Arc<Mutex<HashMap<String, Arc<Mutex<()>>>>>,
+    /// Optional plugin manager injected by the AgentStack for `request.headers` hook.
+    plugin_manager: Option<Arc<tokio::sync::Mutex<PluginManager>>>,
 }
 
 impl ModelRouter {
@@ -150,7 +153,14 @@ impl ModelRouter {
             pool,
             credentials_path,
             refresh_locks: Arc::new(Mutex::new(HashMap::new())),
+            plugin_manager: None,
         }
+    }
+
+    /// Attach a plugin manager so that the `request.headers` hook is called
+    /// before every outgoing LLM API request.
+    pub fn set_plugin_manager(&mut self, pm: Arc<tokio::sync::Mutex<PluginManager>>) {
+        self.plugin_manager = Some(pm);
     }
 
     /// Register an external provider factory (e.g., for CLI agent providers).
@@ -171,6 +181,31 @@ impl ModelRouter {
         // B63/B47 seam: provider instances cache auth/base-URL state and must be
         // dropped on credential refresh. Route decisions are recomputed per run,
         // so there is no separate routing-decision cache to invalidate here.
+        self.invalidate_provider_cache().await;
+    }
+
+    /// Update the API key for a single provider and invalidate the provider cache.
+    ///
+    /// Used by the plugin auth sub-protocol to store credentials returned by
+    /// `authorize_with_plugin` without replacing the entire credential store.
+    pub async fn update_credentials_for_provider(&self, provider: &str, api_key: String) {
+        {
+            let mut guard = self.credentials.write().await;
+            let entry = guard
+                .providers
+                .entry(provider.to_string())
+                .or_insert_with(|| ava_config::ProviderCredential {
+                    api_key: String::new(),
+                    base_url: None,
+                    org_id: None,
+                    oauth_token: None,
+                    oauth_refresh_token: None,
+                    oauth_expires_at: None,
+                    oauth_account_id: None,
+                    litellm_compatible: None,
+                });
+            entry.api_key = api_key;
+        }
         self.invalidate_provider_cache().await;
     }
 
@@ -201,7 +236,7 @@ impl ModelRouter {
             .await?;
             let metadata_provider = create_provider(provider, model, &snapshot, self.pool.clone())?;
 
-            Box::new(DynamicCredentialProvider::new(
+            let dyn_provider = DynamicCredentialProvider::new(
                 provider,
                 model,
                 self.pool.clone(),
@@ -209,7 +244,14 @@ impl ModelRouter {
                 self.credentials_path.clone(),
                 self.refresh_locks.clone(),
                 metadata_provider.as_ref(),
-            ))
+            );
+            // Attach plugin manager if available so request.headers hook fires.
+            let dyn_provider = if let Some(pm) = &self.plugin_manager {
+                dyn_provider.with_plugin_manager(pm.clone())
+            } else {
+                dyn_provider
+            };
+            Box::new(dyn_provider)
         };
 
         let created: Arc<dyn LLMProvider> = Arc::from(created);

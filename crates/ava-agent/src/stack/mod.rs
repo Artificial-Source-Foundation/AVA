@@ -35,7 +35,8 @@ use tokio::sync::{mpsc, RwLock};
 use tracing::{error, info, instrument, warn};
 
 use stack_tools::{
-    build_tool_registry, init_mcp, init_mcp_with_disabled, resolve_workspace_roots, MCPRuntime,
+    build_tool_registry, build_tool_registry_with_plugins, init_mcp, init_mcp_with_disabled,
+    resolve_workspace_roots, MCPRuntime,
 };
 
 pub struct AgentStack {
@@ -124,7 +125,7 @@ impl AgentStack {
         let config_mgr = ConfigManager::load_from_paths(config_path, credentials_path).await?;
         let cfg = config_mgr.get().await;
         let credentials = config_mgr.credentials().await;
-        let router = Arc::new(ModelRouter::new(credentials));
+        let mut router = ModelRouter::new(credentials);
 
         let session_manager = Arc::new(SessionManager::new(&db_path)?);
         let memory = Arc::new(
@@ -237,6 +238,28 @@ impl AgentStack {
         }
         let plugin_manager = Arc::new(tokio::sync::Mutex::new(plugin_mgr));
 
+        // Wire plugin manager into the router so the `request.headers` hook fires
+        // before each outgoing LLM API request.
+        router.set_plugin_manager(Arc::clone(&plugin_manager));
+        let router = Arc::new(router);
+
+        // Trigger the `config` hook so plugins can observe (and optionally
+        // override) the loaded configuration. We fire-and-check-errors but
+        // never block startup on a plugin's config response.
+        {
+            let cfg_value = serde_json::to_value(&cfg).unwrap_or_default();
+            let hook_responses = plugin_manager
+                .lock()
+                .await
+                .trigger_hook(ava_plugin::HookEvent::Config, cfg_value)
+                .await;
+            for resp in hook_responses {
+                if let Some(err) = resp.error {
+                    warn!(plugin = resp.plugin_name, "config hook error: {err}");
+                }
+            }
+        }
+
         let todo_state = TodoState::new();
         let plan_state = PlanState::new();
         let (plan_bridge, plan_rx) = PlanBridge::new();
@@ -262,11 +285,13 @@ impl AgentStack {
             },
         ));
 
-        let (mut registry, shared_tool_sources) = build_tool_registry(
+        // Wire plugin manager into the bash tool via `shell.env` hook.
+        let (mut registry, shared_tool_sources) = build_tool_registry_with_plugins(
             platform.clone(),
             Arc::clone(&permission_inspector),
             Arc::clone(&permission_context),
             approval_bridge.clone(),
+            Some(Arc::clone(&plugin_manager)),
         );
         register_todo_tools(&mut registry, todo_state.clone());
         register_question_tool(&mut registry, question_bridge.clone());
@@ -658,6 +683,74 @@ impl AgentStack {
             .clone()
             .unwrap_or_else(|| cfg.llm.model.clone());
         (provider, model)
+    }
+
+    // ========================================================================
+    // Plugin auth sub-protocol
+    // ========================================================================
+
+    /// Query all loaded plugins for auth methods they can provide for `provider`.
+    ///
+    /// Returns a list of [`ava_plugin::AuthMethodsResponse`] from subscribed
+    /// plugins. Call this before prompting the user so plugins can offer
+    /// alternative auth flows (e.g. device-code, OAuth) for custom providers.
+    pub async fn get_plugin_auth_methods(
+        &self,
+        provider: &str,
+    ) -> Vec<ava_plugin::AuthMethodsResponse> {
+        self.plugin_manager
+            .lock()
+            .await
+            .get_auth_methods(provider)
+            .await
+    }
+
+    /// Execute a plugin-provided auth flow for `provider`.
+    ///
+    /// `method_index` selects which auth method (from a prior
+    /// [`get_plugin_auth_methods`](Self::get_plugin_auth_methods) call) to use.
+    /// `user_input` carries any user-provided data (e.g. a pasted API key).
+    ///
+    /// On success, stores the returned credentials in the live `CredentialStore`
+    /// so they are available for immediate use by the router.
+    pub async fn authorize_with_plugin(
+        &self,
+        provider: &str,
+        method_index: usize,
+        user_input: Option<&str>,
+    ) -> Option<ava_plugin::AuthCredentials> {
+        let creds = self
+            .plugin_manager
+            .lock()
+            .await
+            .authorize(provider, method_index, user_input)
+            .await?;
+
+        // Persist the credentials into the router's live credential store.
+        if let Some(api_key) = &creds.api_key {
+            self.router
+                .update_credentials_for_provider(provider, api_key.clone())
+                .await;
+        }
+
+        Some(creds)
+    }
+
+    /// Refresh expired OAuth credentials for `provider` via the plugin manager.
+    ///
+    /// If successful, the refreshed credentials are stored in the live
+    /// `CredentialStore` and the router's provider cache is invalidated so the
+    /// next request uses the new tokens.
+    pub async fn refresh_plugin_auth(
+        &self,
+        provider: &str,
+        refresh_token: &str,
+    ) -> Option<ava_plugin::AuthCredentials> {
+        self.plugin_manager
+            .lock()
+            .await
+            .refresh_auth(provider, refresh_token)
+            .await
     }
 }
 

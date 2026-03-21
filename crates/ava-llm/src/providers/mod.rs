@@ -3,6 +3,7 @@ pub mod common;
 use std::sync::Arc;
 
 use ava_config::CredentialStore;
+use ava_plugin::PluginManager;
 use ava_types::{AvaError, Result};
 
 use crate::pool::ConnectionPool;
@@ -352,6 +353,74 @@ pub fn create_provider(
                       minimax-coding-plan, minimax-cn-coding-plan"
                 .to_string(),
         }),
+    }
+}
+
+/// Like [`create_provider`] but also attaches `plugin_manager` to providers
+/// that support the `request.headers` hook, so plugins can inject custom
+/// HTTP headers into every outgoing LLM API request.
+///
+/// Currently only `AnthropicProvider` (and its compatible aliases) supports
+/// the hook — other providers receive the manager but silently ignore it until
+/// they opt in.
+pub fn create_provider_with_plugins(
+    provider_name: &str,
+    model: &str,
+    credentials: &CredentialStore,
+    pool: Arc<ConnectionPool>,
+    plugin_manager: Arc<tokio::sync::Mutex<PluginManager>>,
+) -> Result<Box<dyn LLMProvider>> {
+    let provider = create_provider(provider_name, model, credentials, pool.clone())?;
+    // Downcast to AnthropicProvider to attach the plugin manager.
+    // For providers that don't yet support the hook, the manager is not attached —
+    // it can be added for each provider following the same pattern.
+    let normalized = provider_name.to_ascii_lowercase();
+    match normalized.as_str() {
+        "anthropic"
+        | "alibaba"
+        | "alibaba-cn"
+        | "kimi-for-coding"
+        | "minimax-coding-plan"
+        | "minimax-cn-coding-plan" => {
+            // Re-create the Anthropic provider with the plugin manager attached.
+            // We must re-call the constructor because Box<dyn LLMProvider> doesn't
+            // give us back the concrete type.
+            let cred = credentials.get(provider_name).or_else(|| {
+                if normalized != provider_name {
+                    credentials.get(&normalized)
+                } else {
+                    None
+                }
+            });
+            if let Some(entry) = cred {
+                let api_key = entry.effective_api_key().unwrap_or_default().to_string();
+                let is_third_party = normalized != "anthropic";
+                if is_third_party {
+                    let default_url = match normalized.as_str() {
+                        "alibaba" => "https://coding-intl.dashscope.aliyuncs.com/apps/anthropic/v1",
+                        "alibaba-cn" => "https://coding.dashscope.aliyuncs.com/apps/anthropic/v1",
+                        "kimi-for-coding" => "https://api.kimi.com/coding/v1",
+                        "minimax-coding-plan" => "https://api.minimax.io/anthropic/v1",
+                        "minimax-cn-coding-plan" => "https://api.minimaxi.com/anthropic/v1",
+                        _ => unreachable!(),
+                    };
+                    let base_url = entry.base_url.as_deref().unwrap_or(default_url);
+                    let new_pool = pool;
+                    return Ok(Box::new(
+                        AnthropicProvider::with_base_url(new_pool, api_key, model, base_url)
+                            .with_plugin_manager(plugin_manager),
+                    ));
+                }
+                let new_pool = pool;
+                return Ok(Box::new(
+                    AnthropicProvider::new(new_pool, api_key, model)
+                        .with_plugin_manager(plugin_manager),
+                ));
+            }
+            // Credential not found — return the already-created provider without plugin manager.
+            Ok(provider)
+        }
+        _ => Ok(provider),
     }
 }
 

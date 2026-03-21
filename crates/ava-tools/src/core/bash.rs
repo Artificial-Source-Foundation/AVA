@@ -3,6 +3,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use ava_platform::{ExecuteOptions, Platform};
+use ava_plugin::{HookEvent, PluginManager};
 use ava_sandbox::{execute_plan, select_backend, SandboxPolicy, SandboxRequest};
 use ava_types::{AvaError, ToolResult};
 use futures::StreamExt;
@@ -16,11 +17,56 @@ const MAX_OUTPUT_BYTES: usize = 100 * 1024;
 
 pub struct BashTool {
     platform: Arc<dyn Platform>,
+    /// Optional plugin manager for the `shell.env` hook.
+    plugin_manager: Option<Arc<tokio::sync::Mutex<PluginManager>>>,
 }
 
 impl BashTool {
     pub fn new(platform: Arc<dyn Platform>) -> Self {
-        Self { platform }
+        Self {
+            platform,
+            plugin_manager: None,
+        }
+    }
+
+    /// Attach a plugin manager so the `shell.env` hook is called before
+    /// each command execution, allowing plugins to inject environment variables.
+    pub fn with_plugin_manager(mut self, pm: Arc<tokio::sync::Mutex<PluginManager>>) -> Self {
+        self.plugin_manager = Some(pm);
+        self
+    }
+
+    /// Call the `shell.env` plugin hook and collect any extra environment
+    /// variables that subscribed plugins want to inject.
+    async fn plugin_env_vars(&self) -> Vec<(String, String)> {
+        let Some(pm) = &self.plugin_manager else {
+            return Vec::new();
+        };
+        let params = serde_json::json!({});
+        let responses = pm
+            .lock()
+            .await
+            .trigger_hook(HookEvent::ShellEnv, params)
+            .await;
+        let mut vars = Vec::new();
+        for resp in responses {
+            if resp.error.is_some() {
+                tracing::warn!(
+                    plugin = resp.plugin_name,
+                    "shell.env hook error: {:?}",
+                    resp.error
+                );
+                continue;
+            }
+            if let Some(map) = resp.result.as_object() {
+                for (k, v) in map {
+                    if let Some(val) = v.as_str() {
+                        vars.push((k.clone(), val.to_string()));
+                    }
+                }
+            }
+        }
+        vars
     }
 }
 
@@ -64,6 +110,10 @@ impl Tool for BashTool {
 
         tracing::debug!(tool = "bash", %command, "executing bash tool");
 
+        // Collect base env vars, then append any extras from the shell.env plugin hook.
+        let mut env = filtered_env();
+        env.extend(self.plugin_env_vars().await);
+
         // TODO: Invert sandbox model — sandbox ALL commands by default,
         // with narrowly approved exceptions for safe development commands.
         // Currently only install-class commands are sandboxed.
@@ -84,7 +134,7 @@ impl Tool for BashTool {
                 command: "sh".to_string(),
                 args: vec!["-c".to_string(), command.clone()],
                 working_dir: Some(cwd),
-                env: filtered_env(),
+                env: env.clone(),
             };
 
             let plan = backend
@@ -119,7 +169,7 @@ impl Tool for BashTool {
                 ExecuteOptions {
                     timeout: Some(Duration::from_millis(timeout_ms)),
                     working_dir,
-                    env_vars: filtered_env(),
+                    env_vars: env,
                     scrub_env: true,
                 },
             )
@@ -163,6 +213,10 @@ impl Tool for BashTool {
             .unwrap_or(DEFAULT_TIMEOUT_MS);
         let working_dir = args.get("cwd").and_then(Value::as_str).map(PathBuf::from);
 
+        // Collect env vars including any plugin-injected ones.
+        let mut env = filtered_env();
+        env.extend(self.plugin_env_vars().await);
+
         let stream = self
             .platform
             .execute_streaming_with_options(
@@ -170,7 +224,7 @@ impl Tool for BashTool {
                 ExecuteOptions {
                     timeout: Some(Duration::from_millis(timeout_ms)),
                     working_dir,
-                    env_vars: filtered_env(),
+                    env_vars: env,
                     scrub_env: true,
                 },
             )

@@ -1,0 +1,31 @@
+{
+  "status": "fixed",
+  "files_deleted": [
+    "crates/ava-tools/src/core/apply_patch.rs",
+    "crates/ava-tools/src/core/multiedit.rs",
+    "crates/ava-tools/src/core/ast_ops.rs",
+    "crates/ava-tools/src/core/lsp_ops.rs",
+    "crates/ava-tools/src/core/code_search.rs",
+    "crates/ava-tools/src/core/lint.rs",
+    "crates/ava-tools/src/core/test_runner.rs"
+  ],
+  "files_modified": [
+    "crates/ava-tools/src/core/mod.rs",
+    "crates/ava-tools/tests/core_tools_test.rs",
+    "crates/ava-llm/src/providers/mod.rs",
+    "crates/ava-llm/src/router.rs"
+  ],
+  "cli_commands_added": [
+    "ava plugin list",
+    "ava plugin add <path-or-url>",
+    "ava plugin remove <name>",
+    "ava plugin info <name>",
+    "ava plugin init <name>"
+  ],
+  "notes": {
+    "task1": "Deleted all 7 extended tool source files. Removed pub mod declarations and register_extended_tools() from mod.rs. Removed SharedCodebaseIndex type alias import. Removed ApplyPatchTool/MultiEditTool test imports and 5 tests that depended on the deleted tools (apply_patch_single_file, apply_patch_multi_file, apply_patch_fuzzy_offset, multiedit_reports_ghost_snapshot_count, extended_registration_is_now_empty, unregistered_extended_tools_return_not_found). Replaced with a simple extended_tier_is_empty test. Also fixed 2 pre-existing compilation errors in crates/ava-llm/: missing pool.clone() in providers/mod.rs:373, and ProviderCredential::default() call in router.rs:195 (struct has no Default derive).",
+    "task2": "Plugin CLI commands (ava plugin list/add/remove/info/init) were already fully implemented in crates/ava-tui/src/plugin_commands.rs and wired into the CLI via crates/ava-tui/src/config/cli.rs PluginCommand enum and main.rs routing. No changes needed."
+  },
+  "cargo_check_pass": true,
+  "cargo_test_pass": true
+}

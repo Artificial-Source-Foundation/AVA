@@ -16,6 +16,7 @@ async-trait.workspace = true
 ava-auth = { path = "../ava-auth" }
 ava-config = { path = "../ava-config" }
 ava-context = { path = "../ava-context" }
+ava-plugin = { path = "../ava-plugin" }
 ava-types = { path = "../ava-types" }
 futures.workspace = true
 reqwest.workspace = true

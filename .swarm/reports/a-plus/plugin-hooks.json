@@ -1,0 +1,44 @@
+{
+  "status": "fixed",
+  "hooks_wired": ["request.headers", "shell.env", "config", "auth"],
+  "files_modified": [
+    "crates/ava-llm/Cargo.toml",
+    "crates/ava-tools/Cargo.toml",
+    "crates/ava-llm/src/providers/anthropic.rs",
+    "crates/ava-llm/src/providers/mod.rs",
+    "crates/ava-llm/src/dynamic_provider.rs",
+    "crates/ava-llm/src/router.rs",
+    "crates/ava-tools/src/core/bash.rs",
+    "crates/ava-tools/src/core/mod.rs",
+    "crates/ava-agent/src/stack/stack_tools.rs",
+    "crates/ava-agent/src/stack/mod.rs"
+  ],
+  "hook_details": {
+    "request.headers": {
+      "description": "LLM providers call HookEvent::RequestHeaders before each API request so plugins can inject custom headers (auth tokens, tracing IDs, etc.)",
+      "entry_point": "AnthropicProvider::with_plugin_headers() called in generate/generate_stream",
+      "propagation": "AgentStack -> ModelRouter::set_plugin_manager -> DynamicCredentialProvider::with_plugin_manager -> create_provider_with_plugins -> AnthropicProvider::with_plugin_manager"
+    },
+    "shell.env": {
+      "description": "BashTool queries plugins for additional environment variables before executing shell commands",
+      "entry_point": "BashTool::plugin_env_vars() calls HookEvent::ShellEnv, extends filtered_env()",
+      "propagation": "AgentStack -> build_tool_registry_with_plugins -> register_default_tools_with_plugins -> BashTool::with_plugin_manager"
+    },
+    "config": {
+      "description": "Config loading triggers HookEvent::Config hook so plugins can observe/extend configuration",
+      "entry_point": "AgentStack::run() serializes Config and dispatches trigger_hook(HookEvent::Config, cfg_value)",
+      "note": "Notification-style: hook response not merged back into config (plugins observe, not override)"
+    },
+    "auth": {
+      "description": "Plugin auth sub-protocol (get_auth_methods, authorize, refresh_auth) exposed as AgentStack public methods",
+      "methods": [
+        "AgentStack::get_plugin_auth_methods(provider) -> Vec<AuthMethodsResponse>",
+        "AgentStack::authorize_with_plugin(provider, method_index, user_input) -> Option<AuthCredentials>",
+        "AgentStack::refresh_plugin_auth(provider, refresh_token) -> Option<AuthCredentials>"
+      ],
+      "note": "authorize_with_plugin also calls router.update_credentials_for_provider() to persist the returned API key"
+    }
+  },
+  "cargo_check_pass": true,
+  "cargo_test_pass": true
+}

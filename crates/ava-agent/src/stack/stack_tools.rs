@@ -18,7 +18,8 @@ use tokio::sync::RwLock;
 use tracing::{info, warn};
 
 use ava_permissions::inspector::InspectionContext;
-use ava_tools::core::register_default_tools;
+use ava_plugin::PluginManager;
+use ava_tools::core::register_default_tools_with_plugins;
 
 pub(crate) struct ExtensionManagerCaller {
     pub(crate) manager: ExtensionManager,
@@ -177,8 +178,24 @@ pub(crate) fn build_tool_registry(
     permission_context: Arc<RwLock<InspectionContext>>,
     approval_bridge: ApprovalBridge,
 ) -> (ToolRegistry, SharedToolSources) {
+    build_tool_registry_with_plugins(
+        platform,
+        permission_inspector,
+        permission_context,
+        approval_bridge,
+        None,
+    )
+}
+
+pub(crate) fn build_tool_registry_with_plugins(
+    platform: Arc<dyn Platform>,
+    permission_inspector: Arc<dyn PermissionInspector>,
+    permission_context: Arc<RwLock<InspectionContext>>,
+    approval_bridge: ApprovalBridge,
+    plugin_manager: Option<Arc<tokio::sync::Mutex<PluginManager>>>,
+) -> (ToolRegistry, SharedToolSources) {
     let mut registry = ToolRegistry::new();
-    register_default_tools(&mut registry, platform);
+    register_default_tools_with_plugins(&mut registry, platform, plugin_manager);
     let middleware = PermissionMiddleware::new(
         permission_inspector,
         permission_context,

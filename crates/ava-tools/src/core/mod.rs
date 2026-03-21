@@ -1,17 +1,11 @@
-pub mod apply_patch;
-pub mod ast_ops;
 pub mod bash;
 pub mod claude_code;
-pub mod code_search;
 pub mod custom_tool;
 pub mod edit;
 pub mod git_read;
 pub mod glob;
 pub mod grep;
 pub mod hashline;
-pub mod lint;
-pub mod lsp_ops;
-pub mod multiedit;
 pub mod output_fallback;
 pub mod path_guard;
 pub mod plan;
@@ -19,7 +13,6 @@ pub mod question;
 pub mod read;
 pub mod secret_redaction;
 pub mod task;
-pub mod test_runner;
 pub mod todo;
 pub mod web_fetch;
 pub mod web_search;
@@ -48,8 +41,8 @@ pub fn shell_single_quote(value: &str) -> String {
 use std::sync::Arc;
 
 use ava_platform::Platform;
+use ava_plugin::PluginManager;
 
-use crate::core::code_search::SharedCodebaseIndex;
 use crate::registry::ToolRegistry;
 
 /// Register the 9 default tools that are always sent to the LLM.
@@ -60,6 +53,17 @@ use crate::registry::ToolRegistry;
 /// A shared [`hashline::HashlineCache`] is created and passed to both the
 /// read and edit tools so that hash-anchored edits work across tool calls.
 pub fn register_default_tools(registry: &mut ToolRegistry, platform: Arc<dyn Platform>) {
+    register_default_tools_with_plugins(registry, platform, None);
+}
+
+/// Like [`register_default_tools`] but also wires the `shell.env` plugin hook
+/// into the bash tool so plugins can inject environment variables before each
+/// command execution.
+pub fn register_default_tools_with_plugins(
+    registry: &mut ToolRegistry,
+    platform: Arc<dyn Platform>,
+    plugin_manager: Option<Arc<tokio::sync::Mutex<PluginManager>>>,
+) {
     let hashline_cache = hashline::new_cache();
     // Core 6: file I/O + search + shell
     registry.register(read::ReadTool::new(
@@ -68,31 +72,18 @@ pub fn register_default_tools(registry: &mut ToolRegistry, platform: Arc<dyn Pla
     ));
     registry.register(write::WriteTool::new(platform.clone()));
     registry.register(edit::EditTool::new(platform.clone(), hashline_cache));
-    registry.register(bash::BashTool::new(platform.clone()));
+    let bash_tool = if let Some(pm) = plugin_manager {
+        bash::BashTool::new(platform.clone()).with_plugin_manager(pm)
+    } else {
+        bash::BashTool::new(platform.clone())
+    };
+    registry.register(bash_tool);
     registry.register(glob::GlobTool::new());
     registry.register(grep::GrepTool::new());
     // +3: web + git
     registry.register(web_fetch::WebFetchTool::new());
     registry.register(web_search::WebSearchTool::new());
     registry.register(git_read::GitReadTool::new());
-}
-
-/// Register extended tools.
-///
-/// Extended tools (apply_patch, multiedit, ast_ops, lsp_ops, code_search,
-/// lint, test_runner) are **not** registered by default. They are available as
-/// plugins or can be registered manually for advanced use cases.
-///
-/// This function is intentionally empty — the signature is kept for
-/// backwards-compatibility with any external code that calls it.
-#[allow(unused_variables)]
-pub fn register_extended_tools(
-    registry: &mut ToolRegistry,
-    platform: Arc<dyn Platform>,
-    shared_index: Option<SharedCodebaseIndex>,
-) {
-    // No-op: extended tools are not registered by default.
-    // They will be available as plugins in a future release.
 }
 
 /// Register all core tools. Backwards-compatible alias for `register_default_tools`.

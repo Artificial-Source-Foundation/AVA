@@ -10,9 +10,11 @@ use futures::Stream;
 use tokio::sync::{Mutex, RwLock};
 use tracing::{info, warn};
 
+use ava_plugin::PluginManager;
+
 use crate::pool::ConnectionPool;
 use crate::provider::{LLMProvider, LLMResponse, ProviderCapabilities};
-use crate::providers::{common, create_provider};
+use crate::providers::{common, create_provider, create_provider_with_plugins};
 use crate::thinking::ThinkingConfig;
 
 type ProviderRefreshLock = Arc<Mutex<()>>;
@@ -29,6 +31,8 @@ pub(crate) struct DynamicCredentialProvider {
     metadata_supports_thinking: bool,
     metadata_thinking_levels: Vec<ThinkingLevel>,
     metadata_capabilities: ProviderCapabilities,
+    /// Optional plugin manager for the `request.headers` hook.
+    plugin_manager: Option<Arc<tokio::sync::Mutex<PluginManager>>>,
 }
 
 impl DynamicCredentialProvider {
@@ -52,7 +56,18 @@ impl DynamicCredentialProvider {
             metadata_supports_thinking: metadata_provider.supports_thinking(),
             metadata_thinking_levels: metadata_provider.thinking_levels().to_vec(),
             metadata_capabilities: metadata_provider.capabilities(),
+            plugin_manager: None,
         }
+    }
+
+    /// Attach a plugin manager so that the `request.headers` hook is called
+    /// on every request dispatched through this dynamic provider.
+    pub(crate) fn with_plugin_manager(
+        mut self,
+        pm: Arc<tokio::sync::Mutex<PluginManager>>,
+    ) -> Self {
+        self.plugin_manager = Some(pm);
+        self
     }
 
     async fn provider_for_request(&self) -> Result<Box<dyn LLMProvider>> {
@@ -64,12 +79,22 @@ impl DynamicCredentialProvider {
         )
         .await?;
 
-        create_provider(
-            &self.provider_name,
-            &self.model,
-            &snapshot,
-            self.pool.clone(),
-        )
+        if let Some(pm) = &self.plugin_manager {
+            create_provider_with_plugins(
+                &self.provider_name,
+                &self.model,
+                &snapshot,
+                self.pool.clone(),
+                pm.clone(),
+            )
+        } else {
+            create_provider(
+                &self.provider_name,
+                &self.model,
+                &snapshot,
+                self.pool.clone(),
+            )
+        }
     }
 
     fn estimate_cost_for_family(&self, input_tokens: usize, output_tokens: usize) -> f64 {
@@ -110,12 +135,22 @@ impl DynamicCredentialProvider {
         )
         .await?;
 
-        create_provider(
-            &self.provider_name,
-            &self.model,
-            &snapshot,
-            self.pool.clone(),
-        )
+        if let Some(pm) = &self.plugin_manager {
+            create_provider_with_plugins(
+                &self.provider_name,
+                &self.model,
+                &snapshot,
+                self.pool.clone(),
+                pm.clone(),
+            )
+        } else {
+            create_provider(
+                &self.provider_name,
+                &self.model,
+                &snapshot,
+                self.pool.clone(),
+            )
+        }
     }
 
     /// Check whether an error is an auth failure (401) that could be resolved

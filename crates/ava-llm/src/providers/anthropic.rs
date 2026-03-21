@@ -1,7 +1,9 @@
+use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use ava_plugin::PluginManager;
 use ava_types::{AvaError, Message, Result, StreamChunk, ThinkingLevel};
 use futures::{Stream, StreamExt};
 use serde_json::{json, Value};
@@ -35,6 +37,8 @@ pub struct AnthropicProvider {
     /// Whether this is a third-party Anthropic-compatible provider (skip Anthropic-specific headers).
     third_party: bool,
     circuit_breaker: Option<Arc<CircuitBreaker>>,
+    /// Optional plugin manager for `request.headers` hook injection.
+    plugin_manager: Option<Arc<tokio::sync::Mutex<PluginManager>>>,
 }
 
 impl AnthropicProvider {
@@ -51,6 +55,7 @@ impl AnthropicProvider {
             base_url: ANTHROPIC_BASE_URL.to_string(),
             third_party: false,
             circuit_breaker: Some(Arc::new(CircuitBreaker::default_provider())),
+            plugin_manager: None,
         }
     }
 
@@ -68,7 +73,16 @@ impl AnthropicProvider {
             base_url: base_url.into(),
             third_party: true,
             circuit_breaker: Some(Arc::new(CircuitBreaker::default_provider())),
+            plugin_manager: None,
         }
+    }
+
+    /// Attach a plugin manager so that the `request.headers` hook is called
+    /// before each outgoing LLM API request, allowing plugins to inject custom
+    /// headers (auth tokens, tracing IDs, etc.).
+    pub fn with_plugin_manager(mut self, pm: Arc<tokio::sync::Mutex<PluginManager>>) -> Self {
+        self.plugin_manager = Some(pm);
+        self
     }
 
     /// Check if the current model supports Anthropic's adaptive thinking mode.
@@ -254,6 +268,49 @@ impl AnthropicProvider {
         )
         .await
     }
+
+    /// Call the `request.headers` plugin hook and return any extra headers
+    /// that subscribed plugins want to inject into this provider's requests.
+    async fn plugin_headers(&self) -> HashMap<String, String> {
+        let Some(pm) = &self.plugin_manager else {
+            return HashMap::new();
+        };
+        let params = serde_json::json!({ "provider": "anthropic" });
+        let responses = pm
+            .lock()
+            .await
+            .trigger_hook(ava_plugin::HookEvent::RequestHeaders, params)
+            .await;
+        let mut headers = HashMap::new();
+        for resp in responses {
+            if resp.error.is_some() {
+                warn!(
+                    plugin = resp.plugin_name,
+                    "request.headers hook error: {:?}", resp.error
+                );
+                continue;
+            }
+            if let Some(map) = resp.result.as_object() {
+                for (k, v) in map {
+                    if let Some(val) = v.as_str() {
+                        headers.insert(k.clone(), val.to_string());
+                    }
+                }
+            }
+        }
+        headers
+    }
+
+    /// Apply extra headers from the `request.headers` plugin hook to a request builder.
+    async fn with_plugin_headers(
+        &self,
+        mut request: reqwest::RequestBuilder,
+    ) -> reqwest::RequestBuilder {
+        for (k, v) in self.plugin_headers().await {
+            request = request.header(k, v);
+        }
+        request
+    }
 }
 
 #[async_trait]
@@ -264,6 +321,7 @@ impl LLMProvider for AnthropicProvider {
         let request = self
             .build_request(&client)
             .json(&self.build_request_body(messages, false));
+        let request = self.with_plugin_headers(request).await;
 
         let response = self.send_request(request).await?;
         let response = common::validate_status(response, "Anthropic").await?;
@@ -290,6 +348,7 @@ impl LLMProvider for AnthropicProvider {
         let request = self
             .build_request(&client)
             .json(&self.build_request_body(messages, true));
+        let request = self.with_plugin_headers(request).await;
 
         let response = self.send_request(request).await?;
         let response = common::validate_status(response, "Anthropic").await?;
@@ -339,6 +398,7 @@ impl LLMProvider for AnthropicProvider {
         let body = self.build_request_body_with_tools(messages, tools, false);
         let client = self.client().await?;
         let request = self.build_request(&client).json(&body);
+        let request = self.with_plugin_headers(request).await;
 
         let response = self.send_request(request).await?;
         let response = common::validate_status(response, "Anthropic").await?;
@@ -394,6 +454,7 @@ impl LLMProvider for AnthropicProvider {
         let body = self.build_request_body_with_tools(messages, tools, true);
         let client = self.client().await?;
         let request = self.build_request(&client).json(&body);
+        let request = self.with_plugin_headers(request).await;
 
         let response = self.send_request(request).await?;
         let response = common::validate_status(response, "Anthropic").await?;
@@ -420,6 +481,7 @@ impl LLMProvider for AnthropicProvider {
             request = request.header("anthropic-beta", "interleaved-thinking-2025-05-14");
         }
         let request = request.json(&body);
+        let request = self.with_plugin_headers(request).await;
 
         let response = self.send_request(request).await?;
         let response = common::validate_status(response, "Anthropic").await?;
@@ -445,6 +507,7 @@ impl LLMProvider for AnthropicProvider {
             request = request.header("anthropic-beta", "interleaved-thinking-2025-05-14");
         }
         let request = request.json(&body);
+        let request = self.with_plugin_headers(request).await;
 
         let response = self.send_request(request).await?;
         let response = common::validate_status(response, "Anthropic").await?;

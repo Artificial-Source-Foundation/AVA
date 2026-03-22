@@ -17,11 +17,11 @@ pub trait MCPToolCaller: Send + Sync {
 /// This allows MCP tools to be registered in the `ToolRegistry` and called like any
 /// other built-in tool.
 ///
-/// Tools are namespaced as `mcp.{server_name}.{tool_name}` to prevent collisions
+/// Tools are namespaced as `mcp_{server_name}_{tool_name}` to prevent collisions
 /// between different MCP servers. The original tool name is preserved for dispatch
 /// to the MCP server.
 pub struct MCPBridgeTool {
-    /// Namespaced name: `mcp.{server}.{tool}`
+    /// Namespaced name: `mcp_{server}_{tool}`
     namespaced_name: String,
     /// Original tool name as known by the MCP server (used for dispatch).
     original_name: String,
@@ -99,7 +99,7 @@ mod tests {
         );
 
         // Name should be namespaced
-        assert_eq!(tool.name(), "mcp.my_server.test_tool");
+        assert_eq!(tool.name(), "mcp_my_server_test_tool");
         assert_eq!(tool.description(), "A test MCP tool");
 
         // Execute should dispatch using the original name
@@ -127,12 +127,12 @@ mod tests {
 
         let tools = registry.list_tools();
         assert_eq!(tools.len(), 1);
-        assert_eq!(tools[0].name, "mcp.acme.weather");
+        assert_eq!(tools[0].name, "mcp_acme_weather");
 
         let result = registry
             .execute(ava_types::ToolCall {
                 id: "call-1".to_string(),
-                name: "mcp.acme.weather".to_string(),
+                name: "mcp_acme_weather".to_string(),
                 arguments: json!({"city": "London"}),
             })
             .await

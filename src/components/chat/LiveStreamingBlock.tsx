@@ -307,13 +307,9 @@ export const LiveStreamingBlock: Component = () => {
 
             {/* Fallback: show typing indicator when no content is streaming yet */}
             <Show when={!hasAnyContent()}>
-              <div class="flex items-center gap-2 text-xs text-[var(--text-secondary)] py-2">
-                <div class="flex items-center gap-[5px]">
-                  <span class="typing-dot" style={{ 'animation-delay': '0ms' }} />
-                  <span class="typing-dot" style={{ 'animation-delay': '160ms' }} />
-                  <span class="typing-dot" style={{ 'animation-delay': '320ms' }} />
-                </div>
-                <span class="font-[var(--font-ui-mono)] tracking-wide">ava is thinking...</span>
+              <div class="fixed bottom-14 left-4 z-40 flex items-center gap-2 px-3 py-1.5 rounded-full bg-[var(--surface-overlay)] border border-[var(--border-subtle)] shadow-lg text-[11px] text-[var(--text-secondary)]">
+                <span class="w-3.5 h-3.5 border-2 border-[var(--accent)] border-t-transparent rounded-full animate-spin" />
+                <span>ava is thinking...</span>
               </div>
             </Show>
           </div>

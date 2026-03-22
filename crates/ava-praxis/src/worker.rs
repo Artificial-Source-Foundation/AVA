@@ -90,7 +90,8 @@ pub(crate) async fn run_worker(
             | AgentEvent::TokenUsage { .. }
             | AgentEvent::SubAgentComplete { .. }
             | AgentEvent::DiffPreview { .. }
-            | AgentEvent::MCPToolsChanged { .. } => {}
+            | AgentEvent::MCPToolsChanged { .. }
+            | AgentEvent::Checkpoint(_) => {}
         }
     }
 

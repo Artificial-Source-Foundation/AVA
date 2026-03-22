@@ -116,7 +116,13 @@ export const ProjectDropdown: Component = () => {
       </button>
 
       <Show when={dropdownOpen()}>
-        <div class="absolute right-0 top-full mt-1 min-w-[180px] max-w-[240px] py-1 bg-[var(--surface-overlay)] border border-[var(--border-default)] rounded-[var(--radius-lg)] shadow-lg z-[var(--z-popover)]">
+        <div
+          class="fixed min-w-[180px] max-w-[240px] py-1 bg-[var(--surface-overlay)] border border-[var(--border-default)] rounded-[var(--radius-lg)] shadow-lg z-50"
+          style={{
+            top: `${(dropdownRef?.getBoundingClientRect().bottom ?? 0) + 4}px`,
+            left: `${dropdownRef?.getBoundingClientRect().left ?? 0}px`,
+          }}
+        >
           <div class="max-h-[200px] overflow-y-auto scrollbar-none">
             <For each={quickProjects()}>
               {(project) => {

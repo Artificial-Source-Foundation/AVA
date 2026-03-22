@@ -24,8 +24,11 @@ interface WebDatabase {
 
 /**
  * Maps frontend session IDs to backend session IDs.
- * The backend creates its own session during submit_goal, so the IDs diverge.
- * When loading messages, we need to use the backend's ID.
+ *
+ * With the session ID pass-through fix, submit_goal now uses the frontend's
+ * session ID so IDs should always match. This map is kept as a fallback for
+ * edge cases (e.g., retry/regenerate creating new sessions) but should
+ * rarely be populated.
  */
 const _sessionIdMap = new Map<string, string>()
 

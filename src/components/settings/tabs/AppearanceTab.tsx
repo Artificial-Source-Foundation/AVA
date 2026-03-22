@@ -8,6 +8,7 @@
 import {
   Accessibility,
   Code2,
+  Layers,
   Lightbulb,
   Maximize2,
   Moon,
@@ -20,7 +21,7 @@ import {
 import type { Component } from 'solid-js'
 import type { ThemePreset } from '../../../config/theme-presets'
 import { useSettings } from '../../../stores/settings'
-import type { ThinkingDisplay } from '../../../stores/settings/settings-types'
+import type { ActivityDisplay, ThinkingDisplay } from '../../../stores/settings/settings-types'
 import { SettingsCard } from '../SettingsCard'
 import {
   AccentSection,
@@ -58,6 +59,12 @@ export const AppearanceTab: Component = () => {
   const thinkingOptions: { value: ThinkingDisplay; label: string }[] = [
     { value: 'bubble', label: 'Bubble' },
     { value: 'preview', label: 'Preview' },
+    { value: 'hidden', label: 'Hidden' },
+  ]
+
+  const activityOptions: { value: ActivityDisplay; label: string }[] = [
+    { value: 'collapsed', label: 'Collapsed' },
+    { value: 'expanded', label: 'Expanded' },
     { value: 'hidden', label: 'Hidden' },
   ]
 
@@ -108,6 +115,34 @@ export const AppearanceTab: Component = () => {
             : settings().appearance.thinkingDisplay === 'preview'
               ? 'Show a short preview of the thinking content inline'
               : 'Hide thinking blocks entirely'}
+        </p>
+      </SettingsCard>
+
+      <SettingsCard
+        icon={Layers}
+        title="Agent Activity"
+        description="How tool calls and thinking are grouped in chat"
+      >
+        <div class="flex items-center justify-between py-2">
+          <span class="text-[14px] text-[var(--text-secondary)]">Display mode</span>
+          <div class="flex gap-1">
+            {activityOptions.map((opt) => (
+              <button
+                type="button"
+                onClick={() => updateAppearance({ activityDisplay: opt.value })}
+                class={segmentedBtn(settings().appearance.activityDisplay === opt.value)}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <p class="text-[13px] text-[var(--gray-8)]">
+          {settings().appearance.activityDisplay === 'collapsed'
+            ? 'Collapse tool calls and thinking into an expandable card'
+            : settings().appearance.activityDisplay === 'expanded'
+              ? 'Always show all tool calls and thinking inline'
+              : 'Hide tool calls and thinking entirely'}
         </p>
       </SettingsCard>
 

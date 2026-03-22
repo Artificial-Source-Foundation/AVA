@@ -2,6 +2,7 @@ pub mod bash;
 pub mod claude_code;
 pub mod custom_tool;
 pub mod edit;
+pub mod file_backup;
 pub mod git_read;
 pub mod glob;
 pub mod grep;
@@ -52,26 +53,41 @@ use crate::registry::ToolRegistry;
 ///
 /// A shared [`hashline::HashlineCache`] is created and passed to both the
 /// read and edit tools so that hash-anchored edits work across tool calls.
-pub fn register_default_tools(registry: &mut ToolRegistry, platform: Arc<dyn Platform>) {
-    register_default_tools_with_plugins(registry, platform, None);
+pub fn register_default_tools(
+    registry: &mut ToolRegistry,
+    platform: Arc<dyn Platform>,
+) -> file_backup::FileBackupSession {
+    register_default_tools_with_plugins(registry, platform, None)
 }
 
 /// Like [`register_default_tools`] but also wires the `shell.env` plugin hook
 /// into the bash tool so plugins can inject environment variables before each
 /// command execution.
+///
+/// Returns a [`file_backup::FileBackupSession`] handle. Callers should populate
+/// it with the session ID once the agent run starts so that file edits are
+/// backed up to `~/.ava/file-history/{session_id}/`.
 pub fn register_default_tools_with_plugins(
     registry: &mut ToolRegistry,
     platform: Arc<dyn Platform>,
     plugin_manager: Option<Arc<tokio::sync::Mutex<PluginManager>>>,
-) {
+) -> file_backup::FileBackupSession {
     let hashline_cache = hashline::new_cache();
+    let backup_session = file_backup::new_backup_session();
     // Core 6: file I/O + search + shell
     registry.register(read::ReadTool::new(
         platform.clone(),
         hashline_cache.clone(),
     ));
-    registry.register(write::WriteTool::new(platform.clone()));
-    registry.register(edit::EditTool::new(platform.clone(), hashline_cache));
+    registry.register(write::WriteTool::with_backup_session(
+        platform.clone(),
+        backup_session.clone(),
+    ));
+    registry.register(edit::EditTool::with_backup_session(
+        platform.clone(),
+        hashline_cache,
+        backup_session.clone(),
+    ));
     let bash_tool = if let Some(pm) = plugin_manager {
         bash::BashTool::new(platform.clone()).with_plugin_manager(pm)
     } else {
@@ -84,11 +100,12 @@ pub fn register_default_tools_with_plugins(
     registry.register(web_fetch::WebFetchTool::new());
     registry.register(web_search::WebSearchTool::new());
     registry.register(git_read::GitReadTool::new());
+    backup_session
 }
 
 /// Register all core tools. Backwards-compatible alias for `register_default_tools`.
 pub fn register_core_tools(registry: &mut ToolRegistry, platform: Arc<dyn Platform>) {
-    register_default_tools(registry, platform);
+    let _ = register_default_tools(registry, platform);
 }
 
 /// Register the task tool with a spawner that can create sub-agent runs.

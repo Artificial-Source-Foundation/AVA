@@ -306,6 +306,7 @@ async fn run_solo_task(
                 Vec::new(),
                 None,
                 Vec::new(),
+                None,
             )
             .await
     });

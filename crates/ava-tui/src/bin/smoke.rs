@@ -46,6 +46,7 @@ async fn main() -> Result<()> {
                 Vec::new(),
                 None,
                 Vec::new(),
+                None,
             )
             .await
     });
@@ -63,7 +64,8 @@ async fn main() -> Result<()> {
             | AgentEvent::TokenUsage { .. }
             | AgentEvent::SubAgentComplete { .. }
             | AgentEvent::DiffPreview { .. }
-            | AgentEvent::MCPToolsChanged { .. } => {}
+            | AgentEvent::MCPToolsChanged { .. }
+            | AgentEvent::Checkpoint(_) => {}
             AgentEvent::Error(e) => {
                 eprintln!("[error: {e}]");
                 break;

@@ -232,3 +232,80 @@ fn levenshtein(a: &str, b: &str) -> usize {
 
     prev[b_chars.len()]
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{compute_fuzzy_replace, ComputeFuzzyReplaceInput};
+
+    #[test]
+    fn returns_new_content_when_old_string_is_empty() {
+        let output = compute_fuzzy_replace(ComputeFuzzyReplaceInput {
+            content: "original".to_string(),
+            old_string: String::new(),
+            new_string: "replacement".to_string(),
+            replace_all: None,
+        })
+        .expect("empty old string should be handled");
+
+        assert_eq!(output.strategy, "empty_old_string");
+        assert_eq!(output.content, "replacement");
+    }
+
+    #[test]
+    fn normalizes_crlf_and_replaces_across_line_endings() {
+        let output = compute_fuzzy_replace(ComputeFuzzyReplaceInput {
+            content: "alpha\r\nbeta\r\ngamma\r\n".to_string(),
+            old_string: "beta\ngamma\n".to_string(),
+            new_string: "delta\nepsilon\n".to_string(),
+            replace_all: None,
+        })
+        .expect("line ending normalization should allow match");
+
+        assert_eq!(output.strategy, "simple");
+        assert_eq!(output.content, "alpha\ndelta\nepsilon\n");
+    }
+
+    #[test]
+    fn rejects_ambiguous_single_replace_when_candidate_occurs_multiple_times() {
+        let error = compute_fuzzy_replace(ComputeFuzzyReplaceInput {
+            content: "value\nvalue\n".to_string(),
+            old_string: "value".to_string(),
+            new_string: "updated".to_string(),
+            replace_all: Some(false),
+        })
+        .expect_err("duplicate candidate should fail when replace_all is false");
+
+        assert!(error.contains("oldString not found"));
+    }
+
+    #[test]
+    fn replace_all_updates_every_occurrence() {
+        let output = compute_fuzzy_replace(ComputeFuzzyReplaceInput {
+            content: "value\nvalue\n".to_string(),
+            old_string: "value".to_string(),
+            new_string: "updated".to_string(),
+            replace_all: Some(true),
+        })
+        .expect("replace_all should update every occurrence");
+
+        assert_eq!(output.strategy, "simple");
+        assert_eq!(output.content, "updated\nupdated\n");
+    }
+
+    #[test]
+    fn falls_back_to_indentation_flexible_matching() {
+        let output = compute_fuzzy_replace(ComputeFuzzyReplaceInput {
+            content: "fn main() {\n    if ready {\n        work();\n    }\n}\n".to_string(),
+            old_string: "if ready {\n    work();\n}".to_string(),
+            new_string: "if ready {\n    rest();\n}".to_string(),
+            replace_all: None,
+        })
+        .expect("indentation-flexible strategy should match");
+
+        assert_eq!(output.strategy, "indentation_flexible");
+        assert_eq!(
+            output.content,
+            "fn main() {\nif ready {\n    rest();\n}\n}\n"
+        );
+    }
+}

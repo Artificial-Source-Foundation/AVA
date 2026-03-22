@@ -55,6 +55,7 @@ export type CodeTheme =
   | 'catppuccin'
 export type DarkStyle = 'dark' | 'midnight' | 'charcoal'
 export type ThinkingDisplay = 'bubble' | 'preview' | 'hidden'
+export type ActivityDisplay = 'collapsed' | 'expanded' | 'hidden'
 
 export interface AppearanceSettings {
   uiScale: number // 0.85 – 1.2, default 1.0 (maps to html font-size: 16px * scale)
@@ -69,6 +70,7 @@ export interface AppearanceSettings {
   codeTheme: CodeTheme
   darkStyle: DarkStyle
   thinkingDisplay: ThinkingDisplay
+  activityDisplay: ActivityDisplay
   highContrast: boolean
   reduceMotion: boolean
 }

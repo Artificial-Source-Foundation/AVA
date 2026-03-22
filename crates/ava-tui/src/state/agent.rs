@@ -337,6 +337,7 @@ impl AgentState {
                     history,
                     Some(message_queue),
                     images,
+                    None,
                 )
                 .await;
             let _ = relay.await;

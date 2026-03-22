@@ -581,6 +581,7 @@ async fn run_single_task(
                 Vec::new(),
                 None,
                 Vec::new(),
+                None,
             )
             .await
     });

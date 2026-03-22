@@ -5,6 +5,7 @@ use ava_platform::Platform;
 use ava_types::{AvaError, ToolResult};
 use serde_json::{json, Value};
 
+use crate::core::file_backup::FileBackupSession;
 use crate::registry::Tool;
 
 /// Compute a unified diff between old and new content for display.
@@ -19,11 +20,26 @@ fn compute_unified_diff(old: &str, new: &str, path: &str) -> String {
 
 pub struct WriteTool {
     platform: Arc<dyn Platform>,
+    backup_session: FileBackupSession,
 }
 
 impl WriteTool {
     pub fn new(platform: Arc<dyn Platform>) -> Self {
-        Self { platform }
+        Self {
+            platform,
+            backup_session: crate::core::file_backup::new_backup_session(),
+        }
+    }
+
+    /// Create a `WriteTool` with a shared backup session for crash-safe undo.
+    pub fn with_backup_session(
+        platform: Arc<dyn Platform>,
+        backup_session: FileBackupSession,
+    ) -> Self {
+        Self {
+            platform,
+            backup_session,
+        }
     }
 }
 
@@ -63,6 +79,14 @@ impl Tool for WriteTool {
 
         if let Some(parent) = file_path.parent() {
             self.platform.create_dir_all(parent).await?;
+        }
+
+        // Persistent backup before mutation (survives crashes).
+        if let Err(e) =
+            crate::core::file_backup::backup_file_before_edit(&self.backup_session, &file_path)
+                .await
+        {
+            tracing::warn!(path = %path, error = %e, "file backup failed, proceeding with write");
         }
 
         // Snapshot existing content for diff (empty if new file)

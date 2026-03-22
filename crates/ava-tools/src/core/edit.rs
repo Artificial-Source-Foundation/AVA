@@ -6,6 +6,7 @@ use ava_platform::Platform;
 use ava_types::{AvaError, ToolResult};
 use serde_json::{json, Value};
 
+use crate::core::file_backup::FileBackupSession;
 use crate::core::hashline::{self, HashlineCache};
 use crate::edit::{EditEngine, EditRequest};
 use crate::git::GhostSnapshotter;
@@ -16,6 +17,7 @@ pub struct EditTool {
     engine: EditEngine,
     hashline_cache: HashlineCache,
     snapshotter: GhostSnapshotter,
+    backup_session: FileBackupSession,
 }
 
 impl EditTool {
@@ -25,6 +27,22 @@ impl EditTool {
             engine: EditEngine::new(),
             hashline_cache,
             snapshotter: GhostSnapshotter::new(),
+            backup_session: crate::core::file_backup::new_backup_session(),
+        }
+    }
+
+    /// Create an `EditTool` with a shared backup session for crash-safe undo.
+    pub fn with_backup_session(
+        platform: Arc<dyn Platform>,
+        hashline_cache: HashlineCache,
+        backup_session: FileBackupSession,
+    ) -> Self {
+        Self {
+            platform,
+            engine: EditEngine::new(),
+            hashline_cache,
+            snapshotter: GhostSnapshotter::new(),
+            backup_session,
         }
     }
 }
@@ -115,6 +133,14 @@ impl Tool for EditTool {
             };
             (result.content, strategy)
         };
+
+        // Persistent backup before mutation (survives crashes).
+        if let Err(e) =
+            crate::core::file_backup::backup_file_before_edit(&self.backup_session, &file_path)
+                .await
+        {
+            tracing::warn!(path = %path, error = %e, "file backup failed, proceeding with edit");
+        }
 
         let snapshot_note = match self
             .snapshotter

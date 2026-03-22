@@ -77,7 +77,12 @@ export function useInputState(): InputState {
   // Input is NOT disabled during processing -- mid-stream messaging allows
   // users to type while the agent runs (Enter = steer, Alt+Enter = follow-up)
   const inputDisabled = createMemo(() => false)
-  const inputHasText = createMemo(() => !!input().trim())
+  const inputHasText = createMemo(
+    () =>
+      !!input().trim() ||
+      attachments.pendingPastes().length > 0 ||
+      attachments.pendingImages().length > 0
+  )
   const placeholder = createMemo(() =>
     isProcessing()
       ? 'Steer the agent... (Enter = steer, Alt+Enter = follow-up)'
@@ -92,8 +97,10 @@ export function useInputState(): InputState {
     if (resizeFrame !== undefined) cancelAnimationFrame(resizeFrame)
     resizeFrame = requestAnimationFrame(() => {
       if (!textareaRef) return
+      // Reset to auto so scrollHeight recalculates for shrinking content
+      textareaRef.style.height = 'auto'
       const h = `${Math.min(textareaRef.scrollHeight, 200)}px`
-      if (textareaRef.style.height !== h) textareaRef.style.height = h
+      textareaRef.style.height = h
       resizeFrame = undefined
     })
   }
@@ -151,7 +158,9 @@ export function useInputState(): InputState {
   const handleSubmit = async (e: Event): Promise<void> => {
     e.preventDefault()
     const message = input().trim()
-    if (!message || submitting) return
+    const hasPastes = attachments.pendingPastes().length > 0
+    const hasImages = attachments.pendingImages().length > 0
+    if ((!message && !hasPastes && !hasImages) || submitting) return
 
     // Handle /later and /queue slash commands locally
     const parsed = parseSlashCommand(message)

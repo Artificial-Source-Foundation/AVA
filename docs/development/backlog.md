@@ -1,6 +1,6 @@
 # AVA Backlog
 
-> Last updated: 2026-03-20
+> Last updated: 2026-03-21
 > Related: [roadmap.md](roadmap.md), [epics.md](epics.md)
 > SOTA gap research: [sota-gap-analysis.md](sota-gap-analysis.md) (60 items from 12 codebases — reference only, not a todo list)
 
@@ -8,6 +8,11 @@ Tool surface policy: default tools are now 9 (`read`, `write`, `edit`, `bash`, `
 
 ## Recently Completed
 
+- **Web mode session persistence** — frontend→backend session ID mapping, UUID v4 message IDs, backend-only persistence model, WebSocket reuse, PUT endpoint for message updates
+- **MCP reliability** — NDJSON framing fix, race condition fix (await init), lazy init with 30s timeout, tool name underscores for OpenAI compat
+- **Plugin hooks complete** — all 23 plugin hooks wired into agent runtime (full OpenCode parity), MCP HTTP transport, plugin settings UI
+- **Web UI polish** — todo panel, smooth transitions, diff browser, 47 Playwright e2e tests, CSS audit
+- **Streaming fixes** — tool grouping, thinking scroll/duplicate fix, assistant message content persistence on restore
 - **Tool surface refactor** — 9 default tools (was 6); `web_fetch`, `web_search`, `git_read` promoted; Extended tools no longer auto-registered
 - **Security audit round 1-6** — SBPL injection, env scrubbing, rm -rf hardening, find -delete blocking, regex compile safety
 - **Performance audit** — blocking I/O → async, trust caching, connection pooling, ToolCall clone elimination, CodebaseIndex sharing
@@ -44,9 +49,9 @@ Tool surface policy: default tools are now 9 (`read`, `write`, `edit`, `bash`, `
 
 ### Desktop App Bugs (from testing)
 
-5. **Duplicated response text** — assistant messages show content twice in the chat. Likely the streaming content + final message both render.
+5. ~~**Duplicated response text**~~ — DONE: fixed by tool grouping in streaming + duplicate display fix (v2.2.5).
 6. **Cost showing for OAuth** — $0.04 displayed for ChatGPT subscription users. Backend returns 0 but frontend may use registry pricing.
-7. **Thinking content not displayed** — thinking badge shows "Med" but thinking blocks don't render as collapsible sections like TUI. Content may be concatenated with response.
+7. ~~**Thinking content not displayed**~~ — DONE: thinking markdown rendering, scroll, and duplicate display fixed (v2.2.5).
 
 ### After That
 

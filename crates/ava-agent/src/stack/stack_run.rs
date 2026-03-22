@@ -102,7 +102,7 @@ impl AgentStack {
 
     #[allow(clippy::too_many_arguments)]
     #[instrument(
-        skip(self, event_tx, cancel, history, message_queue, images),
+        skip(self, event_tx, cancel, history, message_queue, images, session_id),
         fields(max_turns)
     )]
     pub async fn run(
@@ -114,6 +114,7 @@ impl AgentStack {
         history: Vec<ava_types::Message>,
         message_queue: Option<crate::message_queue::MessageQueue>,
         images: Vec<ava_types::ImageContent>,
+        session_id: Option<uuid::Uuid>,
     ) -> Result<AgentRunResult> {
         let raw_goal = goal.to_string();
 
@@ -270,7 +271,7 @@ impl AgentStack {
         );
         let context = ContextManager::new_with_condenser(condenser_config, condenser);
 
-        let (mut registry, run_tool_sources) = build_tool_registry(
+        let (mut registry, run_tool_sources, run_backup_session) = build_tool_registry(
             self.platform.clone(),
             Arc::clone(&self.permission_inspector),
             Arc::clone(&self.permission_context),
@@ -333,6 +334,16 @@ impl AgentStack {
         )
         .with_history(history)
         .with_plugin_manager(Arc::clone(&self.plugin_manager));
+
+        // Use the caller-provided session ID so frontend and backend share the same ID
+        if let Some(sid) = session_id {
+            agent = agent.with_session_id(sid);
+            // Populate file backup sessions so write/edit tools save pre-mutation
+            // snapshots to ~/.ava/file-history/{session_id}/
+            let sid_str = sid.to_string();
+            *run_backup_session.write().await = Some(sid_str.clone());
+            *self.file_backup_session.write().await = Some(sid_str);
+        }
 
         // Attach JSONL session logger if enabled in config
         if cfg.features.session_logging {

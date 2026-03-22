@@ -71,6 +71,10 @@ pub struct AgentLoop {
     diff_tracker: crate::streaming_diff::StreamingDiffTracker,
     /// Optional JSONL session logger (opt-in via config).
     session_logger: Option<crate::session_logger::SessionLogger>,
+    /// Optional session ID to use instead of generating a new one.
+    /// When set, the resulting session will use this ID, allowing
+    /// external callers (e.g., web frontend) to pre-assign the ID.
+    session_id: Option<uuid::Uuid>,
 }
 
 /// Configuration for a single agent loop run — turn limits, cost caps, and model identity.
@@ -182,6 +186,10 @@ pub enum AgentEvent {
     ToolResult(ToolResult),
     Progress(String),
     Complete(Session),
+    /// Periodic checkpoint of the session state, emitted after each turn so
+    /// callers can persist progress incrementally. If the process exits
+    /// unexpectedly, the last checkpoint is recoverable.
+    Checkpoint(Session),
     Error(String),
     ToolStats(ava_tools::monitor::ToolStats),
     TokenUsage {
@@ -250,7 +258,15 @@ impl AgentLoop {
             plugin_manager: None,
             diff_tracker: crate::streaming_diff::StreamingDiffTracker::new(),
             session_logger: None,
+            session_id: None,
         }
+    }
+
+    /// Set a pre-assigned session ID. The resulting session will use this ID
+    /// instead of generating a new one via `Uuid::new_v4()`.
+    pub fn with_session_id(mut self, id: uuid::Uuid) -> Self {
+        self.session_id = Some(id);
+        self
     }
 
     /// Attach a session logger for structured JSONL logging of each turn.
@@ -266,7 +282,12 @@ impl AgentLoop {
     }
 
     /// Set conversation history to inject after the system prompt.
-    pub fn with_history(mut self, history: Vec<Message>) -> Self {
+    ///
+    /// Runs [`ava_types::cleanup_interrupted_tools`] so that any tool calls
+    /// left without results after a crash get synthetic error results,
+    /// keeping the conversation valid for the LLM API.
+    pub fn with_history(mut self, mut history: Vec<Message>) -> Self {
+        ava_types::cleanup_interrupted_tools(&mut history);
         self.history = history;
         self
     }
@@ -891,7 +912,11 @@ impl AgentLoop {
         goal: &str,
         event_tx: Option<mpsc::UnboundedSender<AgentEvent>>,
     ) -> ava_types::Result<Session> {
-        let mut session = Session::new();
+        let mut session = if let Some(id) = self.session_id {
+            Session::new().with_id(id)
+        } else {
+            Session::new()
+        };
         let mut detector = StuckDetector::new();
         let mut repetition_detector = RepetitionDetector::default();
         let mut total_usage = TokenUsage::default();
@@ -1154,6 +1179,14 @@ impl AgentLoop {
 
             // Add tool results to context
             self.add_tool_results(&tool_calls, &tool_results, &mut session);
+
+            // Checkpoint: emit the session state so callers can persist progress.
+            // If the process exits before the final Complete event, this is recoverable.
+            {
+                let mut checkpoint = session.clone();
+                checkpoint.token_usage = total_usage.clone();
+                Self::emit(&event_tx, AgentEvent::Checkpoint(checkpoint));
+            }
 
             // Inject a self-correction hint for the first error (skip if steering overrides)
             if !steering_triggered {

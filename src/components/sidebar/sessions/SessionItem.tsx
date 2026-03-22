@@ -163,11 +163,6 @@ export const SessionItem: Component<SessionItemProps> = (props) => {
               <span class="opacity-30">|</span>
             </Show>
             <span>{formatDate(props.session.updatedAt)}</span>
-            <Show when={props.session.messageCount > 0}>
-              <span>
-                {props.session.messageCount} msg{props.session.messageCount !== 1 ? 's' : ''}
-              </span>
-            </Show>
           </div>
         </div>
 

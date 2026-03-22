@@ -64,6 +64,7 @@ export const MessageInput: Component = () => {
           expandedPasteIndex={state.attachments.expandedPasteIndex}
           onTogglePastePreview={state.attachments.togglePastePreview}
           onRemovePaste={state.attachments.removePaste}
+          onUpdatePaste={state.attachments.updatePaste}
           isProcessing={state.isProcessing}
           isStreaming={state.chat.isStreaming}
           elapsedSeconds={state.elapsedSeconds}

@@ -38,6 +38,7 @@ export interface AttachmentState {
   removeImage: (i: number) => void
   removeFile: (i: number) => void
   removePaste: (i: number) => void
+  updatePaste: (i: number, content: string) => void
   togglePastePreview: (i: number) => void
   clearAll: () => { files: PendingFile[]; pastes: PendingPaste[] }
 }
@@ -119,6 +120,12 @@ export function createAttachmentState(): AttachmentState {
     if (expandedPasteIndex() === i) setExpandedPasteIndex(null)
   }
 
+  const updatePaste = (i: number, content: string): void => {
+    setPendingPastes((p) =>
+      p.map((paste, x) => (x === i ? { content, lineCount: content.split('\n').length } : paste))
+    )
+  }
+
   const togglePastePreview = (i: number): void => {
     setExpandedPasteIndex((p) => (p === i ? null : i))
   }
@@ -152,6 +159,7 @@ export function createAttachmentState(): AttachmentState {
     removeImage,
     removeFile,
     removePaste,
+    updatePaste,
     togglePastePreview,
     clearAll,
   }

@@ -477,6 +477,10 @@ impl App {
                     .messages
                     .push(UiMessage::new(MessageKind::ToolResult, msg));
             }
+            ava_agent::AgentEvent::Checkpoint(session) => {
+                // Incremental save so progress survives unexpected exits
+                self.state.session.save_session(&session);
+            }
             ava_agent::AgentEvent::Error(err) => {
                 info!(error = %err, "TUI received AgentEvent::Error");
                 self.finalize_assistant_stream();

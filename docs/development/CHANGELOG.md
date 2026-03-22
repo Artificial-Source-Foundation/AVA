@@ -1,5 +1,42 @@
 # Changelog
 
+## v2.2.5 (2026-03-21)
+
+### Web Mode
+
+- **Session ID unification** — frontend-to-backend session ID mapping ensures web mode session restore loads correct messages
+- **Backend-only persistence model** — web mode uses backend session IDs for message sync, eliminating frontend/backend ID mismatch
+- **UUID v4 message IDs** — message ID generation switched to UUID v4 for web mode compatibility
+- **Message persistence fix** — UPDATE handler + PUT endpoint for web mode message content updates
+- **Session message loading API** — new endpoint for loading session messages in web mode
+- **axum route params fix** — route parameters use `{name}` syntax (not `:name`) per axum conventions
+- **WebSocket reuse** — single WebSocket connection reused across agent runs in web mode
+
+### Agent / Core
+
+- **Assistant message content persistence** — assistant message content correctly persisted on session restore
+- **Tool grouping in streaming** — tool calls properly grouped during streaming; thinking scroll and duplicate display fixed
+- **MCP tool name compatibility** — dots replaced with underscores in MCP tool names for OpenAI provider compatibility
+
+### MCP & Plugins
+
+- **MCP stdio framing fix** — MCP stdio transport uses NDJSON (not Content-Length framing)
+- **MCP tool name resolution** — tool name resolution and result feedback corrected
+- **MCP race condition fix** — await init completion before first tool use
+- **Lazy MCP init** — 30s timeout with parallel connections for MCP server initialization
+- **MCP + plugin timeouts** — initialization timeouts added to prevent hung startups
+- **23 plugin hooks wired** — all plugin hooks wired into agent runtime (full OpenCode parity)
+- **Plugin system upgrade** — MCP HTTP transport, hooks, and resources support
+- **MCP + plugin settings** — settings UI wired to real backend configuration
+
+### Frontend (Web)
+
+- **UI polish** — smooth transitions, descriptions, diff browser, spacing, typography, hover states
+- **Todo panel** — sidebar todo panel with live agent updates
+- **Thinking fixes** — markdown rendering, context window percentage display, streaming transitions
+- **CSS audit** — scrollbar-thin, content-visibility, thinking styles cleaned up
+- **47 Playwright e2e tests** — end-to-end test coverage for web mode
+
 ## v2.2.4 (2026-03-20)
 
 ### Tool Surface

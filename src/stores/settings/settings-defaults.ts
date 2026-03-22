@@ -43,6 +43,7 @@ export const DEFAULT_APPEARANCE: AppearanceSettings = {
   codeTheme: 'default',
   darkStyle: 'dark',
   thinkingDisplay: 'bubble',
+  activityDisplay: 'collapsed',
   highContrast: false,
   reduceMotion: false,
 }

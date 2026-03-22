@@ -106,6 +106,7 @@ async fn agent_stack_run_with_mock_provider_completes() {
             Vec::new(),
             None,
             Vec::new(),
+            None,
         )
         .await
         .expect("run should succeed");
@@ -137,7 +138,16 @@ async fn agent_stack_run_honors_cancellation() {
     });
 
     let err = stack
-        .run("slow task", 5, None, cancel, Vec::new(), None, Vec::new())
+        .run(
+            "slow task",
+            5,
+            None,
+            cancel,
+            Vec::new(),
+            None,
+            Vec::new(),
+            None,
+        )
         .await
         .expect_err("run should be cancelled");
     assert!(matches!(err, AvaError::Cancelled));
@@ -271,6 +281,7 @@ async fn streaming_run_emits_budget_warning_and_persists_cost_summary() {
             Vec::new(),
             None,
             Vec::new(),
+            None,
         )
         .await
         .expect("run should succeed");
@@ -348,6 +359,7 @@ async fn follow_up_budget_uses_cumulative_spend() {
             Vec::new(),
             Some(queue),
             Vec::new(),
+            None,
         )
         .await
         .expect("run should succeed");
@@ -573,6 +585,7 @@ instructions: []
             Vec::new(),
             None,
             Vec::new(),
+            None,
         )
         .await
         .expect("run should succeed");
@@ -660,6 +673,7 @@ async fn plugin_hooks_fire_without_crash_on_run() {
             Vec::new(),
             None,
             Vec::new(),
+            None,
         )
         .await
         .expect("run should succeed");

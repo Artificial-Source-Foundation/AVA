@@ -184,7 +184,11 @@ pub(crate) fn build_tool_registry(
     permission_inspector: Arc<dyn PermissionInspector>,
     permission_context: Arc<RwLock<InspectionContext>>,
     approval_bridge: ApprovalBridge,
-) -> (ToolRegistry, SharedToolSources) {
+) -> (
+    ToolRegistry,
+    SharedToolSources,
+    ava_tools::core::file_backup::FileBackupSession,
+) {
     build_tool_registry_with_plugins(
         platform,
         permission_inspector,
@@ -200,9 +204,14 @@ pub(crate) fn build_tool_registry_with_plugins(
     permission_context: Arc<RwLock<InspectionContext>>,
     approval_bridge: ApprovalBridge,
     plugin_manager: Option<Arc<tokio::sync::Mutex<PluginManager>>>,
-) -> (ToolRegistry, SharedToolSources) {
+) -> (
+    ToolRegistry,
+    SharedToolSources,
+    ava_tools::core::file_backup::FileBackupSession,
+) {
     let mut registry = ToolRegistry::new();
-    register_default_tools_with_plugins(&mut registry, platform, plugin_manager.clone());
+    let backup_session =
+        register_default_tools_with_plugins(&mut registry, platform, plugin_manager.clone());
     let middleware = PermissionMiddleware::new(
         permission_inspector,
         permission_context,
@@ -217,5 +226,5 @@ pub(crate) fn build_tool_registry_with_plugins(
     };
     let shared_sources = middleware.tool_sources();
     registry.add_middleware(middleware);
-    (registry, shared_sources)
+    (registry, shared_sources, backup_session)
 }

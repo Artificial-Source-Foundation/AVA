@@ -35,6 +35,7 @@ export interface InputTextAreaProps {
   expandedPasteIndex: Accessor<number | null>
   onTogglePastePreview: (index: number) => void
   onRemovePaste: (index: number) => void
+  onUpdatePaste?: (index: number, content: string) => void
   // Send / cancel / streaming
   isProcessing: Accessor<boolean>
   isStreaming: Accessor<boolean>
@@ -74,43 +75,47 @@ export const InputTextArea: Component<InputTextAreaProps> = (props) => (
       expandedIndex={props.expandedPasteIndex()}
       onTogglePreview={props.onTogglePastePreview}
       onRemove={props.onRemovePaste}
+      onUpdatePaste={props.onUpdatePaste}
     />
 
-    <textarea
-      ref={props.textareaRef}
-      value={props.input()}
-      onInput={(e) => props.onInput(e.currentTarget.value)}
-      onKeyDown={props.onKeyDown}
-      onPaste={props.onPaste}
-      placeholder={props.placeholder()}
-      disabled={props.disabled()}
-      rows={1}
-      class="
-        message-composer-textarea
-        w-full px-[18px] py-3.5 pr-[110px]
-        bg-[var(--gray-2)] text-[var(--text-primary)]
-        placeholder-[var(--gray-7)]
-        border border-[var(--gray-5)] rounded-[var(--radius-2xl)]
-        resize-none transition-colors
-        focus:outline-none focus:border-[var(--accent)]
-        disabled:opacity-50
-      "
-      style={{
-        'min-height': '44px',
-        'max-height': '200px',
-        'font-size': 'var(--chat-font-size)',
-        transition: 'height 100ms ease, border-color 150ms ease',
-      }}
-    />
+    {/* Textarea + submit button in own relative container so button stays anchored */}
+    <div class="relative">
+      <textarea
+        ref={props.textareaRef}
+        value={props.input()}
+        onInput={(e) => props.onInput(e.currentTarget.value)}
+        onKeyDown={props.onKeyDown}
+        onPaste={props.onPaste}
+        placeholder={props.placeholder()}
+        disabled={props.disabled()}
+        rows={1}
+        class="
+          message-composer-textarea
+          w-full px-[18px] py-3.5 pr-[110px]
+          bg-[var(--gray-2)] text-[var(--text-primary)]
+          placeholder-[var(--gray-7)]
+          border border-[var(--gray-5)] rounded-[var(--radius-2xl)]
+          resize-none transition-colors
+          focus:outline-none focus:border-[var(--accent)]
+          disabled:opacity-50
+        "
+        style={{
+          'min-height': '44px',
+          'max-height': '200px',
+          'font-size': 'var(--chat-font-size)',
+          transition: 'height 100ms ease, border-color 150ms ease',
+        }}
+      />
 
-    {/* Send / Cancel / Streaming — inside textarea, vertically centered right */}
-    <SubmitButton
-      isProcessing={props.isProcessing}
-      isStreaming={props.isStreaming}
-      elapsedSeconds={props.elapsedSeconds}
-      onCancel={props.onCancel}
-      inputHasText={props.inputHasText}
-      queuedCount={props.queuedCount}
-    />
+      {/* Send / Cancel / Streaming — inside textarea, vertically centered right */}
+      <SubmitButton
+        isProcessing={props.isProcessing}
+        isStreaming={props.isStreaming}
+        elapsedSeconds={props.elapsedSeconds}
+        onCancel={props.onCancel}
+        inputHasText={props.inputHasText}
+        queuedCount={props.queuedCount}
+      />
+    </div>
   </div>
 )

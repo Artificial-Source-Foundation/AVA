@@ -24,6 +24,7 @@ use ava_permissions::PermissionSystem;
 use ava_platform::{Platform, StandardPlatform};
 use ava_plugin::PluginManager;
 use ava_session::SessionManager;
+use ava_tools::core::file_backup::FileBackupSession;
 use ava_tools::core::plan::PlanBridge;
 use ava_tools::core::question::QuestionBridge;
 use ava_tools::core::{
@@ -101,6 +102,10 @@ pub struct AgentStack {
     /// Set to `true` before the background init task is spawned so multiple
     /// concurrent first-`run()` calls don't double-init.
     mcp_init_done: Arc<AtomicBool>,
+    /// Shared handle for persistent file edit backups. Populated with the
+    /// session ID when `run()` starts so that write/edit tools can save
+    /// pre-mutation snapshots to `~/.ava/file-history/`.
+    file_backup_session: FileBackupSession,
 }
 
 impl AgentStack {
@@ -291,13 +296,14 @@ impl AgentStack {
         ));
 
         // Wire plugin manager into the bash tool via `shell.env` hook.
-        let (mut registry, shared_tool_sources) = build_tool_registry_with_plugins(
-            platform.clone(),
-            Arc::clone(&permission_inspector),
-            Arc::clone(&permission_context),
-            approval_bridge.clone(),
-            Some(Arc::clone(&plugin_manager)),
-        );
+        let (mut registry, shared_tool_sources, file_backup_session) =
+            build_tool_registry_with_plugins(
+                platform.clone(),
+                Arc::clone(&permission_inspector),
+                Arc::clone(&permission_context),
+                approval_bridge.clone(),
+                Some(Arc::clone(&plugin_manager)),
+            );
         register_todo_tools(&mut registry, todo_state.clone());
         register_question_tool(&mut registry, question_bridge.clone());
         register_plan_tool(&mut registry, plan_bridge.clone(), plan_state.clone());
@@ -360,6 +366,7 @@ impl AgentStack {
                 plugin_manager,
                 index_task: std::sync::Mutex::new(Some(index_handle)),
                 mcp_init_done: Arc::new(AtomicBool::new(false)),
+                file_backup_session,
             },
             question_rx,
             approval_rx,
@@ -613,7 +620,7 @@ impl AgentStack {
     }
 
     pub async fn reload_tools(&self) -> Result<usize> {
-        let (mut registry, reload_sources) = build_tool_registry(
+        let (mut registry, reload_sources, _backup_session) = build_tool_registry(
             self.platform.clone(),
             Arc::clone(&self.permission_inspector),
             Arc::clone(&self.permission_context),

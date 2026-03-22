@@ -182,14 +182,18 @@ export const ThinkingRow: Component<ThinkingRowProps> = (props) => {
         </summary>
 
         <Show when={props.thinking}>
+          {/* biome-ignore lint/a11y/noStaticElementInteractions: prevent details toggle */}
+          {/* biome-ignore lint/a11y/useKeyWithClickEvents: text selection area */}
           <div
-            class={`scroll-fade-mask mt-1 max-h-[400px] overflow-y-auto scrollbar-thin message-content thinking-content`}
+            class="mt-1 overflow-y-auto scrollbar-thin message-content thinking-content select-text"
             style={{
               color: 'var(--text-secondary)',
               'font-size': '12.5px',
               opacity: '0.8',
               'line-height': '1.6',
+              cursor: 'text',
             }}
+            onClick={(e) => e.stopPropagation()}
           >
             <div ref={contentRef} class="message-content" />
             <Show when={props.isStreaming}>

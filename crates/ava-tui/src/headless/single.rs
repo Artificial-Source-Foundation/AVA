@@ -76,6 +76,7 @@ pub(super) async fn run_single_agent(cli: CliArgs, goal: &str) -> Result<()> {
                 Vec::new(),
                 Some(message_queue),
                 cli_images,
+                None,
             )
             .await
     });
@@ -137,6 +138,7 @@ pub(super) async fn run_single_agent(cli: CliArgs, goal: &str) -> Result<()> {
                 } => {
                     serde_json::json!({"type": "mcp_tools_changed", "server_name": server_name, "tool_count": tool_count})
                 }
+                AgentEvent::Checkpoint(_) => continue,
             };
             println!("{json}");
         }
@@ -225,6 +227,9 @@ pub(super) async fn run_single_agent(cli: CliArgs, goal: &str) -> Result<()> {
                     }
                     eprintln!("[error: {e}]");
                     break;
+                }
+                AgentEvent::Checkpoint(_) => {
+                    // Checkpoint: session saved by caller after handle.await
                 }
             }
         }

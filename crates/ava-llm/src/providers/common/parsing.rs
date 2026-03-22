@@ -1232,27 +1232,14 @@ pub fn parse_responses_api_stream_chunk(payload: &Value) -> Option<StreamChunk> 
                 // The summary array contains objects like {"type":"summary_text","text":"..."}.
                 // Summaries require OpenAI org verification; without it the array is empty.
                 "reasoning" => {
-                    let mut summary_text = String::new();
-                    if let Some(summary) = item.get("summary").and_then(Value::as_array) {
-                        for entry in summary {
-                            if let Some(text) = entry.get("text").and_then(Value::as_str) {
-                                summary_text.push_str(text);
-                            }
-                        }
-                    }
-                    if summary_text.is_empty() {
-                        // No summary text (unverified org) — emit end sentinel
-                        // so the streaming wrapper can compute elapsed reasoning time.
-                        Some(StreamChunk {
-                            thinking: Some(REASONING_END_SENTINEL.to_string()),
-                            ..Default::default()
-                        })
-                    } else {
-                        Some(StreamChunk {
-                            thinking: Some(summary_text),
-                            ..Default::default()
-                        })
-                    }
+                    // Always emit just the end sentinel. The summary text was
+                    // already streamed via `response.reasoning_summary_text.delta`
+                    // events — emitting the full summary here would duplicate it
+                    // because the frontend accumulates deltas with `prev + content`.
+                    Some(StreamChunk {
+                        thinking: Some(REASONING_END_SENTINEL.to_string()),
+                        ..Default::default()
+                    })
                 }
                 // Skip text/message — already streamed via delta events
                 "text" | "output_text" | "message" => None,

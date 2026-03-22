@@ -84,8 +84,9 @@ pub async fn submit_goal(
             .map_err(|e| error_response(StatusCode::BAD_REQUEST, &e.to_string()))?;
     }
 
-    // If a session_id was provided, load that session's messages as history
-    let (session_id_str, history) =
+    // If a session_id was provided, use it so frontend and backend share the same ID.
+    // Also load that session's messages as history if it already exists in the DB.
+    let (session_uuid, history) =
         if let Some(ref sid) = req.session_id {
             let uuid = uuid::Uuid::parse_str(sid).map_err(|e| {
                 error_response(StatusCode::BAD_REQUEST, &format!("Invalid session_id: {e}"))
@@ -95,10 +96,11 @@ pub async fn submit_goal(
                     error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string())
                 })?;
             let msgs = session.map(|s| s.messages).unwrap_or_default();
-            (sid.clone(), msgs)
+            (uuid, msgs)
         } else {
-            (uuid::Uuid::new_v4().to_string(), vec![])
+            (uuid::Uuid::new_v4(), vec![])
         };
+    let session_id_str = session_uuid.to_string();
 
     let cancel = state.new_cancel_token().await;
     let inner = state.inner.clone();
@@ -144,8 +146,14 @@ pub async fn submit_goal(
         let edit_hist = edit_history.clone();
 
         // Forward raw agent events to the WS broadcast channel, tracking edits
+        let checkpoint_stack = stack.clone();
         let forwarder = tokio::spawn(async move {
             while let Some(event) = rx.recv().await {
+                // Checkpoint: incrementally save session so progress survives crashes
+                if let ava_agent::agent_loop::AgentEvent::Checkpoint(ref session) = event {
+                    let _ = checkpoint_stack.session_manager.save(session);
+                    continue; // Don't forward checkpoint events to WebSocket clients
+                }
                 // Track write/edit tool calls for undo support
                 if let ava_agent::agent_loop::AgentEvent::ToolCall(ref tc) = event {
                     if tc.name == "edit" || tc.name == "write" {
@@ -240,7 +248,8 @@ pub async fn submit_goal(
                 cancel,
                 history,
                 Some(msg_queue),
-                vec![], // no images
+                vec![],             // no images
+                Some(session_uuid), // use frontend's session ID
             )
             .await;
 
@@ -616,6 +625,7 @@ async fn run_agent_from_history(
                 history,
                 Some(msg_queue),
                 vec![],
+                None, // retry/regenerate — let backend generate a new session ID
             )
             .await;
 

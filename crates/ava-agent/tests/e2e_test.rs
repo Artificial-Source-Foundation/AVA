@@ -60,6 +60,7 @@ async fn full_agent_run_with_tool_calls() {
             Vec::new(),
             None,
             Vec::new(),
+            None,
         )
         .await
         .expect("run should succeed");
@@ -105,6 +106,7 @@ async fn agent_run_with_bash_tool() {
             Vec::new(),
             None,
             Vec::new(),
+            None,
         )
         .await
         .expect("run should succeed");
@@ -138,7 +140,16 @@ async fn agent_run_cancellation() {
     });
 
     let err = stack
-        .run("slow run", 5, None, cancel, Vec::new(), None, Vec::new())
+        .run(
+            "slow run",
+            5,
+            None,
+            cancel,
+            Vec::new(),
+            None,
+            Vec::new(),
+            None,
+        )
         .await
         .expect_err("run should be cancelled");
     assert!(matches!(err, AvaError::Cancelled));

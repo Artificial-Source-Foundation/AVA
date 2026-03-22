@@ -1,9 +1,20 @@
 import { Crown, RefreshCw } from 'lucide-solid'
-import { type Accessor, type Component, createMemo, For, Match, Show, Switch } from 'solid-js'
+import {
+  type Accessor,
+  type Component,
+  createMemo,
+  createSignal,
+  For,
+  Index,
+  Match,
+  Show,
+  Switch,
+} from 'solid-js'
 import type { ThinkingSegment } from '../../hooks/use-rust-agent'
 import { formatCost } from '../../lib/cost'
 import { debugLog } from '../../lib/debug-log'
 import { formatMs } from '../../lib/format-time'
+import { useSettings } from '../../stores/settings'
 import { useTeam } from '../../stores/team'
 import type { Message, ToolCall } from '../../types'
 import type { PlanData } from '../../types/rust-ipc'
@@ -196,14 +207,14 @@ const ToolSegmentDispatch: Component<ToolSegmentProps> = (props) => {
 
   return (
     <div class="flex flex-col gap-1.5 my-1">
-      <For each={segments()}>
+      <Index each={segments()}>
         {(seg) => (
           <Show
-            when={seg.kind === 'context'}
+            when={seg().kind === 'context'}
             fallback={
               <SingleToolCallRow
                 toolCall={
-                  (seg as ReturnType<typeof partitionByContext>[number] & { kind: 'single' }).call
+                  (seg() as ReturnType<typeof partitionByContext>[number] & { kind: 'single' }).call
                 }
               />
             }
@@ -211,13 +222,13 @@ const ToolSegmentDispatch: Component<ToolSegmentProps> = (props) => {
             {/* Context segment: group if >1 call, else render single */}
             <Show
               when={
-                (seg as ReturnType<typeof partitionByContext>[number] & { kind: 'context' }).calls
+                (seg() as ReturnType<typeof partitionByContext>[number] & { kind: 'context' }).calls
                   .length > 1
               }
               fallback={
                 <SingleToolCallRow
                   toolCall={
-                    (seg as ReturnType<typeof partitionByContext>[number] & { kind: 'context' })
+                    (seg() as ReturnType<typeof partitionByContext>[number] & { kind: 'context' })
                       .calls[0]
                   }
                 />
@@ -226,7 +237,7 @@ const ToolSegmentDispatch: Component<ToolSegmentProps> = (props) => {
               <ToolCallErrorBoundary>
                 <ContextGroupHeader
                   calls={
-                    (seg as ReturnType<typeof partitionByContext>[number] & { kind: 'context' })
+                    (seg() as ReturnType<typeof partitionByContext>[number] & { kind: 'context' })
                       .calls
                   }
                   isStreaming={props.isStreaming}
@@ -235,7 +246,7 @@ const ToolSegmentDispatch: Component<ToolSegmentProps> = (props) => {
             </Show>
           </Show>
         )}
-      </For>
+      </Index>
     </div>
   )
 }
@@ -255,55 +266,159 @@ const ToolSegmentDispatch: Component<ToolSegmentProps> = (props) => {
  *   💭 Thought for 1.1s
  *   I need to give a concise overview...
  */
+/**
+ * Wraps interleaved thinking + tool calls in a collapsible card.
+ * - While streaming: open, shows live summary "Working... (N tools)"
+ * - After completion: collapsed to one line "Agent activity (3 thoughts, 8 tool calls)"
+ * - Respects `activityDisplay` setting: collapsed (default), expanded, hidden
+ */
 const InterleavedThinkingSegments: Component<{
   segments: ThinkingSegment[]
   toolCallsById: Map<string, ToolCall>
+  isStreaming?: boolean
 }> = (props) => {
+  const { settings } = useSettings()
+  const activityMode = () => settings().appearance.activityDisplay ?? 'collapsed'
+
+  const [isOpen, setIsOpen] = createSignal(props.isStreaming ?? false)
+
+  // Live counts
+  const totalTools = () => props.segments.reduce((sum, seg) => sum + seg.toolCallIds.length, 0)
+  const thinkingCount = () => props.segments.filter((s) => s.thinking).length
+
+  // Tool status counts from toolCallsById
+  const toolStats = () => {
+    let done = 0,
+      failed = 0,
+      running = 0
+    for (const seg of props.segments) {
+      for (const id of seg.toolCallIds) {
+        const tc = props.toolCallsById.get(id)
+        if (!tc) continue
+        if (tc.status === 'error') failed++
+        else if (tc.status === 'success') done++
+        else running++
+      }
+    }
+    return { done, failed, running }
+  }
+
+  // Summary with live stats
+  const summaryLabel = () => {
+    const tools = totalTools()
+    const thoughts = thinkingCount()
+    const stats = toolStats()
+    if (props.isStreaming) {
+      const parts: string[] = []
+      if (thoughts > 0) parts.push(`${thoughts} thought${thoughts !== 1 ? 's' : ''}`)
+      if (tools > 0) {
+        let toolStr = `${tools} tool${tools !== 1 ? 's' : ''}`
+        const extra: string[] = []
+        if (stats.done > 0) extra.push(`${stats.done} done`)
+        if (stats.failed > 0) extra.push(`${stats.failed} failed`)
+        if (stats.running > 0) extra.push(`${stats.running} running`)
+        if (extra.length > 0) toolStr += ` — ${extra.join(', ')}`
+        parts.push(toolStr)
+      }
+      return parts.length > 0 ? `Working... (${parts.join(', ')})` : 'Working...'
+    }
+    const parts: string[] = []
+    if (thoughts > 0) parts.push(`${thoughts} thought${thoughts !== 1 ? 's' : ''}`)
+    if (tools > 0) {
+      let toolStr = `${tools} tool call${tools !== 1 ? 's' : ''}`
+      if (stats.failed > 0) toolStr += `, ${stats.failed} failed`
+      parts.push(toolStr)
+    }
+    return parts.length > 0 ? `Agent activity (${parts.join(', ')})` : 'Agent activity'
+  }
+
+  // When streaming starts, auto-open; keep user's toggle otherwise
+  const detailsOpen = () => {
+    if (activityMode() === 'expanded') return true
+    if (props.isStreaming) return true
+    return isOpen()
+  }
+
+  // Hidden mode — render nothing
+  if (activityMode() === 'hidden') return null
+
+  const inner = (
+    <Index each={props.segments}>
+      {(segment, idx) => {
+        const segmentTools = () =>
+          segment()
+            .toolCallIds.map((id) => props.toolCallsById.get(id))
+            .filter((tc): tc is ToolCall => tc !== undefined)
+        const isLastSegment = () => idx === props.segments.length - 1
+        const segStreaming = () =>
+          !!(props.isStreaming && isLastSegment() && segment().toolCallIds.length === 0)
+
+        return (
+          <div class="flex flex-col gap-1">
+            <Show when={segment().thinking}>
+              <ThinkingRow thinking={segment().thinking} isStreaming={segStreaming()} />
+            </Show>
+            <Show when={segmentTools().length > 0}>
+              <div class="ml-2 my-0.5">
+                <ToolSegmentDispatch toolCalls={segmentTools()} isStreaming={false} />
+              </div>
+            </Show>
+          </div>
+        )
+      }}
+    </Index>
+  )
+
   return (
-    <div class="flex flex-col gap-1.5">
-      <For each={props.segments}>
-        {(segment) => {
-          const segmentTools = () =>
-            segment.toolCallIds
-              .map((id) => props.toolCallsById.get(id))
-              .filter((tc): tc is ToolCall => tc !== undefined)
-
-          return (
-            <div class="flex flex-col gap-1">
-              {/* Thinking block for this segment */}
-              <Show when={segment.thinking}>
-                <ThinkingRow thinking={segment.thinking} isStreaming={false} />
-              </Show>
-
-              {/* Tool calls that happened after this thinking block */}
-              <Show when={segmentTools().length > 0}>
-                <div class="flex flex-col gap-1.5 ml-2 my-0.5">
-                  <For each={segmentTools()}>
-                    {(tc) => (
-                      <ToolCallErrorBoundary>
-                        <Switch fallback={<ToolCallRow toolCall={tc} />}>
-                          <Match when={tc.name === 'bash' && tc}>
-                            {(call) => <CommandOutputRow toolCall={call()} />}
-                          </Match>
-                          <Match when={tc.diff && tc.name !== 'bash' && tc}>
-                            {(call) => <DiffRow toolCall={call()} />}
-                          </Match>
-                        </Switch>
-                      </ToolCallErrorBoundary>
-                    )}
-                  </For>
-                </div>
-              </Show>
-            </div>
-          )
+    <details
+      class="mb-1 rounded-lg animate-fade-in"
+      open={detailsOpen()}
+      onToggle={(e) => setIsOpen((e.currentTarget as HTMLDetailsElement).open)}
+      style={{
+        border: '1px solid var(--border-default, rgba(255,255,255,0.08))',
+        background: 'var(--bg-subtle, rgba(255,255,255,0.02))',
+      }}
+    >
+      <summary
+        style={{
+          cursor: 'pointer',
+          'font-size': '12px',
+          color: 'var(--text-secondary, var(--text-muted))',
+          'user-select': 'none',
+          'list-style': 'none',
+          padding: '8px 12px',
+          display: 'flex',
+          'align-items': 'center',
+          gap: '6px',
         }}
-      </For>
-    </div>
+      >
+        <Show
+          when={props.isStreaming}
+          fallback={
+            <span
+              style={{ 'font-size': '10px', opacity: '0.5', transition: 'transform 150ms' }}
+              class={detailsOpen() ? 'rotate-90' : ''}
+            >
+              ▶
+            </span>
+          }
+        >
+          <span class="w-3.5 h-3.5 border-2 border-[var(--accent)] border-t-transparent rounded-full animate-spin flex-shrink-0" />
+        </Show>
+        <span style={{ flex: '1' }}>{summaryLabel()}</span>
+        <Show when={!detailsOpen()}>
+          <span style={{ 'font-size': '11px', opacity: '0.35' }}>click to expand</span>
+        </Show>
+      </summary>
+      <div class="flex flex-col gap-1.5 px-3 pb-3">{inner}</div>
+    </details>
   )
 }
 
 export const MessageBubble: Component<MessageBubbleProps> = (props) => {
   const team = useTeam()
+  const { settings } = useSettings()
+  const activityMode = () => settings().appearance.activityDisplay ?? 'collapsed'
   const isUser = () => props.message.role === 'user'
   const shouldAnimateIn = () => props.shouldAnimate && !props.isEditing
 
@@ -557,6 +672,7 @@ export const MessageBubble: Component<MessageBubbleProps> = (props) => {
                     <InterleavedThinkingSegments
                       segments={segs()}
                       toolCallsById={toolCallsById()}
+                      isStreaming={true}
                     />
                   )}
                 </Show>
@@ -567,10 +683,43 @@ export const MessageBubble: Component<MessageBubbleProps> = (props) => {
                     !props.streamingThinkingSegments || props.streamingThinkingSegments.length === 0
                   }
                 >
-                  <Show when={hasToolCalls()}>
-                    <ToolCallErrorBoundary>
-                      <ToolSegmentDispatch toolCalls={effectiveToolCalls()!} isStreaming={true} />
-                    </ToolCallErrorBoundary>
+                  <Show when={hasToolCalls() && activityMode() !== 'hidden'}>
+                    <details
+                      class="mb-1 rounded-lg"
+                      open={true}
+                      style={{
+                        border: '1px solid var(--border-default, rgba(255,255,255,0.08))',
+                        background: 'var(--bg-subtle, rgba(255,255,255,0.02))',
+                      }}
+                    >
+                      <summary
+                        style={{
+                          cursor: 'pointer',
+                          'font-size': '12px',
+                          color: 'var(--text-secondary, var(--text-muted))',
+                          'user-select': 'none',
+                          'list-style': 'none',
+                          padding: '8px 12px',
+                          display: 'flex',
+                          'align-items': 'center',
+                          gap: '6px',
+                        }}
+                      >
+                        <span class="w-3.5 h-3.5 border-2 border-[var(--accent)] border-t-transparent rounded-full animate-spin flex-shrink-0" />
+                        <span style={{ flex: '1' }}>
+                          Working... ({effectiveToolCalls()!.length} tool
+                          {effectiveToolCalls()!.length !== 1 ? 's' : ''})
+                        </span>
+                      </summary>
+                      <div class="px-3 pb-3">
+                        <ToolCallErrorBoundary>
+                          <ToolSegmentDispatch
+                            toolCalls={effectiveToolCalls()!}
+                            isStreaming={true}
+                          />
+                        </ToolCallErrorBoundary>
+                      </div>
+                    </details>
                   </Show>
                   <ToolPreview toolCalls={effectiveToolCalls()} isStreaming={true} />
                 </Show>
@@ -594,13 +743,9 @@ export const MessageBubble: Component<MessageBubbleProps> = (props) => {
                       props.streamingThinkingSegments.length === 0)
                   }
                 >
-                  <div class="flex items-center gap-2 text-xs text-[var(--text-secondary)] py-2">
-                    <div class="flex items-center gap-[5px]">
-                      <span class="typing-dot" style={{ 'animation-delay': '0ms' }} />
-                      <span class="typing-dot" style={{ 'animation-delay': '160ms' }} />
-                      <span class="typing-dot" style={{ 'animation-delay': '320ms' }} />
-                    </div>
-                    <span class="font-[var(--font-ui-mono)] tracking-wide">ava is thinking...</span>
+                  <div class="fixed bottom-14 left-4 z-40 flex items-center gap-2 px-3 py-1.5 rounded-full bg-[var(--surface-overlay)] border border-[var(--border-subtle)] shadow-lg text-[11px] text-[var(--text-secondary)]">
+                    <span class="w-3.5 h-3.5 border-2 border-[var(--accent)] border-t-transparent rounded-full animate-spin" />
+                    <span>ava is thinking...</span>
                   </div>
                 </Show>
               </Show>

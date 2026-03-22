@@ -2,7 +2,6 @@
  * Submit Button
  *
  * Send / Cancel button cluster rendered inside the textarea area.
- * Send button is a purple circle with arrow-up icon.
  * Displays streaming elapsed time and a cancel button when processing.
  *
  * When the agent is running the send button stays enabled so users can
@@ -31,14 +30,14 @@ export interface SubmitButtonProps {
 // ---------------------------------------------------------------------------
 
 export const SubmitButton: Component<SubmitButtonProps> = (props) => (
-  <div class="absolute right-2.5 top-0 bottom-0 flex items-center gap-1.5">
+  <div class="absolute right-3 top-0 bottom-0 flex items-center gap-2">
     {/* Queued message count badge */}
     <Show when={props.queuedCount && props.queuedCount() > 0}>
       <span
         class="
           flex items-center justify-center
-          min-w-[18px] h-[18px] px-1
-          text-[9px] font-semibold tabular-nums
+          min-w-[20px] h-[20px] px-1.5
+          text-[10px] font-semibold tabular-nums
           bg-[var(--accent)] text-white
           rounded-full
         "
@@ -50,8 +49,8 @@ export const SubmitButton: Component<SubmitButtonProps> = (props) => (
 
     {/* Streaming elapsed time */}
     <Show when={props.isStreaming()}>
-      <span class="flex items-center gap-1 text-[10px] text-[var(--text-tertiary)] tabular-nums">
-        <span class="w-1.5 h-1.5 bg-[var(--accent)] rounded-full animate-pulse" />
+      <span class="flex items-center gap-1.5 text-[11px] text-[var(--text-tertiary)] tabular-nums">
+        <span class="w-2 h-2 bg-[var(--accent)] rounded-full animate-pulse" />
         {props.elapsedSeconds()}s
       </span>
     </Show>
@@ -63,36 +62,38 @@ export const SubmitButton: Component<SubmitButtonProps> = (props) => (
         onClick={props.onCancel}
         class="
           flex items-center justify-center
-          w-7 h-7
-          bg-[var(--error)] hover:brightness-110
-          text-white rounded-full
-          transition-colors
+          w-8 h-8
+          bg-[var(--error)]/90 hover:bg-[var(--error)]
+          text-white rounded-lg
+          transition-all active:scale-95
         "
-        title="Cancel"
+        title="Cancel (Esc)"
       >
-        <Square class="w-3 h-3" />
+        <Square class="w-3.5 h-3.5" />
       </button>
     </Show>
 
-    {/* Send button — purple circle with arrow-up.
-        Stays enabled during processing so users can steer the agent. */}
+    {/* Send button */}
     <button
       type="submit"
       disabled={!props.inputHasText()}
-      class="
+      class={`
         flex items-center justify-center
-        w-8 h-8 rounded-full
-        transition-all
-        disabled:opacity-30 disabled:cursor-not-allowed
-        bg-[var(--violet-8)] hover:bg-[var(--accent)] text-white
-      "
+        w-8 h-8 rounded-lg
+        transition-all active:scale-95
+        ${
+          props.inputHasText()
+            ? 'bg-[var(--accent)] hover:brightness-110 text-white shadow-sm shadow-[var(--accent)]/25'
+            : 'bg-[var(--gray-4)] text-[var(--gray-7)] cursor-not-allowed'
+        }
+      `}
       title={
         props.isProcessing()
           ? 'Send steering message (Enter), follow-up (Alt+Enter), or post-complete (Ctrl+Alt+Enter)'
-          : 'Send message'
+          : 'Send message (Enter)'
       }
     >
-      <ArrowUp class="w-4 h-4" />
+      <ArrowUp class="w-4 h-4" stroke-width={2.5} />
     </button>
   </div>
 )

@@ -24,7 +24,6 @@ import { useTeam } from '../../stores/team'
 import { ApprovalDock } from './ApprovalDock'
 import { MessageInput } from './MessageInput'
 import { MessageList } from './MessageList'
-import { MessageQueueBar } from './MessageQueueBar'
 import { PlanDock } from './PlanDock'
 import { QuestionDock } from './QuestionDock'
 import { TeamChatView } from './TeamChatView'
@@ -151,13 +150,6 @@ export const ChatView: Component = () => {
 
         {/* Inline agent question dock */}
         <QuestionDock request={agent.pendingQuestion()} onResolve={handleQuestionResolve} />
-
-        {/* Queued messages indicator */}
-        <MessageQueueBar
-          messages={chat.messageQueue()}
-          onRemove={(i) => chat.removeFromQueue(i)}
-          onClear={() => chat.clearQueue()}
-        />
 
         {/* Team status strip (visible when team is active) */}
         <TeamStatusStrip />

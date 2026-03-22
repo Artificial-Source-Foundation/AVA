@@ -711,10 +711,10 @@ function createAgentStore() {
   function followUp(content: string): void {
     // Only add to local queue if the backend accepts the message
     void rustAgent.followUp(content).then(
-      () => setMessageQueue((prev) => [...prev, { content, tier: 'follow-up' }]),
+      () => setMessageQueue((prev) => [...prev, { content, tier: 'queued' }]),
       () => {
         // Backend rejected (agent not running or channel closed) — don't queue locally
-        log.warn('agent', 'Follow-up rejected by backend', { content: content.slice(0, 80) })
+        log.warn('agent', 'Queue rejected by backend', { content: content.slice(0, 80) })
       }
     )
   }
@@ -807,6 +807,24 @@ function createAgentStore() {
 
   function removeFromQueue(index: number): void {
     setMessageQueue((prev) => prev.filter((_, i) => i !== index))
+  }
+
+  function reorderInQueue(fromIndex: number, toIndex: number): void {
+    setMessageQueue((prev) => {
+      if (fromIndex < 0 || fromIndex >= prev.length) return prev
+      if (toIndex < 0 || toIndex >= prev.length) return prev
+      const next = [...prev]
+      const [item] = next.splice(fromIndex, 1)
+      next.splice(toIndex, 0, item)
+      return next
+    })
+  }
+
+  function editInQueue(index: number, newContent: string): void {
+    setMessageQueue((prev) => {
+      if (index < 0 || index >= prev.length) return prev
+      return prev.map((item, i) => (i === index ? { ...item, content: newContent } : item))
+    })
   }
 
   function clearQueue(): void {
@@ -1092,6 +1110,8 @@ function createAgentStore() {
 
     // ── Queue ────────────────────────────────────────────────────────
     removeFromQueue,
+    reorderInQueue,
+    editInQueue,
     clearQueue,
 
     // ── Agent-specific ──────────────────────────────────────────────

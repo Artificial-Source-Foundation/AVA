@@ -614,7 +614,7 @@ export function useRustAgent() {
 
   // ── Mid-stream messaging (3-tier) ─────────────────────────────────
 
-  /** Inject a steering message (Tier 1). Agent processes it after current tool. */
+  /** Inject an interrupt message. Agent stops at next tool boundary and processes it. */
   const steer = async (message: string): Promise<void> => {
     if (!isRunning()) {
       log.warn('agent', 'Steer rejected: agent not running')
@@ -631,7 +631,7 @@ export function useRustAgent() {
     }
   }
 
-  /** Queue a follow-up message (Tier 2). Runs after agent completes current task. */
+  /** Queue a message for next turn. Agent finishes current turn, then processes this. */
   const followUp = async (message: string): Promise<void> => {
     if (!isRunning()) {
       log.warn('agent', 'Cannot queue follow-up: agent is not running')

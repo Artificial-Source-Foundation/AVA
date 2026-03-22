@@ -32,8 +32,8 @@ export interface InputState extends ModelState {
   handleSubmit: (e: Event) => Promise<void>
   handleKeyDown: (e: KeyboardEvent) => void
   handleCancel: () => void
-  handleSteerFromMenu: () => void
-  handleFollowUpFromMenu: () => void
+  handleQueueFromMenu: () => void
+  handleInterruptFromMenu: () => void
   handlePostCompleteFromMenu: () => void
   handleExternalEditor: () => Promise<void>
   autoResize: () => void
@@ -84,7 +84,7 @@ export function useInputState(): InputState {
   )
   const isProcessing = createMemo(() => chat.isStreaming() || agent.isRunning())
   // Input is NOT disabled during processing -- mid-stream messaging allows
-  // users to type while the agent runs (Enter = steer, Alt+Enter = follow-up)
+  // users to type while the agent runs (Enter = queue, Ctrl+Enter = interrupt)
   const inputDisabled = createMemo(() => false)
   const inputHasText = createMemo(
     () =>
@@ -94,7 +94,7 @@ export function useInputState(): InputState {
   )
   const placeholder = createMemo(() =>
     isProcessing()
-      ? 'Steer the agent... (Enter = steer, Alt+Enter = follow-up)'
+      ? 'Type a message... (Enter = queue, Ctrl+Enter = interrupt)'
       : agent.isPlanMode()
         ? 'Plan your approach... (Ctrl+/ for commands)'
         : 'Ask anything... (Ctrl+/ for commands)'
@@ -211,23 +211,23 @@ export function useInputState(): InputState {
       }
     }
 
-    // Mid-stream messaging: route to steer/follow-up when agent is running
+    // Mid-stream messaging: queue for next turn when agent is running (Enter)
     if (isProcessing()) {
       setInput('')
       setHistoryIndex(-1)
       if (textareaRef) textareaRef.style.height = 'auto'
-      // Add the steering message to chat so the user sees what they sent
+      // Add the queued message to chat so the user sees what they sent
       const sessionId = sessionStore.currentSession()?.id ?? ''
       sessionStore.addMessage({
-        id: generateMessageId('steer'),
+        id: generateMessageId('queue'),
         sessionId,
         role: 'user',
         content: message,
         createdAt: Date.now(),
-        metadata: { tier: 'steering' },
+        metadata: { tier: 'queued' },
       })
-      // Default: steering (Enter). Follow-up handled in handleKeyDown with Alt+Enter.
-      agent.steer(message)
+      // Queue: agent finishes current turn, then processes message as new turn
+      agent.followUp(message)
       return
     }
 
@@ -327,8 +327,8 @@ export function useInputState(): InputState {
     }
 
     // Mid-stream messaging keybinds (while agent is running).
-    // During processing, Enter ALWAYS steers (regardless of sendKey setting).
-    // This overrides the ctrl+enter send mode so users can steer with plain Enter.
+    // During processing, Enter queues for next turn (regardless of sendKey setting).
+    // Ctrl+Enter interrupts. Alt+Enter queues post-complete.
     if (isProcessing() && e.key === 'Enter') {
       const message = input().trim()
       if (!message) {
@@ -338,8 +338,25 @@ export function useInputState(): InputState {
         return
       }
 
-      if (e.ctrlKey && e.altKey) {
-        // Ctrl+Alt+Enter: post-complete (Tier 3)
+      if (e.ctrlKey && !e.altKey) {
+        // Ctrl+Enter: interrupt — stop at next tool boundary, send immediately
+        e.preventDefault()
+        setInput('')
+        if (textareaRef) textareaRef.style.height = 'auto'
+        const sessionId = sessionStore.currentSession()?.id ?? ''
+        sessionStore.addMessage({
+          id: generateMessageId('intr'),
+          sessionId,
+          role: 'user',
+          content: message,
+          createdAt: Date.now(),
+          metadata: { tier: 'interrupt' },
+        })
+        agent.steer(message)
+        return
+      }
+      if (e.altKey) {
+        // Alt+Enter: post-complete — queued for after agent fully stops
         e.preventDefault()
         setInput('')
         if (textareaRef) textareaRef.style.height = 'auto'
@@ -355,38 +372,21 @@ export function useInputState(): InputState {
         agent.postComplete(message)
         return
       }
-      if (e.altKey) {
-        // Alt+Enter: follow-up (Tier 2)
+      if (!e.shiftKey) {
+        // Enter (no modifiers): queue — agent finishes current turn, then processes
         e.preventDefault()
         setInput('')
         if (textareaRef) textareaRef.style.height = 'auto'
         const sessionId = sessionStore.currentSession()?.id ?? ''
         sessionStore.addMessage({
-          id: generateMessageId('follow'),
+          id: generateMessageId('queue'),
           sessionId,
           role: 'user',
           content: message,
           createdAt: Date.now(),
-          metadata: { tier: 'follow-up' },
+          metadata: { tier: 'queued' },
         })
         agent.followUp(message)
-        return
-      }
-      if (!e.shiftKey) {
-        // Enter (no modifiers): steer (Tier 1)
-        e.preventDefault()
-        setInput('')
-        if (textareaRef) textareaRef.style.height = 'auto'
-        const sessionId = sessionStore.currentSession()?.id ?? ''
-        sessionStore.addMessage({
-          id: generateMessageId('steer'),
-          sessionId,
-          role: 'user',
-          content: message,
-          createdAt: Date.now(),
-          metadata: { tier: 'steering' },
-        })
-        agent.steer(message)
         return
       }
       // Shift+Enter: newline (fall through)
@@ -410,38 +410,38 @@ export function useInputState(): InputState {
   }
 
   // Menu-driven mid-stream send helpers (for context menu on send button)
-  const handleSteerFromMenu = (): void => {
+  const handleQueueFromMenu = (): void => {
     const message = input().trim()
     if (!message || !isProcessing()) return
     setInput('')
     if (textareaRef) textareaRef.style.height = 'auto'
     const sessionId = sessionStore.currentSession()?.id ?? ''
     sessionStore.addMessage({
-      id: generateMessageId('steer'),
+      id: generateMessageId('queue'),
       sessionId,
       role: 'user',
       content: message,
       createdAt: Date.now(),
-      metadata: { tier: 'steering' },
-    })
-    agent.steer(message)
-  }
-
-  const handleFollowUpFromMenu = (): void => {
-    const message = input().trim()
-    if (!message || !isProcessing()) return
-    setInput('')
-    if (textareaRef) textareaRef.style.height = 'auto'
-    const sessionId = sessionStore.currentSession()?.id ?? ''
-    sessionStore.addMessage({
-      id: generateMessageId('follow'),
-      sessionId,
-      role: 'user',
-      content: message,
-      createdAt: Date.now(),
-      metadata: { tier: 'follow-up' },
+      metadata: { tier: 'queued' },
     })
     agent.followUp(message)
+  }
+
+  const handleInterruptFromMenu = (): void => {
+    const message = input().trim()
+    if (!message || !isProcessing()) return
+    setInput('')
+    if (textareaRef) textareaRef.style.height = 'auto'
+    const sessionId = sessionStore.currentSession()?.id ?? ''
+    sessionStore.addMessage({
+      id: generateMessageId('intr'),
+      sessionId,
+      role: 'user',
+      content: message,
+      createdAt: Date.now(),
+      metadata: { tier: 'interrupt' },
+    })
+    agent.steer(message)
   }
 
   const handlePostCompleteFromMenu = (): void => {
@@ -496,8 +496,8 @@ export function useInputState(): InputState {
     handleSubmit,
     handleKeyDown,
     handleCancel,
-    handleSteerFromMenu,
-    handleFollowUpFromMenu,
+    handleQueueFromMenu,
+    handleInterruptFromMenu,
     handlePostCompleteFromMenu,
     handleExternalEditor,
     autoResize,

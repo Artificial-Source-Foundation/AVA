@@ -3,7 +3,7 @@
  * Shared types for the chat/agent subsystem.
  */
 
-export type MessageTier = 'steering' | 'follow-up' | 'post-complete'
+export type MessageTier = 'queued' | 'interrupt' | 'post-complete' | 'steering' | 'follow-up'
 
 export interface QueuedMessage {
   content: string

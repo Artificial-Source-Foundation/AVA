@@ -5,11 +5,11 @@
  * Displays streaming elapsed time and a cancel button when processing.
  *
  * When the agent is running the send button stays enabled so users can
- * submit steering messages (Enter), follow-ups (Alt+Enter), or
- * post-complete messages (Ctrl+Alt+Enter).
+ * queue messages (Enter), interrupt (Ctrl+Enter), or
+ * post-complete messages (Alt+Enter).
  *
  * Right-clicking the send button during processing opens a context menu
- * to choose between Steer, Follow-up, and Post-complete message tiers.
+ * to choose between Queue, Interrupt, and Post-complete message tiers.
  */
 
 import { ArrowUp, ChevronDown, Clock, MessageSquare, Square, Zap } from 'lucide-solid'
@@ -27,8 +27,8 @@ export interface SubmitButtonProps {
   inputHasText: Accessor<boolean>
   queuedCount?: Accessor<number>
   escapeHint?: Accessor<boolean>
-  onSteer?: () => void
-  onFollowUp?: () => void
+  onQueue?: () => void
+  onInterrupt?: () => void
   onPostComplete?: () => void
 }
 
@@ -63,10 +63,10 @@ export const SubmitButton: Component<SubmitButtonProps> = (props) => {
     document.removeEventListener('click', handleDocClick)
   })
 
-  const handleMenuAction = (action: 'steer' | 'followUp' | 'postComplete'): void => {
+  const handleMenuAction = (action: 'queue' | 'interrupt' | 'postComplete'): void => {
     setMenuOpen(false)
-    if (action === 'steer') props.onSteer?.()
-    else if (action === 'followUp') props.onFollowUp?.()
+    if (action === 'queue') props.onQueue?.()
+    else if (action === 'interrupt') props.onInterrupt?.()
     else if (action === 'postComplete') props.onPostComplete?.()
   }
 
@@ -143,7 +143,7 @@ export const SubmitButton: Component<SubmitButtonProps> = (props) => {
               }
               ${props.isProcessing() && props.inputHasText() ? 'rounded-r-none' : ''}
             `}
-            title={props.isProcessing() ? 'Send steering message (Enter)' : 'Send message (Enter)'}
+            title={props.isProcessing() ? 'Queue for next turn (Enter)' : 'Send message (Enter)'}
             onContextMenu={(e) => openMenu(e)}
           >
             <ArrowUp class="w-4 h-4" stroke-width={2.5} />
@@ -189,16 +189,16 @@ export const SubmitButton: Component<SubmitButtonProps> = (props) => {
           >
             <button
               type="button"
-              onClick={() => handleMenuAction('steer')}
+              onClick={() => handleMenuAction('queue')}
               class="
                 w-full flex items-center gap-3 px-3 py-2
                 hover:bg-[var(--gray-3)] transition-colors text-left
               "
             >
-              <Zap class="w-4 h-4 text-[var(--accent)] shrink-0" />
+              <MessageSquare class="w-4 h-4 text-[var(--accent)] shrink-0" />
               <div class="flex-1 min-w-0">
-                <div class="text-[13px] text-[var(--text-primary)] font-medium">Steer</div>
-                <div class="text-[11px] text-[var(--text-muted)]">Inject between tool calls</div>
+                <div class="text-[13px] text-[var(--text-primary)] font-medium">Queue</div>
+                <div class="text-[11px] text-[var(--text-muted)]">Queue for next turn</div>
               </div>
               <span class="text-[11px] text-[var(--text-tertiary)] tabular-nums shrink-0">
                 Enter
@@ -207,19 +207,21 @@ export const SubmitButton: Component<SubmitButtonProps> = (props) => {
 
             <button
               type="button"
-              onClick={() => handleMenuAction('followUp')}
+              onClick={() => handleMenuAction('interrupt')}
               class="
                 w-full flex items-center gap-3 px-3 py-2
                 hover:bg-[var(--gray-3)] transition-colors text-left
               "
             >
-              <MessageSquare class="w-4 h-4 text-[var(--success)] shrink-0" />
+              <Zap class="w-4 h-4 text-[var(--warning)] shrink-0" />
               <div class="flex-1 min-w-0">
-                <div class="text-[13px] text-[var(--text-primary)] font-medium">Follow-up</div>
-                <div class="text-[11px] text-[var(--text-muted)]">Queue for after current task</div>
+                <div class="text-[13px] text-[var(--text-primary)] font-medium">
+                  Interrupt & Send
+                </div>
+                <div class="text-[11px] text-[var(--text-muted)]">Stop and send now</div>
               </div>
               <span class="text-[11px] text-[var(--text-tertiary)] tabular-nums shrink-0">
-                Alt+Enter
+                Ctrl+Enter
               </span>
             </button>
 
@@ -231,13 +233,13 @@ export const SubmitButton: Component<SubmitButtonProps> = (props) => {
                 hover:bg-[var(--gray-3)] transition-colors text-left
               "
             >
-              <Clock class="w-4 h-4 text-[var(--warning)] shrink-0" />
+              <Clock class="w-4 h-4 text-[var(--violet-4,var(--accent))] shrink-0" />
               <div class="flex-1 min-w-0">
                 <div class="text-[13px] text-[var(--text-primary)] font-medium">Post-complete</div>
                 <div class="text-[11px] text-[var(--text-muted)]">Queue for after agent stops</div>
               </div>
               <span class="text-[11px] text-[var(--text-tertiary)] tabular-nums shrink-0">
-                Ctrl+Alt+Enter
+                Alt+Enter
               </span>
             </button>
           </div>

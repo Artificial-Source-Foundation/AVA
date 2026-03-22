@@ -8,11 +8,12 @@
  * Sub-components live in ./message-input/ for modularity.
  */
 
-import { type Component, Show } from 'solid-js'
+import { type Component, createMemo, Show } from 'solid-js'
 import { useLayout } from '../../stores/layout'
 import { DoomLoopBanner } from './DoomLoopBanner'
 import { FileMentionPopover } from './message-input/file-mention-popover'
 import { InputDialogs } from './message-input/input-dialogs'
+import type { QueuedItem } from './message-input/MessageQueueWidget'
 import { InputTextArea } from './message-input/text-area'
 import { ToolbarStrip } from './message-input/toolbar-strip'
 import { useInputState } from './message-input/use-input-state'
@@ -25,6 +26,16 @@ import { ShortcutHint } from './ShortcutHint'
 export const MessageInput: Component = () => {
   const state = useInputState()
   const { openModelBrowser } = useLayout()
+
+  // Map QueuedMessage[] -> QueuedItem[] (add stable id for the widget)
+  const queuedItems = createMemo<QueuedItem[]>(() =>
+    state.chat.messageQueue().map((msg, i) => ({
+      id: `q-${i}-${msg.content.slice(0, 20)}`,
+      content: msg.content,
+      tier: (msg.tier as QueuedItem['tier']) ?? 'queued',
+      group: msg.group,
+    }))
+  )
 
   return (
     <div class="px-7 py-4 border-t border-[var(--gray-5)]">
@@ -72,9 +83,14 @@ export const MessageInput: Component = () => {
           inputHasText={state.inputHasText}
           queuedCount={state.agent.queuedCount}
           escapeHint={state.escapeHint}
-          onSteer={state.handleSteerFromMenu}
-          onFollowUp={state.handleFollowUpFromMenu}
+          onQueue={state.handleQueueFromMenu}
+          onInterrupt={state.handleInterruptFromMenu}
           onPostComplete={state.handlePostCompleteFromMenu}
+          queuedMessages={queuedItems}
+          onQueueRemove={(i) => state.chat.removeFromQueue(i)}
+          onQueueReorder={(from, to) => state.chat.reorderInQueue(from, to)}
+          onQueueEdit={(i, content) => state.chat.editInQueue(i, content)}
+          onQueueClearAll={() => state.chat.clearQueue()}
         />
         <ShortcutHint sendCount={state.sendCount()} />
 

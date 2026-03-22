@@ -8,6 +8,7 @@
 
 import { type Accessor, type Component, Show } from 'solid-js'
 import { FileChips, ImagePreviews, PasteChips } from './attachment-previews'
+import { MessageQueueWidget, type QueuedItem } from './MessageQueueWidget'
 import { SubmitButton } from './submit-button'
 import type { PendingFile, PendingImage, PendingPaste } from './types'
 
@@ -45,9 +46,15 @@ export interface InputTextAreaProps {
   // Mid-stream messaging
   queuedCount?: Accessor<number>
   escapeHint?: Accessor<boolean>
-  onSteer?: () => void
-  onFollowUp?: () => void
+  onQueue?: () => void
+  onInterrupt?: () => void
   onPostComplete?: () => void
+  // Queue widget
+  queuedMessages?: Accessor<QueuedItem[]>
+  onQueueRemove?: (index: number) => void
+  onQueueReorder?: (fromIndex: number, toIndex: number) => void
+  onQueueEdit?: (index: number, newContent: string) => void
+  onQueueClearAll?: () => void
 }
 
 // ---------------------------------------------------------------------------
@@ -70,6 +77,17 @@ export const InputTextArea: Component<InputTextAreaProps> = (props) => (
       <div class="absolute inset-0 z-10 flex items-center justify-center rounded-lg border-2 border-dashed border-[var(--accent)] bg-[var(--accent-subtle)]">
         <span class="text-xs font-medium text-[var(--accent)]">Drop files here</span>
       </div>
+    </Show>
+
+    {/* Queued message widget — above attachments */}
+    <Show when={props.queuedMessages && props.queuedMessages()?.length > 0}>
+      <MessageQueueWidget
+        queuedMessages={props.queuedMessages!}
+        onRemove={props.onQueueRemove ?? (() => {})}
+        onReorder={props.onQueueReorder ?? (() => {})}
+        onEdit={props.onQueueEdit ?? (() => {})}
+        onClearAll={props.onQueueClearAll ?? (() => {})}
+      />
     </Show>
 
     <ImagePreviews images={props.pendingImages()} onRemove={props.onRemoveImage} />
@@ -120,8 +138,8 @@ export const InputTextArea: Component<InputTextAreaProps> = (props) => (
         inputHasText={props.inputHasText}
         queuedCount={props.queuedCount}
         escapeHint={props.escapeHint}
-        onSteer={props.onSteer}
-        onFollowUp={props.onFollowUp}
+        onQueue={props.onQueue}
+        onInterrupt={props.onInterrupt}
         onPostComplete={props.onPostComplete}
       />
     </div>

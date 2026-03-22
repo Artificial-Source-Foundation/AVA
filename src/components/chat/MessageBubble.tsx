@@ -610,15 +610,17 @@ export const MessageBubble: Component<MessageBubbleProps> = (props) => {
                     <span
                       class="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider"
                       classList={{
-                        'bg-[var(--amber-3)] text-[var(--amber-9)]': tier() === 'steering',
-                        'bg-[var(--blue-3)] text-[var(--blue-9)]': tier() === 'follow-up',
+                        'bg-[var(--blue-3)] text-[var(--blue-9)]':
+                          tier() === 'queued' || tier() === 'follow-up',
+                        'bg-[var(--amber-3)] text-[var(--amber-9)]':
+                          tier() === 'interrupt' || tier() === 'steering',
                         'bg-[var(--violet-3)] text-[var(--violet-9)]': tier() === 'post-complete',
                       }}
                     >
-                      {tier() === 'steering'
-                        ? 'STEERING'
-                        : tier() === 'follow-up'
-                          ? 'FOLLOW-UP'
+                      {tier() === 'queued' || tier() === 'follow-up'
+                        ? 'QUEUED'
+                        : tier() === 'interrupt' || tier() === 'steering'
+                          ? 'INTERRUPT'
                           : 'QUEUED'}
                     </span>
                   </div>

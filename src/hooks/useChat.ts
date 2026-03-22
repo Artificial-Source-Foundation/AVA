@@ -39,6 +39,8 @@ export function useChat() {
     messageQueue: agent.messageQueue,
     queuedCount: agent.queuedCount,
     removeFromQueue: agent.removeFromQueue,
+    reorderInQueue: agent.reorderInQueue,
+    editInQueue: agent.editInQueue,
     steer: agent.steer,
     clearQueue: agent.clearQueue,
 

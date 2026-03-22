@@ -10,17 +10,19 @@ import { type Component, createSignal, For, Show } from 'solid-js'
 
 export interface QueuedMessageDisplay {
   content: string
-  tier?: 'steering' | 'follow-up' | 'post-complete'
+  tier?: 'queued' | 'interrupt' | 'post-complete' | 'steering' | 'follow-up'
   group?: number
   model?: string
 }
 
 function tierBadge(msg: QueuedMessageDisplay): string {
   switch (msg.tier) {
+    case 'interrupt':
     case 'steering':
-      return '[S]'
+      return '[I]'
+    case 'queued':
     case 'follow-up':
-      return '[F]'
+      return '[Q]'
     case 'post-complete':
       return `[G${msg.group ?? 1}]`
     default:
@@ -30,8 +32,10 @@ function tierBadge(msg: QueuedMessageDisplay): string {
 
 function tierColor(msg: QueuedMessageDisplay): string {
   switch (msg.tier) {
+    case 'interrupt':
     case 'steering':
       return 'var(--warning)'
+    case 'queued':
     case 'follow-up':
       return 'var(--accent)'
     case 'post-complete':

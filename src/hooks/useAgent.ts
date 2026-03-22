@@ -7,7 +7,7 @@
  */
 
 import { isTauri } from '@tauri-apps/api/core'
-import { batch, createEffect, createSignal, on } from 'solid-js'
+import { batch, createEffect, createMemo, createSignal, on } from 'solid-js'
 
 import { DEFAULTS } from '../config/constants'
 import { debugLog } from '../lib/debug-log'
@@ -100,6 +100,25 @@ function createAgentStore() {
    * final metadata when streaming ends.  Null when no run is in progress.
    */
   const [liveMessageId, setLiveMessageId] = createSignal<string | null>(null)
+
+  /**
+   * Offset into streamingContent() at which the current live placeholder begins.
+   * When steering splits the response, the first segment's content is frozen into the
+   * original placeholder and this offset tracks where the new placeholder's content starts.
+   */
+  const [streamingContentOffset, setStreamingContentOffset] = createSignal(0)
+  const [toolCallsOffset, setToolCallsOffset] = createSignal(0)
+  const [thinkingSegmentsOffset, setThinkingSegmentsOffset] = createSignal(0)
+
+  // Derived signals that apply steering offsets — these show only the content
+  // relevant to the CURRENT live placeholder, not the entire run's accumulation.
+  const liveStreamingContent = createMemo(() =>
+    rustAgent.streamingContent().slice(streamingContentOffset())
+  )
+  const liveActiveToolCalls = createMemo(() => rustAgent.activeToolCalls().slice(toolCallsOffset()))
+  const liveThinkingSegments = createMemo(() =>
+    rustAgent.thinkingSegments().slice(thinkingSegmentsOffset())
+  )
 
   // Map Rust agent error signal to StreamError shape
   const error = (): StreamError | null => {
@@ -302,6 +321,10 @@ function createAgentStore() {
       setToolActivity([])
       setStreamingTokenEstimate(0)
       setStreamingStartedAt(Date.now())
+      // Reset steering offsets for new run
+      setStreamingContentOffset(0)
+      setToolCallsOffset(0)
+      setThinkingSegmentsOffset(0)
     })
 
     // Ensure a session exists before adding messages
@@ -428,18 +451,27 @@ function createAgentStore() {
 
         if (isCancelled) {
           log.info('agent', 'Run cancelled by user — preserving partial response')
-          // Preserve any streaming content received before cancellation
-          const partialContent = rustAgent.streamingContent()
+          // Preserve any streaming content received before cancellation.
+          // Use the current live message ID (may differ from assistantMsgId after steering).
+          const cancelMsgId = liveMessageId() || assistantMsgId
+          const fullPartial = rustAgent.streamingContent()
+          const cOffset = streamingContentOffset()
+          const partialContent = cOffset > 0 ? fullPartial.slice(cOffset) : fullPartial
           const partialThinking = rustAgent.thinkingContent()
           const elapsedMs = Date.now() - runStartedAt
           if (partialContent || partialThinking) {
-            const partialSegments = rustAgent.thinkingSegments()
+            const allSegments = rustAgent.thinkingSegments()
+            const sOffset = thinkingSegmentsOffset()
+            const partialSegments = sOffset > 0 ? allSegments.slice(sOffset) : allSegments
+            const allTc = rustAgent.activeToolCalls()
+            const tOffset = toolCallsOffset()
+            const partialToolCalls = tOffset > 0 ? allTc.slice(tOffset) : allTc
             // Fill in the placeholder with the partial content
-            session.updateMessage(assistantMsgId, {
+            session.updateMessage(cancelMsgId, {
               content: partialContent,
               tokensUsed: rustAgent.tokenUsage().output,
               costUSD: rustAgent.tokenUsage().cost || undefined,
-              toolCalls: rustAgent.activeToolCalls(),
+              toolCalls: partialToolCalls,
               metadata: {
                 provider: selectedProviderId,
                 model: selectedModelId,
@@ -452,7 +484,7 @@ function createAgentStore() {
             })
           } else {
             // Nothing to show — remove the empty placeholder
-            session.deleteMessage(assistantMsgId)
+            session.deleteMessage(cancelMsgId)
           }
           // Add a subtle system-level cancellation note
           const cancelNote: Message = {
@@ -470,18 +502,29 @@ function createAgentStore() {
 
         log.error('agent', 'Run failed', { error: errorText })
         // Fill the placeholder with just an error (no content body)
-        session.updateMessage(assistantMsgId, {
+        const errorMsgId = liveMessageId() || assistantMsgId
+        session.updateMessage(errorMsgId, {
           content: '',
           error: { type: 'unknown', message: errorText, timestamp: Date.now() },
         })
         return null
       }
 
-      // Settle the assistant response into the placeholder
-      const content = rustAgent.streamingContent()
+      // Settle the assistant response into the placeholder.
+      // If steering happened, liveMessageId will differ from assistantMsgId —
+      // the original was already finalized and a new placeholder was created.
+      const finalMsgId = liveMessageId() || assistantMsgId
+      const fullContent = rustAgent.streamingContent()
+      const contentOffset = streamingContentOffset()
+      const content = contentOffset > 0 ? fullContent.slice(contentOffset) : fullContent
       const elapsedMs = Date.now() - runStartedAt
       const thinking = rustAgent.thinkingContent()
-      const segments = rustAgent.thinkingSegments()
+      const allSegments = rustAgent.thinkingSegments()
+      const tsOffset = thinkingSegmentsOffset()
+      const segments = tsOffset > 0 ? allSegments.slice(tsOffset) : allSegments
+      const allToolCalls = rustAgent.activeToolCalls()
+      const tcOffset = toolCallsOffset()
+      const toolCalls = tcOffset > 0 ? allToolCalls.slice(tcOffset) : allToolCalls
       debugLog(
         'thinking',
         'message metadata:',
@@ -491,13 +534,13 @@ function createAgentStore() {
 
       if (content) {
         // Update the stable placeholder in-place — same ID → same DOM node → no flash
-        session.updateMessage(assistantMsgId, {
+        session.updateMessage(finalMsgId, {
           content,
           tokensUsed: rustAgent.tokenUsage().output,
           // Hide cost for subscription providers (OAuth) — Rust returns 0.0 for these,
           // but use undefined so the UI hides the field entirely
           costUSD: rustAgent.tokenUsage().cost || undefined,
-          toolCalls: rustAgent.activeToolCalls(),
+          toolCalls,
           metadata: {
             provider: selectedProviderId,
             model: selectedModelId,
@@ -511,7 +554,7 @@ function createAgentStore() {
       } else {
         // Agent produced no text output — remove the empty placeholder so it doesn't
         // linger as a blank bubble (tool-only responses, errors, etc.)
-        session.deleteMessage(assistantMsgId)
+        session.deleteMessage(finalMsgId)
       }
 
       log.info('agent', 'Run completed', {
@@ -606,6 +649,62 @@ function createAgentStore() {
   }
 
   function steer(content: string): void {
+    // Snapshot the current streaming state into the existing assistant placeholder
+    // so it becomes a finalized message. Then create a new placeholder for post-
+    // steering content. This makes steering messages appear inline:
+    //   [Assistant response up to steer] → [User: steering msg] → [New assistant response]
+    const currentLiveId = liveMessageId()
+    if (currentLiveId) {
+      const currentContent = rustAgent.streamingContent()
+      const currentToolCalls = rustAgent.activeToolCalls()
+      const currentThinking = rustAgent.thinkingContent()
+      const currentSegments = rustAgent.thinkingSegments()
+      const contentOffset = streamingContentOffset()
+      const tcOffset = toolCallsOffset()
+      const tsOffset = thinkingSegmentsOffset()
+
+      // Finalize the current placeholder with content accumulated since last offset
+      const slicedContent = currentContent.slice(contentOffset)
+      const slicedToolCalls = currentToolCalls.slice(tcOffset)
+      const slicedThinking = currentThinking // thinking is harder to slice, keep full
+      const slicedSegments = currentSegments.slice(tsOffset)
+
+      session.updateMessage(currentLiveId, {
+        content: slicedContent,
+        toolCalls: slicedToolCalls.length > 0 ? slicedToolCalls : undefined,
+        metadata: {
+          ...(slicedThinking ? { thinking: slicedThinking } : {}),
+          ...(slicedSegments.length > 1 ? { thinkingSegments: slicedSegments } : {}),
+        },
+      })
+
+      // Update offsets for the new placeholder
+      const newContentOffset = currentContent.length
+      const newTcOffset = currentToolCalls.length
+      const newTsOffset = currentSegments.length
+
+      // Create new assistant placeholder AFTER the steering message
+      // (the steering user message was already added by the caller in use-input-state.ts)
+      const sessionId = session.currentSession()?.id ?? ''
+      const newAssistantId = generateMessageId('asst')
+      const newPlaceholder: Message = {
+        id: newAssistantId,
+        sessionId,
+        role: 'assistant',
+        content: '',
+        createdAt: Date.now(),
+        model: session.selectedModel(),
+      }
+      session.addMessage(newPlaceholder)
+
+      batch(() => {
+        setLiveMessageId(newAssistantId)
+        setStreamingContentOffset(newContentOffset)
+        setToolCallsOffset(newTcOffset)
+        setThinkingSegmentsOffset(newTsOffset)
+      })
+    }
+
     void rustAgent.steer(content)
   }
 
@@ -753,6 +852,10 @@ function createAgentStore() {
       setToolActivity([])
       setStreamingTokenEstimate(0)
       setStreamingStartedAt(Date.now())
+      // Reset steering offsets for new run
+      setStreamingContentOffset(0)
+      setToolCallsOffset(0)
+      setThinkingSegmentsOffset(0)
     })
 
     // Ensure a session exists
@@ -957,10 +1060,12 @@ function createAgentStore() {
     eventTimeline: rustAgent.events,
 
     // ── Chat signals (mapped from Rust agent) ────────────────────────
+    // These use offset-aware derived signals so that after a steering message
+    // splits the response, only the current placeholder's content is shown.
     isStreaming: rustAgent.isRunning, // alias for backward compat
-    activeToolCalls: rustAgent.activeToolCalls,
-    streamingContent: rustAgent.streamingContent,
-    thinkingSegments: rustAgent.thinkingSegments,
+    activeToolCalls: liveActiveToolCalls,
+    streamingContent: liveStreamingContent,
+    thinkingSegments: liveThinkingSegments,
     streamingTokenEstimate,
     streamingStartedAt,
     error,

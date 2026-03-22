@@ -208,14 +208,31 @@ export function replaceMessagesFromBackend(msgs: Message[]): void {
       ? [...msgs, ...localTierMsgs].sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0))
       : msgs
 
-  // Only replace if actually different to avoid re-render flash
-  if (current.length === merged.length && current.every((m, i) => m.id === merged[i].id)) {
+  // Smart comparison: IDs may differ between frontend-generated placeholders
+  // and backend-persisted messages. Compare by role+content instead of just IDs
+  // to avoid a full re-render flash when only IDs changed.
+  const structurallyEqual =
+    current.length === merged.length &&
+    current.every((m, i) => {
+      const incoming = merged[i]
+      return m.role === incoming.role && m.content === incoming.content
+    })
+
+  if (structurallyEqual) {
+    // Messages are structurally the same — update in-place (preserving DOM nodes)
+    // but adopt the backend IDs and metadata for future consistency
     setMessages((prev) =>
       prev.map((existing, i) => {
         const incoming = merged[i]
-        if (existing.content === incoming.content && existing.toolCalls === incoming.toolCalls) {
+        if (
+          existing.id === incoming.id &&
+          existing.content === incoming.content &&
+          existing.toolCalls === incoming.toolCalls
+        ) {
           return existing
         }
+        // Adopt backend ID + metadata while preserving the SolidJS object identity
+        // as much as possible to minimize DOM thrash
         return { ...existing, ...incoming }
       })
     )

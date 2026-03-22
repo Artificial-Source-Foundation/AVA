@@ -532,35 +532,24 @@ impl OpenAIProvider {
 impl LLMProvider for OpenAIProvider {
     #[instrument(skip(self, messages), fields(model = %self.model))]
     async fn generate(&self, messages: &[Message]) -> Result<String> {
-        let provider_label = self.provider_label();
-        let client = self.client().await?;
-        let body = if self.use_responses_api {
-            self.build_responses_request_body(messages, &[], false)
-        } else {
-            self.build_request_body(messages, false)
-        };
-        let request = client.post(self.completions_url()).json(&body);
-        let request = self.auth_request(request);
-
-        let response = self.send_request(request).await?;
-        let response = common::validate_status(response, &provider_label).await?;
-        let payload: Value = response
-            .json()
-            .await
-            .map_err(|error| AvaError::SerializationError(error.to_string()))?;
-
-        if self.use_responses_api {
-            let (content, _, _, _) = common::parse_responses_api_payload(&payload);
-            if content.is_empty() {
-                Err(AvaError::ProviderError {
-                    provider: provider_label,
-                    message: "empty response from Responses API".to_string(),
-                })
-            } else {
-                Ok(content)
+        // OpenAI's newer models (GPT-5.x, o-series) require stream=true.
+        // Use the streaming endpoint and collect chunks into a single response.
+        let stream = self.generate_stream(messages).await?;
+        use futures::StreamExt;
+        let mut content = String::new();
+        futures::pin_mut!(stream);
+        while let Some(chunk) = stream.next().await {
+            if let Some(text) = chunk.content {
+                content.push_str(&text);
             }
+        }
+        if content.is_empty() {
+            Err(AvaError::ProviderError {
+                provider: self.provider_label(),
+                message: "empty response from streaming collect".to_string(),
+            })
         } else {
-            Self::parse_response_payload(&payload)
+            Ok(content)
         }
     }
 

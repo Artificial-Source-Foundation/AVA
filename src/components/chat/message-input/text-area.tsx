@@ -44,6 +44,10 @@ export interface InputTextAreaProps {
   inputHasText: Accessor<boolean>
   // Mid-stream messaging
   queuedCount?: Accessor<number>
+  escapeHint?: Accessor<boolean>
+  onSteer?: () => void
+  onFollowUp?: () => void
+  onPostComplete?: () => void
 }
 
 // ---------------------------------------------------------------------------
@@ -115,6 +119,10 @@ export const InputTextArea: Component<InputTextAreaProps> = (props) => (
         onCancel={props.onCancel}
         inputHasText={props.inputHasText}
         queuedCount={props.queuedCount}
+        escapeHint={props.escapeHint}
+        onSteer={props.onSteer}
+        onFollowUp={props.onFollowUp}
+        onPostComplete={props.onPostComplete}
       />
     </div>
   </div>

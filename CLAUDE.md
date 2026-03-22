@@ -45,7 +45,7 @@ AVA uses a **Rust-first architecture**. All agent, CLI, and backend code is Rust
 ### Codebase Stats
 
 - **21 Rust crates**, ~40K LOC, 1,798 tests (0 failures)
-- **8 LLM providers**: Anthropic (with prompt caching), OpenAI-compatible, Gemini, Ollama, OpenRouter, Copilot, Inception, Mock
+- **15 LLM providers**: Anthropic (with prompt caching), OpenAI, Gemini, Ollama, OpenRouter, Copilot, Inception, Alibaba, ZAI, ZhipuAI, Kimi, MiniMax, Mock
 - **9 default tools**: `read`, `write`, `edit` (15 strategies incl. ellipsis handling, 3-way merge + diff-match-patch), `bash`, `glob`, `grep`, `web_fetch`, `web_search`, `git_read`
 - **Extended tools** (not auto-registered): `apply_patch`, `multiedit`, `ast_ops`, `lsp_ops`, `code_search`, `lint`, `test_runner` — available as plugins
 - **1 agent tool**: `plan` (Plannotator-style inline plan editing via PlanBridge)

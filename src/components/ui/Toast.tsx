@@ -65,48 +65,53 @@ export const Toast: Component<ToastProps> = (props) => {
 
   return (
     <Motion.div
-      initial={{ opacity: 0, x: '100%' }}
-      animate={{ opacity: 1, x: 0 }}
-      exit={{ opacity: 0, x: '100%' }}
-      transition={{ duration: 0.35, easing: [0.34, 1.56, 0.64, 1] }}
-      class={`
+      initial={{ opacity: 0, y: -8, scale: 0.96 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      exit={{ opacity: 0, y: -8, scale: 0.96 }}
+      transition={{ duration: 0.2, easing: [0.2, 0, 0, 1] }}
+      class="
         pointer-events-auto
-        w-80 max-w-[calc(100vw-2rem)]
-        p-4
-        glass
-        rounded-[var(--radius-lg)]
-      `}
-      style={{ 'border-color': config().border, 'box-shadow': `0 0 12px ${config().border}` }}
+        max-w-[calc(100vw-2rem)]
+        px-3 py-2
+        bg-[var(--surface-overlay)]
+        border border-[var(--border-subtle)]
+        rounded-full
+        shadow-lg
+      "
       role="alert"
     >
-      <div class="flex gap-3">
+      <div class="flex items-center gap-2">
         {/* Icon */}
-        <div class="flex-shrink-0 p-1.5 rounded-full" style={{ background: config().bg }}>
-          <Dynamic component={config().icon} class="w-4 h-4" style={{ color: config().color }} />
-        </div>
+        <Dynamic
+          component={config().icon}
+          class="w-3.5 h-3.5 flex-shrink-0"
+          style={{ color: config().color }}
+        />
 
         {/* Content */}
-        <div class="flex-1 min-w-0">
-          <p class="text-sm font-medium text-[var(--text-primary)]">{props.title}</p>
-          <Show when={props.message}>
-            <p class="mt-1 text-sm text-[var(--text-secondary)]">{props.message}</p>
-          </Show>
-          <Show when={props.action}>
-            <button
-              type="button"
-              onClick={() => props.action?.onClick()}
-              class="
-                mt-2
-                text-sm font-medium
-                transition-colors duration-[var(--duration-fast)]
-                hover:underline
-              "
-              style={{ color: config().color }}
-            >
-              {props.action?.label}
-            </button>
-          </Show>
-        </div>
+        <span class="text-xs font-medium text-[var(--text-primary)] whitespace-nowrap">
+          {props.title}
+        </span>
+        <Show when={props.message}>
+          <span class="text-xs text-[var(--text-secondary)] whitespace-nowrap">
+            {props.message}
+          </span>
+        </Show>
+        <Show when={props.action}>
+          <button
+            type="button"
+            onClick={() => props.action?.onClick()}
+            class="
+              text-xs font-medium
+              transition-colors duration-[var(--duration-fast)]
+              hover:underline
+              whitespace-nowrap
+            "
+            style={{ color: config().color }}
+          >
+            {props.action?.label}
+          </button>
+        </Show>
 
         {/* Dismiss */}
         <Show when={props.onDismiss}>
@@ -115,14 +120,13 @@ export const Toast: Component<ToastProps> = (props) => {
             onClick={() => props.onDismiss?.()}
             class="
               flex-shrink-0
-              p-1 rounded-[var(--radius-md)]
+              p-0.5 rounded-full
               text-[var(--text-tertiary)]
               hover:text-[var(--text-primary)]
-              hover:bg-[var(--surface-raised)]
               transition-colors duration-[var(--duration-fast)]
             "
           >
-            <X class="w-4 h-4" />
+            <X class="w-3 h-3" />
           </button>
         </Show>
       </div>

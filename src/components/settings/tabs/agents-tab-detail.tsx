@@ -10,6 +10,7 @@ import { type Component, createEffect, createMemo, createSignal, For, Show } fro
 import type { AgentPreset } from '../../../config/defaults/agent-defaults'
 import type { LLMProviderConfig } from '../../../config/defaults/provider-defaults'
 import { aggregateModels } from '../../dialogs/model-browser/model-browser-helpers'
+import { SETTINGS_INPUT_CLASS } from '../settings-constants'
 import { CategoryToggleSection } from './agents-detail/CategoryToggleSection'
 import { ALL_TOOLS, CAPABILITY_CATEGORIES, TOOL_CATEGORIES } from './agents-tab-data'
 
@@ -21,8 +22,7 @@ export interface AgentsTabDetailProps {
   isCreating?: boolean
 }
 
-const cls =
-  'w-full px-2.5 py-1.5 bg-[var(--input-background)] text-[var(--text-primary)] border border-[var(--input-border)] rounded-[var(--radius-md)] text-xs focus:outline-none focus:border-[var(--input-border-focus)]'
+const cls = SETTINGS_INPUT_CLASS
 
 export const AgentsTabDetail: Component<AgentsTabDetailProps> = (props) => {
   const [name, setName] = createSignal('')
@@ -103,8 +103,10 @@ export const AgentsTabDetail: Component<AgentsTabDetailProps> = (props) => {
         fallback={
           <div class="flex items-center justify-center h-full text-center">
             <div>
-              <p class="text-xs text-[var(--text-muted)]">Select an agent to configure</p>
-              <p class="text-[10px] text-[var(--text-muted)] mt-1 opacity-60">
+              <p class="text-[var(--settings-text-label)] text-[var(--text-muted)]">
+                Select an agent to configure
+              </p>
+              <p class="text-[var(--settings-text-description)] text-[var(--text-muted)] mt-1 opacity-60">
                 Or click "+ New" to create a custom agent
               </p>
             </div>
@@ -119,7 +121,7 @@ export const AgentsTabDetail: Component<AgentsTabDetailProps> = (props) => {
               value={name()}
               onInput={(e) => setName(e.currentTarget.value)}
               placeholder="Agent name"
-              class={`${cls} text-sm font-semibold`}
+              class={`${cls} text-[var(--settings-text-label)] font-semibold`}
             />
             <input
               type="text"
@@ -132,7 +134,7 @@ export const AgentsTabDetail: Component<AgentsTabDetailProps> = (props) => {
 
           {/* System Prompt — hero section */}
           <div>
-            <span class="text-[11px] font-medium text-[var(--text-secondary)] mb-1.5 block">
+            <span class="text-[var(--settings-text-label)] font-medium text-[var(--text-secondary)] mb-1.5 block">
               System Prompt
             </span>
             <textarea
@@ -140,14 +142,16 @@ export const AgentsTabDetail: Component<AgentsTabDetailProps> = (props) => {
               onInput={(e) => setSystemPrompt(e.currentTarget.value)}
               placeholder="Define the agent's behavior, personality, and constraints. This is the most important field — it shapes how the agent thinks and acts."
               rows={12}
-              class={`${cls} font-mono text-[11px] resize-y min-h-[160px]`}
+              class={`${cls} font-mono text-[var(--settings-text-button)] resize-y min-h-[160px]`}
             />
           </div>
 
           {/* Model + Provider */}
           <div class="grid grid-cols-2 gap-3">
             <div>
-              <span class="text-[10px] text-[var(--text-muted)] mb-1 block">Model</span>
+              <span class="text-[var(--settings-text-label)] text-[var(--text-secondary)] mb-1 block">
+                Model
+              </span>
               <select value={model()} onChange={(e) => setModel(e.currentTarget.value)} class={cls}>
                 <option value="">Use default</option>
                 <For each={[...modelGroups().entries()]}>
@@ -160,7 +164,9 @@ export const AgentsTabDetail: Component<AgentsTabDetailProps> = (props) => {
               </select>
             </div>
             <div>
-              <span class="text-[10px] text-[var(--text-muted)] mb-1 block">Provider</span>
+              <span class="text-[var(--settings-text-label)] text-[var(--text-secondary)] mb-1 block">
+                Provider
+              </span>
               <select
                 value={provider()}
                 onChange={(e) => setProvider(e.currentTarget.value)}
@@ -195,7 +201,7 @@ export const AgentsTabDetail: Component<AgentsTabDetailProps> = (props) => {
           {/* Storage info */}
           <div class="flex items-start gap-2 p-3 rounded-[var(--radius-md)] bg-[var(--alpha-white-3)] border border-[var(--border-subtle)]">
             <Info class="w-3.5 h-3.5 text-[var(--text-muted)] flex-shrink-0 mt-0.5" />
-            <div class="text-[10px] text-[var(--text-muted)] space-y-1 flex-1">
+            <div class="text-[var(--settings-text-badge)] text-[var(--text-muted)] space-y-1 flex-1">
               <p>
                 Agents are stored in app settings (localStorage). Use{' '}
                 <span class="text-[var(--text-secondary)]">Export</span> from the list panel to

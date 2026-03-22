@@ -6,6 +6,7 @@
 
 import { type Component, createSignal, Show } from 'solid-js'
 import type { CustomCommandFile } from '../../../../services/custom-commands'
+import { SETTINGS_FORM_INPUT_CLASS } from '../../settings-constants'
 
 export interface EditFormProps {
   initial?: CustomCommandFile
@@ -55,14 +56,13 @@ export const CommandEditForm: Component<EditFormProps> = (props) => {
     )
   }
 
-  const inputClass =
-    'w-full px-2.5 py-1.5 text-xs rounded-[var(--radius-md)] bg-[var(--surface-raised)] text-[var(--text-primary)] border border-[var(--border-subtle)] focus:border-[var(--accent)] outline-none'
+  const inputClass = SETTINGS_FORM_INPUT_CLASS
 
   return (
     <div class="space-y-3">
       <div>
         <label class="block">
-          <span class="text-[10px] font-medium text-[var(--text-muted)] uppercase tracking-wider">
+          <span class="text-[var(--settings-text-badge)] font-medium text-[var(--text-muted)] uppercase tracking-wider">
             Name *
           </span>
           <input
@@ -77,12 +77,12 @@ export const CommandEditForm: Component<EditFormProps> = (props) => {
           />
         </label>
         <Show when={nameError()}>
-          <p class="text-[10px] text-[var(--error)] mt-0.5">{nameError()}</p>
+          <p class="text-[var(--settings-text-badge)] text-[var(--error)] mt-0.5">{nameError()}</p>
         </Show>
       </div>
 
       <label class="block">
-        <span class="text-[10px] font-medium text-[var(--text-muted)] uppercase tracking-wider">
+        <span class="text-[var(--settings-text-badge)] font-medium text-[var(--text-muted)] uppercase tracking-wider">
           Description
         </span>
         <input
@@ -95,7 +95,7 @@ export const CommandEditForm: Component<EditFormProps> = (props) => {
       </label>
 
       <label class="block">
-        <span class="text-[10px] font-medium text-[var(--text-muted)] uppercase tracking-wider">
+        <span class="text-[var(--settings-text-badge)] font-medium text-[var(--text-muted)] uppercase tracking-wider">
           Prompt *
         </span>
         <textarea
@@ -107,7 +107,7 @@ export const CommandEditForm: Component<EditFormProps> = (props) => {
       </label>
 
       <label class="block">
-        <span class="text-[10px] font-medium text-[var(--text-muted)] uppercase tracking-wider">
+        <span class="text-[var(--settings-text-badge)] font-medium text-[var(--text-muted)] uppercase tracking-wider">
           Allowed Tools
         </span>
         <input
@@ -117,13 +117,13 @@ export const CommandEditForm: Component<EditFormProps> = (props) => {
           class={inputClass}
           placeholder="bash, read_file, write_file"
         />
-        <p class="text-[10px] text-[var(--text-muted)] mt-0.5">
+        <p class="text-[var(--settings-text-badge)] text-[var(--text-muted)] mt-0.5">
           Comma-separated. Leave blank for all tools.
         </p>
       </label>
 
       <label class="block">
-        <span class="text-[10px] font-medium text-[var(--text-muted)] uppercase tracking-wider">
+        <span class="text-[var(--settings-text-badge)] font-medium text-[var(--text-muted)] uppercase tracking-wider">
           Mode
         </span>
         <select value={mode()} onChange={(e) => setMode(e.currentTarget.value)} class={inputClass}>

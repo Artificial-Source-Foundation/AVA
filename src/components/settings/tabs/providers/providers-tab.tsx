@@ -1,12 +1,15 @@
 /**
  * Providers Tab (Redesigned)
  *
- * 2-column card grid layout for managing all LLM providers.
- * Replaces the old accordion list design.
+ * Uses SettingsCard bento-grid pattern for consistency with other settings tabs.
+ * Single card wrapping search + 2-column provider grid.
  */
 
+import { Cloud } from 'lucide-solid'
 import { type Component, createMemo, createSignal } from 'solid-js'
 import type { ProviderModel } from '../../../../config/defaults/provider-defaults'
+import { SettingsCard } from '../../SettingsCard'
+import { SETTINGS_CARD_GAP } from '../../settings-constants'
 import { ProvidersTabGrid } from './providers-tab-grid'
 import { ProvidersTabHeader } from './providers-tab-header'
 
@@ -38,29 +41,31 @@ export const ProvidersTab: Component<ProvidersTabProps> = (props) => {
   })
 
   return (
-    <div class="space-y-4">
-      <ProvidersTabHeader
-        connectedCount={connectedCount}
-        searchQuery={searchQuery}
-        onSearchChange={setSearchQuery}
-      />
+    <div class="grid grid-cols-1" style={{ gap: SETTINGS_CARD_GAP }}>
+      <SettingsCard
+        icon={Cloud}
+        title="LLM Providers"
+        description="Configure API keys and manage provider connections. Keys stored locally — never sent to AVA servers."
+      >
+        <ProvidersTabHeader
+          connectedCount={connectedCount}
+          searchQuery={searchQuery}
+          onSearchChange={setSearchQuery}
+        />
 
-      <ProvidersTabGrid
-        providers={filteredProviders()}
-        expandedId={expandedId()}
-        onExpand={setExpandedId}
-        onToggle={props.onToggle}
-        onSaveApiKey={props.onSaveApiKey}
-        onClearApiKey={props.onClearApiKey}
-        onSetDefaultModel={props.onSetDefaultModel}
-        onTestConnection={props.onTestConnection}
-        onUpdateModels={props.onUpdateModels}
-        onSaveBaseUrl={props.onSaveBaseUrl}
-      />
-
-      <p class="text-[10px] text-[var(--text-muted)] text-center">
-        Keys stored locally — Never sent to AVA servers
-      </p>
+        <ProvidersTabGrid
+          providers={filteredProviders()}
+          expandedId={expandedId()}
+          onExpand={setExpandedId}
+          onToggle={props.onToggle}
+          onSaveApiKey={props.onSaveApiKey}
+          onClearApiKey={props.onClearApiKey}
+          onSetDefaultModel={props.onSetDefaultModel}
+          onTestConnection={props.onTestConnection}
+          onUpdateModels={props.onUpdateModels}
+          onSaveBaseUrl={props.onSaveBaseUrl}
+        />
+      </SettingsCard>
     </div>
   )
 }

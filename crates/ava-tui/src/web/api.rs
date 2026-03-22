@@ -280,7 +280,26 @@ pub async fn submit_goal(
                 }
             }
             Err(e) => {
-                tracing::error!("Agent run failed: {e}");
+                let is_cancelled = matches!(e, ava_types::AvaError::Cancelled);
+                if is_cancelled {
+                    tracing::info!("Agent run cancelled by user (session {session_uuid})");
+                    // Record the session ID so the frontend can load any checkpointed
+                    // messages that were saved before cancellation.
+                    *inner.last_session_id.write().await = Some(session_uuid);
+                    // Send an error event so the frontend knows the agent was cancelled
+                    // and can preserve partial streaming content.
+                    let _ = inner.event_tx.send(WebEvent::Agent(
+                        ava_agent::agent_loop::AgentEvent::Error(
+                            "Agent run cancelled by user".to_string(),
+                        ),
+                    ));
+                } else {
+                    tracing::error!("Agent run failed: {e}");
+                    // Send an error event so the frontend's completion promise resolves
+                    let _ = inner.event_tx.send(WebEvent::Agent(
+                        ava_agent::agent_loop::AgentEvent::Error(e.to_string()),
+                    ));
+                }
             }
         }
     });

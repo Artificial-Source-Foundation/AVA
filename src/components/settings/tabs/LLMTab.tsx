@@ -5,14 +5,16 @@
  * weak model for secondary tasks, agent limits, and custom instructions.
  */
 
+import { Code2, Cpu, FileText, Minimize2, SlidersHorizontal, Tag, Timer } from 'lucide-solid'
 import { type Component, createMemo, For, Show } from 'solid-js'
 import { useSettings } from '../../../stores/settings'
 import { ToggleRow } from '../../ui/ToggleRow'
+import { SettingsCard } from '../SettingsCard'
+import { SETTINGS_CARD_GAP } from '../settings-constants'
 import {
   EDITOR_MODEL_OPTIONS,
   EDITOR_PAIRS,
   MODEL_PAIRS,
-  SectionHeader,
   SliderRow,
   WEAK_MODEL_OPTIONS,
 } from './llm/llm-config'
@@ -52,10 +54,13 @@ export const LLMTab: Component = () => {
   })
 
   return (
-    <div class="space-y-5">
+    <div class="grid grid-cols-1" style={{ gap: SETTINGS_CARD_GAP }}>
       {/* Generation */}
-      <div>
-        <SectionHeader title="Generation" />
+      <SettingsCard
+        icon={SlidersHorizontal}
+        title="Generation"
+        description="Token limits and sampling parameters"
+      >
         <SliderRow
           label="Max Tokens"
           value={settings().generation.maxTokens}
@@ -83,13 +88,16 @@ export const LLMTab: Component = () => {
           format={(v) => v.toFixed(2)}
           onChange={(v) => updateGeneration({ topP: v })}
         />
-      </div>
+      </SettingsCard>
 
       {/* Weak Model */}
-      <div class="pt-2 border-t border-[var(--border-subtle)]">
-        <SectionHeader title="Secondary Model" />
-        <p class="text-[10px] text-[var(--text-muted)] mb-2">
-          Cheaper model for planning, code review, and summaries. Saves 50-80% on secondary tasks.
+      <SettingsCard
+        icon={Cpu}
+        title="Secondary Model"
+        description="Cheaper model for planning, code review, and summaries"
+      >
+        <p class="text-[var(--settings-text-description)] text-[var(--text-muted)] mb-2">
+          Saves 50-80% on secondary tasks.
         </p>
         <div class="flex items-center gap-2">
           <select
@@ -113,7 +121,7 @@ export const LLMTab: Component = () => {
             onClick={() => updateGeneration({ weakModel: suggestedWeak()! })}
             class="
               mt-1.5 px-2 py-1
-              text-[10px] text-[var(--accent)]
+              text-[var(--settings-text-button)] text-[var(--accent)]
               border border-[var(--accent-border)] rounded-[var(--radius-sm)]
               hover:bg-[var(--accent-subtle)] transition-colors
             "
@@ -123,18 +131,20 @@ export const LLMTab: Component = () => {
           </button>
         </Show>
         <Show when={settings().generation.weakModel}>
-          <p class="text-[10px] text-[var(--text-muted)] mt-1">
+          <p class="text-[var(--settings-text-description)] text-[var(--text-muted)] mt-1">
             Used for: task planning, code review, context summaries
           </p>
         </Show>
-      </div>
+      </SettingsCard>
 
       {/* Editor Model (Architect/Editor Split) */}
-      <div class="pt-2 border-t border-[var(--border-subtle)]">
-        <SectionHeader title="Editor Model" />
-        <p class="text-[10px] text-[var(--text-muted)] mb-2">
-          Cheaper model for Junior Devs executing file edits. The primary model acts as the
-          architect (planning), this model handles execution.
+      <SettingsCard
+        icon={Code2}
+        title="Editor Model"
+        description="Cheaper model for file edits and code generation"
+      >
+        <p class="text-[var(--settings-text-description)] text-[var(--text-muted)] mb-2">
+          The primary model plans, this model executes file edits.
         </p>
         <div class="flex items-center gap-2">
           <select
@@ -158,7 +168,7 @@ export const LLMTab: Component = () => {
             onClick={() => updateGeneration({ editorModel: suggestedEditor()! })}
             class="
               mt-1.5 px-2 py-1
-              text-[10px] text-[var(--accent)]
+              text-[var(--settings-text-button)] text-[var(--accent)]
               border border-[var(--accent-border)] rounded-[var(--radius-sm)]
               hover:bg-[var(--accent-subtle)] transition-colors
             "
@@ -169,15 +179,18 @@ export const LLMTab: Component = () => {
           </button>
         </Show>
         <Show when={settings().generation.editorModel}>
-          <p class="text-[10px] text-[var(--text-muted)] mt-1">
-            Used for: file edits, code generation, tool execution by Junior Devs
+          <p class="text-[var(--settings-text-description)] text-[var(--text-muted)] mt-1">
+            Used for: file edits, code generation, tool execution
           </p>
         </Show>
-      </div>
+      </SettingsCard>
 
       {/* Agent Limits */}
-      <div class="pt-2 border-t border-[var(--border-subtle)]">
-        <SectionHeader title="Agent Limits" />
+      <SettingsCard
+        icon={Timer}
+        title="Agent Limits"
+        description="Maximum turns and time per agent run"
+      >
         <SliderRow
           label="Max Turns"
           value={settings().agentLimits.agentMaxTurns}
@@ -195,14 +208,14 @@ export const LLMTab: Component = () => {
           format={(v) => `${v}m`}
           onChange={(v) => updateAgentLimits({ agentMaxTimeMinutes: v })}
         />
-      </div>
+      </SettingsCard>
 
       {/* Custom Instructions */}
-      <div class="pt-2 border-t border-[var(--border-subtle)]">
-        <SectionHeader title="Custom Instructions" />
-        <p class="text-[10px] text-[var(--text-muted)] mb-2">
-          Prepended as a system message to every chat and agent request.
-        </p>
+      <SettingsCard
+        icon={FileText}
+        title="Custom Instructions"
+        description="Prepended as a system message to every request"
+      >
         <textarea
           value={settings().generation.customInstructions}
           onInput={(e) => updateGeneration({ customInstructions: e.currentTarget.value })}
@@ -218,15 +231,18 @@ export const LLMTab: Component = () => {
           "
         />
         <Show when={settings().generation.customInstructions.length > 0}>
-          <span class="text-[10px] text-[var(--text-muted)] mt-1 block text-right">
+          <span class="text-[var(--settings-text-badge)] text-[var(--text-muted)] mt-1 block text-right">
             {settings().generation.customInstructions.length} chars
           </span>
         </Show>
-      </div>
+      </SettingsCard>
 
       {/* Context Compaction */}
-      <div class="pt-2 border-t border-[var(--border-subtle)]">
-        <SectionHeader title="Context Compaction" />
+      <SettingsCard
+        icon={Minimize2}
+        title="Context Compaction"
+        description="Automatic conversation compression"
+      >
         <ToggleRow
           label="Auto-compact conversation"
           description="Automatically compress old messages when context window usage is high"
@@ -248,18 +264,21 @@ export const LLMTab: Component = () => {
                 })
               }
             />
-            <p class="text-[10px] text-[var(--text-muted)] mt-1">
+            <p class="text-[var(--settings-text-description)] text-[var(--text-muted)] mt-1">
               Compress old messages when context reaches this percentage of the token limit.
             </p>
           </div>
         </Show>
-      </div>
+      </SettingsCard>
 
       {/* Model Aliases */}
-      <div class="pt-2 border-t border-[var(--border-subtle)]">
-        <SectionHeader title="Model Aliases" />
+      <SettingsCard
+        icon={Tag}
+        title="Model Aliases"
+        description="Short names for frequently used models"
+      >
         <ModelAliasesSection />
-      </div>
+      </SettingsCard>
     </div>
   )
 }

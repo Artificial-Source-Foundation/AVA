@@ -21,15 +21,21 @@ export const OllamaModelCard: Component<OllamaModelCardProps> = (props) => {
       <div class="flex-1 min-w-0">
         <p class="text-xs font-medium text-[var(--text-primary)] truncate">{props.model.name}</p>
         <div class="flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-0.5">
-          <span class="text-[10px] text-[var(--text-muted)]">{formatBytes(props.model.size)}</span>
+          <span class="text-[var(--settings-text-badge)] text-[var(--text-muted)]">
+            {formatBytes(props.model.size)}
+          </span>
           <Show when={props.model.family}>
-            <span class="text-[10px] text-[var(--text-muted)]">{props.model.family}</span>
+            <span class="text-[var(--settings-text-badge)] text-[var(--text-muted)]">
+              {props.model.family}
+            </span>
           </Show>
           <Show when={props.model.parameterSize}>
-            <span class="text-[10px] text-[var(--text-muted)]">{props.model.parameterSize}</span>
+            <span class="text-[var(--settings-text-badge)] text-[var(--text-muted)]">
+              {props.model.parameterSize}
+            </span>
           </Show>
           <Show when={props.model.quantizationLevel}>
-            <span class="text-[10px] px-1 py-0.5 rounded bg-[var(--surface-sunken)] text-[var(--text-muted)]">
+            <span class="text-[var(--settings-text-badge)] px-1 py-0.5 rounded bg-[var(--surface-sunken)] text-[var(--text-muted)]">
               {props.model.quantizationLevel}
             </span>
           </Show>
@@ -43,14 +49,14 @@ export const OllamaModelCard: Component<OllamaModelCardProps> = (props) => {
               type="button"
               onClick={props.onConfirmDelete}
               disabled={props.isDeleting}
-              class="px-2 py-1 text-[10px] text-white bg-[var(--error)] rounded-[var(--radius-sm)] disabled:opacity-50"
+              class="px-2 py-1 text-[var(--settings-text-badge)] text-white bg-[var(--error)] rounded-[var(--radius-sm)] disabled:opacity-50"
             >
               {props.isDeleting ? 'Deleting...' : 'Confirm'}
             </button>
             <button
               type="button"
               onClick={props.onCancelDelete}
-              class="px-2 py-1 text-[10px] text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
+              class="px-2 py-1 text-[var(--settings-text-badge)] text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
             >
               Cancel
             </button>

@@ -91,7 +91,7 @@ export const NotificationProvider: Component<NotificationProviderProps> = (props
   const [toasts, setToasts] = createSignal<ToastItem[]>([])
 
   const position = () => props.position ?? 'top-right'
-  const defaultDuration = () => props.defaultDuration ?? 5000
+  const defaultDuration = () => props.defaultDuration ?? 3000
   const maxToasts = () => props.maxToasts ?? 5
 
   let toastCounter = 0
@@ -152,7 +152,7 @@ export const NotificationProvider: Component<NotificationProviderProps> = (props
     'top-left': 'top-4 left-4',
     'bottom-right': 'bottom-4 right-4',
     'bottom-left': 'bottom-4 left-4',
-    'top-center': 'top-4 left-1/2 -translate-x-1/2',
+    'top-center': 'top-12 left-1/2 -translate-x-1/2',
     'bottom-center': 'bottom-4 left-1/2 -translate-x-1/2',
   }
 

@@ -11,6 +11,8 @@ import {
   MessageSquare,
   PanelLeftClose,
   PanelLeftOpen,
+  PanelRightClose,
+  PanelRightOpen,
   Settings,
   Sparkles,
 } from 'lucide-solid'
@@ -39,6 +41,8 @@ export const ActivityBar: Component = () => {
     toggleSidebar,
     openSettings,
     settingsOpen,
+    rightPanelVisible,
+    toggleRightPanel,
   } = useLayout()
   const { settings } = useSettings()
 
@@ -131,8 +135,41 @@ export const ActivityBar: Component = () => {
         </For>
       </div>
 
-      {/* Bottom icons: sidebar toggle + settings */}
+      {/* Bottom icons: panels + settings */}
       <div class="flex flex-col items-center gap-0.5 mb-2">
+        {/* Right panel toggle (Activity) */}
+        <button
+          type="button"
+          onClick={toggleRightPanel}
+          class={`
+            flex items-center justify-center
+            w-12 h-10
+            transition-colors duration-[var(--duration-fast)]
+            ${
+              rightPanelVisible()
+                ? 'text-[var(--text-primary)]'
+                : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)]'
+            }
+          `}
+          title="Toggle Activity Panel"
+          aria-label="Toggle Activity Panel"
+        >
+          <span
+            class={`
+              flex items-center justify-center
+              w-8 h-8 rounded-[var(--radius-md)]
+              transition-colors duration-[var(--duration-fast)]
+              ${rightPanelVisible() ? 'bg-[var(--alpha-white-8)]' : 'hover:bg-[var(--alpha-white-5)]'}
+            `}
+          >
+            {rightPanelVisible() ? (
+              <PanelRightClose class="w-[18px] h-[18px]" />
+            ) : (
+              <PanelRightOpen class="w-[18px] h-[18px]" />
+            )}
+          </span>
+        </button>
+
         {/* Sidebar toggle */}
         <button
           type="button"

@@ -5,11 +5,14 @@
  * and always-approved tool list.
  */
 
+import { ListChecks, Shield, ShieldCheck } from 'lucide-solid'
 import { type Component, For } from 'solid-js'
 import { useSettings } from '../../../stores/settings'
 import type { PermissionMode } from '../../../stores/settings/settings-types'
+import { SettingsCard } from '../SettingsCard'
+import { SETTINGS_CARD_GAP } from '../settings-constants'
 import { ApprovedToolsSection } from './permissions/ApprovedToolsSection'
-import { SectionHeader, segmentedBtn } from './permissions/permissions-helpers'
+import { segmentedBtn } from './permissions/permissions-helpers'
 import { ToolRulesSection } from './permissions/ToolRulesSection'
 
 export const PermissionsTab: Component = () => {
@@ -58,15 +61,20 @@ export const PermissionsTab: Component = () => {
   }
 
   return (
-    <div class="space-y-6">
+    <div class="grid grid-cols-1" style={{ gap: SETTINGS_CARD_GAP }}>
       {/* Global Mode */}
-      <div>
-        <SectionHeader title="Global Mode" />
+      <SettingsCard
+        icon={Shield}
+        title="Global Mode"
+        description="Controls how tool executions are approved"
+      >
         <div class="flex items-center justify-between py-2">
           <div>
-            <span class="text-[14px] text-[var(--text-secondary)]">Permission mode</span>
-            <p class="text-[13px] text-[var(--text-muted)]">
-              Controls how tool executions are approved
+            <span class="text-[var(--settings-text-label)] text-[var(--text-secondary)]">
+              Permission mode
+            </span>
+            <p class="text-[var(--settings-text-description)] text-[var(--text-muted)]">
+              Choose between manual approval or automatic execution
             </p>
           </div>
           <div class="flex gap-1">
@@ -87,36 +95,48 @@ export const PermissionsTab: Component = () => {
         <div class="mt-3 flex items-center gap-2">
           <button
             type="button"
-            class="px-3 py-1.5 text-[13px] rounded-[var(--radius-md)] bg-[var(--surface-raised)] text-[var(--text-secondary)] border border-[var(--border-subtle)] hover:border-[var(--warning)]"
+            class="px-3 py-1.5 text-[var(--settings-text-description)] rounded-[var(--radius-md)] bg-[var(--surface-raised)] text-[var(--text-secondary)] border border-[var(--border-subtle)] hover:border-[var(--warning)]"
             onClick={() => applyPreset('strict')}
           >
             Strict
           </button>
           <button
             type="button"
-            class="px-3 py-1.5 text-[13px] rounded-[var(--radius-md)] bg-[var(--surface-raised)] text-[var(--text-secondary)] border border-[var(--border-subtle)] hover:border-[var(--accent)]"
+            class="px-3 py-1.5 text-[var(--settings-text-description)] rounded-[var(--radius-md)] bg-[var(--surface-raised)] text-[var(--text-secondary)] border border-[var(--border-subtle)] hover:border-[var(--accent)]"
             onClick={() => applyPreset('balanced')}
           >
             Balanced
           </button>
           <button
             type="button"
-            class="px-3 py-1.5 text-[13px] rounded-[var(--radius-md)] bg-[var(--surface-raised)] text-[var(--text-secondary)] border border-[var(--border-subtle)] hover:border-[var(--error)]"
+            class="px-3 py-1.5 text-[var(--settings-text-description)] rounded-[var(--radius-md)] bg-[var(--surface-raised)] text-[var(--text-secondary)] border border-[var(--border-subtle)] hover:border-[var(--error)]"
             onClick={() => applyPreset('yolo')}
           >
             YOLO
           </button>
         </div>
-      </div>
+      </SettingsCard>
 
       {/* Tool Rules */}
-      <ToolRulesSection rules={rules()} onUpdateRules={(r) => updateSettings({ toolRules: r })} />
+      <SettingsCard
+        icon={ListChecks}
+        title="Tool Rules"
+        description="Per-tool approval rules — first match wins"
+      >
+        <ToolRulesSection rules={rules()} onUpdateRules={(r) => updateSettings({ toolRules: r })} />
+      </SettingsCard>
 
       {/* Always-Approved Tools */}
-      <ApprovedToolsSection
-        tools={approvedTools()}
-        onUpdateTools={(t) => updateSettings({ autoApprovedTools: t })}
-      />
+      <SettingsCard
+        icon={ShieldCheck}
+        title="Always-Approved Tools"
+        description="Tools that skip approval regardless of permission mode"
+      >
+        <ApprovedToolsSection
+          tools={approvedTools()}
+          onUpdateTools={(t) => updateSettings({ autoApprovedTools: t })}
+        />
+      </SettingsCard>
     </div>
   )
 }

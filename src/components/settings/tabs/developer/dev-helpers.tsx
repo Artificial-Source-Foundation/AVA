@@ -14,7 +14,7 @@ export { Toggle } from '../../../ui/Toggle'
 // ============================================================================
 
 export const DevSectionHeader: Component<{ title: string }> = (props) => (
-  <h3 class="text-[10px] font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-2">
+  <h3 class="text-[var(--settings-text-badge)] font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-2">
     {props.title}
   </h3>
 )

@@ -72,7 +72,7 @@ export const GitInstallDialog: Component<GitInstallDialogProps> = (props) => {
             autofocus
           />
           <Show when={gitError()}>
-            <p class="text-[10px] text-[var(--error)]">{gitError()}</p>
+            <p class="text-[var(--settings-text-badge)] text-[var(--error)]">{gitError()}</p>
           </Show>
           <div class="flex gap-2 justify-end">
             <button
@@ -154,7 +154,7 @@ export const LinkLocalDialog: Component<LinkLocalDialogProps> = (props) => {
             autofocus
           />
           <Show when={linkError()}>
-            <p class="text-[10px] text-[var(--error)]">{linkError()}</p>
+            <p class="text-[var(--settings-text-badge)] text-[var(--error)]">{linkError()}</p>
           </Show>
           <div class="flex gap-2 justify-end">
             <button
@@ -210,7 +210,7 @@ export const PermissionConfirmDialog: Component<PermissionConfirmDialogProps> = 
                   const meta = PLUGIN_PERMISSION_META[perm as PluginPermission]
                   return (
                     <span
-                      class="inline-flex items-center gap-1 px-2 py-1 text-[10px] font-medium rounded-full border"
+                      class="inline-flex items-center gap-1 px-2 py-1 text-[var(--settings-text-badge)] font-medium rounded-full border"
                       style={{
                         color: permissionColor(perm as PluginPermission),
                         'border-color': permissionColor(perm as PluginPermission),
@@ -224,7 +224,7 @@ export const PermissionConfirmDialog: Component<PermissionConfirmDialogProps> = 
                 }}
               </For>
             </div>
-            <p class="text-[10px] text-[var(--text-muted)]">
+            <p class="text-[var(--settings-text-badge)] text-[var(--text-muted)]">
               This plugin can access sensitive system resources. Only install plugins from sources
               you trust.
             </p>

@@ -4,13 +4,15 @@ import {
   FileDiff,
   FolderOpen,
   GitCompareArrows,
+  MoreHorizontal,
   Route,
   Users,
   X,
 } from 'lucide-solid'
-import { createMemo, Show } from 'solid-js'
+import { createMemo, createSignal, Show } from 'solid-js'
 import { useRustAgent } from '../../hooks/use-rust-agent'
 import { useAgent } from '../../hooks/useAgent'
+import type { RightPanelTab } from '../../stores/layout'
 import { useLayout } from '../../stores/layout'
 import { useSession } from '../../stores/session'
 import { useSettings } from '../../stores/settings'
@@ -24,6 +26,141 @@ import { TodoPanel } from '../panels/TodoPanel'
 import { TrajectoryInspector } from '../panels/TrajectoryInspector'
 import { WorkerDetail } from '../panels/team/WorkerDetail'
 import { PanelErrorBoundary } from '../ui/PanelErrorBoundary'
+
+// ---------------------------------------------------------------------------
+// Primary tabs (always visible) + overflow tabs (behind "..." menu)
+// ---------------------------------------------------------------------------
+
+const ALL_PANEL_TABS: { id: RightPanelTab; icon: typeof Bot; label: string; primary: boolean }[] = [
+  { id: 'activity', icon: Bot, label: 'Activity', primary: true },
+  { id: 'changes', icon: FileDiff, label: 'Changes', primary: true },
+  { id: 'todos', icon: CheckSquare, label: 'Todos', primary: true },
+  { id: 'files', icon: FolderOpen, label: 'Files', primary: false },
+  { id: 'review', icon: GitCompareArrows, label: 'Review', primary: false },
+  { id: 'trajectory', icon: Route, label: 'Trajectory', primary: false },
+  { id: 'team', icon: Users, label: 'Team', primary: false },
+]
+
+interface TabBarProps {
+  currentTab: RightPanelTab
+  onSwitch: (tab: RightPanelTab) => void
+  onClose: () => void
+  todoCount: number
+  changesCount: number
+  showTeam: boolean
+}
+
+function TabBar(props: TabBarProps) {
+  const [moreOpen, setMoreOpen] = createSignal(false)
+  let moreRef: HTMLDivElement | undefined
+
+  const handleClickOutside = (e: MouseEvent) => {
+    if (moreRef && !moreRef.contains(e.target as Node)) setMoreOpen(false)
+  }
+
+  const primaryTabs = () => ALL_PANEL_TABS.filter((t) => t.primary)
+  const overflowTabs = () =>
+    ALL_PANEL_TABS.filter((t) => !t.primary && (t.id !== 'team' || props.showTeam))
+
+  const isOverflowActive = () => overflowTabs().some((t) => t.id === props.currentTab)
+
+  const badge = (tabId: RightPanelTab) => {
+    if (tabId === 'todos' && props.todoCount > 0) return props.todoCount
+    if (tabId === 'changes' && props.changesCount > 0) return props.changesCount
+    return 0
+  }
+
+  return (
+    <div class="flex items-center h-8 flex-shrink-0 border-b border-[var(--border-subtle)]">
+      {/* Primary tabs — icon-only with tooltip, always fit */}
+      <div class="flex items-center flex-1 min-w-0">
+        {primaryTabs().map((tab) => {
+          const Icon = tab.icon
+          const count = () => badge(tab.id)
+          return (
+            <button
+              type="button"
+              onClick={() => props.onSwitch(tab.id)}
+              class="relative flex items-center justify-center w-8 h-8 transition-colors flex-shrink-0"
+              classList={{
+                'text-[var(--accent)] border-b-2 border-[var(--accent)]':
+                  props.currentTab === tab.id,
+                'text-[var(--text-muted)] hover:text-[var(--text-secondary)]':
+                  props.currentTab !== tab.id,
+              }}
+              title={tab.label}
+            >
+              <Icon class="w-4 h-4" />
+              <Show when={count() > 0}>
+                <span class="absolute -top-0.5 -right-0.5 min-w-[14px] h-[14px] px-0.5 flex items-center justify-center rounded-full bg-[var(--accent)] text-white text-[8px] font-bold leading-none">
+                  {count()}
+                </span>
+              </Show>
+            </button>
+          )
+        })}
+
+        {/* More dropdown */}
+        <div ref={moreRef} class="relative h-full flex-shrink-0">
+          <button
+            type="button"
+            onClick={() => {
+              setMoreOpen(!moreOpen())
+              if (!moreOpen()) {
+                document.addEventListener('click', handleClickOutside, { once: true })
+              }
+            }}
+            class="flex items-center justify-center w-8 h-8 transition-colors"
+            classList={{
+              'text-[var(--accent)] border-b-2 border-[var(--accent)]': isOverflowActive(),
+              'text-[var(--text-muted)] hover:text-[var(--text-secondary)]': !isOverflowActive(),
+            }}
+            title="More tabs"
+          >
+            <MoreHorizontal class="w-4 h-4" />
+          </button>
+
+          <Show when={moreOpen()}>
+            <div class="absolute top-full right-0 mt-1 min-w-[140px] py-1 bg-[var(--surface-overlay)] border border-[var(--border-default)] rounded-[var(--radius-md)] shadow-lg z-50">
+              {overflowTabs().map((tab) => {
+                const Icon = tab.icon
+                return (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      props.onSwitch(tab.id)
+                      setMoreOpen(false)
+                    }}
+                    class="w-full flex items-center gap-2 px-3 py-1.5 text-[11px] transition-colors"
+                    classList={{
+                      'text-[var(--accent)] bg-[var(--alpha-white-5)]': props.currentTab === tab.id,
+                      'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--alpha-white-5)]':
+                        props.currentTab !== tab.id,
+                    }}
+                  >
+                    <Icon class="w-3.5 h-3.5" />
+                    {tab.label}
+                  </button>
+                )
+              })}
+            </div>
+          </Show>
+        </div>
+      </div>
+
+      {/* Close button — always visible */}
+      <button
+        type="button"
+        onClick={props.onClose}
+        class="flex items-center justify-center w-8 h-8 flex-shrink-0 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
+        aria-label="Close panel"
+        title="Close panel"
+      >
+        <X class="w-3.5 h-3.5" />
+      </button>
+    </div>
+  )
+}
 
 interface RightPanelProps {
   startRightResize: (event: MouseEvent) => void
@@ -93,125 +230,14 @@ export function RightPanel(props: RightPanelProps) {
         style={{ width: `${rightPanelWidth()}px` }}
       >
         <div class="flex flex-col h-full bg-[var(--gray-1)]">
-          <div class="flex items-center h-8 flex-shrink-0 border-b border-[var(--border-subtle)]">
-            <button
-              type="button"
-              onClick={() => switchRightPanelTab('activity')}
-              class="flex items-center gap-1.5 px-3 h-full text-[10px] font-semibold uppercase tracking-wider transition-colors"
-              classList={{
-                'text-[var(--accent)] border-b border-[var(--accent)]':
-                  rightPanelTab() === 'activity',
-                'text-[var(--text-muted)] hover:text-[var(--text-secondary)]':
-                  rightPanelTab() !== 'activity',
-              }}
-            >
-              <Bot class="w-3 h-3" />
-              Activity
-            </button>
-            <button
-              type="button"
-              onClick={() => switchRightPanelTab('files')}
-              class="flex items-center gap-1.5 px-3 h-full text-[10px] font-semibold uppercase tracking-wider transition-colors"
-              classList={{
-                'text-[var(--accent)] border-b border-[var(--accent)]': rightPanelTab() === 'files',
-                'text-[var(--text-muted)] hover:text-[var(--text-secondary)]':
-                  rightPanelTab() !== 'files',
-              }}
-            >
-              <FolderOpen class="w-3 h-3" />
-              Files
-            </button>
-            <button
-              type="button"
-              onClick={() => switchRightPanelTab('review')}
-              class="flex items-center gap-1.5 px-3 h-full text-[10px] font-semibold uppercase tracking-wider transition-colors"
-              classList={{
-                'text-[var(--accent)] border-b border-[var(--accent)]':
-                  rightPanelTab() === 'review',
-                'text-[var(--text-muted)] hover:text-[var(--text-secondary)]':
-                  rightPanelTab() !== 'review',
-              }}
-            >
-              <GitCompareArrows class="w-3 h-3" />
-              Review
-            </button>
-            <button
-              type="button"
-              onClick={() => switchRightPanelTab('trajectory')}
-              class="flex items-center gap-1.5 px-3 h-full text-[10px] font-semibold uppercase tracking-wider transition-colors"
-              classList={{
-                'text-[var(--accent)] border-b border-[var(--accent)]':
-                  rightPanelTab() === 'trajectory',
-                'text-[var(--text-muted)] hover:text-[var(--text-secondary)]':
-                  rightPanelTab() !== 'trajectory',
-              }}
-            >
-              <Route class="w-3 h-3" />
-              Trajectory
-            </button>
-            <Show when={settings().generation.delegationEnabled || team.hierarchy() !== null}>
-              <button
-                type="button"
-                onClick={() => switchRightPanelTab('team')}
-                class="flex items-center gap-1.5 px-3 h-full text-[10px] font-semibold uppercase tracking-wider transition-colors"
-                classList={{
-                  'text-[var(--accent)] border-b border-[var(--accent)]':
-                    rightPanelTab() === 'team',
-                  'text-[var(--text-muted)] hover:text-[var(--text-secondary)]':
-                    rightPanelTab() !== 'team',
-                }}
-              >
-                <Users class="w-3 h-3" />
-                Team
-              </button>
-            </Show>
-            <button
-              type="button"
-              onClick={() => switchRightPanelTab('todos')}
-              class="flex items-center gap-1.5 px-3 h-full text-[10px] font-semibold uppercase tracking-wider transition-colors"
-              classList={{
-                'text-[var(--accent)] border-b border-[var(--accent)]': rightPanelTab() === 'todos',
-                'text-[var(--text-muted)] hover:text-[var(--text-secondary)]':
-                  rightPanelTab() !== 'todos',
-              }}
-            >
-              <CheckSquare class="w-3 h-3" />
-              Todos
-              <Show when={todoCount() > 0}>
-                <span class="ml-1 px-1 py-0.5 rounded-full bg-[var(--accent-muted)] text-[var(--accent)] text-[9px] font-bold leading-none">
-                  {todoCount()}
-                </span>
-              </Show>
-            </button>
-            <button
-              type="button"
-              onClick={() => switchRightPanelTab('changes')}
-              class="flex items-center gap-1.5 px-3 h-full text-[10px] font-semibold uppercase tracking-wider transition-colors"
-              classList={{
-                'text-[var(--accent)] border-b border-[var(--accent)]':
-                  rightPanelTab() === 'changes',
-                'text-[var(--text-muted)] hover:text-[var(--text-secondary)]':
-                  rightPanelTab() !== 'changes',
-              }}
-            >
-              <FileDiff class="w-3 h-3" />
-              Changes
-              <Show when={changesCount() > 0}>
-                <span class="ml-1 px-1 py-0.5 rounded-full bg-[var(--accent-muted)] text-[var(--accent)] text-[9px] font-bold leading-none">
-                  {changesCount()}
-                </span>
-              </Show>
-            </button>
-            <div class="flex-1" />
-            <button
-              type="button"
-              onClick={() => setRightPanelVisible(false)}
-              class="p-1 mr-1.5 rounded-[var(--radius-sm)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--alpha-white-5)] transition-colors"
-              aria-label="Close right panel"
-            >
-              <X class="w-3 h-3" />
-            </button>
-          </div>
+          <TabBar
+            currentTab={rightPanelTab()}
+            onSwitch={switchRightPanelTab}
+            onClose={() => setRightPanelVisible(false)}
+            todoCount={todoCount()}
+            changesCount={changesCount()}
+            showTeam={settings().generation.delegationEnabled || team.hierarchy() !== null}
+          />
 
           <div class="flex-1 overflow-hidden">
             <Show when={rightPanelTab() === 'activity'}>

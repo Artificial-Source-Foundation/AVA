@@ -6,11 +6,13 @@
  * Fully self-contained — manages its own state via useSettings().
  */
 
-import { Wand2 } from 'lucide-solid'
+import { Users, Wand2 } from 'lucide-solid'
 import { type Component, createSignal } from 'solid-js'
 import type { AgentPreset } from '../../../config/defaults/agent-defaults'
 import { resolveAgentIcon } from '../../../config/defaults/agent-defaults'
 import { useSettings } from '../../../stores/settings'
+import { SettingsCard } from '../SettingsCard'
+import { SETTINGS_CARD_GAP } from '../settings-constants'
 import { AgentsTabDetail } from './agents-tab-detail'
 import { AgentsTabList } from './agents-tab-list'
 
@@ -100,29 +102,40 @@ export const AgentsTab: Component = () => {
   }
 
   return (
-    <div class="flex h-full -mx-6 -my-6" style={{ height: 'calc(100% + 48px)' }}>
-      <div class="w-[40%] flex-shrink-0">
-        <AgentsTabList
-          agents={settings().agents}
-          selectedId={creatingNew() ? null : selectedId()}
-          onSelect={handleSelect}
-          onToggle={handleToggle}
-          searchQuery={searchQuery()}
-          onSearchChange={setSearchQuery}
-          onImport={handleImport}
-          onExport={handleExport}
-          onCreate={handleCreate}
-        />
-      </div>
-      <div class="flex-1 min-w-0">
-        <AgentsTabDetail
-          agent={selectedAgent()}
-          providers={settings().providers}
-          onSave={handleSave}
-          onDelete={handleDelete}
-          isCreating={creatingNew()}
-        />
-      </div>
+    <div class="grid grid-cols-1" style={{ gap: SETTINGS_CARD_GAP }}>
+      <SettingsCard
+        icon={Users}
+        title="Agent Presets"
+        description="Configure agent roles, tools, and system prompts"
+      >
+        <div
+          class="flex -mx-6 -mb-6 rounded-b-[var(--radius-xl)] overflow-hidden"
+          style={{ height: '520px' }}
+        >
+          <div class="w-[40%] flex-shrink-0">
+            <AgentsTabList
+              agents={settings().agents}
+              selectedId={creatingNew() ? null : selectedId()}
+              onSelect={handleSelect}
+              onToggle={handleToggle}
+              searchQuery={searchQuery()}
+              onSearchChange={setSearchQuery}
+              onImport={handleImport}
+              onExport={handleExport}
+              onCreate={handleCreate}
+            />
+          </div>
+          <div class="flex-1 min-w-0">
+            <AgentsTabDetail
+              agent={selectedAgent()}
+              providers={settings().providers}
+              onSave={handleSave}
+              onDelete={handleDelete}
+              isCreating={creatingNew()}
+            />
+          </div>
+        </div>
+      </SettingsCard>
     </div>
   )
 }

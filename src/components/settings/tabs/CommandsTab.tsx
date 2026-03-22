@@ -13,20 +13,9 @@ import {
   listCommands,
   saveCommand,
 } from '../../../services/custom-commands'
+import { SettingsCard } from '../SettingsCard'
+import { SETTINGS_CARD_GAP } from '../settings-constants'
 import { CommandEditForm } from './commands/CommandEditForm'
-
-// ============================================================================
-// Shared helpers
-// ============================================================================
-
-const SectionHeader: Component<{ title: string; right?: () => import('solid-js').JSX.Element }> = (
-  props
-) => (
-  <div class="flex items-center justify-between mb-3">
-    <h3 class="text-sm font-semibold text-[var(--text-primary)]">{props.title}</h3>
-    {props.right?.()}
-  </div>
-)
 
 // ============================================================================
 // Command Card
@@ -48,7 +37,7 @@ const CommandCard: Component<CommandCardProps> = (props) => {
         <div class="flex-1 min-w-0">
           <div class="text-xs font-semibold text-[var(--text-primary)]">/{props.command.name}</div>
           <Show when={props.command.description}>
-            <div class="text-[10px] text-[var(--text-muted)] truncate">
+            <div class="text-[var(--settings-text-badge)] text-[var(--text-muted)] truncate">
               {props.command.description}
             </div>
           </Show>
@@ -85,10 +74,10 @@ const CommandCard: Component<CommandCardProps> = (props) => {
 
       <Show when={expanded()}>
         <div class="px-3 pb-2.5 border-t border-[var(--border-subtle)]">
-          <pre class="text-[10px] text-[var(--text-secondary)] font-mono whitespace-pre-wrap mt-2 max-h-32 overflow-y-auto">
+          <pre class="text-[var(--settings-text-badge)] text-[var(--text-secondary)] font-mono whitespace-pre-wrap mt-2 max-h-32 overflow-y-auto">
             {props.command.prompt}
           </pre>
-          <div class="text-[9px] text-[var(--text-muted)] mt-1.5 font-mono truncate">
+          <div class="text-[var(--settings-text-caption)] text-[var(--text-muted)] mt-1.5 font-mono truncate">
             {props.command.filePath}
           </div>
         </div>
@@ -143,77 +132,84 @@ export const CommandsTab: Component = () => {
   }
 
   return (
-    <div class="space-y-4">
-      <Show
-        when={!editing()}
-        fallback={
-          <div>
-            <SectionHeader title={editing() === 'new' ? 'New Command' : 'Edit Command'} />
-            <CommandEditForm
-              initial={editingCommand()}
-              onSave={handleSave}
-              onCancel={() => setEditing(null)}
-            />
-          </div>
-        }
+    <div class="grid grid-cols-1" style={{ gap: SETTINGS_CARD_GAP }}>
+      <SettingsCard
+        icon={Terminal}
+        title="Custom Commands"
+        description="Reusable TOML-based prompt templates from ~/.ava/commands/"
       >
-        <SectionHeader
-          title="Custom Commands"
-          right={() => (
+        <Show
+          when={!editing()}
+          fallback={
+            <div>
+              <h4 class="text-[var(--settings-text-label)] font-semibold text-[var(--text-primary)] mb-3">
+                {editing() === 'new' ? 'New Command' : 'Edit Command'}
+              </h4>
+              <CommandEditForm
+                initial={editingCommand()}
+                onSave={handleSave}
+                onCancel={() => setEditing(null)}
+              />
+            </div>
+          }
+        >
+          <div class="flex justify-end">
             <button
               type="button"
               onClick={() => setEditing('new')}
-              class="flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded-[var(--radius-md)] bg-[var(--accent)] text-white hover:bg-[var(--accent-hover)] transition-colors"
+              class="flex items-center gap-1 px-2 py-1 text-[var(--settings-text-button)] font-medium rounded-[var(--radius-md)] bg-[var(--accent)] text-white hover:bg-[var(--accent-hover)] transition-colors"
             >
               <Plus class="w-3 h-3" />
               New Command
             </button>
-          )}
-        />
+          </div>
 
-        <Show
-          when={!loading()}
-          fallback={
-            <div class="space-y-2">
-              <div class="h-14 bg-[var(--surface-raised)] rounded-[var(--radius-lg)] animate-pulse" />
-              <div class="h-14 bg-[var(--surface-raised)] rounded-[var(--radius-lg)] animate-pulse" />
-            </div>
-          }
-        >
           <Show
-            when={commands().length > 0}
+            when={!loading()}
             fallback={
-              <div class="flex flex-col items-center justify-center py-10 text-center">
-                <FolderOpen class="w-8 h-8 text-[var(--text-muted)] mb-2" />
-                <p class="text-xs text-[var(--text-secondary)] mb-1">No custom commands yet</p>
-                <p class="text-[10px] text-[var(--text-muted)] max-w-xs mb-3">
-                  Commands are TOML files in ~/.ava/commands/. Create one to define reusable
-                  prompts.
-                </p>
-                <button
-                  type="button"
-                  onClick={() => setEditing('new')}
-                  class="inline-flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-medium rounded-[var(--radius-md)] bg-[var(--accent)] text-white hover:brightness-110 transition-colors"
-                >
-                  Create your first command
-                </button>
+              <div class="space-y-2">
+                <div class="h-14 bg-[var(--surface-raised)] rounded-[var(--radius-lg)] animate-pulse" />
+                <div class="h-14 bg-[var(--surface-raised)] rounded-[var(--radius-lg)] animate-pulse" />
               </div>
             }
           >
-            <div class="space-y-2">
-              <For each={commands()}>
-                {(cmd) => (
-                  <CommandCard
-                    command={cmd}
-                    onEdit={() => setEditing(cmd.filePath)}
-                    onDelete={() => handleDelete(cmd.filePath)}
-                  />
-                )}
-              </For>
-            </div>
+            <Show
+              when={commands().length > 0}
+              fallback={
+                <div class="flex flex-col items-center justify-center py-10 text-center">
+                  <FolderOpen class="w-8 h-8 text-[var(--text-muted)] mb-2" />
+                  <p class="text-[var(--settings-text-description)] text-[var(--text-secondary)] mb-1">
+                    No custom commands yet
+                  </p>
+                  <p class="text-[var(--settings-text-description)] text-[var(--text-muted)] max-w-xs mb-3">
+                    Commands are TOML files in ~/.ava/commands/. Create one to define reusable
+                    prompts.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setEditing('new')}
+                    class="inline-flex items-center gap-1.5 px-3 py-1.5 text-[var(--settings-text-button)] font-medium rounded-[var(--radius-md)] bg-[var(--accent)] text-white hover:brightness-110 transition-colors"
+                  >
+                    Create your first command
+                  </button>
+                </div>
+              }
+            >
+              <div class="space-y-2">
+                <For each={commands()}>
+                  {(cmd) => (
+                    <CommandCard
+                      command={cmd}
+                      onEdit={() => setEditing(cmd.filePath)}
+                      onDelete={() => handleDelete(cmd.filePath)}
+                    />
+                  )}
+                </For>
+              </div>
+            </Show>
           </Show>
         </Show>
-      </Show>
+      </SettingsCard>
     </div>
   )
 }

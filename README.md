@@ -41,7 +41,7 @@ ava serve                    # web browser UI
 
 ## Features
 
-- **8 LLM providers** — Anthropic, OpenAI, Gemini, Ollama, OpenRouter, Copilot, Inception, Mock
+- **15 LLM providers** — Anthropic, OpenAI, Gemini, Ollama, OpenRouter, Copilot, Inception, Alibaba, ZAI, ZhipuAI, Kimi, MiniMax, and more
 - **9 built-in tools** — read, write, edit, bash, glob, grep, web_fetch, web_search, git_read
 - **Multi-agent mode** — a Director assembles Leads and Workers to tackle complex tasks
 - **MCP support** — connect any MCP server for extra tools
@@ -53,15 +53,19 @@ ava serve                    # web browser UI
 
 ## Providers
 
-| Provider | Auth |
-|----------|------|
-| Anthropic | API key |
-| OpenAI | API key |
-| Google Gemini | API key |
-| Ollama | Local (no key) |
-| OpenRouter | API key |
-| GitHub Copilot | GitHub OAuth |
-| Inception | API key |
+| Provider | Auth | Models |
+|----------|------|--------|
+| Anthropic | API key | Claude 4, Sonnet, Haiku |
+| OpenAI | OAuth or API key | GPT-5.4, o3, o4-mini |
+| Google Gemini | OAuth or API key | Gemini 2.5 Pro, Flash |
+| Ollama | Local (no key) | Llama, Mistral, etc. |
+| OpenRouter | API key | 100+ models |
+| GitHub Copilot | GitHub OAuth | GPT-5.4 |
+| Inception | API key | Mercury 2 |
+| Alibaba | API key | Qwen 3.5 Plus |
+| ZAI / ZhipuAI | API key | GLM-4.7 |
+| Kimi | API key | K2P5 |
+| MiniMax | API key | MiniMax-M2 |
 
 ## Keyboard shortcuts
 

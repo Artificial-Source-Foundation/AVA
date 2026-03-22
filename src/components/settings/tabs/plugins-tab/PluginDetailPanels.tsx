@@ -27,7 +27,9 @@ export const PluginPermissionBadges: Component<PluginPermissionBadgesProps> = (p
     <div class="border border-[var(--border-subtle)] rounded-[var(--radius-md)] bg-[var(--surface)] p-3 space-y-1.5">
       <div class="flex items-center gap-2">
         <Shield class="w-3.5 h-3.5 text-[var(--text-muted)]" />
-        <span class="text-[11px] text-[var(--text-primary)]">Permissions</span>
+        <span class="text-[var(--settings-text-button)] text-[var(--text-primary)]">
+          Permissions
+        </span>
       </div>
       <div class="flex flex-wrap gap-1.5">
         <For each={props.plugin()!.permissions!}>
@@ -35,7 +37,7 @@ export const PluginPermissionBadges: Component<PluginPermissionBadgesProps> = (p
             const meta = PLUGIN_PERMISSION_META[perm]
             return (
               <span
-                class="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium rounded-full border"
+                class="inline-flex items-center gap-1 px-2 py-0.5 text-[var(--settings-text-badge)] font-medium rounded-full border"
                 style={{
                   color: permissionColor(perm),
                   'border-color': permissionColor(perm),
@@ -51,7 +53,7 @@ export const PluginPermissionBadges: Component<PluginPermissionBadgesProps> = (p
         </For>
       </div>
       <Show when={props.plugin()!.permissions!.some((p) => SENSITIVE_PERMISSIONS.includes(p))}>
-        <p class="text-[9px] text-[var(--warning)] flex items-center gap-1">
+        <p class="text-[var(--settings-text-caption)] text-[var(--warning)] flex items-center gap-1">
           <AlertTriangle class="w-2.5 h-2.5" />
           This plugin requests sensitive permissions
         </p>
@@ -81,17 +83,23 @@ export const PluginSourceInfo: Component<PluginSourceInfoProps> = (props) => (
         >
           <GitBranch class="w-3.5 h-3.5 text-[var(--accent)]" />
         </Show>
-        <span class="text-[11px] text-[var(--text-primary)]">
+        <span class="text-[var(--settings-text-button)] text-[var(--text-primary)]">
           {props.state()?.sourceType === 'git' ? 'Git Source' : 'Local Link'}
         </span>
       </div>
       <Show when={props.state()?.sourceUrl}>
-        <p class="text-[10px] text-[var(--text-secondary)] break-all">{props.state()?.sourceUrl}</p>
+        <p class="text-[var(--settings-text-badge)] text-[var(--text-secondary)] break-all">
+          {props.state()?.sourceUrl}
+        </p>
       </Show>
       <Show when={props.state()?.version}>
-        <p class="text-[10px] text-[var(--text-muted)]">Version: {props.state()?.version}</p>
+        <p class="text-[var(--settings-text-badge)] text-[var(--text-muted)]">
+          Version: {props.state()?.version}
+        </p>
       </Show>
-      <p class="text-[10px] text-[var(--text-muted)]">Scope: {props.state()?.scope || 'global'}</p>
+      <p class="text-[var(--settings-text-badge)] text-[var(--text-muted)]">
+        Scope: {props.state()?.scope || 'global'}
+      </p>
     </div>
   </Show>
 )

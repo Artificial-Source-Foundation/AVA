@@ -1,11 +1,14 @@
 /**
  * Keybindings Settings Tab
  *
- * Flat, minimal design matching GeneralSection.
+ * Bento-grid layout using SettingsCard, matching AppearanceTab/BehaviorTab.
  * View and customize keyboard shortcuts.
  */
 
+import { Code2, Compass, Keyboard, MessageCircle, Settings2 } from 'lucide-solid'
 import { type Component, createSignal, For, Show } from 'solid-js'
+import { SettingsCard } from '../SettingsCard'
+import { SETTINGS_CARD_GAP } from '../settings-constants'
 
 // ============================================================================
 // Types
@@ -52,7 +55,7 @@ const formatKey = (key: string): string => {
 }
 
 const KeyCombo: Component<{ keys: string[] }> = (props) => (
-  <span class="text-[11px] font-mono text-[var(--text-muted)] bg-[var(--surface-raised)] border border-[var(--border-subtle)] rounded px-1.5 py-0.5">
+  <span class="text-[var(--settings-text-input)] font-mono text-[var(--text-muted)] bg-[var(--surface-raised)] border border-[var(--border-subtle)] rounded px-1.5 py-0.5">
     {props.keys.map((k) => formatKey(k)).join(' + ')}
   </span>
 )
@@ -87,88 +90,112 @@ export const KeybindingsTab: Component<KeybindingsTabProps> = (props) => {
     return groups
   }
 
+  const categoryMeta: Record<string, { icon: Component<{ class?: string }>; description: string }> =
+    {
+      General: { icon: Settings2, description: 'Global shortcuts' },
+      Navigation: { icon: Compass, description: 'Tab and panel shortcuts' },
+      Chat: { icon: MessageCircle, description: 'Message and conversation shortcuts' },
+      Editor: { icon: Code2, description: 'Text editing shortcuts' },
+    }
+
+  const defaultMeta = { icon: Keyboard, description: 'Keyboard shortcuts' }
+
   return (
-    <div class="space-y-4">
-      {/* Search */}
-      <input
-        type="text"
-        placeholder="Search shortcuts..."
-        value={searchQuery()}
-        onInput={(e) => setSearchQuery(e.currentTarget.value)}
-        class="
-          w-full px-3 py-2
-          bg-[var(--input-background)]
-          border border-[var(--input-border)]
-          rounded-[var(--radius-md)]
-          text-xs text-[var(--text-primary)]
-          placeholder:text-[var(--input-placeholder)]
-          focus:outline-none focus:border-[var(--input-border-focus)]
-          transition-colors
-        "
-      />
+    <div class="space-y-5">
+      {/* Search + Reset All */}
+      <div class="space-y-2">
+        <input
+          type="text"
+          placeholder="Search shortcuts..."
+          value={searchQuery()}
+          onInput={(e) => setSearchQuery(e.currentTarget.value)}
+          class="
+            w-full px-3 py-2
+            bg-[var(--input-background)]
+            border border-[var(--input-border)]
+            rounded-[var(--radius-md)]
+            text-[var(--settings-text-input)] text-[var(--text-primary)]
+            placeholder:text-[var(--input-placeholder)]
+            focus:outline-none focus:border-[var(--input-border-focus)]
+            transition-colors
+          "
+        />
 
-      {/* Reset all (if customized) */}
-      <Show when={customCount() > 0 && props.onResetAll}>
-        <div class="flex items-center justify-between py-1">
-          <span class="text-[10px] text-[var(--text-muted)]">{customCount()} customized</span>
-          <button
-            type="button"
-            onClick={() => props.onResetAll?.()}
-            class="text-[10px] text-[var(--text-muted)] hover:text-[var(--warning)] transition-colors"
-          >
-            Reset all
-          </button>
-        </div>
-      </Show>
-
-      {/* Grouped shortcuts */}
-      <For each={Object.entries(grouped())}>
-        {([category, bindings]) => (
-          <div>
-            <h3 class="text-[10px] font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-2">
-              {category}
-            </h3>
-            <div class="space-y-0.5">
-              <For each={bindings}>
-                {(kb) => (
-                  <div class="flex items-center justify-between py-1.5 group">
-                    <div class="flex-1 min-w-0">
-                      <span class="text-xs text-[var(--text-secondary)]">{kb.action}</span>
-                      <Show when={kb.isCustom}>
-                        <span class="ml-1.5 text-[9px] text-[var(--accent)]">modified</span>
-                      </Show>
-                    </div>
-                    <div class="flex items-center gap-2">
-                      <KeyCombo keys={kb.keys} />
-                      <Show when={props.onEdit}>
-                        <button
-                          type="button"
-                          onClick={() => props.onEdit?.(kb.id)}
-                          class="text-[10px] text-[var(--text-muted)] hover:text-[var(--accent)] opacity-0 group-hover:opacity-100 transition-[color,opacity]"
-                        >
-                          Edit
-                        </button>
-                      </Show>
-                      <Show when={kb.isCustom && props.onReset}>
-                        <button
-                          type="button"
-                          onClick={() => props.onReset?.(kb.id)}
-                          class="text-[10px] text-[var(--text-muted)] hover:text-[var(--warning)] opacity-0 group-hover:opacity-100 transition-[color,opacity]"
-                        >
-                          Reset
-                        </button>
-                      </Show>
-                    </div>
-                  </div>
-                )}
-              </For>
-            </div>
+        <Show when={customCount() > 0 && props.onResetAll}>
+          <div class="flex items-center justify-between py-1">
+            <span class="text-[var(--settings-text-badge)] text-[var(--text-muted)]">
+              {customCount()} customized
+            </span>
+            <button
+              type="button"
+              onClick={() => props.onResetAll?.()}
+              class="text-[var(--settings-text-badge)] text-[var(--text-muted)] hover:text-[var(--warning)] transition-colors"
+            >
+              Reset all
+            </button>
           </div>
-        )}
-      </For>
+        </Show>
+      </div>
 
-      <Show when={filteredKeybindings().length === 0}>
-        <p class="text-xs text-[var(--text-muted)] text-center py-6">No shortcuts found</p>
+      {/* Category cards in bento grid */}
+      <Show
+        when={filteredKeybindings().length > 0}
+        fallback={
+          <p class="text-[var(--settings-text-description)] text-[var(--text-muted)] text-center py-6">
+            No shortcuts found
+          </p>
+        }
+      >
+        <div class="grid grid-cols-1" style={{ gap: SETTINGS_CARD_GAP }}>
+          <For each={Object.entries(grouped())}>
+            {([category, bindings]) => {
+              const meta = categoryMeta[category] ?? defaultMeta
+              return (
+                <SettingsCard icon={meta.icon} title={category} description={meta.description}>
+                  <div class="space-y-0.5">
+                    <For each={bindings}>
+                      {(kb) => (
+                        <div class="flex items-center justify-between py-1.5 group">
+                          <div class="flex-1 min-w-0">
+                            <span class="text-[var(--settings-text-label)] text-[var(--text-secondary)]">
+                              {kb.action}
+                            </span>
+                            <Show when={kb.isCustom}>
+                              <span class="ml-1.5 text-[var(--settings-text-caption)] text-[var(--accent)]">
+                                modified
+                              </span>
+                            </Show>
+                          </div>
+                          <div class="flex items-center gap-2">
+                            <KeyCombo keys={kb.keys} />
+                            <Show when={props.onEdit}>
+                              <button
+                                type="button"
+                                onClick={() => props.onEdit?.(kb.id)}
+                                class="text-[var(--settings-text-button)] text-[var(--text-muted)] hover:text-[var(--accent)] opacity-0 group-hover:opacity-100 transition-[color,opacity]"
+                              >
+                                Edit
+                              </button>
+                            </Show>
+                            <Show when={kb.isCustom && props.onReset}>
+                              <button
+                                type="button"
+                                onClick={() => props.onReset?.(kb.id)}
+                                class="text-[var(--settings-text-button)] text-[var(--text-muted)] hover:text-[var(--warning)] opacity-0 group-hover:opacity-100 transition-[color,opacity]"
+                              >
+                                Reset
+                              </button>
+                            </Show>
+                          </div>
+                        </div>
+                      )}
+                    </For>
+                  </div>
+                </SettingsCard>
+              )
+            }}
+          </For>
+        </div>
       </Show>
     </div>
   )

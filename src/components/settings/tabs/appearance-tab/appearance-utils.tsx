@@ -15,7 +15,7 @@ export { Toggle } from '../../../ui/Toggle'
 
 /** Small uppercase section header */
 export const SectionHeader: Component<{ title: string }> = (props) => (
-  <h3 class="text-[11px] font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-2.5">
+  <h3 class="text-[var(--settings-text-button)] font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-2.5">
     {props.title}
   </h3>
 )

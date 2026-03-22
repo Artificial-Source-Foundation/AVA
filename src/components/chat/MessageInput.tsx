@@ -71,6 +71,10 @@ export const MessageInput: Component = () => {
           onCancel={state.handleCancel}
           inputHasText={state.inputHasText}
           queuedCount={state.agent.queuedCount}
+          escapeHint={state.escapeHint}
+          onSteer={state.handleSteerFromMenu}
+          onFollowUp={state.handleFollowUpFromMenu}
+          onPostComplete={state.handlePostCompleteFromMenu}
         />
         <ShortcutHint sendCount={state.sendCount()} />
 

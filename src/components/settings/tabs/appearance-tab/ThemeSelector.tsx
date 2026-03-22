@@ -42,7 +42,7 @@ export const ColorModeSection: Component = () => {
     <div>
       <SectionHeader title="Color Mode" />
       <div class="flex items-center justify-between py-2">
-        <span class="text-[14px] text-[var(--text-secondary)]">Theme</span>
+        <span class="text-[var(--settings-text-label)] text-[var(--text-secondary)]">Theme</span>
         <div class="flex gap-1">
           <button
             type="button"
@@ -69,7 +69,9 @@ export const ColorModeSection: Component = () => {
       </div>
       <Show when={showDarkStyle()}>
         <div class="flex items-center justify-between py-2 mt-1">
-          <span class="text-[14px] text-[var(--text-secondary)]">Dark style</span>
+          <span class="text-[var(--settings-text-label)] text-[var(--text-secondary)]">
+            Dark style
+          </span>
           <div class="flex gap-1">
             <For each={DARK_STYLE_OPTIONS}>
               {(opt) => (
@@ -108,7 +110,7 @@ export const AccentSection: Component = () => {
     <div>
       <SectionHeader title="Accent Color" />
       <div class="flex items-center justify-between py-2">
-        <span class="text-[14px] text-[var(--text-secondary)]">Color</span>
+        <span class="text-[var(--settings-text-label)] text-[var(--text-secondary)]">Color</span>
         <div class="flex gap-2 items-center">
           <For each={ACCENT_PRESETS}>
             {(preset) => (
@@ -173,12 +175,14 @@ export const AccentSection: Component = () => {
                 updateAppearance({ customAccentColor: val })
               }
             }}
-            class="w-24 px-3 py-2 text-[13px] font-mono bg-[var(--surface-raised)] text-[var(--text-secondary)] border border-[var(--border-default)] rounded-[var(--radius-md)] outline-none focus:border-[var(--accent)]"
+            class="w-24 px-3 py-2 text-[var(--settings-text-description)] font-mono bg-[var(--surface-raised)] text-[var(--text-secondary)] border border-[var(--border-default)] rounded-[var(--radius-md)] outline-none focus:border-[var(--accent)]"
             placeholder="#8b5cf6"
           />
         </div>
       </Show>
-      <p class="text-[13px] text-[var(--text-muted)] mt-1.5">{accentLabel()}</p>
+      <p class="text-[var(--settings-text-description)] text-[var(--text-muted)] mt-1.5">
+        {accentLabel()}
+      </p>
     </div>
   )
 }
@@ -208,8 +212,10 @@ export const ThemePresetsGrid: Component<ThemePresetsGridProps> = (props) => (
             <div class="w-3 h-3 rounded-full" style={{ background: preset.swatch }} />
           </div>
           <div class="min-w-0">
-            <p class="text-[12px] font-medium text-[var(--text-primary)] truncate">{preset.name}</p>
-            <p class="text-[11px] text-[var(--text-muted)]">{preset.mode}</p>
+            <p class="text-[var(--settings-text-input)] font-medium text-[var(--text-primary)] truncate">
+              {preset.name}
+            </p>
+            <p class="text-[var(--settings-text-button)] text-[var(--text-muted)]">{preset.mode}</p>
           </div>
         </button>
       )}

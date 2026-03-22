@@ -29,7 +29,7 @@ export const CategoryToggleSection: Component<CategoryToggleSectionProps> = (pro
   return (
     <div>
       <div class="flex items-center justify-between mb-2">
-        <span class="text-[11px] font-medium text-[var(--text-secondary)]">
+        <span class="text-[var(--settings-text-label)] font-medium text-[var(--text-secondary)]">
           {props.title}{' '}
           <span class="text-[var(--text-muted)] font-normal">({props.countLabel})</span>
         </span>
@@ -38,14 +38,14 @@ export const CategoryToggleSection: Component<CategoryToggleSectionProps> = (pro
             <button
               type="button"
               onClick={() => props.onSelectAll?.()}
-              class="text-[9px] text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors"
+              class="text-[var(--settings-text-button)] text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors"
             >
               All
             </button>
             <button
               type="button"
               onClick={() => props.onSelectNone?.()}
-              class="text-[9px] text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors"
+              class="text-[var(--settings-text-button)] text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors"
             >
               None
             </button>
@@ -56,7 +56,7 @@ export const CategoryToggleSection: Component<CategoryToggleSectionProps> = (pro
         <For each={props.categories}>
           {(cat) => (
             <div class="flex items-start gap-2">
-              <span class="text-[9px] text-[var(--text-muted)] w-14 flex-shrink-0 pt-0.5 text-right">
+              <span class="text-[var(--settings-text-button)] text-[var(--text-muted)] w-16 flex-shrink-0 pt-0.5 text-right">
                 {cat.label}
               </span>
               <div class="flex flex-wrap gap-1">

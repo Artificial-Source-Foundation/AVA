@@ -61,9 +61,9 @@ export const ToolbarStrip: Component<ToolbarStripProps> = (props) => {
   const sandbox = useSandbox()
 
   return (
-    <div class="flex items-center justify-between text-[10px] text-[var(--text-tertiary)] font-[var(--font-ui-mono)] select-none overflow-x-auto">
+    <div class="flex items-center justify-between gap-2 text-[10px] text-[var(--text-tertiary)] font-[var(--font-ui-mono)] select-none overflow-x-auto flex-wrap min-w-0">
       {/* Left: model + thinking + plan/act + permission */}
-      <div class="flex items-center gap-2">
+      <div class="flex items-center gap-2 flex-wrap min-w-0">
         <ModelSelector
           onToggle={openModelBrowser}
           currentModelDisplay={props.currentModelDisplay}

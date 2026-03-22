@@ -12,6 +12,7 @@ import type { LeadConfig } from '../../../stores/settings'
 import { useSettings } from '../../../stores/settings'
 import { ToggleRow } from '../../ui/ToggleRow'
 import { SettingsCard } from '../SettingsCard'
+import { SETTINGS_CARD_GAP } from '../settings-constants'
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -53,9 +54,11 @@ const ModelSelect: Component<{
 }> = (props) => (
   <div class="flex items-center justify-between py-2 gap-4">
     <div class="flex flex-col min-w-0">
-      <span class="text-[14px] text-[var(--gray-10)] leading-tight">{props.label}</span>
+      <span class="text-[var(--settings-text-label)] text-[var(--gray-10)] leading-tight">
+        {props.label}
+      </span>
       <Show when={props.description}>
-        <span class="text-[13px] text-[var(--gray-7)] leading-tight mt-0.5">
+        <span class="text-[var(--settings-text-description)] text-[var(--gray-7)] leading-tight mt-0.5">
           {props.description}
         </span>
       </Show>
@@ -63,7 +66,7 @@ const ModelSelect: Component<{
     <select
       value={props.value}
       onChange={(e) => props.onChange(e.currentTarget.value)}
-      class="min-w-[200px] max-w-[280px] px-3 py-1.5 rounded-[var(--radius-md)] bg-[var(--gray-2)] border border-[var(--gray-5)] text-[13px] text-[var(--text-primary)] outline-none focus:border-[var(--accent)] transition-colors"
+      class="min-w-[200px] max-w-[280px] px-3 py-1.5 rounded-[var(--radius-md)] bg-[var(--gray-2)] border border-[var(--gray-5)] text-[var(--settings-text-description)] text-[var(--text-primary)] outline-none focus:border-[var(--accent)] transition-colors"
     >
       <For each={props.models}>{(m) => <option value={m.id}>{m.label}</option>}</For>
     </select>
@@ -87,7 +90,7 @@ const LeadRow: Component<{
           class="flex-1 flex items-center gap-3 text-left"
         >
           <span
-            class="text-[14px] font-medium"
+            class="text-[var(--settings-text-label)] font-medium"
             classList={{
               'text-[var(--text-primary)]': props.lead.enabled,
               'text-[var(--gray-7)]': !props.lead.enabled,
@@ -96,12 +99,14 @@ const LeadRow: Component<{
             {domainLabels[props.lead.domain] ?? props.lead.domain} Lead
           </span>
           <Show when={props.lead.model}>
-            <span class="text-[12px] text-[var(--gray-7)] px-1.5 py-0.5 rounded bg-[var(--gray-4)]">
+            <span class="text-[var(--settings-text-input)] text-[var(--gray-7)] px-1.5 py-0.5 rounded bg-[var(--gray-4)]">
               {props.lead.model}
             </span>
           </Show>
         </button>
-        <span class="text-[12px] text-[var(--gray-7)]">{props.lead.maxWorkers}w</span>
+        <span class="text-[var(--settings-text-input)] text-[var(--gray-7)]">
+          {props.lead.maxWorkers}w
+        </span>
         <label class="relative inline-flex items-center cursor-pointer">
           <input
             type="checkbox"
@@ -126,8 +131,10 @@ const LeadRow: Component<{
 
           <div class="flex items-center justify-between py-2 gap-4">
             <div class="flex flex-col min-w-0">
-              <span class="text-[14px] text-[var(--gray-10)] leading-tight">Max workers</span>
-              <span class="text-[13px] text-[var(--gray-7)] leading-tight mt-0.5">
+              <span class="text-[var(--settings-text-label)] text-[var(--gray-10)] leading-tight">
+                Max workers
+              </span>
+              <span class="text-[var(--settings-text-description)] text-[var(--gray-7)] leading-tight mt-0.5">
                 Maximum concurrent workers for this lead
               </span>
             </div>
@@ -141,20 +148,22 @@ const LeadRow: Component<{
                 onInput={(e) => props.onUpdate({ maxWorkers: Number(e.currentTarget.value) })}
                 class="w-24 accent-[var(--accent)]"
               />
-              <span class="text-[13px] font-mono text-[var(--gray-8)] w-6 text-right">
+              <span class="text-[var(--settings-text-description)] font-mono text-[var(--gray-8)] w-6 text-right">
                 {props.lead.maxWorkers}
               </span>
             </div>
           </div>
 
           <div class="space-y-1.5">
-            <span class="text-[14px] text-[var(--gray-10)] leading-tight">Custom prompt</span>
+            <span class="text-[var(--settings-text-label)] text-[var(--gray-10)] leading-tight">
+              Custom prompt
+            </span>
             <textarea
               value={props.lead.customPrompt}
               onInput={(e) => props.onUpdate({ customPrompt: e.currentTarget.value })}
               placeholder="Additional system prompt for this lead..."
               rows={3}
-              class="w-full px-3 py-2 rounded-[var(--radius-md)] bg-[var(--gray-2)] border border-[var(--gray-5)] text-[13px] text-[var(--text-primary)] placeholder:text-[var(--gray-6)] outline-none focus:border-[var(--accent)] resize-y transition-colors"
+              class="w-full px-3 py-2 rounded-[var(--radius-md)] bg-[var(--gray-2)] border border-[var(--gray-5)] text-[var(--settings-text-description)] text-[var(--text-primary)] placeholder:text-[var(--gray-6)] outline-none focus:border-[var(--accent)] resize-y transition-colors"
             />
           </div>
         </div>
@@ -189,7 +198,7 @@ export const TeamTab: Component = () => {
   }
 
   return (
-    <div class="grid grid-cols-1" style={{ gap: '28px' }}>
+    <div class="grid grid-cols-1" style={{ gap: SETTINGS_CARD_GAP }}>
       {/* Enable team mode */}
       <SettingsCard
         icon={Users}
@@ -269,7 +278,7 @@ export const TeamTab: Component = () => {
           <div class="flex flex-wrap gap-2">
             <For each={team().workerNames}>
               {(name) => (
-                <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-[var(--gray-4)] text-[13px] text-[var(--text-secondary)] border border-[var(--gray-5)]">
+                <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-[var(--gray-4)] text-[var(--settings-text-description)] text-[var(--text-secondary)] border border-[var(--gray-5)]">
                   {name}
                   <button
                     type="button"
@@ -292,13 +301,13 @@ export const TeamTab: Component = () => {
                 if (e.key === 'Enter') addWorkerName()
               }}
               placeholder="Add a name..."
-              class="flex-1 px-3 py-1.5 rounded-[var(--radius-md)] bg-[var(--gray-2)] border border-[var(--gray-5)] text-[13px] text-[var(--text-primary)] placeholder:text-[var(--gray-6)] outline-none focus:border-[var(--accent)] transition-colors"
+              class="flex-1 px-3 py-1.5 rounded-[var(--radius-md)] bg-[var(--gray-2)] border border-[var(--gray-5)] text-[var(--settings-text-description)] text-[var(--text-primary)] placeholder:text-[var(--gray-6)] outline-none focus:border-[var(--accent)] transition-colors"
             />
             <button
               type="button"
               onClick={addWorkerName}
               disabled={!newName().trim()}
-              class="px-3 py-1.5 rounded-[var(--radius-md)] bg-[var(--accent)] text-white text-[13px] font-medium disabled:opacity-40 hover:opacity-90 transition-opacity flex items-center gap-1.5"
+              class="px-3 py-1.5 rounded-[var(--radius-md)] bg-[var(--accent)] text-white text-[var(--settings-text-description)] font-medium disabled:opacity-40 hover:opacity-90 transition-opacity flex items-center gap-1.5"
             >
               <Plus class="w-3.5 h-3.5" />
               Add

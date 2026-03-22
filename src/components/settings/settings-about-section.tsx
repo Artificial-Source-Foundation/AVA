@@ -19,7 +19,7 @@ export const AboutSection: Component = () => {
         <p class="text-xs text-[var(--text-muted)] mt-1">
           Desktop AI coding app with a virtual dev team and community plugins.
         </p>
-        <span class="inline-block mt-2 px-2 py-0.5 text-[10px] font-mono text-[var(--accent)] bg-[var(--accent-subtle)] rounded-[var(--radius-sm)]">
+        <span class="inline-block mt-2 px-2 py-0.5 text-[var(--settings-text-badge)] font-mono text-[var(--accent)] bg-[var(--accent-subtle)] rounded-[var(--radius-sm)]">
           v0.1.0-alpha
         </span>
       </div>
@@ -49,7 +49,7 @@ export const AboutSection: Component = () => {
         <div class="flex items-center justify-between">
           <div>
             <span class="text-xs text-[var(--text-secondary)]">Developer Mode</span>
-            <p class="text-[10px] text-[var(--text-muted)]">
+            <p class="text-[var(--settings-text-badge)] text-[var(--text-muted)]">
               <Show
                 when={settings().devMode}
                 fallback="Enable to show the Developer tab with console logs and debug tools."

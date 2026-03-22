@@ -7,6 +7,7 @@
 import { X } from 'lucide-solid'
 import { type Component, createSignal } from 'solid-js'
 import type { CustomRule, RuleActivationMode } from '../../../../stores/settings/settings-types'
+import { SETTINGS_FORM_INPUT_CLASS } from '../../settings-constants'
 
 export const RuleForm: Component<{
   initial?: CustomRule
@@ -41,8 +42,7 @@ export const RuleForm: Component<{
     })
   }
 
-  const cls =
-    'w-full px-2 py-1.5 text-[12px] rounded-[var(--radius-md)] bg-[var(--surface-raised)] text-[var(--text-primary)] border border-[var(--border-subtle)] focus:border-[var(--accent)] outline-none'
+  const cls = SETTINGS_FORM_INPUT_CLASS
 
   return (
     <div class="space-y-3 p-3 rounded-[var(--radius-lg)] border border-[var(--accent-muted)] bg-[var(--accent-subtle)]">
@@ -92,7 +92,7 @@ export const RuleForm: Component<{
         <textarea
           value={content()}
           onInput={(e) => setContent(e.currentTarget.value)}
-          class={`${cls} resize-none font-mono text-[11px]`}
+          class={`${cls} resize-none font-mono text-[var(--settings-text-button)]`}
           rows={8}
           placeholder="Coding instructions injected into the system prompt..."
         />
@@ -101,7 +101,7 @@ export const RuleForm: Component<{
         <button
           type="button"
           onClick={props.onCancel}
-          class="px-3 py-1 text-[11px] rounded-[var(--radius-md)] bg-[var(--surface-raised)] text-[var(--text-secondary)] hover:bg-[var(--alpha-white-8)] transition-colors"
+          class="px-3 py-1 text-[var(--settings-text-button)] rounded-[var(--radius-md)] bg-[var(--surface-raised)] text-[var(--text-secondary)] hover:bg-[var(--alpha-white-8)] transition-colors"
         >
           Cancel
         </button>
@@ -109,7 +109,7 @@ export const RuleForm: Component<{
           type="button"
           onClick={handleSave}
           disabled={!name().trim()}
-          class="px-3 py-1 text-[11px] rounded-[var(--radius-md)] bg-[var(--accent)] text-white hover:brightness-110 disabled:opacity-40 transition-colors"
+          class="px-3 py-1 text-[var(--settings-text-button)] rounded-[var(--radius-md)] bg-[var(--accent)] text-white hover:brightness-110 disabled:opacity-40 transition-colors"
         >
           Save
         </button>

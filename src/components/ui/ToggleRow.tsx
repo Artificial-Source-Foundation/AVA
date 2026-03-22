@@ -34,9 +34,11 @@ export const ToggleRow: Component<ToggleRowProps> = (props) => {
       `}
     >
       <div class="flex flex-col min-w-0">
-        <span class="text-[14px] text-[var(--gray-10)] leading-tight">{props.label}</span>
+        <span class="text-[var(--settings-text-label)] text-[var(--gray-10)] leading-tight">
+          {props.label}
+        </span>
         <Show when={props.description}>
-          <span class="text-[13px] text-[var(--gray-7)] leading-tight mt-0.5">
+          <span class="text-[var(--settings-text-description)] text-[var(--gray-7)] leading-tight mt-0.5">
             {props.description}
           </span>
         </Show>

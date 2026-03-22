@@ -11,7 +11,7 @@ export const ModelAliasesSection: Component = () => {
 
   return (
     <div>
-      <p class="text-[10px] text-[var(--text-muted)] mb-2">
+      <p class="text-[var(--settings-text-description)] text-[var(--text-muted)] mb-2">
         Create short names for model IDs (e.g. "fast" → "openai/gpt-4o-mini")
       </p>
       <div class="space-y-1.5">
@@ -29,10 +29,10 @@ export const ModelAliasesSection: Component = () => {
                   aliases[newAlias] = modelId
                   updateSettings({ modelAliases: aliases })
                 }}
-                class="w-24 px-2 py-1 text-[11px] rounded-[var(--radius-md)] bg-[var(--surface-raised)] text-[var(--text-primary)] border border-[var(--border-subtle)] focus:border-[var(--accent)] outline-none"
+                class="w-24 px-2 py-1 text-[var(--settings-text-button)] rounded-[var(--radius-md)] bg-[var(--surface-raised)] text-[var(--text-primary)] border border-[var(--border-subtle)] focus:border-[var(--accent)] outline-none"
                 placeholder="alias"
               />
-              <span class="text-[10px] text-[var(--text-muted)]">→</span>
+              <span class="text-[var(--settings-text-badge)] text-[var(--text-muted)]">→</span>
               <input
                 type="text"
                 value={modelId}
@@ -43,7 +43,7 @@ export const ModelAliasesSection: Component = () => {
                     modelAliases: { ...settings().modelAliases, [alias]: newModelId },
                   })
                 }}
-                class="flex-1 px-2 py-1 text-[11px] rounded-[var(--radius-md)] bg-[var(--surface-raised)] text-[var(--text-primary)] border border-[var(--border-subtle)] focus:border-[var(--accent)] outline-none"
+                class="flex-1 px-2 py-1 text-[var(--settings-text-button)] rounded-[var(--radius-md)] bg-[var(--surface-raised)] text-[var(--text-primary)] border border-[var(--border-subtle)] focus:border-[var(--accent)] outline-none"
                 placeholder="provider/model-id"
               />
               <button
@@ -53,7 +53,7 @@ export const ModelAliasesSection: Component = () => {
                   delete aliases[alias]
                   updateSettings({ modelAliases: aliases })
                 }}
-                class="px-1.5 py-1 text-[10px] text-[var(--error)] hover:bg-[var(--alpha-white-5)] rounded-[var(--radius-sm)] transition-colors"
+                class="px-1.5 py-1 text-[var(--settings-text-badge)] text-[var(--error)] hover:bg-[var(--alpha-white-5)] rounded-[var(--radius-sm)] transition-colors"
                 title="Remove alias"
               >
                 x
@@ -74,7 +74,7 @@ export const ModelAliasesSection: Component = () => {
           aliases[name] = ''
           updateSettings({ modelAliases: aliases })
         }}
-        class="mt-2 px-3 py-1 text-[11px] rounded-[var(--radius-md)] bg-[var(--surface-raised)] text-[var(--text-secondary)] hover:bg-[var(--alpha-white-8)] transition-colors"
+        class="mt-2 px-3 py-1 text-[var(--settings-text-button)] rounded-[var(--radius-md)] bg-[var(--surface-raised)] text-[var(--text-secondary)] hover:bg-[var(--alpha-white-8)] transition-colors"
       >
         + Add Alias
       </button>

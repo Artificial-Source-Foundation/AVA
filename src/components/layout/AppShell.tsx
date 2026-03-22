@@ -44,6 +44,8 @@ export const AppShell: Component = () => {
   } = useLayout()
   const { settings } = useSettings()
 
+  const { settingsOpen } = useLayout()
+
   const { startSidebarResize, startRightResize, startBottomResize } = createResizeHandlers({
     sidebarWidth,
     setSidebarWidth,
@@ -57,7 +59,10 @@ export const AppShell: Component = () => {
     <div class="h-screen flex flex-col text-[var(--text-primary)] overflow-hidden">
       <TitleBar />
 
-      <div class="flex-1 flex overflow-hidden">
+      <div
+        class="flex-1 flex overflow-hidden"
+        style={{ visibility: settingsOpen() ? 'hidden' : 'visible' }}
+      >
         <ActivityBar />
 
         {/* Sidebar — width transition with overflow:hidden (no bleed, smooth) */}

@@ -5,7 +5,7 @@
  * PluginInstallDialog, PluginDevMode, and the shared PluginDetailPanel.
  */
 
-import { Package } from 'lucide-solid'
+import { Code2, Info, Package } from 'lucide-solid'
 import { type Component, createMemo, createSignal, For, onCleanup, Show } from 'solid-js'
 import { watchPluginDirectory } from '../../../services/extension-loader'
 import { usePlugins } from '../../../stores/plugins'
@@ -14,6 +14,8 @@ import { type PluginPermission, SENSITIVE_PERMISSIONS } from '../../../types/plu
 import { PluginDetailPanel } from '../../plugins'
 import { PluginWizard } from '../../plugins/PluginWizard'
 import { PublishDialog } from '../../plugins/PublishDialog'
+import { SettingsCard } from '../SettingsCard'
+import { SETTINGS_CARD_GAP } from '../settings-constants'
 import {
   type DevModeStatus,
   FeaturedPluginCard,
@@ -159,16 +161,124 @@ export const PluginsTab: Component = () => {
   const sortedPlugins = createMemo(() => sortPlugins(plugins.filteredPlugins(), sortBy()))
 
   return (
-    <div class="space-y-3">
-      {/* Header toolbar */}
-      <PluginToolbar
-        onShowWizard={() => setShowWizard(true)}
-        onShowPublish={() => setShowPublish(true)}
-        onShowGitDialog={() => setShowGitDialog(true)}
-        onShowLinkDialog={() => setShowLinkDialog(true)}
-      />
+    <div class="grid grid-cols-1" style={{ gap: SETTINGS_CARD_GAP }}>
+      {/* Plugins card */}
+      <SettingsCard
+        icon={Package}
+        title="Plugins"
+        description="Extend AVA with community and custom plugins"
+      >
+        {/* Header toolbar */}
+        <PluginToolbar
+          onShowWizard={() => setShowWizard(true)}
+          onShowPublish={() => setShowPublish(true)}
+          onShowGitDialog={() => setShowGitDialog(true)}
+          onShowLinkDialog={() => setShowLinkDialog(true)}
+        />
 
-      {/* Dialogs */}
+        {/* Status bar */}
+        <div class="text-[var(--settings-text-description)] text-[var(--text-muted)]">
+          <span>Status: {plugins.catalogStatus()}</span>
+          <span class="mx-1">&bull;</span>
+          <span>Last sync: {formatSyncTime(plugins.lastCatalogSyncAt())}</span>
+        </div>
+
+        <Show when={plugins.catalogError()}>
+          <p class="text-[var(--settings-text-badge)] text-[var(--error)]">
+            {plugins.catalogError()}
+          </p>
+        </Show>
+
+        {/* Search, category filter, sort */}
+        <PluginSearch sortBy={sortBy} onSortChange={setSortBy} />
+
+        {/* Featured section */}
+        <Show when={showFeatured()}>
+          <div class="space-y-1.5">
+            <p class="text-[var(--settings-text-badge)] uppercase tracking-wide text-[var(--text-muted)]">
+              Featured
+            </p>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+              <For each={plugins.featuredPlugins()}>
+                {(plugin) => <FeaturedPluginCard plugin={plugin} onSelect={setSelectedPluginId} />}
+              </For>
+            </div>
+          </div>
+        </Show>
+
+        {/* Plugin list */}
+        <div class="space-y-1.5">
+          <Show
+            when={sortedPlugins().length > 0}
+            fallback={
+              <div class="flex flex-col items-center justify-center py-10 text-center">
+                <Package class="w-8 h-8 text-[var(--text-muted)] mb-2" />
+                <p class="text-[var(--settings-text-description)] text-[var(--text-secondary)] mb-1">
+                  No plugins installed
+                </p>
+                <p class="text-[var(--settings-text-description)] text-[var(--text-muted)] max-w-xs mb-3">
+                  Plugins add capabilities to AVA. {emptyStateMessage()}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setShowWizard(true)}
+                  class="inline-flex items-center gap-1.5 px-3 py-1.5 text-[var(--settings-text-button)] font-medium rounded-[var(--radius-md)] bg-[var(--accent)] text-white hover:brightness-110 transition-colors"
+                >
+                  Create your first plugin
+                </button>
+              </div>
+            }
+          >
+            <For each={sortedPlugins()}>
+              {(plugin) => (
+                <PluginCard
+                  plugin={plugin}
+                  isSelected={selectedPluginId() === plugin.id}
+                  onSelect={setSelectedPluginId}
+                  onInstall={handleInstallWithPermCheck}
+                />
+              )}
+            </For>
+          </Show>
+        </div>
+      </SettingsCard>
+
+      {/* Plugin Details card */}
+      <Show when={selectedPlugin()}>
+        <SettingsCard
+          icon={Info}
+          title="Plugin Details"
+          description="Configuration and info for the selected plugin"
+        >
+          <PluginDetailPanel plugin={selectedPlugin()} state={selectedState()} />
+          <PluginPermissionBadges plugin={selectedPlugin} />
+          <PluginSourceInfo plugin={selectedPlugin} state={selectedState} />
+        </SettingsCard>
+      </Show>
+
+      {/* Developer Mode card */}
+      <Show when={selectedPlugin() && selectedState()?.installed}>
+        {(_) => {
+          const pluginId = () => selectedPluginId()!
+          return (
+            <SettingsCard
+              icon={Code2}
+              title="Developer Mode"
+              description="Live reload and debug tools for plugin development"
+            >
+              <PluginDevMode
+                pluginId={pluginId}
+                isDevMode={() => devModePlugins()[pluginId()] ?? false}
+                status={() => devModeStatus()[pluginId()] ?? 'idle'}
+                logs={() => devModeLogs()[pluginId()] ?? []}
+                onToggle={toggleDevMode}
+              />
+            </SettingsCard>
+          )
+        }}
+      </Show>
+
+      {/* Dialogs (outside cards — they're modals) */}
       <GitInstallDialog open={showGitDialog} onClose={() => setShowGitDialog(false)} />
       <LinkLocalDialog open={showLinkDialog} onClose={() => setShowLinkDialog(false)} />
       <PermissionConfirmDialog
@@ -176,92 +286,6 @@ export const PluginsTab: Component = () => {
         onCancel={() => setPermConfirmPluginId(null)}
         onConfirm={confirmInstallWithPerms}
       />
-
-      {/* Status bar */}
-      <div class="text-[10px] text-[var(--text-muted)]">
-        <span>Status: {plugins.catalogStatus()}</span>
-        <span class="mx-1">&bull;</span>
-        <span>Last sync: {formatSyncTime(plugins.lastCatalogSyncAt())}</span>
-      </div>
-
-      <Show when={plugins.catalogError()}>
-        <p class="text-[10px] text-[var(--error)]">{plugins.catalogError()}</p>
-      </Show>
-
-      {/* Search, category filter, sort */}
-      <PluginSearch sortBy={sortBy} onSortChange={setSortBy} />
-
-      {/* Featured section */}
-      <Show when={showFeatured()}>
-        <div class="space-y-1.5">
-          <p class="text-[10px] uppercase tracking-wide text-[var(--text-muted)]">Featured</p>
-          <div class="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
-            <For each={plugins.featuredPlugins()}>
-              {(plugin) => <FeaturedPluginCard plugin={plugin} onSelect={setSelectedPluginId} />}
-            </For>
-          </div>
-        </div>
-      </Show>
-
-      {/* Plugin list */}
-      <div class="space-y-1.5">
-        <Show
-          when={sortedPlugins().length > 0}
-          fallback={
-            <div class="flex flex-col items-center justify-center py-10 text-center">
-              <Package class="w-8 h-8 text-[var(--text-muted)] mb-2" />
-              <p class="text-xs text-[var(--text-secondary)] mb-1">No plugins installed</p>
-              <p class="text-[10px] text-[var(--text-muted)] max-w-xs mb-3">
-                Plugins add capabilities to AVA. {emptyStateMessage()}
-              </p>
-              <button
-                type="button"
-                onClick={() => setShowWizard(true)}
-                class="inline-flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-medium rounded-[var(--radius-md)] bg-[var(--accent)] text-white hover:brightness-110 transition-colors"
-              >
-                Create your first plugin
-              </button>
-            </div>
-          }
-        >
-          <For each={sortedPlugins()}>
-            {(plugin) => (
-              <PluginCard
-                plugin={plugin}
-                isSelected={selectedPluginId() === plugin.id}
-                onSelect={setSelectedPluginId}
-                onInstall={handleInstallWithPermCheck}
-              />
-            )}
-          </For>
-        </Show>
-      </div>
-
-      {/* Detail panel */}
-      <PluginDetailPanel plugin={selectedPlugin()} state={selectedState()} />
-
-      {/* Permission badges for selected plugin */}
-      <PluginPermissionBadges plugin={selectedPlugin} />
-
-      {/* Source info for non-catalog plugins */}
-      <PluginSourceInfo plugin={selectedPlugin} state={selectedState} />
-
-      {/* Dev mode panel */}
-      <Show when={selectedPlugin() && selectedState()?.installed}>
-        {(_) => {
-          const pluginId = () => selectedPluginId()!
-          return (
-            <PluginDevMode
-              pluginId={pluginId}
-              isDevMode={() => devModePlugins()[pluginId()] ?? false}
-              status={() => devModeStatus()[pluginId()] ?? 'idle'}
-              logs={() => devModeLogs()[pluginId()] ?? []}
-              onToggle={toggleDevMode}
-            />
-          )
-        }}
-      </Show>
-
       <PublishDialog open={showPublish()} onClose={() => setShowPublish(false)} />
       <PluginWizard open={showWizard()} onClose={() => setShowWizard(false)} />
     </div>

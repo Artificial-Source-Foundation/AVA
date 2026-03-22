@@ -62,7 +62,7 @@ export const EDITOR_PAIRS: Record<string, string> = {
 // ============================================================================
 
 export const SectionHeader: Component<{ title: string }> = (props) => (
-  <h3 class="text-[10px] font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-2">
+  <h3 class="text-[var(--settings-text-badge)] font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-2">
     {props.title}
   </h3>
 )
@@ -79,7 +79,9 @@ export const SliderRow: Component<{
   const display = () => (props.format ? props.format(props.value) : String(props.value))
   return (
     <div class="flex items-center justify-between py-1.5 gap-3">
-      <span class="text-xs text-[var(--text-secondary)] flex-shrink-0">{props.label}</span>
+      <span class="text-[var(--settings-text-label)] text-[var(--text-secondary)] flex-shrink-0">
+        {props.label}
+      </span>
       <div class="flex items-center gap-2 flex-1 justify-end">
         <input
           type="range"
@@ -90,7 +92,7 @@ export const SliderRow: Component<{
           onInput={(e) => props.onChange(Number(e.currentTarget.value))}
           class="w-28 accent-[var(--accent)]"
         />
-        <span class="text-[11px] font-mono text-[var(--text-muted)] w-14 text-right">
+        <span class="text-[var(--settings-text-button)] font-mono text-[var(--text-muted)] w-14 text-right">
           {display()}
         </span>
       </div>

@@ -77,12 +77,14 @@ export const ProviderCard: Component<ProviderCardProps> = (props) => {
                 {props.provider.name}
               </span>
               <Show when={isPlugin()}>
-                <span class="px-1.5 py-0.5 text-[8px] font-semibold uppercase tracking-wider text-[var(--accent)] bg-[var(--accent)]/10 rounded-full">
+                <span class="px-1.5 py-0.5 text-[var(--settings-text-caption)] font-semibold uppercase tracking-wider text-[var(--accent)] bg-[var(--accent)]/10 rounded-full">
                   Plugin
                 </span>
               </Show>
             </div>
-            <p class="text-[10px] text-[var(--text-muted)] mt-0.5">{props.provider.description}</p>
+            <p class="text-[var(--settings-text-badge)] text-[var(--text-muted)] mt-0.5">
+              {props.provider.description}
+            </p>
           </div>
         </button>
 

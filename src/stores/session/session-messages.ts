@@ -173,7 +173,35 @@ export function deleteMessagesAfter(messageId: string): void {
  * what the Rust agent actually persisted.
  */
 export function replaceMessagesFromBackend(msgs: Message[]): void {
-  setMessages(msgs)
+  const current = messages()
+
+  // Preserve locally-added tier messages (steering/follow-up/post-complete)
+  // that the backend doesn't know about. These are user messages with a tier
+  // in metadata that were added during mid-stream messaging.
+  const localTierMsgs = current.filter(
+    (m) => m.metadata?.tier && !msgs.some((bm) => bm.id === m.id)
+  )
+
+  // Merge: backend messages + any local tier messages that weren't in the backend set
+  const merged =
+    localTierMsgs.length > 0
+      ? [...msgs, ...localTierMsgs].sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0))
+      : msgs
+
+  // Only replace if actually different to avoid re-render flash
+  if (current.length === merged.length && current.every((m, i) => m.id === merged[i].id)) {
+    setMessages((prev) =>
+      prev.map((existing, i) => {
+        const incoming = merged[i]
+        if (existing.content === incoming.content && existing.toolCalls === incoming.toolCalls) {
+          return existing
+        }
+        return { ...existing, ...incoming }
+      })
+    )
+  } else {
+    setMessages(merged)
+  }
 }
 
 export async function rollbackToMessage(messageId: string): Promise<void> {

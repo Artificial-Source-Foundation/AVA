@@ -27,13 +27,13 @@ export const PluginSearch: Component<PluginSearchProps> = (props) => {
             value={plugins.search()}
             onInput={(e) => plugins.setSearch(e.currentTarget.value)}
             placeholder="Search plugins..."
-            class="w-full pl-7 pr-2 py-1.5 text-[11px] bg-[var(--surface-raised)] border border-[var(--border-subtle)] rounded-[var(--radius-md)] text-[var(--text-secondary)]"
+            class="w-full pl-7 pr-2 py-1.5 text-[var(--settings-text-button)] bg-[var(--surface-raised)] border border-[var(--border-subtle)] rounded-[var(--radius-md)] text-[var(--text-secondary)]"
           />
         </div>
         <button
           type="button"
           onClick={() => plugins.setShowInstalledOnly(!plugins.showInstalledOnly())}
-          class={`px-2 py-1.5 text-[10px] rounded-[var(--radius-md)] border ${plugins.showInstalledOnly() ? 'text-[var(--accent)] border-[var(--accent-muted)] bg-[var(--accent-subtle)]' : 'text-[var(--text-secondary)] border-[var(--border-subtle)] bg-[var(--surface-raised)]'}`}
+          class={`px-2 py-1.5 text-[var(--settings-text-badge)] rounded-[var(--radius-md)] border ${plugins.showInstalledOnly() ? 'text-[var(--accent)] border-[var(--accent-muted)] bg-[var(--accent-subtle)]' : 'text-[var(--text-secondary)] border-[var(--border-subtle)] bg-[var(--surface-raised)]'}`}
         >
           Installed only
         </button>
@@ -45,7 +45,7 @@ export const PluginSearch: Component<PluginSearchProps> = (props) => {
             <button
               type="button"
               onClick={() => plugins.setCategoryFilter(category)}
-              class={`px-2 py-1 text-[10px] rounded-[var(--radius-md)] border ${plugins.categoryFilter() === category ? 'text-[var(--accent)] border-[var(--accent-muted)] bg-[var(--accent-subtle)]' : 'text-[var(--text-secondary)] border-[var(--border-subtle)] bg-[var(--surface-raised)]'}`}
+              class={`px-2 py-1 text-[var(--settings-text-badge)] rounded-[var(--radius-md)] border ${plugins.categoryFilter() === category ? 'text-[var(--accent)] border-[var(--accent-muted)] bg-[var(--accent-subtle)]' : 'text-[var(--text-secondary)] border-[var(--border-subtle)] bg-[var(--surface-raised)]'}`}
             >
               {category === 'all' ? 'All' : categoryLabel(category)}
             </button>
@@ -56,7 +56,7 @@ export const PluginSearch: Component<PluginSearchProps> = (props) => {
           <select
             value={props.sortBy()}
             onChange={(e) => props.onSortChange(e.currentTarget.value as PluginSortBy)}
-            class="text-[10px] bg-[var(--surface-raised)] border border-[var(--border-subtle)] rounded-[var(--radius-md)] text-[var(--text-secondary)] px-1.5 py-1 outline-none"
+            class="text-[var(--settings-text-badge)] bg-[var(--surface-raised)] border border-[var(--border-subtle)] rounded-[var(--radius-md)] text-[var(--text-secondary)] px-1.5 py-1 outline-none"
           >
             <option value="popular">Popular</option>
             <option value="rated">Top Rated</option>

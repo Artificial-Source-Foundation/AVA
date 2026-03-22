@@ -92,7 +92,19 @@ export function useMessageData(opts: UseMessageDataOptions): MessageDataAPI {
 
   const lastMessageId = createMemo(() => {
     const msgs = opts.messages()
-    return msgs.length > 0 ? msgs[msgs.length - 1].id : null
+    if (msgs.length === 0) return null
+    // If the last messages are mid-stream tier messages (steering/follow-up/post-complete),
+    // the streaming assistant message before them should still be considered "last"
+    // so that isActiveStreaming stays true and the Working card stays visible.
+    const last = msgs[msgs.length - 1]
+    if (last.role === 'user' && last.metadata?.tier) {
+      // Walk backwards to find the assistant message being streamed
+      for (let i = msgs.length - 2; i >= 0; i--) {
+        if (msgs[i].role === 'assistant') return msgs[i].id
+        if (msgs[i].role === 'user' && !msgs[i].metadata?.tier) break
+      }
+    }
+    return last.id
   })
 
   const loadOlderMessages = (): void => {

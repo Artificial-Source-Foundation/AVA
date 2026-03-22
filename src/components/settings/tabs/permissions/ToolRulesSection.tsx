@@ -7,7 +7,6 @@
 import { Plus, Trash2 } from 'lucide-solid'
 import { type Component, createSignal, For, Show } from 'solid-js'
 import type { ToolApprovalRule } from '../../../../stores/settings/settings-types'
-import { SectionHeader } from './permissions-helpers'
 
 export interface ToolRulesSectionProps {
   rules: ToolApprovalRule[]
@@ -40,12 +39,11 @@ export const ToolRulesSection: Component<ToolRulesSectionProps> = (props) => {
   }
 
   return (
-    <div class="pt-2 border-t border-[var(--border-subtle)]">
-      <SectionHeader title="Tool Rules (first match wins)" />
+    <div>
       <Show
         when={props.rules.length > 0}
         fallback={
-          <p class="text-[13px] text-[var(--text-muted)] py-2">
+          <p class="text-[var(--settings-text-description)] text-[var(--text-muted)] py-2">
             No custom rules. Add rules to override per-tool behavior.
           </p>
         }
@@ -54,11 +52,11 @@ export const ToolRulesSection: Component<ToolRulesSectionProps> = (props) => {
           <For each={props.rules}>
             {(rule, index) => (
               <div class="flex items-center gap-2 py-1 group">
-                <span class="text-[14px] text-[var(--text-secondary)] font-mono flex-1 truncate">
+                <span class="text-[var(--settings-text-label)] text-[var(--text-secondary)] font-mono flex-1 truncate">
                   {rule.tool}
                 </span>
                 <span
-                  class="text-[12px] px-2 py-0.5 rounded"
+                  class="text-[var(--settings-text-badge)] px-2 py-0.5 rounded"
                   classList={{
                     'bg-[color-mix(in_srgb,var(--success)_15%,transparent)] text-[var(--success)]':
                       rule.action === 'allow',
@@ -75,7 +73,7 @@ export const ToolRulesSection: Component<ToolRulesSectionProps> = (props) => {
                     <button
                       type="button"
                       onClick={() => moveRule(index(), -1)}
-                      class="text-[9px] text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
+                      class="text-[var(--settings-text-caption)] text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
                     >
                       ^
                     </button>
@@ -84,7 +82,7 @@ export const ToolRulesSection: Component<ToolRulesSectionProps> = (props) => {
                     <button
                       type="button"
                       onClick={() => moveRule(index(), 1)}
-                      class="text-[9px] text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
+                      class="text-[var(--settings-text-caption)] text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
                     >
                       v
                     </button>
@@ -113,12 +111,12 @@ export const ToolRulesSection: Component<ToolRulesSectionProps> = (props) => {
             if (e.key === 'Enter') addRule()
           }}
           placeholder="Tool name or glob (e.g. bash, write_*)"
-          class="flex-1 px-3 py-2 text-[14px] rounded-[var(--radius-md)] bg-[var(--surface-raised)] text-[var(--text-primary)] border border-[var(--border-subtle)] focus:border-[var(--accent)] outline-none"
+          class="flex-1 px-3 py-2 text-[var(--settings-text-label)] rounded-[var(--radius-md)] bg-[var(--surface-raised)] text-[var(--text-primary)] border border-[var(--border-subtle)] focus:border-[var(--accent)] outline-none"
         />
         <select
           value={newAction()}
           onChange={(e) => setNewAction(e.currentTarget.value as 'allow' | 'ask' | 'deny')}
-          class="px-3 py-2 text-[14px] rounded-[var(--radius-md)] bg-[var(--surface-raised)] text-[var(--text-primary)] border border-[var(--border-subtle)] outline-none"
+          class="px-3 py-2 text-[var(--settings-text-label)] rounded-[var(--radius-md)] bg-[var(--surface-raised)] text-[var(--text-primary)] border border-[var(--border-subtle)] outline-none"
         >
           <option value="allow">Allow</option>
           <option value="ask">Ask</option>

@@ -21,8 +21,10 @@ export const ProviderRowClearConfirm: Component<ProviderRowClearConfirmProps> = 
       <div class="flex items-start gap-2">
         <AlertTriangle class="w-3.5 h-3.5 text-[var(--error)] flex-shrink-0 mt-0.5" />
         <div class="flex-1 min-w-0">
-          <p class="text-[11px] font-medium text-[var(--error)]">Clear all credentials?</p>
-          <p class="text-[10px] text-[var(--text-muted)] mt-0.5">
+          <p class="text-[var(--settings-text-button)] font-medium text-[var(--error)]">
+            Clear all credentials?
+          </p>
+          <p class="text-[var(--settings-text-badge)] text-[var(--text-muted)] mt-0.5">
             This will remove {clearTarget()} for {props.providerName}. You will need to
             re-authenticate.
           </p>
@@ -32,14 +34,14 @@ export const ProviderRowClearConfirm: Component<ProviderRowClearConfirmProps> = 
         <button
           type="button"
           onClick={props.onConfirm}
-          class="px-2.5 py-1 text-[10px] font-medium text-white bg-[var(--error)] rounded-[var(--radius-md)] hover:brightness-110 transition-colors"
+          class="px-2.5 py-1 text-[var(--settings-text-badge)] font-medium text-white bg-[var(--error)] rounded-[var(--radius-md)] hover:brightness-110 transition-colors"
         >
           Yes, clear
         </button>
         <button
           type="button"
           onClick={props.onCancel}
-          class="px-2.5 py-1 text-[10px] text-[var(--text-secondary)] bg-[var(--surface-raised)] border border-[var(--border-subtle)] rounded-[var(--radius-md)] hover:border-[var(--border-default)] transition-colors"
+          class="px-2.5 py-1 text-[var(--settings-text-badge)] text-[var(--text-secondary)] bg-[var(--surface-raised)] border border-[var(--border-subtle)] rounded-[var(--radius-md)] hover:border-[var(--border-default)] transition-colors"
         >
           Cancel
         </button>

@@ -25,9 +25,13 @@ export const SettingsCard: Component<SettingsCardProps> = (props) => (
         </div>
       </Show>
       <div class="min-w-0">
-        <h3 class="text-[16px] font-semibold text-[var(--text-primary)]">{props.title}</h3>
+        <h3 class="text-[var(--settings-text-title)] font-semibold text-[var(--text-primary)]">
+          {props.title}
+        </h3>
         <Show when={props.description}>
-          <p class="text-[13px] text-[var(--gray-8)] mt-0.5">{props.description}</p>
+          <p class="text-[var(--settings-text-description)] text-[var(--gray-8)] mt-0.5">
+            {props.description}
+          </p>
         </Show>
       </div>
     </div>

@@ -60,27 +60,19 @@ export const RulesSection: Component = () => {
 
   return (
     <div class="space-y-3">
-      {/* Header */}
-      <div class="flex items-center justify-between">
-        <div>
-          <h3 class="text-sm font-semibold text-[var(--text-primary)]">Rules</h3>
-          <p class="text-[10px] text-[var(--text-muted)] mt-0.5">
-            Path-targeted coding instructions that inject into the system prompt.
-          </p>
-        </div>
-        <div class="flex items-center gap-2">
-          <span class="px-2 py-0.5 text-[10px] rounded-full bg-[var(--accent-subtle)] text-[var(--accent)] border border-[var(--accent-muted)]">
-            {activeCount()} active
-          </span>
-          <button
-            type="button"
-            onClick={handleCreateNew}
-            class="inline-flex items-center gap-1 px-2 py-1 text-[11px] rounded-[var(--radius-md)] bg-[var(--accent)] text-white hover:brightness-110 transition-colors"
-          >
-            <Plus class="w-3 h-3" />
-            Create Rule
-          </button>
-        </div>
+      {/* Actions */}
+      <div class="flex items-center justify-end gap-2">
+        <span class="px-2 py-0.5 text-[var(--settings-text-badge)] rounded-full bg-[var(--accent-subtle)] text-[var(--accent)] border border-[var(--accent-muted)]">
+          {activeCount()} active
+        </span>
+        <button
+          type="button"
+          onClick={handleCreateNew}
+          class="inline-flex items-center gap-1 px-2 py-1 text-[var(--settings-text-button)] font-medium rounded-[var(--radius-md)] bg-[var(--accent)] text-white hover:brightness-110 transition-colors"
+        >
+          <Plus class="w-3 h-3" />
+          Create Rule
+        </button>
       </div>
 
       {/* Inline form */}
@@ -100,7 +92,7 @@ export const RulesSection: Component = () => {
       <Show
         when={rules().length > 0}
         fallback={
-          <p class="text-[10px] text-[var(--text-muted)] italic py-2">
+          <p class="text-[var(--settings-text-description)] text-[var(--text-muted)] italic py-2">
             No rules yet. Create a rule or add .md files to .ava/rules/ in your project.
           </p>
         }

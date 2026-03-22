@@ -63,7 +63,7 @@ export const SettingsModalSidebar: Component<SettingsModalSidebarProps> = (props
       <button
         type="button"
         onClick={props.onBack}
-        class="flex items-center gap-2 px-4 py-3 text-[12px] text-[var(--gray-7)] hover:text-[var(--gray-9)] transition-colors"
+        class="flex items-center gap-2 px-4 py-3 text-[var(--settings-text-input)] text-[var(--gray-7)] hover:text-[var(--gray-9)] transition-colors"
       >
         <ArrowLeft class="w-3.5 h-3.5" />
         Back to Chat

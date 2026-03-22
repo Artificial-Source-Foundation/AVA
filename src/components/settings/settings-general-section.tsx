@@ -5,6 +5,7 @@ import { useSettings } from '../../stores/settings'
 import { Toggle } from '../ui/Toggle'
 import { ToggleRow } from '../ui/ToggleRow'
 import { SettingsCard } from './SettingsCard'
+import { SETTINGS_CARD_GAP } from './settings-constants'
 
 export const GeneralSection: Component = () => {
   const {
@@ -36,13 +37,15 @@ export const GeneralSection: Component = () => {
   }
 
   return (
-    <div class="grid grid-cols-1" style={{ gap: '28px' }}>
+    <div class="grid grid-cols-1" style={{ gap: SETTINGS_CARD_GAP }}>
       <SettingsCard icon={Monitor} title="Interface" description="Layout and display preferences">
         <div class="space-y-0.5">
           <For each={uiToggles}>
             {(toggle) => (
               <div class="flex items-center justify-between py-2">
-                <span class="text-[14px] text-[var(--text-secondary)]">{toggle.label}</span>
+                <span class="text-[var(--settings-text-label)] text-[var(--text-secondary)]">
+                  {toggle.label}
+                </span>
                 <Toggle
                   checked={!!settings().ui[toggle.key]}
                   onChange={() => updateUI({ [toggle.key]: !settings().ui[toggle.key] })}
@@ -79,14 +82,18 @@ export const GeneralSection: Component = () => {
           <Show when={settings().git.autoCommit}>
             <div class="flex items-center justify-between py-2 gap-3">
               <div>
-                <span class="text-[14px] text-[var(--text-secondary)]">Commit prefix</span>
-                <p class="text-[13px] text-[var(--gray-8)]">Prepended to auto-commit messages</p>
+                <span class="text-[var(--settings-text-label)] text-[var(--text-secondary)]">
+                  Commit prefix
+                </span>
+                <p class="text-[var(--settings-text-description)] text-[var(--gray-8)]">
+                  Prepended to auto-commit messages
+                </p>
               </div>
               <input
                 type="text"
                 value={settings().git.commitPrefix}
                 onInput={(e) => updateGit({ commitPrefix: e.currentTarget.value })}
-                class="w-32 px-3 py-2 text-[14px] rounded-[var(--radius-md)] bg-[var(--gray-3)] text-[var(--text-primary)] border border-[var(--gray-5)] focus:border-[var(--accent)] outline-none"
+                class="w-32 px-3 py-2 text-[var(--settings-text-label)] rounded-[var(--radius-md)] bg-[var(--gray-3)] text-[var(--text-primary)] border border-[var(--gray-5)] focus:border-[var(--accent)] outline-none"
                 placeholder="[ava]"
               />
             </div>
@@ -114,7 +121,7 @@ export const GeneralSection: Component = () => {
           <button
             type="button"
             onClick={() => exportSettings()}
-            class="flex items-center gap-2 px-4 py-2.5 text-[13px] text-[var(--text-secondary)] bg-[var(--gray-2)] border border-[var(--gray-5)] rounded-[var(--radius-md)] hover:border-[var(--accent-muted)] transition-colors"
+            class="flex items-center gap-2 px-4 py-2.5 text-[var(--settings-text-description)] text-[var(--text-secondary)] bg-[var(--gray-2)] border border-[var(--gray-5)] rounded-[var(--radius-md)] hover:border-[var(--accent-muted)] transition-colors"
           >
             <Download class="w-4 h-4" />
             Export Settings
@@ -122,7 +129,7 @@ export const GeneralSection: Component = () => {
           <button
             type="button"
             onClick={() => importSettings()}
-            class="flex items-center gap-2 px-4 py-2.5 text-[13px] text-[var(--text-secondary)] bg-[var(--gray-2)] border border-[var(--gray-5)] rounded-[var(--radius-md)] hover:border-[var(--accent-muted)] transition-colors"
+            class="flex items-center gap-2 px-4 py-2.5 text-[var(--settings-text-description)] text-[var(--text-secondary)] bg-[var(--gray-2)] border border-[var(--gray-5)] rounded-[var(--radius-md)] hover:border-[var(--accent-muted)] transition-colors"
           >
             <Upload class="w-4 h-4" />
             Import Settings
@@ -133,7 +140,7 @@ export const GeneralSection: Component = () => {
               <button
                 type="button"
                 onClick={() => setConfirmClear(true)}
-                class="flex items-center gap-2 px-4 py-2.5 text-[13px] text-[var(--error)] bg-[var(--gray-2)] border border-[var(--gray-5)] rounded-[var(--radius-md)] hover:border-[var(--error)] transition-colors"
+                class="flex items-center gap-2 px-4 py-2.5 text-[var(--settings-text-description)] text-[var(--error)] bg-[var(--gray-2)] border border-[var(--gray-5)] rounded-[var(--radius-md)] hover:border-[var(--error)] transition-colors"
               >
                 <Trash2 class="w-4 h-4" />
                 Clear All Data
@@ -141,18 +148,20 @@ export const GeneralSection: Component = () => {
             }
           >
             <div class="flex items-center gap-2">
-              <span class="text-[13px] text-[var(--error)]">Are you sure?</span>
+              <span class="text-[var(--settings-text-description)] text-[var(--error)]">
+                Are you sure?
+              </span>
               <button
                 type="button"
                 onClick={handleClearAll}
-                class="px-4 py-2.5 text-[13px] text-white bg-[var(--error)] rounded-[var(--radius-md)] hover:brightness-110 transition-colors"
+                class="px-4 py-2.5 text-[var(--settings-text-description)] text-white bg-[var(--error)] rounded-[var(--radius-md)] hover:brightness-110 transition-colors"
               >
                 Yes, clear everything
               </button>
               <button
                 type="button"
                 onClick={() => setConfirmClear(false)}
-                class="px-4 py-2.5 text-[13px] text-[var(--text-secondary)] bg-[var(--gray-2)] border border-[var(--gray-5)] rounded-[var(--radius-md)] transition-colors"
+                class="px-4 py-2.5 text-[var(--settings-text-description)] text-[var(--text-secondary)] bg-[var(--gray-2)] border border-[var(--gray-5)] rounded-[var(--radius-md)] transition-colors"
               >
                 Cancel
               </button>
@@ -160,7 +169,9 @@ export const GeneralSection: Component = () => {
           </Show>
         </div>
         <div class="pt-3">
-          <span class="text-[12px] font-mono text-[var(--gray-8)]">AVA v0.1.0-alpha</span>
+          <span class="text-[var(--settings-text-input)] font-mono text-[var(--gray-8)]">
+            AVA v0.1.0-alpha
+          </span>
         </div>
       </SettingsCard>
     </div>

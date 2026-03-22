@@ -24,6 +24,7 @@ export interface InputState extends ModelState {
   inputDisabled: Accessor<boolean>
   inputHasText: Accessor<boolean>
   placeholder: Accessor<string>
+  escapeHint: Accessor<boolean>
   mentionOpen: Accessor<boolean>
   mentionFiltered: Accessor<SearchableFile[]>
   mentionIndex: Accessor<number>
@@ -31,6 +32,9 @@ export interface InputState extends ModelState {
   handleSubmit: (e: Event) => Promise<void>
   handleKeyDown: (e: KeyboardEvent) => void
   handleCancel: () => void
+  handleSteerFromMenu: () => void
+  handleFollowUpFromMenu: () => void
+  handlePostCompleteFromMenu: () => void
   handleExternalEditor: () => Promise<void>
   autoResize: () => void
   onTextareaInput: (v: string) => void
@@ -51,6 +55,11 @@ export function useInputState(): InputState {
   let submitting = false
   let textareaRef: HTMLTextAreaElement | undefined
   let resizeFrame: number | undefined
+
+  // Double-Escape abort: first press shows hint, second within 2s cancels
+  let lastEscapeTime = 0
+  let escapeTimer: ReturnType<typeof setTimeout> | undefined
+  const [escapeHint, setEscapeHint] = createSignal(false)
 
   const attachments = createAttachmentState()
   const chat = useChat()
@@ -150,6 +159,7 @@ export function useInputState(): InputState {
 
   onCleanup(() => {
     if (resizeFrame !== undefined) cancelAnimationFrame(resizeFrame)
+    clearTimeout(escapeTimer)
     window.removeEventListener('ava:set-input', handleExternalInput)
     window.removeEventListener('ava:stash-prompt', handleStash)
     window.removeEventListener('ava:restore-prompt', handleRestore)
@@ -293,10 +303,40 @@ export function useInputState(): InputState {
       }
       return
     }
-    // Mid-stream messaging keybinds (while agent is running)
+    // Double-Escape abort (while agent is running)
+    if (isProcessing() && e.key === 'Escape') {
+      e.preventDefault()
+      const now = Date.now()
+      if (now - lastEscapeTime < 2000) {
+        // Second press within 2s — cancel
+        clearTimeout(escapeTimer)
+        setEscapeHint(false)
+        lastEscapeTime = 0
+        agent.cancel()
+      } else {
+        // First press — show hint
+        lastEscapeTime = now
+        setEscapeHint(true)
+        clearTimeout(escapeTimer)
+        escapeTimer = setTimeout(() => {
+          setEscapeHint(false)
+          lastEscapeTime = 0
+        }, 2000)
+      }
+      return
+    }
+
+    // Mid-stream messaging keybinds (while agent is running).
+    // During processing, Enter ALWAYS steers (regardless of sendKey setting).
+    // This overrides the ctrl+enter send mode so users can steer with plain Enter.
     if (isProcessing() && e.key === 'Enter') {
       const message = input().trim()
-      if (!message) return
+      if (!message) {
+        // Shift+Enter: allow newline even during processing
+        if (e.shiftKey) return
+        e.preventDefault()
+        return
+      }
 
       if (e.ctrlKey && e.altKey) {
         // Ctrl+Alt+Enter: post-complete (Tier 3)
@@ -333,9 +373,20 @@ export function useInputState(): InputState {
         return
       }
       if (!e.shiftKey) {
-        // Enter: steer (Tier 1)
+        // Enter (no modifiers): steer (Tier 1)
         e.preventDefault()
-        void handleSubmit(e)
+        setInput('')
+        if (textareaRef) textareaRef.style.height = 'auto'
+        const sessionId = sessionStore.currentSession()?.id ?? ''
+        sessionStore.addMessage({
+          id: generateMessageId('steer'),
+          sessionId,
+          role: 'user',
+          content: message,
+          createdAt: Date.now(),
+          metadata: { tier: 'steering' },
+        })
+        agent.steer(message)
         return
       }
       // Shift+Enter: newline (fall through)
@@ -356,6 +407,58 @@ export function useInputState(): InputState {
 
   const handleCancel = (): void => {
     agent.cancel()
+  }
+
+  // Menu-driven mid-stream send helpers (for context menu on send button)
+  const handleSteerFromMenu = (): void => {
+    const message = input().trim()
+    if (!message || !isProcessing()) return
+    setInput('')
+    if (textareaRef) textareaRef.style.height = 'auto'
+    const sessionId = sessionStore.currentSession()?.id ?? ''
+    sessionStore.addMessage({
+      id: generateMessageId('steer'),
+      sessionId,
+      role: 'user',
+      content: message,
+      createdAt: Date.now(),
+      metadata: { tier: 'steering' },
+    })
+    agent.steer(message)
+  }
+
+  const handleFollowUpFromMenu = (): void => {
+    const message = input().trim()
+    if (!message || !isProcessing()) return
+    setInput('')
+    if (textareaRef) textareaRef.style.height = 'auto'
+    const sessionId = sessionStore.currentSession()?.id ?? ''
+    sessionStore.addMessage({
+      id: generateMessageId('follow'),
+      sessionId,
+      role: 'user',
+      content: message,
+      createdAt: Date.now(),
+      metadata: { tier: 'follow-up' },
+    })
+    agent.followUp(message)
+  }
+
+  const handlePostCompleteFromMenu = (): void => {
+    const message = input().trim()
+    if (!message || !isProcessing()) return
+    setInput('')
+    if (textareaRef) textareaRef.style.height = 'auto'
+    const sessionId = sessionStore.currentSession()?.id ?? ''
+    sessionStore.addMessage({
+      id: generateMessageId('post'),
+      sessionId,
+      role: 'user',
+      content: message,
+      createdAt: Date.now(),
+      metadata: { tier: 'post-complete' },
+    })
+    agent.postComplete(message)
   }
   const handleExternalEditor = async (): Promise<void> => {
     try {
@@ -384,6 +487,7 @@ export function useInputState(): InputState {
     inputDisabled,
     inputHasText,
     placeholder,
+    escapeHint,
     mentionOpen: mention.mentionOpen,
     mentionFiltered: mention.mentionFiltered,
     mentionIndex: mention.mentionIndex,
@@ -392,6 +496,9 @@ export function useInputState(): InputState {
     handleSubmit,
     handleKeyDown,
     handleCancel,
+    handleSteerFromMenu,
+    handleFollowUpFromMenu,
+    handlePostCompleteFromMenu,
     handleExternalEditor,
     autoResize,
     onTextareaInput,

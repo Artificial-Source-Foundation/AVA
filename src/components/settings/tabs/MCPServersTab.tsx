@@ -1,13 +1,16 @@
 /**
  * MCP Servers Settings Tab
  *
- * Flat, minimal design matching GeneralSection.
+ * Flat, minimal design using SettingsCard design system.
  * Manage Model Context Protocol (MCP) server connections.
  */
 
+import { Server } from 'lucide-solid'
 import { type Component, createSignal, For, Show } from 'solid-js'
 import { getOAuthStatus, type OAuthStatus, revokeAuth } from '../../../services/mcp-oauth'
 import { MCPOAuthDialog } from '../../dialogs/MCPOAuthDialog'
+import { SettingsCard } from '../SettingsCard'
+import { SETTINGS_CARD_GAP } from '../settings-constants'
 
 // ============================================================================
 // Types
@@ -87,18 +90,19 @@ export const MCPServersTab: Component<MCPServersTabProps> = (props) => {
   }
 
   return (
-    <div class="space-y-4">
-      {/* Header */}
-      <div class="flex items-center justify-between">
-        <p class="text-[10px] text-[var(--text-muted)]">
-          {connectedCount()} of {props.servers.length} connected
-        </p>
-        <div class="flex items-center gap-2">
+    <div class="grid grid-cols-1" style={{ gap: SETTINGS_CARD_GAP }}>
+      <SettingsCard
+        icon={Server}
+        title="MCP Servers"
+        description={`${connectedCount()} of ${props.servers.length} connected`}
+      >
+        {/* Actions */}
+        <div class="flex items-center justify-end gap-2">
           <Show when={props.onRefresh}>
             <button
               type="button"
               onClick={() => props.onRefresh?.()}
-              class="text-[10px] text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors"
+              class="text-[var(--settings-text-badge)] text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors"
             >
               Refresh
             </button>
@@ -107,122 +111,129 @@ export const MCPServersTab: Component<MCPServersTabProps> = (props) => {
             <button
               type="button"
               onClick={() => props.onAdd?.()}
-              class="px-2.5 py-1.5 text-[11px] font-medium text-[var(--accent)] hover:bg-[var(--accent-subtle)] rounded-[var(--radius-md)] transition-colors"
+              class="px-2.5 py-1.5 text-[var(--settings-text-button)] font-medium text-[var(--accent)] hover:bg-[var(--accent-subtle)] rounded-[var(--radius-md)] transition-colors"
             >
               + Add
             </button>
           </Show>
         </div>
-      </div>
 
-      {/* Server List */}
-      <Show
-        when={props.servers.length > 0}
-        fallback={
-          <p class="text-xs text-[var(--text-muted)] text-center py-6">
-            No MCP servers configured. MCP servers extend AVA with external tools.
-          </p>
-        }
-      >
-        <div class="space-y-0.5">
-          <For each={props.servers}>
-            {(server) => (
-              <div class="flex items-center justify-between py-2 group">
-                <div class="flex-1 min-w-0">
-                  <div class="flex items-center gap-1.5">
-                    <span class="text-xs text-[var(--text-secondary)]">{server.name}</span>
-                    <span
-                      class={`w-1.5 h-1.5 rounded-full ${server.status === 'connecting' ? 'animate-pulse' : ''}`}
-                      style={{ background: statusColor[server.status] }}
-                    />
-                    <span class="text-[9px]" style={{ color: statusColor[server.status] }}>
-                      {statusLabel[server.status]}
-                    </span>
+        {/* Server List */}
+        <Show
+          when={props.servers.length > 0}
+          fallback={
+            <p class="text-[var(--settings-text-description)] text-[var(--text-muted)] text-center py-6">
+              No MCP servers configured. MCP servers extend AVA with external tools.
+            </p>
+          }
+        >
+          <div class="space-y-0.5">
+            <For each={props.servers}>
+              {(server) => (
+                <div class="flex items-center justify-between py-2 group">
+                  <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-1.5">
+                      <span class="text-[var(--settings-text-label)] text-[var(--text-secondary)]">
+                        {server.name}
+                      </span>
+                      <span
+                        class={`w-1.5 h-1.5 rounded-full ${server.status === 'connecting' ? 'animate-pulse' : ''}`}
+                        style={{ background: statusColor[server.status] }}
+                      />
+                      <span
+                        class="text-[var(--settings-text-caption)]"
+                        style={{ color: statusColor[server.status] }}
+                      >
+                        {statusLabel[server.status]}
+                      </span>
+                    </div>
+                    <p class="text-[var(--settings-text-badge)] text-[var(--text-muted)] font-mono truncate">
+                      {server.url}
+                    </p>
+                    <Show when={server.status === 'error' && server.error}>
+                      <p class="text-[var(--settings-text-badge)] text-[var(--error)]">
+                        {server.error}
+                      </p>
+                    </Show>
                   </div>
-                  <p class="text-[10px] text-[var(--text-muted)] font-mono truncate">
-                    {server.url}
-                  </p>
-                  <Show when={server.status === 'error' && server.error}>
-                    <p class="text-[10px] text-[var(--error)]">{server.error}</p>
-                  </Show>
-                </div>
-                <div class="flex items-center gap-1.5">
-                  {/* OAuth status */}
-                  <Show when={serverOAuthStatus(server.name) !== 'none'}>
-                    <span
-                      class="text-[9px]"
-                      style={{ color: oauthStatusColor[serverOAuthStatus(server.name)] }}
+                  <div class="flex items-center gap-1.5">
+                    {/* OAuth status */}
+                    <Show when={serverOAuthStatus(server.name) !== 'none'}>
+                      <span
+                        class="text-[var(--settings-text-caption)]"
+                        style={{ color: oauthStatusColor[serverOAuthStatus(server.name)] }}
+                      >
+                        {oauthStatusLabel[serverOAuthStatus(server.name)]}
+                      </span>
+                    </Show>
+                    <Show
+                      when={serverOAuthStatus(server.name) === 'authorized'}
+                      fallback={
+                        <button
+                          type="button"
+                          onClick={() => setOauthTarget(server.name)}
+                          class="text-[var(--settings-text-badge)] text-[var(--text-muted)] hover:text-[var(--accent)] opacity-0 group-hover:opacity-100 transition-[color,opacity]"
+                        >
+                          Authorize
+                        </button>
+                      }
                     >
-                      {oauthStatusLabel[serverOAuthStatus(server.name)]}
-                    </span>
-                  </Show>
-                  <Show
-                    when={serverOAuthStatus(server.name) === 'authorized'}
-                    fallback={
                       <button
                         type="button"
-                        onClick={() => setOauthTarget(server.name)}
-                        class="text-[10px] text-[var(--text-muted)] hover:text-[var(--accent)] opacity-0 group-hover:opacity-100 transition-[color,opacity]"
+                        onClick={() => handleRevoke(server.name)}
+                        class="text-[var(--settings-text-badge)] text-[var(--text-muted)] hover:text-[var(--warning)] opacity-0 group-hover:opacity-100 transition-[color,opacity]"
                       >
-                        Authorize
+                        Revoke
                       </button>
-                    }
-                  >
-                    <button
-                      type="button"
-                      onClick={() => handleRevoke(server.name)}
-                      class="text-[10px] text-[var(--text-muted)] hover:text-[var(--warning)] opacity-0 group-hover:opacity-100 transition-[color,opacity]"
+                    </Show>
+                    <Show when={server.status === 'connected' && props.onDisconnect}>
+                      <button
+                        type="button"
+                        onClick={() => props.onDisconnect?.(server.id)}
+                        class="text-[var(--settings-text-badge)] text-[var(--text-muted)] hover:text-[var(--error)] opacity-0 group-hover:opacity-100 transition-[color,opacity]"
+                      >
+                        Stop
+                      </button>
+                    </Show>
+                    <Show
+                      when={
+                        (server.status === 'disconnected' || server.status === 'error') &&
+                        props.onConnect
+                      }
                     >
-                      Revoke
-                    </button>
-                  </Show>
-                  <Show when={server.status === 'connected' && props.onDisconnect}>
-                    <button
-                      type="button"
-                      onClick={() => props.onDisconnect?.(server.id)}
-                      class="text-[10px] text-[var(--text-muted)] hover:text-[var(--error)] opacity-0 group-hover:opacity-100 transition-[color,opacity]"
-                    >
-                      Stop
-                    </button>
-                  </Show>
-                  <Show
-                    when={
-                      (server.status === 'disconnected' || server.status === 'error') &&
-                      props.onConnect
-                    }
-                  >
-                    <button
-                      type="button"
-                      onClick={() => props.onConnect?.(server.id)}
-                      class="text-[10px] text-[var(--text-muted)] hover:text-[var(--success)] opacity-0 group-hover:opacity-100 transition-[color,opacity]"
-                    >
-                      Start
-                    </button>
-                  </Show>
-                  <Show when={props.onEdit}>
-                    <button
-                      type="button"
-                      onClick={() => props.onEdit?.(server.id)}
-                      class="text-[10px] text-[var(--text-muted)] hover:text-[var(--accent)] opacity-0 group-hover:opacity-100 transition-[color,opacity]"
-                    >
-                      Edit
-                    </button>
-                  </Show>
-                  <Show when={props.onRemove}>
-                    <button
-                      type="button"
-                      onClick={() => props.onRemove?.(server.id)}
-                      class="text-[10px] text-[var(--text-muted)] hover:text-[var(--error)] opacity-0 group-hover:opacity-100 transition-[color,opacity]"
-                    >
-                      Remove
-                    </button>
-                  </Show>
+                      <button
+                        type="button"
+                        onClick={() => props.onConnect?.(server.id)}
+                        class="text-[var(--settings-text-badge)] text-[var(--text-muted)] hover:text-[var(--success)] opacity-0 group-hover:opacity-100 transition-[color,opacity]"
+                      >
+                        Start
+                      </button>
+                    </Show>
+                    <Show when={props.onEdit}>
+                      <button
+                        type="button"
+                        onClick={() => props.onEdit?.(server.id)}
+                        class="text-[var(--settings-text-badge)] text-[var(--text-muted)] hover:text-[var(--accent)] opacity-0 group-hover:opacity-100 transition-[color,opacity]"
+                      >
+                        Edit
+                      </button>
+                    </Show>
+                    <Show when={props.onRemove}>
+                      <button
+                        type="button"
+                        onClick={() => props.onRemove?.(server.id)}
+                        class="text-[var(--settings-text-badge)] text-[var(--text-muted)] hover:text-[var(--error)] opacity-0 group-hover:opacity-100 transition-[color,opacity]"
+                      >
+                        Remove
+                      </button>
+                    </Show>
+                  </div>
                 </div>
-              </div>
-            )}
-          </For>
-        </div>
-      </Show>
+              )}
+            </For>
+          </div>
+        </Show>
+      </SettingsCard>
 
       {/* OAuth Dialog */}
       <MCPOAuthDialog

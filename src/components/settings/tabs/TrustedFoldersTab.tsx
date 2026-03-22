@@ -61,7 +61,7 @@ export const TrustedFoldersTab: Component = () => {
           <ShieldCheck class="w-4 h-4 text-[var(--success)]" />
           <h3 class="text-sm font-medium text-[var(--text-primary)]">Allowed Directories</h3>
         </div>
-        <p class="text-[11px] text-[var(--text-muted)] mb-3">
+        <p class="text-[var(--settings-text-button)] text-[var(--text-muted)] mb-3">
           The agent can read and write in these directories.
         </p>
 
@@ -84,7 +84,7 @@ export const TrustedFoldersTab: Component = () => {
             )}
           </For>
           <Show when={settings().trustedFolders.allowed.length === 0}>
-            <p class="text-[11px] text-[var(--text-muted)] italic py-2">
+            <p class="text-[var(--settings-text-button)] text-[var(--text-muted)] italic py-2">
               No allowed directories configured.
             </p>
           </Show>
@@ -117,7 +117,7 @@ export const TrustedFoldersTab: Component = () => {
           <ShieldX class="w-4 h-4 text-[var(--error)]" />
           <h3 class="text-sm font-medium text-[var(--text-primary)]">Denied Directories</h3>
         </div>
-        <p class="text-[11px] text-[var(--text-muted)] mb-3">
+        <p class="text-[var(--settings-text-button)] text-[var(--text-muted)] mb-3">
           The agent will be blocked from accessing these directories.
         </p>
 
@@ -140,7 +140,7 @@ export const TrustedFoldersTab: Component = () => {
             )}
           </For>
           <Show when={settings().trustedFolders.denied.length === 0}>
-            <p class="text-[11px] text-[var(--text-muted)] italic py-2">
+            <p class="text-[var(--settings-text-button)] text-[var(--text-muted)] italic py-2">
               No denied directories configured.
             </p>
           </Show>

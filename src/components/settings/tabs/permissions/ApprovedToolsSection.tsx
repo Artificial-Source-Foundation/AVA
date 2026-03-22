@@ -6,7 +6,6 @@
 
 import { Plus, X } from 'lucide-solid'
 import { type Component, createSignal, For, Show } from 'solid-js'
-import { SectionHeader } from './permissions-helpers'
 
 export interface ApprovedToolsSectionProps {
   tools: string[]
@@ -28,12 +27,11 @@ export const ApprovedToolsSection: Component<ApprovedToolsSectionProps> = (props
   }
 
   return (
-    <div class="pt-2 border-t border-[var(--border-subtle)]">
-      <SectionHeader title="Always-Approved Tools" />
+    <div>
       <Show
         when={props.tools.length > 0}
         fallback={
-          <p class="text-[13px] text-[var(--text-muted)] py-2">
+          <p class="text-[var(--settings-text-description)] text-[var(--text-muted)] py-2">
             No always-approved tools configured.
           </p>
         }
@@ -41,7 +39,7 @@ export const ApprovedToolsSection: Component<ApprovedToolsSectionProps> = (props
         <div class="flex flex-wrap gap-1 mb-2">
           <For each={props.tools}>
             {(tool) => (
-              <span class="inline-flex items-center gap-1.5 px-2.5 py-1 text-[13px] bg-[var(--surface-raised)] text-[var(--text-secondary)] rounded-[var(--radius-md)] border border-[var(--border-subtle)]">
+              <span class="inline-flex items-center gap-1.5 px-2.5 py-1 text-[var(--settings-text-description)] bg-[var(--surface-raised)] text-[var(--text-secondary)] rounded-[var(--radius-md)] border border-[var(--border-subtle)]">
                 <span class="font-mono">{tool}</span>
                 <button
                   type="button"
@@ -64,7 +62,7 @@ export const ApprovedToolsSection: Component<ApprovedToolsSectionProps> = (props
             if (e.key === 'Enter') addApprovedTool()
           }}
           placeholder="Tool name (e.g. read_file, glob)"
-          class="flex-1 px-3 py-2 text-[14px] rounded-[var(--radius-md)] bg-[var(--surface-raised)] text-[var(--text-primary)] border border-[var(--border-subtle)] focus:border-[var(--accent)] outline-none"
+          class="flex-1 px-3 py-2 text-[var(--settings-text-label)] rounded-[var(--radius-md)] bg-[var(--surface-raised)] text-[var(--text-primary)] border border-[var(--border-subtle)] focus:border-[var(--accent)] outline-none"
         />
         <button
           type="button"

@@ -736,17 +736,19 @@ function createAgentStore() {
     if (rustAgent.isRunning()) return
     log.info('agent', 'Edit and resend', { messageId, contentLength: newContent.length })
     batch(() => {
-      setCurrentThought('')
-      setDoomLoopDetected(false)
-      setToolActivity([])
-      setStreamingTokenEstimate(0)
-      setStreamingStartedAt(Date.now())
+      // Remove all messages after the edited one, then remove the edited
+      // message itself so that run() can add a fresh user message and
+      // properly set up the streaming infrastructure (placeholder, liveMessageId,
+      // isRunning, WebSocket listener, etc.).
+      session.deleteMessagesAfter(messageId)
+      session.deleteMessage(messageId)
+      // Exit editing mode
+      session.stopEditing()
     })
-    try {
-      await rustBackend.editAndResend({ messageId, newContent })
-    } finally {
-      setStreamingStartedAt(null)
-    }
+    // Delegate to run() which handles both Tauri and web mode correctly:
+    // adds user message, adds assistant placeholder, attaches event listener,
+    // sets isRunning, and waits for completion.
+    await run(newContent)
   }
 
   async function regenerateResponse(_assistantMessageId: string): Promise<void> {

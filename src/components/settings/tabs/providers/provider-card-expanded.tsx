@@ -174,7 +174,7 @@ export const ProviderCardExpanded: Component<ProviderCardExpandedProps> = (props
         <button
           type="button"
           onClick={() => setShowOllamaBrowser(true)}
-          class="flex items-center gap-2 w-full px-3 py-2 text-[11px] text-[var(--text-secondary)] hover:text-[var(--accent)] bg-[var(--surface-sunken)] border border-[var(--border-subtle)] rounded-[var(--radius-md)] transition-colors"
+          class="flex items-center gap-2 w-full px-3 py-2 text-[var(--settings-text-button)] text-[var(--text-secondary)] hover:text-[var(--accent)] bg-[var(--surface-sunken)] border border-[var(--border-subtle)] rounded-[var(--radius-md)] transition-colors"
         >
           <Server class="w-3 h-3" />
           Manage Local Models
@@ -215,7 +215,7 @@ export const ProviderCardExpanded: Component<ProviderCardExpandedProps> = (props
             <button
               type="button"
               onClick={() => props.onTestConnection?.()}
-              class="text-[10px] text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors"
+              class="text-[var(--settings-text-badge)] text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors"
             >
               Test connection
             </button>
@@ -224,7 +224,7 @@ export const ProviderCardExpanded: Component<ProviderCardExpandedProps> = (props
             <button
               type="button"
               onClick={() => setShowClearConfirm(true)}
-              class="flex items-center gap-1 text-[10px] text-[var(--text-muted)] hover:text-[var(--error)] transition-colors"
+              class="flex items-center gap-1 text-[var(--settings-text-badge)] text-[var(--text-muted)] hover:text-[var(--error)] transition-colors"
               title="Clear all credentials"
             >
               <Trash2 class="w-2.5 h-2.5" />
@@ -236,7 +236,7 @@ export const ProviderCardExpanded: Component<ProviderCardExpandedProps> = (props
           href={getProviderDocsUrl(props.provider.id)}
           target="_blank"
           rel="noopener noreferrer"
-          class="flex items-center gap-1 text-[10px] text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors"
+          class="flex items-center gap-1 text-[var(--settings-text-badge)] text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors"
         >
           Docs
           <ExternalLink class="w-2.5 h-2.5" />
@@ -244,7 +244,9 @@ export const ProviderCardExpanded: Component<ProviderCardExpandedProps> = (props
       </div>
 
       <Show when={props.provider.status === 'error' && props.provider.error}>
-        <p class="text-[10px] text-[var(--error)] px-1">{props.provider.error}</p>
+        <p class="text-[var(--settings-text-badge)] text-[var(--error)] px-1">
+          {props.provider.error}
+        </p>
       </Show>
     </div>
   )

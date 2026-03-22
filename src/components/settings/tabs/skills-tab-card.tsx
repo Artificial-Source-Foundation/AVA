@@ -7,6 +7,7 @@
 import { Brain, Pencil, Trash2, X } from 'lucide-solid'
 import { type Component, createSignal, For, Show } from 'solid-js'
 import type { CustomSkill, SkillActivationMode } from '../../../stores/settings/settings-types'
+import { SETTINGS_FORM_INPUT_CLASS } from '../settings-constants'
 
 // ============================================================================
 // Skill Card
@@ -44,24 +45,26 @@ export const SkillCard: Component<{
       <div class="flex items-center gap-2 flex-wrap">
         <span class="text-xs font-medium text-[var(--text-primary)]">{props.name}</span>
         <Show when={props.isCustom}>
-          <span class="px-1 py-0.5 text-[8px] rounded bg-[var(--warning-subtle)] text-[var(--warning)] border border-[var(--warning)]/20">
+          <span class="px-1 py-0.5 text-[var(--settings-text-caption)] rounded bg-[var(--warning-subtle)] text-[var(--warning)] border border-[var(--warning)]/20">
             Custom
           </span>
         </Show>
         <Show when={props.isOverride}>
-          <span class="px-1 py-0.5 text-[8px] rounded bg-[var(--accent-subtle)] text-[var(--accent)] border border-[var(--accent)]/20">
+          <span class="px-1 py-0.5 text-[var(--settings-text-caption)] rounded bg-[var(--accent-subtle)] text-[var(--accent)] border border-[var(--accent)]/20">
             Modified
           </span>
         </Show>
         <For each={props.fileGlobs}>
           {(glob) => (
-            <span class="px-1.5 py-0.5 text-[9px] rounded-[var(--radius-sm)] bg-[var(--surface-raised)] border border-[var(--border-subtle)] text-[var(--text-muted)] font-mono">
+            <span class="px-1.5 py-0.5 text-[var(--settings-text-caption)] rounded-[var(--radius-sm)] bg-[var(--surface-raised)] border border-[var(--border-subtle)] text-[var(--text-muted)] font-mono">
               {glob}
             </span>
           )}
         </For>
       </div>
-      <p class="text-[10px] text-[var(--text-muted)] mt-0.5">{props.description}</p>
+      <p class="text-[var(--settings-text-badge)] text-[var(--text-muted)] mt-0.5">
+        {props.description}
+      </p>
     </div>
     <div class="flex items-center gap-1 flex-shrink-0 mt-0.5">
       <button
@@ -148,8 +151,7 @@ export const SkillForm: Component<{
     })
   }
 
-  const cls =
-    'w-full px-2 py-1.5 text-[12px] rounded-[var(--radius-md)] bg-[var(--surface-raised)] text-[var(--text-primary)] border border-[var(--border-subtle)] focus:border-[var(--accent)] outline-none'
+  const cls = SETTINGS_FORM_INPUT_CLASS
 
   return (
     <div class="space-y-3 p-3 rounded-[var(--radius-lg)] border border-[var(--accent-muted)] bg-[var(--accent-subtle)]">
@@ -200,7 +202,7 @@ export const SkillForm: Component<{
         <textarea
           value={instructions()}
           onInput={(e) => setInstructions(e.currentTarget.value)}
-          class={`${cls} resize-none font-mono text-[11px]`}
+          class={`${cls} resize-none font-mono text-[var(--settings-text-button)]`}
           rows={6}
           placeholder="Instructions injected into the system prompt when matching files are detected..."
         />
@@ -209,7 +211,7 @@ export const SkillForm: Component<{
         <button
           type="button"
           onClick={props.onCancel}
-          class="px-3 py-1 text-[11px] rounded-[var(--radius-md)] bg-[var(--surface-raised)] text-[var(--text-secondary)] hover:bg-[var(--alpha-white-8)] transition-colors"
+          class="px-3 py-1 text-[var(--settings-text-button)] rounded-[var(--radius-md)] bg-[var(--surface-raised)] text-[var(--text-secondary)] hover:bg-[var(--alpha-white-8)] transition-colors"
         >
           Cancel
         </button>
@@ -217,7 +219,7 @@ export const SkillForm: Component<{
           type="button"
           onClick={handleSave}
           disabled={!name().trim()}
-          class="px-3 py-1 text-[11px] rounded-[var(--radius-md)] bg-[var(--accent)] text-white hover:brightness-110 disabled:opacity-40 transition-colors"
+          class="px-3 py-1 text-[var(--settings-text-button)] rounded-[var(--radius-md)] bg-[var(--accent)] text-white hover:brightness-110 disabled:opacity-40 transition-colors"
         >
           Save
         </button>

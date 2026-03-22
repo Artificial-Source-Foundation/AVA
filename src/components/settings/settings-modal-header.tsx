@@ -16,7 +16,9 @@ export const SettingsModalHeader: Component<SettingsModalHeaderProps> = (props) 
       style={{ height: '40px', background: 'var(--gray-0)' }}
       data-tauri-drag-region
     >
-      <span class="text-[13px] font-medium text-[var(--text-primary)]">Settings</span>
+      <span class="text-[var(--settings-text-description)] font-medium text-[var(--text-primary)]">
+        Settings
+      </span>
 
       {/* Search — right side */}
       <div class="absolute right-3 flex items-center gap-2">

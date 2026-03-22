@@ -129,7 +129,7 @@ export const OllamaModelBrowser: Component<OllamaModelBrowserProps> = (props) =>
           </div>
           <Show when={pullStatus()}>
             <p
-              class={`text-[10px] px-1 ${pullStatus().includes('failed') ? 'text-[var(--error)]' : 'text-[var(--text-muted)]'}`}
+              class={`text-[var(--settings-text-badge)] px-1 ${pullStatus().includes('failed') ? 'text-[var(--error)]' : 'text-[var(--text-muted)]'}`}
             >
               {pullStatus()}
             </p>
@@ -180,14 +180,14 @@ export const OllamaModelBrowser: Component<OllamaModelBrowserProps> = (props) =>
 
           {/* Footer */}
           <div class="flex items-center justify-between pt-1 border-t border-[var(--border-subtle)]">
-            <span class="text-[10px] text-[var(--text-muted)]">
+            <span class="text-[var(--settings-text-badge)] text-[var(--text-muted)]">
               {models().length} model{models().length !== 1 ? 's' : ''} installed
             </span>
             <button
               type="button"
               onClick={() => void loadModels()}
               disabled={loading()}
-              class="text-[10px] text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors disabled:opacity-50"
+              class="text-[var(--settings-text-badge)] text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors disabled:opacity-50"
             >
               Refresh
             </button>

@@ -309,6 +309,17 @@
   --code-background: var(--surface-raised);
   --code-text: var(--text-primary);
 
+  /* Settings typography scale */
+  --settings-text-title: 16px;
+  --settings-text-label: 14px;
+  --settings-text-description: 13px;
+  --settings-text-input: 12px;
+  --settings-text-button: 11px;
+  --settings-text-badge: 10px;
+  --settings-text-caption: 9px;
+  --settings-card-gap: 28px;
+  --settings-card-padding: 24px;
+
   /* Chat font size (overridden by applyAppearance) */
   --chat-font-size: 13px;
 

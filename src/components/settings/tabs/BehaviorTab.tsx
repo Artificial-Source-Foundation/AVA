@@ -12,6 +12,7 @@ import { useSettings } from '../../../stores/settings'
 import { segmentedBtnClass } from '../../ui/SegmentedControl'
 import { ToggleRow } from '../../ui/ToggleRow'
 import { SettingsCard } from '../SettingsCard'
+import { SETTINGS_CARD_GAP } from '../settings-constants'
 
 // ============================================================================
 // Main Tab
@@ -21,12 +22,14 @@ export const BehaviorTab: Component = () => {
   const { settings, updateBehavior, updateNotifications, updateUI } = useSettings()
 
   return (
-    <div class="grid grid-cols-1" style={{ gap: '28px' }}>
+    <div class="grid grid-cols-1" style={{ gap: SETTINGS_CARD_GAP }}>
       <SettingsCard icon={Keyboard} title="Input" description="Send key and input behavior">
         <div class="flex items-center justify-between py-2">
           <div>
-            <span class="text-[14px] text-[var(--text-secondary)]">Send message with</span>
-            <p class="text-[13px] text-[var(--text-muted)]">
+            <span class="text-[var(--settings-text-label)] text-[var(--text-secondary)]">
+              Send message with
+            </span>
+            <p class="text-[var(--settings-text-description)] text-[var(--text-muted)]">
               {settings().behavior.sendKey === 'enter'
                 ? 'Shift+Enter for newline'
                 : 'Enter for newline'}
@@ -86,8 +89,10 @@ export const BehaviorTab: Component = () => {
       >
         <div class="flex items-center justify-between py-2">
           <div>
-            <span class="text-[14px] text-[var(--text-secondary)]">Tool response style</span>
-            <p class="text-[13px] text-[var(--text-muted)]">
+            <span class="text-[var(--settings-text-label)] text-[var(--text-secondary)]">
+              Tool response style
+            </span>
+            <p class="text-[var(--settings-text-description)] text-[var(--text-muted)]">
               {settings().ui.toolResponseStyle === 'concise'
                 ? 'Results collapsed by default — click to expand'
                 : 'Results expanded with full output'}
@@ -125,7 +130,9 @@ export const BehaviorTab: Component = () => {
         />
         <Show when={settings().notifications.soundOnCompletion}>
           <div class="flex items-center justify-between py-2 gap-3">
-            <span class="text-[14px] text-[var(--text-secondary)]">Volume</span>
+            <span class="text-[var(--settings-text-label)] text-[var(--text-secondary)]">
+              Volume
+            </span>
             <div class="flex items-center gap-2 flex-1 justify-end">
               <input
                 type="range"
@@ -136,7 +143,7 @@ export const BehaviorTab: Component = () => {
                 onInput={(e) => updateNotifications({ soundVolume: Number(e.currentTarget.value) })}
                 class="w-32 accent-[var(--accent)]"
               />
-              <span class="text-[13px] font-mono text-[var(--text-muted)] w-10 text-right">
+              <span class="text-[var(--settings-text-description)] font-mono text-[var(--text-muted)] w-10 text-right">
                 {settings().notifications.soundVolume}%
               </span>
             </div>

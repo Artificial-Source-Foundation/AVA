@@ -115,7 +115,7 @@ export const KeybindingEditModal: Component<KeybindingEditModalProps> = (props) 
                 </div>
               </Show>
             </button>
-            <p class="text-[10px] text-[var(--text-muted)] mt-1.5">
+            <p class="text-[var(--settings-text-badge)] text-[var(--text-muted)] mt-1.5">
               Click to record a new shortcut
             </p>
           </FieldGroup>

@@ -4,6 +4,7 @@ import { batch, createSignal, onCleanup } from 'solid-js'
 import { apiInvoke, createEventSocket } from '../lib/api-client'
 import { debugLog } from '../lib/debug-log'
 import { log } from '../lib/logger'
+import { useLayout } from '../stores/layout'
 import type { ToolCall } from '../types'
 import type {
   AgentEvent,
@@ -305,6 +306,15 @@ export function useRustAgent() {
         const todoEvent = event as TodoUpdateEvent
         debugLog('todo', 'todo_update event', todoEvent.todos.length, 'items')
         setTodos(todoEvent.todos)
+        // Auto-open the right panel to the Todos tab when todos arrive
+        if (todoEvent.todos.length > 0) {
+          try {
+            const layout = useLayout()
+            layout.switchRightPanelTab('todos')
+          } catch {
+            // Layout context may not be available in all environments
+          }
+        }
         break
       }
 
@@ -526,6 +536,9 @@ export function useRustAgent() {
         }
         return updated
       })
+      // Set the error so that useAgent's cancel detection can identify this as a
+      // user-initiated cancellation and preserve partial streaming content.
+      setError('Agent run cancelled by user')
       setIsRunning(false)
     })
     // Resolve the web-mode completion promise so run() can return
@@ -544,12 +557,17 @@ export function useRustAgent() {
 
   /** Inject a steering message (Tier 1). Agent processes it after current tool. */
   const steer = async (message: string): Promise<void> => {
-    if (!isRunning()) return
+    if (!isRunning()) {
+      log.warn('agent', 'Steer rejected: agent not running')
+      return
+    }
     log.info('agent', 'Steering message injected', { length: message.length })
     try {
       await invoke('steer_agent', { message })
+      log.info('agent', 'Steering message delivered successfully')
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
+      log.error('agent', 'Steering message failed', { error: msg })
       setError(msg)
     }
   }

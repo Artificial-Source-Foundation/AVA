@@ -484,10 +484,15 @@ export const MessageBubble: Component<MessageBubbleProps> = (props) => {
     if (!content || content.length < 80) return false
     // Skip if message ended with an error
     if (props.message.error) return false
+    // Skip if message has tool calls — agent completed naturally via tools
+    if (props.message.toolCalls && props.message.toolCalls.length > 0) return false
+    // Skip if thinking segments present — structured response, not truncated
+    if (props.message.metadata?.thinkingSegments) return false
     const trimmed = content.trimEnd()
     // Check last non-whitespace character
     const lastChar = trimmed[trimmed.length - 1]
-    return !/[.!?:)\]}"'`]/.test(lastChar)
+    // Also allow code fence endings and markdown
+    return !/[.!?:)\]}"'`\n]/.test(lastChar)
   })
 
   /** Map from tool call ID to ToolCall for interleaved rendering */
@@ -598,6 +603,27 @@ export const MessageBubble: Component<MessageBubbleProps> = (props) => {
                   />
                 </Show>
               </div>
+              {/* Tier badge for mid-stream messages */}
+              <Show when={props.message.metadata?.tier as string | undefined}>
+                {(tier) => (
+                  <div class="flex justify-end mt-0.5">
+                    <span
+                      class="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider"
+                      classList={{
+                        'bg-[var(--amber-3)] text-[var(--amber-9)]': tier() === 'steering',
+                        'bg-[var(--blue-3)] text-[var(--blue-9)]': tier() === 'follow-up',
+                        'bg-[var(--violet-3)] text-[var(--violet-9)]': tier() === 'post-complete',
+                      }}
+                    >
+                      {tier() === 'steering'
+                        ? 'STEERING'
+                        : tier() === 'follow-up'
+                          ? 'FOLLOW-UP'
+                          : 'QUEUED'}
+                    </span>
+                  </div>
+                )}
+              </Show>
               <TimestampLine align="right" />
             </div>
           </div>

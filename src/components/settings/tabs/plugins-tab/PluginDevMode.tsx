@@ -23,10 +23,12 @@ export const PluginDevMode: Component<PluginDevModeProps> = (props) => {
       <div class="flex items-center justify-between">
         <div class="flex items-center gap-2">
           <Code2 class="w-3.5 h-3.5 text-[var(--text-muted)]" />
-          <span class="text-[11px] text-[var(--text-primary)]">Dev Mode</span>
+          <span class="text-[var(--settings-text-button)] text-[var(--text-primary)]">
+            Dev Mode
+          </span>
           <Show when={props.isDevMode()}>
             <span
-              class={`px-1.5 py-0.5 text-[9px] rounded-full ${
+              class={`px-1.5 py-0.5 text-[var(--settings-text-caption)] rounded-full ${
                 props.status() === 'reloading'
                   ? 'bg-[var(--warning-subtle)] text-[var(--warning)]'
                   : 'bg-[var(--success-subtle)] text-[var(--success)]'
@@ -51,12 +53,12 @@ export const PluginDevMode: Component<PluginDevModeProps> = (props) => {
           />
         </button>
       </div>
-      <p class="text-[10px] text-[var(--text-muted)]">
+      <p class="text-[var(--settings-text-badge)] text-[var(--text-muted)]">
         Watches plugin files and auto-reloads on change.
       </p>
       <Show when={props.logs().length > 0}>
         <div class="bg-[var(--gray-1)] rounded-[var(--radius-sm)] p-2 max-h-24 overflow-y-auto">
-          <pre class="text-[9px] text-[var(--text-muted)] font-mono whitespace-pre-wrap">
+          <pre class="text-[var(--settings-text-caption)] text-[var(--text-muted)] font-mono whitespace-pre-wrap">
             {props.logs().join('\n')}
           </pre>
         </div>

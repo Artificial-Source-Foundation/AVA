@@ -23,6 +23,7 @@ import type { ThemePreset } from '../../../config/theme-presets'
 import { useSettings } from '../../../stores/settings'
 import type { ActivityDisplay, ThinkingDisplay } from '../../../stores/settings/settings-types'
 import { SettingsCard } from '../SettingsCard'
+import { SETTINGS_CARD_GAP } from '../settings-constants'
 import {
   AccentSection,
   AccessibilitySection,
@@ -69,7 +70,7 @@ export const AppearanceTab: Component = () => {
   ]
 
   return (
-    <div class="grid grid-cols-1" style={{ gap: '28px' }}>
+    <div class="grid grid-cols-1" style={{ gap: SETTINGS_CARD_GAP }}>
       <SettingsCard icon={Moon} title="Color Mode" description="Theme and dark style variant">
         <ColorModeSection />
       </SettingsCard>
@@ -96,7 +97,9 @@ export const AppearanceTab: Component = () => {
         description="How AI thinking/reasoning blocks appear in chat"
       >
         <div class="flex items-center justify-between py-2">
-          <span class="text-[14px] text-[var(--text-secondary)]">Display mode</span>
+          <span class="text-[var(--settings-text-label)] text-[var(--text-secondary)]">
+            Display mode
+          </span>
           <div class="flex gap-1">
             {thinkingOptions.map((opt) => (
               <button
@@ -109,7 +112,7 @@ export const AppearanceTab: Component = () => {
             ))}
           </div>
         </div>
-        <p class="text-[13px] text-[var(--gray-8)]">
+        <p class="text-[var(--settings-text-description)] text-[var(--gray-8)]">
           {settings().appearance.thinkingDisplay === 'bubble'
             ? 'Show thinking in a collapsible bubble'
             : settings().appearance.thinkingDisplay === 'preview'
@@ -124,7 +127,9 @@ export const AppearanceTab: Component = () => {
         description="How tool calls and thinking are grouped in chat"
       >
         <div class="flex items-center justify-between py-2">
-          <span class="text-[14px] text-[var(--text-secondary)]">Display mode</span>
+          <span class="text-[var(--settings-text-label)] text-[var(--text-secondary)]">
+            Display mode
+          </span>
           <div class="flex gap-1">
             {activityOptions.map((opt) => (
               <button
@@ -137,7 +142,7 @@ export const AppearanceTab: Component = () => {
             ))}
           </div>
         </div>
-        <p class="text-[13px] text-[var(--gray-8)]">
+        <p class="text-[var(--settings-text-description)] text-[var(--gray-8)]">
           {settings().appearance.activityDisplay === 'collapsed'
             ? 'Collapse tool calls and thinking into an expandable card'
             : settings().appearance.activityDisplay === 'expanded'

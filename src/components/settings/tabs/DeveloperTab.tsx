@@ -6,7 +6,7 @@
  * without needing browser devtools (which aren't available in Tauri).
  */
 
-import { Copy, Trash2 } from 'lucide-solid'
+import { Code2, Copy, FileText, Terminal, Trash2 } from 'lucide-solid'
 import {
   type Component,
   createEffect,
@@ -21,14 +21,9 @@ import { setDebugDevMode } from '../../../lib/debug-log'
 import { getFrontendLogFilePath, readFrontendLogFile } from '../../../lib/logger'
 import { clearDevLogs, getDevLogs } from '../../../services/dev-console'
 import { useSettings } from '../../../stores/settings'
-import {
-  extractSource,
-  formatTime,
-  levelColor,
-  levelLabel,
-  DevSectionHeader as SectionHeader,
-  Toggle,
-} from './developer/dev-helpers'
+import { SettingsCard } from '../SettingsCard'
+import { SETTINGS_CARD_GAP } from '../settings-constants'
+import { extractSource, formatTime, levelColor, levelLabel, Toggle } from './developer/dev-helpers'
 
 export const DeveloperTab: Component = () => {
   const { settings, updateSettings } = useSettings()
@@ -117,14 +112,17 @@ export const DeveloperTab: Component = () => {
   }
 
   return (
-    <div class="space-y-5">
-      {/* Toggle */}
-      <div>
-        <SectionHeader title="Developer Mode" />
+    <div class="grid grid-cols-1" style={{ gap: SETTINGS_CARD_GAP }}>
+      {/* Developer Mode */}
+      <SettingsCard
+        icon={Code2}
+        title="Developer Mode"
+        description="Toggle developer console and configure log verbosity."
+      >
         <div class="flex items-center justify-between py-1.5">
           <div>
             <span class="text-xs text-[var(--text-secondary)]">Enable developer console</span>
-            <p class="text-[10px] text-[var(--text-muted)]">
+            <p class="text-[var(--settings-text-badge)] text-[var(--text-muted)]">
               Console capture is always active. This toggle controls Developer tab visibility.
             </p>
           </div>
@@ -139,7 +137,7 @@ export const DeveloperTab: Component = () => {
         <div class="flex items-center justify-between py-1.5">
           <div>
             <span class="text-xs text-[var(--text-secondary)]">Log level</span>
-            <p class="text-[10px] text-[var(--text-muted)]">
+            <p class="text-[var(--settings-text-badge)] text-[var(--text-muted)]">
               DEBUG shows middleware + verbose internals. INFO is the default.
             </p>
           </div>
@@ -150,7 +148,7 @@ export const DeveloperTab: Component = () => {
                 logLevel: e.currentTarget.value as 'debug' | 'info' | 'warn' | 'error',
               })
             }
-            class="px-2 py-1 text-[10px] bg-[var(--surface-raised)] border border-[var(--border-subtle)] rounded-[var(--radius-md)] text-[var(--text-secondary)]"
+            class="px-2 py-1 text-[var(--settings-text-badge)] bg-[var(--surface-raised)] border border-[var(--border-subtle)] rounded-[var(--radius-md)] text-[var(--text-secondary)]"
           >
             <option value="debug">DEBUG</option>
             <option value="info">INFO</option>
@@ -158,23 +156,28 @@ export const DeveloperTab: Component = () => {
             <option value="error">ERROR</option>
           </select>
         </div>
-      </div>
+      </SettingsCard>
 
       {/* Console viewer */}
       <Show when={settings().devMode}>
-        <div class="pt-2 border-t border-[var(--border-subtle)]">
+        <SettingsCard
+          icon={Terminal}
+          title="Console Output"
+          description="Live console log viewer with filtering."
+        >
           <div class="flex items-center justify-between mb-2">
-            <SectionHeader title="Console Output" />
             <div class="flex items-center gap-2">
-              <span class="text-[10px] text-[var(--text-muted)]">
+              <span class="text-[var(--settings-text-badge)] text-[var(--text-muted)]">
                 {filteredLogs().length}
                 <Show when={filteredLogs().length !== logs().length}> / {logs().length}</Show>{' '}
                 entries
               </span>
+            </div>
+            <div class="flex items-center gap-2">
               <button
                 type="button"
                 onClick={handleCopy}
-                class="flex items-center gap-1 px-2 py-1 text-[10px] text-[var(--text-muted)] hover:text-[var(--accent)] bg-[var(--surface-raised)] border border-[var(--border-subtle)] rounded-[var(--radius-md)] transition-colors"
+                class="flex items-center gap-1 px-2 py-1 text-[var(--settings-text-badge)] text-[var(--text-muted)] hover:text-[var(--accent)] bg-[var(--surface-raised)] border border-[var(--border-subtle)] rounded-[var(--radius-md)] transition-colors"
               >
                 <Copy class="w-3 h-3" />
                 {copied() ? 'Copied!' : 'Copy All'}
@@ -182,7 +185,7 @@ export const DeveloperTab: Component = () => {
               <button
                 type="button"
                 onClick={() => clearDevLogs()}
-                class="flex items-center gap-1 px-2 py-1 text-[10px] text-[var(--text-muted)] hover:text-[var(--error)] bg-[var(--surface-raised)] border border-[var(--border-subtle)] rounded-[var(--radius-md)] transition-colors"
+                class="flex items-center gap-1 px-2 py-1 text-[var(--settings-text-badge)] text-[var(--text-muted)] hover:text-[var(--error)] bg-[var(--surface-raised)] border border-[var(--border-subtle)] rounded-[var(--radius-md)] transition-colors"
               >
                 <Trash2 class="w-3 h-3" />
                 Clear
@@ -196,7 +199,7 @@ export const DeveloperTab: Component = () => {
               onChange={(e) =>
                 setLevelFilter(e.currentTarget.value as 'all' | 'log' | 'info' | 'warn' | 'error')
               }
-              class="px-2 py-1 text-[10px] bg-[var(--surface-raised)] border border-[var(--border-subtle)] rounded-[var(--radius-md)] text-[var(--text-secondary)]"
+              class="px-2 py-1 text-[var(--settings-text-badge)] bg-[var(--surface-raised)] border border-[var(--border-subtle)] rounded-[var(--radius-md)] text-[var(--text-secondary)]"
             >
               <option value="all">All levels</option>
               <option value="log">LOG</option>
@@ -207,7 +210,7 @@ export const DeveloperTab: Component = () => {
             <select
               value={sourceFilter()}
               onChange={(e) => setSourceFilter(e.currentTarget.value)}
-              class="px-2 py-1 text-[10px] bg-[var(--surface-raised)] border border-[var(--border-subtle)] rounded-[var(--radius-md)] text-[var(--text-secondary)]"
+              class="px-2 py-1 text-[var(--settings-text-badge)] bg-[var(--surface-raised)] border border-[var(--border-subtle)] rounded-[var(--radius-md)] text-[var(--text-secondary)]"
             >
               <For each={availableSources()}>
                 {(source) => <option value={source}>{source}</option>}
@@ -218,7 +221,7 @@ export const DeveloperTab: Component = () => {
               value={textFilter()}
               onInput={(e) => setTextFilter(e.currentTarget.value)}
               placeholder="Filter text..."
-              class="flex-1 px-2 py-1 text-[10px] bg-[var(--surface-raised)] border border-[var(--border-subtle)] rounded-[var(--radius-md)] text-[var(--text-secondary)] placeholder:text-[var(--text-muted)] outline-none"
+              class="flex-1 px-2 py-1 text-[var(--settings-text-badge)] bg-[var(--surface-raised)] border border-[var(--border-subtle)] rounded-[var(--radius-md)] text-[var(--text-secondary)] placeholder:text-[var(--text-muted)] outline-none"
             />
             <Show when={!stickToBottom()}>
               <button
@@ -228,7 +231,7 @@ export const DeveloperTab: Component = () => {
                   scrollRef.scrollTop = scrollRef.scrollHeight
                   setStickToBottom(true)
                 }}
-                class="px-2 py-1 text-[10px] text-[var(--accent)] bg-[var(--surface-raised)] border border-[var(--border-subtle)] rounded-[var(--radius-md)]"
+                class="px-2 py-1 text-[var(--settings-text-badge)] text-[var(--accent)] bg-[var(--surface-raised)] border border-[var(--border-subtle)] rounded-[var(--radius-md)]"
               >
                 Jump to latest
               </button>
@@ -238,13 +241,13 @@ export const DeveloperTab: Component = () => {
           <div
             ref={scrollRef}
             onScroll={handleLogScroll}
-            class="bg-[var(--gray-1)] border border-[var(--border-subtle)] rounded-[var(--radius-md)] overflow-auto font-mono text-[11px] leading-[1.6]"
+            class="bg-[var(--gray-1)] border border-[var(--border-subtle)] rounded-[var(--radius-md)] overflow-auto font-mono text-[var(--settings-text-button)] leading-[1.6]"
             style={{ height: '320px' }}
           >
             <Show
               when={filteredLogs().length > 0}
               fallback={
-                <p class="text-[var(--text-muted)] text-center py-8 text-[11px]">
+                <p class="text-[var(--text-muted)] text-center py-8 text-[var(--settings-text-button)]">
                   No logs match current filters.
                 </p>
               }
@@ -282,23 +285,28 @@ export const DeveloperTab: Component = () => {
             </Show>
           </div>
 
-          <p class="text-[10px] text-[var(--text-muted)] mt-2">
+          <p class="text-[var(--settings-text-badge)] text-[var(--text-muted)] mt-2">
             Tip: Copy all logs and paste them when reporting issues.
           </p>
-        </div>
+        </SettingsCard>
       </Show>
 
       {/* File Log Viewer */}
       <Show when={settings().devMode}>
-        <div class="pt-2 border-t border-[var(--border-subtle)]">
+        <SettingsCard
+          icon={FileText}
+          title="File Logs"
+          description="Persistent file-based logs that survive across sessions."
+        >
           <div class="flex items-center justify-between mb-2">
-            <SectionHeader title="File Logs" />
             <div class="flex items-center gap-2">
               <Show when={getFrontendLogFilePath()}>
-                <span class="text-[10px] text-[var(--text-muted)] font-mono truncate max-w-[200px]">
+                <span class="text-[var(--settings-text-badge)] text-[var(--text-muted)] font-mono truncate max-w-[200px]">
                   {getFrontendLogFilePath()}
                 </span>
               </Show>
+            </div>
+            <div class="flex items-center gap-2">
               <button
                 type="button"
                 onClick={async () => {
@@ -310,7 +318,7 @@ export const DeveloperTab: Component = () => {
                     setFileLogLoading(false)
                   }
                 }}
-                class="flex items-center gap-1 px-2 py-1 text-[10px] text-[var(--text-muted)] hover:text-[var(--accent)] bg-[var(--surface-raised)] border border-[var(--border-subtle)] rounded-[var(--radius-md)] transition-colors"
+                class="flex items-center gap-1 px-2 py-1 text-[var(--settings-text-badge)] text-[var(--text-muted)] hover:text-[var(--accent)] bg-[var(--surface-raised)] border border-[var(--border-subtle)] rounded-[var(--radius-md)] transition-colors"
               >
                 {fileLogLoading() ? 'Loading...' : 'View Logs'}
               </button>
@@ -326,7 +334,7 @@ export const DeveloperTab: Component = () => {
                       // ignore
                     }
                   }}
-                  class="flex items-center gap-1 px-2 py-1 text-[10px] text-[var(--text-muted)] hover:text-[var(--accent)] bg-[var(--surface-raised)] border border-[var(--border-subtle)] rounded-[var(--radius-md)] transition-colors"
+                  class="flex items-center gap-1 px-2 py-1 text-[var(--settings-text-badge)] text-[var(--text-muted)] hover:text-[var(--accent)] bg-[var(--surface-raised)] border border-[var(--border-subtle)] rounded-[var(--radius-md)] transition-colors"
                 >
                   <Copy class="w-3 h-3" />
                   {fileLogCopied() ? 'Copied!' : 'Copy'}
@@ -337,18 +345,18 @@ export const DeveloperTab: Component = () => {
 
           <Show when={fileLogContent()}>
             <div
-              class="bg-[var(--gray-1)] border border-[var(--border-subtle)] rounded-[var(--radius-md)] overflow-auto font-mono text-[11px] leading-[1.6] whitespace-pre-wrap p-2"
+              class="bg-[var(--gray-1)] border border-[var(--border-subtle)] rounded-[var(--radius-md)] overflow-auto font-mono text-[var(--settings-text-button)] leading-[1.6] whitespace-pre-wrap p-2"
               style={{ height: '280px' }}
             >
               {fileLogContent()}
             </div>
           </Show>
 
-          <p class="text-[10px] text-[var(--text-muted)] mt-2">
+          <p class="text-[var(--settings-text-badge)] text-[var(--text-muted)] mt-2">
             File logs persist across sessions. Debug-level entries only written when Developer Mode
             is on.
           </p>
-        </div>
+        </SettingsCard>
       </Show>
     </div>
   )

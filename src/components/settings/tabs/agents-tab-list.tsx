@@ -52,14 +52,14 @@ export const AgentsTabList: Component<AgentsTabListProps> = (props) => {
           placeholder="Search agents..."
           value={props.searchQuery}
           onInput={(e) => props.onSearchChange(e.currentTarget.value)}
-          class="w-full px-2.5 py-1.5 bg-[var(--input-background)] border border-[var(--input-border)] rounded-[var(--radius-md)] text-xs text-[var(--text-primary)] placeholder:text-[var(--input-placeholder)] focus:outline-none focus:border-[var(--input-border-focus)]"
+          class="w-full px-2.5 py-1.5 bg-[var(--input-background)] border border-[var(--input-border)] rounded-[var(--radius-md)] text-[var(--settings-text-input)] text-[var(--text-primary)] placeholder:text-[var(--input-placeholder)] focus:outline-none focus:border-[var(--input-border-focus)]"
         />
         <div class="flex gap-1">
           <Show when={props.onImport}>
             <button
               type="button"
               onClick={() => props.onImport?.()}
-              class="px-2 py-1 text-[10px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--alpha-white-5)] rounded-[var(--radius-sm)] transition-colors"
+              class="px-2 py-1 text-[var(--settings-text-badge)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--alpha-white-5)] rounded-[var(--radius-sm)] transition-colors"
             >
               Import
             </button>
@@ -68,7 +68,7 @@ export const AgentsTabList: Component<AgentsTabListProps> = (props) => {
             <button
               type="button"
               onClick={() => props.onExport?.()}
-              class="px-2 py-1 text-[10px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--alpha-white-5)] rounded-[var(--radius-sm)] transition-colors"
+              class="px-2 py-1 text-[var(--settings-text-badge)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--alpha-white-5)] rounded-[var(--radius-sm)] transition-colors"
             >
               Export
             </button>
@@ -78,7 +78,7 @@ export const AgentsTabList: Component<AgentsTabListProps> = (props) => {
             <button
               type="button"
               onClick={() => props.onCreate?.()}
-              class="px-2 py-1 text-[10px] font-medium text-[var(--accent)] hover:bg-[var(--accent-subtle)] rounded-[var(--radius-sm)] transition-colors"
+              class="px-2 py-1 text-[var(--settings-text-badge)] font-medium text-[var(--accent)] hover:bg-[var(--accent-subtle)] rounded-[var(--radius-sm)] transition-colors"
             >
               + New
             </button>
@@ -123,7 +123,9 @@ export const AgentsTabList: Component<AgentsTabListProps> = (props) => {
         </Show>
 
         <Show when={filtered().length === 0}>
-          <p class="text-[10px] text-[var(--text-muted)] text-center py-4">No agents found</p>
+          <p class="text-[var(--settings-text-badge)] text-[var(--text-muted)] text-center py-4">
+            No agents found
+          </p>
         </Show>
       </div>
     </div>
@@ -142,7 +144,7 @@ const TierSection: Component<{
   onToggle: (id: string, enabled: boolean) => void
 }> = (props) => (
   <div class="mb-2">
-    <h4 class="px-2 py-1 text-[9px] font-semibold text-[var(--text-muted)] uppercase tracking-wider">
+    <h4 class="px-2 py-1 text-[var(--settings-text-caption)] font-semibold text-[var(--text-muted)] uppercase tracking-wider">
       {props.label}
     </h4>
     <For each={props.agents}>
@@ -160,8 +162,10 @@ const TierSection: Component<{
             class={`w-1.5 h-1.5 rounded-full flex-shrink-0 mt-1.5 ${agent.enabled ? 'bg-[var(--success)]' : 'bg-[var(--border-default)]'}`}
           />
           <div class="flex-1 min-w-0">
-            <span class="text-xs text-[var(--text-secondary)] truncate block">{agent.name}</span>
-            <span class="text-[9px] text-[var(--text-muted)] truncate block leading-tight">
+            <span class="text-[var(--settings-text-input)] text-[var(--text-secondary)] truncate block">
+              {agent.name}
+            </span>
+            <span class="text-[var(--settings-text-caption)] text-[var(--text-muted)] truncate block leading-tight">
               {agent.description}
             </span>
           </div>

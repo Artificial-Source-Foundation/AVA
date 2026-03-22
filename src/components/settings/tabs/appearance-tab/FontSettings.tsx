@@ -47,7 +47,7 @@ export const FontSection: Component = () => {
       <SectionHeader title="Font" />
       {/* Sans / UI font */}
       <div class="flex items-center justify-between py-2">
-        <span class="text-[14px] text-[var(--text-secondary)]">UI Font</span>
+        <span class="text-[var(--settings-text-label)] text-[var(--text-secondary)]">UI Font</span>
         <div class="flex gap-1">
           <For each={SANS_FONT_OPTIONS}>
             {(font) => (
@@ -64,7 +64,9 @@ export const FontSection: Component = () => {
       </div>
       {/* Monospace font */}
       <div class="flex items-center justify-between py-2">
-        <span class="text-[14px] text-[var(--text-secondary)]">Monospace</span>
+        <span class="text-[var(--settings-text-label)] text-[var(--text-secondary)]">
+          Monospace
+        </span>
         <div class="flex gap-1">
           <For each={MONO_FONT_OPTIONS}>
             {(font) => (
@@ -89,8 +91,10 @@ export const FontSection: Component = () => {
       {/* Ligatures */}
       <div class="flex items-center justify-between py-2 mt-1">
         <div>
-          <span class="text-[14px] text-[var(--text-secondary)]">Ligatures</span>
-          <p class="text-[13px] text-[var(--text-muted)] mt-0.5">
+          <span class="text-[var(--settings-text-label)] text-[var(--text-secondary)]">
+            Ligatures
+          </span>
+          <p class="text-[var(--settings-text-description)] text-[var(--text-muted)] mt-0.5">
             {'Enables => and !== style ligatures (Fira Code, JetBrains Mono)'}
           </p>
         </div>
@@ -101,13 +105,15 @@ export const FontSection: Component = () => {
       </div>
       {/* Chat font size */}
       <div class="flex items-center justify-between py-2 mt-1">
-        <span class="text-[14px] text-[var(--text-secondary)]">Chat font size</span>
-        <span class="text-[14px] font-mono text-[var(--text-primary)]">
+        <span class="text-[var(--settings-text-label)] text-[var(--text-secondary)]">
+          Chat font size
+        </span>
+        <span class="text-[var(--settings-text-label)] font-mono text-[var(--text-primary)]">
           {settings().appearance.chatFontSize}px
         </span>
       </div>
       <div class="flex items-center gap-2 py-1">
-        <span class="text-[13px] text-[var(--text-muted)] w-6">11</span>
+        <span class="text-[var(--settings-text-description)] text-[var(--text-muted)] w-6">11</span>
         <input
           type="range"
           min="11"
@@ -119,7 +125,9 @@ export const FontSection: Component = () => {
           }
           class="flex-1 h-1 appearance-none bg-[var(--border-default)] rounded-full cursor-pointer accent-[var(--accent)]"
         />
-        <span class="text-[13px] text-[var(--text-muted)] w-6 text-right">20</span>
+        <span class="text-[var(--settings-text-description)] text-[var(--text-muted)] w-6 text-right">
+          20
+        </span>
       </div>
     </div>
   )

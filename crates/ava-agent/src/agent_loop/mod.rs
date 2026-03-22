@@ -1157,7 +1157,37 @@ impl AgentLoop {
             session.add_message(assistant_message);
 
             // Natural completion: non-empty text with no tool calls = final answer
+            // BUT first check the steering queue — the user may have sent a message
+            // while we were waiting for the LLM response.
             if tool_calls.is_empty() {
+                // Poll the queue to receive any messages that arrived during the LLM call,
+                // then check for pending steering messages before completing.
+                let has_steering = if let Some(ref mut queue) = self.message_queue {
+                    queue.poll();
+                    queue.has_steering()
+                } else {
+                    false
+                };
+
+                if has_steering {
+                    info!("Natural completion deferred — steering messages pending");
+                    if let Some(ref mut queue) = self.message_queue {
+                        let steering_msgs = queue.drain_steering();
+                        for text in steering_msgs {
+                            let prefixed = format!("[User steering] {text}");
+                            Self::emit(
+                                &event_tx,
+                                AgentEvent::Progress(format!("steering: {text}")),
+                            );
+                            let msg = Message::new(Role::User, prefixed);
+                            self.context.add_message(msg.clone());
+                            session.add_message(msg);
+                        }
+                    }
+                    turn += 1;
+                    continue; // Re-enter the loop for another LLM turn
+                }
+
                 info!(
                     text_len = response_text.len(),
                     "natural completion — no tool calls"

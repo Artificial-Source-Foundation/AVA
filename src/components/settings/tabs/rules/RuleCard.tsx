@@ -35,7 +35,7 @@ export const ActivationBadge: Component<{ mode: RuleActivationMode }> = (props) 
   const colors = () => ACTIVATION_COLORS[props.mode]
   return (
     <span
-      class="px-1 py-0.5 text-[8px] rounded uppercase font-semibold tracking-wider"
+      class="px-1 py-0.5 text-[var(--settings-text-caption)] rounded uppercase font-semibold tracking-wider"
       style={{
         background: colors().bg,
         color: colors().text,
@@ -80,14 +80,16 @@ export const RuleCard: Component<{
         <ActivationBadge mode={props.rule.activation} />
         <For each={props.rule.globs}>
           {(glob) => (
-            <span class="px-1.5 py-0.5 text-[9px] rounded-[var(--radius-sm)] bg-[var(--surface-raised)] border border-[var(--border-subtle)] text-[var(--text-muted)] font-mono">
+            <span class="px-1.5 py-0.5 text-[var(--settings-text-caption)] rounded-[var(--radius-sm)] bg-[var(--surface-raised)] border border-[var(--border-subtle)] text-[var(--text-muted)] font-mono">
               {glob}
             </span>
           )}
         </For>
       </div>
       <Show when={props.rule.description}>
-        <p class="text-[10px] text-[var(--text-muted)] mt-0.5">{props.rule.description}</p>
+        <p class="text-[var(--settings-text-badge)] text-[var(--text-muted)] mt-0.5">
+          {props.rule.description}
+        </p>
       </Show>
     </div>
     <div class="flex items-center gap-1 flex-shrink-0 mt-0.5">

@@ -58,7 +58,7 @@ export const EditForm: Component<EditFormProps> = (props) => {
   return (
     <div
       class="
-        max-w-[80%] ml-auto
+        w-[min(95vw,900px)]
         bg-[var(--accent-subtle)]
         border border-[var(--accent-muted)]
         rounded-[var(--radius-lg)]
@@ -80,12 +80,13 @@ export const EditForm: Component<EditFormProps> = (props) => {
           border border-[var(--input-border)]
           rounded-[var(--radius-md)]
           text-sm resize-none
-          min-h-[80px]
+          min-h-[200px] max-h-[min(60vh,600px)]
           transition-all duration-[var(--duration-fast)]
           focus:outline-none focus:border-[var(--input-border-focus)] focus:ring-2 focus:ring-[var(--accent-subtle)]
           disabled:opacity-50
+          overflow-y-auto
         "
-        rows={3}
+        rows={8}
         disabled={isSaving()}
       />
       <div class="flex items-center justify-between mt-3">

@@ -28,10 +28,14 @@ export const FeaturedPluginCard: Component<FeaturedPluginCardProps> = (props) =>
   >
     <div class="flex items-center gap-1.5 mb-0.5">
       <Puzzle class="w-3 h-3 text-[var(--accent)]" />
-      <span class="text-[11px] text-[var(--text-primary)]">{props.plugin.name}</span>
-      <span class="text-[9px] text-[var(--text-muted)]">v{props.plugin.version}</span>
+      <span class="text-[var(--settings-text-button)] text-[var(--text-primary)]">
+        {props.plugin.name}
+      </span>
+      <span class="text-[var(--settings-text-caption)] text-[var(--text-muted)]">
+        v{props.plugin.version}
+      </span>
     </div>
-    <div class="mb-0.5 flex items-center gap-1 text-[9px] text-[var(--text-muted)]">
+    <div class="mb-0.5 flex items-center gap-1 text-[var(--settings-text-caption)] text-[var(--text-muted)]">
       <span class="uppercase">{props.plugin.source}</span>
       <span>&bull;</span>
       <span
@@ -40,7 +44,9 @@ export const FeaturedPluginCard: Component<FeaturedPluginCardProps> = (props) =>
         {props.plugin.trust}
       </span>
     </div>
-    <p class="text-[10px] text-[var(--text-muted)] line-clamp-2">{props.plugin.description}</p>
+    <p class="text-[var(--settings-text-badge)] text-[var(--text-muted)] line-clamp-2">
+      {props.plugin.description}
+    </p>
   </button>
 )
 
@@ -83,7 +89,7 @@ export const PluginCard: Component<PluginCardProps> = (props) => {
           <Puzzle class="w-3.5 h-3.5 flex-shrink-0 text-[var(--text-muted)]" />
           <div class="flex-1 min-w-0">
             <p class="text-xs text-[var(--text-primary)]">{props.plugin.name}</p>
-            <div class="flex items-center gap-1 text-[9px] text-[var(--text-muted)]">
+            <div class="flex items-center gap-1 text-[var(--settings-text-caption)] text-[var(--text-muted)]">
               <span>v{props.plugin.version}</span>
               <span>&bull;</span>
               <span class="uppercase">{props.plugin.source}</span>
@@ -122,22 +128,26 @@ export const PluginCard: Component<PluginCardProps> = (props) => {
                 </span>
               </Show>
             </div>
-            <p class="text-[10px] text-[var(--text-muted)]">{props.plugin.description}</p>
+            <p class="text-[var(--settings-text-badge)] text-[var(--text-muted)]">
+              {props.plugin.description}
+            </p>
             <Show when={state().sourceUrl}>
-              <p class="text-[9px] text-[var(--text-muted)] truncate">{state().sourceUrl}</p>
+              <p class="text-[var(--settings-text-caption)] text-[var(--text-muted)] truncate">
+                {state().sourceUrl}
+              </p>
             </Show>
           </div>
         </button>
         <Show when={error()}>
           <div class="mt-0.5 flex items-center gap-2">
-            <p class="text-[10px] text-[var(--error)]">{error()}</p>
+            <p class="text-[var(--settings-text-badge)] text-[var(--error)]">{error()}</p>
             <button
               type="button"
               onClick={() => {
                 void plugins.retry(props.plugin.id)
               }}
               disabled={isBusy() || plugins.failedAction(props.plugin.id) === null}
-              class="px-1.5 py-0.5 text-[9px] rounded-[var(--radius-sm)] border border-[var(--border-default)] text-[var(--text-secondary)] disabled:opacity-50"
+              class="px-1.5 py-0.5 text-[var(--settings-text-caption)] rounded-[var(--radius-sm)] border border-[var(--border-default)] text-[var(--text-secondary)] disabled:opacity-50"
             >
               Retry
             </button>
@@ -147,7 +157,7 @@ export const PluginCard: Component<PluginCardProps> = (props) => {
                 void plugins.recover(props.plugin.id)
               }}
               disabled={isBusy()}
-              class="px-1.5 py-0.5 text-[9px] rounded-[var(--radius-sm)] border border-[var(--error)] text-[var(--error)] disabled:opacity-50"
+              class="px-1.5 py-0.5 text-[var(--settings-text-caption)] rounded-[var(--radius-sm)] border border-[var(--error)] text-[var(--error)] disabled:opacity-50"
             >
               Recover
             </button>
@@ -161,7 +171,7 @@ export const PluginCard: Component<PluginCardProps> = (props) => {
             type="button"
             onClick={() => props.onInstall(props.plugin.id)}
             disabled={isBusy()}
-            class="px-2 py-1 text-[10px] text-white bg-[var(--accent)] rounded-[var(--radius-md)] disabled:opacity-60"
+            class="px-2 py-1 text-[var(--settings-text-badge)] text-white bg-[var(--accent)] rounded-[var(--radius-md)] disabled:opacity-60"
           >
             {pending() === 'install' ? 'Installing...' : 'Install'}
           </button>
@@ -193,7 +203,7 @@ export const PluginCard: Component<PluginCardProps> = (props) => {
             void plugins.toggleEnabled(props.plugin.id)
           }}
           disabled={isBusy()}
-          class={`px-2 py-1 text-[10px] rounded-[var(--radius-md)] border disabled:opacity-60 ${state().enabled ? 'text-[var(--success)] border-[var(--success)]' : 'text-[var(--text-muted)] border-[var(--border-default)]'}`}
+          class={`px-2 py-1 text-[var(--settings-text-badge)] rounded-[var(--radius-md)] border disabled:opacity-60 ${state().enabled ? 'text-[var(--success)] border-[var(--success)]' : 'text-[var(--text-muted)] border-[var(--border-default)]'}`}
         >
           {pending() === 'toggle' ? 'Updating...' : state().enabled ? 'Enabled' : 'Disabled'}
         </button>

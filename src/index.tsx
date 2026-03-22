@@ -97,7 +97,7 @@ const LoadingFallback = () => (
 render(
   () => (
     <ThemeProvider>
-      <NotificationProvider position="top-right">
+      <NotificationProvider position="top-center">
         <AppErrorBoundary>
           <Suspense fallback={<LoadingFallback />}>
             {isPreviewMode() ? <DesignSystemPreview /> : <App />}

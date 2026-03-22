@@ -866,8 +866,8 @@ impl AgentLoop {
                 if !executed_indices.contains(i) {
                     let skip_result = ToolResult {
                         call_id: tc.id.clone(),
-                        content: "Skipped due to steering message.".to_string(),
-                        is_error: true,
+                        content: "[Tool execution interrupted — the user has sent a new instruction. Do NOT retry this tool. Focus on the user's new message instead.]".to_string(),
+                        is_error: false,
                     };
                     let execution = ToolExecution {
                         tool_name: tc.name.clone(),
@@ -1173,18 +1173,18 @@ impl AgentLoop {
                     info!("Natural completion deferred — steering messages pending");
                     if let Some(ref mut queue) = self.message_queue {
                         let steering_msgs = queue.drain_steering();
-                        for text in steering_msgs {
-                            let prefixed = format!("[User steering] {text}");
+                        if !steering_msgs.is_empty() {
+                            let combined = steering_msgs.join("\n");
                             Self::emit(
                                 &event_tx,
-                                AgentEvent::Progress(format!("steering: {text}")),
+                                AgentEvent::Progress(format!("steering: {combined}")),
                             );
-                            let msg = Message::new(Role::User, prefixed);
+                            let msg = Message::new(Role::User, combined);
                             self.context.add_message(msg.clone());
                             session.add_message(msg);
                         }
                     }
-                    turn += 1;
+                    // Do NOT increment turn here — the main loop increments at the top
                     continue; // Re-enter the loop for another LLM turn
                 }
 
@@ -1235,13 +1235,23 @@ impl AgentLoop {
             }
 
             // Steering injection: if steering was triggered, inject all steering
-            // messages as user turns and skip to the next LLM call.
+            // messages as a single user turn and skip to the next LLM call.
+            // The message is framed as a new user instruction so the LLM treats
+            // it as a fresh request rather than retrying interrupted tools.
             if steering_triggered {
                 if let Some(ref mut queue) = self.message_queue {
                     let steering_msgs = queue.drain_steering();
-                    for text in steering_msgs {
-                        let prefixed = format!("[User steering] {text}");
-                        Self::emit(&event_tx, AgentEvent::Progress(format!("steering: {text}")));
+                    if !steering_msgs.is_empty() {
+                        let combined = steering_msgs.join("\n");
+                        Self::emit(
+                            &event_tx,
+                            AgentEvent::Progress(format!("steering: {combined}")),
+                        );
+                        let prefixed = format!(
+                            "[The user has interrupted with a new instruction. \
+                             Stop what you were doing and address this instead. \
+                             Do NOT retry any interrupted tools.]\n\n{combined}"
+                        );
                         let msg = Message::new(Role::User, prefixed);
                         self.context.add_message(msg.clone());
                         session.add_message(msg);

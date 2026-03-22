@@ -1025,11 +1025,14 @@ async fn steering_message_injected_into_session() {
         .await
         .expect("run should succeed");
 
-    // Steering message should appear as a user message with [User steering] prefix
-    let has_steering = session
-        .messages
-        .iter()
-        .any(|m| m.role == ava_types::Role::User && m.content.contains("[User steering]"));
+    // Steering message should appear as a user message containing the steering text
+    // and the interruption framing prefix
+    let has_steering = session.messages.iter().any(|m| {
+        m.role == ava_types::Role::User
+            && m.content.contains("steer me now")
+            && m.content
+                .contains("user has interrupted with a new instruction")
+    });
     assert!(
         has_steering,
         "steering message should be injected into session as user message"

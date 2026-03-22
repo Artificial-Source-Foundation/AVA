@@ -2483,7 +2483,10 @@ mod tests {
     }
 
     #[test]
-    fn responses_reasoning_output_item_done_extracts_summary() {
+    fn responses_reasoning_output_item_done_always_emits_end_sentinel() {
+        // Even when summary text is present, we emit the end sentinel because
+        // the summary was already streamed via delta events. Emitting the full
+        // text here would duplicate it in the frontend's accumulator.
         let payload = json!({
             "type": "response.output_item.done",
             "item": {
@@ -2495,10 +2498,7 @@ mod tests {
             }
         });
         let chunk = parse_responses_api_stream_chunk(&payload).unwrap();
-        assert_eq!(
-            chunk.thinking.as_deref(),
-            Some("The model considered multiple approaches.")
-        );
+        assert_eq!(chunk.thinking.as_deref(), Some(REASONING_END_SENTINEL));
     }
 
     #[test]

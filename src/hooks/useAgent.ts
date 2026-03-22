@@ -735,20 +735,183 @@ function createAgentStore() {
   async function editAndResend(messageId: string, newContent: string): Promise<void> {
     if (rustAgent.isRunning()) return
     log.info('agent', 'Edit and resend', { messageId, contentLength: newContent.length })
+
+    // ── 1. Clean up in-memory messages (immediate UI update) ──────────
     batch(() => {
       // Remove all messages after the edited one, then remove the edited
-      // message itself so that run() can add a fresh user message and
-      // properly set up the streaming infrastructure (placeholder, liveMessageId,
-      // isRunning, WebSocket listener, etc.).
+      // message itself so the UI immediately reflects the truncation.
       session.deleteMessagesAfter(messageId)
       session.deleteMessage(messageId)
       // Exit editing mode
       session.stopEditing()
     })
-    // Delegate to run() which handles both Tauri and web mode correctly:
-    // adds user message, adds assistant placeholder, attaches event listener,
-    // sets isRunning, and waits for completion.
-    await run(newContent)
+
+    // ── 2. Reset agent UI state ──────────────────────────────────────
+    batch(() => {
+      setCurrentThought('')
+      setDoomLoopDetected(false)
+      setToolActivity([])
+      setStreamingTokenEstimate(0)
+      setStreamingStartedAt(Date.now())
+    })
+
+    // Ensure a session exists
+    let currentSess = session.currentSession()
+    if (!currentSess) {
+      await session.createNewSession()
+      currentSess = session.currentSession()
+    }
+    const sessionId = currentSess?.id ?? ''
+
+    // ── 3. Add user message + assistant placeholder ──────────────────
+    const userMsg: Message = {
+      id: generateMessageId('user'),
+      sessionId,
+      role: 'user',
+      content: newContent,
+      createdAt: Date.now(),
+    }
+    session.addMessage(userMsg)
+
+    const budget = getCoreBudget()
+    if (budget) {
+      budget.addMessage(userMsg.id, userMsg.content)
+      window.dispatchEvent(
+        new CustomEvent('ava:core-settings-changed', { detail: { category: 'context' } })
+      )
+    }
+
+    const selectedModelId = session.selectedModel()
+    const selectedProviderId = session.selectedProvider() || undefined
+
+    const assistantMsgId = generateMessageId('asst')
+    const placeholderMsg: Message = {
+      id: assistantMsgId,
+      sessionId,
+      role: 'assistant',
+      content: '',
+      createdAt: Date.now(),
+      model: selectedModelId,
+    }
+    session.addMessage(placeholderMsg)
+    setLiveMessageId(assistantMsgId)
+
+    // ── 4. Call the backend's edit-resend API ─────────────────────────
+    // This tells the backend to truncate the session at the edited message
+    // and start a fresh agent run, instead of submit_goal which would load
+    // the full (un-truncated) session history.
+    try {
+      const runStartedAt = Date.now()
+      const result = await rustAgent.editAndResendRun(messageId, newContent)
+      const errorText = rustAgent.error()
+
+      if (errorText) {
+        const isCancelled =
+          errorText === 'Agent run cancelled by user' || errorText.includes('cancelled by user')
+        if (isCancelled) {
+          const partialContent = rustAgent.streamingContent()
+          const elapsedMs = Date.now() - runStartedAt
+          if (partialContent) {
+            session.updateMessage(assistantMsgId, {
+              content: partialContent,
+              metadata: {
+                provider: selectedProviderId,
+                model: selectedModelId,
+                elapsedMs,
+                cancelled: true,
+              },
+            })
+          } else {
+            session.deleteMessage(assistantMsgId)
+          }
+          return
+        }
+        session.updateMessage(assistantMsgId, {
+          content: '',
+          error: { type: 'unknown', message: errorText, timestamp: Date.now() },
+        })
+        return
+      }
+
+      // Settle the assistant response
+      const content = rustAgent.streamingContent()
+      const elapsedMs = Date.now() - runStartedAt
+      const thinking = rustAgent.thinkingContent()
+      const segments = rustAgent.thinkingSegments()
+
+      if (content) {
+        session.updateMessage(assistantMsgId, {
+          content,
+          tokensUsed: rustAgent.tokenUsage().output,
+          costUSD: rustAgent.tokenUsage().cost || undefined,
+          toolCalls: rustAgent.activeToolCalls(),
+          metadata: {
+            provider: selectedProviderId,
+            model: selectedModelId,
+            mode: isPlanMode() ? 'plan' : 'code',
+            elapsedMs,
+            ...(thinking ? { thinking } : {}),
+            ...(segments.length > 1 ? { thinkingSegments: segments } : {}),
+          },
+        })
+      } else {
+        session.deleteMessage(assistantMsgId)
+      }
+
+      // Sync from backend in web mode
+      const backendSessionId = result?.sessionId || sessionId
+      if (!isTauri() && backendSessionId) {
+        try {
+          const apiBase = (import.meta.env.VITE_API_URL as string) || ''
+          const res = await fetch(`${apiBase}/api/sessions/${backendSessionId}/messages`)
+          if (res.ok) {
+            const rawMsgs = (await res.json()) as Array<Record<string, unknown>>
+            const backendMsgs: Message[] = rawMsgs.map((m) => {
+              const metaRaw = m.metadata
+              const metadata =
+                typeof metaRaw === 'string'
+                  ? (JSON.parse(metaRaw) as Record<string, unknown>)
+                  : (metaRaw as Record<string, unknown> | undefined)
+              return {
+                id: m.id as string,
+                sessionId: backendSessionId,
+                role: m.role as Message['role'],
+                content: (m.content as string) ?? '',
+                createdAt:
+                  typeof m.created_at === 'number'
+                    ? m.created_at
+                    : typeof m.timestamp === 'string'
+                      ? new Date(m.timestamp).getTime()
+                      : Date.now(),
+                tokensUsed: (m.tokens_used as number) || undefined,
+                costUSD: (m.cost_usd as number | null) ?? undefined,
+                model: (m.model as string | null) ?? undefined,
+                metadata,
+                toolCalls: (metadata?.toolCalls as Message['toolCalls']) ?? undefined,
+              }
+            })
+            session.replaceMessagesFromBackend(backendMsgs)
+            registerBackendSessionId(sessionId, backendSessionId)
+          }
+        } catch (syncErr) {
+          log.warn('agent', 'Failed to sync messages from backend after edit-resend', {
+            error: String(syncErr),
+          })
+        }
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      log.error('agent', 'Unexpected error in editAndResend', { error: msg })
+      session.updateMessage(assistantMsgId, {
+        content: `**Error:** ${msg}`,
+        error: { type: 'unknown', message: msg, timestamp: Date.now() },
+      })
+    } finally {
+      batch(() => {
+        setStreamingStartedAt(null)
+        setLiveMessageId(null)
+      })
+    }
   }
 
   async function regenerateResponse(_assistantMessageId: string): Promise<void> {

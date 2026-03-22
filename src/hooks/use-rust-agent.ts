@@ -516,6 +516,65 @@ export function useRustAgent() {
     }
   }
 
+  /**
+   * Run the agent via the edit-and-resend backend endpoint.
+   * Same streaming infrastructure as run(), but calls edit_and_resend instead
+   * of submit_goal so the backend properly truncates history at the edited
+   * message before starting the new agent run.
+   */
+  const editAndResendRun = async (
+    messageId: string,
+    newContent: string
+  ): Promise<SubmitGoalResult | null> => {
+    resetState()
+    setIsRunning(true)
+    runStartTime = Date.now()
+    chunkCount = 0
+    totalTextLen = 0
+    firstTokenLogged = false
+    log.info('streaming', 'Edit-and-resend stream started', { messageId })
+    try {
+      await attachListener()
+      const editArgs = {
+        args: {
+          messageId,
+          newContent,
+        },
+      }
+
+      if (isTauri()) {
+        const result = await invoke<SubmitGoalResult>('edit_and_resend', editArgs)
+        setLastResult(result)
+        setIsRunning(false)
+        return result
+      }
+
+      // Web mode: HTTP call returns immediately, wait for WebSocket completion
+      const completionPromise = new Promise<SubmitGoalResult | null>((resolve) => {
+        completionResolve = resolve
+      })
+
+      const submitResult = await invoke<SubmitGoalResult>('edit_and_resend', editArgs)
+
+      const result = await completionPromise
+
+      const finalResult: SubmitGoalResult = result
+        ? { ...result, sessionId: result.sessionId || submitResult.sessionId }
+        : { success: false, turns: 0, sessionId: submitResult.sessionId }
+      setLastResult(finalResult)
+      return finalResult
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      log.error('error', 'IPC invoke failed', { command: 'edit_and_resend', error: message })
+      setError(message)
+      setIsRunning(false)
+      completionResolve = null
+      return null
+    } finally {
+      detachListener()
+    }
+  }
+
   const cancel = async (): Promise<void> => {
     log.info('agent', 'Agent cancel requested')
     try {
@@ -639,6 +698,7 @@ export function useRustAgent() {
     pendingPlan,
     todos,
     run,
+    editAndResendRun,
     cancel,
     clearError,
     // Mid-stream messaging

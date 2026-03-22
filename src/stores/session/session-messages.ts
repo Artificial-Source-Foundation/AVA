@@ -161,10 +161,30 @@ export async function deleteMessage(id: string): Promise<void> {
 }
 
 export function deleteMessagesAfter(messageId: string): void {
-  setMessages((prev) => {
-    const index = prev.findIndex((m) => m.id === messageId)
-    return index >= 0 ? prev.slice(0, index + 1) : prev
-  })
+  const prev = messages()
+  const index = prev.findIndex((m) => m.id === messageId)
+  if (index < 0) return
+
+  // Collect IDs of messages to be removed (everything after the target)
+  const removedMessages = prev.slice(index + 1)
+
+  // Update in-memory state immediately
+  setMessages(prev.slice(0, index + 1))
+
+  // Persist deletions to the database (Tauri mode only — in web mode the
+  // backend handles its own session truncation via the edit-resend endpoint).
+  if (isTauri() && removedMessages.length > 0) {
+    // Delete each removed message from the DB, respecting pending inserts
+    for (const msg of removedMessages) {
+      const pending = pendingInserts.get(msg.id)
+      const doDelete = pending
+        ? pending.then(() => dbDeleteMessage(msg.id))
+        : dbDeleteMessage(msg.id)
+      doDelete.catch((err: unknown) =>
+        logError('Session', 'Failed to delete message from DB in deleteMessagesAfter', err)
+      )
+    }
+  }
 }
 
 /**

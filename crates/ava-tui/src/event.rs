@@ -129,6 +129,8 @@ pub enum AppEvent {
     Question(ava_tools::core::question::QuestionRequest),
     /// Agent is requesting interactive approval for a tool call.
     ToolApproval(ava_tools::permission_middleware::ApprovalRequest),
+    /// Agent is proposing a plan for user review via the plan tool.
+    PlanProposal(ava_tools::core::plan::PlanRequest),
     /// A hook execution completed (fired asynchronously).
     HookResult {
         event: crate::hooks::HookEvent,
@@ -206,6 +208,10 @@ impl std::fmt::Debug for AppEvent {
             Self::ToolApproval(req) => f
                 .debug_struct("ToolApproval")
                 .field("tool", &req.call.name)
+                .finish(),
+            Self::PlanProposal(req) => f
+                .debug_struct("PlanProposal")
+                .field("summary", &req.plan.summary)
                 .finish(),
             Self::HookResult {
                 event, description, ..

@@ -8,6 +8,7 @@ pub mod mention_picker;
 pub mod message;
 pub mod message_list;
 pub mod model_selector;
+pub mod plan_approval;
 pub mod provider_connect;
 pub mod rewind_modal;
 pub mod safe_render;

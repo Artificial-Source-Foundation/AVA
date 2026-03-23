@@ -963,6 +963,18 @@ button {
   }
 }
 
+/* Plan overlay entrance */
+@keyframes planOverlayIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 /* Plan card entrance */
 @keyframes planCardIn {
   from {

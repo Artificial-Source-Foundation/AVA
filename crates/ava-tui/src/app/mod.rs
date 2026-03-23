@@ -103,6 +103,8 @@ pub struct AppState {
     // ── Permissions & Keybindings ───────────────────────────────────────
     pub permission: PermissionState,
     pub keybinds: KeybindState,
+    /// Active plan approval request from the agent's plan tool.
+    pub plan_approval: Option<crate::state::plan_approval::PlanApprovalState>,
 
     // ── Model & Provider ────────────────────────────────────────────────
     pub model_catalog: ava_config::CatalogState,
@@ -223,6 +225,7 @@ pub enum ModalType {
     CommandPalette,
     SessionList,
     ToolApproval,
+    PlanApproval,
     ModelSelector,
     ToolList,
     ProviderConnect,
@@ -266,6 +269,8 @@ pub struct App {
     approval_rx: Option<
         tokio::sync::mpsc::UnboundedReceiver<ava_tools::permission_middleware::ApprovalRequest>,
     >,
+    /// Receiver for plan proposal requests from the agent's plan tool.
+    plan_rx: Option<tokio::sync::mpsc::UnboundedReceiver<ava_tools::core::plan::PlanRequest>>,
     /// Timestamp of the last Esc press, for double-Esc detection.
     last_esc_time: Option<std::time::Instant>,
     /// Pending background goal from `/bg` command (consumed in submit_goal).
@@ -332,7 +337,7 @@ impl App {
             })
             .unwrap_or_default();
 
-        let (agent, question_rx, approval_rx, _plan_rx) = AgentState::new(
+        let (agent, question_rx, approval_rx, plan_rx) = AgentState::new(
             data_dir.clone(),
             provider,
             model,
@@ -363,6 +368,7 @@ impl App {
             // Permissions & Keybindings
             permission,
             keybinds,
+            plan_approval: None,
             // Model & Provider
             model_catalog,
             voice: VoiceState {
@@ -415,6 +421,7 @@ impl App {
             voice_config: ava_config::VoiceConfig::default(),
             question_rx: Some(question_rx),
             approval_rx: Some(approval_rx),
+            plan_rx: Some(plan_rx),
             last_esc_time: None,
             pending_bg_goal: None,
             pending_praxis_goal: None,
@@ -554,6 +561,7 @@ impl App {
         // Take the question receiver so we can poll it in the event loop
         let mut question_rx = self.question_rx.take();
         let mut approval_rx = self.approval_rx.take();
+        let mut plan_rx = self.plan_rx.take();
 
         // First-time onboarding: if no provider has credentials, show welcome
         // message and auto-open the provider connect modal.
@@ -611,6 +619,9 @@ impl App {
                 },
                 Some(req) = async { match approval_rx.as_mut() { Some(rx) => rx.recv().await, None => None } } => {
                     self.handle_event(AppEvent::ToolApproval(req), app_tx.clone(), agent_tx.clone());
+                },
+                Some(req) = async { match plan_rx.as_mut() { Some(rx) => rx.recv().await, None => None } } => {
+                    self.handle_event(AppEvent::PlanProposal(req), app_tx.clone(), agent_tx.clone());
                 },
                 else => break,
             }
@@ -942,6 +953,7 @@ impl App {
             // Permissions & Keybindings
             permission: PermissionState::default(),
             keybinds: KeybindState::default(),
+            plan_approval: None,
             // Model & Provider
             model_catalog: ava_config::CatalogState::default(),
             voice: VoiceState::default(),
@@ -990,6 +1002,7 @@ impl App {
             voice_config: ava_config::VoiceConfig::default(),
             question_rx: None,
             approval_rx: None,
+            plan_rx: None,
             last_esc_time: None,
             pending_bg_goal: None,
             pending_praxis_goal: None,

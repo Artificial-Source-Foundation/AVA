@@ -32,10 +32,13 @@ pub fn render(frame: &mut Frame<'_>, state: &mut AppState) {
 
     let area = frame.area();
 
-    // When tool approval is pending, replace the composer with the approval dock
+    // When tool approval or plan approval is pending, replace the composer with the dock
     let approval_active = matches!(state.active_modal, Some(ModalType::ToolApproval));
+    let plan_approval_active = matches!(state.active_modal, Some(ModalType::PlanApproval));
     let composer_h = if approval_active {
         crate::widgets::tool_approval::APPROVAL_DOCK_HEIGHT
+    } else if plan_approval_active {
+        crate::widgets::plan_approval::PLAN_APPROVAL_DOCK_HEIGHT
     } else {
         layout::composer_height(&state.input.buffer, area.width, area.height)
     };
@@ -76,6 +79,19 @@ pub fn render(frame: &mut Frame<'_>, state: &mut AppState) {
                 &state.theme,
             );
         }
+    } else if plan_approval_active {
+        // Render the plan approval dock in place of the composer
+        if let Some(ref pa) = state.plan_approval {
+            let dock_bg = Block::default().style(Style::default().bg(state.theme.bg_elevated));
+            frame.render_widget(dock_bg, split.composer);
+
+            crate::widgets::plan_approval::render_plan_approval(
+                frame,
+                split.composer,
+                pa,
+                &state.theme,
+            );
+        }
     } else {
         // Composer bg drawn AFTER the message list so it acts as a curtain
         // covering any streaming text that overflows into the composer area.
@@ -107,9 +123,9 @@ pub fn render(frame: &mut Frame<'_>, state: &mut AppState) {
         }
     }
 
-    // Render modals on top (ToolApproval is rendered inline as a dock, not as a modal overlay)
+    // Render modals on top (ToolApproval and PlanApproval are rendered inline as docks, not as modal overlays)
     if let Some(modal) = state.active_modal {
-        if modal != ModalType::ToolApproval {
+        if modal != ModalType::ToolApproval && modal != ModalType::PlanApproval {
             render_modal(frame, state, modal);
         }
     }
@@ -236,8 +252,8 @@ fn render_modal(frame: &mut Frame<'_>, state: &mut AppState, modal: ModalType) {
                 &state.theme,
             );
         }
-        ModalType::ToolApproval => {
-            // Handled inline as a bottom dock bar — should not reach here.
+        ModalType::ToolApproval | ModalType::PlanApproval => {
+            // Handled inline as bottom dock bars — should not reach here.
         }
         ModalType::ModelSelector => {
             if let Some(ref mut selector) = state.model_selector {

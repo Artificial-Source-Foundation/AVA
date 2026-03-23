@@ -33,6 +33,7 @@ export interface PlanCardProps {
   onApprove: (plan: PlanData, stepComments: Record<string, string>) => void
   onReject: (feedback: string, stepComments: Record<string, string>) => void
   onEdit: (plan: PlanData, stepComments: Record<string, string>) => void
+  onViewFull?: () => void
 }
 
 // ============================================================================
@@ -230,16 +231,22 @@ export const PlanCard: Component<PlanCardProps> = (props) => {
       <div class="flex items-center gap-2.5 px-4 py-2.5 border-b border-[var(--border-subtle)] bg-[var(--surface-raised)]">
         <div
           class="p-1 rounded-[var(--radius-sm)] flex-shrink-0"
-          style={{ background: 'var(--accent-subtle)' }}
+          style={{ background: 'rgba(139, 92, 246, 0.12)' }}
         >
-          <ClipboardList class="w-4 h-4" style={{ color: 'var(--accent)' }} />
+          <ClipboardList class="w-4 h-4" style={{ color: '#8B5CF6' }} />
         </div>
         <span
           class="text-[10px] font-semibold tracking-widest uppercase flex-shrink-0"
-          style={{ color: 'var(--accent)' }}
+          style={{ color: '#8B5CF6' }}
         >
           Plan
         </span>
+        <Show when={props.plan.codename}>
+          <span class="text-[12px] font-semibold flex-shrink-0" style={{ color: '#8B5CF6' }}>
+            {props.plan.codename}
+          </span>
+          <span class="text-[10px] text-[var(--text-muted)] flex-shrink-0">&mdash;</span>
+        </Show>
         <span class="text-[13px] font-medium text-[var(--text-primary)] truncate flex-1">
           {props.plan.summary}
         </span>
@@ -431,6 +438,18 @@ export const PlanCard: Component<PlanCardProps> = (props) => {
               </span>
             </Show>
           </div>
+
+          {/* View Full Plan link */}
+          <Show when={props.onViewFull}>
+            <button
+              type="button"
+              onClick={() => props.onViewFull?.()}
+              class="text-[11px] font-medium transition-colors hover:underline mr-2"
+              style={{ color: '#8B5CF6' }}
+            >
+              View Full Plan &rarr;
+            </button>
+          </Show>
 
           {/* Action buttons */}
           <div class="flex items-center gap-1.5">

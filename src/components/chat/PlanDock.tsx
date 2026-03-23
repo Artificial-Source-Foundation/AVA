@@ -9,11 +9,13 @@
 import { type Component, Show } from 'solid-js'
 import { useAgent } from '../../hooks/useAgent'
 import { logInfo } from '../../services/logger'
+import { usePlanOverlay } from '../../stores/planOverlayStore'
 import type { PlanData } from '../../types/rust-ipc'
 import { PlanCard } from './PlanCard'
 
 export const PlanDock: Component = () => {
   const agent = useAgent()
+  const { openPlan } = usePlanOverlay()
 
   const handleApprove = (plan: PlanData, stepComments: Record<string, string>): void => {
     logInfo('plan', 'Plan approved', { steps: plan.steps.length })
@@ -30,6 +32,11 @@ export const PlanDock: Component = () => {
     agent.resolvePlan('modified', plan, undefined, stepComments)
   }
 
+  const handleViewFull = (): void => {
+    const plan = agent.pendingPlan()
+    if (plan) openPlan(plan)
+  }
+
   return (
     <Show when={agent.pendingPlan()}>
       {(plan) => (
@@ -42,6 +49,7 @@ export const PlanDock: Component = () => {
             onApprove={handleApprove}
             onReject={handleReject}
             onEdit={handleEdit}
+            onViewFull={handleViewFull}
           />
         </div>
       )}

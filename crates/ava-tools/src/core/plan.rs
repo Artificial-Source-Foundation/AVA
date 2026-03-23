@@ -158,11 +158,49 @@ fn parse_plan(args: &Value) -> ava_types::Result<Plan> {
         .and_then(Value::as_u64)
         .map(|v| v as u32);
 
+    let codename = args
+        .get("codename")
+        .and_then(Value::as_str)
+        .map(String::from)
+        .or_else(|| Some(auto_codename(&summary)));
+
     Ok(Plan {
         steps,
         summary,
         estimated_turns,
+        codename,
     })
+}
+
+/// Generate a short codename from a plan summary.
+fn auto_codename(summary: &str) -> String {
+    const STOP_WORDS: &[&str] = &[
+        "the", "a", "an", "and", "or", "to", "in", "for", "of", "with", "on", "at", "by", "from",
+        "is", "it", "this", "that",
+    ];
+    let words: Vec<String> = summary
+        .split_whitespace()
+        .filter(|w| !STOP_WORDS.contains(&w.to_lowercase().as_str()))
+        .take(3)
+        .map(|w| {
+            let mut c = w.chars();
+            match c.next() {
+                Some(first) => {
+                    let mut s = first.to_uppercase().to_string();
+                    for ch in c {
+                        s.push(ch.to_lowercase().next().unwrap_or(ch));
+                    }
+                    s
+                }
+                None => String::new(),
+            }
+        })
+        .collect();
+    if words.is_empty() {
+        "Plan".to_string()
+    } else {
+        words.join("-")
+    }
 }
 
 /// Generate a filesystem-safe slug from a summary string.
@@ -181,11 +219,57 @@ fn slugify(summary: &str) -> String {
         .collect()
 }
 
-/// Persist a plan to `.ava/plans/` in the current working directory.
+/// Format a plan as human-readable Markdown.
+fn format_plan_as_markdown(plan: &Plan) -> String {
+    let mut md = String::new();
+    md.push_str("---\n");
+    if let Some(codename) = &plan.codename {
+        md.push_str(&format!("codename: {codename}\n"));
+    }
+    md.push_str(&format!(
+        "summary: \"{}\"\n",
+        plan.summary.replace('"', "\\\"")
+    ));
+    if let Some(turns) = plan.estimated_turns {
+        md.push_str(&format!("estimated_turns: {turns}\n"));
+    }
+    md.push_str(&format!("created: {}\n", chrono::Utc::now().to_rfc3339()));
+    md.push_str("---\n\n");
+    if let Some(codename) = &plan.codename {
+        md.push_str(&format!("# {} — {}\n\n", codename, plan.summary));
+    } else {
+        md.push_str(&format!("# {}\n\n", plan.summary));
+    }
+    md.push_str("## Steps\n\n");
+    for (i, step) in plan.steps.iter().enumerate() {
+        md.push_str(&format!(
+            "### {}. {} `[{}]`\n\n",
+            i + 1,
+            step.description,
+            step.action
+        ));
+        if !step.files.is_empty() {
+            md.push_str("**Files:**\n");
+            for file in &step.files {
+                md.push_str(&format!("- `{file}`\n"));
+            }
+            md.push('\n');
+        }
+        if !step.depends_on.is_empty() {
+            md.push_str(&format!(
+                "**Depends on:** {}\n\n",
+                step.depends_on.join(", ")
+            ));
+        }
+    }
+    md
+}
+
+/// Persist a plan to `.ava/plans/` as Markdown.
 fn persist_plan(plan: &Plan) -> Option<String> {
     let timestamp = chrono::Utc::now().format("%Y%m%d-%H%M%S");
     let slug = slugify(&plan.summary);
-    let filename = format!("{timestamp}-{slug}.json");
+    let filename = format!("{timestamp}-{slug}.md");
 
     let plans_dir = std::path::PathBuf::from(".ava/plans");
     if let Err(e) = std::fs::create_dir_all(&plans_dir) {
@@ -194,20 +278,13 @@ fn persist_plan(plan: &Plan) -> Option<String> {
     }
 
     let path = plans_dir.join(&filename);
-    match serde_json::to_string_pretty(plan) {
-        Ok(json) => {
-            if let Err(e) = std::fs::write(&path, json) {
-                tracing::warn!("failed to write plan to {}: {e}", path.display());
-                return None;
-            }
-            tracing::info!("plan saved to {}", path.display());
-            Some(path.display().to_string())
-        }
-        Err(e) => {
-            tracing::warn!("failed to serialize plan: {e}");
-            None
-        }
+    let md = format_plan_as_markdown(plan);
+    if let Err(e) = std::fs::write(&path, &md) {
+        tracing::warn!("failed to write plan to {}: {e}", path.display());
+        return None;
     }
+    tracing::info!("plan saved to {}", path.display());
+    Some(path.display().to_string())
 }
 
 /// Format a plan decision into a human-readable tool result string.
@@ -492,6 +569,7 @@ mod tests {
                 ],
                 summary: "Implement auth (test-first)".into(),
                 estimated_turns: None,
+                codename: None,
             };
             req.reply
                 .send(PlanDecision::Modified {

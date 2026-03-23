@@ -235,6 +235,7 @@ export interface PlanData {
   steps: PlanStep[]
   estimatedTurns: number
   estimatedBudgetUsd?: number
+  codename?: string
 }
 
 export interface PlanCreatedEvent {

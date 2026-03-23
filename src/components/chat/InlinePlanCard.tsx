@@ -19,6 +19,7 @@ const ACTION_COLORS: Record<PlanStepAction, { bg: string; text: string; label: s
 
 export interface InlinePlanCardProps {
   plan: PlanData
+  onViewFull?: () => void
 }
 
 export const InlinePlanCard: Component<InlinePlanCardProps> = (props) => {
@@ -34,16 +35,22 @@ export const InlinePlanCard: Component<InlinePlanCardProps> = (props) => {
       >
         <div
           class="p-1 rounded-[var(--radius-sm)] flex-shrink-0"
-          style={{ background: 'var(--accent-subtle)' }}
+          style={{ background: 'rgba(139, 92, 246, 0.12)' }}
         >
-          <ClipboardList class="w-3.5 h-3.5" style={{ color: 'var(--accent)' }} />
+          <ClipboardList class="w-3.5 h-3.5" style={{ color: '#8B5CF6' }} />
         </div>
         <span
           class="text-[10px] font-semibold tracking-widest uppercase flex-shrink-0"
-          style={{ color: 'var(--accent)' }}
+          style={{ color: '#8B5CF6' }}
         >
           Plan
         </span>
+        <Show when={props.plan.codename}>
+          <span class="text-[12px] font-semibold flex-shrink-0" style={{ color: '#8B5CF6' }}>
+            {props.plan.codename}
+          </span>
+          <span class="text-[10px] text-[var(--text-muted)] flex-shrink-0">&mdash;</span>
+        </Show>
         <span class="text-[12px] text-[var(--text-primary)] truncate flex-1">
           {props.plan.summary}
         </span>
@@ -104,6 +111,18 @@ export const InlinePlanCard: Component<InlinePlanCardProps> = (props) => {
                 <span>&middot;</span>
                 <span>~${props.plan.estimatedBudgetUsd!.toFixed(2)}</span>
               </Show>
+            </div>
+          </Show>
+          <Show when={props.onViewFull}>
+            <div class="mt-2 pt-2 border-t border-[var(--border-subtle)] flex justify-end">
+              <button
+                type="button"
+                onClick={() => props.onViewFull?.()}
+                class="text-[11px] font-medium transition-colors hover:underline"
+                style={{ color: '#8B5CF6' }}
+              >
+                View Full Plan &rarr;
+              </button>
             </div>
           </Show>
         </div>

@@ -511,6 +511,12 @@ impl App {
                     });
                 self.state.active_modal = Some(ModalType::ToolApproval);
             }
+            AppEvent::PlanProposal(req) => {
+                self.state.plan_approval = Some(
+                    crate::state::plan_approval::PlanApprovalState::new(req.plan, req.reply),
+                );
+                self.state.active_modal = Some(ModalType::PlanApproval);
+            }
             AppEvent::HookResult {
                 event,
                 result,

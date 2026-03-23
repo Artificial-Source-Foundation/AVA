@@ -54,6 +54,10 @@ pub struct Plan {
     /// Estimated number of agent turns to complete the plan.
     #[serde(default)]
     pub estimated_turns: Option<u32>,
+    /// Short memorable codename for the plan (e.g., "Phoenix", "Refactor-Auth").
+    /// Auto-generated from summary if not provided by the agent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub codename: Option<String>,
 }
 
 /// The user's decision on a proposed plan.
@@ -82,6 +86,7 @@ impl std::fmt::Display for PlanDecision {
 impl PartialEq for Plan {
     fn eq(&self, other: &Self) -> bool {
         self.summary == other.summary
+            && self.codename == other.codename
             && self.estimated_turns == other.estimated_turns
             && self.steps.len() == other.steps.len()
             && self
@@ -159,6 +164,7 @@ mod tests {
             }],
             summary: "Research auth patterns".into(),
             estimated_turns: Some(5),
+            codename: None,
         };
 
         let json = serde_json::to_string(&plan).unwrap();
@@ -197,6 +203,7 @@ mod tests {
             steps: vec![],
             summary: "Test plan".into(),
             estimated_turns: None,
+            codename: None,
         });
 
         let plan = state.get().unwrap();
@@ -210,6 +217,7 @@ mod tests {
             steps: vec![],
             summary: "Will be cleared".into(),
             estimated_turns: None,
+            codename: None,
         });
         assert!(state.get().is_some());
 
@@ -226,6 +234,7 @@ mod tests {
             steps: vec![],
             summary: "Shared plan".into(),
             estimated_turns: Some(10),
+            codename: None,
         });
 
         let plan = state2.get().unwrap();

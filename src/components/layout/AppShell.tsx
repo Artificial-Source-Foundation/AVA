@@ -2,7 +2,9 @@ import type { LucideProps } from 'lucide-solid'
 import { Brain, ScrollText, Terminal, X } from 'lucide-solid'
 import { type Component, For, type JSX, lazy, Show } from 'solid-js'
 import { useLayout } from '../../stores/layout'
+import { usePlanOverlay } from '../../stores/planOverlayStore'
 import { useSettings } from '../../stores/settings'
+import { PlanOverlay } from '../chat/PlanOverlay'
 import { TerminalPanel } from '../panels/TerminalPanel'
 import { SettingsModal } from '../settings'
 import { SidebarMemory } from '../sidebar/SidebarMemory'
@@ -45,6 +47,7 @@ export const AppShell: Component = () => {
   const { settings } = useSettings()
 
   const { settingsOpen } = useLayout()
+  const { isOpen: planOverlayOpen } = usePlanOverlay()
 
   const { startSidebarResize, startRightResize, startBottomResize } = createResizeHandlers({
     sidebarWidth,
@@ -92,9 +95,11 @@ export const AppShell: Component = () => {
 
         {/* Center: Main content + optional bottom panel */}
         <div class="flex-1 flex flex-col overflow-hidden min-w-0">
-          {/* Main content */}
+          {/* Main content — plan overlay replaces chat when open */}
           <div class="flex-1 overflow-hidden min-h-0">
-            <MainArea />
+            <Show when={!planOverlayOpen()} fallback={<PlanOverlay />}>
+              <MainArea />
+            </Show>
           </div>
 
           {/* Bottom panel (Memory / Terminal / Output) — gated on ui.showBottomPanel */}
@@ -184,6 +189,8 @@ export const AppShell: Component = () => {
 
       {/* Settings Modal (overlay) */}
       <SettingsModal />
+
+      {/* PlanOverlay is rendered inline above, replacing MainArea when open */}
     </div>
   )
 }

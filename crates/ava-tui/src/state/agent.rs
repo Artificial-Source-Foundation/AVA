@@ -675,6 +675,14 @@ impl AgentState {
     ) {
         let suffix = mode.prompt_suffix().map(|s| s.to_string());
         let is_plan = matches!(mode, AgentMode::Plan);
+        // Load per-mode model config before spawning async task
+        let project_root = std::env::current_dir().unwrap_or_default();
+        let project_state = ava_config::ProjectState::load(&project_root);
+        let target_model = match mode {
+            AgentMode::Plan => project_state.plan_model.clone(),
+            AgentMode::Code => project_state.code_model.clone(),
+            AgentMode::Praxis => None,
+        };
         if let Some(stack) = &self.stack {
             let stack = stack.clone();
             tokio::spawn(async move {
@@ -687,6 +695,16 @@ impl AgentState {
                     warn!("set_mode: set_plan_mode failed: {e}");
                     if error.is_none() {
                         error = Some(format!("set_plan_mode: {e}"));
+                    }
+                }
+                // Switch model if per-mode model is configured
+                if let Some(model_key) = target_model {
+                    if let Some((provider, model)) = model_key.split_once('/') {
+                        if let Err(e) = stack.switch_model(provider, model).await {
+                            warn!("set_mode: switch_model failed: {e}");
+                        }
+                    } else {
+                        warn!("set_mode: invalid model key format (expected provider/model): {model_key}");
                     }
                 }
                 if let (Some(msg), Some(tx)) = (error, app_tx) {

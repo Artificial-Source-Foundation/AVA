@@ -307,6 +307,12 @@ pub struct ProjectState {
     /// Recently used models (most recent first, max 5). Stored as "provider/model" keys.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub recent_models: Vec<String>,
+    /// Model to use in Plan mode (format: "provider/model").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plan_model: Option<String>,
+    /// Model to use in Code mode (format: "provider/model").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code_model: Option<String>,
 }
 
 impl ProjectState {

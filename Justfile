@@ -33,6 +33,18 @@ run *ARGS:
 headless GOAL *ARGS:
     cargo run --bin ava -- "{{ GOAL }}" --headless {{ ARGS }}
 
+# Run TUI in release mode (optimized, much faster)
+run-release *ARGS:
+    cargo run --release --bin ava -- {{ ARGS }}
+
+# Run headless in release mode
+headless-release GOAL *ARGS:
+    cargo run --release --bin ava -- "{{ GOAL }}" --headless {{ ARGS }}
+
+# Run desktop app in release mode (optimized Rust + debug webview)
+tauri-release:
+    npm run tauri build -- --debug
+
 # Build release binary
 build-release:
     cargo build --release --bin ava

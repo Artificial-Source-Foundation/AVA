@@ -565,53 +565,15 @@ function createAgentStore() {
         contentLength: content?.length ?? 0,
       })
 
-      // In web mode the Rust agent is the single writer for session persistence.
-      // After the run completes, fetch the authoritative message list from the
-      // backend and replace the in-memory store so the UI reflects what was
-      // actually saved (correct tool_calls, metadata, tokens, etc.).
-      // Use the backend's session ID (from the run result) — it may differ from the frontend's
+      // In web mode, register the backend session ID mapping so session
+      // switching loads from the right backend session. We do NOT replace
+      // messages here — the streaming content was already persisted via
+      // updateMessage() above, and replacing would cause a visible flash.
+      // Messages are synced from the backend only on session switch.
       const backendSessionId = result?.sessionId || sessionId
       if (!isTauri() && backendSessionId) {
-        try {
-          const apiBase = (import.meta.env.VITE_API_URL as string) || ''
-          const res = await fetch(`${apiBase}/api/sessions/${backendSessionId}/messages`)
-          if (res.ok) {
-            const rawMsgs = (await res.json()) as Array<Record<string, unknown>>
-            const backendMsgs: Message[] = rawMsgs.map((m) => {
-              const metaRaw = m.metadata
-              const metadata =
-                typeof metaRaw === 'string'
-                  ? (JSON.parse(metaRaw) as Record<string, unknown>)
-                  : (metaRaw as Record<string, unknown> | undefined)
-              return {
-                id: m.id as string,
-                sessionId: backendSessionId,
-                role: m.role as Message['role'],
-                content: (m.content as string) ?? '',
-                createdAt:
-                  typeof m.created_at === 'number'
-                    ? m.created_at
-                    : typeof m.timestamp === 'string'
-                      ? new Date(m.timestamp).getTime()
-                      : Date.now(),
-                tokensUsed: (m.tokens_used as number) || undefined,
-                costUSD: (m.cost_usd as number | null) ?? undefined,
-                model: (m.model as string | null) ?? undefined,
-                metadata,
-                toolCalls: (metadata?.toolCalls as Message['toolCalls']) ?? undefined,
-              }
-            })
-            session.replaceMessagesFromBackend(backendMsgs)
-            // Register the ID mapping so session switching loads from the right backend session
-            registerBackendSessionId(sessionId, backendSessionId)
-            log.info('agent', 'Store synced from backend', {
-              count: backendMsgs.length,
-              backendSessionId,
-            })
-          }
-        } catch (syncErr) {
-          log.warn('agent', 'Failed to sync messages from backend', { error: String(syncErr) })
-        }
+        registerBackendSessionId(sessionId, backendSessionId)
+        log.info('agent', 'Backend session ID registered', { backendSessionId })
       }
 
       return result

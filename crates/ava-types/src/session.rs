@@ -63,6 +63,112 @@ impl Default for Session {
     }
 }
 
+/// Repair a conversation history before sending it to an LLM.
+///
+/// Fixes structural issues that cause cryptic API errors:
+/// 1. Orphaned tool results — `Role::Tool` messages without a preceding assistant
+///    message that contains a matching `tool_call`. Removed.
+/// 2. Empty assistant messages — assistant messages with no content and no tool calls.
+///    Removed.
+/// 3. Consecutive user messages — merged into a single user message (LLMs expect
+///    alternating user/assistant).
+/// 4. Messages after a terminal assistant response — if an assistant message has no
+///    tool calls (i.e. it is a final response), remove any non-user messages that
+///    follow it (stale tool results from a prior turn, etc.).
+/// 5. Duplicate messages — same role + same content in immediate sequence. Deduplicated.
+///
+/// This is intentionally conservative: it only touches messages that would cause API
+/// errors. Call it right before building the LLM request.
+pub fn repair_conversation(messages: &mut Vec<Message>) {
+    if messages.is_empty() {
+        return;
+    }
+
+    // --- Pass 1: Remove empty assistant messages ---
+    messages.retain(|m| {
+        if m.role == Role::Assistant && m.content.trim().is_empty() && m.tool_calls.is_empty() {
+            return false;
+        }
+        true
+    });
+
+    // --- Pass 2: Remove orphaned tool results ---
+    // Collect all tool_call IDs present in assistant messages.
+    let valid_call_ids: HashSet<String> = messages
+        .iter()
+        .filter(|m| m.role == Role::Assistant)
+        .flat_map(|m| m.tool_calls.iter().map(|tc| tc.id.clone()))
+        .collect();
+
+    messages.retain(|m| {
+        if m.role == Role::Tool {
+            if let Some(ref call_id) = m.tool_call_id {
+                return valid_call_ids.contains(call_id);
+            }
+            // Tool message with no call_id — orphaned, remove it.
+            return false;
+        }
+        true
+    });
+
+    // --- Pass 3: Remove non-user messages after terminal assistant ---
+    // A "terminal" assistant message has content but no tool calls.
+    // Any Tool messages after it are stale leftovers.
+    let mut last_terminal_assistant_idx: Option<usize> = None;
+    for (i, m) in messages.iter().enumerate() {
+        if m.role == Role::Assistant && m.tool_calls.is_empty() && !m.content.trim().is_empty() {
+            last_terminal_assistant_idx = Some(i);
+        } else if m.role == Role::User {
+            // A user message resets — the user is continuing the conversation.
+            last_terminal_assistant_idx = None;
+        }
+    }
+    if let Some(idx) = last_terminal_assistant_idx {
+        // Remove any non-user messages after the terminal assistant.
+        let mut i = idx + 1;
+        while i < messages.len() {
+            if messages[i].role != Role::User {
+                messages.remove(i);
+            } else {
+                i += 1;
+            }
+        }
+    }
+
+    // --- Pass 4: Merge consecutive user messages ---
+    let mut i = 0;
+    while i + 1 < messages.len() {
+        if messages[i].role == Role::User && messages[i + 1].role == Role::User {
+            let next_content = messages[i + 1].content.clone();
+            let next_images = messages[i + 1].images.clone();
+            messages[i].content = if messages[i].content.is_empty() {
+                next_content
+            } else if next_content.is_empty() {
+                messages[i].content.clone()
+            } else {
+                format!("{}\n\n{}", messages[i].content, next_content)
+            };
+            messages[i].images.extend(next_images);
+            messages.remove(i + 1);
+        } else {
+            i += 1;
+        }
+    }
+
+    // --- Pass 5: Remove sequential duplicates (same role + same content) ---
+    let mut i = 0;
+    while i + 1 < messages.len() {
+        if messages[i].role == messages[i + 1].role
+            && messages[i].content == messages[i + 1].content
+            && messages[i].tool_calls.len() == messages[i + 1].tool_calls.len()
+        {
+            messages.remove(i + 1);
+        } else {
+            i += 1;
+        }
+    }
+}
+
 /// Scan messages for assistant tool_calls that lack a corresponding tool_result
 /// message and append synthetic error results for each orphaned call.
 ///
@@ -255,5 +361,243 @@ mod tests {
         // Running again should not add duplicates
         cleanup_interrupted_tools(&mut messages);
         assert_eq!(messages.len(), 3);
+    }
+
+    // ── repair_conversation tests ──
+
+    #[test]
+    fn test_repair_empty() {
+        let mut messages: Vec<Message> = vec![];
+        repair_conversation(&mut messages);
+        assert!(messages.is_empty());
+    }
+
+    #[test]
+    fn test_repair_valid_conversation_unchanged() {
+        let tc = ToolCall {
+            id: "call_1".to_string(),
+            name: "read".to_string(),
+            arguments: serde_json::json!({}),
+        };
+        let tr = ToolResult {
+            call_id: "call_1".to_string(),
+            content: "ok".to_string(),
+            is_error: false,
+        };
+        let mut messages = vec![
+            Message::new(Role::User, "hello"),
+            Message::new(Role::Assistant, "calling read").with_tool_calls(vec![tc]),
+            Message::new(Role::Tool, "ok")
+                .with_tool_call_id("call_1")
+                .with_tool_results(vec![tr]),
+            Message::new(Role::Assistant, "done"),
+        ];
+        repair_conversation(&mut messages);
+        assert_eq!(messages.len(), 4);
+    }
+
+    #[test]
+    fn test_repair_orphaned_tool_result() {
+        // Tool result with no matching assistant tool_call — should be removed.
+        let mut messages = vec![
+            Message::new(Role::User, "hello"),
+            Message::new(Role::Assistant, "hi"),
+            Message::new(Role::Tool, "stale result").with_tool_call_id("nonexistent_call"),
+        ];
+        repair_conversation(&mut messages);
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0].role, Role::User);
+        assert_eq!(messages[1].role, Role::Assistant);
+    }
+
+    #[test]
+    fn test_repair_tool_result_no_call_id() {
+        // Tool message with no call_id at all — orphaned, remove.
+        let mut messages = vec![
+            Message::new(Role::User, "hello"),
+            Message::new(Role::Tool, "mystery result"),
+        ];
+        repair_conversation(&mut messages);
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].role, Role::User);
+    }
+
+    #[test]
+    fn test_repair_empty_assistant_message() {
+        let mut messages = vec![
+            Message::new(Role::User, "hello"),
+            Message::new(Role::Assistant, ""),
+            Message::new(Role::Assistant, "real response"),
+        ];
+        repair_conversation(&mut messages);
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[1].content, "real response");
+    }
+
+    #[test]
+    fn test_repair_whitespace_only_assistant_message() {
+        let mut messages = vec![
+            Message::new(Role::User, "hello"),
+            Message::new(Role::Assistant, "   \n  "),
+            Message::new(Role::Assistant, "actual reply"),
+        ];
+        repair_conversation(&mut messages);
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[1].content, "actual reply");
+    }
+
+    #[test]
+    fn test_repair_assistant_with_tool_calls_not_removed() {
+        // An assistant message with empty content but tool_calls should NOT be removed.
+        let tc = ToolCall {
+            id: "call_1".to_string(),
+            name: "read".to_string(),
+            arguments: serde_json::json!({}),
+        };
+        let tr = ToolResult {
+            call_id: "call_1".to_string(),
+            content: "ok".to_string(),
+            is_error: false,
+        };
+        let mut messages = vec![
+            Message::new(Role::User, "hello"),
+            Message::new(Role::Assistant, "").with_tool_calls(vec![tc]),
+            Message::new(Role::Tool, "ok")
+                .with_tool_call_id("call_1")
+                .with_tool_results(vec![tr]),
+        ];
+        repair_conversation(&mut messages);
+        assert_eq!(messages.len(), 3);
+    }
+
+    #[test]
+    fn test_repair_consecutive_user_messages_merged() {
+        let mut messages = vec![
+            Message::new(Role::User, "first"),
+            Message::new(Role::User, "second"),
+            Message::new(Role::User, "third"),
+            Message::new(Role::Assistant, "reply"),
+        ];
+        repair_conversation(&mut messages);
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0].role, Role::User);
+        assert!(messages[0].content.contains("first"));
+        assert!(messages[0].content.contains("second"));
+        assert!(messages[0].content.contains("third"));
+        assert_eq!(messages[1].role, Role::Assistant);
+    }
+
+    #[test]
+    fn test_repair_messages_after_terminal_assistant() {
+        // After a terminal assistant message (no tool calls), stale Tool messages
+        // should be removed, but user messages should be kept.
+        let mut messages = vec![
+            Message::new(Role::User, "hello"),
+            Message::new(Role::Assistant, "done, no more tools"),
+            Message::new(Role::Tool, "stale tool result").with_tool_call_id("old_call"),
+        ];
+        repair_conversation(&mut messages);
+        // The tool result is orphaned (no matching tool_call) AND after terminal assistant.
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0].role, Role::User);
+        assert_eq!(messages[1].role, Role::Assistant);
+    }
+
+    #[test]
+    fn test_repair_user_after_terminal_assistant_kept() {
+        let mut messages = vec![
+            Message::new(Role::User, "hello"),
+            Message::new(Role::Assistant, "done"),
+            Message::new(Role::User, "follow up"),
+        ];
+        repair_conversation(&mut messages);
+        assert_eq!(messages.len(), 3);
+        assert_eq!(messages[2].role, Role::User);
+        assert_eq!(messages[2].content, "follow up");
+    }
+
+    #[test]
+    fn test_repair_duplicate_messages() {
+        let mut messages = vec![
+            Message::new(Role::User, "hello"),
+            Message::new(Role::Assistant, "world"),
+            Message::new(Role::Assistant, "world"),
+        ];
+        repair_conversation(&mut messages);
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[1].content, "world");
+    }
+
+    #[test]
+    fn test_repair_duplicate_user_messages() {
+        // Consecutive identical user messages get merged first, then deduped.
+        let mut messages = vec![
+            Message::new(Role::User, "same"),
+            Message::new(Role::User, "same"),
+            Message::new(Role::Assistant, "reply"),
+        ];
+        repair_conversation(&mut messages);
+        // Two "same" user messages get merged into "same\n\nsame", so no exact dedup.
+        // But the merge itself consolidates them.
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0].role, Role::User);
+        assert_eq!(messages[1].role, Role::Assistant);
+    }
+
+    #[test]
+    fn test_repair_idempotent() {
+        let mut messages = vec![
+            Message::new(Role::User, "hello"),
+            Message::new(Role::User, "world"),
+            Message::new(Role::Assistant, ""),
+            Message::new(Role::Assistant, "reply"),
+            Message::new(Role::Tool, "orphan").with_tool_call_id("nope"),
+        ];
+        repair_conversation(&mut messages);
+        let first_pass = messages.clone();
+        repair_conversation(&mut messages);
+        assert_eq!(messages.len(), first_pass.len());
+        for (a, b) in messages.iter().zip(first_pass.iter()) {
+            assert_eq!(a.role, b.role);
+            assert_eq!(a.content, b.content);
+        }
+    }
+
+    #[test]
+    fn test_repair_complex_scenario() {
+        // A complex scenario combining multiple issues.
+        let tc = ToolCall {
+            id: "call_1".to_string(),
+            name: "read".to_string(),
+            arguments: serde_json::json!({}),
+        };
+        let tr = ToolResult {
+            call_id: "call_1".to_string(),
+            content: "file data".to_string(),
+            is_error: false,
+        };
+        let mut messages = vec![
+            Message::new(Role::User, "step 1"),
+            Message::new(Role::User, "step 2"), // consecutive user — merge
+            Message::new(Role::Assistant, ""),  // empty assistant — remove
+            Message::new(Role::Assistant, "reading").with_tool_calls(vec![tc]),
+            Message::new(Role::Tool, "file data")
+                .with_tool_call_id("call_1")
+                .with_tool_results(vec![tr]),
+            Message::new(Role::Tool, "orphan").with_tool_call_id("call_99"), // orphaned — remove
+            Message::new(Role::Assistant, "all done"),
+        ];
+        repair_conversation(&mut messages);
+        // Expected: merged user, assistant+tool_call, tool_result, terminal assistant
+        assert_eq!(messages.len(), 4);
+        assert_eq!(messages[0].role, Role::User);
+        assert!(messages[0].content.contains("step 1"));
+        assert!(messages[0].content.contains("step 2"));
+        assert_eq!(messages[1].role, Role::Assistant);
+        assert_eq!(messages[1].content, "reading");
+        assert_eq!(messages[2].role, Role::Tool);
+        assert_eq!(messages[2].tool_call_id.as_deref(), Some("call_1"));
+        assert_eq!(messages[3].role, Role::Assistant);
+        assert_eq!(messages[3].content, "all done");
     }
 }

@@ -151,9 +151,13 @@ pub async fn submit_goal(
         let forwarder = tokio::spawn(async move {
             let mut last_tool_was_todo_write = false;
             while let Some(event) = rx.recv().await {
-                // Checkpoint: incrementally save session so progress survives crashes
+                // Checkpoint: incrementally save session so progress survives crashes.
+                // Uses add_messages (INSERT OR REPLACE) instead of full save
+                // (DELETE-all + INSERT-all) to avoid data loss on crash.
                 if let ava_agent::agent_loop::AgentEvent::Checkpoint(ref session) = event {
-                    let _ = checkpoint_stack.session_manager.save(session);
+                    let _ = checkpoint_stack
+                        .session_manager
+                        .add_messages(session.id, &session.messages);
                     continue; // Don't forward checkpoint events to WebSocket clients
                 }
                 // Track write/edit tool calls for undo support, and detect todo_write
@@ -1373,14 +1377,13 @@ pub async fn add_message(
         model: None,
     };
 
-    session.messages.push(message);
-    session.updated_at = chrono::Utc::now();
-
+    // Incremental insert: only persist this single message instead of
+    // re-writing the entire session (crash-safe, O(1) instead of O(n)).
     state
         .inner
         .stack
         .session_manager
-        .save(&session)
+        .add_message(uuid, &message)
         .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
 
     Ok(Json(summary))
@@ -1421,44 +1424,23 @@ pub async fn update_message(
         error_response(StatusCode::BAD_REQUEST, &format!("Invalid session ID: {e}"))
     })?;
     // Accept both UUID and custom string IDs (frontend uses "asst-{timestamp}-{random}")
-    let msg_uuid_opt = uuid::Uuid::parse_str(&msg_id).ok();
-
-    let mut session = state
-        .inner
-        .stack
-        .session_manager
-        .get(session_uuid)
-        .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?
-        .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "Session not found"))?;
-
-    let msg = session
-        .messages
-        .iter_mut()
-        .find(|m| {
-            if let Some(ref uuid) = msg_uuid_opt {
-                m.id == *uuid
-            } else {
-                m.id.to_string() == msg_id
-            }
-        })
-        .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "Message not found"))?;
-
-    if let Some(content) = req.content {
-        msg.content = content;
-    }
+    let msg_uuid = uuid::Uuid::parse_str(&msg_id).map_err(|e| {
+        error_response(StatusCode::BAD_REQUEST, &format!("Invalid message ID: {e}"))
+    })?;
 
     // Metadata, tokens, cost, model are frontend-only fields not stored in
     // ava_types::Message.  We persist the content update in the backend
     // session (for LLM context) and return success; the frontend's in-memory
     // store holds the rich metadata for its own display needs.
-    session.updated_at = chrono::Utc::now();
-
-    state
-        .inner
-        .stack
-        .session_manager
-        .save(&session)
-        .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
+    if let Some(content) = req.content {
+        // O(1) targeted UPDATE — no need to load/rewrite the entire session.
+        state
+            .inner
+            .stack
+            .session_manager
+            .update_message_content(session_uuid, msg_uuid, &content)
+            .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
+    }
 
     Ok(Json(serde_json::json!({ "ok": true })))
 }

@@ -37,6 +37,10 @@ pub fn base_url_for_provider(provider_name: &str) -> Option<&'static str> {
         "gemini" => Some("https://generativelanguage.googleapis.com"),
         "copilot" => Some("https://api.individual.githubcopilot.com"),
         "inception" => Some("https://api.inceptionlabs.ai"),
+        "xai" => Some("https://api.x.ai/v1"),
+        "mistral" => Some("https://api.mistral.ai/v1"),
+        "groq" => Some("https://api.groq.com/openai/v1"),
+        "deepseek" => Some("https://api.deepseek.com/v1"),
         "ollama" => Some("http://localhost:11434"),
         "alibaba" => Some("https://coding-intl.dashscope.aliyuncs.com/apps/anthropic/v1"),
         "alibaba-cn" => Some("https://coding.dashscope.aliyuncs.com/apps/anthropic/v1"),
@@ -114,10 +118,9 @@ pub fn create_provider(
 
     match normalized.as_str() {
         "anthropic" => {
-            let entry = credential
-                .ok_or_else(|| AvaError::MissingApiKey {
-                    provider: "anthropic".to_string(),
-                })?;
+            let entry = credential.ok_or_else(|| AvaError::MissingApiKey {
+                provider: "anthropic".to_string(),
+            })?;
             let api_key = entry
                 .effective_api_key()
                 .ok_or_else(|| AvaError::MissingApiKey {
@@ -126,10 +129,9 @@ pub fn create_provider(
             Ok(Box::new(AnthropicProvider::new(pool, api_key, model)))
         }
         "openai" => {
-            let entry = credential
-                .ok_or_else(|| AvaError::MissingApiKey {
-                    provider: "openai".to_string(),
-                })?;
+            let entry = credential.ok_or_else(|| AvaError::MissingApiKey {
+                provider: "openai".to_string(),
+            })?;
 
             // ChatGPT OAuth uses chatgpt.com/backend-api/codex with JWT access_token.
             // When the user has an OAuth token but NO API key, route to the
@@ -148,9 +150,7 @@ pub fn create_provider(
                 let base_url = entry
                     .base_url
                     .clone()
-                    .unwrap_or_else(|| {
-                        "https://chatgpt.com/backend-api/codex".to_string()
-                    });
+                    .unwrap_or_else(|| "https://chatgpt.com/backend-api/codex".to_string());
                 let account_id = openai_oauth_account_id(&entry);
                 Ok(Box::new(
                     OpenAIProvider::with_base_url(pool, oauth_token, model, base_url)
@@ -181,9 +181,9 @@ pub fn create_provider(
                     .base_url
                     .clone()
                     .unwrap_or_else(|| "https://api.openai.com".to_string());
-                let litellm = entry.litellm_compatible.unwrap_or_else(|| {
-                    openai::looks_like_litellm_proxy(&base_url)
-                });
+                let litellm = entry
+                    .litellm_compatible
+                    .unwrap_or_else(|| openai::looks_like_litellm_proxy(&base_url));
                 Ok(Box::new(
                     OpenAIProvider::with_base_url(pool, api_key, model, base_url)
                         .with_litellm_compatible(litellm),
@@ -191,10 +191,9 @@ pub fn create_provider(
             }
         }
         "openrouter" => {
-            let entry = credential
-                .ok_or_else(|| AvaError::MissingApiKey {
-                    provider: "openrouter".to_string(),
-                })?;
+            let entry = credential.ok_or_else(|| AvaError::MissingApiKey {
+                provider: "openrouter".to_string(),
+            })?;
             let api_key = entry
                 .effective_api_key()
                 .ok_or_else(|| AvaError::MissingApiKey {
@@ -210,10 +209,9 @@ pub fn create_provider(
             }
         }
         "inception" => {
-            let entry = credential
-                .ok_or_else(|| AvaError::MissingApiKey {
-                    provider: "inception".to_string(),
-                })?;
+            let entry = credential.ok_or_else(|| AvaError::MissingApiKey {
+                provider: "inception".to_string(),
+            })?;
             let api_key = entry
                 .effective_api_key()
                 .ok_or_else(|| AvaError::MissingApiKey {
@@ -229,10 +227,9 @@ pub fn create_provider(
             }
         }
         "gemini" => {
-            let entry = credential
-                .ok_or_else(|| AvaError::MissingApiKey {
-                    provider: "gemini".to_string(),
-                })?;
+            let entry = credential.ok_or_else(|| AvaError::MissingApiKey {
+                provider: "gemini".to_string(),
+            })?;
             let api_key = entry
                 .effective_api_key()
                 .ok_or_else(|| AvaError::MissingApiKey {
@@ -244,12 +241,13 @@ pub fn create_provider(
             let entry = credential.ok_or_else(|| AvaError::MissingApiKey {
                 provider: "copilot".to_string(),
             })?;
-            let oauth_token = entry
-                .oauth_token
-                .as_deref()
-                .ok_or_else(|| AvaError::MissingApiKey {
-                    provider: "copilot (not connected — use /connect copilot)".to_string(),
-                })?;
+            let oauth_token =
+                entry
+                    .oauth_token
+                    .as_deref()
+                    .ok_or_else(|| AvaError::MissingApiKey {
+                        provider: "copilot (not connected — use /connect copilot)".to_string(),
+                    })?;
             Ok(Box::new(CopilotProvider::new(
                 pool,
                 oauth_token.to_string(),
@@ -263,20 +261,46 @@ pub fn create_provider(
                 .unwrap_or_else(|| "http://localhost:11434".to_string());
             Ok(Box::new(OllamaProvider::new(pool, base_url, model)))
         }
+        // OpenAI-compatible providers (xAI Grok, Mistral, Groq, DeepSeek)
+        "xai" | "mistral" | "groq" | "deepseek" => {
+            let entry = credential.ok_or_else(|| AvaError::MissingApiKey {
+                provider: normalized.to_string(),
+            })?;
+            let api_key = entry
+                .effective_api_key()
+                .ok_or_else(|| AvaError::MissingApiKey {
+                    provider: normalized.to_string(),
+                })?
+                .to_string();
+            let default_url = match normalized.as_str() {
+                "xai" => "https://api.x.ai/v1",
+                "mistral" => "https://api.mistral.ai/v1",
+                "groq" => "https://api.groq.com/openai/v1",
+                "deepseek" => "https://api.deepseek.com/v1",
+                _ => unreachable!(),
+            };
+            let base_url = entry.base_url.as_deref().unwrap_or(default_url);
+            Ok(Box::new(OpenAIProvider::with_base_url(
+                pool, api_key, model, base_url,
+            )))
+        }
         // ChatGPT — explicit provider alias for the Responses API.
         // Users can also configure OAuth under the "openai" provider name
         // (auto-detected from OAuth-only credentials).
         "chatgpt" => {
-            let entry = credential
-                .ok_or_else(|| AvaError::MissingApiKey {
-                    provider: "chatgpt".to_string(),
-                })?;
+            let entry = credential.ok_or_else(|| AvaError::MissingApiKey {
+                provider: "chatgpt".to_string(),
+            })?;
             let oauth_token = entry
                 .oauth_token
                 .as_deref()
                 .or_else(|| {
                     let key = entry.api_key.trim();
-                    if key.is_empty() { None } else { Some(key) }
+                    if key.is_empty() {
+                        None
+                    } else {
+                        Some(key)
+                    }
                 })
                 .ok_or_else(|| AvaError::MissingApiKey {
                     provider: "chatgpt (not connected — configure OAuth or set token)".to_string(),
@@ -321,7 +345,11 @@ pub fn create_provider(
             ))
         }
         // Anthropic-compatible coding plan providers
-        "alibaba" | "alibaba-cn" | "kimi-for-coding" | "minimax-coding-plan" | "minimax-cn-coding-plan" => {
+        "alibaba"
+        | "alibaba-cn"
+        | "kimi-for-coding"
+        | "minimax-coding-plan"
+        | "minimax-cn-coding-plan" => {
             let entry = credential.ok_or_else(|| AvaError::MissingApiKey {
                 provider: provider_name.to_string(),
             })?;
@@ -338,20 +366,19 @@ pub fn create_provider(
                 "minimax-cn-coding-plan" => "https://api.minimaxi.com/anthropic/v1",
                 _ => unreachable!(),
             };
-            let base_url = entry
-                .base_url
-                .as_deref()
-                .unwrap_or(default_url);
+            let base_url = entry.base_url.as_deref().unwrap_or(default_url);
             Ok(Box::new(AnthropicProvider::with_base_url(
                 pool, api_key, model, base_url,
             )))
         }
         _ => Err(AvaError::ProviderError {
             provider: provider_name.to_string(),
-            message: "unknown provider. Available: anthropic, openai, chatgpt, openrouter, inception, copilot, gemini, ollama, \
+            message:
+                "unknown provider. Available: anthropic, openai, chatgpt, openrouter, inception, \
+                      xai, mistral, groq, deepseek, copilot, gemini, ollama, \
                       alibaba, alibaba-cn, zai-coding-plan, zhipuai-coding-plan, kimi-for-coding, \
                       minimax-coding-plan, minimax-cn-coding-plan"
-                .to_string(),
+                    .to_string(),
         }),
     }
 }
@@ -553,6 +580,10 @@ mod tests {
             ("openai", "gpt-4.1"),
             ("openrouter", "anthropic/claude-sonnet-4"),
             ("inception", "mercury-2"),
+            ("xai", "grok-3"),
+            ("mistral", "mistral-large"),
+            ("groq", "llama-3.3-70b"),
+            ("deepseek", "deepseek-chat"),
             ("gemini", "gemini-2.5-pro"),
             ("ollama", "llama3.3"),
             ("alibaba", "qwen3.5-plus"),
@@ -585,6 +616,10 @@ mod tests {
             "openai",
             "openrouter",
             "inception",
+            "xai",
+            "mistral",
+            "groq",
+            "deepseek",
             "gemini",
             "copilot",
             "ollama",
@@ -711,6 +746,39 @@ mod tests {
         let provider =
             create_provider("inception", "mercury-coder", &creds, default_pool()).unwrap();
         assert_eq!(provider.model_name(), "mercury-coder-small");
+    }
+
+    #[test]
+    fn xai_creates_openai_compatible_provider() {
+        let creds = mock_creds_for(&["xai"]);
+        let provider = create_provider("xai", "grok-3", &creds, default_pool()).unwrap();
+        assert_eq!(provider.model_name(), "grok-3");
+        assert!(provider.supports_tools());
+    }
+
+    #[test]
+    fn mistral_creates_openai_compatible_provider() {
+        let creds = mock_creds_for(&["mistral"]);
+        let provider = create_provider("mistral", "mistral-large", &creds, default_pool()).unwrap();
+        assert_eq!(provider.model_name(), "mistral-large");
+        assert!(provider.supports_tools());
+    }
+
+    #[test]
+    fn groq_creates_openai_compatible_provider() {
+        let creds = mock_creds_for(&["groq"]);
+        let provider = create_provider("groq", "llama-3.3-70b", &creds, default_pool()).unwrap();
+        assert_eq!(provider.model_name(), "llama-3.3-70b");
+        assert!(provider.supports_tools());
+    }
+
+    #[test]
+    fn deepseek_creates_openai_compatible_provider() {
+        let creds = mock_creds_for(&["deepseek"]);
+        let provider =
+            create_provider("deepseek", "deepseek-chat", &creds, default_pool()).unwrap();
+        assert_eq!(provider.model_name(), "deepseek-chat");
+        assert!(provider.supports_tools());
     }
 
     #[test]

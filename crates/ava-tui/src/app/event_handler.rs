@@ -478,8 +478,10 @@ impl App {
                     .push(UiMessage::new(MessageKind::ToolResult, msg));
             }
             ava_agent::AgentEvent::Checkpoint(session) => {
-                // Incremental save so progress survives unexpected exits
-                self.state.session.save_session(&session);
+                // Incremental save so progress survives unexpected exits.
+                // Uses add_messages (INSERT OR REPLACE) instead of full save
+                // (DELETE-all + INSERT-all) to avoid data loss on crash.
+                self.state.session.checkpoint_session(&session);
             }
             ava_agent::AgentEvent::SnapshotTaken {
                 commit_hash,
@@ -487,6 +489,24 @@ impl App {
             } => {
                 debug!(hash = %commit_hash, msg = %message, "snapshot recorded for rewind");
                 self.state.rewind.record_snapshot_hash(commit_hash);
+                // Lazily create the snapshot manager handle for TUI-side restore.
+                // The agent loop has its own handle; here we create a matching one
+                // pointing at the same project so /rewind can use it.
+                if self.state.snapshot_manager.is_none() {
+                    let project_root = std::env::current_dir().unwrap_or_default();
+                    if let Ok(mgr) =
+                        ava_tools::core::file_snapshot::SnapshotManager::new_initialized(
+                            &project_root,
+                        )
+                    {
+                        let shared = ava_tools::core::file_snapshot::new_shared_snapshot_manager();
+                        // Use try_write to avoid blocking — the lock is uncontested here.
+                        if let Ok(mut guard) = shared.try_write() {
+                            *guard = Some(mgr);
+                        }
+                        self.state.snapshot_manager = Some(shared);
+                    }
+                }
             }
             ava_agent::AgentEvent::Error(err) => {
                 info!(error = %err, "TUI received AgentEvent::Error");

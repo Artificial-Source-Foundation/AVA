@@ -385,47 +385,35 @@ Commands
 
     /// Restore code at a checkpoint, preferring snapshot-based restore when available.
     ///
-    /// When a shadow git snapshot hash is present, uses the `SnapshotManager` to
-    /// restore the full project state. Falls back to per-file content restore
-    /// from the checkpoint's `file_changes` list.
+    /// When a shadow git snapshot hash is present, uses synchronous git commands
+    /// to restore the full project state from the shadow repo. Falls back to
+    /// per-file content restore from the checkpoint's `file_changes` list.
     fn restore_code_at_checkpoint(
         &self,
         checkpoint_idx: usize,
         snapshot_hash: &Option<String>,
     ) -> (usize, Vec<String>) {
         if let Some(ref hash) = snapshot_hash {
-            // Try snapshot-based restore (blocking — acceptable for UI action)
-            if let Some(ref manager) = self.state.snapshot_manager {
-                let rt = tokio::runtime::Handle::try_current();
-                if let Ok(handle) = rt {
-                    let manager = manager.clone();
-                    let hash = hash.clone();
-                    let result = std::thread::scope(|_| {
-                        handle.block_on(async {
-                            let guard = manager.read().await;
-                            if let Some(ref mgr) = *guard {
-                                mgr.restore(&hash).await
-                            } else {
-                                Err("snapshot manager not available".to_string())
+            // Try snapshot-based restore using synchronous git commands.
+            // This is acceptable because rewind is a rare, user-initiated action.
+            if let Some(ref manager_handle) = self.state.snapshot_manager {
+                if let Ok(guard) = manager_handle.try_read() {
+                    if let Some(ref mgr) = *guard {
+                        match Self::restore_snapshot_sync(mgr, hash) {
+                            Ok(count) => {
+                                tracing::info!(
+                                    hash = %hash,
+                                    files = count,
+                                    "restored project state via snapshot"
+                                );
+                                return (count, Vec::new());
                             }
-                        })
-                    });
-                    match result {
-                        Ok(changed_files) => {
-                            let count = changed_files.len();
-                            tracing::info!(
-                                hash = %hash,
-                                files = count,
-                                "restored project state via snapshot"
-                            );
-                            return (count, Vec::new());
-                        }
-                        Err(e) => {
-                            tracing::warn!(
-                                error = %e,
-                                "snapshot restore failed, falling back to per-file restore"
-                            );
-                            // Fall through to per-file restore
+                            Err(e) => {
+                                tracing::warn!(
+                                    error = %e,
+                                    "snapshot restore failed, falling back to per-file restore"
+                                );
+                            }
                         }
                     }
                 }
@@ -434,6 +422,61 @@ Commands
 
         // Fallback: per-file content restore
         self.state.rewind.restore_files_after(checkpoint_idx)
+    }
+
+    /// Synchronous snapshot restore using `std::process::Command`.
+    ///
+    /// The `SnapshotManager`'s async `restore()` cannot be used from the TUI's
+    /// sync event handler, so we replicate the essential git operations here.
+    fn restore_snapshot_sync(
+        mgr: &ava_tools::core::file_snapshot::SnapshotManager,
+        snapshot_hash: &str,
+    ) -> Result<usize, String> {
+        let snapshot_dir = mgr.snapshot_dir();
+        let project_root = mgr.project_root();
+
+        // read-tree: load the snapshot's tree into the index
+        let read_output = std::process::Command::new("git")
+            .env("GIT_DIR", snapshot_dir)
+            .env("GIT_WORK_TREE", project_root)
+            .args(["read-tree", snapshot_hash])
+            .output()
+            .map_err(|e| format!("git read-tree failed: {e}"))?;
+
+        if !read_output.status.success() {
+            let stderr = String::from_utf8_lossy(&read_output.stderr);
+            return Err(format!("git read-tree failed: {stderr}"));
+        }
+
+        // checkout-index: write the indexed files to the working directory
+        let checkout_output = std::process::Command::new("git")
+            .env("GIT_DIR", snapshot_dir)
+            .env("GIT_WORK_TREE", project_root)
+            .args(["checkout-index", "-a", "-f"])
+            .output()
+            .map_err(|e| format!("git checkout-index failed: {e}"))?;
+
+        if !checkout_output.status.success() {
+            let stderr = String::from_utf8_lossy(&checkout_output.stderr);
+            return Err(format!("git checkout-index failed: {stderr}"));
+        }
+
+        // Count changed files by comparing HEAD to the target snapshot
+        let diff_output = std::process::Command::new("git")
+            .env("GIT_DIR", snapshot_dir)
+            .env("GIT_WORK_TREE", project_root)
+            .args(["diff", "--name-only", "HEAD", snapshot_hash])
+            .output();
+
+        let count = match diff_output {
+            Ok(out) if out.status.success() => {
+                let text = String::from_utf8_lossy(&out.stdout);
+                text.lines().filter(|l| !l.trim().is_empty()).count()
+            }
+            _ => 0, // Non-fatal — we still restored successfully
+        };
+
+        Ok(count)
     }
 
     pub(crate) fn extract_code_blocks(content: &str) -> Vec<CodeBlock> {

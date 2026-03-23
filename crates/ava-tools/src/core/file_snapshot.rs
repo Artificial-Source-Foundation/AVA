@@ -79,6 +79,21 @@ impl SnapshotManager {
         })
     }
 
+    /// Create a `SnapshotManager` and mark it as already initialized.
+    ///
+    /// Use this when you know the shadow repo already exists (e.g., because
+    /// another component already initialized it). Skips the async `init()` call.
+    pub fn new_initialized(project_root: &Path) -> Result<Self, String> {
+        let mut mgr = Self::new(project_root)?;
+        // Only mark initialized if the shadow repo actually exists.
+        if mgr.snapshot_dir.join("HEAD").exists() {
+            mgr.initialized = true;
+            Ok(mgr)
+        } else {
+            Err("shadow snapshot repo not yet initialized".to_string())
+        }
+    }
+
     /// Initialize the shadow git repo if it doesn't already exist.
     ///
     /// Creates a bare-style repo with `git init` and configures it to use

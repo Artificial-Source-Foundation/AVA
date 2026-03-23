@@ -15,6 +15,10 @@ pub fn default_model_for_provider(provider: &str) -> Option<&'static str> {
         "openai" => Some("gpt-5.3-codex"),
         "openrouter" => Some("openai/gpt-4o-mini"),
         "gemini" => Some("gemini-1.5-flash"),
+        "xai" => Some("grok-3"),
+        "mistral" => Some("mistral-large"),
+        "groq" => Some("llama-3.3-70b"),
+        "deepseek" => Some("deepseek-chat"),
         "ollama" => Some("llama3.1"),
         _ => None,
     }

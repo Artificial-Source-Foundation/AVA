@@ -221,6 +221,224 @@
       }
     },
     {
+      "id": "deepseek-chat",
+      "provider": "deepseek",
+      "name": "DeepSeek Chat (V3)",
+      "aliases": ["deepseek-v3"],
+      "capabilities": {
+        "tool_call": true,
+        "streaming": true
+      },
+      "limits": {
+        "context_window": 131072,
+        "max_output": 8192
+      },
+      "cost": {
+        "input_per_million": 0.27,
+        "output_per_million": 1.1
+      }
+    },
+    {
+      "id": "deepseek-coder",
+      "provider": "deepseek",
+      "name": "DeepSeek Coder",
+      "aliases": [],
+      "capabilities": {
+        "tool_call": true,
+        "streaming": true
+      },
+      "limits": {
+        "context_window": 131072,
+        "max_output": 8192
+      },
+      "cost": {
+        "input_per_million": 0.27,
+        "output_per_million": 1.1
+      }
+    },
+    {
+      "id": "deepseek-reasoner",
+      "provider": "deepseek",
+      "name": "DeepSeek Reasoner",
+      "aliases": [],
+      "capabilities": {
+        "tool_call": true,
+        "reasoning": true,
+        "streaming": true
+      },
+      "limits": {
+        "context_window": 131072,
+        "max_output": 32768
+      },
+      "cost": {
+        "input_per_million": 0.55,
+        "output_per_million": 2.19
+      }
+    },
+    {
+      "id": "grok-3",
+      "provider": "xai",
+      "name": "Grok 3",
+      "aliases": ["grok3"],
+      "capabilities": {
+        "tool_call": true,
+        "streaming": true
+      },
+      "limits": {
+        "context_window": 131072,
+        "max_output": 16384
+      },
+      "cost": {
+        "input_per_million": 3.0,
+        "output_per_million": 15.0
+      }
+    },
+    {
+      "id": "grok-3-mini",
+      "provider": "xai",
+      "name": "Grok 3 Mini",
+      "aliases": ["grok3-mini"],
+      "capabilities": {
+        "tool_call": true,
+        "reasoning": true,
+        "streaming": true
+      },
+      "limits": {
+        "context_window": 131072,
+        "max_output": 16384
+      },
+      "cost": {
+        "input_per_million": 0.3,
+        "output_per_million": 0.5
+      }
+    },
+    {
+      "id": "grok-2",
+      "provider": "xai",
+      "name": "Grok 2",
+      "aliases": ["grok2"],
+      "capabilities": {
+        "tool_call": true,
+        "streaming": true
+      },
+      "limits": {
+        "context_window": 131072,
+        "max_output": 16384
+      },
+      "cost": {
+        "input_per_million": 2.0,
+        "output_per_million": 10.0
+      }
+    },
+    {
+      "id": "mistral-large",
+      "provider": "mistral",
+      "name": "Mistral Large",
+      "aliases": ["mistral-large-latest"],
+      "capabilities": {
+        "tool_call": true,
+        "streaming": true
+      },
+      "limits": {
+        "context_window": 131072,
+        "max_output": 8192
+      },
+      "cost": {
+        "input_per_million": 2.0,
+        "output_per_million": 6.0
+      }
+    },
+    {
+      "id": "mistral-medium",
+      "provider": "mistral",
+      "name": "Mistral Medium",
+      "aliases": ["mistral-medium-latest"],
+      "capabilities": {
+        "tool_call": true,
+        "streaming": true
+      },
+      "limits": {
+        "context_window": 131072,
+        "max_output": 8192
+      },
+      "cost": {
+        "input_per_million": 0.4,
+        "output_per_million": 2.0
+      }
+    },
+    {
+      "id": "codestral",
+      "provider": "mistral",
+      "name": "Codestral",
+      "aliases": ["codestral-latest"],
+      "capabilities": {
+        "tool_call": true,
+        "streaming": true
+      },
+      "limits": {
+        "context_window": 262144,
+        "max_output": 8192
+      },
+      "cost": {
+        "input_per_million": 0.3,
+        "output_per_million": 0.9
+      }
+    },
+    {
+      "id": "llama-3.3-70b",
+      "provider": "groq",
+      "name": "Llama 3.3 70B",
+      "aliases": ["llama-3.3-70b-versatile"],
+      "capabilities": {
+        "tool_call": true,
+        "streaming": true
+      },
+      "limits": {
+        "context_window": 131072,
+        "max_output": 32768
+      },
+      "cost": {
+        "input_per_million": 0.59,
+        "output_per_million": 0.79
+      }
+    },
+    {
+      "id": "mixtral-8x7b",
+      "provider": "groq",
+      "name": "Mixtral 8x7B",
+      "aliases": ["mixtral-8x7b-32768"],
+      "capabilities": {
+        "tool_call": true,
+        "streaming": true
+      },
+      "limits": {
+        "context_window": 32768,
+        "max_output": 8192
+      },
+      "cost": {
+        "input_per_million": 0.24,
+        "output_per_million": 0.24
+      }
+    },
+    {
+      "id": "gemma2-9b",
+      "provider": "groq",
+      "name": "Gemma 2 9B",
+      "aliases": ["gemma2-9b-it"],
+      "capabilities": {
+        "tool_call": true,
+        "streaming": true
+      },
+      "limits": {
+        "context_window": 8192,
+        "max_output": 4096
+      },
+      "cost": {
+        "input_per_million": 0.2,
+        "output_per_million": 0.2
+      }
+    },
+    {
       "id": "mercury-2",
       "provider": "inception",
       "name": "Mercury 2",

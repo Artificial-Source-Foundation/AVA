@@ -496,6 +496,24 @@ impl AgentLoop {
             }
         }
 
+        // Repair conversation history before sending to LLM — fix orphaned tool
+        // results, empty assistant messages, consecutive user messages, and duplicates
+        // that would cause cryptic API errors.
+        {
+            let mut msgs = self.context.get_messages().to_vec();
+            let before = msgs.len();
+            ava_types::repair_conversation(&mut msgs);
+            if msgs.len() != before {
+                debug!(
+                    before,
+                    after = msgs.len(),
+                    removed = before - msgs.len(),
+                    "repaired conversation history before LLM call"
+                );
+                self.context.replace_messages(msgs);
+            }
+        }
+
         let streaming = event_tx.is_some();
 
         let result = if streaming {
@@ -1098,17 +1116,67 @@ impl AgentLoop {
                 .await;
             }
 
-            // --- Generate LLM response ---
-            let (response_text, tool_calls, usage) =
-                match self.generate_turn_response(&event_tx).await {
-                    Ok(result) => result,
-                    Err(error) => {
+            // --- Generate LLM response (with context overflow recovery) ---
+            let (response_text, tool_calls, usage) = match self
+                .generate_turn_response(&event_tx)
+                .await
+            {
+                Ok(result) => result,
+                Err(error) if ava_llm::providers::common::is_context_overflow(&error) => {
+                    // Context overflow detected — auto-compact and retry once.
+                    warn!(
+                        error = %error,
+                        tokens = self.context.token_count(),
+                        "context overflow from provider, attempting auto-compaction"
+                    );
+                    Self::emit(
+                        &event_tx,
+                        AgentEvent::Progress(
+                            "context overflow detected, compacting...".to_string(),
+                        ),
+                    );
+
+                    // Try lightweight pruning first
+                    let pruned = self.context.try_prune();
+                    if pruned > 0 {
+                        Self::emit(
+                            &event_tx,
+                            AgentEvent::Progress(format!("pruned {pruned} old tool output(s)")),
+                        );
+                    }
+
+                    // Full async compaction
+                    if let Err(compact_err) = self.context.compact_async().await {
+                        warn!(error = %compact_err, "compaction failed during overflow recovery");
                         let err_event = AgentEvent::Error(error.to_string());
                         Self::emit(&event_tx, err_event.clone());
                         self.broadcast_event_to_plugins(&err_event).await;
                         return Err(error);
                     }
-                };
+
+                    Self::emit(
+                        &event_tx,
+                        AgentEvent::Progress("context compacted, retrying LLM call...".to_string()),
+                    );
+
+                    // Retry the LLM call once after compaction
+                    match self.generate_turn_response(&event_tx).await {
+                        Ok(result) => result,
+                        Err(retry_error) => {
+                            let err_event = AgentEvent::Error(retry_error.to_string());
+                            Self::emit(&event_tx, err_event.clone());
+                            self.broadcast_event_to_plugins(&err_event).await;
+                            return Err(retry_error);
+                        }
+                    }
+                }
+                Err(error) => {
+                    let err_event = AgentEvent::Error(error.to_string());
+                    Self::emit(&event_tx, err_event.clone());
+                    self.broadcast_event_to_plugins(&err_event).await;
+                    return Err(error);
+                }
+            };
 
             // --- Fire AgentAfter plugin hook ---
             if let Some(ref pm) = self.plugin_manager {

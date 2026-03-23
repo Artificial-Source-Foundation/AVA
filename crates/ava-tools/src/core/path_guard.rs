@@ -56,15 +56,41 @@ pub fn enforce_workspace_path(input: &str, tool_name: &str) -> Result<PathBuf> {
         parent_resolved.join(file_name)
     };
 
-    if !resolved.starts_with(&workspace) {
-        return Err(AvaError::PermissionDenied(format!(
-            "{tool_name} path {} is outside workspace {}",
-            resolved.display(),
-            workspace.display()
-        )));
-    }
+    check_symlink_escape(&resolved, &workspace, input, tool_name)?;
 
     Ok(resolved)
+}
+
+/// Check if a resolved (canonicalized) path escapes the workspace boundary.
+///
+/// This catches symlink-based escapes: a symlink inside the workspace that
+/// points to a location outside it. After `std::fs::canonicalize()` resolves
+/// all symlinks, the canonical path must still reside under the workspace root.
+///
+/// For paths that don't exist yet, callers should canonicalize the parent
+/// directory and append the filename before calling this function.
+pub fn check_symlink_escape(
+    resolved_path: &Path,
+    workspace_root: &Path,
+    original_input: &str,
+    tool_name: &str,
+) -> Result<()> {
+    if !resolved_path.starts_with(workspace_root) {
+        // Determine if this was a symlink escape vs a plain path escape
+        let raw = Path::new(original_input);
+        let is_symlink = raw.is_symlink() || raw.parent().map(|p| p.is_symlink()).unwrap_or(false);
+        let reason = if is_symlink {
+            "path escapes workspace boundary via symlink"
+        } else {
+            "path is outside workspace"
+        };
+        return Err(AvaError::PermissionDenied(format!(
+            "{tool_name}: {reason} — resolved {} is outside {}",
+            resolved_path.display(),
+            workspace_root.display()
+        )));
+    }
+    Ok(())
 }
 
 fn workspace_root() -> Result<PathBuf> {
@@ -131,6 +157,120 @@ mod tests {
 
         match previous {
             Some(previous_path) => std::env::set_var("AVA_WORKSPACE", previous_path),
+            None => std::env::remove_var("AVA_WORKSPACE"),
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlink_file_escape_is_detected() {
+        let ws = TempDir::new().unwrap();
+        let outside = TempDir::new().unwrap();
+
+        // Create a file outside the workspace
+        let outside_file = outside.path().join("secret.txt");
+        std::fs::write(&outside_file, "secret data").unwrap();
+
+        // Create a symlink inside the workspace pointing outside
+        let symlink_path = ws.path().join("escape.txt");
+        std::os::unix::fs::symlink(&outside_file, &symlink_path).unwrap();
+
+        let previous = std::env::var_os("AVA_WORKSPACE");
+        std::env::set_var("AVA_WORKSPACE", ws.path());
+
+        let result = enforce_workspace_path("escape.txt", "write");
+        assert!(result.is_err(), "symlink file escape should be blocked");
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("symlink") || err_msg.contains("outside workspace"),
+            "error should mention symlink escape, got: {err_msg}"
+        );
+
+        match previous {
+            Some(p) => std::env::set_var("AVA_WORKSPACE", p),
+            None => std::env::remove_var("AVA_WORKSPACE"),
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlink_directory_escape_is_detected() {
+        let ws = TempDir::new().unwrap();
+        let outside = TempDir::new().unwrap();
+
+        // Create a directory outside the workspace with a file
+        let outside_dir = outside.path().join("data");
+        std::fs::create_dir_all(&outside_dir).unwrap();
+        std::fs::write(outside_dir.join("config.toml"), "key = true").unwrap();
+
+        // Create a symlinked directory inside the workspace
+        let symlink_dir = ws.path().join("linked");
+        std::os::unix::fs::symlink(&outside_dir, &symlink_dir).unwrap();
+
+        let previous = std::env::var_os("AVA_WORKSPACE");
+        std::env::set_var("AVA_WORKSPACE", ws.path());
+
+        let result = enforce_workspace_path("linked/config.toml", "edit");
+        assert!(
+            result.is_err(),
+            "symlink directory escape should be blocked"
+        );
+
+        match previous {
+            Some(p) => std::env::set_var("AVA_WORKSPACE", p),
+            None => std::env::remove_var("AVA_WORKSPACE"),
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlink_within_workspace_is_allowed() {
+        let ws = TempDir::new().unwrap();
+
+        // Create a real file inside the workspace
+        let real_file = ws.path().join("real.txt");
+        std::fs::write(&real_file, "data").unwrap();
+
+        // Create a symlink inside the workspace pointing to another workspace file
+        let symlink_path = ws.path().join("link.txt");
+        std::os::unix::fs::symlink(&real_file, &symlink_path).unwrap();
+
+        let previous = std::env::var_os("AVA_WORKSPACE");
+        std::env::set_var("AVA_WORKSPACE", ws.path());
+
+        let result = enforce_workspace_path("link.txt", "write");
+        assert!(result.is_ok(), "symlink within workspace should be allowed");
+
+        match previous {
+            Some(p) => std::env::set_var("AVA_WORKSPACE", p),
+            None => std::env::remove_var("AVA_WORKSPACE"),
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn new_file_under_symlinked_parent_escape_is_detected() {
+        let ws = TempDir::new().unwrap();
+        let outside = TempDir::new().unwrap();
+
+        // Symlink a directory inside workspace to outside
+        let outside_dir = outside.path().join("ext");
+        std::fs::create_dir_all(&outside_dir).unwrap();
+        let symlink_dir = ws.path().join("ext");
+        std::os::unix::fs::symlink(&outside_dir, &symlink_dir).unwrap();
+
+        let previous = std::env::var_os("AVA_WORKSPACE");
+        std::env::set_var("AVA_WORKSPACE", ws.path());
+
+        // Try to create a new file under the symlinked directory
+        let result = enforce_workspace_path("ext/newfile.rs", "write");
+        assert!(
+            result.is_err(),
+            "new file under symlinked escape directory should be blocked"
+        );
+
+        match previous {
+            Some(p) => std::env::set_var("AVA_WORKSPACE", p),
             None => std::env::remove_var("AVA_WORKSPACE"),
         }
     }

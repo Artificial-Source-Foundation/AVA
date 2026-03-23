@@ -187,12 +187,12 @@ mod tests {
     #[test]
     fn registry_is_minimal() {
         let reg = ModelRegistry::load();
-        // The registry should be a small fallback (~12 essential models),
+        // The registry should be a small fallback (~25 essential models),
         // not the full catalog. Subscription/coding-plan providers are in
         // fallback.rs instead.
         assert!(
-            reg.models.len() <= 20,
-            "Registry should be minimal (~12 models), found {}",
+            reg.models.len() <= 30,
+            "Registry should be minimal (~25 models), found {}",
             reg.models.len()
         );
     }

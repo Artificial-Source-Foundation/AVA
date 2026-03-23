@@ -168,36 +168,155 @@ impl SessionManager {
         )
         .map_err(db_error)?;
 
-        tx.execute(
-            "DELETE FROM messages WHERE session_id = ?1",
-            params![session.id.to_string()],
-        )
-        .map_err(db_error)?;
-
+        // Upsert each message with INSERT OR REPLACE — no DELETE-all needed.
+        // This is crash-safe: if the process dies mid-transaction, existing
+        // messages remain intact because the transaction rolls back.
         for message in &session.messages {
+            Self::upsert_message_in_tx(&tx, session.id, message)?;
+        }
+
+        // Remove orphaned messages that are no longer in the session's message
+        // list.  This replaces the old DELETE-all + INSERT-all pattern with a
+        // targeted cleanup that only removes messages whose IDs are absent from
+        // the current set.
+        if !session.messages.is_empty() {
+            // Build a comma-separated list of quoted message IDs for the NOT IN clause.
+            let id_list: Vec<String> = session.messages.iter().map(|m| m.id.to_string()).collect();
+            let placeholders: String = id_list.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+            let sql = format!(
+                "DELETE FROM messages WHERE session_id = ?1 AND id NOT IN ({placeholders})"
+            );
+            let mut stmt = tx.prepare(&sql).map_err(db_error)?;
+            let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> =
+                vec![Box::new(session.id.to_string())];
+            for id in &id_list {
+                param_values.push(Box::new(id.clone()));
+            }
+            let params_ref: Vec<&dyn rusqlite::types::ToSql> =
+                param_values.iter().map(|p| p.as_ref()).collect();
+            stmt.execute(params_ref.as_slice()).map_err(db_error)?;
+        } else {
+            // Session has no messages — remove all messages for this session.
             tx.execute(
-                "INSERT OR REPLACE INTO messages (id, session_id, role, content, timestamp, tool_calls, tool_results, tool_call_id, images, parent_id)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-                params![
-                    message.id.to_string(),
-                    session.id.to_string(),
-                    role_to_str(&message.role),
-                    message.content,
-                    message.timestamp.to_rfc3339(),
-                    serde_json::to_string(&message.tool_calls)
-                        .map_err(|error| AvaError::SerializationError(error.to_string()))?,
-                    serde_json::to_string(&message.tool_results)
-                        .map_err(|error| AvaError::SerializationError(error.to_string()))?,
-                    message.tool_call_id.as_deref(),
-                    serde_json::to_string(&message.images)
-                        .map_err(|error| AvaError::SerializationError(error.to_string()))?,
-                    message.parent_id.map(|id| id.to_string()),
-                ],
+                "DELETE FROM messages WHERE session_id = ?1",
+                params![session.id.to_string()],
             )
             .map_err(db_error)?;
         }
 
         tx.commit().map_err(db_error)
+    }
+
+    /// Persist a single message to the database, upserting it.
+    ///
+    /// This is the preferred method for incremental saves (e.g. checkpoints).
+    /// It only touches one row and updates the session's `updated_at` timestamp.
+    /// If the process crashes, previously persisted messages are unaffected.
+    pub fn add_message(&self, session_id: Uuid, message: &Message) -> Result<()> {
+        let mut conn = self.open_conn()?;
+        let tx = conn.transaction().map_err(db_error)?;
+
+        Self::upsert_message_in_tx(&tx, session_id, message)?;
+
+        tx.execute(
+            "UPDATE sessions SET updated_at = ?1 WHERE id = ?2",
+            params![Utc::now().to_rfc3339(), session_id.to_string()],
+        )
+        .map_err(db_error)?;
+
+        tx.commit().map_err(db_error)
+    }
+
+    /// Persist multiple messages incrementally without deleting existing ones.
+    ///
+    /// Like `add_message` but batched in a single transaction for efficiency.
+    pub fn add_messages(&self, session_id: Uuid, messages: &[Message]) -> Result<()> {
+        if messages.is_empty() {
+            return Ok(());
+        }
+        let mut conn = self.open_conn()?;
+        let tx = conn.transaction().map_err(db_error)?;
+
+        for message in messages {
+            Self::upsert_message_in_tx(&tx, session_id, message)?;
+        }
+
+        tx.execute(
+            "UPDATE sessions SET updated_at = ?1 WHERE id = ?2",
+            params![Utc::now().to_rfc3339(), session_id.to_string()],
+        )
+        .map_err(db_error)?;
+
+        tx.commit().map_err(db_error)
+    }
+
+    /// Update only the content of an existing message.
+    ///
+    /// This is O(1) — a single UPDATE statement. Use this when only the
+    /// message text has changed (e.g. streaming content finalization).
+    pub fn update_message_content(
+        &self,
+        session_id: Uuid,
+        message_id: Uuid,
+        content: &str,
+    ) -> Result<()> {
+        let conn = self.open_conn()?;
+        let updated = conn
+            .execute(
+                "UPDATE messages SET content = ?1 WHERE id = ?2 AND session_id = ?3",
+                params![content, message_id.to_string(), session_id.to_string()],
+            )
+            .map_err(db_error)?;
+
+        if updated == 0 {
+            return Err(AvaError::NotFound(format!(
+                "message {message_id} not found in session {session_id}"
+            )));
+        }
+
+        conn.execute(
+            "UPDATE sessions SET updated_at = ?1 WHERE id = ?2",
+            params![Utc::now().to_rfc3339(), session_id.to_string()],
+        )
+        .map_err(db_error)?;
+
+        Ok(())
+    }
+
+    /// Upsert a single message row within an existing transaction.
+    fn upsert_message_in_tx(
+        tx: &rusqlite::Transaction<'_>,
+        session_id: Uuid,
+        message: &Message,
+    ) -> Result<()> {
+        tx.execute(
+            "INSERT INTO messages (id, session_id, role, content, timestamp, tool_calls, tool_results, tool_call_id, images, parent_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+             ON CONFLICT(id) DO UPDATE SET
+               content = excluded.content,
+               tool_calls = excluded.tool_calls,
+               tool_results = excluded.tool_results,
+               tool_call_id = excluded.tool_call_id,
+               images = excluded.images,
+               parent_id = excluded.parent_id",
+            params![
+                message.id.to_string(),
+                session_id.to_string(),
+                role_to_str(&message.role),
+                message.content,
+                message.timestamp.to_rfc3339(),
+                serde_json::to_string(&message.tool_calls)
+                    .map_err(|error| AvaError::SerializationError(error.to_string()))?,
+                serde_json::to_string(&message.tool_results)
+                    .map_err(|error| AvaError::SerializationError(error.to_string()))?,
+                message.tool_call_id.as_deref(),
+                serde_json::to_string(&message.images)
+                    .map_err(|error| AvaError::SerializationError(error.to_string()))?,
+                message.parent_id.map(|id| id.to_string()),
+            ],
+        )
+        .map_err(db_error)?;
+        Ok(())
     }
 
     pub fn get(&self, id: Uuid) -> Result<Option<Session>> {
@@ -1353,5 +1472,152 @@ mod tree_tests {
 
         let leaves = mgr.get_branch_leaves(session.id).unwrap();
         assert!(leaves.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod incremental_tests {
+    use super::*;
+    use ava_types::Role;
+
+    fn temp_manager() -> (SessionManager, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let mgr = SessionManager::new(dir.path().join("test.db")).unwrap();
+        (mgr, dir)
+    }
+
+    #[test]
+    fn add_message_persists_single_message() {
+        let (mgr, _dir) = temp_manager();
+        let session = mgr.create().unwrap();
+        mgr.save(&session).unwrap();
+
+        let msg = Message::new(Role::User, "incremental hello");
+        mgr.add_message(session.id, &msg).unwrap();
+
+        let loaded = mgr.get(session.id).unwrap().unwrap();
+        assert_eq!(loaded.messages.len(), 1);
+        assert_eq!(loaded.messages[0].content, "incremental hello");
+        assert_eq!(loaded.messages[0].id, msg.id);
+    }
+
+    #[test]
+    fn add_message_upserts_existing_message() {
+        let (mgr, _dir) = temp_manager();
+        let session = mgr.create().unwrap();
+        mgr.save(&session).unwrap();
+
+        let mut msg = Message::new(Role::Assistant, "draft");
+        let msg_id = msg.id;
+        mgr.add_message(session.id, &msg).unwrap();
+
+        // Update the content and re-add
+        msg.content = "final answer".to_string();
+        mgr.add_message(session.id, &msg).unwrap();
+
+        let loaded = mgr.get(session.id).unwrap().unwrap();
+        assert_eq!(loaded.messages.len(), 1);
+        assert_eq!(loaded.messages[0].id, msg_id);
+        assert_eq!(loaded.messages[0].content, "final answer");
+    }
+
+    #[test]
+    fn add_messages_batch() {
+        let (mgr, _dir) = temp_manager();
+        let session = mgr.create().unwrap();
+        mgr.save(&session).unwrap();
+
+        let msgs = vec![
+            Message::new(Role::User, "first"),
+            Message::new(Role::Assistant, "second"),
+            Message::new(Role::User, "third"),
+        ];
+        mgr.add_messages(session.id, &msgs).unwrap();
+
+        let loaded = mgr.get(session.id).unwrap().unwrap();
+        assert_eq!(loaded.messages.len(), 3);
+    }
+
+    #[test]
+    fn add_messages_empty_is_noop() {
+        let (mgr, _dir) = temp_manager();
+        let session = mgr.create().unwrap();
+        mgr.save(&session).unwrap();
+
+        mgr.add_messages(session.id, &[]).unwrap();
+
+        let loaded = mgr.get(session.id).unwrap().unwrap();
+        assert!(loaded.messages.is_empty());
+    }
+
+    #[test]
+    fn update_message_content_changes_only_content() {
+        let (mgr, _dir) = temp_manager();
+        let session = mgr.create().unwrap();
+        mgr.save(&session).unwrap();
+
+        let msg = Message::new(Role::Assistant, "original");
+        let msg_id = msg.id;
+        mgr.add_message(session.id, &msg).unwrap();
+
+        mgr.update_message_content(session.id, msg_id, "updated")
+            .unwrap();
+
+        let loaded = mgr.get(session.id).unwrap().unwrap();
+        assert_eq!(loaded.messages.len(), 1);
+        assert_eq!(loaded.messages[0].content, "updated");
+        assert_eq!(loaded.messages[0].role, Role::Assistant);
+    }
+
+    #[test]
+    fn update_message_content_not_found() {
+        let (mgr, _dir) = temp_manager();
+        let session = mgr.create().unwrap();
+        mgr.save(&session).unwrap();
+
+        let err = mgr
+            .update_message_content(session.id, Uuid::new_v4(), "nope")
+            .unwrap_err();
+        assert!(err.to_string().contains("not found"));
+    }
+
+    #[test]
+    fn save_removes_orphaned_messages() {
+        let (mgr, _dir) = temp_manager();
+        let mut session = mgr.create().unwrap();
+        session.add_message(Message::new(Role::User, "keep me"));
+        session.add_message(Message::new(Role::Assistant, "remove me"));
+        mgr.save(&session).unwrap();
+
+        // Remove the second message from the session and re-save
+        session.messages.pop();
+        mgr.save(&session).unwrap();
+
+        let loaded = mgr.get(session.id).unwrap().unwrap();
+        assert_eq!(loaded.messages.len(), 1);
+        assert_eq!(loaded.messages[0].content, "keep me");
+    }
+
+    #[test]
+    fn save_upsert_preserves_existing_on_crash_simulation() {
+        // Simulates the key safety property: if we save with INSERT OR REPLACE
+        // and the session has messages, existing messages are preserved.
+        let (mgr, _dir) = temp_manager();
+        let mut session = mgr.create().unwrap();
+        let m1 = Message::new(Role::User, "first");
+        let m1_id = m1.id;
+        session.add_message(m1);
+        mgr.save(&session).unwrap();
+
+        // Add a second message incrementally (simulating checkpoint)
+        let m2 = Message::new(Role::Assistant, "second");
+        let m2_id = m2.id;
+        mgr.add_message(session.id, &m2).unwrap();
+
+        // Verify both messages exist
+        let loaded = mgr.get(session.id).unwrap().unwrap();
+        assert_eq!(loaded.messages.len(), 2);
+        assert_eq!(loaded.messages[0].id, m1_id);
+        assert_eq!(loaded.messages[1].id, m2_id);
     }
 }

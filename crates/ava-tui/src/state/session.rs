@@ -63,6 +63,15 @@ impl SessionState {
         self.current_session = Some(session.clone());
     }
 
+    /// Incrementally persist messages without DELETE-all + INSERT-all.
+    ///
+    /// Used by the checkpoint handler to save progress crash-safely.
+    pub fn checkpoint_session(&self, session: &Session) {
+        if let Err(e) = self.manager.add_messages(session.id, &session.messages) {
+            tracing::warn!("Failed to checkpoint session: {}", e);
+        }
+    }
+
     // ── Bookmark operations (BG-13) ──────────────────────────────────
 
     /// Add a bookmark at the given message index.

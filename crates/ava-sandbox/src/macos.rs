@@ -1,6 +1,12 @@
+use std::path::Path;
+
 use crate::error::{Result, SandboxError};
 use crate::policy::{validate_policy, validate_request};
 use crate::types::{SandboxPlan, SandboxPolicy, SandboxRequest};
+
+/// Directories within writable mounts that should be read-only to prevent
+/// the sandboxed process from corrupting git history or AVA config/credentials.
+const PROTECTED_SUBDIRS: &[&str] = &[".git", ".ava"];
 
 /// Escape a path string for safe embedding in an SBPL string literal.
 ///
@@ -40,6 +46,19 @@ pub fn build_sandbox_exec_plan(
         profile_parts.push(format!("(allow file-read* (subpath \"{safe}\"))"));
     }
 
+    // Deny writes to protected subdirectories before allowing writes to
+    // their parent. SBPL uses first-match-wins, so these deny rules must
+    // appear before the broader file-write* allows.
+    for path in &policy.writable_paths {
+        for subdir in PROTECTED_SUBDIRS {
+            let protected = format!("{}/{subdir}", path.trim_end_matches('/'));
+            if Path::new(&protected).is_dir() {
+                let safe = escape_sbpl_path(&protected)?;
+                profile_parts.push(format!("(deny file-write* (subpath \"{safe}\"))"));
+            }
+        }
+    }
+
     for path in &policy.writable_paths {
         let safe = escape_sbpl_path(path)?;
         profile_parts.push(format!("(allow file-write* (subpath \"{safe}\"))"));
@@ -50,6 +69,14 @@ pub fn build_sandbox_exec_plan(
     }
 
     if let Some(cwd) = &request.working_dir {
+        // Deny writes to protected subdirectories before allowing cwd writes.
+        for subdir in PROTECTED_SUBDIRS {
+            let protected = format!("{}/{subdir}", cwd.trim_end_matches('/'));
+            if Path::new(&protected).is_dir() {
+                let safe = escape_sbpl_path(&protected)?;
+                profile_parts.push(format!("(deny file-write* (subpath \"{safe}\"))"));
+            }
+        }
         let safe = escape_sbpl_path(cwd)?;
         profile_parts.push(format!("(allow file-read* (subpath \"{safe}\"))"));
         profile_parts.push(format!("(allow file-write* (subpath \"{safe}\"))"));
@@ -123,5 +150,67 @@ mod tests {
 
         assert!(plan.args[1].contains("subpath \"/tmp\""));
         assert!(plan.args.iter().any(|arg| arg == "A=1"));
+    }
+
+    #[test]
+    fn sbpl_profile_protects_git_and_ava_dirs() {
+        let repo_root = env!("CARGO_MANIFEST_DIR")
+            .strip_suffix("/crates/ava-sandbox")
+            .unwrap_or(env!("CARGO_MANIFEST_DIR"));
+
+        let git_dir = format!("{repo_root}/.git");
+        if !Path::new(&git_dir).is_dir() {
+            return;
+        }
+
+        let request = SandboxRequest {
+            command: "echo".to_string(),
+            args: vec!["hi".to_string()],
+            working_dir: None,
+            env: vec![],
+        };
+        let policy = SandboxPolicy {
+            writable_paths: vec![repo_root.to_string()],
+            ..SandboxPolicy::default()
+        };
+        let plan = build_sandbox_exec_plan(&request, &policy).unwrap();
+        let profile = &plan.args[1];
+
+        // Deny for .git should appear before allow for the parent
+        let deny_pos = profile
+            .find(&format!("(deny file-write* (subpath \"{git_dir}\"))"))
+            .expect("profile should deny writes to .git");
+        let allow_pos = profile
+            .find(&format!("(allow file-write* (subpath \"{repo_root}\"))"))
+            .expect("profile should allow writes to repo root");
+        assert!(
+            deny_pos < allow_pos,
+            "deny for .git must appear before allow for parent (deny@{deny_pos}, allow@{allow_pos})"
+        );
+    }
+
+    #[test]
+    fn sbpl_profile_skips_nonexistent_protected_dirs() {
+        let request = SandboxRequest {
+            command: "echo".to_string(),
+            args: vec!["hi".to_string()],
+            working_dir: None,
+            env: vec![],
+        };
+        let policy = SandboxPolicy {
+            writable_paths: vec!["/tmp".to_string()],
+            ..SandboxPolicy::default()
+        };
+        let plan = build_sandbox_exec_plan(&request, &policy).unwrap();
+        let profile = &plan.args[1];
+
+        assert!(
+            !profile.contains("deny file-write* (subpath \"/tmp/.git\")"),
+            "should not deny nonexistent .git"
+        );
+        assert!(
+            !profile.contains("deny file-write* (subpath \"/tmp/.ava\")"),
+            "should not deny nonexistent .ava"
+        );
     }
 }

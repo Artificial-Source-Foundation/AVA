@@ -75,6 +75,16 @@ impl ContextManager {
         &self.messages
     }
 
+    /// Replace the entire message list (e.g. after conversation repair).
+    /// Recalculates token counts from scratch.
+    pub fn replace_messages(&mut self, messages: Vec<Message>) {
+        self.tracker = TokenTracker::new(self.token_limit);
+        for msg in &messages {
+            self.tracker.add_message(msg);
+        }
+        self.messages = messages;
+    }
+
     pub fn token_count(&self) -> usize {
         self.tracker.current_tokens
     }

@@ -17,7 +17,7 @@ pub use context::Context;
 pub use error::{AvaError, ErrorCategory, ProviderErrorClass, Result};
 pub use message::{ImageContent, ImageMediaType, Message, Role};
 pub use plan::{Plan, PlanAction, PlanDecision, PlanState, PlanStep};
-pub use session::{cleanup_interrupted_tools, Session};
+pub use session::{cleanup_interrupted_tools, repair_conversation, Session};
 pub use todo::{TodoItem, TodoPriority, TodoState, TodoStatus};
 pub use tool::{Tool, ToolCall, ToolResult};
 

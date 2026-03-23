@@ -1,4 +1,4 @@
-<!-- Last verified: 2026-03-16 -->
+<!-- Last verified: 2026-03-23 -->
 # AI Coding Agent Instructions (v3)
 
 > Instructions for AI assistants working on AVA. This file is auto-injected into the AVA agent's system prompt.
@@ -7,22 +7,22 @@
 
 ```bash
 # All-in-one check
-just check                      # fmt + clippy + nextest
+just check                      # fmt + clippy + targeted nextest
 
 # Or raw cargo
 cargo test --workspace
 cargo clippy --workspace
 
 # Desktop
-npm run tauri dev
-npm run lint && npx tsc --noEmit
+pnpm tauri dev
+pnpm lint && pnpm typecheck
 ```
 
 Read first: `CLAUDE.md`
 
 ## What AVA Is
 
-AVA is a Rust-first AI coding assistant (CLI/TUI + Tauri desktop). 20 Rust crates, ~104K LOC, 1,798 tests.
+AVA is a Rust-first AI coding assistant (CLI/TUI + Tauri desktop) with a 21-crate Rust workspace.
 
 - **CLI/TUI**: `crates/ava-tui/` (Ratatui + Crossterm + Tokio)
 - **Agent runtime**: `crates/ava-agent/`, `ava-llm/`, `ava-tools/`, `ava-praxis/`
@@ -32,10 +32,9 @@ AVA is a Rust-first AI coding assistant (CLI/TUI + Tauri desktop). 20 Rust crate
 
 ## Key Counts
 
-- 8 LLM providers (Anthropic, OpenAI, Gemini, Ollama, OpenRouter, Copilot, Inception, Mock)
-- 6 default tools: `read`, `write`, `edit`, `bash`, `glob`, `grep`
-- 8 extended tools: `apply_patch`, `web_fetch`, `web_search`, `multiedit`, `ast_ops`, `lsp_ops`, `code_search`, `git_read`
-- Dynamic: MCP servers + TOML custom tools
+- 21 Rust crates in the root workspace (`src-tauri/` remains outside the workspace)
+- 9 default tools: `read`, `write`, `edit`, `bash`, `glob`, `grep`, `web_fetch`, `web_search`, `git_read`
+- Additional tools load separately at runtime (for example `task`, `todo_*`, `question`, `plan`, MCP, and TOML custom tools)
 
 ## Where To Put New Code
 
@@ -48,13 +47,13 @@ AVA is a Rust-first AI coding assistant (CLI/TUI + Tauri desktop). 20 Rust crate
 
 ## Tool Surface Policy
 
-Keep the default set capped at 6. New tools should default to Extended, MCP, plugin, or custom-tool delivery. Only promote to default with strong justification.
+Keep the default set capped at 9. New tools should default to opt-in delivery (plugin, MCP, or custom-tool). Only promote to default with strong justification.
 
 ## Common Tasks
 
 ### Add Tool (Rust)
 
-1. Tier decision: default to Extended
+1. Tier decision: default to opt-in delivery unless it truly belongs in the default 9
 2. Create `crates/ava-tools/src/core/{tool_name}.rs`
 3. Implement `Tool` trait (`name`, `description`, `parameters`, `execute`)
 4. Register in `register_core_tools()` with appropriate tiering
@@ -87,7 +86,7 @@ Keep the default set capped at 6. New tools should default to Extended, MCP, plu
 
 ```bash
 just check
-npm run lint && npm run format:check && npx tsc --noEmit
+pnpm lint && pnpm format:check && pnpm typecheck
 ```
 
 ## After Every Significant Change

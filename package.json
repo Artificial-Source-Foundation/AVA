@@ -8,6 +8,7 @@
     "start": "vite",
     "dev": "vite",
     "build": "vite build",
+    "build:packages": "pnpm --dir plugins/sdk build && pnpm -r --filter './plugins/examples/*' build",
     "build:cli": "echo 'CLI is now a Rust binary — use cargo build'",
     "serve": "vite preview",
     "tauri": "tauri",

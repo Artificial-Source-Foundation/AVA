@@ -2,6 +2,13 @@
 
 ## v2.2.6 (2026-03-22)
 
+### DX / Repo Hygiene
+
+- **CI and release package-manager alignment** — GitHub workflows now consistently use pnpm for desktop dependency installation; release jobs use the correct `dtolnay/rust-toolchain` action.
+- **Plugin workspace build script restored** — root `build:packages` script plus `pnpm-workspace.yaml` entries now cover `plugins/sdk` and example plugins again; TypeScript example entrypoints are now treated as generated build output rather than committed source.
+- **Artifact hygiene tightened** — root `.gitignore` now excludes `.claude/`, `.playwright-mcp/`, root-level scratch PNGs, and `package-lock.json`; stale tracked Playwright screenshots and the npm lockfile were removed.
+- **Legacy helper scripts refreshed** — `scripts/testing/verify-mvp.sh`, `scripts/testing/rust-migration-smoke.sh`, and `.opencode/context.md` now reflect the Rust-first + pnpm workflow.
+
 ### Providers
 
 - **Azure OpenAI provider** — `crates/ava-llm/src/providers/azure.rs`. API key + deployment-based routing, configurable API version, full streaming support.

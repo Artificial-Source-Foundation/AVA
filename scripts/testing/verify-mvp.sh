@@ -2,12 +2,12 @@
 set -euo pipefail
 
 echo "[verify:mvp] Running lint"
-npm run lint
+pnpm lint
 
 echo "[verify:mvp] Running typecheck"
-npx tsc --noEmit
+pnpm typecheck
 
 echo "[verify:mvp] Running test suite"
-npm run test:run
+pnpm test:run
 
 echo "[verify:mvp] All MVP checks passed"

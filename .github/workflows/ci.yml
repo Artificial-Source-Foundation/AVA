@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main, master]
+    branches: [master]
   pull_request:
-    branches: [main, master]
+    branches: [master]
 
 env:
   CARGO_INCREMENTAL: 0
@@ -173,7 +173,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build workspace packages
-        run: pnpm build:packages
+        run: pnpm run build:packages
 
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0

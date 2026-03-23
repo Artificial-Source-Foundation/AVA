@@ -1,6 +1,6 @@
 # AVA Backlog
 
-> Last updated: 2026-03-22
+> Last updated: 2026-03-23
 > Related: [roadmap.md](roadmap.md), [epics.md](epics.md)
 > SOTA gap research: [sota-gap-analysis.md](sota-gap-analysis.md) (60 items from 12 codebases — reference only, not a todo list)
 
@@ -48,6 +48,7 @@ Tool surface policy: default tools are now 9 (`read`, `write`, `edit`, `bash`, `
 - **Plugin system Phase 1** — `ava-plugin` crate, AgentStack wiring, TypeScript + Python SDKs, 4 examples, CLI commands, auth hooks
 - **Dead code cleanup** — 30 unwired modules → `docs/ideas/`, -10.5K LOC
 - **Docs overhaul** — README, crate-map, plugin guide, changelog, codebase docs, SOTA gap analysis
+- **DX cleanup pass** — CI/release workflows aligned on pnpm + rust-toolchain, plugin workspace build script restored, stale npm lockfile and Playwright artifact tracking removed, helper scripts updated for the Rust-first workflow
 
 ## Execution Order
 

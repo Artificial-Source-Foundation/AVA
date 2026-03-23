@@ -1,10 +1,10 @@
-<!-- Last verified: 2026-03-17. Run 'just check' to revalidate. -->
+<!-- Last verified: 2026-03-23. Run 'just check' to revalidate. -->
 
 # AVA Documentation
 
 AVA is a Rust-first AI coding assistant that runs as a CLI/TUI, web server, or Tauri desktop app. It sits between minimalist tools (Pi) and batteries-included IDEs (Cursor) -- lean defaults with opt-in power via MCP servers, TOML custom tools, and multi-agent orchestration.
 
-**21 Rust crates, ~40K LOC, 1,513 tests, single binary.**
+**21 Rust crates in the root workspace, plus the Tauri desktop host in `src-tauri/`.**
 
 ## Quick Start
 
@@ -20,7 +20,7 @@ just run                         # interactive TUI
 just headless "your goal"        # headless mode
 
 # Desktop app
-npm run tauri dev
+pnpm tauri dev
 ```
 
 Credentials live at `~/.ava/credentials.json`. See [CLI Testing](#cli-testing) below.
@@ -41,29 +41,29 @@ All three interfaces share the same Rust backend. The desktop frontend (SolidJS)
 
 ### Crate Map
 
-| Crate | Purpose | Files | LOC |
-|-------|---------|------:|----:|
-| `ava-tui` | CLI/TUI binary (Ratatui + Crossterm + Tokio) | 95 | 33,119 |
-| `ava-agent` | Agent execution loop, tool calling, stuck detection, mid-stream messaging | 28 | 10,251 |
-| `ava-llm` | LLM provider interface, connection pool, circuit breaker, retry, routing | 25 | 11,658 |
-| `ava-tools` | Tool trait, registry, 6 default + 8 extended tools, TOML custom tools | 49 | 10,641 |
-| `ava-permissions` | Permission rules, bash command classifier, risk levels, path safety | 19 | 6,412 |
-| `ava-config` | Config management, credentials, model catalog, thinking budgets | 14 | 5,071 |
-| `ava-praxis` | Multi-agent orchestration (Director pattern), ACP, artifacts, mailbox | 15 | 3,691 |
-| `ava-context` | Token tracking, context condensation (sliding window, summarization) | 17 | 3,079 |
-| `ava-mcp` | Model Context Protocol client/server, stdio + HTTP transport | 6 | 1,786 |
-| `ava-types` | Shared types: Message, Session, ToolCall, AvaError, ContextAttachment | 7 | 1,755 |
-| `ava-plugin` | Power plugin system (JSON-RPC, subprocess isolation, 12 hook types) | 6 | ~1,400 |
-| `ava-session` | Session persistence (SQLite), bookmarks, conversation tree | 3 | 1,609 |
-| `ava-cli-providers` | External CLI agent integration (Claude Code, etc.) | 9 | 1,510 |
-| `ava-auth` | OAuth (PKCE, device code), Copilot token exchange, API key management | 8 | 1,499 |
-| `ava-codebase` | Code indexing (BM25 + PageRank), dependency graph, semantic search | 10 | 1,269 |
-| `ava-platform` | File system and shell abstractions | 4 | 989 |
-| `ava-memory` | Persistent key-value memory with SQLite FTS5 | 2 | 778 |
-| `ava-sandbox` | OS-level sandboxing (bwrap on Linux, sandbox-exec on macOS) | 8 | 670 |
-| `ava-extensions` | Extension system: hooks, native/WASM loaders | 5 | 509 |
-| `ava-db` | SQLite connection pool, session/message models | 4 | 444 |
-| `ava-validator` | Code validation pipeline with retry orchestration | 3 | 299 |
+| Crate | Purpose |
+|-------|---------|
+| `ava-tui` | CLI/TUI binary plus headless/web entrypoints |
+| `ava-agent` | Agent execution loop, tool calling, instruction loading |
+| `ava-llm` | Provider interface, routing, retries, streaming |
+| `ava-tools` | Tool trait, registry, default tool set, custom tool loading |
+| `ava-permissions` | Permission rules, bash classification, path safety |
+| `ava-config` | Config management, credentials, model catalog |
+| `ava-praxis` | Multi-agent orchestration and planning flows |
+| `ava-context` | Token tracking and context condensation |
+| `ava-mcp` | MCP client/server support |
+| `ava-types` | Shared types used across the workspace |
+| `ava-plugin` | Plugin runtime and hook dispatch |
+| `ava-session` | Session persistence and conversation state |
+| `ava-cli-providers` | External CLI agent integrations |
+| `ava-auth` | OAuth and API credential flows |
+| `ava-codebase` | Code indexing and search |
+| `ava-platform` | File system and shell abstractions |
+| `ava-memory` | Persistent memory storage |
+| `ava-sandbox` | Command sandboxing |
+| `ava-extensions` | Native/WASM extension loading |
+| `ava-db` | SQLite connection pool and DB models |
+| `ava-validator` | Validation pipeline utilities |
 
 Full crate dependency graph: [architecture/crate-map.md](architecture/crate-map.md)
 
@@ -71,12 +71,11 @@ Full crate dependency graph: [architecture/crate-map.md](architecture/crate-map.
 
 | Tier | Count | Tools |
 |------|------:|-------|
-| Default | 6 | `read`, `write`, `edit`, `bash`, `glob`, `grep` |
-| Extended | 8 | `apply_patch`, `web_fetch`, `web_search`, `multiedit`, `ast_ops`, `lsp_ops`, `code_search`, `git_read` |
-| Always-on helpers | -- | `todo_read`, `todo_write`, `question`, `task`, `codebase_search`, memory tools, session tools |
-| Dynamic | -- | MCP server tools + TOML custom tools |
+| Default | 9 | `read`, `write`, `edit`, `bash`, `glob`, `grep`, `web_fetch`, `web_search`, `git_read` |
+| Built-in helpers | runtime | `task`, `todo_read`, `todo_write`, `question`, `plan`, and related session/memory helpers |
+| Dynamic | runtime | MCP server tools + TOML custom tools |
 
-Extended tools are available but not sent to the LLM unless `extended_tools` is enabled.
+The default set is the prompt-visible built-in surface. Other helpers are registered by runtime context or configuration.
 
 ## Adding Tools
 

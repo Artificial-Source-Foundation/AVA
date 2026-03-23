@@ -1,16 +1,16 @@
 # Project Context
 
 ## Environment
-- Language: TypeScript (monorepo) + Rust (Tauri backend)
-- Runtime: Node.js + Tauri desktop app
-- Build: `npm run build:packages` then `npm run build:cli`
-- Test: `npm run test:run` (or `npx vitest run <path>`)
-- Typecheck: `npx tsc --noEmit`
-- Package Manager: npm (lockfile present) and pnpm workspace metadata
+- Language: Rust-first workspace + TypeScript desktop frontend
+- Runtime: Rust CLI/TUI + Node.js tooling for the desktop app
+- Build: `cargo build --bin ava` and `pnpm build` for the frontend bundle
+- Test: `just check` for the fast project loop, `pnpm test:run` for frontend tests
+- Typecheck: `pnpm typecheck`
+- Package Manager: pnpm
 
 ## Project Type
 - Application: Desktop app (Tauri + SolidJS)
-- Monorepo: `packages/*` + `cli` + `src`
+- Workspace: `crates/*` + `src` + `src-tauri`
 
 ## Infrastructure
 - Container: none detected in root
@@ -21,8 +21,8 @@
 ## Structure
 - Frontend app: `src/`
 - Tauri backend: `src-tauri/`
-- Core logic: `packages/core/src/`
-- CLI: `cli/src/`
+- Core logic: `crates/`
+- CLI/TUI: `crates/ava-tui/`
 - Docs: `docs/`
 
 ## Conventions Observed
@@ -32,7 +32,5 @@
 - Architecture: desktop-first, plugin ecosystem planned in frontend and partially implemented in core backend
 
 ## Notes
-- `docs/ROADMAP.md` still marks Phase 2 plugin ecosystem as next.
-- Core extension lifecycle code already exists in `packages/core/src/extensions/`.
-- Frontend plugin UX remains placeholder in settings (no marketplace UI yet).
-- Sprint 1.6 testing/hardening exists as a plan doc and appears partially implemented.
+- Use `CLAUDE.md` and `AGENTS.md` at the repo root as the current source of truth for architecture and workflow details.
+- Plugin SDK examples live under `plugins/`, but the main product backend is the Rust workspace under `crates/`.

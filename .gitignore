@@ -8,6 +8,7 @@ target/
 
 # pnpm
 .pnpm-store/
+package-lock.json
 
 # Package builds
 packages/*/dist/
@@ -54,12 +55,19 @@ docs/memory-bank/
 
 # Local git worktrees
 .worktrees/
+.claude/
 
 # E2E test artifacts
 e2e/screenshots/
 playwright-report/
 test-results/
 .ava/
+.playwright-mcp/
+/*.png
+plugins/examples/code-stats/index.js
+plugins/examples/env-guard/index.js
+plugins/examples/hello-plugin/index.js
+plugins/examples/request-logger/index.js
 
 # Benchmark scratch artifacts (generated code from model benchmark runs)
 # Keep compiled Rust library artifacts out of the working tree.

@@ -83,7 +83,7 @@ create_plugin({"tool.before": on_tool_before})
 
 **Handler signature:**
 ```typescript
-(ctx: PluginContext, params: Record<string, unknown>) => Promise<Record<string, unknown> | void>
+(ctx: PluginContext, params: Record<string, unknown>) => Promise<Record<string, unknown> | undefined>
 ```
 
 **PluginContext fields:**
@@ -100,10 +100,13 @@ Location: `plugins/examples/`
 |---------|----------|-------|
 | `hello-plugin/` | TypeScript | Basic session hooks |
 | `hello-python/` | Python | SDK usage, tool.before/after |
+| `code-stats/` | TypeScript | Per-session tool timing and summary logging |
 | `copilot-auth/` | JavaScript | Device code OAuth flow, auth hooks |
 | `env-guard/` | TypeScript | Blocking dangerous file access |
 | `request-logger/` | TypeScript | Persistent logging to `.ava/tool-log.jsonl` |
 | `tool-timer/` | JavaScript | Timing metrics, bash command filtering |
+
+TypeScript examples compile to `index.js` for runtime, but the generated entrypoints are not the source of truth. Run `pnpm install && pnpm run build:packages` from the repo root before launching a TypeScript example via `plugin.toml`.
 
 ## Manifest Format
 

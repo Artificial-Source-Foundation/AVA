@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::time::Instant;
 
@@ -404,10 +405,13 @@ impl AgentLoop {
                             "capping touched paths for on-demand rule activation"
                         );
                     }
-
-                    for file_path in touched_paths
-                        .iter()
+                    let unique_paths: BTreeSet<PathBuf> = touched_paths
+                        .into_iter()
                         .take(MAX_TOUCHED_PATHS_FOR_RULES)
+                        .collect();
+
+                    for file_path in unique_paths
+                        .iter()
                         .filter_map(|path| normalize_touched_path(&project_root, path))
                     {
                         if tool_call.name == "read" {

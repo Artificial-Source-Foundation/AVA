@@ -12,6 +12,8 @@ fn prompt_profile(
     model_name: &str,
     native_tools: bool,
 ) -> PromptProfile {
+    // Conservative allowlist for the lean profile; unknown models fall back to Standard.
+    // TODO: derive this from model-catalog capability metadata instead of name matching.
     if !native_tools {
         return PromptProfile::Standard;
     }
@@ -136,8 +138,7 @@ pub fn build_system_prompt(
         prompt.push_str("- Run tests after making changes when a test suite exists.\n");
         prompt.push_str("- For multi-step tasks, use `todo_write` to track progress. Mark items `in_progress` as you start them and `completed` when done.\n");
     } else {
-        prompt
-            .push_str("- Use `todo_write` only when it helps manage genuinely multi-step work.\n");
+        prompt.push_str("- Run tests when a test suite exists. Use `todo_write` only for genuinely multi-step work.\n");
     }
     prompt.push_str("- When your task is complete, call `attempt_completion` with a result describing what you did.\n\n");
 
@@ -296,7 +297,7 @@ mod tests {
         let standard = build_system_prompt(&tools, true, ProviderKind::OpenAI, "gpt-4.1");
         let lean = build_system_prompt(&tools, true, ProviderKind::OpenAI, "gpt-5.4");
         assert!(lean.len() < standard.len());
-        assert!(!lean.contains("Run tests after making changes when a test suite exists."));
+        assert!(lean.contains("Run tests when a test suite exists."));
     }
 
     // ── provider_prompt_suffix tests ──────────────────────────────────

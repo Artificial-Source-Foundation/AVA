@@ -20,7 +20,7 @@ pub struct Memory {
     pub created_at: String,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct MemorySystem {
     db_path: PathBuf,
 }

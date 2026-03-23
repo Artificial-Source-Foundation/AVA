@@ -16,6 +16,9 @@
 - **Project instruction loading narrowed** — AVA no longer injects `CLAUDE.md` as project runtime instructions; trusted project instruction loading now centers on `AGENTS.md`, `.ava/rules/*.md`, `.ava/skills/`, and other explicit repo-local rule files.
 - **On-demand project rules** — `.ava/rules/*.md` now activate lazily when the agent touches matching files instead of being front-loaded into every run.
 - **Leaner system prompts** — base and provider-specific system prompts were trimmed so simple online tasks spend less time and budget on repeated orchestration prose.
+- **Prompt telemetry** — AVA now logs estimated system-prompt token counts and on-demand rule token activation totals, making prompt-bloat regressions easier to spot.
+- **Hot-path leanups** — native-tool providers no longer get duplicated tool descriptions in the system prompt, tool-definition hooks short-circuit when unused, model registry loading is cached, and memory/plugin startup enrichment now has tighter latency bounds.
+- **Model-aware prompt profiles** — stronger native-tool models now get a leaner base prompt profile, reducing orchestration text without changing the default safety/instruction path for smaller models.
 
 ### Providers
 

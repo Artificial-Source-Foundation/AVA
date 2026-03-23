@@ -153,9 +153,9 @@ Always use type hints in function signatures.
 Prefer dataclasses over plain dicts for structured data.
 ```
 
-This rule is injected only after the agent reads or edits a matching `.py` file
-or path under `scripts/`. The frontmatter is stripped from the output -- only
-the body text is injected.
+This rule is injected only after the agent touches a matching path (for example
+via `read`, `edit`, `write`, `glob`, or `grep`). The frontmatter is stripped
+from the output -- only the body text is injected.
 
 Rules without frontmatter activate on the first touched file in the project.
 

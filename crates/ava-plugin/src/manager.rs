@@ -66,6 +66,11 @@ impl PluginManager {
         }
     }
 
+    /// Returns true when at least one plugin subscribes to the given hook.
+    pub fn has_hook_subscribers(&self, event: HookEvent) -> bool {
+        !self.dispatcher.subscribers(&event).is_empty()
+    }
+
     /// Discover and load all plugins from the given directories.
     ///
     /// For each discovered plugin:

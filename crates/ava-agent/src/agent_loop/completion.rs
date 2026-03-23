@@ -28,7 +28,8 @@ const EDIT_TOOL_NAMES: &[&str] = &["write", "edit", "multiedit", "apply_patch"];
 /// Extract a file path from partially-accumulated JSON arguments.
 ///
 /// Looks for `"file_path":"..."` or `"path":"..."` patterns using simple string
-/// search (no JSON parser needed since the JSON may be incomplete).
+/// search (no JSON parser needed since the JSON may be incomplete). This is a
+/// best-effort progress hint, not an authoritative parser.
 fn extract_file_path_from_partial(json: &str) -> Option<String> {
     for key in &["file_path", "path"] {
         let pattern = format!("\"{}\":\"", key);

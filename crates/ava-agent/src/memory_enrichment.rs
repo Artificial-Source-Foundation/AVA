@@ -6,7 +6,10 @@
 
 use ava_memory::MemorySystem;
 use ava_types::MEMORY_BLOCK_MAX_CHARS;
-use tracing::warn;
+use tokio::time::{timeout, Duration};
+use tracing::{info, warn};
+
+const MEMORY_ENRICHMENT_TIMEOUT_MS: u64 = 150;
 
 /// Enrich a goal string with relevant memories from the memory system.
 ///
@@ -19,18 +22,44 @@ pub async fn enrich_goal_with_memories(memory: &MemorySystem, goal: &str) -> Str
         return goal.to_string();
     }
     let query = keywords.join(" ");
-    let Ok(memories) = memory.search(&query) else {
-        return goal.to_string();
-    };
+    let memory = memory.clone();
+    let query_for_task = query.clone();
+    let search = tokio::task::spawn_blocking(move || {
+        let memories = memory
+            .search(&query_for_task)
+            .map_err(|err| err.to_string())?;
+        let learned = memory
+            .search_confirmed_learned(&query_for_task, 5)
+            .map_err(|err| err.to_string())?;
+        Ok::<_, String>((memories, learned))
+    });
+
+    let (memories, learned): (Vec<_>, Vec<_>) =
+        match timeout(Duration::from_millis(MEMORY_ENRICHMENT_TIMEOUT_MS), search).await {
+            Ok(Ok(Ok(result))) => result,
+            Ok(Ok(Err(err))) => {
+                warn!(error = %err, "memory enrichment failed");
+                return goal.to_string();
+            }
+            Ok(Err(err)) => {
+                warn!(error = %err, "memory enrichment task failed");
+                return goal.to_string();
+            }
+            Err(_) => {
+                info!(
+                    timeout_ms = MEMORY_ENRICHMENT_TIMEOUT_MS,
+                    "memory enrichment timed out"
+                );
+                return goal.to_string();
+            }
+        };
+
     let entries: Vec<String> = memories
         .into_iter()
         .take(5)
         .map(|m| format!("- [{}]: {}", m.key, m.value))
         .collect();
 
-    let learned = memory
-        .search_confirmed_learned(&query, 5)
-        .unwrap_or_default();
     let learned_entries: Vec<String> = learned
         .into_iter()
         .map(|m| format!("- [{}]: {}", m.key, m.value))

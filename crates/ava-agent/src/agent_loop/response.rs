@@ -127,7 +127,19 @@ impl AgentLoop {
     /// Return the tool definitions that should be sent to the LLM, respecting
     /// the `extended_tools` config flag to filter by tier, and `plan_mode` to
     /// restrict to read-only tools.
+    ///
+    /// The result is cached because a single `AgentLoop` treats its tool set and
+    /// plan-mode configuration as immutable for the lifetime of the loop.
     pub(super) fn active_tool_defs(&self) -> Vec<ava_types::Tool> {
+        if let Some(cached) = self
+            .cached_tool_defs
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone()
+        {
+            return cached;
+        }
+
         let all_tools = if self.config.extended_tools {
             self.tools.list_tools_for_tiers(&[
                 ToolTier::Default,
@@ -139,14 +151,21 @@ impl AgentLoop {
                 .list_tools_for_tiers(&[ToolTier::Default, ToolTier::Plugin])
         };
 
-        if self.config.plan_mode {
+        let tools = if self.config.plan_mode {
             all_tools
                 .into_iter()
                 .filter(|t| PLAN_MODE_ALLOWED_TOOLS.contains(&t.name.as_str()))
                 .collect()
         } else {
             all_tools
-        }
+        };
+
+        let mut cache = self
+            .cached_tool_defs
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        *cache = Some(tools.clone());
+        tools
     }
 
     /// Return tool definitions after applying the `tool.definition` plugin hook.
@@ -162,6 +181,14 @@ impl AgentLoop {
         let Some(ref pm) = self.plugin_manager else {
             return base;
         };
+
+        if !pm
+            .lock()
+            .await
+            .has_hook_subscribers(ava_plugin::HookEvent::ToolDefinition)
+        {
+            return base;
+        }
 
         // Serialise to JSON so the plugin hook can inspect/modify them as plain data.
         let tool_json: Vec<serde_json::Value> = base

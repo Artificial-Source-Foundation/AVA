@@ -1,6 +1,56 @@
 use ava_llm::ProviderKind;
 use ava_types::Tool;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PromptProfile {
+    Standard,
+    Lean,
+}
+
+fn prompt_profile(
+    provider_kind: ProviderKind,
+    model_name: &str,
+    native_tools: bool,
+) -> PromptProfile {
+    if !native_tools {
+        return PromptProfile::Standard;
+    }
+
+    let model_lower = model_name.to_lowercase();
+    let frontier_or_reasoning = match provider_kind {
+        ProviderKind::Anthropic => {
+            model_lower.contains("claude-sonnet-4.6")
+                || model_lower.contains("claude-opus-4.6")
+                || model_lower.contains("claude-sonnet-4-6")
+                || model_lower.contains("claude-opus-4-6")
+        }
+        ProviderKind::OpenAI => {
+            model_lower.starts_with("o3")
+                || model_lower.starts_with("o4")
+                || model_lower.contains("gpt-5.4")
+                || model_lower.contains("codex")
+        }
+        ProviderKind::Gemini => {
+            model_lower.contains("gemini-2.5") || model_lower.contains("gemini-3.1")
+        }
+        ProviderKind::OpenRouter => {
+            model_lower.contains("claude-sonnet-4.6")
+                || model_lower.contains("claude-opus-4.6")
+                || model_lower.contains("gpt-5.4")
+                || model_lower.contains("gemini-3.1")
+                || model_lower.starts_with("o3")
+                || model_lower.starts_with("o4")
+        }
+        _ => false,
+    };
+
+    if frontier_or_reasoning {
+        PromptProfile::Lean
+    } else {
+        PromptProfile::Standard
+    }
+}
+
 /// Return provider-specific instructions to append to the base system prompt.
 ///
 /// The core system prompt stays the same for all providers. This function returns
@@ -64,8 +114,14 @@ pub fn provider_prompt_suffix(provider_kind: ProviderKind, model_name: &str) -> 
 /// For providers with native tool calling, this prompt is shorter (tool defs
 /// are sent via the API). For text-only providers, tool schemas are embedded
 /// in the prompt with the JSON envelope format.
-pub fn build_system_prompt(tools: &[Tool], native_tools: bool) -> String {
+pub fn build_system_prompt(
+    tools: &[Tool],
+    native_tools: bool,
+    provider_kind: ProviderKind,
+    model_name: &str,
+) -> String {
     let mut prompt = String::with_capacity(2048);
+    let profile = prompt_profile(provider_kind, model_name, native_tools);
 
     prompt.push_str(
         "You are AVA, an AI coding assistant. You help users with software engineering tasks \
@@ -76,22 +132,37 @@ pub fn build_system_prompt(tools: &[Tool], native_tools: bool) -> String {
     prompt.push_str("- Read files before modifying them. Never guess at code you haven't seen.\n");
     prompt.push_str("- Prefer native tools (read, edit, glob, grep) over bash equivalents — they are faster, sandboxed, and produce structured output.\n");
     prompt.push_str("- When calling multiple tools with no dependencies between them, make all independent calls in parallel.\n");
-    prompt.push_str("- Run tests after making changes when a test suite exists.\n");
-    prompt.push_str("- For multi-step tasks, use `todo_write` to track progress. Mark items `in_progress` as you start them and `completed` when done.\n");
+    if profile == PromptProfile::Standard {
+        prompt.push_str("- Run tests after making changes when a test suite exists.\n");
+        prompt.push_str("- For multi-step tasks, use `todo_write` to track progress. Mark items `in_progress` as you start them and `completed` when done.\n");
+    } else {
+        prompt
+            .push_str("- Use `todo_write` only when it helps manage genuinely multi-step work.\n");
+    }
     prompt.push_str("- When your task is complete, call `attempt_completion` with a result describing what you did.\n\n");
 
     prompt.push_str("### Code discipline\n");
     prompt.push_str("- Do only what was asked. Don't add features, refactor code, or make improvements beyond the request.\n");
     prompt.push_str("- Never assume a library is available — check the manifest (package.json, Cargo.toml, etc.) first.\n");
-    prompt.push_str(
-        "- Follow existing naming conventions, patterns, and formatting in the codebase.\n",
-    );
-    prompt.push_str("- Prefer direct changes over speculative abstractions or extra comments.\n\n");
+    if profile == PromptProfile::Standard {
+        prompt.push_str(
+            "- Follow existing naming conventions, patterns, and formatting in the codebase.\n",
+        );
+        prompt.push_str(
+            "- Prefer direct changes over speculative abstractions or extra comments.\n\n",
+        );
+    } else {
+        prompt.push_str("- Match the existing codebase style and keep changes direct.\n\n");
+    }
 
     prompt.push_str("### Executing with care\n");
     prompt.push_str("- Consider reversibility before destructive actions (force push, delete, rm -rf). Ask the user first for hard-to-reverse operations.\n");
     prompt.push_str("- When encountering obstacles, investigate — don't use destructive actions as shortcuts. Files you find may be in-progress work.\n");
-    prompt.push_str("- If your approach is blocked after a fair attempt, reconsider instead of brute-forcing.\n\n");
+    if profile == PromptProfile::Standard {
+        prompt.push_str("- If your approach is blocked after a fair attempt, reconsider instead of brute-forcing.\n\n");
+    } else {
+        prompt.push_str("- Reconsider when blocked instead of brute-forcing.\n\n");
+    }
 
     prompt.push_str("### Communication\n");
     prompt
@@ -100,12 +171,9 @@ pub fn build_system_prompt(tools: &[Tool], native_tools: bool) -> String {
     prompt.push_str("- Avoid filler, time estimates, and unnecessary verbosity.\n\n");
 
     if native_tools {
-        // Provider sends tool definitions via API — just list names for awareness.
-        prompt.push_str("## Available Tools\n");
-        for tool in tools {
-            prompt.push_str(&format!("- **{}**: {}\n", tool.name, tool.description));
-        }
-        prompt.push('\n');
+        prompt.push_str(
+            "## Tool use\n\nUse the provided native tool/function calling interface for tool interactions.\n\n",
+        );
     } else {
         // Text-only provider — embed full schemas and specify the JSON envelope.
         prompt.push_str("## Tools\n\n");
@@ -175,7 +243,7 @@ mod tests {
     #[test]
     fn text_prompt_contains_tool_names_and_schemas() {
         let tools = mock_tools();
-        let prompt = build_system_prompt(&tools, false);
+        let prompt = build_system_prompt(&tools, false, ProviderKind::OpenAI, "gpt-4.1");
 
         assert!(prompt.contains("read"));
         assert!(prompt.contains("bash"));
@@ -189,10 +257,9 @@ mod tests {
     #[test]
     fn native_prompt_lists_tools_without_json_envelope() {
         let tools = mock_tools();
-        let prompt = build_system_prompt(&tools, true);
+        let prompt = build_system_prompt(&tools, true, ProviderKind::OpenAI, "gpt-4.1");
 
-        assert!(prompt.contains("read"));
-        assert!(prompt.contains("bash"));
+        assert!(prompt.contains("native tool/function calling interface"));
         // Should NOT contain the JSON envelope instructions
         assert!(!prompt.contains("```json"));
         assert!(prompt.contains("attempt_completion"));
@@ -205,7 +272,7 @@ mod tests {
             description: "Signal task completion".to_string(),
             parameters: json!({}),
         }];
-        let prompt = build_system_prompt(&tools, false);
+        let prompt = build_system_prompt(&tools, false, ProviderKind::OpenAI, "gpt-4.1");
         // Should only appear once (as part of the tool list, not the fallback section)
         let count = prompt.matches("### attempt_completion").count();
         assert_eq!(count, 1);
@@ -214,13 +281,22 @@ mod tests {
     #[test]
     fn prompt_is_concise() {
         let tools = mock_tools();
-        let prompt = build_system_prompt(&tools, false);
+        let prompt = build_system_prompt(&tools, false, ProviderKind::OpenAI, "gpt-4.1");
         // Should be well under 2000 tokens (~8000 chars) for 2 tools
         assert!(
             prompt.len() < 4000,
             "prompt too long: {} chars",
             prompt.len()
         );
+    }
+
+    #[test]
+    fn lean_profile_is_shorter_for_frontier_native_models() {
+        let tools = mock_tools();
+        let standard = build_system_prompt(&tools, true, ProviderKind::OpenAI, "gpt-4.1");
+        let lean = build_system_prompt(&tools, true, ProviderKind::OpenAI, "gpt-5.4");
+        assert!(lean.len() < standard.len());
+        assert!(!lean.contains("Run tests after making changes when a test suite exists."));
     }
 
     // ── provider_prompt_suffix tests ──────────────────────────────────

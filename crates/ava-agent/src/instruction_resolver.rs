@@ -5,7 +5,7 @@
 
 use tracing::info;
 
-use ava_config::model_catalog::registry::ModelRegistry;
+use ava_config::model_catalog::registry::registry;
 
 /// Fraction of the model's context window reserved for project instructions.
 /// Reserves 1/3 for instructions, leaving 2/3 for conversation history and tool results.
@@ -90,8 +90,7 @@ pub fn build_sub_agent_instructions(
 
 /// Trim project instructions to fit within the model's context window (max 33%).
 fn trim_instructions_for_model(instructions: &str, model_name: &str) -> String {
-    let registry = ModelRegistry::load();
-    let context_window = registry
+    let context_window = registry()
         .find(model_name)
         .map(|m| m.limits.context_window)
         .unwrap_or(200_000); // default to 200K if unknown

@@ -54,6 +54,7 @@ Tool surface policy: default tools are now 9 (`read`, `write`, `edit`, `bash`, `
 - **Fast-path benchmark controls** — AVA `--fast` now isolates prompt/indexing overhead during headless benchmarking, and runtime project instruction loading no longer pulls in `CLAUDE.md`
 - **Hybrid instruction loading** — startup prompt now stays AGENTS-first while `.ava/rules` load on demand after touched-file detection, reducing simple-task prompt bloat
 - **Second lean-runtime pass** — on-demand rules now also wake up from search results, prompt token telemetry is logged, and startup hot paths are tighter around plugin/memory overhead
+- **Model-aware lean prompts** — frontier/reasoning models now use a shorter native-tool prompt profile so benchmark runs spend less time on repeated workflow prose
 
 ## Execution Order
 

@@ -17,6 +17,7 @@ use crate::stuck::StuckDetector;
 const MAX_TOOL_RESULT_BYTES: usize = 50_000;
 const POST_EDIT_VALIDATION_TOOLS: &[&str] = &["edit", "multiedit", "write", "apply_patch"];
 const VALIDATION_FAILURE_MARKER: &str = "[post-edit validation status: failed]";
+const MAX_TOUCHED_PATHS_FOR_RULES: usize = 20;
 
 fn touched_file_path(tool_call: &ToolCall) -> Option<PathBuf> {
     match tool_call.name.as_str() {
@@ -26,6 +27,47 @@ fn touched_file_path(tool_call: &ToolCall) -> Option<PathBuf> {
             .and_then(|value| value.as_str())
             .map(PathBuf::from),
         _ => None,
+    }
+}
+
+fn touched_file_paths(tool_call: &ToolCall, result: &ToolResult) -> Vec<PathBuf> {
+    match tool_call.name.as_str() {
+        "read" | "write" | "edit" => touched_file_path(tool_call).into_iter().collect(),
+        "glob" => result
+            .content
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .map(PathBuf::from)
+            .collect(),
+        "grep" => result
+            .content
+            .lines()
+            // Grep emits `path:line:content`; split on the first colon and treat the
+            // left side as the path. This assumes normal Unix-style paths.
+            .filter_map(|line| line.split_once(':').map(|(path, _)| path.trim()))
+            .filter(|path| !path.is_empty())
+            .map(PathBuf::from)
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+fn normalize_touched_path(
+    project_root: &std::path::Path,
+    file_path: &std::path::Path,
+) -> Option<PathBuf> {
+    let candidate = if file_path.is_absolute() {
+        file_path.to_path_buf()
+    } else {
+        project_root.join(file_path)
+    };
+
+    let canonical = std::fs::canonicalize(&candidate).ok()?;
+    if canonical.starts_with(project_root) {
+        Some(canonical)
+    } else {
+        None
     }
 }
 
@@ -350,43 +392,57 @@ impl AgentLoop {
         truncate_tool_result(&mut result);
 
         if !result.is_error {
-            if let (Some(file_path), Some(project_root)) =
-                (touched_file_path(tool_call), self.project_root.clone())
-            {
+            if let Some(project_root) = self.project_root.clone() {
                 if ava_config::is_project_trusted(&project_root) {
                     let mut sections = Vec::new();
-
-                    if tool_call.name == "read" {
-                        if let Some(instructions) =
-                            contextual_instructions_for_file(&file_path, &project_root)
-                        {
-                            sections.push(instructions);
-                        }
+                    let touched_paths = touched_file_paths(tool_call, &result);
+                    if touched_paths.len() > MAX_TOUCHED_PATHS_FOR_RULES {
+                        debug!(
+                            tool = %tool_call.name,
+                            seen_paths = touched_paths.len(),
+                            capped_paths = MAX_TOUCHED_PATHS_FOR_RULES,
+                            "capping touched paths for on-demand rule activation"
+                        );
                     }
 
-                    if self.enable_dynamic_rules {
-                        let mut activated = self
-                            .activated_rule_paths
-                            .lock()
-                            .unwrap_or_else(|error| error.into_inner());
-                        let rule_sections = matching_rule_instructions_for_file(
-                            &file_path,
-                            &project_root,
-                            &mut activated,
-                        );
-                        if !rule_sections.is_empty() {
-                            let token_sum: usize = rule_sections
-                                .iter()
-                                .map(|section| estimate_tokens(section))
-                                .sum();
-                            debug!(
-                                file = %file_path.display(),
-                                rule_count = rule_sections.len(),
-                                rule_tokens = token_sum,
-                                "activated on-demand project rules"
-                            );
+                    for file_path in touched_paths
+                        .iter()
+                        .take(MAX_TOUCHED_PATHS_FOR_RULES)
+                        .filter_map(|path| normalize_touched_path(&project_root, path))
+                    {
+                        if tool_call.name == "read" {
+                            if let Some(instructions) =
+                                contextual_instructions_for_file(&file_path, &project_root)
+                            {
+                                sections.push(instructions);
+                            }
                         }
-                        sections.extend(rule_sections);
+
+                        if self.enable_dynamic_rules {
+                            let mut activated = self
+                                .activated_rule_paths
+                                .lock()
+                                .unwrap_or_else(|error| error.into_inner());
+                            let rule_sections = matching_rule_instructions_for_file(
+                                &file_path,
+                                &project_root,
+                                &mut activated,
+                            );
+                            if !rule_sections.is_empty() {
+                                let token_sum: usize = rule_sections
+                                    .iter()
+                                    .map(|section| estimate_tokens(section))
+                                    .sum();
+                                debug!(
+                                    file = %file_path.display(),
+                                    rule_count = rule_sections.len(),
+                                    rule_tokens = token_sum,
+                                    tool = %tool_call.name,
+                                    "activated on-demand project rules"
+                                );
+                            }
+                            sections.extend(rule_sections);
+                        }
                     }
 
                     append_contextual_sections(&mut result, &sections);

@@ -64,6 +64,10 @@ export function useRustAgent() {
   let runStartTime = 0
   let firstTokenLogged = false
 
+  // Track pending tool_call names (FIFO queue) so we can match tool_result
+  // events to their corresponding tool_call names. Results arrive in order.
+  let pendingToolNames: string[] = []
+
   // In web mode, the HTTP submit returns immediately while the agent runs async.
   // We use this resolver to make run() wait for the complete/error WebSocket event.
   let completionResolve: ((result: SubmitGoalResult | null) => void) | null = null
@@ -113,6 +117,7 @@ export function useRustAgent() {
           (event as { name?: string }).name,
           (event as { args?: unknown }).args
         )
+        pendingToolNames.push(event.name as string)
         const newToolId = `${event.name}-${Date.now()}`
         // Extract file path from args for file-modifying tools
         const args = event.args as Record<string, unknown>
@@ -151,6 +156,32 @@ export function useRustAgent() {
           event.is_error ? 'ERROR' : 'OK',
           (event.content as string)?.slice(0, 120)
         )
+        // Parse todos from todo_write tool results directly in the frontend.
+        // This is more reliable than waiting for a separate TodoUpdate event
+        // from Rust, which may not arrive in Tauri mode.
+        const matchedToolName = pendingToolNames.shift() ?? ''
+        if (matchedToolName === 'todo_write' && !event.is_error) {
+          try {
+            const content = event.content as string
+            // The tool output format: "Updated todo list (N total, M incomplete):\n[...]"
+            const jsonStart = content.indexOf('[')
+            if (jsonStart >= 0) {
+              const parsed = JSON.parse(content.slice(jsonStart)) as TodoItem[]
+              log.info('todo', 'Parsed todos from tool_result', { count: parsed.length })
+              setTodos(parsed)
+              if (parsed.length > 0) {
+                try {
+                  const layout = useLayout()
+                  layout.switchRightPanelTab('todos')
+                } catch {
+                  // Layout context may not be available in all environments
+                }
+              }
+            }
+          } catch {
+            debugLog('todo', 'Failed to parse todos from tool_result content')
+          }
+        }
         setActiveToolCalls((prev) => {
           // Use indexOf (first running) — results arrive in the same order as tool_call events
           const firstIdx = prev.findIndex((tc) => tc.status === 'running')
@@ -252,9 +283,16 @@ export function useRustAgent() {
           totalChars: totalTextLen,
           elapsedMs: Date.now() - runStartTime,
         })
+        // In Tauri mode, do NOT set isRunning(false) here — let useAgent.ts
+        // finalize the message content first, then call endRun() in a batch
+        // to avoid a flash where the message switches from streaming to stored
+        // with empty content. In web mode, set it because useAgent.ts waits
+        // for the completion promise.
         batch(() => {
-          setIsRunning(false)
-          // Mark any remaining running tool calls as interrupted
+          if (!isTauri()) {
+            setIsRunning(false)
+          }
+          // Mark any remaining running tool calls as completed
           setActiveToolCalls((prev) => {
             const updated = [...prev]
             for (const tc of updated) {
@@ -468,6 +506,7 @@ export function useRustAgent() {
     chunkCount = 0
     totalTextLen = 0
     firstTokenLogged = false
+    pendingToolNames = []
     log.info('streaming', 'Stream started', { model: opts?.model, provider: opts?.provider })
     try {
       await attachListener()
@@ -483,10 +522,12 @@ export function useRustAgent() {
       }
 
       if (isTauri()) {
-        // Tauri mode: invoke blocks until the agent finishes
+        // Tauri mode: invoke blocks until the agent finishes.
+        // Do NOT set isRunning(false) here — let the caller (useAgent) finalize
+        // the message content first, then call endRun() in a batch to avoid
+        // a flash where isActiveStreaming=false but the message is still empty.
         const result = await invoke<SubmitGoalResult>('submit_goal', submitArgs)
         setLastResult(result)
-        setIsRunning(false)
         return result
       }
 
@@ -536,6 +577,7 @@ export function useRustAgent() {
     chunkCount = 0
     totalTextLen = 0
     firstTokenLogged = false
+    pendingToolNames = []
     log.info('streaming', 'Edit-and-resend stream started', { messageId })
     try {
       await attachListener()
@@ -547,9 +589,10 @@ export function useRustAgent() {
       }
 
       if (isTauri()) {
+        // Same as run(): don't set isRunning(false) here — let the caller
+        // finalize the message first, then call endRun() in a batch.
         const result = await invoke<SubmitGoalResult>('edit_and_resend', editArgs)
         setLastResult(result)
-        setIsRunning(false)
         return result
       }
 
@@ -614,6 +657,15 @@ export function useRustAgent() {
 
   const clearError = (): void => {
     setError(null)
+  }
+
+  /**
+   * Explicitly mark the run as finished. Used by useAgent.ts in Tauri mode
+   * to control the exact moment isRunning goes false — after the message
+   * content has been finalized, preventing a flash of empty content.
+   */
+  const endRun = (): void => {
+    setIsRunning(false)
   }
 
   // ── Mid-stream messaging (3-tier) ─────────────────────────────────
@@ -705,6 +757,7 @@ export function useRustAgent() {
     editAndResendRun,
     cancel,
     clearError,
+    endRun,
     // Mid-stream messaging
     steer,
     followUp,

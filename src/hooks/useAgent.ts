@@ -503,9 +503,12 @@ function createAgentStore() {
         log.error('agent', 'Run failed', { error: errorText })
         // Fill the placeholder with just an error (no content body)
         const errorMsgId = liveMessageId() || assistantMsgId
-        session.updateMessage(errorMsgId, {
-          content: '',
-          error: { type: 'unknown', message: errorText, timestamp: Date.now() },
+        batch(() => {
+          session.updateMessage(errorMsgId, {
+            content: '',
+            error: { type: 'unknown', message: errorText, timestamp: Date.now() },
+          })
+          rustAgent.endRun()
         })
         return null
       }
@@ -532,30 +535,41 @@ function createAgentStore() {
         segments.length > 0 ? `${segments.length} segments` : ''
       )
 
-      if (content) {
-        // Update the stable placeholder in-place — same ID → same DOM node → no flash
-        session.updateMessage(finalMsgId, {
-          content,
-          tokensUsed: rustAgent.tokenUsage().output,
-          // Hide cost for subscription providers (OAuth) — Rust returns 0.0 for these,
-          // but use undefined so the UI hides the field entirely
-          costUSD: rustAgent.tokenUsage().cost || undefined,
-          toolCalls,
-          metadata: {
-            provider: selectedProviderId,
-            model: selectedModelId,
-            mode: isPlanMode() ? 'plan' : 'code',
-            elapsedMs,
-            ...(thinking ? { thinking } : {}),
-            // Store interleaved segments for post-completion rendering
-            ...(segments.length > 1 ? { thinkingSegments: segments } : {}),
-          },
-        })
-      } else {
-        // Agent produced no text output — remove the empty placeholder so it doesn't
-        // linger as a blank bubble (tool-only responses, errors, etc.)
-        session.deleteMessage(finalMsgId)
-      }
+      // Finalize the message and end the run in a single batch so that
+      // isActiveStreaming transitions to false at the same time as the stored
+      // message content is updated. This prevents a flash where the component
+      // switches from streaming to stored rendering with empty content.
+      batch(() => {
+        if (content) {
+          // Update the stable placeholder in-place — same ID → same DOM node → no flash
+          session.updateMessage(finalMsgId, {
+            content,
+            tokensUsed: rustAgent.tokenUsage().output,
+            // Hide cost for subscription providers (OAuth) — Rust returns 0.0 for these,
+            // but use undefined so the UI hides the field entirely
+            costUSD: rustAgent.tokenUsage().cost || undefined,
+            toolCalls,
+            metadata: {
+              provider: selectedProviderId,
+              model: selectedModelId,
+              mode: isPlanMode() ? 'plan' : 'code',
+              elapsedMs,
+              ...(thinking ? { thinking } : {}),
+              // Store interleaved segments for post-completion rendering
+              ...(segments.length > 1 ? { thinkingSegments: segments } : {}),
+            },
+          })
+        } else {
+          // Agent produced no text output — remove the empty placeholder so it doesn't
+          // linger as a blank bubble (tool-only responses, errors, etc.)
+          session.deleteMessage(finalMsgId)
+        }
+        // End the run in the same batch so isRunning goes false atomically
+        // with the message content update — no gap for empty content flash.
+        rustAgent.endRun()
+        setLiveMessageId(null)
+        setStreamingStartedAt(null)
+      })
 
       log.info('agent', 'Run completed', {
         success: true,
@@ -581,9 +595,12 @@ function createAgentStore() {
       // Unexpected error (not from rustAgent internals)
       const msg = err instanceof Error ? err.message : String(err)
       log.error('agent', 'Unexpected agent error', { error: msg })
-      session.updateMessage(assistantMsgId, {
-        content: `**Error:** ${msg}`,
-        error: { type: 'unknown', message: msg, timestamp: Date.now() },
+      batch(() => {
+        session.updateMessage(assistantMsgId, {
+          content: `**Error:** ${msg}`,
+          error: { type: 'unknown', message: msg, timestamp: Date.now() },
+        })
+        rustAgent.endRun()
       })
       return null
     } finally {
@@ -909,9 +926,12 @@ function createAgentStore() {
           }
           return
         }
-        session.updateMessage(assistantMsgId, {
-          content: '',
-          error: { type: 'unknown', message: errorText, timestamp: Date.now() },
+        batch(() => {
+          session.updateMessage(assistantMsgId, {
+            content: '',
+            error: { type: 'unknown', message: errorText, timestamp: Date.now() },
+          })
+          rustAgent.endRun()
         })
         return
       }
@@ -922,24 +942,30 @@ function createAgentStore() {
       const thinking = rustAgent.thinkingContent()
       const segments = rustAgent.thinkingSegments()
 
-      if (content) {
-        session.updateMessage(assistantMsgId, {
-          content,
-          tokensUsed: rustAgent.tokenUsage().output,
-          costUSD: rustAgent.tokenUsage().cost || undefined,
-          toolCalls: rustAgent.activeToolCalls(),
-          metadata: {
-            provider: selectedProviderId,
-            model: selectedModelId,
-            mode: isPlanMode() ? 'plan' : 'code',
-            elapsedMs,
-            ...(thinking ? { thinking } : {}),
-            ...(segments.length > 1 ? { thinkingSegments: segments } : {}),
-          },
-        })
-      } else {
-        session.deleteMessage(assistantMsgId)
-      }
+      // Finalize message and end run atomically to prevent content flash
+      batch(() => {
+        if (content) {
+          session.updateMessage(assistantMsgId, {
+            content,
+            tokensUsed: rustAgent.tokenUsage().output,
+            costUSD: rustAgent.tokenUsage().cost || undefined,
+            toolCalls: rustAgent.activeToolCalls(),
+            metadata: {
+              provider: selectedProviderId,
+              model: selectedModelId,
+              mode: isPlanMode() ? 'plan' : 'code',
+              elapsedMs,
+              ...(thinking ? { thinking } : {}),
+              ...(segments.length > 1 ? { thinkingSegments: segments } : {}),
+            },
+          })
+        } else {
+          session.deleteMessage(assistantMsgId)
+        }
+        rustAgent.endRun()
+        setLiveMessageId(null)
+        setStreamingStartedAt(null)
+      })
 
       // Sync from backend in web mode
       const backendSessionId = result?.sessionId || sessionId
@@ -985,9 +1011,12 @@ function createAgentStore() {
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       log.error('agent', 'Unexpected error in editAndResend', { error: msg })
-      session.updateMessage(assistantMsgId, {
-        content: `**Error:** ${msg}`,
-        error: { type: 'unknown', message: msg, timestamp: Date.now() },
+      batch(() => {
+        session.updateMessage(assistantMsgId, {
+          content: `**Error:** ${msg}`,
+          error: { type: 'unknown', message: msg, timestamp: Date.now() },
+        })
+        rustAgent.endRun()
       })
     } finally {
       batch(() => {

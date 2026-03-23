@@ -94,17 +94,20 @@ impl AgentMode {
                  attempting everything in a single pass."
             ),
             Self::Plan => Some(
-                "You are in Plan mode. You can analyze code, create plans, and write plan documents \
-                 to .ava/plans/*.md. You cannot modify source code files or run destructive commands. \
-                 Use read, glob, grep, and todo_read freely. You may ONLY use the write tool to create \
-                 files under the .ava/plans/ directory with a .md extension.\n\n\
-                 When creating a plan, structure it with:\n\
+                "You are in Plan mode. Your job is to analyze the codebase and create a structured plan.\n\n\
+                 **Available tools**: read, glob, grep, web_fetch, web_search, git_read, bash (read-only \
+                 commands only — ls, cat, git status, git log, cargo test, etc.), codebase_search, \
+                 todo_read, todo_write, plan, question, memory_read.\n\n\
+                 **Blocked tools**: write, edit, multiedit, apply_patch (except writing to .ava/plans/*.md).\n\n\
+                 When creating a plan, use the plan tool to present it. Structure it with:\n\
+                 - **Codename**: A short memorable name for the plan\n\
                  - **Goal**: What the plan aims to achieve\n\
                  - **Analysis**: Current state and findings\n\
                  - **Steps**: Numbered implementation steps\n\
                  - **Files to modify**: List of files that will need changes\n\
                  - **Risks**: Potential issues and mitigations\n\n\
-                 When your plan is complete, the user can switch to Code mode to implement it."
+                 The user will review your plan and choose to Execute (switch to Code mode), \
+                 Reject (with feedback), or Refine (continue planning)."
             ),
         }
     }

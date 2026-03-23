@@ -1,5 +1,7 @@
+mod completion;
 mod repetition;
 mod response;
+mod steering;
 mod tool_execution;
 
 use std::collections::hash_map::DefaultHasher;
@@ -12,7 +14,6 @@ use std::sync::Arc;
 use ava_context::ContextManager;
 use ava_llm::ThinkingConfig;
 use ava_plugin::PluginManager;
-use ava_tools::monitor::ToolExecution;
 use ava_tools::registry::ToolRegistry;
 use ava_types::{
     ImageContent, Message, Role, Session, ThinkingLevel, TokenUsage, ToolCall, ToolResult,
@@ -415,36 +416,6 @@ impl AgentLoop {
         self.context.add_message(Message::new(Role::System, system));
     }
 
-    /// Inject a summary prompt and do one final LLM call so the agent can wrap up.
-    async fn force_summary(
-        &mut self,
-        session: &mut Session,
-        prompt: &str,
-        total_usage: &mut TokenUsage,
-        event_tx: &Option<mpsc::UnboundedSender<AgentEvent>>,
-    ) {
-        let summary_msg = Message::new(Role::User, prompt.to_string());
-        self.context.add_message(summary_msg.clone());
-        session.add_message(summary_msg);
-        Self::emit(
-            event_tx,
-            AgentEvent::Progress(if prompt.contains("budget") {
-                "budget limit reached — requesting summary".to_string()
-            } else {
-                "turn limit reached — requesting summary".to_string()
-            }),
-        );
-        if let Ok((text, _, usage)) = self.generate_response_with_thinking().await {
-            Self::merge_usage(total_usage, &usage);
-            if !text.trim().is_empty() {
-                Self::emit(event_tx, AgentEvent::Token(text.clone()));
-                let msg = Message::new(Role::Assistant, text);
-                self.context.add_message(msg.clone());
-                session.add_message(msg);
-            }
-        }
-    }
-
     /// Generate LLM response — streaming when `event_tx` is present, non-streaming otherwise.
     ///
     /// Returns (response_text, tool_calls, usage). When streaming, tokens and thinking
@@ -791,198 +762,6 @@ impl AgentLoop {
         &mut self,
     ) -> ava_types::Result<(String, Vec<ToolCall>, Option<TokenUsage>)> {
         self.generate_response_with_thinking().await
-    }
-
-    /// Execute tool calls with steering support and event emission.
-    ///
-    /// Returns (tool_results, steering_triggered, repetition_warning).
-    async fn execute_tools_unified(
-        &mut self,
-        tool_calls: &[ToolCall],
-        detector: &mut StuckDetector,
-        repetition_detector: &mut RepetitionDetector,
-        event_tx: &Option<mpsc::UnboundedSender<AgentEvent>>,
-    ) -> (Vec<ToolResult>, bool, Option<String>) {
-        let mut steering_triggered = false;
-
-        // Guard against runaway tool invocations from a single LLM response
-        if tool_calls.len() > MAX_TOOLS_PER_TURN {
-            warn!(
-                requested = tool_calls.len(),
-                limit = MAX_TOOLS_PER_TURN,
-                "Tool call limit reached, truncating to {MAX_TOOLS_PER_TURN}"
-            );
-        }
-        let capped_calls = &tool_calls[..tool_calls.len().min(MAX_TOOLS_PER_TURN)];
-
-        // Separate into read-only and write groups
-        let mut read_calls: Vec<(usize, &ToolCall)> = Vec::new();
-        let mut write_calls: Vec<(usize, &ToolCall)> = Vec::new();
-        for (i, tc) in capped_calls.iter().enumerate() {
-            if tc.name == "attempt_completion" {
-                continue;
-            }
-            if tool_execution::READ_ONLY_TOOLS.contains(&tc.name.as_str()) {
-                read_calls.push((i, tc));
-            } else {
-                write_calls.push((i, tc));
-            }
-        }
-
-        // Emit all ToolCall events first (streaming mode)
-        for tc in capped_calls {
-            if tc.name == "attempt_completion" {
-                continue;
-            }
-            Self::emit(event_tx, AgentEvent::ToolCall(tc.clone()));
-        }
-
-        let mut indexed_results: Vec<(usize, ToolResult, ToolExecution)> = Vec::new();
-
-        // Read-only tools concurrently
-        if !read_calls.is_empty() {
-            let futs: Vec<_> = read_calls
-                .iter()
-                .map(|(_, tc)| self.execute_tool_call_timed(tc))
-                .collect();
-            let results = futures::future::join_all(futs).await;
-            for (pos, (i, _)) in read_calls.iter().enumerate() {
-                let (result, execution) = results[pos].clone();
-                indexed_results.push((*i, result, execution));
-            }
-        }
-
-        // Poll for steering after read-only batch
-        if let Some(ref mut queue) = self.message_queue {
-            queue.poll();
-            if queue.has_steering() {
-                steering_triggered = true;
-            }
-        }
-
-        // Write tools sequentially — check steering between each
-        if !steering_triggered && !write_calls.is_empty() {
-            // Take a shadow git snapshot before any write tools execute.
-            // This enables full project-state rollback via /rewind.
-            {
-                let manager_guard = self.snapshot_manager.read().await;
-                if let Some(ref manager) = *manager_guard {
-                    let tool_names: Vec<&str> =
-                        write_calls.iter().map(|(_, tc)| tc.name.as_str()).collect();
-                    let snap_msg = format!("before: {}", tool_names.join(", "));
-                    match manager.take_snapshot(&snap_msg).await {
-                        Ok(hash) => {
-                            debug!(hash = %hash, "shadow snapshot taken before write tools");
-                            Self::emit(
-                                event_tx,
-                                AgentEvent::SnapshotTaken {
-                                    commit_hash: hash,
-                                    message: snap_msg,
-                                },
-                            );
-                        }
-                        Err(e) => {
-                            // Non-fatal — log but don't block tool execution
-                            warn!(error = %e, "failed to take shadow snapshot");
-                        }
-                    }
-                }
-            }
-
-            for (i, tc) in &write_calls {
-                // Snapshot file before write/edit tools for diff tracking
-                let diff_path =
-                    if crate::streaming_diff::StreamingDiffTracker::is_tracked_tool(&tc.name) {
-                        let maybe_path = extract_tool_path(tc);
-                        if let Some(ref p) = maybe_path {
-                            self.diff_tracker.snapshot_before_edit_async(p).await;
-                        }
-                        maybe_path
-                    } else {
-                        None
-                    };
-
-                let (result, execution) = self.execute_tool_call_timed(tc).await;
-
-                // Record diff after successful write/edit
-                if !result.is_error {
-                    if let Some(ref path) = diff_path {
-                        if let Some(crate::streaming_diff::DiffEvent::EditComplete {
-                            ref file,
-                            ref diff_text,
-                            additions,
-                            deletions,
-                        }) = self.diff_tracker.record_edit_complete_async(path).await
-                        {
-                            Self::emit(
-                                event_tx,
-                                AgentEvent::DiffPreview {
-                                    file: file.clone(),
-                                    diff_text: diff_text.clone(),
-                                    additions,
-                                    deletions,
-                                },
-                            );
-                        }
-                    }
-                }
-
-                indexed_results.push((*i, result, execution));
-
-                // Poll for steering after each write tool
-                if let Some(ref mut queue) = self.message_queue {
-                    queue.poll();
-                    if queue.has_steering() {
-                        steering_triggered = true;
-                        break;
-                    }
-                }
-            }
-        }
-
-        // If steering was triggered, add skip results for remaining write tools
-        if steering_triggered {
-            let executed_indices: std::collections::HashSet<usize> =
-                indexed_results.iter().map(|(i, _, _)| *i).collect();
-            for (i, tc) in &write_calls {
-                if !executed_indices.contains(i) {
-                    let skip_result = ToolResult {
-                        call_id: tc.id.clone(),
-                        content: "[Tool execution interrupted — the user has sent a new instruction. Do NOT retry this tool. Focus on the user's new message instead.]".to_string(),
-                        is_error: false,
-                    };
-                    let execution = ToolExecution {
-                        tool_name: tc.name.clone(),
-                        arguments_hash: ava_tools::monitor::hash_arguments(&tc.arguments),
-                        success: false,
-                        duration: std::time::Duration::ZERO,
-                        timestamp: Instant::now(),
-                    };
-                    indexed_results.push((*i, skip_result, execution));
-                }
-            }
-        }
-
-        // Sort by original index and collect results
-        indexed_results.sort_by_key(|(i, _, _)| *i);
-        let mut tool_results = Vec::new();
-        let mut repetition_warning = None;
-        for (idx, result, execution) in &indexed_results {
-            detector.tool_monitor_mut().record(execution.clone());
-            tool_results.push(result.clone());
-            Self::emit(event_tx, AgentEvent::ToolResult(result.clone()));
-
-            // Record each tool call in the repetition detector.
-            // We match back to the original ToolCall by index.
-            if let Some(tc) = capped_calls.get(*idx) {
-                if let Some(warning) = repetition_detector.record(tc) {
-                    warn!("{warning}");
-                    repetition_warning = Some(warning);
-                }
-            }
-        }
-
-        (tool_results, steering_triggered, repetition_warning)
     }
 
     /// Unified agent execution engine. Both `run()` (headless) and `run_streaming()`
@@ -1562,24 +1341,6 @@ fn correction_hint_parts(result: &ToolResult) -> (&'static str, &str) {
     }
 }
 
-/// Extract the target file path from a tool call's arguments.
-///
-/// Looks for `path` or `file_path` string fields. Returns the path as a
-/// `PathBuf`, resolving relative paths against the current directory.
-fn extract_tool_path(tc: &ToolCall) -> Option<std::path::PathBuf> {
-    let path_str = tc
-        .arguments
-        .get("path")
-        .or_else(|| tc.arguments.get("file_path"))
-        .and_then(|v| v.as_str())?;
-    let path = std::path::PathBuf::from(path_str);
-    if path.is_absolute() {
-        Some(path)
-    } else {
-        std::env::current_dir().ok().map(|cwd| cwd.join(path))
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1910,7 +1671,7 @@ mod tests {
     }
 
     #[test]
-    fn plan_mode_blocks_bash() {
+    fn plan_mode_blocks_destructive_bash() {
         use tool_execution::check_plan_mode_tool;
         let tc = ToolCall {
             id: "1".to_string(),
@@ -1919,13 +1680,67 @@ mod tests {
         };
         let result = check_plan_mode_tool(&tc);
         assert!(result.is_some());
-        assert!(result.unwrap().contains("bash is not available"));
+        assert!(result.unwrap().contains("Plan mode"));
+    }
+
+    #[test]
+    fn plan_mode_allows_readonly_bash() {
+        use tool_execution::check_plan_mode_tool;
+        for cmd in &[
+            "ls -la",
+            "cat README.md",
+            "git status",
+            "git log --oneline -10",
+            "cargo test --workspace",
+        ] {
+            let tc = ToolCall {
+                id: "1".to_string(),
+                name: "bash".to_string(),
+                arguments: serde_json::json!({"command": cmd}),
+            };
+            assert!(
+                check_plan_mode_tool(&tc).is_none(),
+                "bash '{cmd}' should be allowed in plan mode"
+            );
+        }
+    }
+
+    #[test]
+    fn plan_mode_blocks_high_risk_bash() {
+        use tool_execution::check_plan_mode_tool;
+        for cmd in &[
+            "git push --force origin main",
+            "npm publish",
+            "docker rm container_id",
+        ] {
+            let tc = ToolCall {
+                id: "1".to_string(),
+                name: "bash".to_string(),
+                arguments: serde_json::json!({"command": cmd}),
+            };
+            assert!(
+                check_plan_mode_tool(&tc).is_some(),
+                "bash '{cmd}' should be blocked in plan mode"
+            );
+        }
     }
 
     #[test]
     fn plan_mode_allows_read_tools() {
         use tool_execution::check_plan_mode_tool;
-        for tool_name in &["read", "glob", "grep", "codebase_search", "todo_read"] {
+        for tool_name in &[
+            "read",
+            "glob",
+            "grep",
+            "codebase_search",
+            "todo_read",
+            "web_fetch",
+            "web_search",
+            "git_read",
+            "plan",
+            "question",
+            "memory_read",
+        ] {
             let tc = ToolCall {
                 id: "1".to_string(),
                 name: tool_name.to_string(),

@@ -55,6 +55,10 @@
 //! | GET    | `/ws`                             | WebSocket for streaming events            |
 
 pub mod api;
+mod api_agent;
+mod api_config;
+mod api_interactive;
+mod api_sessions;
 pub mod state;
 pub mod ws;
 

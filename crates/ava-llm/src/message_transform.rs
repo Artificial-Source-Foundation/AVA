@@ -40,19 +40,28 @@ pub enum ProviderKind {
     Copilot,
     /// Inception (OpenAI-compatible).
     Inception,
+    /// Azure OpenAI (OpenAI-compatible with Azure-specific auth).
+    AzureOpenAI,
+    /// AWS Bedrock (Anthropic-compatible with SigV4 auth).
+    Bedrock,
 }
 
 impl ProviderKind {
     /// Whether this provider natively understands thinking/reasoning blocks.
     pub fn supports_thinking_blocks(self) -> bool {
-        matches!(self, Self::Anthropic | Self::Gemini)
+        matches!(self, Self::Anthropic | Self::Gemini | Self::Bedrock)
     }
 
     /// Whether this provider uses the OpenAI-compatible message format.
     pub fn is_openai_compatible(self) -> bool {
         matches!(
             self,
-            Self::OpenAI | Self::OpenRouter | Self::Copilot | Self::Ollama | Self::Inception
+            Self::OpenAI
+                | Self::OpenRouter
+                | Self::Copilot
+                | Self::Ollama
+                | Self::Inception
+                | Self::AzureOpenAI
         )
     }
 
@@ -66,6 +75,8 @@ impl ProviderKind {
             | "minimax-coding-plan"
             | "minimax-cn-coding-plan" => Self::Anthropic,
             "openai" | "zai-coding-plan" | "zhipuai-coding-plan" => Self::OpenAI,
+            "azure" => Self::AzureOpenAI,
+            "bedrock" => Self::Bedrock,
             "gemini" => Self::Gemini,
             "ollama" => Self::Ollama,
             "openrouter" => Self::OpenRouter,

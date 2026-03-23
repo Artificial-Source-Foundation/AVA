@@ -9,6 +9,7 @@ target/
 # pnpm
 .pnpm-store/
 package-lock.json
+plugins/**/package-lock.json
 
 # Package builds
 packages/*/dist/

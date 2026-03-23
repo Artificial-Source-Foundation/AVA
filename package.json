@@ -23,6 +23,7 @@
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "verify:mvp": "bash scripts/testing/verify-mvp.sh",
+    "bench:cli-shootout": "node scripts/benchmarks/cli-shootout.mjs",
     "docs:drift": "node scripts/docs/check-doc-drift.mjs",
     "knip": "knip",
     "knip:fix": "knip --fix",

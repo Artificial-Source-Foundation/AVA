@@ -156,6 +156,10 @@ async fn default_tester(provider: &str, store: &CredentialStore) -> Result<Strin
         return Ok(format!("ollama: OK ({endpoint})"));
     }
 
+    if credential.is_oauth_configured() {
+        return Ok(format!("{provider}: OK (OAuth configured)"));
+    }
+
     if credential.api_key.trim().is_empty() {
         return Err(AvaError::ConfigError(format!(
             "{} API key is empty",
@@ -324,5 +328,34 @@ mod tests {
         .unwrap();
 
         assert_eq!(result, "openai: OK (mock tester)");
+    }
+
+    #[tokio::test]
+    async fn test_command_accepts_oauth_only_credentials() {
+        let mut store = CredentialStore::default();
+        store.set(
+            "copilot",
+            ProviderCredential {
+                api_key: String::new(),
+                base_url: None,
+                org_id: None,
+                oauth_token: Some("ghu_test_token".to_string()),
+                oauth_refresh_token: Some("refresh-token".to_string()),
+                oauth_expires_at: None,
+                oauth_account_id: None,
+                litellm_compatible: None,
+            },
+        );
+
+        let result = execute_credential_command(
+            CredentialCommand::Test {
+                provider: "copilot".to_string(),
+            },
+            &mut store,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(result, "copilot: OK (OAuth configured)");
     }
 }

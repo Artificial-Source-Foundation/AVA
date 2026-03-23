@@ -62,6 +62,10 @@ machete:
 bench *ARGS:
     cargo bench --workspace {{ ARGS }}
 
+# Compare local AVA and OpenCode CLI speed
+bench-cli-shootout *ARGS:
+    node scripts/benchmarks/cli-shootout.mjs {{ ARGS }}
+
 # Clean build artifacts
 clean:
     cargo clean

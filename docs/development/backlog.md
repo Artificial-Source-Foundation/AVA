@@ -8,7 +8,7 @@ Tool surface policy: default tools are now 9 (`read`, `write`, `edit`, `bash`, `
 
 ## Recently Completed
 
-- **21 LLM providers** — added Azure OpenAI, AWS Bedrock, xAI, Mistral, Groq, DeepSeek, ChatGPT alias (was 15)
+- **22 LLM providers** — added Azure OpenAI, AWS Bedrock, xAI, Mistral, Groq, DeepSeek, ChatGPT alias (was 15)
 - **Mid-stream messaging refactor** — renamed to Queue/Interrupt/Post-complete; new keybindings (Enter=queue, Ctrl+Enter=interrupt, Alt+Enter=post-complete, Double-Escape=cancel); MessageQueueWidget with reorder/edit/remove
 - **Context overflow auto-compact** — 12 overflow patterns detected, agent loop auto-compacts and retries
 - **Shadow git snapshots** — file_snapshot.rs creates git snapshots before edits, enabling revert_file
@@ -49,6 +49,8 @@ Tool surface policy: default tools are now 9 (`read`, `write`, `edit`, `bash`, `
 - **Dead code cleanup** — 30 unwired modules → `docs/ideas/`, -10.5K LOC
 - **Docs overhaul** — README, crate-map, plugin guide, changelog, codebase docs, SOTA gap analysis
 - **DX cleanup pass** — CI/release workflows aligned on pnpm + rust-toolchain, plugin workspace build script restored, stale npm lockfile and Playwright artifact tracking removed, helper scripts updated for the Rust-first workflow
+- **CLI benchmark harness** — reproducible AVA-vs-OpenCode startup and matched-task benchmark script with JSON/Markdown output under `.tmp/benchmarks/`
+- **Copilot verification cleanup** — `auth test copilot` now recognizes OAuth credentials, installed AVA binary was refreshed from the current repo build, and benchmark reporting is more useful for flaky external-provider runs
 
 ## Execution Order
 

@@ -33,6 +33,7 @@ Layer 5 (top):          ava-tui (depends on nearly everything + ava-plugin)
 - **Key types**: `AgentLoop`, `AgentConfig`, `AgentEvent`, `AgentStack` (unified entrypoint), `MessageQueue` (3-tier steering/follow-up/post-complete), `ReflectionLoop`, `ErrorKind`
 - **Key modules**: `agent_loop/` (tool execution, response parsing), `instructions.rs` (project instruction discovery), `stack.rs` (composed runtime), `system_prompt.rs`, `stuck.rs`, `message_queue.rs`
 - **Depends on**: ava-types, ava-llm, ava-tools, ava-config, ava-context, ava-permissions, ava-platform, ava-session, ava-memory, ava-mcp, ava-codebase, ava-plugin, ava-cli-providers
+- **Dev-depends on**: ava-praxis for agent-level integration tests and benches
 
 ### ava-llm
 - **Purpose**: Unified LLM provider interface with routing, circuit breaking, and connection pooling

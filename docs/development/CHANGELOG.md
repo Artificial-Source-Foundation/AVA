@@ -6,8 +6,11 @@
 
 - **CI and release package-manager alignment** — GitHub workflows now consistently use pnpm for desktop dependency installation; release jobs use the correct `dtolnay/rust-toolchain` action.
 - **Plugin workspace build script restored** — root `build:packages` script plus `pnpm-workspace.yaml` entries now cover `plugins/sdk` and example plugins again; TypeScript example entrypoints are now treated as generated build output rather than committed source.
-- **Artifact hygiene tightened** — root `.gitignore` now excludes `.claude/`, `.playwright-mcp/`, root-level scratch PNGs, and `package-lock.json`; stale tracked Playwright screenshots and the npm lockfile were removed.
+- **Artifact hygiene tightened** — root `.gitignore` now excludes `.claude/`, `.playwright-mcp/`, root-level scratch PNGs, and `package-lock.json`; stale tracked Playwright screenshots plus root/plugin npm lockfiles were removed.
 - **Legacy helper scripts refreshed** — `scripts/testing/verify-mvp.sh`, `scripts/testing/rust-migration-smoke.sh`, and `.opencode/context.md` now reflect the Rust-first + pnpm workflow.
+- **CLI shootout harness** — `scripts/benchmarks/cli-shootout.mjs` adds a reproducible AVA-vs-OpenCode benchmark for offline startup costs and optional matched-model online tasks, with JSON/Markdown artifacts under `.tmp/benchmarks/`.
+- **Copilot auth test fixed** — `ava auth test copilot` now accepts OAuth-only Copilot credentials instead of incorrectly requiring an API key.
+- **Benchmark reporting improved** — the CLI shootout now defaults to 5 online samples and includes per-sample failure summaries in the Markdown report, making flaky Copilot/OpenAI runs easier to diagnose.
 
 ### Providers
 
@@ -15,7 +18,7 @@
 - **AWS Bedrock provider** — `crates/ava-llm/src/providers/bedrock.rs`. Self-contained SigV4 signing (SHA-256 + HMAC-SHA256), Anthropic Messages API format, separate invoke/streaming endpoints, 12 tests including crypto test vectors.
 - **xAI, Mistral, Groq, DeepSeek providers** — OpenAI-compatible providers with correct base URLs and model routing.
 - **ChatGPT provider alias** — explicit `chatgpt` provider name for Responses API routing (in addition to auto-detection via OpenAI OAuth).
-- **Total: 21 providers** (was 15). Full list: Anthropic, OpenAI, ChatGPT, Gemini, Ollama, OpenRouter, Copilot, Inception, Alibaba, Alibaba CN, ZAI, ZhipuAI, Kimi, MiniMax, MiniMax CN, Azure OpenAI, AWS Bedrock, xAI, Mistral, Groq, DeepSeek, Mock.
+- **Total: 22 providers** (was 15). Full list: Anthropic, OpenAI, ChatGPT, Gemini, Ollama, OpenRouter, Copilot, Inception, Alibaba, Alibaba CN, ZAI, ZhipuAI, Kimi, MiniMax, MiniMax CN, Azure OpenAI, AWS Bedrock, xAI, Mistral, Groq, DeepSeek, Mock.
 
 ### Mid-Stream Messaging Refactor
 

@@ -52,6 +52,7 @@ Tool surface policy: default tools are now 9 (`read`, `write`, `edit`, `bash`, `
 - **CLI benchmark harness** — reproducible AVA-vs-OpenCode startup and matched-task benchmark script with JSON/Markdown output under `.tmp/benchmarks/`
 - **Copilot verification cleanup** — `auth test copilot` now recognizes OAuth credentials, installed AVA binary was refreshed from the current repo build, and benchmark reporting is more useful for flaky external-provider runs
 - **Fast-path benchmark controls** — AVA `--fast` now isolates prompt/indexing overhead during headless benchmarking, and runtime project instruction loading no longer pulls in `CLAUDE.md`
+- **Hybrid instruction loading** — startup prompt now stays AGENTS-first while `.ava/rules` load on demand after touched-file detection, reducing simple-task prompt bloat
 
 ## Execution Order
 
@@ -73,6 +74,7 @@ Tool surface policy: default tools are now 9 (`read`, `write`, `edit`, `bash`, `
 5. **Plugin Phase 2** — `@ava-ai/plugin` npm publish, auth hook sub-protocol.
 6. **Plugin Phase 3** — OpenCode compatibility bridge, plugin marketplace.
 7. **Message revert** — undo specific tool call results. Important for trust.
+8. **Shared daemon for multi-project** — Single background process owns expensive shared resources (LLM connections, credential store, model registry, global memory). Each project gets a lightweight agent context (codebase index, MCP, session, permissions). Reduces RAM from ~30MB×N to ~30MB+5MB×N for N projects. Lock file at `~/.ava/daemon.lock` with `{ pid, port }`. CLI/desktop detects running daemon and connects instead of spawning new process. Similar to Docker daemon / VS Code server architecture.
 
 ### Platform Verification
 

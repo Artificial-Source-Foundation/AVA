@@ -378,10 +378,12 @@ const AnnotationsPanel: Component<{
         >
           <For each={props.annotations}>
             {(ann) => (
-              <button
-                type="button"
+              <article
                 onClick={() => props.onFocus(ann.id)}
-                class="w-full text-left rounded-lg border p-3 transition-all"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') props.onFocus(ann.id)
+                }}
+                class="w-full text-left rounded-lg border p-3 transition-all cursor-pointer"
                 style={{
                   background:
                     props.focusedId === ann.id
@@ -444,7 +446,7 @@ const AnnotationsPanel: Component<{
                     {ann.commentText}
                   </p>
                 </Show>
-              </button>
+              </article>
             )}
           </For>
         </Show>

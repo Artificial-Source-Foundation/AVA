@@ -13,22 +13,25 @@ const [stepLabels, setStepLabels] = createSignal<Record<string, string[]>>({})
 const [previousPlan, setPreviousPlan] = createSignal<PlanData | null>(null)
 const [showDiff, setShowDiff] = createSignal(false)
 
-// Load plan from URL hash on startup (plan sharing)
+// Load plan from URL hash on startup (plan sharing).
+// Deferred to allow the SolidJS component tree to mount first.
 if (typeof window !== 'undefined') {
   const hash = window.location.hash
   if (hash.startsWith('#plan=')) {
-    try {
-      const encoded = hash.slice(6)
-      const json = decodeURIComponent(escape(atob(encoded)))
-      const plan = JSON.parse(json) as PlanData
-      if (plan?.summary && Array.isArray(plan.steps)) {
-        setActivePlan(plan)
-        setIsOpen(true)
-        history.replaceState(null, '', window.location.pathname)
+    setTimeout(() => {
+      try {
+        const encoded = hash.slice(6)
+        const json = decodeURIComponent(escape(atob(encoded)))
+        const plan = JSON.parse(json) as PlanData
+        if (plan?.summary && Array.isArray(plan.steps)) {
+          setActivePlan(plan)
+          setIsOpen(true)
+          history.replaceState(null, '', window.location.pathname)
+        }
+      } catch {
+        // ignore malformed plan hash
       }
-    } catch {
-      // ignore malformed plan hash
-    }
+    }, 500)
   }
 }
 

@@ -14,6 +14,8 @@
 - **Benchmark reporting improved** — the CLI shootout now defaults to 5 online samples and includes per-sample failure summaries in the Markdown report, making flaky Copilot/OpenAI runs easier to diagnose.
 - **Fast benchmark mode** — AVA now supports `--fast` for lower-overhead headless runs by skipping project instruction injection and eager codebase indexing; the CLI shootout can enable it with `--ava-fast`.
 - **Project instruction loading narrowed** — AVA no longer injects `CLAUDE.md` as project runtime instructions; trusted project instruction loading now centers on `AGENTS.md`, `.ava/rules/*.md`, `.ava/skills/`, and other explicit repo-local rule files.
+- **On-demand project rules** — `.ava/rules/*.md` now activate lazily when the agent touches matching files instead of being front-loaded into every run.
+- **Leaner system prompts** — base and provider-specific system prompts were trimmed so simple online tasks spend less time and budget on repeated orchestration prose.
 
 ### Providers
 

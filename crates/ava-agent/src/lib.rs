@@ -23,7 +23,9 @@ pub mod trace;
 pub mod turn_diff;
 
 pub use instructions::{
-    contextual_instructions_for_file, load_project_instructions, trim_instructions_to_budget,
+    contextual_instructions_for_file, load_project_instructions,
+    load_startup_project_instructions_with_config, matching_rule_instructions_for_file,
+    trim_instructions_to_budget,
 };
 /// Reflection loop primitives for error analysis and auto-fix retries.
 pub use reflection::{ErrorKind, ReflectionAgent, ReflectionLoop, ToolExecutor, ToolResult};

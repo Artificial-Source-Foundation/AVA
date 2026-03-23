@@ -150,6 +150,8 @@ impl Scout {
                 cwd.display(),
                 query
             )),
+            project_root: Some(cwd.to_path_buf()),
+            enable_dynamic_rules: false,
             extended_tools: false,
             plan_mode: false,
             post_edit_validation: None,

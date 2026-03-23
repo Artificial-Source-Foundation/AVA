@@ -203,6 +203,7 @@ impl AgentStack {
             .resolve(&resolved_provider_name, provider.model_name());
         let plan_mode = *self.plan_mode.read().await;
         let mode_suffix = self.mode_prompt_suffix.read().await.clone();
+        let project_root = self.permission_context.read().await.workspace_root.clone();
         // Consume any pending plan context (one-shot: only applies to this run).
         let plan_context = self.plan_context.write().await.take();
 
@@ -213,6 +214,7 @@ impl AgentStack {
             crate::instruction_resolver::build_system_prompt_suffix_async(
                 mode_suffix,
                 provider.model_name().to_string(),
+                project_root.clone(),
                 cfg.instructions.clone(),
                 self.include_project_instructions,
             )
@@ -253,6 +255,8 @@ impl AgentStack {
             thinking_level: thinking,
             thinking_budget_tokens,
             system_prompt_suffix,
+            project_root: Some(project_root.clone()),
+            enable_dynamic_rules: true,
             extended_tools: false,
             plan_mode,
             post_edit_validation: None,
@@ -733,7 +737,10 @@ impl TaskSpawner for AgentTaskSpawner {
             thinking_budget_tokens: None,
             system_prompt_suffix: crate::instruction_resolver::build_sub_agent_instructions(
                 &effective_model,
+                &std::env::current_dir().unwrap_or_default(),
             ),
+            project_root: Some(std::env::current_dir().unwrap_or_default()),
+            enable_dynamic_rules: true,
             extended_tools: true, // sub-agents get full tool access
             plan_mode: false,
             auto_compact: true,

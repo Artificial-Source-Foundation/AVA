@@ -25,11 +25,15 @@ const INSTRUCTION_BUDGET_DIVISOR: usize = 3;
 pub fn build_system_prompt_suffix(
     mode_suffix: Option<String>,
     model_name: &str,
+    project_root: &std::path::Path,
     extra_instruction_paths: &[String],
     include_project_instructions: bool,
 ) -> Option<String> {
     let project_instructions = if include_project_instructions {
-        crate::instructions::load_project_instructions_with_config(extra_instruction_paths)
+        crate::instructions::load_startup_project_instructions_from_root_with_config(
+            project_root,
+            extra_instruction_paths,
+        )
     } else {
         None
     };
@@ -55,6 +59,7 @@ pub fn build_system_prompt_suffix(
 pub async fn build_system_prompt_suffix_async(
     mode_suffix: Option<String>,
     model_name: String,
+    project_root: std::path::PathBuf,
     extra_instruction_paths: Vec<String>,
     include_project_instructions: bool,
 ) -> Option<String> {
@@ -62,6 +67,7 @@ pub async fn build_system_prompt_suffix_async(
         build_system_prompt_suffix(
             mode_suffix,
             &model_name,
+            &project_root,
             &extra_instruction_paths,
             include_project_instructions,
         )
@@ -74,8 +80,11 @@ pub async fn build_system_prompt_suffix_async(
 /// to determine the context budget.
 ///
 /// Returns `None` if no project instruction files are found.
-pub fn build_sub_agent_instructions(model_name: &str) -> Option<String> {
-    crate::instructions::load_project_instructions()
+pub fn build_sub_agent_instructions(
+    model_name: &str,
+    project_root: &std::path::Path,
+) -> Option<String> {
+    crate::instructions::load_startup_project_instructions_from_root_with_config(project_root, &[])
         .map(|pi| trim_instructions_for_model(&pi, model_name))
 }
 

@@ -70,6 +70,31 @@ pub fn load_project_instructions() -> Option<String> {
     load_project_instructions_with_config(&[])
 }
 
+/// Load the lean startup instruction set used for the initial system prompt.
+///
+/// Startup stays intentionally small: global/root `AGENTS.md` files and
+/// user-configured extras load eagerly, while `.ava/rules/*.md` are resolved on
+/// demand after the agent touches matching files.
+pub fn load_startup_project_instructions_with_config(extra_paths: &[String]) -> Option<String> {
+    let cwd = std::env::current_dir().ok()?;
+    load_startup_project_instructions_from_root_with_config(&cwd, extra_paths)
+}
+
+pub fn load_startup_project_instructions_from_root_with_config(
+    root: &Path,
+    extra_paths: &[String],
+) -> Option<String> {
+    let home = dirs::home_dir();
+    let project_trusted = ava_config::is_project_trusted(root);
+    if !project_trusted {
+        tracing::warn!(
+            "Skipping project-local instructions — project not trusted. \
+             Run with --trust to approve."
+        );
+    }
+    load_startup_from_root_with_extras(root, home.as_deref(), extra_paths, project_trusted)
+}
+
 /// Load project instructions with additional user-configured paths.
 ///
 /// `extra_paths` are file paths or glob patterns relative to the project root.
@@ -90,6 +115,73 @@ pub fn load_project_instructions_with_config(extra_paths: &[String]) -> Option<S
         );
     }
     load_from_root_with_extras(&cwd, home.as_deref(), extra_paths, project_trusted)
+}
+
+fn load_startup_from_root_with_extras(
+    root: &Path,
+    home: Option<&Path>,
+    extra_paths: &[String],
+    project_trusted: bool,
+) -> Option<String> {
+    let mut seen = HashSet::new();
+    let mut sections = Vec::new();
+
+    if let Some(home) = home {
+        let global = home.join(".ava").join("AGENTS.md");
+        try_load_file(&global, &mut seen, &mut sections);
+    }
+
+    if project_trusted {
+        let mut ancestors = Vec::new();
+        let mut dir = root.parent();
+        while let Some(d) = dir {
+            if d.join(".git").exists() {
+                ancestors.push(d.to_path_buf());
+                break;
+            }
+            ancestors.push(d.to_path_buf());
+            dir = d.parent();
+        }
+        ancestors.reverse();
+        for ancestor in &ancestors {
+            let path = ancestor.join("AGENTS.md");
+            try_load_file(&path, &mut seen, &mut sections);
+        }
+
+        let project_agents = root.join("AGENTS.md");
+        try_load_file_bounded(&project_agents, root, &mut seen, &mut sections);
+
+        let project_ava_agents = root.join(".ava").join("AGENTS.md");
+        try_load_file_bounded(&project_ava_agents, root, &mut seen, &mut sections);
+
+        for extra in extra_paths {
+            if extra.contains('*') {
+                let full_pattern = root.join(extra);
+                if let Ok(paths) = glob::glob(&full_pattern.to_string_lossy()) {
+                    let mut matched: Vec<PathBuf> = paths.filter_map(|p| p.ok()).collect();
+                    matched.sort();
+                    for path in matched {
+                        try_load_file_bounded(&path, root, &mut seen, &mut sections);
+                    }
+                }
+            } else {
+                let path = root.join(extra);
+                try_load_file_bounded(&path, root, &mut seen, &mut sections);
+            }
+        }
+    }
+
+    load_skill_sections(root, home, project_trusted, &mut seen, &mut sections);
+
+    if sections.is_empty() {
+        return None;
+    }
+
+    let content = sections.join("\n\n");
+    Some(format!(
+        "# Project Instructions\n\nFollow the instructions below for this project.\n\n{}",
+        content
+    ))
 }
 
 /// Internal implementation that accepts explicit root and home paths for testability.
@@ -380,6 +472,20 @@ fn has_matching_files(root: &Path, patterns: &[String]) -> bool {
     false
 }
 
+fn file_matches_patterns(file_path: &Path, project_root: &Path, patterns: &[String]) -> bool {
+    let relative = file_path
+        .strip_prefix(project_root)
+        .unwrap_or(file_path)
+        .to_string_lossy()
+        .replace(std::path::MAIN_SEPARATOR, "/");
+
+    patterns.iter().any(|pattern| {
+        glob::Pattern::new(pattern)
+            .map(|compiled| compiled.matches(&relative))
+            .unwrap_or(false)
+    })
+}
+
 /// Try to load a rule file, respecting optional frontmatter path globs.
 /// If the file has `paths:` frontmatter, only include it if matching files exist.
 fn try_load_rule_file(
@@ -440,6 +546,71 @@ fn try_load_rule_file(
 
     tracing::debug!("loaded instruction file: {}", path.display());
     sections.push(format!("# From: {}\n\n{}", path.display(), body));
+}
+
+/// Load relevant `.ava/rules/*.md` bodies for a specific touched file.
+///
+/// Rules activate at most once per session using canonical paths tracked in
+/// `activated_rules`. Rules without `paths:` frontmatter activate on the first
+/// touched file; scoped rules activate only when that file matches.
+pub fn matching_rule_instructions_for_file(
+    file_path: &Path,
+    project_root: &Path,
+    activated_rules: &mut HashSet<PathBuf>,
+) -> Vec<String> {
+    let rules_dir = project_root.join(".ava").join("rules");
+    let Ok(entries) = fs::read_dir(&rules_dir) else {
+        return Vec::new();
+    };
+
+    let mut rule_files: Vec<PathBuf> = entries
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.extension()
+                .map(|ext| ext.eq_ignore_ascii_case("md"))
+                .unwrap_or(false)
+        })
+        .collect();
+    rule_files.sort();
+
+    let project_root =
+        fs::canonicalize(project_root).unwrap_or_else(|_| project_root.to_path_buf());
+    let mut sections = Vec::new();
+
+    for path in rule_files {
+        let Ok(canonical) = fs::canonicalize(&path) else {
+            continue;
+        };
+        if !canonical.starts_with(&project_root) || activated_rules.contains(&canonical) {
+            continue;
+        }
+
+        let Ok(content) = fs::read_to_string(&path) else {
+            continue;
+        };
+        let trimmed = content.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let (paths, body) = parse_frontmatter(trimmed);
+        if let Some(ref patterns) = paths {
+            if !file_matches_patterns(file_path, &project_root, patterns) {
+                continue;
+            }
+        }
+
+        let body = body.trim();
+        if body.is_empty() {
+            continue;
+        }
+
+        activated_rules.insert(canonical);
+        sections.push(format!("# From: {}\n\n{}", path.display(), body));
+    }
+
+    sections
 }
 
 /// Load contextual instructions for a specific file path.
@@ -769,6 +940,64 @@ mod tests {
         assert!(
             text.contains("Be concise."),
             "Rule without frontmatter should always load"
+        );
+    }
+
+    #[test]
+    fn test_startup_instructions_skip_rules() {
+        let tmp = TempDir::new().unwrap();
+        let fake_home = TempDir::new().unwrap();
+        let ava_dir = fake_home.path().join(".ava");
+        fs::create_dir_all(&ava_dir).unwrap();
+        fs::write(ava_dir.join("AGENTS.md"), "Global rules.").unwrap();
+        fs::write(tmp.path().join("AGENTS.md"), "Project rules.").unwrap();
+
+        let rules = tmp.path().join(".ava").join("rules");
+        fs::create_dir_all(&rules).unwrap();
+        fs::write(rules.join("rust.md"), "Always use anyhow.").unwrap();
+
+        let result =
+            load_startup_from_root_with_extras(tmp.path(), Some(fake_home.path()), &[], true)
+                .unwrap();
+        assert!(result.contains("Global rules."));
+        assert!(result.contains("Project rules."));
+        assert!(!result.contains("Always use anyhow."));
+    }
+
+    #[test]
+    fn test_matching_rule_instructions_for_file_is_path_scoped() {
+        let tmp = TempDir::new().unwrap();
+        let rules = tmp.path().join(".ava").join("rules");
+        let src = tmp.path().join("src");
+        fs::create_dir_all(&rules).unwrap();
+        fs::create_dir_all(&src).unwrap();
+        fs::write(src.join("main.rs"), "fn main() {}\n").unwrap();
+        fs::write(tmp.path().join("README.md"), "docs\n").unwrap();
+
+        let rule_content = "---\npaths:\n  - \"src/**/*.rs\"\n---\nRust path rule.";
+        fs::write(rules.join("rust.md"), rule_content).unwrap();
+
+        let mut activated = HashSet::new();
+        let readme_sections = matching_rule_instructions_for_file(
+            &tmp.path().join("README.md"),
+            tmp.path(),
+            &mut activated,
+        );
+        assert!(
+            readme_sections.is_empty(),
+            "rule should not load for README.md"
+        );
+
+        let rust_sections =
+            matching_rule_instructions_for_file(&src.join("main.rs"), tmp.path(), &mut activated);
+        assert_eq!(rust_sections.len(), 1);
+        assert!(rust_sections[0].contains("Rust path rule."));
+
+        let repeated =
+            matching_rule_instructions_for_file(&src.join("main.rs"), tmp.path(), &mut activated);
+        assert!(
+            repeated.is_empty(),
+            "rule should only activate once per session"
         );
     }
 

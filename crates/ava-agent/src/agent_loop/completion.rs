@@ -22,6 +22,10 @@ use crate::system_prompt::{build_system_prompt, provider_prompt_suffix};
 
 use super::response::parse_tool_calls;
 
+fn estimate_tokens(text: &str) -> usize {
+    ava_context::count_tokens_default(text)
+}
+
 impl AgentLoop {
     /// Inject the system prompt into the context before the first turn.
     /// Idempotent: calling this multiple times (e.g., follow-up runs) is safe.
@@ -68,6 +72,14 @@ impl AgentLoop {
                 system.push_str(&text);
             }
         }
+        info!(
+            model = %self.config.model,
+            prompt_chars = system.len(),
+            prompt_tokens = estimate_tokens(&system),
+            has_suffix = self.config.system_prompt_suffix.is_some(),
+            dynamic_rules = self.enable_dynamic_rules,
+            "system prompt prepared"
+        );
         self.context.add_message(Message::new(Role::System, system));
     }
 

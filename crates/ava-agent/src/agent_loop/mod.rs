@@ -4,6 +4,7 @@ mod response;
 mod steering;
 mod tool_execution;
 
+use std::collections::HashSet;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Instant;
@@ -72,6 +73,12 @@ pub struct AgentLoop {
     session_id: Option<uuid::Uuid>,
     /// Shadow git snapshot manager for full project-state undo/rollback.
     snapshot_manager: ava_tools::core::file_snapshot::SharedSnapshotManager,
+    /// Trusted project root used for contextual instruction resolution.
+    project_root: Option<std::path::PathBuf>,
+    /// Tracks `.ava/rules/*.md` files already injected during this session.
+    activated_rule_paths: std::sync::Mutex<HashSet<std::path::PathBuf>>,
+    /// When false, skip on-demand project rule injection entirely.
+    enable_dynamic_rules: bool,
 }
 
 /// Configuration for a single agent loop run — turn limits, cost caps, and model identity.
@@ -100,6 +107,12 @@ pub struct AgentConfig {
     /// Optional suffix appended to the system prompt (e.g., mode-specific instructions).
     #[serde(default)]
     pub system_prompt_suffix: Option<String>,
+    /// Trusted project root used for contextual instruction resolution.
+    #[serde(default)]
+    pub project_root: Option<std::path::PathBuf>,
+    /// When true, inject matching `.ava/rules/*.md` lazily after file touches.
+    #[serde(default = "default_enable_dynamic_rules")]
+    pub enable_dynamic_rules: bool,
     /// When true, include extended-tier tools in the system prompt alongside
     /// default tools. Extended tools are always *executable* regardless of this flag.
     #[serde(default)]
@@ -170,6 +183,10 @@ fn default_stream_timeout_secs() -> u64 {
 }
 
 fn default_prompt_caching() -> bool {
+    true
+}
+
+fn default_enable_dynamic_rules() -> bool {
     true
 }
 
@@ -254,6 +271,8 @@ impl AgentLoop {
         context: ContextManager,
         config: AgentConfig,
     ) -> Self {
+        let project_root = config.project_root.clone();
+        let enable_dynamic_rules = config.enable_dynamic_rules;
         Self {
             llm,
             tools,
@@ -269,6 +288,9 @@ impl AgentLoop {
             session_logger: None,
             session_id: None,
             snapshot_manager: ava_tools::core::file_snapshot::new_shared_snapshot_manager(),
+            project_root,
+            activated_rule_paths: std::sync::Mutex::new(HashSet::new()),
+            enable_dynamic_rules,
         }
     }
 
@@ -297,6 +319,17 @@ impl AgentLoop {
     /// Attach a plugin manager for hook dispatch during the agent loop.
     pub fn with_plugin_manager(mut self, pm: Arc<tokio::sync::Mutex<PluginManager>>) -> Self {
         self.plugin_manager = Some(pm);
+        self
+    }
+
+    /// Override project instruction context for contextual AGENTS/rule loading.
+    pub fn with_project_instruction_context(
+        mut self,
+        project_root: Option<std::path::PathBuf>,
+        enable_dynamic_rules: bool,
+    ) -> Self {
+        self.project_root = project_root;
+        self.enable_dynamic_rules = enable_dynamic_rules;
         self
     }
 
@@ -889,6 +922,8 @@ mod tests {
             thinking_level: ThinkingLevel::Off,
             thinking_budget_tokens: None,
             system_prompt_suffix: None,
+            project_root: None,
+            enable_dynamic_rules: false,
             extended_tools: false,
             plan_mode: false,
             post_edit_validation: None,
@@ -921,6 +956,8 @@ mod tests {
             thinking_level: ThinkingLevel::Off,
             thinking_budget_tokens: None,
             system_prompt_suffix: None,
+            project_root: None,
+            enable_dynamic_rules: false,
             extended_tools: false,
             plan_mode: false,
             post_edit_validation: None,
@@ -956,6 +993,8 @@ mod tests {
             thinking_level: ThinkingLevel::Off,
             thinking_budget_tokens: None,
             system_prompt_suffix: None,
+            project_root: None,
+            enable_dynamic_rules: false,
             extended_tools: false,
             plan_mode: false,
             post_edit_validation: None,
@@ -1008,6 +1047,8 @@ mod tests {
             thinking_level: ThinkingLevel::Off,
             thinking_budget_tokens: None,
             system_prompt_suffix: None,
+            project_root: None,
+            enable_dynamic_rules: false,
             extended_tools: false,
             plan_mode: false,
             post_edit_validation: None,
@@ -1060,6 +1101,8 @@ mod tests {
             thinking_level: ThinkingLevel::Off,
             thinking_budget_tokens: None,
             system_prompt_suffix: None,
+            project_root: None,
+            enable_dynamic_rules: false,
             extended_tools: false,
             plan_mode: false,
             post_edit_validation: None,
@@ -1087,6 +1130,8 @@ mod tests {
             thinking_level: ThinkingLevel::Off,
             thinking_budget_tokens: None,
             system_prompt_suffix: None,
+            project_root: None,
+            enable_dynamic_rules: false,
             extended_tools: false,
             plan_mode: false,
             post_edit_validation: None,

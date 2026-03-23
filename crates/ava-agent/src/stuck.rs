@@ -230,6 +230,8 @@ mod tests {
             thinking_level: ava_types::ThinkingLevel::Off,
             thinking_budget_tokens: None,
             system_prompt_suffix: None,
+            project_root: None,
+            enable_dynamic_rules: false,
             extended_tools: false,
             plan_mode: false,
             post_edit_validation: None,

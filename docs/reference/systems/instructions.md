@@ -1,16 +1,53 @@
 # Project Instructions
 
-AVA discovers and loads instruction files from multiple locations to provide
-project-specific context to the LLM. Instructions are injected as a suffix to
-the system prompt, giving the model project-specific rules, coding conventions,
-and constraints.
+AVA discovers instruction files from multiple locations to provide
+project-specific context to the LLM. The runtime now uses a hybrid model:
+
+- startup prompt: lean, mostly `AGENTS.md`-based instructions
+- on-demand prompt additions: matching `.ava/rules/*.md` after the agent touches
+  relevant files
 
 All instruction loading logic lives in `crates/ava-agent/src/instructions.rs`.
 
 ## Discovery Order
 
-Instructions are loaded in this order (earlier entries appear first in the
-system prompt, later entries take precedence for conflicting guidance):
+## Startup Prompt Sources
+
+The initial system-prompt suffix stays intentionally small. Startup loads:
+
+### 1. Global User Instructions
+
+```
+~/.ava/AGENTS.md
+```
+
+### 2. Ancestor Directory Walk
+
+Starting from the current working directory's parent, walk upward looking for
+`AGENTS.md` in each ancestor directory. Stop at the first directory containing
+a `.git` folder (repository boundary).
+
+### 3. Project Root AGENTS
+
+```
+AGENTS.md
+.ava/AGENTS.md
+```
+
+### 4. User-Configured Extra Paths
+
+Additional paths from `config.yaml` under the `instructions:` key remain eager
+because they are explicit user configuration.
+
+Global and trusted project skill directories also remain available at startup.
+Cross-tool root files like `.cursorrules` and `.github/copilot-instructions.md`
+are part of the broader discovery surface, but not the lean startup prompt.
+
+## Full Discovery Order
+
+The underlying loader can still discover a broader instruction surface, in this
+order (earlier entries appear first, later entries take precedence for
+conflicting guidance):
 
 ### 1. Global User Instructions
 
@@ -24,8 +61,8 @@ instructions can override.
 ### 2. Ancestor Directory Walk
 
 Starting from the current working directory's parent, walk upward looking for
-`AGENTS.md` and `CLAUDE.md` in each ancestor directory. Stop at the first
-directory containing a `.git` folder (repository boundary).
+`AGENTS.md` in each ancestor directory. Stop at the first directory containing a
+`.git` folder (repository boundary).
 
 Ancestors are loaded in **top-down order** (outermost first) so that
 more-specific subdirectory rules take priority over parent rules.
@@ -39,7 +76,6 @@ Checked in this order (all that exist are included):
 
 ```
 AGENTS.md
-CLAUDE.md
 .cursorrules
 .github/copilot-instructions.md
 ```
@@ -92,19 +128,18 @@ AVA reads instruction files from other AI coding tools:
 | File | Tool | Notes |
 |---|---|---|
 | `AGENTS.md` | AVA native | Primary instruction format |
-| `CLAUDE.md` | Claude Code | Fully supported |
 | `.cursorrules` | Cursor | Loaded from project root |
 | `.github/copilot-instructions.md` | GitHub Copilot | Standard location |
 
-This means a project can have a single `CLAUDE.md` or `.cursorrules` file that
-works with both AVA and the original tool.
+`CLAUDE.md` is no longer loaded into AVA's runtime system prompt. If you want to
+reuse Claude-specific guidance with AVA, move the content into `AGENTS.md` or an
+explicit `instructions:` entry.
 
 ## Glob-Scoped Rules with Frontmatter
 
 Files in `.ava/rules/` can include YAML frontmatter to restrict when they are
-loaded. If `paths:` globs are specified, the rule file is only included when
-at least one matching file exists in the project
-(`crates/ava-agent/src/instructions.rs:137`).
+loaded. If `paths:` globs are specified, the rule file is injected only after
+the agent touches a matching file path.
 
 Example `.ava/rules/python.md`:
 
@@ -118,11 +153,11 @@ Always use type hints in function signatures.
 Prefer dataclasses over plain dicts for structured data.
 ```
 
-This rule is only loaded if the project contains `.py` files or a `scripts/`
-directory. The frontmatter is stripped from the output -- only the body text
-is injected into the system prompt.
+This rule is injected only after the agent reads or edits a matching `.py` file
+or path under `scripts/`. The frontmatter is stripped from the output -- only
+the body text is injected.
 
-Rules without frontmatter are always loaded regardless of project contents.
+Rules without frontmatter activate on the first touched file in the project.
 
 ## Contextual Per-File Instructions
 
@@ -199,7 +234,7 @@ Follow the instructions below for this project.
 
 Global user rules here.
 
-# From: /home/user/project/CLAUDE.md
+# From: /home/user/project/AGENTS.md
 
 Project-specific rules here.
 
@@ -208,14 +243,15 @@ Project-specific rules here.
 Style guidelines here.
 ```
 
-This is then appended to the system prompt suffix in `AgentStack::run()`
-(`crates/ava-agent/src/stack.rs:431`).
+Startup instructions are appended to the system prompt suffix in
+`AgentStack::run()`. Matching rule bodies are added later via tool-result
+context after file touches.
 
 ## Key Files
 
 | File | Role |
 |---|---|
-| `crates/ava-agent/src/instructions.rs` | All discovery, loading, frontmatter parsing, contextual instructions |
-| `crates/ava-agent/src/stack.rs:431` | System prompt suffix assembly (mode + instructions) |
+| `crates/ava-agent/src/instructions.rs` | Discovery, startup loading, rule matching, contextual instructions |
+| `crates/ava-agent/src/instruction_resolver.rs` | Startup prompt suffix assembly and trimming |
 | `crates/ava-config/src/agents.rs` | `AgentsConfig`, `AgentDefaults`, `AgentOverride` |
 | `crates/ava-config/src/lib.rs` | `instructions` field in config.yaml |

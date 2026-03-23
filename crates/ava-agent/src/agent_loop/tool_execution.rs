@@ -11,12 +11,36 @@ use ava_tools::registry::ToolRegistry;
 
 use super::repetition::RepetitionDetector;
 use super::{AgentEvent, AgentLoop, MAX_TOOLS_PER_TURN};
-use crate::instructions::contextual_instructions_for_file;
+use crate::instructions::{contextual_instructions_for_file, matching_rule_instructions_for_file};
 use crate::stuck::StuckDetector;
 
 const MAX_TOOL_RESULT_BYTES: usize = 50_000;
 const POST_EDIT_VALIDATION_TOOLS: &[&str] = &["edit", "multiedit", "write", "apply_patch"];
 const VALIDATION_FAILURE_MARKER: &str = "[post-edit validation status: failed]";
+
+fn touched_file_path(tool_call: &ToolCall) -> Option<PathBuf> {
+    match tool_call.name.as_str() {
+        "read" | "write" | "edit" => tool_call
+            .arguments
+            .get("path")
+            .and_then(|value| value.as_str())
+            .map(PathBuf::from),
+        _ => None,
+    }
+}
+
+fn append_contextual_sections(result: &mut ToolResult, sections: &[String]) {
+    if sections.is_empty() {
+        return;
+    }
+
+    result.content.push_str("\n\n---\n");
+    result.content.push_str(&sections.join("\n\n"));
+}
+
+fn estimate_tokens(text: &str) -> usize {
+    ava_context::count_tokens_default(text)
+}
 
 /// Tools that are safe to execute concurrently (no side effects).
 pub const READ_ONLY_TOOLS: &[&str] = &[
@@ -325,20 +349,47 @@ impl AgentLoop {
         };
         truncate_tool_result(&mut result);
 
-        // Append contextual AGENTS.md instructions for read tool results.
-        // Only inject if the project is trusted — untrusted projects must not
-        // have their AGENTS.md injected as contextual instructions.
-        if tool_call.name == "read" && !result.is_error {
-            if let Some(path_str) = tool_call.arguments.get("path").and_then(|v| v.as_str()) {
-                let file_path = PathBuf::from(path_str);
-                let project_root = std::env::current_dir().unwrap_or_default();
+        if !result.is_error {
+            if let (Some(file_path), Some(project_root)) =
+                (touched_file_path(tool_call), self.project_root.clone())
+            {
                 if ava_config::is_project_trusted(&project_root) {
-                    if let Some(instructions) =
-                        contextual_instructions_for_file(&file_path, &project_root)
-                    {
-                        result.content.push_str("\n\n---\n");
-                        result.content.push_str(&instructions);
+                    let mut sections = Vec::new();
+
+                    if tool_call.name == "read" {
+                        if let Some(instructions) =
+                            contextual_instructions_for_file(&file_path, &project_root)
+                        {
+                            sections.push(instructions);
+                        }
                     }
+
+                    if self.enable_dynamic_rules {
+                        let mut activated = self
+                            .activated_rule_paths
+                            .lock()
+                            .unwrap_or_else(|error| error.into_inner());
+                        let rule_sections = matching_rule_instructions_for_file(
+                            &file_path,
+                            &project_root,
+                            &mut activated,
+                        );
+                        if !rule_sections.is_empty() {
+                            let token_sum: usize = rule_sections
+                                .iter()
+                                .map(|section| estimate_tokens(section))
+                                .sum();
+                            debug!(
+                                file = %file_path.display(),
+                                rule_count = rule_sections.len(),
+                                rule_tokens = token_sum,
+                                "activated on-demand project rules"
+                            );
+                        }
+                        sections.extend(rule_sections);
+                    }
+
+                    append_contextual_sections(&mut result, &sections);
                 }
             }
         }

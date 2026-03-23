@@ -69,8 +69,9 @@ pub struct DesktopBridge {
     /// Pending plan reply channel. Set when a plan_created event is forwarded
     /// to the frontend; consumed when the frontend calls `resolve_plan`.
     pub pending_plan_reply: PendingPlanReply,
-    /// The session ID of the last completed agent run, used for retry/regenerate.
-    pub last_session_id: RwLock<Option<Uuid>>,
+    /// The session ID of the last completed (or checkpointed) agent run.
+    /// Used for retry/regenerate and to load history for the next run.
+    pub last_session_id: Arc<RwLock<Option<Uuid>>>,
     /// Stack of file edits made by the agent, most recent last.
     /// Used by `undo_last_edit` to restore the previous content.
     pub edit_history: Arc<RwLock<VecDeque<FileEditRecord>>>,
@@ -101,7 +102,7 @@ impl DesktopBridge {
             pending_approval_reply: Arc::new(Mutex::new(None)),
             pending_question_reply: Arc::new(Mutex::new(None)),
             pending_plan_reply: Arc::new(Mutex::new(None)),
-            last_session_id: RwLock::new(None),
+            last_session_id: Arc::new(RwLock::new(None)),
             edit_history: Arc::new(RwLock::new(VecDeque::new())),
         })
     }

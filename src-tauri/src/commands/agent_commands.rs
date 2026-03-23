@@ -75,12 +75,16 @@ async fn run_agent_inner(
     // Clone the todo state so the forwarder can emit todo updates
     let todo_state = bridge.stack.todo_state.clone();
     let checkpoint_sm = bridge.stack.session_manager.clone();
+    let checkpoint_last_id = bridge.last_session_id.clone();
     let forwarder = tokio::spawn(async move {
         let mut last_tool_was_todo_write = false;
         while let Some(event) = rx.recv().await {
-            // Checkpoint: incrementally save session so progress survives crashes
+            // Checkpoint: incrementally save session so progress survives crashes.
+            // Also update last_session_id so the next run can load history even
+            // if the current run is cancelled/interrupted.
             if let ava_agent::agent_loop::AgentEvent::Checkpoint(ref session) = event {
                 let _ = checkpoint_sm.save(session);
+                *checkpoint_last_id.write().await = Some(session.id);
                 continue;
             }
             // Track write/edit tool calls for undo support

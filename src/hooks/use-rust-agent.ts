@@ -156,30 +156,30 @@ export function useRustAgent() {
           event.is_error ? 'ERROR' : 'OK',
           (event.content as string)?.slice(0, 120)
         )
-        // Parse todos from todo_write tool results directly in the frontend.
-        // This is more reliable than waiting for a separate TodoUpdate event
-        // from Rust, which may not arrive in Tauri mode.
-        const matchedToolName = pendingToolNames.shift() ?? ''
-        if (matchedToolName === 'todo_write' && !event.is_error) {
-          try {
-            const content = event.content as string
-            // The tool output format: "Updated todo list (N total, M incomplete):\n[...]"
-            const jsonStart = content.indexOf('[')
-            if (jsonStart >= 0) {
-              const parsed = JSON.parse(content.slice(jsonStart)) as TodoItem[]
-              log.info('todo', 'Parsed todos from tool_result', { count: parsed.length })
-              setTodos(parsed)
-              if (parsed.length > 0) {
-                try {
-                  const layout = useLayout()
-                  layout.switchRightPanelTab('todos')
-                } catch {
-                  // Layout context may not be available in all environments
+        // Parse todos from tool_result content if it looks like a todo_write output.
+        // The content starts with "Updated todo list" and contains a JSON array.
+        // This is more reliable than the separate TodoUpdate event path.
+        if (!event.is_error) {
+          const content = (event.content as string) ?? ''
+          if (content.startsWith('Updated todo list')) {
+            try {
+              const jsonStart = content.indexOf('[')
+              if (jsonStart >= 0) {
+                const parsed = JSON.parse(content.slice(jsonStart)) as TodoItem[]
+                log.info('todo', 'Parsed todos from tool_result', { count: parsed.length })
+                setTodos(parsed)
+                if (parsed.length > 0) {
+                  try {
+                    const layout = useLayout()
+                    layout.switchRightPanelTab('todos')
+                  } catch {
+                    // Layout context may not be available
+                  }
                 }
               }
+            } catch {
+              debugLog('todo', 'Failed to parse todos from tool_result')
             }
-          } catch {
-            debugLog('todo', 'Failed to parse todos from tool_result content')
           }
         }
         setActiveToolCalls((prev) => {

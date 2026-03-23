@@ -21,6 +21,7 @@ function parseArgs(argv) {
     warmupRuns: 1,
     timeoutMs: 120000,
     online: false,
+    avaFast: false,
     avaProvider: undefined,
     avaModel: undefined,
     opencodeModel: undefined,
@@ -64,6 +65,9 @@ function parseArgs(argv) {
         break
       case '--online':
         options.online = true
+        break
+      case '--ava-fast':
+        options.avaFast = true
         break
       case '--ava-provider':
         options.avaProvider = next
@@ -278,6 +282,7 @@ function makeOnlineTasks(options) {
       verify: (output, exitCode) => exitCode === 0 && /BENCHMARK_OK/.test(output),
       avaArgs: [
         '--headless',
+        ...(options.avaFast ? ['--fast'] : []),
         '--json',
         '--provider',
         options.avaProvider,
@@ -304,6 +309,7 @@ function makeOnlineTasks(options) {
       verify: (output, exitCode) => exitCode === 0 && /\bava\b/.test(output),
       avaArgs: [
         '--headless',
+        ...(options.avaFast ? ['--fast'] : []),
         '--json',
         '--provider',
         options.avaProvider,
@@ -446,6 +452,7 @@ function makeMarkdownReport(metadata, groups, summaries) {
   lines.push(`- OpenCode binary: ${metadata.opencodeBin}`)
   lines.push(`- AVA version: ${metadata.avaVersion}`)
   lines.push(`- OpenCode version: ${metadata.opencodeVersion}`)
+  lines.push(`- AVA fast mode: ${metadata.config.avaFast ? 'enabled' : 'disabled'}`)
   lines.push(
     `- AVA binary size: ${metadata.avaSizeMb === null ? 'n/a' : `${metadata.avaSizeMb.toFixed(2)} MB`}`
   )
@@ -571,6 +578,7 @@ async function main() {
       avaProvider: options.avaProvider ?? null,
       avaModel: options.avaModel ?? null,
       opencodeModel: options.opencodeModel ?? null,
+      avaFast: options.avaFast,
     },
   }
 

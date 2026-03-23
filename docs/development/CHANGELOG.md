@@ -12,6 +12,8 @@
 - **Copilot auth test fixed** — `ava auth test copilot` now accepts OAuth-only Copilot credentials instead of incorrectly requiring an API key.
 - **OAuth auth-test clarity** — `ava auth test` now reports when OAuth credentials exist but are already expired, avoiding false confidence from presence-only checks.
 - **Benchmark reporting improved** — the CLI shootout now defaults to 5 online samples and includes per-sample failure summaries in the Markdown report, making flaky Copilot/OpenAI runs easier to diagnose.
+- **Fast benchmark mode** — AVA now supports `--fast` for lower-overhead headless runs by skipping project instruction injection and eager codebase indexing; the CLI shootout can enable it with `--ava-fast`.
+- **Project instruction loading narrowed** — AVA no longer injects `CLAUDE.md` as project runtime instructions; trusted project instruction loading now centers on `AGENTS.md`, `.ava/rules/*.md`, `.ava/skills/`, and other explicit repo-local rule files.
 
 ### Providers
 

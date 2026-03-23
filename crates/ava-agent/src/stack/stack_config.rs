@@ -24,6 +24,10 @@ pub struct AgentStackConfig {
     pub compaction_threshold_pct: u8,
     /// When false, automatic context compaction is disabled entirely.
     pub auto_compact: bool,
+    /// When false, skip loading project instruction files into the system prompt.
+    pub include_project_instructions: bool,
+    /// When false, skip eager background codebase indexing at startup.
+    pub eager_codebase_indexing: bool,
 }
 
 #[derive(Debug)]
@@ -46,6 +50,8 @@ impl Default for AgentStackConfig {
             working_dir: None,
             compaction_threshold_pct: 80,
             auto_compact: true,
+            include_project_instructions: true,
+            eager_codebase_indexing: true,
         }
     }
 }

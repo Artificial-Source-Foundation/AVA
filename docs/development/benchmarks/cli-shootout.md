@@ -37,6 +37,7 @@ pnpm run bench:cli-shootout
 ```
 
 By default the harness resolves `ava` and `opencode` from `PATH`. Override them with `--ava-bin`, `--opencode-bin`, `AVA_BENCH_BIN`, or `OPENCODE_BENCH_BIN` when needed.
+Use `--ava-fast` to benchmark AVA with lower-overhead startup settings (`--fast` skips project instruction injection and eager codebase indexing).
 
 Online with the same provider/model pair for both CLIs:
 
@@ -55,6 +56,7 @@ Custom binaries or fewer iterations:
 ```bash
 node scripts/benchmarks/cli-shootout.mjs \
   --ava-bin /path/to/ava \
+  --ava-fast \
   --opencode-bin /path/to/opencode \
   --offline-iterations 5 \
   --online-iterations 2
@@ -78,3 +80,4 @@ The online suite defaults to 5 measured samples so failure rates and p95 values 
 - Online runs are only meaningful when both CLIs use the same upstream model/provider pair.
 - Session state, provider auth, and network conditions can still affect online variance; use medians and repeated runs.
 - Working directory matters a lot for RSS: benchmarking inside a large repo measures startup plus repo-context overhead, while a temp fixture isolates more of the pure CLI/runtime cost.
+- AVA fast mode is useful for isolating prompt/context overhead. It is not the default user experience; compare both modes before drawing product conclusions.

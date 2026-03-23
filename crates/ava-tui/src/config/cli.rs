@@ -47,6 +47,10 @@ pub struct CliArgs {
     #[arg(long)]
     pub headless: bool,
 
+    /// Reduce startup overhead by skipping project instructions and eager codebase indexing
+    #[arg(long)]
+    pub fast: bool,
+
     /// Output JSON events (for scripting/piping)
     #[arg(long)]
     pub json: bool,

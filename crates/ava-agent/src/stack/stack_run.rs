@@ -214,6 +214,7 @@ impl AgentStack {
                 mode_suffix,
                 provider.model_name().to_string(),
                 cfg.instructions.clone(),
+                self.include_project_instructions,
             )
             .await;
 

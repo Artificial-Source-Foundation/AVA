@@ -199,6 +199,7 @@ impl AgentState {
         max_turns: usize,
         max_budget_usd: f64,
         yolo: bool,
+        fast: bool,
     ) -> Result<(
         Self,
         tokio::sync::mpsc::UnboundedReceiver<ava_tools::core::question::QuestionRequest>,
@@ -215,6 +216,8 @@ impl AgentState {
             max_turns,
             max_budget_usd,
             yolo,
+            include_project_instructions: !fast,
+            eager_codebase_indexing: !fast,
             ..AgentStackConfig::default()
         };
         let (agent_stack, question_rx, approval_rx, plan_rx) = AgentStack::new(config).await?;

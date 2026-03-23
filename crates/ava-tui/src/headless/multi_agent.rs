@@ -25,6 +25,8 @@ pub(super) async fn run_multi_agent(cli: CliArgs, goal: &str) -> Result<()> {
         max_turns: cli.max_turns,
         max_budget_usd: cli.max_budget_usd,
         yolo: cli.auto_approve,
+        include_project_instructions: !cli.fast,
+        eager_codebase_indexing: !cli.fast,
         ..Default::default()
     })
     .await?;

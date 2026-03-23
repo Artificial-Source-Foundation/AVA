@@ -89,6 +89,8 @@ pub struct AgentStack {
     compaction_threshold_pct: u8,
     /// When false, automatic context compaction is disabled entirely.
     auto_compact: bool,
+    /// When false, skip loading project instruction files into the system prompt.
+    include_project_instructions: bool,
     /// Parent session ID for linking sub-agent sessions back to their parent.
     /// Set by the TUI before calling `run()` so spawned sub-agents record lineage.
     pub parent_session_id: RwLock<Option<String>>,
@@ -155,24 +157,29 @@ impl AgentStack {
         let workspace_roots = resolve_workspace_roots(&effective_cwd, &cfg.workspace_roots);
 
         let codebase_index: Arc<RwLock<Option<Arc<CodebaseIndex>>>> = Arc::new(RwLock::new(None));
-        let index_clone = codebase_index.clone();
-        let project_root = effective_cwd.clone();
-        let workspace_roots_for_task = workspace_roots.clone();
-        let index_handle = tokio::spawn(async move {
-            let index_result = if workspace_roots_for_task.len() > 1 {
-                index_workspace(&workspace_roots_for_task).await
-            } else {
-                index_project(&project_root).await
-            };
+        let index_handle = if config.eager_codebase_indexing {
+            let index_clone = codebase_index.clone();
+            let project_root = effective_cwd.clone();
+            let workspace_roots_for_task = workspace_roots.clone();
+            Some(tokio::spawn(async move {
+                let index_result = if workspace_roots_for_task.len() > 1 {
+                    index_workspace(&workspace_roots_for_task).await
+                } else {
+                    index_project(&project_root).await
+                };
 
-            match index_result {
-                Ok(idx) => {
-                    *index_clone.write().await = Some(Arc::new(idx));
-                    info!("Codebase indexing complete");
+                match index_result {
+                    Ok(idx) => {
+                        *index_clone.write().await = Some(Arc::new(idx));
+                        info!("Codebase indexing complete");
+                    }
+                    Err(e) => warn!("Codebase indexing failed: {e}"),
                 }
-                Err(e) => warn!("Codebase indexing failed: {e}"),
-            }
-        });
+            }))
+        } else {
+            info!("Skipping eager codebase indexing at startup");
+            None
+        };
         let routing_locked = config
             .provider
             .as_deref()
@@ -384,9 +391,10 @@ impl AgentStack {
                 agents_config,
                 compaction_threshold_pct: config.compaction_threshold_pct,
                 auto_compact: config.auto_compact,
+                include_project_instructions: config.include_project_instructions,
                 parent_session_id: RwLock::new(None),
                 plugin_manager,
-                index_task: std::sync::Mutex::new(Some(index_handle)),
+                index_task: std::sync::Mutex::new(index_handle),
                 mcp_init_done: Arc::new(AtomicBool::new(false)),
                 plan_context: RwLock::new(None),
                 file_backup_session,

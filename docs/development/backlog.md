@@ -51,6 +51,7 @@ Tool surface policy: default tools are now 9 (`read`, `write`, `edit`, `bash`, `
 - **DX cleanup pass** — CI/release workflows aligned on pnpm + rust-toolchain, plugin workspace build script restored, stale npm lockfile and Playwright artifact tracking removed, helper scripts updated for the Rust-first workflow
 - **CLI benchmark harness** — reproducible AVA-vs-OpenCode startup and matched-task benchmark script with JSON/Markdown output under `.tmp/benchmarks/`
 - **Copilot verification cleanup** — `auth test copilot` now recognizes OAuth credentials, installed AVA binary was refreshed from the current repo build, and benchmark reporting is more useful for flaky external-provider runs
+- **Fast-path benchmark controls** — AVA `--fast` now isolates prompt/indexing overhead during headless benchmarking, and runtime project instruction loading no longer pulls in `CLAUDE.md`
 
 ## Execution Order
 

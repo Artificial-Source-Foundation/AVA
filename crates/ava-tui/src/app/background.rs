@@ -148,6 +148,8 @@ impl App {
                     working_dir: Some(isolation.worktree_path),
                     compaction_threshold_pct: 80,
                     auto_compact: true,
+                    include_project_instructions: true,
+                    eager_codebase_indexing: true,
                 };
                 match ava_agent::stack::AgentStack::new(config).await {
                     Ok((stack, _, _, _)) => Arc::new(stack),

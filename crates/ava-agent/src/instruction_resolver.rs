@@ -26,9 +26,13 @@ pub fn build_system_prompt_suffix(
     mode_suffix: Option<String>,
     model_name: &str,
     extra_instruction_paths: &[String],
+    include_project_instructions: bool,
 ) -> Option<String> {
-    let project_instructions =
-        crate::instructions::load_project_instructions_with_config(extra_instruction_paths);
+    let project_instructions = if include_project_instructions {
+        crate::instructions::load_project_instructions_with_config(extra_instruction_paths)
+    } else {
+        None
+    };
 
     let project_instructions =
         project_instructions.map(|pi| trim_instructions_for_model(&pi, model_name));
@@ -52,9 +56,15 @@ pub async fn build_system_prompt_suffix_async(
     mode_suffix: Option<String>,
     model_name: String,
     extra_instruction_paths: Vec<String>,
+    include_project_instructions: bool,
 ) -> Option<String> {
     tokio::task::spawn_blocking(move || {
-        build_system_prompt_suffix(mode_suffix, &model_name, &extra_instruction_paths)
+        build_system_prompt_suffix(
+            mode_suffix,
+            &model_name,
+            &extra_instruction_paths,
+            include_project_instructions,
+        )
     })
     .await
     .unwrap_or(None)

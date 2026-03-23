@@ -10,7 +10,6 @@ use std::path::{Path, PathBuf};
 /// Well-known instruction file names checked in the project root.
 const PROJECT_ROOT_FILES: &[&str] = &[
     "AGENTS.md",
-    "CLAUDE.md",
     ".cursorrules",
     ".github/copilot-instructions.md",
 ];
@@ -27,7 +26,7 @@ fn estimate_tokens(text: &str) -> usize {
 /// Trim instructions to fit within a token budget.
 ///
 /// When the model's context window is small (e.g. 128K), the raw project
-/// instructions (CLAUDE.md + AGENTS.md + rules) can consume most of the
+/// instructions (AGENTS.md + rules + skills) can consume most of the
 /// available context. This function truncates at a section boundary so the
 /// agent still has room for conversation and tool output.
 pub fn trim_instructions_to_budget(instructions: &str, max_tokens: usize) -> String {
@@ -76,7 +75,7 @@ pub fn load_project_instructions() -> Option<String> {
 /// `extra_paths` are file paths or glob patterns relative to the project root.
 /// They are loaded after the standard instruction files.
 ///
-/// Project-local instruction files (AGENTS.md, CLAUDE.md, .cursorrules,
+/// Project-local instruction files (AGENTS.md, .cursorrules,
 /// .github/copilot-instructions.md, .ava/rules/*.md, .ava/skills/) are only
 /// loaded when the project is trusted. Global instructions (~/.ava/AGENTS.md)
 /// always load regardless of trust.
@@ -138,10 +137,8 @@ fn load_from_root_with_extras(
             // Load in top-down order (outermost first) so more-specific rules take priority
             ancestors.reverse();
             for ancestor in &ancestors {
-                for name in &["AGENTS.md", "CLAUDE.md"] {
-                    let path = ancestor.join(name);
-                    try_load_file(&path, &mut seen, &mut sections);
-                }
+                let path = ancestor.join("AGENTS.md");
+                try_load_file(&path, &mut seen, &mut sections);
             }
         }
 
@@ -659,7 +656,7 @@ mod tests {
     fn test_empty_files_skipped() {
         let tmp = TempDir::new().unwrap();
         fs::write(tmp.path().join("AGENTS.md"), "").unwrap();
-        fs::write(tmp.path().join("CLAUDE.md"), "   \n  \t  ").unwrap();
+        fs::write(tmp.path().join(".cursorrules"), "   \n  \t  ").unwrap();
 
         let result = load_from_root(tmp.path(), None);
         assert!(
@@ -802,7 +799,7 @@ mod tests {
         fs::create_dir_all(&ava_dir).unwrap();
 
         fs::write(ava_dir.join("AGENTS.md"), "Global rules.").unwrap();
-        fs::write(tmp.path().join("CLAUDE.md"), "Project rules.").unwrap();
+        fs::write(tmp.path().join("AGENTS.md"), "Project rules.").unwrap();
 
         let result = load_from_root(tmp.path(), Some(fake_home.path()));
         let text = result.unwrap();
@@ -1085,7 +1082,7 @@ mod tests {
 
         // Project-local files (should be skipped when untrusted)
         fs::write(tmp.path().join("AGENTS.md"), "Project AGENTS.").unwrap();
-        fs::write(tmp.path().join("CLAUDE.md"), "Project CLAUDE.").unwrap();
+        fs::write(tmp.path().join(".cursorrules"), "Project cursorrules.").unwrap();
         let rules = tmp.path().join(".ava").join("rules");
         fs::create_dir_all(&rules).unwrap();
         fs::write(rules.join("style.md"), "Style rule.").unwrap();
@@ -1109,8 +1106,8 @@ mod tests {
             "Project AGENTS.md should be skipped when untrusted"
         );
         assert!(
-            !text.contains("Project CLAUDE."),
-            "Project CLAUDE.md should be skipped when untrusted"
+            !text.contains("Project cursorrules."),
+            ".cursorrules should be skipped when untrusted"
         );
         assert!(
             !text.contains("Style rule."),

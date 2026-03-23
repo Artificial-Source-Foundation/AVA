@@ -87,6 +87,10 @@ pub struct CliArgs {
     #[arg(long)]
     pub workflow: Option<String>,
 
+    /// Disable automatic update checks on startup
+    #[arg(long)]
+    pub no_update_check: bool,
+
     /// Attach image files to the prompt (repeatable). Supported: png, jpg, jpeg, gif, webp
     #[arg(long)]
     pub image: Vec<String>,
@@ -161,6 +165,11 @@ pub enum Command {
         #[command(subcommand)]
         action: PluginCommand,
     },
+    /// Check for and install updates
+    Update,
+    /// Check for and install updates (alias)
+    #[command(name = "self-update")]
+    SelfUpdate,
     /// Start the AVA web server (HTTP API + WebSocket for agent events)
     Serve {
         /// Port to listen on

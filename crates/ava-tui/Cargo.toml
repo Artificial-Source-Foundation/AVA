@@ -33,6 +33,7 @@ nucleo = "0.5"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 ava-agent = { path = "../ava-agent" }
+ava-cli-providers = { path = "../ava-cli-providers" }
 ava-praxis = { path = "../ava-praxis" }
 ava-llm = { path = "../ava-llm" }
 ava-tools = { path = "../ava-tools" }
@@ -66,6 +67,8 @@ chrono = "0.4"
 dirs = "5"
 unicode-width = "0.2"
 tempfile = "3"
+flate2 = "1"
+tar = "0.4"
 arboard = "3"
 base64 = "0.22"
 png = "0.18"

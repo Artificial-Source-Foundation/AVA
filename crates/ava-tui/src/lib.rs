@@ -32,6 +32,7 @@ pub mod text_utils;
 #[cfg(feature = "voice")]
 pub mod transcribe;
 pub mod ui;
+pub mod updater;
 #[cfg(feature = "web")]
 pub mod web;
 pub mod widgets;

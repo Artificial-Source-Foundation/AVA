@@ -39,8 +39,20 @@ async fn main() -> Result<()> {
         }
     }
 
+    // Background update check (non-blocking, once per 24h)
+    if !cli.no_update_check {
+        tokio::spawn(async {
+            if let Some(msg) = ava_tui::updater::check_and_notify().await {
+                eprintln!("{msg}");
+            }
+        });
+    }
+
     // Subcommand routing
     match cli.command.clone() {
+        Some(Command::Update | Command::SelfUpdate) => {
+            return ava_tui::updater::run_update_command().await;
+        }
         Some(Command::Review(args)) => return run_review(args).await,
         Some(Command::Auth { action }) => return run_auth(action).await,
         Some(Command::Plugin { action }) => return run_plugin(action).await,

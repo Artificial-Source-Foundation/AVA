@@ -1,54 +1,36 @@
 /**
- * Full-Screen Plan Overlay
+ * Full-Screen Plan Overlay — Plannotator Design
  *
- * Plannotator-inspired plan viewer. Renders the plan as a styled document card
- * centered on a dark canvas background, with a fixed toolbar header.
+ * 3-panel layout: TOC sidebar | Document card on grid canvas | Annotations panel
+ * With floating selection toolbar, comment popovers, and annotation highlights.
  *
  * Design reference: Plannotator (backnotprop/plannotator)
- * - Document card centered on dark canvas with shadow
- * - Fixed header toolbar with back, codename badge, and actions
- * - Step cards with action badges, file lists, dependency chains
- * - Progress bar and metadata strip
- * - Esc or Back button to close
  */
 
 import {
   ArrowLeft,
   Check,
-  ChevronDown,
-  ChevronUp,
+  ChevronLeft,
   ClipboardList,
-  Clock,
   Copy,
-  DollarSign,
   Download,
   FileCode,
   GitBranch,
-  GitCompareArrows,
-  Hash,
+  Link2,
+  MessageCircle,
   MessageSquare,
+  MousePointer2,
   Pencil,
-  PenLine,
-  Play,
-  Share2,
-  Tag,
-  Users,
+  Settings,
+  Square,
+  Trash2,
   X,
-  XCircle,
+  Zap,
 } from 'lucide-solid'
-import {
-  type Component,
-  createEffect,
-  createSignal,
-  For,
-  type JSX,
-  onCleanup,
-  Show,
-} from 'solid-js'
+import { type Component, createEffect, createSignal, For, onCleanup, Show } from 'solid-js'
 import { useAgent } from '../../hooks/useAgent'
-import { usePlanOverlay } from '../../stores/planOverlayStore'
+import { type PlanAnnotation, usePlanOverlay } from '../../stores/planOverlayStore'
 import type { PlanData, PlanStep, PlanStepAction, PlanSummary } from '../../types/rust-ipc'
-import { diffPlans } from '../../utils/planDiff'
 
 // ============================================================================
 // Constants
@@ -56,7 +38,6 @@ import { diffPlans } from '../../utils/planDiff'
 
 const PLAN_ACCENT = '#8B5CF6'
 const PLAN_ACCENT_SUBTLE = 'rgba(139, 92, 246, 0.12)'
-const PLAN_ACCENT_GLOW = 'rgba(139, 92, 246, 0.08)'
 
 const ACTION_CONFIG: Record<
   PlanStepAction,
@@ -88,15 +69,6 @@ const ACTION_CONFIG: Record<
   },
 }
 
-const QUICK_LABELS = [
-  { id: 'clarify', emoji: '\u2753', text: 'Clarify this', color: '#EAB308' },
-  { id: 'needs-tests', emoji: '\uD83E\uDDEA', text: 'Needs tests', color: '#3B82F6' },
-  { id: 'out-of-scope', emoji: '\uD83D\uDEAB', text: 'Out of scope', color: '#EF4444' },
-  { id: 'nice', emoji: '\uD83D\uDC4D', text: 'Nice approach', color: '#22C55E' },
-  { id: 'alternatives', emoji: '\uD83D\uDD04', text: 'Consider alternatives', color: '#EC4899' },
-  { id: 'verify', emoji: '\uD83D\uDD0D', text: 'Verify this', color: '#F97316' },
-] as const
-
 // ============================================================================
 // Helpers
 // ============================================================================
@@ -120,7 +92,6 @@ function parsePlanMarkdown(content: string): PlanData | null {
   let summary = ''
   const steps: PlanStep[] = []
 
-  // Parse frontmatter
   let inFrontmatter = false
   let frontmatterDone = false
   for (const line of lines) {
@@ -143,7 +114,6 @@ function parsePlanMarkdown(content: string): PlanData | null {
     }
     if (!frontmatterDone && !inFrontmatter) continue
 
-    // Parse steps: lines starting with ### or numbered lists with [ACTION]
     const stepMatch = line.match(/^(?:###\s+|(\d+)\.\s+)\[(\w+)]\s+(.+)/)
     if (stepMatch) {
       const action = (stepMatch[2].toLowerCase() as PlanStepAction) || 'implement'
@@ -156,7 +126,6 @@ function parsePlanMarkdown(content: string): PlanData | null {
         approved: false,
       })
     }
-    // Parse file references after a step
     const filesMatch = line.match(/^\s+Files:\s*(.+)/)
     if (filesMatch && steps.length > 0) {
       steps[steps.length - 1].files = filesMatch[1].split(',').map((f) => f.trim())
@@ -167,468 +136,738 @@ function parsePlanMarkdown(content: string): PlanData | null {
   return { summary, steps, estimatedTurns: steps.length, codename }
 }
 
+function generateId(): string {
+  return `ann-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+}
+
 // ============================================================================
 // Sub-components
 // ============================================================================
 
-/** Individual step rendered as a card with left accent border */
-const StepCard: Component<{
-  step: PlanStep
-  index: number
-  allSteps: PlanStep[]
-  comment?: string
-  isCommenting: boolean
-  isEditing: boolean
-  labels: string[]
-  onToggleApproval: () => void
-  onToggleComment: () => void
-  onAddComment: (comment: string) => void
-  onToggleEdit: () => void
-  onUpdateDescription: (description: string) => void
-  onMoveUp: () => void
-  onMoveDown: () => void
-  onAddLabel: (labelId: string) => void
-  onRemoveLabel: (labelId: string) => void
-  isFirst: boolean
-  isLast: boolean
-  diffType?: 'added' | 'removed' | 'modified' | 'unchanged'
-  oldDescription?: string
+/** Floating toolbar that appears when user selects text inside the document */
+const SelectionToolbar: Component<{
+  text: string
+  top: number
+  left: number
+  onCopy: () => void
+  onDelete: () => void
+  onComment: () => void
+  onQuickLabel: () => void
+  onClose: () => void
 }> = (props) => {
-  const action = () => ACTION_CONFIG[props.step.action]
-  const depLabels = () =>
-    props.step.dependsOn.map((depId) => {
-      const idx = props.allSteps.findIndex((s) => s.id === depId)
-      return idx >= 0 ? `Step ${idx + 1}` : depId
-    })
+  return (
+    <div
+      class="fixed z-[100] flex items-center gap-0.5 rounded-lg border p-1"
+      style={{
+        top: `${props.top}px`,
+        left: `${props.left}px`,
+        transform: 'translateX(-50%)',
+        background: 'var(--surface-raised)',
+        'border-color': 'var(--border-subtle)',
+        'box-shadow': '0 10px 25px -5px rgba(0,0,0,0.25), 0 8px 10px -6px rgba(0,0,0,0.15)',
+        animation: 'selectionToolbarIn 150ms ease-out',
+      }}
+    >
+      <button
+        type="button"
+        onClick={() => props.onCopy()}
+        class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[12px] font-medium transition-colors"
+        style={{ color: 'var(--text-secondary)' }}
+        title="Copy selected text"
+      >
+        <Copy class="w-3.5 h-3.5" />
+        Copy
+      </button>
 
-  const [editText, setEditText] = createSignal('')
-  const [commentText, setCommentText] = createSignal('')
-  const [labelPickerOpen, setLabelPickerOpen] = createSignal(false)
+      <div class="w-px h-5 mx-0.5" style={{ background: 'var(--border-subtle)' }} />
 
-  // Initialize edit text when entering edit mode
-  createEffect(() => {
-    if (props.isEditing) {
-      setEditText(props.step.description)
-    }
-  })
+      <button
+        type="button"
+        onClick={() => props.onDelete()}
+        class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[12px] font-medium transition-colors"
+        style={{ color: '#EF4444' }}
+        title="Mark for deletion"
+      >
+        <Trash2 class="w-3.5 h-3.5" />
+        Delete
+      </button>
 
-  // Initialize comment text from existing comment
-  createEffect(() => {
-    if (props.isCommenting) {
-      setCommentText(props.comment ?? '')
-    }
-  })
+      <button
+        type="button"
+        onClick={() => props.onComment()}
+        class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[12px] font-medium transition-colors"
+        style={{ color: PLAN_ACCENT }}
+        title="Add comment"
+      >
+        <MessageSquare class="w-3.5 h-3.5" />
+        Comment
+      </button>
 
-  const saveEdit = (): void => {
-    const text = editText().trim()
-    if (text && text !== props.step.description) {
-      props.onUpdateDescription(text)
-    }
-    props.onToggleEdit()
-  }
+      <button
+        type="button"
+        onClick={() => props.onQuickLabel()}
+        class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[12px] font-medium transition-colors"
+        style={{ color: '#F59E0B' }}
+        title="Quick label"
+      >
+        <Zap class="w-3.5 h-3.5" />
+      </button>
 
-  const cancelEdit = (): void => {
-    props.onToggleEdit()
-  }
+      <button
+        type="button"
+        onClick={() => props.onClose()}
+        class="flex items-center px-1.5 py-1.5 rounded-md text-[12px] transition-colors"
+        style={{ color: 'var(--text-muted)' }}
+        title="Dismiss"
+      >
+        <X class="w-3.5 h-3.5" />
+      </button>
+    </div>
+  )
+}
 
-  const saveComment = (): void => {
-    props.onAddComment(commentText())
-    props.onToggleComment()
-  }
+/** Comment popover anchored near selected text */
+const CommentPopover: Component<{
+  contextText: string
+  top: number
+  left: number
+  onSave: (comment: string) => void
+  onCancel: () => void
+}> = (props) => {
+  const [text, setText] = createSignal('')
 
   return (
-    <section
-      id={`plan-step-${props.step.id}`}
-      class="group/step rounded-lg border overflow-hidden transition-all duration-150"
+    <div
+      class="fixed z-[110] rounded-xl border w-[320px]"
       style={{
-        background:
-          props.diffType === 'added'
-            ? 'rgba(34, 197, 94, 0.04)'
-            : props.diffType === 'removed'
-              ? 'rgba(239, 68, 68, 0.04)'
-              : props.diffType === 'modified'
-                ? 'rgba(245, 158, 11, 0.04)'
-                : 'var(--surface)',
-        'border-color':
-          props.diffType === 'added'
-            ? 'rgba(34, 197, 94, 0.3)'
-            : props.diffType === 'removed'
-              ? 'rgba(239, 68, 68, 0.3)'
-              : props.diffType === 'modified'
-                ? 'rgba(245, 158, 11, 0.3)'
-                : props.step.approved
-                  ? 'rgba(34, 197, 94, 0.3)'
-                  : 'var(--border-subtle)',
-        'border-left': `3px solid $
-          props.diffType === 'added'
-            ? '#22C55E'
-            : props.diffType === 'removed'
-              ? '#EF4444'
-              : props.diffType === 'modified'
-                ? '#F59E0B'
-                : props.step.approved
-                  ? '#22C55E'
-                  : action().text`,
-        opacity:
-          props.diffType === 'unchanged' ? '0.6' : props.diffType === 'removed' ? '0.7' : undefined,
-        'text-decoration': props.diffType === 'removed' ? 'line-through' : undefined,
+        top: `${props.top}px`,
+        left: `${props.left}px`,
+        transform: 'translateX(-50%)',
+        background: 'var(--surface-raised)',
+        'border-color': 'var(--border-subtle)',
+        'box-shadow': '0 20px 40px -10px rgba(0,0,0,0.3)',
+        animation: 'selectionToolbarIn 150ms ease-out',
       }}
-      data-step-card
     >
-      {/* Step header */}
-      <div class="flex items-center gap-3 px-4 py-3">
-        {/* Reorder buttons — visible on hover */}
-        <div class="flex flex-col gap-0.5 flex-shrink-0 transition-opacity duration-100 opacity-0 group-hover/step:opacity-100">
-          <button
-            type="button"
-            onClick={() => props.onMoveUp()}
-            disabled={props.isFirst}
-            class="p-0 border-0 rounded transition-colors"
-            style={{
-              color: props.isFirst ? 'var(--border-subtle)' : 'var(--text-muted)',
-              cursor: props.isFirst ? 'default' : 'pointer',
-              background: 'transparent',
-              width: '16px',
-              height: '16px',
-              display: 'flex',
-              'align-items': 'center',
-              'justify-content': 'center',
-            }}
-            title="Move step up"
-          >
-            <ChevronUp class="w-3.5 h-3.5" />
-          </button>
-          <button
-            type="button"
-            onClick={() => props.onMoveDown()}
-            disabled={props.isLast}
-            class="p-0 border-0 rounded transition-colors"
-            style={{
-              color: props.isLast ? 'var(--border-subtle)' : 'var(--text-muted)',
-              cursor: props.isLast ? 'default' : 'pointer',
-              background: 'transparent',
-              width: '16px',
-              height: '16px',
-              display: 'flex',
-              'align-items': 'center',
-              'justify-content': 'center',
-            }}
-            title="Move step down"
-          >
-            <ChevronDown class="w-3.5 h-3.5" />
-          </button>
-        </div>
-        {/* Step number / check — clickable to toggle approval */}
-        <button
-          type="button"
-          onClick={() => props.onToggleApproval()}
-          class="w-7 h-7 rounded-full flex items-center justify-center text-[12px] font-bold flex-shrink-0 transition-all cursor-pointer border-0 p-0"
-          style={{
-            background: props.step.approved ? 'rgba(34, 197, 94, 0.15)' : action().bg,
-            color: props.step.approved ? '#22C55E' : action().text,
-            transition: 'transform 150ms',
-          }}
-          title={props.step.approved ? 'Mark as unapproved' : 'Mark as approved'}
-        >
-          <Show when={props.step.approved} fallback={props.index + 1}>
-            <Check class="w-4 h-4" />
-          </Show>
-        </button>
-
-        {/* Description or edit input */}
-        <Show
-          when={!props.isEditing}
-          fallback={
-            <input
-              type="text"
-              value={editText()}
-              onInput={(e) => setEditText(e.currentTarget.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault()
-                  saveEdit()
-                } else if (e.key === 'Escape') {
-                  e.preventDefault()
-                  cancelEdit()
-                }
-              }}
-              onBlur={() => saveEdit()}
-              ref={(el) => setTimeout(() => el.focus(), 0)}
-              class="text-[14px] font-medium flex-1 leading-snug rounded px-2 py-1 border outline-none"
-              style={{
-                color: 'var(--text-primary)',
-                background: 'var(--alpha-white-5)',
-                'border-color': PLAN_ACCENT,
-              }}
-            />
-          }
-        >
-          <div class="flex-1">
-            <Show when={props.diffType === 'modified' && props.oldDescription}>
-              <span class="text-[13px] text-[var(--text-muted)] line-through block mb-0.5">
-                {props.oldDescription}
-              </span>
-            </Show>
-            <span class="text-[14px] text-[var(--text-primary)] font-medium leading-snug">
-              {props.step.description}
-            </span>
-          </div>
-        </Show>
-
-        {/* Hover actions: edit + comment */}
-        <div
-          class="flex items-center gap-0.5 transition-opacity duration-100 group-hover/step:opacity-100"
-          classList={{
-            'opacity-100': props.isEditing || props.isCommenting,
-            'opacity-0': !props.isEditing && !props.isCommenting,
-          }}
-        >
-          <button
-            type="button"
-            onClick={() => props.onToggleEdit()}
-            class="p-1.5 rounded-md transition-colors"
-            style={{ color: props.isEditing ? PLAN_ACCENT : 'var(--text-muted)' }}
-            title="Edit step description"
-          >
-            <Pencil class="w-3.5 h-3.5" />
-          </button>
-          <button
-            type="button"
-            onClick={() => props.onToggleComment()}
-            class="p-1.5 rounded-md transition-colors"
-            style={{
-              color: props.comment
-                ? PLAN_ACCENT
-                : props.isCommenting
-                  ? PLAN_ACCENT
-                  : 'var(--text-muted)',
-            }}
-            title="Add comment"
-          >
-            <MessageSquare class="w-3.5 h-3.5" />
-          </button>
-          <div class="relative">
-            <button
-              type="button"
-              onClick={() => setLabelPickerOpen(!labelPickerOpen())}
-              class="p-1.5 rounded-md transition-colors"
-              style={{
-                color:
-                  props.labels.length > 0 || labelPickerOpen() ? PLAN_ACCENT : 'var(--text-muted)',
-              }}
-              title="Add label"
-            >
-              <Tag class="w-3.5 h-3.5" />
-            </button>
-            <Show when={labelPickerOpen()}>
-              <div
-                class="absolute right-0 top-full mt-1 z-50 rounded-lg border p-2 min-w-[180px]"
-                style={{
-                  background: 'var(--surface-raised)',
-                  'border-color': 'var(--border-subtle)',
-                  'box-shadow': '0 4px 12px rgba(0,0,0,0.2)',
-                }}
-              >
-                <For each={QUICK_LABELS}>
-                  {(label) => {
-                    const isApplied = () => props.labels.includes(label.id)
-                    return (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (isApplied()) {
-                            props.onRemoveLabel(label.id)
-                          } else {
-                            props.onAddLabel(label.id)
-                          }
-                        }}
-                        class="flex items-center gap-2 w-full text-left px-2 py-1.5 rounded-md text-[12px] transition-colors"
-                        style={{
-                          color: isApplied() ? label.color : 'var(--text-secondary)',
-                          background: isApplied() ? `$label.color15` : 'transparent',
-                        }}
-                      >
-                        <span>{label.emoji}</span>
-                        <span>{label.text}</span>
-                        <Show when={isApplied()}>
-                          <Check class="w-3 h-3 ml-auto" style={{ color: label.color }} />
-                        </Show>
-                      </button>
-                    )
-                  }}
-                </For>
-              </div>
-            </Show>
-          </div>
-        </div>
-
-        {/* Action badge */}
-        <span
-          class="inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-semibold tracking-wider uppercase flex-shrink-0 border"
-          style={{ background: action().bg, color: action().text, 'border-color': action().border }}
-        >
-          {action().label}
-        </span>
+      {/* Context quote */}
+      <div
+        class="px-4 pt-3 pb-2 text-[11px] italic border-b"
+        style={{
+          color: 'var(--text-muted)',
+          'border-color': 'var(--border-subtle)',
+          'max-height': '60px',
+          overflow: 'hidden',
+          'text-overflow': 'ellipsis',
+        }}
+      >
+        "{props.contextText.slice(0, 120)}
+        {props.contextText.length > 120 ? '...' : ''}"
       </div>
 
-      {/* Existing comment indicator */}
-      <Show when={props.comment && !props.isCommenting}>
-        <div class="px-4 pb-2 -mt-1 flex items-start gap-2" style={{ 'padding-left': '3.25rem' }}>
-          <MessageSquare
-            class="w-3 h-3 mt-0.5 flex-shrink-0"
-            style={{ color: PLAN_ACCENT, opacity: '0.6' }}
-          />
-          <span class="text-[12px] leading-snug italic" style={{ color: 'var(--text-muted)' }}>
-            {props.comment}
+      {/* Textarea */}
+      <div class="p-3">
+        <textarea
+          value={text()}
+          onInput={(e) => setText(e.currentTarget.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+              e.preventDefault()
+              const val = text().trim()
+              if (val) props.onSave(val)
+            }
+            if (e.key === 'Escape') {
+              e.preventDefault()
+              props.onCancel()
+            }
+          }}
+          ref={(el) => setTimeout(() => el.focus(), 50)}
+          placeholder="Add a comment..."
+          rows={3}
+          class="w-full text-[13px] rounded-lg border px-3 py-2 outline-none resize-none"
+          style={{
+            color: 'var(--text-primary)',
+            background: 'var(--alpha-white-3)',
+            'border-color': 'var(--border-subtle)',
+          }}
+        />
+        <div class="flex items-center justify-between mt-2">
+          <span class="text-[10px]" style={{ color: 'var(--text-muted)' }}>
+            Ctrl+Enter to save
           </span>
-        </div>
-      </Show>
-
-      {/* Applied labels */}
-      <Show when={props.labels.length > 0}>
-        <div
-          class="px-4 pb-2 -mt-1 flex items-center gap-1.5 flex-wrap"
-          style={{ 'padding-left': '3.25rem' }}
-        >
-          <For each={props.labels}>
-            {(labelId) => {
-              const label = () => QUICK_LABELS.find((l) => l.id === labelId)
-              return (
-                <Show when={label()}>
-                  {(l) => (
-                    <button
-                      type="button"
-                      class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium border cursor-pointer transition-opacity hover:opacity-80"
-                      style={{
-                        color: l().color,
-                        background: `$l().color12`,
-                        'border-color': `$l().color30`,
-                      }}
-                      onClick={() => props.onRemoveLabel(l().id)}
-                      title={`Remove "${l().text}"`}
-                    >
-                      <span>{l().emoji}</span>
-                      {l().text}
-                      <X class="w-2.5 h-2.5" />
-                    </button>
-                  )}
-                </Show>
-              )
-            }}
-          </For>
-        </div>
-      </Show>
-
-      {/* Comment textarea */}
-      <Show when={props.isCommenting}>
-        <div class="px-4 pb-3 -mt-1" style={{ 'padding-left': '3.25rem' }}>
-          <textarea
-            value={commentText()}
-            onInput={(e) => setCommentText(e.currentTarget.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-                e.preventDefault()
-                saveComment()
-              } else if (e.key === 'Escape') {
-                e.preventDefault()
-                props.onToggleComment()
-              }
-            }}
-            ref={(el) => setTimeout(() => el.focus(), 0)}
-            placeholder="Add a comment for this step..."
-            rows={2}
-            class="w-full text-[12px] rounded-md border px-3 py-2 outline-none resize-none"
-            style={{
-              color: 'var(--text-primary)',
-              background: 'var(--alpha-white-3)',
-              'border-color': PLAN_ACCENT,
-            }}
-          />
-          <div class="flex items-center justify-end gap-2 mt-1.5">
-            <span class="text-[10px]" style={{ color: 'var(--text-muted)' }}>
-              Ctrl+Enter to save
-            </span>
+          <div class="flex items-center gap-2">
             <button
               type="button"
-              onClick={() => props.onToggleComment()}
-              class="text-[11px] px-2 py-0.5 rounded transition-colors"
+              onClick={() => props.onCancel()}
+              class="text-[12px] px-3 py-1 rounded-md transition-colors"
               style={{ color: 'var(--text-muted)' }}
             >
               Cancel
             </button>
             <button
               type="button"
-              onClick={saveComment}
-              class="text-[11px] px-2 py-0.5 rounded transition-colors"
-              style={{ color: PLAN_ACCENT }}
+              onClick={() => {
+                const val = text().trim()
+                if (val) props.onSave(val)
+              }}
+              class="text-[12px] px-3 py-1 rounded-md font-medium transition-colors"
+              style={{ color: '#fff', background: PLAN_ACCENT }}
             >
               Save
             </button>
           </div>
         </div>
-      </Show>
-
-      {/* Details: files + dependencies */}
-      <Show when={props.step.files.length > 0 || props.step.dependsOn.length > 0}>
-        <div
-          class="px-4 py-2.5 space-y-2 border-t"
-          style={{ 'border-color': 'var(--border-subtle)' }}
-        >
-          <Show when={props.step.files.length > 0}>
-            <div class="flex items-start gap-2">
-              <FileCode
-                class="w-3.5 h-3.5 mt-0.5 flex-shrink-0"
-                style={{ color: 'var(--text-muted)' }}
-              />
-              <div class="flex flex-wrap gap-1.5">
-                <For each={props.step.files}>
-                  {(file) => (
-                    <span
-                      class="text-[11px] px-1.5 py-0.5 rounded border"
-                      style={{
-                        background: 'var(--alpha-white-3)',
-                        'border-color': 'var(--border-subtle)',
-                        color: 'var(--text-secondary)',
-                        'font-family': 'var(--font-ui-mono)',
-                      }}
-                    >
-                      {file}
-                    </span>
-                  )}
-                </For>
-              </div>
-            </div>
-          </Show>
-          <Show when={props.step.dependsOn.length > 0}>
-            <div class="flex items-center gap-2">
-              <GitBranch class="w-3.5 h-3.5 flex-shrink-0" style={{ color: 'var(--text-muted)' }} />
-              <span class="text-[11px] text-[var(--text-muted)]">
-                Depends on: {depLabels().join(', ')}
-              </span>
-            </div>
-          </Show>
-        </div>
-      </Show>
-    </section>
+      </div>
+    </div>
   )
 }
 
-/** Metadata pill in the info strip */
-const MetaPill: Component<{ icon: Component<{ class?: string }>; children: JSX.Element }> = (
-  props
-) => (
-  <div
-    class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] border"
-    style={{
-      background: 'var(--alpha-white-3)',
-      'border-color': 'var(--border-subtle)',
-      color: 'var(--text-muted)',
-    }}
-  >
-    <props.icon class="w-3.5 h-3.5" />
-    {props.children}
-  </div>
-)
+/** Right sidebar showing annotations */
+const AnnotationsPanel: Component<{
+  annotations: PlanAnnotation[]
+  focusedId: string | null
+  onFocus: (id: string) => void
+  onRemove: (id: string) => void
+}> = (props) => {
+  return (
+    <aside
+      class="flex flex-col h-full border-l flex-shrink-0 overflow-hidden"
+      style={{
+        width: '288px',
+        background: 'var(--surface)',
+        'border-color': 'var(--border-subtle)',
+      }}
+    >
+      {/* Header */}
+      <div
+        class="flex items-center gap-2 px-4 py-3 border-b flex-shrink-0"
+        style={{ 'border-color': 'var(--border-subtle)' }}
+      >
+        <span
+          class="text-[11px] font-semibold tracking-widest uppercase"
+          style={{ color: 'var(--text-muted)' }}
+        >
+          Annotations
+        </span>
+        <Show when={props.annotations.length > 0}>
+          <span
+            class="inline-flex items-center justify-center min-w-[18px] h-[18px] rounded-full text-[10px] font-bold px-1"
+            style={{ background: PLAN_ACCENT_SUBTLE, color: PLAN_ACCENT }}
+          >
+            {props.annotations.length}
+          </span>
+        </Show>
+      </div>
+
+      {/* Content */}
+      <div class="flex-1 overflow-y-auto p-3 space-y-2">
+        <Show
+          when={props.annotations.length > 0}
+          fallback={
+            <div class="flex flex-col items-center justify-center h-full gap-3 text-center px-4">
+              <div
+                class="w-10 h-10 rounded-full flex items-center justify-center"
+                style={{ background: 'var(--alpha-white-5)' }}
+              >
+                <MessageCircle class="w-5 h-5" style={{ color: 'var(--text-muted)' }} />
+              </div>
+              <span class="text-[12px]" style={{ color: 'var(--text-muted)' }}>
+                Select text to add annotations
+              </span>
+            </div>
+          }
+        >
+          <For each={props.annotations}>
+            {(ann) => (
+              <button
+                type="button"
+                onClick={() => props.onFocus(ann.id)}
+                class="w-full text-left rounded-lg border p-3 transition-all"
+                style={{
+                  background:
+                    props.focusedId === ann.id
+                      ? 'rgba(59, 130, 246, 0.08)'
+                      : 'var(--alpha-white-3)',
+                  'border-color':
+                    props.focusedId === ann.id ? 'rgba(59, 130, 246, 0.3)' : 'var(--border-subtle)',
+                }}
+              >
+                <div class="flex items-center justify-between mb-1.5">
+                  <span
+                    class="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-semibold uppercase tracking-wider"
+                    style={{
+                      background:
+                        ann.type === 'deletion'
+                          ? 'rgba(239, 68, 68, 0.12)'
+                          : ann.type === 'comment'
+                            ? 'rgba(234, 179, 8, 0.12)'
+                            : 'rgba(139, 92, 246, 0.12)',
+                      color:
+                        ann.type === 'deletion'
+                          ? '#EF4444'
+                          : ann.type === 'comment'
+                            ? '#EAB308'
+                            : PLAN_ACCENT,
+                    }}
+                  >
+                    {ann.type === 'deletion'
+                      ? 'Deletion'
+                      : ann.type === 'comment'
+                        ? 'Comment'
+                        : 'Global'}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      props.onRemove(ann.id)
+                    }}
+                    class="p-0.5 rounded transition-colors"
+                    style={{ color: 'var(--text-muted)' }}
+                    title="Remove annotation"
+                  >
+                    <X class="w-3 h-3" />
+                  </button>
+                </div>
+                <p
+                  class="text-[11px] leading-relaxed mb-1"
+                  style={{
+                    color: 'var(--text-secondary)',
+                    'text-decoration': ann.type === 'deletion' ? 'line-through' : 'none',
+                    'text-decoration-color': ann.type === 'deletion' ? '#EF4444' : undefined,
+                  }}
+                >
+                  {ann.originalText.slice(0, 80)}
+                  {ann.originalText.length > 80 ? '...' : ''}
+                </p>
+                <Show when={ann.commentText}>
+                  <p class="text-[11px] italic" style={{ color: 'var(--text-muted)' }}>
+                    {ann.commentText}
+                  </p>
+                </Show>
+              </button>
+            )}
+          </For>
+        </Show>
+      </div>
+    </aside>
+  )
+}
+
+/** Left sidebar with table of contents and plan history */
+const TOCSidebar: Component<{
+  steps: PlanStep[]
+  activeStepId: string | null
+  collapsed: boolean
+  planHistory: PlanSummary[]
+  onScrollTo: (stepId: string) => void
+  onToggleCollapse: () => void
+  onLoadPlan: (filename: string) => void
+}> = (props) => {
+  const [activeTab, setActiveTab] = createSignal<'contents' | 'versions'>('contents')
+
+  return (
+    <aside
+      class="flex flex-col h-full border-r flex-shrink-0 overflow-hidden transition-all"
+      style={{
+        width: props.collapsed ? '0px' : '240px',
+        'min-width': props.collapsed ? '0px' : '240px',
+        background: 'var(--surface)',
+        'border-color': 'var(--border-subtle)',
+        opacity: props.collapsed ? '0' : '1',
+      }}
+    >
+      {/* Header with tabs */}
+      <div
+        class="flex items-center justify-between px-3 py-2 border-b flex-shrink-0"
+        style={{ 'border-color': 'var(--border-subtle)' }}
+      >
+        <div class="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={() => setActiveTab('contents')}
+            class="px-2 py-1 rounded text-[10px] font-semibold tracking-widest uppercase transition-colors"
+            style={{
+              color: activeTab() === 'contents' ? 'var(--text-primary)' : 'var(--text-muted)',
+              background: activeTab() === 'contents' ? 'var(--alpha-white-5)' : 'transparent',
+            }}
+          >
+            Contents
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('versions')}
+            class="px-2 py-1 rounded text-[10px] font-semibold tracking-widest uppercase transition-colors"
+            style={{
+              color: activeTab() === 'versions' ? 'var(--text-primary)' : 'var(--text-muted)',
+              background: activeTab() === 'versions' ? 'var(--alpha-white-5)' : 'transparent',
+            }}
+          >
+            Versions
+          </button>
+        </div>
+        <button
+          type="button"
+          onClick={() => props.onToggleCollapse()}
+          class="p-1 rounded transition-colors"
+          style={{ color: 'var(--text-muted)' }}
+          title="Collapse sidebar"
+        >
+          <ChevronLeft class="w-3.5 h-3.5" />
+        </button>
+      </div>
+
+      {/* Contents tab */}
+      <Show when={activeTab() === 'contents'}>
+        <nav class="flex-1 overflow-y-auto py-2">
+          <For each={props.steps}>
+            {(step, i) => {
+              const action = () => ACTION_CONFIG[step.action]
+              return (
+                <button
+                  type="button"
+                  onClick={() => props.onScrollTo(step.id)}
+                  class="w-full text-left flex items-center gap-2 px-3 py-2 transition-colors"
+                  style={{
+                    background:
+                      props.activeStepId === step.id ? 'var(--alpha-white-5)' : 'transparent',
+                    'border-left':
+                      props.activeStepId === step.id
+                        ? `2px solid ${PLAN_ACCENT}`
+                        : '2px solid transparent',
+                  }}
+                >
+                  <span
+                    class="flex-shrink-0 w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold"
+                    style={{
+                      background: step.approved ? 'rgba(34, 197, 94, 0.15)' : action().bg,
+                      color: step.approved ? '#22C55E' : action().text,
+                    }}
+                  >
+                    <Show when={step.approved} fallback={i() + 1}>
+                      <Check class="w-3 h-3" />
+                    </Show>
+                  </span>
+                  <span
+                    class="text-[12px] leading-tight truncate"
+                    style={{
+                      color:
+                        props.activeStepId === step.id
+                          ? 'var(--text-primary)'
+                          : 'var(--text-secondary)',
+                    }}
+                  >
+                    {step.description}
+                  </span>
+                </button>
+              )
+            }}
+          </For>
+        </nav>
+
+        {/* History section */}
+        <Show when={props.planHistory.length > 0}>
+          <div class="border-t px-3 py-2" style={{ 'border-color': 'var(--border-subtle)' }}>
+            <span
+              class="text-[10px] font-semibold tracking-widest uppercase block mb-2"
+              style={{ color: 'var(--text-muted)' }}
+            >
+              History
+            </span>
+            <div class="space-y-1 max-h-[150px] overflow-y-auto">
+              <For each={props.planHistory}>
+                {(entry) => (
+                  <button
+                    type="button"
+                    onClick={() => props.onLoadPlan(entry.filename)}
+                    class="w-full text-left rounded px-2 py-1.5 transition-colors text-[11px]"
+                    style={{ color: 'var(--text-secondary)' }}
+                    title={entry.summary}
+                  >
+                    <span class="block truncate font-medium">
+                      {entry.codename || entry.summary.slice(0, 30)}
+                    </span>
+                    <span class="block text-[10px] mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                      {entry.stepCount} steps
+                    </span>
+                  </button>
+                )}
+              </For>
+            </div>
+          </div>
+        </Show>
+      </Show>
+
+      {/* Versions tab (placeholder) */}
+      <Show when={activeTab() === 'versions'}>
+        <div class="flex-1 flex items-center justify-center px-4">
+          <span class="text-[12px] text-center" style={{ color: 'var(--text-muted)' }}>
+            Version history coming soon
+          </span>
+        </div>
+      </Show>
+    </aside>
+  )
+}
+
+/** Floating mode toolbar above the document card */
+const AnnotationToolstrip: Component<{
+  activeMode: 'select' | 'markup' | 'comment' | 'shape' | 'quicklabel'
+  onModeChange: (mode: 'select' | 'markup' | 'comment' | 'shape' | 'quicklabel') => void
+}> = (props) => {
+  return (
+    <div class="flex items-center justify-center mb-4">
+      <div
+        class="inline-flex items-center gap-0.5 rounded-full border px-1 py-0.5"
+        style={{
+          background: 'var(--surface-raised)',
+          'border-color': 'var(--border-subtle)',
+          'box-shadow': '0 2px 8px rgba(0,0,0,0.12)',
+        }}
+      >
+        {/* Group 1: Select + Settings */}
+        <div class="flex items-center gap-0.5 px-1">
+          <button
+            type="button"
+            onClick={() => props.onModeChange('select')}
+            class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-[11px] font-medium transition-colors"
+            style={{
+              background: props.activeMode === 'select' ? PLAN_ACCENT_SUBTLE : 'transparent',
+              color: props.activeMode === 'select' ? PLAN_ACCENT : 'var(--text-muted)',
+            }}
+          >
+            <MousePointer2 class="w-3.5 h-3.5" />
+            Select
+          </button>
+          <button
+            type="button"
+            class="p-1.5 rounded-full transition-colors"
+            style={{ color: 'var(--text-muted)' }}
+            title="Settings"
+            tabIndex={0}
+          >
+            <Settings class="w-3.5 h-3.5" />
+          </button>
+        </div>
+
+        <div class="w-px h-5" style={{ background: 'var(--border-subtle)' }} />
+
+        {/* Group 2: Markup + Comment + Shape + Quick Label */}
+        <div class="flex items-center gap-0.5 px-1">
+          <button
+            type="button"
+            onClick={() => props.onModeChange('markup')}
+            class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-[11px] font-medium transition-colors"
+            style={{
+              background: props.activeMode === 'markup' ? PLAN_ACCENT_SUBTLE : 'transparent',
+              color: props.activeMode === 'markup' ? PLAN_ACCENT : 'var(--text-muted)',
+            }}
+          >
+            <Pencil class="w-3.5 h-3.5" />
+            Markup
+          </button>
+          <button
+            type="button"
+            onClick={() => props.onModeChange('comment')}
+            class="p-1.5 rounded-full transition-colors"
+            style={{
+              background: props.activeMode === 'comment' ? PLAN_ACCENT_SUBTLE : 'transparent',
+              color: props.activeMode === 'comment' ? PLAN_ACCENT : 'var(--text-muted)',
+            }}
+            title="Comment mode"
+          >
+            <MessageSquare class="w-3.5 h-3.5" />
+          </button>
+          <button
+            type="button"
+            onClick={() => props.onModeChange('shape')}
+            class="p-1.5 rounded-full transition-colors"
+            style={{
+              background: props.activeMode === 'shape' ? PLAN_ACCENT_SUBTLE : 'transparent',
+              color: props.activeMode === 'shape' ? PLAN_ACCENT : 'var(--text-muted)',
+            }}
+            title="Shape mode"
+          >
+            <Square class="w-3.5 h-3.5" />
+          </button>
+          <button
+            type="button"
+            onClick={() => props.onModeChange('quicklabel')}
+            class="p-1.5 rounded-full transition-colors"
+            style={{
+              background: props.activeMode === 'quicklabel' ? PLAN_ACCENT_SUBTLE : 'transparent',
+              color: props.activeMode === 'quicklabel' ? '#F59E0B' : 'var(--text-muted)',
+            }}
+            title="Quick label"
+          >
+            <Zap class="w-3.5 h-3.5" />
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/** The centered document card that renders the plan as a readable document */
+const PlanDocument: Component<{
+  plan: PlanData
+  annotations: PlanAnnotation[]
+  onMouseUp: (e: MouseEvent) => void
+  onGlobalComment: () => void
+  onCopyPlan: () => void
+  cardRef: (el: HTMLElement) => void
+}> = (props) => {
+  const approvedCount = () => props.plan.steps.filter((s) => s.approved).length
+  const estimatedCost = () =>
+    props.plan.estimatedBudgetUsd != null ? `~$${props.plan.estimatedBudgetUsd.toFixed(2)}` : null
+
+  return (
+    <article
+      ref={props.cardRef}
+      onMouseUp={(e) => props.onMouseUp(e)}
+      class="relative mx-auto select-text"
+      style={{
+        'max-width': '880px',
+        background: 'var(--surface)',
+        'border-radius': '12px',
+        'box-shadow': '0 20px 25px -5px rgba(0,0,0,0.15), 0 8px 10px -6px rgba(0,0,0,0.1)',
+        border: '1px solid var(--border-subtle)',
+        padding: '40px',
+        animation: 'planCardIn 250ms ease-out',
+      }}
+    >
+      {/* Top-right action links */}
+      <div class="absolute top-4 right-4 flex items-center gap-3">
+        <button
+          type="button"
+          onClick={() => props.onGlobalComment()}
+          class="text-[11px] font-medium transition-colors"
+          style={{ color: 'var(--text-muted)' }}
+        >
+          Global comment
+        </button>
+        <button
+          type="button"
+          onClick={() => props.onCopyPlan()}
+          class="text-[11px] font-medium transition-colors"
+          style={{ color: 'var(--text-muted)' }}
+        >
+          Copy plan
+        </button>
+      </div>
+
+      {/* Codename badge */}
+      <Show when={props.plan.codename}>
+        <span
+          class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold tracking-wider uppercase mb-3"
+          style={{ background: PLAN_ACCENT_SUBTLE, color: PLAN_ACCENT }}
+        >
+          {props.plan.codename}
+        </span>
+      </Show>
+
+      {/* Title */}
+      <h1 class="text-[24px] font-bold leading-tight mb-3" style={{ color: 'var(--text-primary)' }}>
+        {props.plan.summary}
+      </h1>
+
+      {/* Meta line */}
+      <p class="text-[13px] mb-6" style={{ color: 'var(--text-muted)' }}>
+        {props.plan.steps.length} steps
+        {' \u00B7 '}~{props.plan.estimatedTurns} turns
+        <Show when={estimatedCost()}>
+          {' \u00B7 '}
+          {estimatedCost()}
+        </Show>
+        <Show when={approvedCount() > 0}>
+          {' \u00B7 '}
+          <span style={{ color: '#22C55E' }}>
+            {approvedCount()}/{props.plan.steps.length} approved
+          </span>
+        </Show>
+      </p>
+
+      {/* Divider */}
+      <div class="mb-6" style={{ height: '1px', background: 'var(--border-subtle)' }} />
+
+      {/* Steps rendered as document sections */}
+      <div class="space-y-6">
+        <For each={props.plan.steps}>
+          {(step, i) => {
+            const action = () => ACTION_CONFIG[step.action]
+            const depLabels = () =>
+              step.dependsOn.map((depId) => {
+                const idx = props.plan.steps.findIndex((s) => s.id === depId)
+                return idx >= 0 ? `Step ${idx + 1}` : depId
+              })
+
+            return (
+              <section id={`plan-step-${step.id}`} data-step-id={step.id}>
+                {/* Step heading */}
+                <div class="flex items-center gap-3 mb-2">
+                  <h3 class="text-[16px] font-semibold" style={{ color: 'var(--text-primary)' }}>
+                    <span style={{ color: 'var(--text-muted)' }}>{i() + 1}.</span>{' '}
+                    {step.description}
+                  </h3>
+                  <span
+                    class="inline-flex items-center px-2 py-0.5 rounded-full text-[9px] font-semibold tracking-wider uppercase border flex-shrink-0"
+                    style={{
+                      background: action().bg,
+                      color: action().text,
+                      'border-color': action().border,
+                    }}
+                  >
+                    {action().label}
+                  </span>
+                  <Show when={step.approved}>
+                    <Check class="w-4 h-4 flex-shrink-0" style={{ color: '#22C55E' }} />
+                  </Show>
+                </div>
+
+                {/* Files */}
+                <Show when={step.files.length > 0}>
+                  <ul class="mb-2 space-y-0.5">
+                    <For each={step.files}>
+                      {(file) => (
+                        <li class="flex items-center gap-2 text-[12px]">
+                          <FileCode
+                            class="w-3 h-3 flex-shrink-0"
+                            style={{ color: 'var(--text-muted)' }}
+                          />
+                          <code
+                            class="px-1 rounded"
+                            style={{
+                              color: 'var(--text-secondary)',
+                              background: 'var(--alpha-white-3)',
+                              'font-family': 'var(--font-ui-mono)',
+                              'font-size': '11px',
+                            }}
+                          >
+                            {file}
+                          </code>
+                        </li>
+                      )}
+                    </For>
+                  </ul>
+                </Show>
+
+                {/* Dependencies */}
+                <Show when={step.dependsOn.length > 0}>
+                  <p
+                    class="flex items-center gap-1.5 text-[11px]"
+                    style={{ color: 'var(--text-muted)' }}
+                  >
+                    <GitBranch class="w-3 h-3 flex-shrink-0" />
+                    Depends on: {depLabels().join(', ')}
+                  </p>
+                </Show>
+              </section>
+            )
+          }}
+        </For>
+      </div>
+    </article>
+  )
+}
 
 // ============================================================================
 // Main Overlay
@@ -640,29 +879,39 @@ export const PlanOverlay: Component = () => {
     isOpen,
     closePlan,
     executePlan,
-    refinePlan,
     stepComments,
-    commentingStepId,
-    stepLabels,
-    addStepComment,
-    toggleStepComment,
-    updateStep,
-    toggleStepApproval,
-    moveStep,
-    addStepLabel,
-    removeStepLabel,
-    previousPlan,
-    showDiff,
-    toggleDiff,
-    hasDiff,
+    annotations,
+    addAnnotation,
+    removeAnnotation,
   } = usePlanOverlay()
   const agent = useAgent()
+
   const [copied, setCopied] = createSignal(false)
   const [shareCopied, setShareCopied] = createSignal(false)
-  const [editingStepId, setEditingStepId] = createSignal<string | null>(null)
-  const [showRejectInput, setShowRejectInput] = createSignal(false)
-  const [rejectFeedback, setRejectFeedback] = createSignal('')
+  const [tocCollapsed, setTocCollapsed] = createSignal(false)
+  const [activeStepId, setActiveStepId] = createSignal<string | null>(null)
   const [planHistory, setPlanHistory] = createSignal<PlanSummary[]>([])
+  const [toolMode, setToolMode] = createSignal<
+    'select' | 'markup' | 'comment' | 'shape' | 'quicklabel'
+  >('select')
+  const [focusedAnnotationId, setFocusedAnnotationId] = createSignal<string | null>(null)
+
+  // Selection toolbar state
+  const [selectionToolbar, setSelectionToolbar] = createSignal<{
+    text: string
+    top: number
+    left: number
+  } | null>(null)
+
+  // Comment popover state
+  const [commentPopover, setCommentPopover] = createSignal<{
+    text: string
+    top: number
+    left: number
+  } | null>(null)
+
+  // Global comment popover
+  const [globalCommentOpen, setGlobalCommentOpen] = createSignal(false)
 
   // Fetch plan history when overlay opens
   createEffect(() => {
@@ -670,7 +919,7 @@ export const PlanOverlay: Component = () => {
       fetch('/api/plans')
         .then((r) => r.json())
         .then((plans: PlanSummary[]) => setPlanHistory(plans))
-        .catch(() => {}) // silently ignore if API not available
+        .catch(() => {})
     }
   })
 
@@ -682,14 +931,13 @@ export const PlanOverlay: Component = () => {
         return r.text()
       })
       .then((content) => {
-        // Parse the markdown back into a PlanData structure
         const plan = parsePlanMarkdown(content)
         if (plan) {
           const { openPlan: openPlanFn } = usePlanOverlay()
           openPlanFn(plan)
         }
       })
-      .catch(() => {}) // silently ignore errors
+      .catch(() => {})
   }
 
   /** Generate a shareable URL with the plan encoded in the hash. */
@@ -705,9 +953,6 @@ export const PlanOverlay: Component = () => {
     })
   }
 
-  const commentCount = (): number =>
-    Object.keys(stepComments()).filter((k) => stepComments()[k]).length
-
   /** Collect step comments into a flat record for the backend. */
   const collectStepComments = (): Record<string, string> => {
     const comments = stepComments()
@@ -718,6 +963,23 @@ export const PlanOverlay: Component = () => {
     return result
   }
 
+  /** Build feedback string from annotations */
+  const collectAnnotationFeedback = (): string => {
+    const anns = annotations()
+    if (anns.length === 0) return ''
+    const parts: string[] = []
+    for (const ann of anns) {
+      if (ann.type === 'deletion') {
+        parts.push(`[DELETE] "${ann.originalText}"`)
+      } else if (ann.type === 'comment') {
+        parts.push(`[COMMENT on "${ann.originalText.slice(0, 60)}..."] ${ann.commentText ?? ''}`)
+      } else if (ann.type === 'global_comment') {
+        parts.push(`[GLOBAL COMMENT] ${ann.commentText ?? ''}`)
+      }
+    }
+    return parts.join('\n')
+  }
+
   /** Approve and execute the plan via the agent backend. */
   const handleApprove = (mode: 'code' | 'praxis'): void => {
     const plan = activePlan()
@@ -726,29 +988,85 @@ export const PlanOverlay: Component = () => {
     executePlan(mode)
   }
 
-  /** Send rejection with feedback to the agent backend. */
+  /** Send rejection with annotations as feedback to the agent backend. */
   const handleReject = (): void => {
-    const feedback = rejectFeedback().trim()
-    if (!feedback) return
-    // Collect step comments and include them in the rejection feedback
+    const feedback = collectAnnotationFeedback()
     const comments = collectStepComments()
     const commentEntries = Object.entries(comments)
     const commentSuffix =
       commentEntries.length > 0
         ? `\n\nStep comments:\n${commentEntries.map(([id, c]) => `- Step ${id}: ${c}`).join('\n')}`
         : ''
-    agent.resolvePlan('rejected', undefined, feedback + commentSuffix, comments)
-    setShowRejectInput(false)
-    setRejectFeedback('')
+    const fullFeedback = (feedback + commentSuffix).trim()
+    if (!fullFeedback) {
+      // If no annotations/comments, just close
+      closePlan()
+      return
+    }
+    agent.resolvePlan('rejected', undefined, fullFeedback, comments)
     closePlan()
   }
 
-  /** Refine: send as modified with step comments to the agent backend. */
-  const handleRefine = (): void => {
+  const handleCopy = (): void => {
     const plan = activePlan()
     if (!plan) return
-    agent.resolvePlan('modified', plan, undefined, collectStepComments())
-    refinePlan()
+    const text = formatPlanMarkdown(plan)
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    })
+  }
+
+  const handleDownload = (): void => {
+    const plan = activePlan()
+    if (!plan) return
+    const md = formatPlanMarkdown(plan)
+    const blob = new Blob([md], { type: 'text/markdown' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${plan.codename || 'plan'}.md`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  /** Handle text selection inside the document card */
+  const handleDocumentMouseUp = (): void => {
+    const sel = window.getSelection()
+    if (!sel || sel.isCollapsed || !sel.toString().trim()) {
+      // Don't dismiss if clicking inside the toolbar/popover
+      return
+    }
+    const range = sel.getRangeAt(0)
+    const rect = range.getBoundingClientRect()
+    setSelectionToolbar({
+      text: sel.toString(),
+      top: rect.top - 48,
+      left: rect.left + rect.width / 2,
+    })
+  }
+
+  /** Dismiss selection toolbar when clicking outside */
+  const handleDocumentClick = (e: MouseEvent): void => {
+    const target = e.target as HTMLElement
+    // Don't dismiss if clicking toolbar or popover
+    if (target.closest('[data-selection-toolbar]') || target.closest('[data-comment-popover]')) {
+      return
+    }
+    // Only dismiss if no text is selected
+    const sel = window.getSelection()
+    if (!sel || sel.isCollapsed) {
+      setSelectionToolbar(null)
+    }
+  }
+
+  /** Scroll to a step in the document */
+  const scrollToStep = (stepId: string): void => {
+    setActiveStepId(stepId)
+    const el = document.getElementById(`plan-step-${stepId}`)
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }
   }
 
   // Keyboard shortcuts
@@ -758,15 +1076,19 @@ export const PlanOverlay: Component = () => {
       if (e.key === 'Escape') {
         e.preventDefault()
         e.stopPropagation()
-        if (showRejectInput()) {
-          setShowRejectInput(false)
-          setRejectFeedback('')
-        } else {
-          closePlan()
+        if (commentPopover()) {
+          setCommentPopover(null)
+          return
         }
+        if (selectionToolbar()) {
+          setSelectionToolbar(null)
+          window.getSelection()?.removeAllRanges()
+          return
+        }
+        closePlan()
         return
       }
-      // Cmd/Ctrl+Shift+Enter = Execute with Praxis (check before Ctrl+Enter)
+      // Cmd/Ctrl+Shift+Enter = Execute with Praxis
       if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && e.shiftKey) {
         e.preventDefault()
         handleApprove('praxis')
@@ -791,32 +1113,13 @@ export const PlanOverlay: Component = () => {
     onCleanup(() => window.removeEventListener('keydown', handleKeyDown, { capture: true }))
   })
 
-  const approvedCount = () => activePlan()?.steps.filter((s) => s.approved).length ?? 0
-  const totalSteps = () => activePlan()?.steps.length ?? 0
-  const progressPct = () => (totalSteps() > 0 ? (approvedCount() / totalSteps()) * 100 : 0)
-
-  const handleCopy = (): void => {
-    const plan = activePlan()
-    if (!plan) return
-    const text = formatPlanMarkdown(plan)
-    navigator.clipboard.writeText(text).then(() => {
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
-    })
-  }
-
-  const handleDownload = (): void => {
-    const plan = activePlan()
-    if (!plan) return
-    const md = formatPlanMarkdown(plan)
-    const blob = new Blob([md], { type: 'text/markdown' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `$plan.codename || 'plan'.md`
-    a.click()
-    URL.revokeObjectURL(url)
-  }
+  // Click outside to dismiss selection toolbar
+  createEffect(() => {
+    if (!isOpen()) return
+    const handler = (e: MouseEvent) => handleDocumentClick(e)
+    document.addEventListener('mousedown', handler)
+    onCleanup(() => document.removeEventListener('mousedown', handler))
+  })
 
   return (
     <Show when={isOpen() && activePlan()}>
@@ -828,8 +1131,8 @@ export const PlanOverlay: Component = () => {
             animation: 'planOverlayIn 200ms ease-out',
           }}
         >
-          {/* ── Header toolbar (Plannotator-style fixed bar) ── */}
-          <div
+          {/* ── Header bar (48px) ── */}
+          <header
             class="flex items-center gap-3 px-5 flex-shrink-0"
             style={{
               height: '48px',
@@ -837,63 +1140,66 @@ export const PlanOverlay: Component = () => {
               'border-bottom': '1px solid var(--border-subtle)',
             }}
           >
-            {/* Left: Back button */}
+            {/* Left: Back + codename badge */}
             <button
               type="button"
               onClick={() => closePlan()}
-              class="flex items-center gap-1.5 text-[13px] hover:opacity-100 transition-opacity"
+              class="flex items-center gap-1.5 text-[13px] transition-opacity"
               style={{ color: 'var(--text-secondary)', opacity: '0.8' }}
             >
               <ArrowLeft class="w-4 h-4" />
               <span>Back to Chat</span>
             </button>
 
-            {/* Center: Codename badge */}
-            <div class="flex-1 flex justify-center">
-              <div class="flex items-center gap-2">
-                <div class="p-1 rounded" style={{ background: PLAN_ACCENT_SUBTLE }}>
-                  <ClipboardList class="w-4 h-4" style={{ color: PLAN_ACCENT }} />
-                </div>
-                <Show when={plan().codename}>
-                  <span class="text-[13px] font-bold tracking-wide" style={{ color: PLAN_ACCENT }}>
-                    {plan().codename}
-                  </span>
-                </Show>
-                {/* Diff badge */}
-                <Show when={hasDiff()}>
-                  {(() => {
-                    const prev = previousPlan()
-                    const curr = plan()
-                    if (!prev || !curr) return null
-                    const result = diffPlans(prev, curr)
-                    return (
-                      <button
-                        type="button"
-                        onClick={() => toggleDiff()}
-                        class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium border transition-colors"
-                        classList={{
-                          'border-[#22C55E] text-[#22C55E] bg-[rgba(34,197,94,0.1)]': showDiff(),
-                          'border-[var(--border-subtle)] text-[var(--text-muted)] hover:text-[var(--text-primary)]':
-                            !showDiff(),
-                        }}
-                      >
-                        <GitCompareArrows class="w-3 h-3" />+{result.stats.added} -
-                        {result.stats.removed} ~{result.stats.modified}
-                      </button>
-                    )
-                  })()}
-                </Show>
+            <div class="flex items-center gap-2 ml-3">
+              <div class="p-1 rounded" style={{ background: PLAN_ACCENT_SUBTLE }}>
+                <ClipboardList class="w-4 h-4" style={{ color: PLAN_ACCENT }} />
               </div>
+              <Show when={plan().codename}>
+                <span class="text-[13px] font-bold tracking-wide" style={{ color: PLAN_ACCENT }}>
+                  {plan().codename}
+                </span>
+              </Show>
             </div>
 
-            {/* Right: Actions */}
-            <div class="flex items-center gap-1">
+            <div class="flex-1" />
+
+            {/* Right: Send Feedback + Approve + icons */}
+            <div class="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => handleReject()}
+                class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-medium border transition-colors"
+                style={{
+                  color: PLAN_ACCENT,
+                  'border-color': PLAN_ACCENT,
+                  background: 'transparent',
+                }}
+                title="Send feedback from annotations"
+              >
+                Send Feedback
+              </button>
+              <button
+                type="button"
+                onClick={() => handleApprove('code')}
+                class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-medium transition-colors"
+                style={{
+                  color: '#fff',
+                  background: '#22C55E',
+                }}
+                title="Approve plan (Ctrl+Enter)"
+              >
+                Approve
+              </button>
+
+              <div class="w-px h-5 mx-1" style={{ background: 'var(--border-subtle)' }} />
+
               <button
                 type="button"
                 onClick={handleCopy}
                 class="p-2 rounded-md transition-colors"
                 style={{ color: 'var(--text-muted)' }}
-                title="Copy as Markdown (Ctrl+C)"
+                title="Copy as Markdown"
               >
                 <Show when={copied()} fallback={<Copy class="w-4 h-4" />}>
                   <Check class="w-4 h-4" style={{ color: '#22C55E' }} />
@@ -904,7 +1210,7 @@ export const PlanOverlay: Component = () => {
                 onClick={handleDownload}
                 class="p-2 rounded-md transition-colors"
                 style={{ color: 'var(--text-muted)' }}
-                title="Download as .md (Ctrl+S)"
+                title="Download (Ctrl+S)"
               >
                 <Download class="w-4 h-4" />
               </button>
@@ -913,10 +1219,10 @@ export const PlanOverlay: Component = () => {
                 onClick={handleShare}
                 class="p-2 rounded-md transition-colors"
                 style={{ color: shareCopied() ? '#22C55E' : 'var(--text-muted)' }}
-                title={shareCopied() ? 'Link copied!' : 'Copy share link'}
+                title="Share link"
               >
-                <Show when={shareCopied()} fallback={<Share2 class="w-4 h-4" />}>
-                  <Check class="w-4 h-4" style={{ color: '#22C55E' }} />
+                <Show when={shareCopied()} fallback={<Link2 class="w-4 h-4" />}>
+                  <Check class="w-4 h-4" />
                 </Show>
               </button>
               <button
@@ -929,436 +1235,152 @@ export const PlanOverlay: Component = () => {
                 <X class="w-4 h-4" />
               </button>
             </div>
+          </header>
+
+          {/* ── 3-Panel body ── */}
+          <div class="flex flex-1 overflow-hidden">
+            {/* Left: TOC Sidebar */}
+            <TOCSidebar
+              steps={plan().steps}
+              activeStepId={activeStepId()}
+              collapsed={tocCollapsed()}
+              planHistory={planHistory()}
+              onScrollTo={scrollToStep}
+              onToggleCollapse={() => setTocCollapsed((v) => !v)}
+              onLoadPlan={loadPlanFromHistory}
+            />
+
+            {/* Center: Grid canvas + document card */}
+            <main
+              class="flex-1 overflow-y-auto plan-grid-bg"
+              style={{
+                background: 'var(--bg)',
+                padding: '24px',
+              }}
+            >
+              {/* Annotation toolstrip */}
+              <AnnotationToolstrip activeMode={toolMode()} onModeChange={setToolMode} />
+
+              {/* Document card */}
+              <PlanDocument
+                plan={plan()}
+                annotations={annotations()}
+                onMouseUp={handleDocumentMouseUp}
+                onGlobalComment={() => setGlobalCommentOpen(true)}
+                onCopyPlan={handleCopy}
+                cardRef={() => {}}
+              />
+            </main>
+
+            {/* Right: Annotations Panel */}
+            <AnnotationsPanel
+              annotations={annotations()}
+              focusedId={focusedAnnotationId()}
+              onFocus={(id) => setFocusedAnnotationId(id)}
+              onRemove={(id) => removeAnnotation(id)}
+            />
           </div>
 
-          {/* ── Canvas area with TOC + centered document card ── */}
-          <div
-            class="flex-1 overflow-y-auto"
-            style={{
-              background: `
-                radial-gradient(circle at 50% 0%, ${PLAN_ACCENT_GLOW} 0%, transparent 50%),
-                var(--bg)
-              `,
-              'background-size': '100% 100%, 24px 24px',
-            }}
-          >
-            <div class="flex">
-              {/* TOC sidebar */}
-              <div
-                class="w-[200px] flex-shrink-0 sticky top-0 self-start hidden lg:block border-r"
-                style={{
-                  'border-color': 'var(--border-subtle)',
-                  background: 'color-mix(in srgb, var(--surface) 50%, transparent)',
-                }}
-              >
-                <div class="py-8 pl-6 pr-2">
-                  <span
-                    class="text-[10px] font-semibold tracking-[0.1em] uppercase mb-3 block"
-                    style={{ color: 'var(--text-muted)' }}
-                  >
-                    Contents
-                  </span>
-                  <div class="space-y-1">
-                    <For each={plan().steps}>
-                      {(step, index) => (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            document
-                              .getElementById(`plan-step-${step.id}`)
-                              ?.scrollIntoView({ behavior: 'smooth', block: 'center' })
-                          }
-                          class="w-full text-left text-[11px] py-1 px-2 rounded truncate transition-colors"
-                          classList={{
-                            'hover:bg-[rgba(255,255,255,0.05)]': true,
-                          }}
-                          style={{
-                            color: step.approved ? '#22C55E' : 'var(--text-muted)',
-                          }}
-                        >
-                          {index() + 1}. {step.description}
-                        </button>
-                      )}
-                    </For>
-                  </div>
-
-                  {/* Plan history */}
-                  <div class="mt-4">
-                    <span
-                      class="text-[10px] font-semibold tracking-[0.1em] uppercase mb-2 block"
-                      style={{ color: 'var(--text-muted)' }}
-                    >
-                      History
-                    </span>
-                    <Show
-                      when={planHistory().length > 0}
-                      fallback={
-                        <span class="text-[10px] text-[var(--text-muted)]">No saved plans</span>
-                      }
-                    >
-                      <div class="space-y-1">
-                        <For each={planHistory()}>
-                          {(item) => (
-                            <button
-                              type="button"
-                              onClick={() => loadPlanFromHistory(item.filename)}
-                              class="w-full text-left text-[10px] py-1 px-2 rounded truncate transition-colors text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--alpha-white-5)]"
-                              title={item.summary}
-                            >
-                              {item.codename || item.summary.slice(0, 20)}
-                            </button>
-                          )}
-                        </For>
-                      </div>
-                    </Show>
-                  </div>
-                </div>
-              </div>
-
-              {/* Document card — fills remaining width like Plannotator */}
-              <div
-                class="flex-1 min-w-0 overflow-hidden"
-                style={{
-                  background: 'var(--surface)',
-                }}
-              >
-                {/* ── Document header (inside card) ── */}
-                <div
-                  class="px-10 pt-8 pb-6"
-                  style={{
-                    'border-bottom': '1px solid var(--border-subtle)',
-                    background: `linear-gradient(180deg, ${PLAN_ACCENT_GLOW} 0%, transparent 100%)`,
+          {/* ── Floating Selection Toolbar ── */}
+          <Show when={selectionToolbar()}>
+            {(toolbar) => (
+              <div data-selection-toolbar>
+                <SelectionToolbar
+                  text={toolbar().text}
+                  top={toolbar().top}
+                  left={toolbar().left}
+                  onCopy={() => {
+                    navigator.clipboard.writeText(toolbar().text)
+                    setSelectionToolbar(null)
+                    window.getSelection()?.removeAllRanges()
                   }}
-                >
-                  {/* Codename label */}
-                  <Show when={plan().codename}>
-                    <span
-                      class="text-[11px] font-bold tracking-[0.15em] uppercase block mb-3"
-                      style={{ color: PLAN_ACCENT }}
-                    >
-                      {plan().codename}
-                    </span>
-                  </Show>
-
-                  {/* Title */}
-                  <h1
-                    class="text-[20px] font-semibold leading-tight mb-4"
-                    style={{ color: 'var(--text-primary)' }}
-                  >
-                    {plan().summary}
-                  </h1>
-
-                  {/* Meta pills strip */}
-                  <div class="flex items-center gap-2 flex-wrap">
-                    <MetaPill icon={Hash}>
-                      {totalSteps()} step{totalSteps() !== 1 ? 's' : ''}
-                    </MetaPill>
-                    <Show when={plan().estimatedTurns}>
-                      <MetaPill icon={Clock}>~{plan().estimatedTurns} turns</MetaPill>
-                    </Show>
-                    <Show when={plan().estimatedBudgetUsd != null}>
-                      <MetaPill icon={DollarSign}>
-                        ~${plan().estimatedBudgetUsd!.toFixed(2)}
-                      </MetaPill>
-                    </Show>
-                    <Show when={approvedCount() > 0}>
-                      <div
-                        class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] border"
-                        style={{
-                          background: 'rgba(34, 197, 94, 0.08)',
-                          'border-color': 'rgba(34, 197, 94, 0.25)',
-                          color: '#22C55E',
-                        }}
-                      >
-                        <Check class="w-3.5 h-3.5" />
-                        {approvedCount()}/{totalSteps()} approved
-                      </div>
-                    </Show>
-                  </div>
-
-                  {/* Progress bar */}
-                  <Show when={approvedCount() > 0}>
-                    <div class="mt-4">
-                      <div
-                        class="h-1 rounded-full overflow-hidden"
-                        style={{ background: 'var(--alpha-white-5)' }}
-                      >
-                        <div
-                          class="h-full rounded-full transition-all duration-500 ease-out"
-                          style={{
-                            width: `${progressPct()}%`,
-                            background: 'linear-gradient(90deg, #22C55E, #4ADE80)',
-                          }}
-                        />
-                      </div>
-                    </div>
-                  </Show>
-                </div>
-
-                {/* ── Steps section (inside card) ── */}
-                <div class="px-10 py-6">
-                  <div class="flex items-center gap-2 mb-4">
-                    <span
-                      class="text-[11px] font-semibold tracking-[0.1em] uppercase"
-                      style={{ color: 'var(--text-muted)' }}
-                    >
-                      Implementation Steps
-                    </span>
-                    <div class="flex-1 h-px" style={{ background: 'var(--border-subtle)' }} />
-                  </div>
-
-                  <div class="space-y-3">
-                    {(() => {
-                      const prev = previousPlan()
-                      const curr = plan()
-                      const diff = showDiff() && prev ? diffPlans(prev, curr) : null
-                      const diffMap = diff ? new Map(diff.steps.map((d) => [d.step.id, d])) : null
-
-                      // When in diff mode, show removed steps too
-                      const stepsToRender = diff ? diff.steps.map((d) => d.step) : curr.steps
-
-                      return (
-                        <For each={stepsToRender}>
-                          {(step, index) => {
-                            const stepDiff = () => diffMap?.get(step.id)
-                            return (
-                              <StepCard
-                                step={step}
-                                index={index()}
-                                allSteps={curr.steps}
-                                comment={stepComments()[step.id]}
-                                isCommenting={commentingStepId() === step.id}
-                                isEditing={editingStepId() === step.id}
-                                labels={stepLabels()[step.id] || []}
-                                onToggleApproval={() => toggleStepApproval(step.id)}
-                                onToggleComment={() => toggleStepComment(step.id)}
-                                onAddComment={(comment) => addStepComment(step.id, comment)}
-                                onToggleEdit={() =>
-                                  setEditingStepId((prev) => (prev === step.id ? null : step.id))
-                                }
-                                onUpdateDescription={(desc) =>
-                                  updateStep(step.id, { description: desc })
-                                }
-                                onMoveUp={() => moveStep(step.id, 'up')}
-                                onMoveDown={() => moveStep(step.id, 'down')}
-                                onAddLabel={(labelId) => addStepLabel(step.id, labelId)}
-                                onRemoveLabel={(labelId) => removeStepLabel(step.id, labelId)}
-                                isFirst={index() === 0}
-                                isLast={index() === stepsToRender.length - 1}
-                                diffType={stepDiff()?.diffType}
-                                oldDescription={stepDiff()?.oldStep?.description}
-                              />
-                            )
-                          }}
-                        </For>
-                      )
-                    })()}
-                  </div>
-                </div>
-
-                {/* ── Footer with action buttons (inside card) ── */}
-                <div
-                  class="px-10 py-5"
-                  style={{
-                    'border-top': '1px solid var(--border-subtle)',
-                    background: 'var(--surface-raised)',
+                  onDelete={() => {
+                    addAnnotation({
+                      id: generateId(),
+                      type: 'deletion',
+                      originalText: toolbar().text,
+                      createdAt: Date.now(),
+                    })
+                    setSelectionToolbar(null)
+                    window.getSelection()?.removeAllRanges()
                   }}
-                >
-                  {/* Rejection feedback textarea (shown when Reject clicked) */}
-                  <Show when={showRejectInput()}>
-                    <div class="mb-4">
-                      <textarea
-                        value={rejectFeedback()}
-                        onInput={(e) => setRejectFeedback(e.currentTarget.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' && !e.shiftKey) {
-                            e.preventDefault()
-                            handleReject()
-                          } else if (e.key === 'Escape') {
-                            e.preventDefault()
-                            e.stopPropagation()
-                            setShowRejectInput(false)
-                            setRejectFeedback('')
-                          }
-                        }}
-                        ref={(el) => setTimeout(() => el.focus(), 0)}
-                        placeholder="Why should this plan be rejected? What should change?"
-                        rows={3}
-                        class="w-full text-[13px] rounded-md border px-3 py-2 outline-none resize-none"
-                        style={{
-                          color: 'var(--text-primary)',
-                          background: 'var(--alpha-white-3)',
-                          'border-color': 'rgba(239, 68, 68, 0.4)',
-                        }}
-                      />
-                      <div class="flex items-center justify-between mt-2">
-                        <span class="text-[10px]" style={{ color: 'var(--text-muted)' }}>
-                          Enter to send, Esc to cancel
-                        </span>
-                        <div class="flex items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setShowRejectInput(false)
-                              setRejectFeedback('')
-                            }}
-                            class="text-[12px] px-3 py-1 rounded-md transition-colors"
-                            style={{ color: 'var(--text-muted)' }}
-                          >
-                            Cancel
-                          </button>
-                          <button
-                            type="button"
-                            onClick={handleReject}
-                            disabled={!rejectFeedback().trim()}
-                            class="text-[12px] px-3 py-1 rounded-md font-medium transition-all"
-                            style={{
-                              color: rejectFeedback().trim() ? '#EF4444' : 'var(--text-muted)',
-                              background: rejectFeedback().trim()
-                                ? 'rgba(239, 68, 68, 0.1)'
-                                : 'transparent',
-                              opacity: rejectFeedback().trim() ? '1' : '0.5',
-                            }}
-                          >
-                            Send Rejection
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  </Show>
-
-                  {/* Keyboard shortcut hints */}
-                  <div
-                    class="flex items-center gap-3 mb-3 text-[10px]"
-                    style={{ color: 'var(--text-muted)' }}
-                  >
-                    <span class="flex items-center gap-1">
-                      <kbd
-                        class="px-1.5 py-0.5 rounded border"
-                        style={{
-                          background: 'var(--alpha-white-5)',
-                          'border-color': 'var(--border-subtle)',
-                        }}
-                      >
-                        Ctrl+Enter
-                      </kbd>{' '}
-                      Execute
-                    </span>
-                    <span style={{ opacity: '0.4' }}>&bull;</span>
-                    <span class="flex items-center gap-1">
-                      <kbd
-                        class="px-1.5 py-0.5 rounded border"
-                        style={{
-                          background: 'var(--alpha-white-5)',
-                          'border-color': 'var(--border-subtle)',
-                        }}
-                      >
-                        Ctrl+S
-                      </kbd>{' '}
-                      Download
-                    </span>
-                    <span style={{ opacity: '0.4' }}>&bull;</span>
-                    <span class="flex items-center gap-1">
-                      <kbd
-                        class="px-1.5 py-0.5 rounded border"
-                        style={{
-                          background: 'var(--alpha-white-5)',
-                          'border-color': 'var(--border-subtle)',
-                        }}
-                      >
-                        Esc
-                      </kbd>{' '}
-                      Close
-                    </span>
-                  </div>
-
-                  <div class="flex items-center justify-between">
-                    {/* Left: Reject + Refine + comment count */}
-                    <div class="flex items-center gap-2">
-                      {/* Reject — red text button */}
-                      <button
-                        type="button"
-                        onClick={() => setShowRejectInput(true)}
-                        class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[12px] font-medium transition-all hover:opacity-90"
-                        style={{
-                          color: '#EF4444',
-                          background: 'transparent',
-                        }}
-                        title="Reject the plan with feedback"
-                      >
-                        <XCircle class="w-3.5 h-3.5" />
-                        Reject
-                      </button>
-
-                      {/* Refine Plan — text button */}
-                      <button
-                        type="button"
-                        onClick={handleRefine}
-                        class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[12px] font-medium transition-all hover:opacity-90"
-                        style={{
-                          color: 'var(--text-secondary)',
-                          background: 'transparent',
-                        }}
-                        title="Send modifications back to the agent"
-                      >
-                        <PenLine class="w-3.5 h-3.5" />
-                        Refine Plan
-                      </button>
-
-                      <Show when={commentCount() > 0}>
-                        <span
-                          class="inline-flex items-center gap-1 text-[11px]"
-                          style={{ color: PLAN_ACCENT }}
-                        >
-                          <MessageSquare class="w-3 h-3" />
-                          {commentCount()} comment{commentCount() !== 1 ? 's' : ''}
-                        </span>
-                      </Show>
-                    </div>
-
-                    {/* Right: Execute + Praxis */}
-                    <div class="flex items-center gap-2">
-                      {/* Execute Plan — primary filled button */}
-                      <button
-                        type="button"
-                        onClick={() => handleApprove('code')}
-                        class="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-md text-[12px] font-semibold transition-all hover:opacity-90"
-                        style={{
-                          background: PLAN_ACCENT,
-                          color: '#ffffff',
-                          'box-shadow': `0 1px 3px ${PLAN_ACCENT_SUBTLE}`,
-                        }}
-                        title="Approve and execute plan in Code mode (Ctrl+Enter)"
-                      >
-                        <Play class="w-3.5 h-3.5" />
-                        Execute Plan
-                      </button>
-
-                      {/* Start with Praxis — secondary outlined button */}
-                      <button
-                        type="button"
-                        onClick={() => handleApprove('praxis')}
-                        class="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-md text-[12px] font-medium border transition-all hover:opacity-90"
-                        style={{
-                          color: PLAN_ACCENT,
-                          'border-color': PLAN_ACCENT,
-                          background: 'transparent',
-                        }}
-                        title="Approve and execute plan with Praxis multi-agent mode (Ctrl+Shift+Enter)"
-                      >
-                        <Users class="w-3.5 h-3.5" />
-                        Start with Praxis
-                      </button>
-                    </div>
-                  </div>
-                </div>
+                  onComment={() => {
+                    setCommentPopover({
+                      text: toolbar().text,
+                      top: toolbar().top + 56,
+                      left: toolbar().left,
+                    })
+                    setSelectionToolbar(null)
+                  }}
+                  onQuickLabel={() => {
+                    // Add as "clarify" quick label annotation
+                    addAnnotation({
+                      id: generateId(),
+                      type: 'comment',
+                      originalText: toolbar().text,
+                      commentText: 'Needs clarification',
+                      createdAt: Date.now(),
+                    })
+                    setSelectionToolbar(null)
+                    window.getSelection()?.removeAllRanges()
+                  }}
+                  onClose={() => {
+                    setSelectionToolbar(null)
+                    window.getSelection()?.removeAllRanges()
+                  }}
+                />
               </div>
+            )}
+          </Show>
+
+          {/* ── Comment Popover ── */}
+          <Show when={commentPopover()}>
+            {(popover) => (
+              <div data-comment-popover>
+                <CommentPopover
+                  contextText={popover().text}
+                  top={popover().top}
+                  left={popover().left}
+                  onSave={(comment) => {
+                    addAnnotation({
+                      id: generateId(),
+                      type: 'comment',
+                      originalText: popover().text,
+                      commentText: comment,
+                      createdAt: Date.now(),
+                    })
+                    setCommentPopover(null)
+                    window.getSelection()?.removeAllRanges()
+                  }}
+                  onCancel={() => setCommentPopover(null)}
+                />
+              </div>
+            )}
+          </Show>
+
+          {/* ── Global Comment Popover ── */}
+          <Show when={globalCommentOpen()}>
+            <div data-comment-popover>
+              <CommentPopover
+                contextText="Global comment on entire plan"
+                top={200}
+                left={window.innerWidth / 2}
+                onSave={(comment) => {
+                  addAnnotation({
+                    id: generateId(),
+                    type: 'global_comment',
+                    originalText: 'Entire plan',
+                    commentText: comment,
+                    createdAt: Date.now(),
+                  })
+                  setGlobalCommentOpen(false)
+                }}
+                onCancel={() => setGlobalCommentOpen(false)}
+              />
             </div>
-          </div>
+          </Show>
         </div>
       )}
     </Show>
   )
 }
-
-export default PlanOverlay

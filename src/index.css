@@ -987,6 +987,52 @@ button {
   }
 }
 
+/* Plan grid background for Plannotator canvas */
+.plan-grid-bg {
+  background-image:
+    linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+/* Plan annotation highlights */
+.plan-highlight-deletion {
+  background: rgba(239, 68, 68, 0.25);
+  text-decoration: line-through;
+  text-decoration-color: #ef4444;
+  text-decoration-thickness: 2px;
+  border-radius: 2px;
+  padding: 0 2px;
+  cursor: pointer;
+}
+
+.plan-highlight-comment {
+  background: rgba(234, 179, 8, 0.25);
+  border-bottom: 2px solid #eab308;
+  border-radius: 2px;
+  padding: 0 2px;
+  cursor: pointer;
+}
+
+.plan-highlight-focused.plan-highlight-deletion,
+.plan-highlight-focused.plan-highlight-comment,
+.plan-highlight-focused {
+  background: rgba(59, 130, 246, 0.35);
+  box-shadow: 0 0 8px rgba(59, 130, 246, 0.3);
+}
+
+/* Selection toolbar fade-in */
+@keyframes selectionToolbarIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 /* Plan step expand */
 @keyframes planStepExpand {
   from {

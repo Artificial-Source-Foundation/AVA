@@ -1,6 +1,14 @@
 import { createSignal } from 'solid-js'
 import type { PlanData, PlanStep } from '../types/rust-ipc'
 
+export interface PlanAnnotation {
+  id: string
+  type: 'deletion' | 'comment' | 'global_comment'
+  originalText: string
+  commentText?: string
+  createdAt: number
+}
+
 const [activePlan, setActivePlan] = createSignal<PlanData | null>(null)
 const [isOpen, setIsOpen] = createSignal(false)
 const [pendingExecution, setPendingExecution] = createSignal<{
@@ -12,6 +20,7 @@ const [commentingStepId, setCommentingStepId] = createSignal<string | null>(null
 const [stepLabels, setStepLabels] = createSignal<Record<string, string[]>>({})
 const [previousPlan, setPreviousPlan] = createSignal<PlanData | null>(null)
 const [showDiff, setShowDiff] = createSignal(false)
+const [annotations, setAnnotations] = createSignal<PlanAnnotation[]>([])
 
 // Load plan from URL hash on startup (plan sharing).
 // Deferred to allow the SolidJS component tree to mount first.
@@ -35,6 +44,23 @@ if (typeof window !== 'undefined') {
   }
 }
 
+// Expose for testing/debugging (Playwright can access the same module instance)
+if (typeof window !== 'undefined') {
+  Object.defineProperty(window, '__planOverlay', {
+    value: {
+      openPlan: (plan: PlanData) => {
+        setActivePlan(plan)
+        setIsOpen(true)
+      },
+      closePlan: () => {
+        setIsOpen(false)
+      },
+    },
+    writable: true,
+    configurable: true,
+  })
+}
+
 export function usePlanOverlay() {
   return {
     activePlan,
@@ -45,6 +71,14 @@ export function usePlanOverlay() {
     stepLabels,
     previousPlan,
     showDiff,
+    annotations,
+    addAnnotation: (ann: PlanAnnotation) => {
+      setAnnotations((prev) => [...prev, ann])
+    },
+    removeAnnotation: (id: string) => {
+      setAnnotations((prev) => prev.filter((a) => a.id !== id))
+    },
+    clearAnnotations: () => setAnnotations([]),
     toggleDiff: () => setShowDiff((prev) => !prev),
     hasDiff: () => previousPlan() !== null,
     openPlan: (plan: PlanData) => {
@@ -64,6 +98,7 @@ export function usePlanOverlay() {
         setStepLabels({})
         setPreviousPlan(null)
         setShowDiff(false)
+        setAnnotations([])
       }, 200)
     },
     executePlan: (mode: 'code' | 'praxis') => {
@@ -77,6 +112,7 @@ export function usePlanOverlay() {
           setCommentingStepId(null)
           setPreviousPlan(null)
           setShowDiff(false)
+          setAnnotations([])
         }, 200)
       }
     },
@@ -93,6 +129,7 @@ export function usePlanOverlay() {
         setStepComments({})
         setCommentingStepId(null)
         setStepLabels({})
+        setAnnotations([])
       }, 200)
     },
     addStepComment: (stepId: string, comment: string) => {

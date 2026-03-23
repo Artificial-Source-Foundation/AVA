@@ -304,8 +304,12 @@ export function useRustAgent() {
 
       case 'todo_update': {
         const todoEvent = event as TodoUpdateEvent
-        debugLog('todo', 'todo_update event', todoEvent.todos.length, 'items')
-        setTodos(todoEvent.todos)
+        log.info('todo', 'todo_update received', {
+          count: todoEvent.todos?.length ?? 0,
+          raw: JSON.stringify(todoEvent).slice(0, 200),
+        })
+        debugLog('todo', 'todo_update event', todoEvent.todos?.length ?? 0, 'items')
+        setTodos(todoEvent.todos ?? [])
         // Auto-open the right panel to the Todos tab when todos arrive
         if (todoEvent.todos.length > 0) {
           try {

@@ -125,7 +125,10 @@ async fn run_agent_inner(
                         .collect();
                     let _ = app_clone.emit("agent-event", AgentEvent::TodoUpdate { todos });
                 }
-            } else {
+            } else if !matches!(event, ava_agent::agent_loop::AgentEvent::SnapshotTaken { .. }) {
+                // Only reset the flag for events that aren't snapshots —
+                // SnapshotTaken fires between ToolCall and ToolResult and would
+                // incorrectly reset last_tool_was_todo_write.
                 last_tool_was_todo_write = false;
             }
             emit_backend_event(&app_clone, &event);

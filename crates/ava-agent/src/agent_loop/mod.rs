@@ -308,6 +308,7 @@ impl AgentLoop {
     /// keeping the conversation valid for the LLM API.
     pub fn with_history(mut self, mut history: Vec<Message>) -> Self {
         ava_types::cleanup_interrupted_tools(&mut history);
+        ava_types::repair_conversation(&mut history);
         self.history = history;
         self
     }

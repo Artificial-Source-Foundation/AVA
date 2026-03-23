@@ -5,7 +5,9 @@
 //! adds durable persistence for debugging and compliance.
 
 use chrono::{DateTime, Utc};
-use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions};
+use sqlx::sqlite::{
+    SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions, SqliteSynchronous,
+};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
@@ -48,7 +50,10 @@ impl AuditStore {
         let options = SqliteConnectOptions::from_str(&url)
             .map_err(|e| AuditStoreError::Database(e.to_string()))?
             .journal_mode(SqliteJournalMode::Wal)
-            .busy_timeout(std::time::Duration::from_millis(3000));
+            .synchronous(SqliteSynchronous::Normal)
+            .foreign_keys(true)
+            .busy_timeout(std::time::Duration::from_millis(3000))
+            .pragma("cache_size", "-64000");
 
         let pool = SqlitePoolOptions::new()
             .max_connections(2)

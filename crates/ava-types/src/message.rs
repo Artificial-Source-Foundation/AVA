@@ -112,6 +112,23 @@ pub struct Message {
     /// When `None`, this is a root message or a legacy linear message.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent_id: Option<Uuid>,
+    /// Whether this message is visible to the agent (included in LLM context).
+    /// Messages compacted by the context condenser have this set to `false` so
+    /// the LLM no longer sees them, but the UI can still display them.
+    #[serde(default = "default_true")]
+    pub agent_visible: bool,
+    /// Whether this message is visible to the user (shown in UI).
+    /// Allows hiding messages from the UI while keeping them in the agent context.
+    #[serde(default = "default_true")]
+    pub user_visible: bool,
+    /// If compacted, the original content before compaction was applied.
+    /// Lets the UI show original content on expansion of a dimmed/collapsed message.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub original_content: Option<String>,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl Message {
@@ -126,6 +143,9 @@ impl Message {
             tool_call_id: None,
             images: Vec::new(),
             parent_id: None,
+            agent_visible: true,
+            user_visible: true,
+            original_content: None,
         }
     }
 
@@ -157,6 +177,22 @@ impl Message {
     /// Whether this message has any image attachments.
     pub fn has_images(&self) -> bool {
         !self.images.is_empty()
+    }
+
+    /// Mark this message as hidden from the agent (LLM context) but still
+    /// visible to the user. Used during context compaction so users can scroll
+    /// back to see original content while the agent only sees the summary.
+    pub fn mark_compacted(&mut self) {
+        if self.original_content.is_none() && !self.content.is_empty() {
+            self.original_content = Some(self.content.clone());
+        }
+        self.agent_visible = false;
+        // user_visible stays true — UI shows these dimmed/collapsed
+    }
+
+    /// Whether this message has been compacted (hidden from agent, original preserved).
+    pub fn is_compacted(&self) -> bool {
+        !self.agent_visible && self.original_content.is_some()
     }
 }
 
@@ -367,5 +403,75 @@ mod tests {
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains("images"));
         assert!(json.contains("image/gif"));
+    }
+
+    // ── Visibility / compaction tests ──
+
+    #[test]
+    fn test_message_defaults_visible() {
+        let msg = Message::new(Role::User, "hello");
+        assert!(msg.agent_visible);
+        assert!(msg.user_visible);
+        assert!(msg.original_content.is_none());
+        assert!(!msg.is_compacted());
+    }
+
+    #[test]
+    fn test_mark_compacted() {
+        let mut msg = Message::new(Role::Assistant, "I will read the file");
+        msg.mark_compacted();
+        assert!(!msg.agent_visible);
+        assert!(msg.user_visible);
+        assert_eq!(
+            msg.original_content.as_deref(),
+            Some("I will read the file")
+        );
+        assert!(msg.is_compacted());
+    }
+
+    #[test]
+    fn test_mark_compacted_preserves_first_original() {
+        let mut msg = Message::new(Role::User, "first content");
+        msg.mark_compacted();
+        // Modify content after compaction
+        msg.content = "modified".to_string();
+        // Mark compacted again — should not overwrite original_content
+        msg.mark_compacted();
+        assert_eq!(
+            msg.original_content.as_deref(),
+            Some("first content"),
+            "original_content should be preserved from first compaction"
+        );
+    }
+
+    #[test]
+    fn test_visibility_serde_defaults() {
+        // Deserializing old JSON without visibility fields should default to true
+        let json = r#"{
+            "id": "00000000-0000-0000-0000-000000000001",
+            "role": "User",
+            "content": "hello",
+            "timestamp": "2026-01-01T00:00:00Z",
+            "tool_calls": [],
+            "tool_results": []
+        }"#;
+        let msg: Message = serde_json::from_str(json).unwrap();
+        assert!(msg.agent_visible);
+        assert!(msg.user_visible);
+        assert!(msg.original_content.is_none());
+    }
+
+    #[test]
+    fn test_visibility_serde_roundtrip() {
+        let mut msg = Message::new(Role::Assistant, "original text");
+        msg.mark_compacted();
+        let json = serde_json::to_string(&msg).unwrap();
+        let deserialized: Message = serde_json::from_str(&json).unwrap();
+        assert!(!deserialized.agent_visible);
+        assert!(deserialized.user_visible);
+        assert_eq!(
+            deserialized.original_content.as_deref(),
+            Some("original text")
+        );
     }
 }

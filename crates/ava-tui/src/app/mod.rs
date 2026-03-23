@@ -97,6 +97,8 @@ pub struct AppState {
     pub session: SessionState,
     /// State for the rewind system (checkpoints + modal).
     pub rewind: RewindState,
+    /// Shared snapshot manager for project-state undo/rollback.
+    pub snapshot_manager: Option<ava_tools::core::file_snapshot::SharedSnapshotManager>,
 
     // ── Permissions & Keybindings ───────────────────────────────────────
     pub permission: PermissionState,
@@ -357,6 +359,7 @@ impl App {
             // Session & Persistence
             session,
             rewind: RewindState::default(),
+            snapshot_manager: None,
             // Permissions & Keybindings
             permission,
             keybinds,
@@ -935,6 +938,7 @@ impl App {
             // Session & Persistence
             session,
             rewind: RewindState::default(),
+            snapshot_manager: None,
             // Permissions & Keybindings
             permission: PermissionState::default(),
             keybinds: KeybindState::default(),

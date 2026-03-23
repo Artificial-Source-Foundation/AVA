@@ -3,7 +3,9 @@
 //! Provides SQLite database operations for sessions, messages, and other persistent data.
 
 use ava_types::Result;
-use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions};
+use sqlx::sqlite::{
+    SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions, SqliteSynchronous,
+};
 use std::path::Path;
 use std::str::FromStr;
 
@@ -25,8 +27,10 @@ impl Database {
         let options = SqliteConnectOptions::from_str(database_url)
             .map_err(|e| ava_types::AvaError::DatabaseError(e.to_string()))?
             .journal_mode(SqliteJournalMode::Wal)
+            .synchronous(SqliteSynchronous::Normal)
             .foreign_keys(true)
-            .busy_timeout(std::time::Duration::from_millis(5000));
+            .busy_timeout(std::time::Duration::from_millis(5000))
+            .pragma("cache_size", "-64000");
 
         let pool = SqlitePoolOptions::new()
             .max_connections(5)

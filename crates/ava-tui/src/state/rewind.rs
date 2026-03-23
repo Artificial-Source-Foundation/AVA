@@ -33,6 +33,10 @@ pub struct Checkpoint {
     pub timestamp: String,
     /// File changes that occurred during the agent turn following this message.
     pub file_changes: Vec<FileChange>,
+    /// Shadow git snapshot commit hash taken before the agent turn started.
+    /// When present, enables full project-state restore via the shadow repo
+    /// instead of per-file content restore.
+    pub snapshot_hash: Option<String>,
 }
 
 /// The 5 rewind options presented to the user.
@@ -106,7 +110,22 @@ impl RewindState {
             message_preview: preview,
             timestamp: chrono::Local::now().format("%H:%M:%S").to_string(),
             file_changes: Vec::new(),
+            snapshot_hash: None,
         });
+    }
+
+    /// Record a snapshot hash on the latest checkpoint.
+    ///
+    /// Called when the agent loop emits a `SnapshotTaken` event, linking
+    /// the shadow git commit to this checkpoint for full project-state restore.
+    pub fn record_snapshot_hash(&mut self, hash: String) {
+        if let Some(checkpoint) = self.checkpoints.last_mut() {
+            // Only record the first snapshot hash per checkpoint (the baseline
+            // state before any write tools ran).
+            if checkpoint.snapshot_hash.is_none() {
+                checkpoint.snapshot_hash = Some(hash);
+            }
+        }
     }
 
     /// Record a file change on the current (latest) checkpoint.

@@ -26,4 +26,5 @@ tokio.workspace = true
 tracing.workspace = true
 uuid.workspace = true
 rand = "0.8"
+httpdate = "1"
 

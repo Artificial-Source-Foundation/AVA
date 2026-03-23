@@ -36,6 +36,7 @@ impl Condenser {
                 messages: messages.to_vec(),
                 estimated_tokens: self.tracker.current_tokens,
                 strategy: "none".to_string(),
+                compacted_messages: Vec::new(),
             });
         }
 
@@ -53,10 +54,12 @@ impl Condenser {
                     self.tracker.current_tokens,
                     strategy.name()
                 );
+                let compacted = mark_compacted_messages(messages, &current);
                 return Ok(CondensationResult {
                     messages: current,
                     estimated_tokens: self.tracker.current_tokens,
                     strategy: strategy.name().to_string(),
+                    compacted_messages: compacted,
                 });
             }
         }
@@ -113,6 +116,7 @@ impl HybridCondenser {
                 messages: messages.to_vec(),
                 estimated_tokens: self.tracker.current_tokens,
                 strategy: "none".to_string(),
+                compacted_messages: Vec::new(),
             });
         }
 
@@ -125,10 +129,12 @@ impl HybridCondenser {
             self.tracker.add_messages(&current);
 
             if !self.tracker.is_over_limit() {
+                let compacted = mark_compacted_messages(messages, &current);
                 return Ok(CondensationResult {
                     messages: current,
                     estimated_tokens: self.tracker.current_tokens,
                     strategy: strategy.name().to_string(),
+                    compacted_messages: compacted,
                 });
             }
         }
@@ -142,10 +148,12 @@ impl HybridCondenser {
             self.tracker.add_messages(&current);
 
             if !self.tracker.is_over_limit() {
+                let compacted = mark_compacted_messages(messages, &current);
                 return Ok(CondensationResult {
                     messages: current,
                     estimated_tokens: self.tracker.current_tokens,
                     strategy: strategy.name().to_string(),
+                    compacted_messages: compacted,
                 });
             }
         }
@@ -163,10 +171,12 @@ impl HybridCondenser {
                     self.tracker.current_tokens,
                     strategy.name()
                 );
+                let compacted = mark_compacted_messages(messages, &current);
                 return Ok(CondensationResult {
                     messages: current,
                     estimated_tokens: self.tracker.current_tokens,
                     strategy: strategy.name().to_string(),
+                    compacted_messages: compacted,
                 });
             }
         }
@@ -176,6 +186,27 @@ impl HybridCondenser {
             self.config.max_tokens,
         ))
     }
+}
+
+/// Identify messages from `original` that are not present in `condensed` (by ID)
+/// and return them with `agent_visible = false` and `original_content` preserved.
+/// These are the messages that were dropped during compaction.
+pub fn mark_compacted_messages_pub(original: &[Message], condensed: &[Message]) -> Vec<Message> {
+    mark_compacted_messages(original, condensed)
+}
+
+fn mark_compacted_messages(original: &[Message], condensed: &[Message]) -> Vec<Message> {
+    use std::collections::HashSet;
+    let retained_ids: HashSet<uuid::Uuid> = condensed.iter().map(|m| m.id).collect();
+    original
+        .iter()
+        .filter(|m| !retained_ids.contains(&m.id))
+        .map(|m| {
+            let mut compacted = m.clone();
+            compacted.mark_compacted();
+            compacted
+        })
+        .collect()
 }
 
 pub fn create_condenser(max_tokens: usize) -> Condenser {

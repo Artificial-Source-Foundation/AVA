@@ -301,10 +301,12 @@ Commands
         let checkpoint = &self.state.rewind.checkpoints[checkpoint_idx];
         let msg_index = checkpoint.message_index;
         let preview: String = crate::text_utils::truncate_display(&checkpoint.message_preview, 50);
+        let snapshot_hash = checkpoint.snapshot_hash.clone();
 
         match option {
             RewindOption::RestoreCodeAndConversation => {
-                let (file_count, errors) = self.state.rewind.restore_files_after(checkpoint_idx);
+                let (file_count, errors) =
+                    self.restore_code_at_checkpoint(checkpoint_idx, &snapshot_hash);
                 if msg_index < self.state.messages.messages.len() {
                     self.state.messages.messages.truncate(msg_index);
                 }
@@ -313,7 +315,12 @@ Commands
 
                 let mut status = format!("Rewound to before: '{preview}'");
                 if file_count > 0 {
-                    status.push_str(&format!(" ({file_count} files restored)"));
+                    let method = if snapshot_hash.is_some() {
+                        "via snapshot"
+                    } else {
+                        "via file backup"
+                    };
+                    status.push_str(&format!(" ({file_count} files restored {method})"));
                 }
                 if !errors.is_empty() {
                     status.push_str(&format!(" ({} errors)", errors.len()));
@@ -337,7 +344,8 @@ Commands
                 self.set_status(&status, StatusLevel::Info);
             }
             RewindOption::RestoreCode => {
-                let (file_count, errors) = self.state.rewind.restore_files_after(checkpoint_idx);
+                let (file_count, errors) =
+                    self.restore_code_at_checkpoint(checkpoint_idx, &snapshot_hash);
                 if let Some(cp) = self.state.rewind.checkpoints.get_mut(checkpoint_idx) {
                     cp.file_changes.clear();
                 }
@@ -373,6 +381,59 @@ Commands
 
         self.state.rewind.close();
         self.state.active_modal = None;
+    }
+
+    /// Restore code at a checkpoint, preferring snapshot-based restore when available.
+    ///
+    /// When a shadow git snapshot hash is present, uses the `SnapshotManager` to
+    /// restore the full project state. Falls back to per-file content restore
+    /// from the checkpoint's `file_changes` list.
+    fn restore_code_at_checkpoint(
+        &self,
+        checkpoint_idx: usize,
+        snapshot_hash: &Option<String>,
+    ) -> (usize, Vec<String>) {
+        if let Some(ref hash) = snapshot_hash {
+            // Try snapshot-based restore (blocking — acceptable for UI action)
+            if let Some(ref manager) = self.state.snapshot_manager {
+                let rt = tokio::runtime::Handle::try_current();
+                if let Ok(handle) = rt {
+                    let manager = manager.clone();
+                    let hash = hash.clone();
+                    let result = std::thread::scope(|_| {
+                        handle.block_on(async {
+                            let guard = manager.read().await;
+                            if let Some(ref mgr) = *guard {
+                                mgr.restore(&hash).await
+                            } else {
+                                Err("snapshot manager not available".to_string())
+                            }
+                        })
+                    });
+                    match result {
+                        Ok(changed_files) => {
+                            let count = changed_files.len();
+                            tracing::info!(
+                                hash = %hash,
+                                files = count,
+                                "restored project state via snapshot"
+                            );
+                            return (count, Vec::new());
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                error = %e,
+                                "snapshot restore failed, falling back to per-file restore"
+                            );
+                            // Fall through to per-file restore
+                        }
+                    }
+                }
+            }
+        }
+
+        // Fallback: per-file content restore
+        self.state.rewind.restore_files_after(checkpoint_idx)
     }
 
     pub(crate) fn extract_code_blocks(content: &str) -> Vec<CodeBlock> {

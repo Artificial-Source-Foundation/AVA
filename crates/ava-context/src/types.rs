@@ -11,6 +11,10 @@ pub struct CondensationResult {
     pub messages: Vec<Message>,
     pub estimated_tokens: usize,
     pub strategy: String,
+    /// Messages that were compacted (removed from the agent context).
+    /// These have `agent_visible = false` and `original_content` set so
+    /// the UI can still display them dimmed/collapsed.
+    pub compacted_messages: Vec<Message>,
 }
 
 #[derive(Debug, Clone)]

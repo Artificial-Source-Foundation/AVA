@@ -18,6 +18,7 @@ regex = "1"
 ava-types = { path = "../ava-types" }
 tracing.workspace = true
 tiktoken-rs = "0.9"
+uuid.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true

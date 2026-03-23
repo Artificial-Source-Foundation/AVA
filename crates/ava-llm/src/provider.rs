@@ -77,10 +77,49 @@ pub enum ProviderErrorKind {
 }
 
 impl ProviderErrorKind {
-    /// Classify an `AvaError` into a structured error kind by inspecting
-    /// the error message. This is a heuristic — providers that return
-    /// structured error responses should override with more precise logic.
+    /// Classify an `AvaError` into a structured error kind.
+    ///
+    /// Prefers structural matching on typed error variants. Falls back to
+    /// heuristic string inspection for legacy `ProviderError` variants.
     pub fn classify(error: &AvaError) -> Self {
+        // First, try structural matching on typed variants
+        match error {
+            AvaError::RateLimited {
+                retry_after_secs, ..
+            } => {
+                return Self::RateLimit {
+                    retry_after_secs: Some(*retry_after_secs),
+                };
+            }
+            AvaError::AuthError { .. }
+            | AvaError::Forbidden { .. }
+            | AvaError::MissingApiKey { .. } => {
+                return Self::AuthFailure;
+            }
+            AvaError::QuotaExhausted { .. } => {
+                // Terminal billing error — not retryable, maps to AuthFailure
+                // (caller should check ProviderErrorClass for finer distinction)
+                return Self::AuthFailure;
+            }
+            AvaError::ServerError { status, .. } => {
+                return Self::ServerError { status: *status };
+            }
+            AvaError::ContextWindowExceeded { .. } => {
+                return Self::ContextWindowExceeded;
+            }
+            AvaError::ModelNotFound { .. } => {
+                return Self::ModelNotFound;
+            }
+            AvaError::TimeoutError(_) | AvaError::ToolTimeout { .. } => {
+                return Self::Timeout;
+            }
+            AvaError::ProviderUnavailable { .. } => {
+                return Self::ServerError { status: 503 };
+            }
+            _ => {}
+        }
+
+        // Fall back to heuristic string inspection for legacy ProviderError
         let msg = error.to_string().to_lowercase();
         if msg.contains("rate limit") || msg.contains("429") || msg.contains("too many requests") {
             Self::RateLimit {

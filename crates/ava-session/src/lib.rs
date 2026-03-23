@@ -712,6 +712,9 @@ impl SessionManager {
                     tool_call_id,
                     images,
                     parent_id,
+                    agent_visible: true,
+                    user_visible: true,
+                    original_content: None,
                 })
             })
             .map_err(db_error)?
@@ -907,6 +910,9 @@ impl SessionManager {
                     tool_call_id,
                     images,
                     parent_id,
+                    agent_visible: true,
+                    user_visible: true,
+                    original_content: None,
                 })
             })
             .map_err(db_error)?
@@ -958,8 +964,10 @@ impl SessionManager {
         let conn = Connection::open(db_path).map_err(db_error)?;
         conn.execute_batch(
             "PRAGMA journal_mode = WAL;
+             PRAGMA synchronous = NORMAL;
              PRAGMA foreign_keys = ON;
-             PRAGMA busy_timeout = 5000;",
+             PRAGMA busy_timeout = 5000;
+             PRAGMA cache_size = -64000;",
         )
         .map_err(db_error)?;
         Ok(conn)

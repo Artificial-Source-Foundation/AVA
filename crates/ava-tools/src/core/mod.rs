@@ -3,6 +3,7 @@ pub mod claude_code;
 pub mod custom_tool;
 pub mod edit;
 pub mod file_backup;
+pub mod file_snapshot;
 pub mod git_read;
 pub mod glob;
 pub mod grep;

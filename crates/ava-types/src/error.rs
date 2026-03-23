@@ -33,6 +33,30 @@ pub enum AvaError {
     #[error("Model '{model}' not found for provider '{provider}'")]
     ModelNotFound { provider: String, model: String },
 
+    /// Quota or billing exhausted (HTTP 402) — terminal, user must add credits.
+    #[error(
+        "Quota exhausted for provider '{provider}': {message}. Add credits or switch providers"
+    )]
+    QuotaExhausted { provider: String, message: String },
+
+    /// Authentication failure (HTTP 401) — credentials invalid or expired.
+    #[error("Authentication failed for provider '{provider}': {message}. Check your API key")]
+    AuthError { provider: String, message: String },
+
+    /// Authorization failure (HTTP 403) — access forbidden, wrong permissions or plan.
+    #[error(
+        "Access forbidden for provider '{provider}': {message}. Check your API key permissions"
+    )]
+    Forbidden { provider: String, message: String },
+
+    /// Server-side error (HTTP 5xx) — temporary, retryable with backoff.
+    #[error("Server error from '{provider}' ({status}): {message}")]
+    ServerError {
+        provider: String,
+        status: u16,
+        message: String,
+    },
+
     /// Circuit breaker is open — provider had too many consecutive failures.
     #[error("Provider '{provider}' is temporarily unavailable (circuit breaker open). Retry after cooldown")]
     ProviderUnavailable { provider: String },
@@ -156,6 +180,24 @@ pub enum ErrorCategory {
     Agent,
 }
 
+/// Classification of provider/LLM errors for retry decisions.
+///
+/// This enables callers (retry logic, circuit breaker, fallback routing, UI)
+/// to make decisions based on error semantics rather than parsing error strings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ProviderErrorClass {
+    /// Retryable rate-limit error (HTTP 429) — wait and retry.
+    Retryable,
+    /// Terminal quota/billing error (HTTP 402) — stop trying, user action needed.
+    Terminal,
+    /// Authentication/authorization failure (HTTP 401, 403) — credentials invalid, don't retry.
+    Auth,
+    /// Server-side error (HTTP 500, 502, 503, 504) — temporary, retry with backoff.
+    ServerError,
+    /// Unknown or unclassified error.
+    Unknown,
+}
+
 impl AvaError {
     /// Get the category for this error
     pub fn category(&self) -> ErrorCategory {
@@ -183,13 +225,20 @@ impl AvaError {
 
             AvaError::ProviderError { .. }
             | AvaError::RateLimited { .. }
+            | AvaError::QuotaExhausted { .. }
+            | AvaError::AuthError { .. }
+            | AvaError::Forbidden { .. }
+            | AvaError::ServerError { .. }
             | AvaError::ProviderUnavailable { .. } => ErrorCategory::Provider,
 
             AvaError::AgentStopped { .. } | AvaError::Cancelled => ErrorCategory::Agent,
         }
     }
 
-    /// Check if this error is retryable
+    /// Check if this error is retryable.
+    ///
+    /// Retryable: rate limits (429), server errors (5xx), timeouts, transient failures.
+    /// NOT retryable: quota exhausted (402), auth failures (401/403), bad requests (400).
     pub fn is_retryable(&self) -> bool {
         matches!(
             self,
@@ -197,9 +246,28 @@ impl AvaError {
                 | AvaError::DatabaseError(_)
                 | AvaError::PlatformError(_)
                 | AvaError::RateLimited { .. }
+                | AvaError::ServerError { .. }
                 | AvaError::ToolTimeout { .. }
                 | AvaError::ProviderUnavailable { .. }
         )
+    }
+
+    /// Classify this error for provider-level retry/routing decisions.
+    ///
+    /// Returns `Some(class)` for provider errors, `None` for non-provider errors.
+    pub fn provider_error_class(&self) -> Option<ProviderErrorClass> {
+        match self {
+            AvaError::RateLimited { .. } => Some(ProviderErrorClass::Retryable),
+            AvaError::ServerError { .. } => Some(ProviderErrorClass::ServerError),
+            AvaError::ProviderUnavailable { .. } => Some(ProviderErrorClass::ServerError),
+            AvaError::QuotaExhausted { .. } => Some(ProviderErrorClass::Terminal),
+            AvaError::AuthError { .. } | AvaError::Forbidden { .. } => {
+                Some(ProviderErrorClass::Auth)
+            }
+            AvaError::MissingApiKey { .. } => Some(ProviderErrorClass::Auth),
+            AvaError::ProviderError { .. } => Some(ProviderErrorClass::Unknown),
+            _ => None,
+        }
     }
 
     /// Get a user-friendly error message
@@ -237,6 +305,26 @@ impl AvaError {
                     "Context window exceeded ({current} > {limit} tokens). \
                      Use a larger model or break the task into smaller parts"
                 )
+            }
+            AvaError::QuotaExhausted { provider, message } => {
+                format!(
+                    "Quota exhausted for {provider}: {message}. Add credits or switch providers"
+                )
+            }
+            AvaError::AuthError { provider, message } => {
+                format!("Authentication failed for {provider}: {message}. Check your API key")
+            }
+            AvaError::Forbidden { provider, message } => {
+                format!(
+                    "Access forbidden for {provider}: {message}. Check your API key permissions"
+                )
+            }
+            AvaError::ServerError {
+                provider,
+                status,
+                message,
+            } => {
+                format!("{provider} server error ({status}): {message}")
             }
             AvaError::ProviderUnavailable { provider } => {
                 format!("{provider} is temporarily unavailable (circuit breaker open)")
@@ -471,6 +559,23 @@ mod tests {
                 current: 200_000,
                 limit: 128_000,
             },
+            AvaError::QuotaExhausted {
+                provider: "test".to_string(),
+                message: "insufficient credits".to_string(),
+            },
+            AvaError::AuthError {
+                provider: "test".to_string(),
+                message: "invalid key".to_string(),
+            },
+            AvaError::Forbidden {
+                provider: "test".to_string(),
+                message: "wrong permissions".to_string(),
+            },
+            AvaError::ServerError {
+                provider: "test".to_string(),
+                status: 502,
+                message: "bad gateway".to_string(),
+            },
             AvaError::ProviderUnavailable {
                 provider: "test".to_string(),
             },
@@ -510,5 +615,87 @@ mod tests {
         assert!(!err.is_retryable());
         assert!(err.to_string().contains("200000"));
         assert!(err.to_string().contains("128000"));
+    }
+
+    // ── Quota/rate-limit error classification tests ─────────────────────
+
+    #[test]
+    fn quota_exhausted_is_terminal_not_retryable() {
+        let err = AvaError::QuotaExhausted {
+            provider: "openai".to_string(),
+            message: "insufficient credits".to_string(),
+        };
+        assert_eq!(err.category(), ErrorCategory::Provider);
+        assert!(!err.is_retryable());
+        assert_eq!(
+            err.provider_error_class(),
+            Some(ProviderErrorClass::Terminal)
+        );
+        assert!(err.user_message().contains("credits"));
+    }
+
+    #[test]
+    fn auth_error_is_not_retryable() {
+        let err = AvaError::AuthError {
+            provider: "anthropic".to_string(),
+            message: "invalid api key".to_string(),
+        };
+        assert_eq!(err.category(), ErrorCategory::Provider);
+        assert!(!err.is_retryable());
+        assert_eq!(err.provider_error_class(), Some(ProviderErrorClass::Auth));
+    }
+
+    #[test]
+    fn forbidden_error_is_not_retryable() {
+        let err = AvaError::Forbidden {
+            provider: "openai".to_string(),
+            message: "model access denied".to_string(),
+        };
+        assert_eq!(err.category(), ErrorCategory::Provider);
+        assert!(!err.is_retryable());
+        assert_eq!(err.provider_error_class(), Some(ProviderErrorClass::Auth));
+    }
+
+    #[test]
+    fn server_error_is_retryable() {
+        let err = AvaError::ServerError {
+            provider: "gemini".to_string(),
+            status: 503,
+            message: "service unavailable".to_string(),
+        };
+        assert_eq!(err.category(), ErrorCategory::Provider);
+        assert!(err.is_retryable());
+        assert_eq!(
+            err.provider_error_class(),
+            Some(ProviderErrorClass::ServerError)
+        );
+    }
+
+    #[test]
+    fn rate_limited_classified_as_retryable() {
+        let err = AvaError::RateLimited {
+            provider: "openai".to_string(),
+            retry_after_secs: 30,
+        };
+        assert!(err.is_retryable());
+        assert_eq!(
+            err.provider_error_class(),
+            Some(ProviderErrorClass::Retryable)
+        );
+    }
+
+    #[test]
+    fn missing_api_key_classified_as_auth() {
+        let err = AvaError::MissingApiKey {
+            provider: "anthropic".to_string(),
+        };
+        assert!(!err.is_retryable());
+        assert_eq!(err.provider_error_class(), Some(ProviderErrorClass::Auth));
+    }
+
+    #[test]
+    fn non_provider_error_has_no_class() {
+        let err = AvaError::ToolError("test".to_string());
+        assert_eq!(err.provider_error_class(), None);
     }
 }

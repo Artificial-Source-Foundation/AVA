@@ -46,6 +46,33 @@ impl RetryBudget {
         Some(delay.min(self.max_delay))
     }
 
+    /// Returns the delay to wait before retrying, incorporating an optional
+    /// server-supplied hint (e.g. from a `Retry-After` header). The hint is
+    /// used as the minimum delay — `max(hint, exponential_backoff)` — with
+    /// ±20% jitter applied on top.
+    pub fn should_retry_with_hint(
+        &mut self,
+        error: &AvaError,
+        server_hint: Option<Duration>,
+    ) -> Option<Duration> {
+        if !error.is_retryable() || self.remaining == 0 {
+            return None;
+        }
+
+        self.remaining -= 1;
+        let attempt = self.max_retries - self.remaining; // 1-based
+        let exponential = self
+            .base_delay
+            .saturating_mul(1u32 << (attempt - 1).min(30));
+        let base = match server_hint {
+            Some(hint) => hint.max(exponential),
+            None => exponential,
+        };
+        let jitter_factor = rand::thread_rng().gen_range(0.8..=1.2);
+        let delay = base.mul_f64(jitter_factor);
+        Some(delay.min(self.max_delay))
+    }
+
     /// Reset the budget for a new operation.
     pub fn reset(&mut self) {
         self.remaining = self.max_retries;
@@ -165,6 +192,62 @@ mod tests {
                 "Delay too long: {delay:?}"
             );
         }
+    }
+
+    #[test]
+    fn should_retry_with_hint_uses_hint_as_floor() {
+        let mut budget =
+            RetryBudget::new(5).with_delays(Duration::from_secs(1), Duration::from_secs(120));
+        let err = AvaError::RateLimited {
+            provider: "openai".to_string(),
+            retry_after_secs: 30,
+        };
+        let hint = Some(Duration::from_secs(30));
+
+        // Attempt 1: exp=1s, hint=30s -> base=30s, with ±20% jitter: [24s, 36s]
+        let d = budget.should_retry_with_hint(&err, hint).unwrap();
+        assert!(
+            d >= Duration::from_secs(24) && d <= Duration::from_secs(36),
+            "Expected ~30s delay, got {d:?}"
+        );
+    }
+
+    #[test]
+    fn should_retry_with_hint_none_falls_back_to_exponential() {
+        let mut budget =
+            RetryBudget::new(5).with_delays(Duration::from_secs(1), Duration::from_secs(120));
+        let err = AvaError::RateLimited {
+            provider: "openai".to_string(),
+            retry_after_secs: 5,
+        };
+
+        // No hint: same as regular should_retry
+        let d = budget.should_retry_with_hint(&err, None).unwrap();
+        // Attempt 1: base_delay * 2^0 = 1s, with ±20% jitter: [0.8s, 1.2s]
+        assert!(
+            d >= Duration::from_millis(800) && d <= Duration::from_millis(1200),
+            "Expected ~1s delay, got {d:?}"
+        );
+    }
+
+    #[test]
+    fn should_retry_with_hint_prefers_backoff_when_larger() {
+        let mut budget =
+            RetryBudget::new(5).with_delays(Duration::from_secs(1), Duration::from_secs(120));
+        let err = AvaError::TimeoutError("test".to_string());
+        let hint = Some(Duration::from_millis(100)); // very small hint
+
+        // Consume first 3 retries to get to attempt 4
+        budget.should_retry_with_hint(&err, hint);
+        budget.should_retry_with_hint(&err, hint);
+        budget.should_retry_with_hint(&err, hint);
+
+        // Attempt 4: base_delay * 2^3 = 8s, hint=100ms -> base=8s
+        let d = budget.should_retry_with_hint(&err, hint).unwrap();
+        assert!(
+            d >= Duration::from_millis(6400) && d <= Duration::from_millis(9600),
+            "Expected ~8s delay (backoff > hint), got {d:?}"
+        );
     }
 
     #[test]

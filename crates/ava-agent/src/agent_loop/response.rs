@@ -3,7 +3,7 @@ use std::hash::{Hash, Hasher};
 use std::time::{Duration, Instant};
 
 use ava_llm::ThinkingConfig;
-use ava_types::{AvaError, Result, StreamToolCall, ThinkingLevel, TokenUsage, ToolCall};
+use ava_types::{AvaError, Message, Result, StreamToolCall, ThinkingLevel, TokenUsage, ToolCall};
 use serde::Deserialize;
 use serde_json::Value;
 use tracing::warn;
@@ -178,7 +178,15 @@ impl AgentLoop {
         &mut self,
     ) -> Result<(String, Vec<ToolCall>, Option<TokenUsage>)> {
         // Dedup guard: skip if identical request within 2s
-        let messages = self.context.get_messages();
+        // Only send agent-visible messages to the LLM (compacted messages excluded).
+        let messages: Vec<Message> = self
+            .context
+            .get_messages()
+            .iter()
+            .filter(|m| m.agent_visible)
+            .cloned()
+            .collect();
+        let messages = messages.as_slice();
         let hash = {
             let mut hasher = DefaultHasher::new();
             if let Some(last) = messages.last() {
@@ -256,7 +264,15 @@ impl AgentLoop {
         }
 
         // Dedup guard
-        let messages = self.context.get_messages();
+        // Only send agent-visible messages to the LLM (compacted messages excluded).
+        let messages: Vec<Message> = self
+            .context
+            .get_messages()
+            .iter()
+            .filter(|m| m.agent_visible)
+            .cloned()
+            .collect();
+        let messages = messages.as_slice();
         let hash = {
             let mut hasher = DefaultHasher::new();
             if let Some(last) = messages.last() {

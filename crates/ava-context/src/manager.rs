@@ -19,6 +19,9 @@ pub struct ContextManager {
     condenser: CondenserKind,
     /// Latest compaction summary for iterative summarization (BG-7).
     last_summary: Option<String>,
+    /// Messages that have been compacted (hidden from agent, visible to user).
+    /// Accumulated across compaction rounds so the UI can display the full history.
+    compacted_messages: Vec<Message>,
 }
 
 impl ContextManager {
@@ -30,6 +33,7 @@ impl ContextManager {
             tracker: TokenTracker::new(token_limit),
             condenser: CondenserKind::Sync(create_condenser(token_limit)),
             last_summary: None,
+            compacted_messages: Vec::new(),
         }
     }
 
@@ -42,6 +46,7 @@ impl ContextManager {
             tracker: TokenTracker::new(config.max_tokens),
             condenser: CondenserKind::Hybrid(condenser),
             last_summary: None,
+            compacted_messages: Vec::new(),
         }
     }
 
@@ -101,6 +106,7 @@ impl ContextManager {
         match &mut self.condenser {
             CondenserKind::Sync(condenser) => {
                 let condensed = condenser.condense(&self.messages)?;
+                self.compacted_messages.extend(condensed.compacted_messages);
                 self.messages = condensed.messages;
                 self.tracker.reset();
                 self.tracker.add_messages(&self.messages);
@@ -110,8 +116,13 @@ impl ContextManager {
                 // Caller should use compact_async() for hybrid condensers.
                 // Fall back to a basic sliding window to avoid panicking.
                 use crate::strategies::{CondensationStrategy, SlidingWindowStrategy};
+                let original = self.messages.clone();
                 let target = (self.token_limit as f32 * 0.75) as usize;
                 let condensed = SlidingWindowStrategy.condense(&self.messages, target)?;
+                // Mark dropped messages as compacted
+                let compacted =
+                    crate::condenser::mark_compacted_messages_pub(&original, &condensed);
+                self.compacted_messages.extend(compacted);
                 self.messages = condensed;
                 self.tracker.reset();
                 self.tracker.add_messages(&self.messages);
@@ -131,10 +142,12 @@ impl ContextManager {
         match &mut self.condenser {
             CondenserKind::Sync(condenser) => {
                 let condensed = condenser.condense(&self.messages)?;
+                self.compacted_messages.extend(condensed.compacted_messages);
                 self.messages = condensed.messages;
             }
             CondenserKind::Hybrid(condenser) => {
                 let condensed = condenser.condense(&self.messages).await?;
+                self.compacted_messages.extend(condensed.compacted_messages);
                 self.messages = condensed.messages;
             }
         }
@@ -167,5 +180,28 @@ impl ContextManager {
         self.messages
             .iter()
             .find(|message| message.role == Role::System)
+    }
+
+    /// Return only the messages that should be sent to the LLM (agent-visible).
+    /// This filters out messages that have been compacted.
+    pub fn get_agent_visible_messages(&self) -> Vec<&Message> {
+        self.messages.iter().filter(|m| m.agent_visible).collect()
+    }
+
+    /// Return all messages including compacted ones, for UI display.
+    /// Compacted messages (from previous compaction rounds) come first,
+    /// followed by the current context messages. Compacted messages have
+    /// `agent_visible = false` and `is_compacted() = true`.
+    pub fn get_all_messages_for_ui(&self) -> Vec<&Message> {
+        let mut all: Vec<&Message> = self.compacted_messages.iter().collect();
+        all.extend(self.messages.iter());
+        // Sort by timestamp to maintain chronological order
+        all.sort_by_key(|m| m.timestamp);
+        all
+    }
+
+    /// Get the compacted messages from previous compaction rounds.
+    pub fn compacted_messages(&self) -> &[Message] {
+        &self.compacted_messages
     }
 }

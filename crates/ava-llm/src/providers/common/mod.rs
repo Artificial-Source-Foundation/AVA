@@ -7,6 +7,7 @@ pub use parsing::*;
 use std::time::Duration;
 
 use ava_types::{AvaError, Result};
+use rand::Rng;
 
 pub const DEFAULT_MAX_RETRIES: usize = 3;
 
@@ -46,39 +47,98 @@ pub async fn validate_status(
     }
 
     let status = response.status();
+    // Extract retry-after from headers before consuming the body
+    let retry_after = parse_retry_after(response.headers());
     let body = response
         .text()
         .await
         .unwrap_or_else(|_| "<body unavailable>".to_string());
 
-    if status == reqwest::StatusCode::UNAUTHORIZED {
-        return Err(AvaError::MissingApiKey {
+    let body_short = truncate_body(&body, 200);
+
+    match status.as_u16() {
+        // 401 Unauthorized — credentials invalid or expired
+        401 => Err(AvaError::AuthError {
             provider: provider.to_string(),
-        });
-    }
+            message: body_short,
+        }),
 
-    if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
-        return Err(rate_limited_error(provider, &body));
-    }
-
-    if status == reqwest::StatusCode::NOT_FOUND {
-        return Err(AvaError::ProviderError {
+        // 402 Payment Required — quota/billing exhausted (terminal, don't retry)
+        402 => Err(AvaError::QuotaExhausted {
             provider: provider.to_string(),
-            message: format!("resource not found ({status}): {body}"),
-        });
-    }
+            message: body_short,
+        }),
 
-    Err(AvaError::ProviderError {
-        provider: provider.to_string(),
-        message: format!("request failed ({status}): {body}"),
-    })
+        // 403 Forbidden — wrong permissions or plan
+        403 => Err(AvaError::Forbidden {
+            provider: provider.to_string(),
+            message: body_short,
+        }),
+
+        // 404 Not Found — model or resource not found
+        404 => Err(AvaError::ProviderError {
+            provider: provider.to_string(),
+            message: format!("resource not found ({status}): {body_short}"),
+        }),
+
+        // 429 Too Many Requests — retryable rate limit
+        429 => {
+            let retry_after_secs = retry_after
+                .map(|d| d.as_secs().max(1))
+                .or_else(|| {
+                    serde_json::from_str::<serde_json::Value>(&body)
+                        .ok()
+                        .and_then(|v| v.get("retry_after")?.as_u64())
+                })
+                .unwrap_or(30);
+
+            Err(AvaError::RateLimited {
+                provider: provider.to_string(),
+                retry_after_secs,
+            })
+        }
+
+        // 400, 422, etc. — bad request (terminal, don't retry)
+        400..=499 => Err(AvaError::ProviderError {
+            provider: provider.to_string(),
+            message: format!("request failed ({status}): {body_short}"),
+        }),
+
+        // 5xx — server error (retryable with backoff)
+        500..=599 => Err(AvaError::ServerError {
+            provider: provider.to_string(),
+            status: status.as_u16(),
+            message: body_short,
+        }),
+
+        // Anything else
+        _ => Err(AvaError::ProviderError {
+            provider: provider.to_string(),
+            message: format!("unexpected status ({status}): {body_short}"),
+        }),
+    }
 }
 
-/// Parse the `Retry-After` (seconds) or `retry-after-ms` (milliseconds) header
-/// from an HTTP response. Returns the delay as a `Duration`, preferring the
-/// millisecond variant when both are present.
+/// Truncate a response body for inclusion in error messages.
+fn truncate_body(body: &str, max_len: usize) -> String {
+    if body.len() <= max_len {
+        body.to_string()
+    } else {
+        format!("{}...", &body[..max_len])
+    }
+}
+
+/// Parse retry delay from HTTP response headers.
+///
+/// Checks (in priority order):
+/// 1. `retry-after-ms` — milliseconds (OpenAI, Azure)
+/// 2. `retry-after` — seconds as integer, or HTTP-date (RFC 7231 §7.1.3)
+/// 3. `x-ratelimit-reset` — Unix timestamp (GitHub, some LLM providers)
+///
+/// Returns the delay as a `Duration`, or `None` if no parseable header is found.
+/// For absolute timestamps, returns the duration until that time (floored at 0).
 pub fn parse_retry_after(headers: &reqwest::header::HeaderMap) -> Option<Duration> {
-    // Prefer retry-after-ms (milliseconds) — used by OpenAI and some providers
+    // 1. Prefer retry-after-ms (milliseconds) — used by OpenAI and some providers
     if let Some(ms) = headers
         .get("retry-after-ms")
         .and_then(|v| v.to_str().ok())
@@ -86,23 +146,61 @@ pub fn parse_retry_after(headers: &reqwest::header::HeaderMap) -> Option<Duratio
     {
         return Some(Duration::from_millis(ms));
     }
-    // Fall back to standard retry-after (seconds)
-    if let Some(secs) = headers
-        .get("retry-after")
+
+    // 2. Standard retry-after: integer seconds or HTTP-date
+    if let Some(value) = headers.get("retry-after").and_then(|v| v.to_str().ok()) {
+        // Try integer seconds first
+        if let Ok(secs) = value.parse::<u64>() {
+            return Some(Duration::from_secs(secs));
+        }
+        // Try HTTP-date (e.g. "Sun, 22 Mar 2026 12:00:00 GMT")
+        if let Ok(date) = httpdate::parse_http_date(value) {
+            let now = std::time::SystemTime::now();
+            return Some(date.duration_since(now).unwrap_or(Duration::ZERO));
+        }
+    }
+
+    // 3. x-ratelimit-reset — Unix timestamp (seconds since epoch)
+    if let Some(ts) = headers
+        .get("x-ratelimit-reset")
         .and_then(|v| v.to_str().ok())
         .and_then(|s| s.parse::<u64>().ok())
     {
-        return Some(Duration::from_secs(secs));
+        let reset_time = std::time::UNIX_EPOCH + Duration::from_secs(ts);
+        let now = std::time::SystemTime::now();
+        return Some(reset_time.duration_since(now).unwrap_or(Duration::ZERO));
     }
+
     None
+}
+
+/// Compute retry delay: use server-suggested delay (from headers) as the floor,
+/// fall back to exponential backoff, then apply ±20% jitter.
+fn compute_retry_delay(
+    server_hint: Option<Duration>,
+    attempt: usize,
+    max_delay: Duration,
+) -> Duration {
+    let exponential = Duration::from_secs(2u64.saturating_pow(attempt as u32));
+    let base = match server_hint {
+        Some(hint) => hint.max(exponential),
+        None => exponential,
+    };
+    let jitter_factor = rand::thread_rng().gen_range(0.8..=1.2);
+    base.mul_f64(jitter_factor).min(max_delay)
 }
 
 /// Send an HTTP request with retry logic for transient failures.
 ///
 /// Retries on:
-/// - 429 (rate limit) — respects Retry-After header
-/// - 5xx (server error) — exponential backoff
+/// - 429 (rate limit) — respects `retry-after-ms`, `retry-after`, `x-ratelimit-reset` headers
+/// - 5xx (server error) — respects retry-after headers, falls back to exponential backoff
 /// - Network errors — exponential backoff
+///
+/// When a server supplies a retry delay via headers, that value is used as the
+/// minimum wait time (i.e. `max(server_hint, exponential_backoff)`), with ±20%
+/// jitter applied on top. This matches the behavior of OpenCode, Codex CLI, and
+/// Gemini CLI.
 ///
 /// Fails immediately on 4xx (except 429).
 pub async fn send_with_retry(
@@ -110,6 +208,7 @@ pub async fn send_with_retry(
     provider: &str,
     max_retries: usize,
 ) -> Result<reqwest::Response> {
+    let max_delay = Duration::from_secs(120);
     let mut attempts = 0;
     loop {
         let cloned = request.try_clone().ok_or_else(|| AvaError::ProviderError {
@@ -125,8 +224,15 @@ pub async fn send_with_retry(
                         .await
                         .map(|_| unreachable!());
                 }
-                let delay = parse_retry_after(resp.headers())
-                    .unwrap_or_else(|| Duration::from_secs(2u64.saturating_pow(attempts as u32)));
+                let server_hint = parse_retry_after(resp.headers());
+                let delay = compute_retry_delay(server_hint, attempts, max_delay);
+                tracing::warn!(
+                    provider,
+                    attempt = attempts,
+                    delay_ms = delay.as_millis() as u64,
+                    server_hint_ms = server_hint.map(|d| d.as_millis() as u64),
+                    "rate limited (429), retrying"
+                );
                 tokio::time::sleep(delay).await;
             }
             Ok(resp) if resp.status().is_server_error() => {
@@ -136,8 +242,17 @@ pub async fn send_with_retry(
                         .await
                         .map(|_| unreachable!());
                 }
-                let delay = 2u64.saturating_pow(attempts as u32);
-                tokio::time::sleep(Duration::from_secs(delay)).await;
+                let server_hint = parse_retry_after(resp.headers());
+                let delay = compute_retry_delay(server_hint, attempts, max_delay);
+                tracing::warn!(
+                    provider,
+                    attempt = attempts,
+                    status = resp.status().as_u16(),
+                    delay_ms = delay.as_millis() as u64,
+                    server_hint_ms = server_hint.map(|d| d.as_millis() as u64),
+                    "server error, retrying"
+                );
+                tokio::time::sleep(delay).await;
             }
             Ok(resp) => return Ok(resp),
             Err(e) => {
@@ -145,8 +260,15 @@ pub async fn send_with_retry(
                 if attempts > max_retries {
                     return Err(reqwest_error(e));
                 }
-                let delay = 2u64.saturating_pow(attempts as u32);
-                tokio::time::sleep(Duration::from_secs(delay)).await;
+                let delay = compute_retry_delay(None, attempts, max_delay);
+                tracing::warn!(
+                    provider,
+                    attempt = attempts,
+                    delay_ms = delay.as_millis() as u64,
+                    error = %e,
+                    "network error, retrying"
+                );
+                tokio::time::sleep(delay).await;
             }
         }
     }
@@ -458,6 +580,141 @@ mod tests {
         assert_eq!(usage.output_tokens, 300);
         assert_eq!(usage.cache_read_tokens, 1500);
         assert_eq!(usage.cache_creation_tokens, 500);
+    }
+
+    #[test]
+    fn parse_retry_after_ms_header() {
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert("retry-after-ms", "1500".parse().unwrap());
+        let d = parse_retry_after(&headers).unwrap();
+        assert_eq!(d, Duration::from_millis(1500));
+    }
+
+    #[test]
+    fn parse_retry_after_seconds_header() {
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert("retry-after", "30".parse().unwrap());
+        let d = parse_retry_after(&headers).unwrap();
+        assert_eq!(d, Duration::from_secs(30));
+    }
+
+    #[test]
+    fn parse_retry_after_http_date() {
+        let mut headers = reqwest::header::HeaderMap::new();
+        // Use a date 10 seconds in the future
+        let future = std::time::SystemTime::now() + Duration::from_secs(10);
+        let date_str = httpdate::fmt_http_date(future);
+        headers.insert("retry-after", date_str.parse().unwrap());
+        let d = parse_retry_after(&headers).unwrap();
+        // Should be approximately 10 seconds (within 2s tolerance for test timing)
+        assert!(
+            d >= Duration::from_secs(8) && d <= Duration::from_secs(12),
+            "Expected ~10s delay, got {d:?}"
+        );
+    }
+
+    #[test]
+    fn parse_retry_after_http_date_in_past() {
+        let mut headers = reqwest::header::HeaderMap::new();
+        // Use a date in the past
+        let past = std::time::SystemTime::now() - Duration::from_secs(60);
+        let date_str = httpdate::fmt_http_date(past);
+        headers.insert("retry-after", date_str.parse().unwrap());
+        let d = parse_retry_after(&headers).unwrap();
+        assert_eq!(d, Duration::ZERO, "Past date should return zero delay");
+    }
+
+    #[test]
+    fn parse_retry_after_x_ratelimit_reset() {
+        let mut headers = reqwest::header::HeaderMap::new();
+        let future_ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+            + 15;
+        headers.insert("x-ratelimit-reset", future_ts.to_string().parse().unwrap());
+        let d = parse_retry_after(&headers).unwrap();
+        // Should be approximately 15 seconds
+        assert!(
+            d >= Duration::from_secs(13) && d <= Duration::from_secs(17),
+            "Expected ~15s delay, got {d:?}"
+        );
+    }
+
+    #[test]
+    fn parse_retry_after_x_ratelimit_reset_in_past() {
+        let mut headers = reqwest::header::HeaderMap::new();
+        let past_ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+            - 60;
+        headers.insert("x-ratelimit-reset", past_ts.to_string().parse().unwrap());
+        let d = parse_retry_after(&headers).unwrap();
+        assert_eq!(d, Duration::ZERO, "Past timestamp should return zero delay");
+    }
+
+    #[test]
+    fn parse_retry_after_ms_takes_priority() {
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert("retry-after-ms", "500".parse().unwrap());
+        headers.insert("retry-after", "60".parse().unwrap());
+        let d = parse_retry_after(&headers).unwrap();
+        assert_eq!(
+            d,
+            Duration::from_millis(500),
+            "retry-after-ms should take priority"
+        );
+    }
+
+    #[test]
+    fn parse_retry_after_no_headers() {
+        let headers = reqwest::header::HeaderMap::new();
+        assert!(parse_retry_after(&headers).is_none());
+    }
+
+    #[test]
+    fn compute_retry_delay_uses_server_hint_as_floor() {
+        let hint = Duration::from_secs(30);
+        let delay = compute_retry_delay(Some(hint), 1, Duration::from_secs(120));
+        // With hint=30s and attempt=1 (exp=2s), should use hint as base
+        // With ±20% jitter: [24s, 36s]
+        assert!(
+            delay >= Duration::from_secs(24) && delay <= Duration::from_secs(36),
+            "Expected delay based on 30s hint with jitter, got {delay:?}"
+        );
+    }
+
+    #[test]
+    fn compute_retry_delay_uses_backoff_when_larger() {
+        let hint = Duration::from_millis(100);
+        let delay = compute_retry_delay(Some(hint), 3, Duration::from_secs(120));
+        // attempt=3 -> exp=8s, which is larger than 100ms hint
+        // With ±20% jitter: [6.4s, 9.6s]
+        assert!(
+            delay >= Duration::from_millis(6400) && delay <= Duration::from_millis(9600),
+            "Expected delay based on 8s backoff with jitter, got {delay:?}"
+        );
+    }
+
+    #[test]
+    fn compute_retry_delay_caps_at_max() {
+        let hint = Duration::from_secs(200);
+        let delay = compute_retry_delay(Some(hint), 1, Duration::from_secs(120));
+        assert!(
+            delay <= Duration::from_secs(120),
+            "Delay should be capped at max_delay, got {delay:?}"
+        );
+    }
+
+    #[test]
+    fn compute_retry_delay_fallback_without_hint() {
+        let delay = compute_retry_delay(None, 2, Duration::from_secs(120));
+        // attempt=2 -> exp=4s, with ±20% jitter: [3.2s, 4.8s]
+        assert!(
+            delay >= Duration::from_millis(3200) && delay <= Duration::from_millis(4800),
+            "Expected exponential backoff with jitter, got {delay:?}"
+        );
     }
 
     #[test]

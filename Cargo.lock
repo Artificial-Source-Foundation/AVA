@@ -376,6 +376,7 @@ dependencies = [
  "tiktoken-rs",
  "tokio",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -414,6 +415,7 @@ dependencies = [
  "ava-plugin",
  "ava-types",
  "futures",
+ "httpdate",
  "rand 0.8.5",
  "reqwest",
  "serde",

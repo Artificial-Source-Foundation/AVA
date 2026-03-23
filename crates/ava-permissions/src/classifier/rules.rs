@@ -203,6 +203,284 @@ pub(super) fn check_blocked_patterns(lower: &str, _original: &str) -> Option<Str
         }
     }
 
+    // ── Reverse shells (Critical) ──────────────────────────────────────
+    if is_reverse_shell(lower) {
+        return Some("Reverse shell detected".to_string());
+    }
+
+    // ── Crypto mining (Critical) ────────────────────────────────────────
+    if is_crypto_mining(lower) {
+        return Some("Crypto mining detected".to_string());
+    }
+
+    // ── Security software tampering (Critical) ─────────────────────────
+    if is_security_tampering(lower) {
+        return Some("Security software tampering detected".to_string());
+    }
+
+    // ── Cron job injection (Critical) ───────────────────────────────────
+    if is_cron_injection(lower) {
+        return Some("Cron job injection detected".to_string());
+    }
+
+    None
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Category: Reverse shells & system compromise
+// ═══════════════════════════════════════════════════════════════════════════
+
+fn is_reverse_shell(lower: &str) -> bool {
+    // bash -i >& /dev/tcp/...
+    if lower.contains("bash -i") && lower.contains("/dev/tcp") {
+        return true;
+    }
+    if lower.contains("bash -i") && lower.contains("/dev/udp") {
+        return true;
+    }
+
+    // nc/ncat -e / --exec (netcat reverse shell)
+    if (lower.contains("nc ") || lower.contains("ncat ") || lower.contains("netcat "))
+        && (lower.contains(" -e ") || lower.contains(" --exec") || lower.contains(" -c "))
+    {
+        return true;
+    }
+
+    // python/python3 -c "import socket" (socket-based reverse shell)
+    if (lower.contains("python -c") || lower.contains("python3 -c"))
+        && lower.contains("import socket")
+    {
+        return true;
+    }
+    if (lower.contains("python -c") || lower.contains("python3 -c"))
+        && lower.contains("import os")
+        && lower.contains("pty.spawn")
+    {
+        return true;
+    }
+
+    // perl -e with socket
+    if lower.contains("perl -e") && lower.contains("socket") {
+        return true;
+    }
+
+    // ruby -rsocket
+    if lower.contains("ruby -rsocket") || lower.contains("ruby -r socket") {
+        return true;
+    }
+
+    // php -r with fsockopen
+    if lower.contains("php -r") && lower.contains("fsockopen") {
+        return true;
+    }
+
+    // socat reverse shell
+    if lower.contains("socat") && lower.contains("exec:") {
+        return true;
+    }
+
+    // telnet-based reverse shell: telnet <host> <port> | /bin/sh
+    if lower.contains("telnet") && lower.contains("/bin/") {
+        return true;
+    }
+
+    // /dev/tcp direct (bash built-in networking)
+    if lower.contains("/dev/tcp/") || lower.contains("/dev/udp/") {
+        return true;
+    }
+
+    // mkfifo pipe-based reverse shell
+    if lower.contains("mkfifo") && (lower.contains("/bin/sh") || lower.contains("/bin/bash")) {
+        return true;
+    }
+
+    false
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Category: Crypto mining
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Known miner binaries and mining pool URL patterns.
+const MINER_BINARIES: &[&str] = &[
+    "xmrig",
+    "minerd",
+    "cgminer",
+    "bfgminer",
+    "ethminer",
+    "cpuminer",
+    "ccminer",
+    "t-rex",
+    "nbminer",
+    "phoenixminer",
+    "lolminer",
+    "gminer",
+    "claymore",
+    "nanominer",
+    "teamredminer",
+    "wildrig",
+    "srbminer",
+    "xmr-stak",
+];
+
+fn is_crypto_mining(lower: &str) -> bool {
+    let first_word = lower.split_ascii_whitespace().next().unwrap_or("");
+    // Strip path prefix: /tmp/xmrig -> xmrig
+    let binary = first_word.rsplit('/').next().unwrap_or(first_word);
+    if MINER_BINARIES.iter().any(|m| binary.starts_with(m)) {
+        return true;
+    }
+
+    // Mining pool URLs (stratum protocol)
+    if lower.contains("stratum+tcp://") || lower.contains("stratum+ssl://") {
+        return true;
+    }
+
+    // Common mining pool domains
+    if lower.contains("pool.minexmr.com")
+        || lower.contains("xmrpool.eu")
+        || lower.contains("nanopool.org")
+        || lower.contains("mining.oc.tc")
+        || lower.contains("pool.supportxmr.com")
+        || lower.contains("monerohash.com")
+        || lower.contains("hashvault.pro")
+        || lower.contains("herominers.com")
+    {
+        return true;
+    }
+
+    false
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Category: Security software tampering
+// ═══════════════════════════════════════════════════════════════════════════
+
+fn is_security_tampering(lower: &str) -> bool {
+    // Firewall disabling
+    if lower.contains("ufw disable") || lower.contains("ufw --force disable") {
+        return true;
+    }
+    if lower.contains("iptables -f") || lower.contains("iptables --flush") {
+        return true;
+    }
+    if lower.contains("iptables -p") && lower.contains("accept") {
+        return true;
+    }
+    if lower.contains("nft flush ruleset") || lower.contains("nft delete") {
+        return true;
+    }
+    if lower.contains("firewall-cmd") && lower.contains("--panic-off") {
+        return true;
+    }
+
+    // Disabling SELinux / AppArmor
+    if lower.contains("setenforce 0") || lower.contains("setenforce permissive") {
+        return true;
+    }
+    if lower.contains("apparmor_parser -R") || lower.contains("aa-teardown") {
+        return true;
+    }
+    // systemctl disable/stop on security services
+    if lower.contains("systemctl")
+        && (lower.contains("stop") || lower.contains("disable"))
+        && (lower.contains("apparmor")
+            || lower.contains("firewalld")
+            || lower.contains("fail2ban")
+            || lower.contains("ufw")
+            || lower.contains("auditd")
+            || lower.contains("clamav")
+            || lower.contains("rkhunter")
+            || lower.contains("ossec"))
+    {
+        return true;
+    }
+
+    // Killing security processes
+    if (lower.contains("kill") || lower.contains("pkill") || lower.contains("killall"))
+        && (lower.contains("clamd")
+            || lower.contains("fail2ban")
+            || lower.contains("ossec")
+            || lower.contains("snort")
+            || lower.contains("suricata")
+            || lower.contains("auditd")
+            || lower.contains("sshguard"))
+    {
+        return true;
+    }
+
+    // Modifying /etc/hosts (DNS hijacking)
+    if (lower.contains("> /etc/hosts")
+        || lower.contains(">>/etc/hosts")
+        || lower.contains(">> /etc/hosts")
+        || lower.contains(">/etc/hosts"))
+        && !lower.contains("localhost")
+    {
+        return true;
+    }
+    if lower.contains("tee /etc/hosts") || lower.contains("tee -a /etc/hosts") {
+        return true;
+    }
+
+    false
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Category: Cron job injection
+// ═══════════════════════════════════════════════════════════════════════════
+
+fn is_cron_injection(lower: &str) -> bool {
+    // Piping into crontab
+    if lower.contains("| crontab") || lower.contains("|crontab") {
+        return true;
+    }
+    // Redirecting into cron directories
+    if lower.contains("> /etc/cron")
+        || lower.contains(">/etc/cron")
+        || lower.contains(">> /etc/cron")
+        || lower.contains(">>/etc/cron")
+    {
+        return true;
+    }
+    // Writing to cron spool
+    if lower.contains("/var/spool/cron") && (lower.contains(">") || lower.contains("tee")) {
+        return true;
+    }
+    false
+}
+
+/// Check for high-risk patterns that span pipes/chains (whole-command analysis).
+///
+/// These patterns require seeing the full command to detect cross-pipe exfiltration
+/// and similar multi-stage attacks.
+pub(super) fn check_whole_command_high_risk(lower: &str) -> Option<CommandClassification> {
+    // base64 encode piped to curl/wget (encode-and-exfil pattern)
+    if lower.contains("base64") && (lower.contains("curl") || lower.contains("wget")) {
+        return Some(CommandClassification {
+            risk_level: RiskLevel::High,
+            tags: vec![SafetyTag::NetworkAccess],
+            warnings: vec![
+                "Base64 encoding combined with network command — potential exfiltration"
+                    .to_string(),
+            ],
+            blocked: false,
+            reason: None,
+        });
+    }
+
+    // tar/zip piped to nc — sending archives over network
+    if (lower.contains("tar ") || lower.contains("zip "))
+        && (lower.contains("| nc ") || lower.contains("|nc ") || lower.contains("| ncat"))
+    {
+        return Some(CommandClassification {
+            risk_level: RiskLevel::High,
+            tags: vec![SafetyTag::NetworkAccess, SafetyTag::Destructive],
+            warnings: vec!["Piping archive to network command — potential exfiltration".to_string()],
+            blocked: false,
+            reason: None,
+        });
+    }
+
     None
 }
 
@@ -400,6 +678,50 @@ pub(super) fn check_high_risk_patterns(
         });
     }
 
+    // ── Credential theft (High) ───────────────────────────────────────
+    if let Some(result) = check_credential_access(first_word, lower) {
+        return Some(result);
+    }
+
+    // ── Data exfiltration (High) ────────────────────────────────────────
+    if let Some(result) = check_data_exfiltration(lower) {
+        return Some(result);
+    }
+
+    // ── Privilege escalation (High) ─────────────────────────────────────
+    if let Some(result) = check_privilege_escalation(lower) {
+        return Some(result);
+    }
+
+    // ── PATH hijacking (High) ───────────────────────────────────────────
+    if let Some(result) = check_path_hijacking(lower) {
+        return Some(result);
+    }
+
+    // ── Keylogger / input capture (High) ────────────────────────────────
+    if lower.contains("xinput") && lower.contains("test") {
+        warnings.push("Potential keylogger via xinput".to_string());
+        tags = vec![SafetyTag::SystemModification];
+        return Some(CommandClassification {
+            risk_level: RiskLevel::High,
+            tags,
+            warnings,
+            blocked: false,
+            reason: None,
+        });
+    }
+    if lower.contains("script -q") || (lower.contains("strace") && lower.contains("read")) {
+        warnings.push("Potential input/keystroke capture".to_string());
+        tags = vec![SafetyTag::SystemModification];
+        return Some(CommandClassification {
+            risk_level: RiskLevel::High,
+            tags,
+            warnings,
+            blocked: false,
+            reason: None,
+        });
+    }
+
     // Plain network commands (curl, wget without pipe to shell)
     if matches!(
         first_word,
@@ -414,6 +736,412 @@ pub(super) fn check_high_risk_patterns(
             blocked: false,
             reason: None,
         });
+    }
+
+    None
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Category: Credential theft (High risk)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Sensitive paths that likely contain credentials or secrets.
+const SENSITIVE_PATH_PATTERNS: &[&str] = &[
+    "/.ssh/",
+    "/.aws/",
+    "/.gnupg/",
+    "/.gpg/",
+    "/.config/gcloud/",
+    "/.azure/",
+    "/.kube/config",
+    "/.docker/config.json",
+    "/.npmrc",
+    "/.pypirc",
+    "/.netrc",
+    "/.git-credentials",
+    "/.config/gh/hosts.yml",
+    "/id_rsa",
+    "/id_ed25519",
+    "/id_ecdsa",
+    "/id_dsa",
+    "/.pem",
+    "/.p12",
+    "/.pfx",
+];
+
+/// File names that typically contain secrets.
+const SENSITIVE_FILE_NAMES: &[&str] = &[
+    ".env",
+    ".env.local",
+    ".env.production",
+    "credentials",
+    "credentials.json",
+    "credentials.yaml",
+    "credentials.yml",
+    "secrets.json",
+    "secrets.yaml",
+    "secrets.yml",
+    "token",
+    "tokens.json",
+    "master.key",
+    "service-account.json",
+    "keyfile.json",
+    "private.key",
+    "private.pem",
+];
+
+/// Browser credential store paths.
+const BROWSER_CREDENTIAL_PATHS: &[&str] = &[
+    "login data",
+    "cookies",
+    "web data",
+    ".mozilla/firefox",
+    "google-chrome",
+    "chromium",
+    "brave-browser",
+    "microsoft-edge",
+    "default/login",
+    "keychain",
+    "key3.db",
+    "key4.db",
+    "logins.json",
+    "cert9.db",
+];
+
+fn check_credential_access(first_word: &str, lower: &str) -> Option<CommandClassification> {
+    // Commands that read files
+    let is_read_cmd = matches!(
+        first_word,
+        "cat"
+            | "less"
+            | "more"
+            | "head"
+            | "tail"
+            | "strings"
+            | "xxd"
+            | "hexdump"
+            | "od"
+            | "base64"
+            | "openssl"
+            | "cp"
+            | "mv"
+            | "tar"
+            | "zip"
+    );
+
+    // Also catch grep/find/ls on sensitive paths
+    let is_search_cmd = matches!(first_word, "grep" | "find" | "ls" | "file" | "stat");
+
+    if is_read_cmd || is_search_cmd {
+        // Check for sensitive path patterns
+        for pattern in SENSITIVE_PATH_PATTERNS {
+            if lower.contains(pattern) {
+                return Some(CommandClassification {
+                    risk_level: RiskLevel::High,
+                    tags: vec![SafetyTag::Privileged],
+                    warnings: vec![format!("Accessing sensitive credential path: {pattern}")],
+                    blocked: false,
+                    reason: None,
+                });
+            }
+        }
+
+        // Check for sensitive file names
+        for name in SENSITIVE_FILE_NAMES {
+            if lower.contains(name) {
+                return Some(CommandClassification {
+                    risk_level: RiskLevel::High,
+                    tags: vec![SafetyTag::Privileged],
+                    warnings: vec![format!("Accessing file that may contain secrets: {name}")],
+                    blocked: false,
+                    reason: None,
+                });
+            }
+        }
+
+        // Check for browser credential stores
+        for path in BROWSER_CREDENTIAL_PATHS {
+            if lower.contains(path) {
+                return Some(CommandClassification {
+                    risk_level: RiskLevel::High,
+                    tags: vec![SafetyTag::Privileged],
+                    warnings: vec![format!("Accessing browser credential store: {path}")],
+                    blocked: false,
+                    reason: None,
+                });
+            }
+        }
+    }
+
+    // Env var dumping that may leak secrets
+    if (lower.starts_with("env") || lower.starts_with("printenv") || lower.starts_with("set"))
+        && (lower.contains("secret")
+            || lower.contains("token")
+            || lower.contains("password")
+            || lower.contains("api_key")
+            || lower.contains("apikey"))
+    {
+        return Some(CommandClassification {
+            risk_level: RiskLevel::High,
+            tags: vec![SafetyTag::Privileged],
+            warnings: vec!["Accessing environment variables that may contain secrets".to_string()],
+            blocked: false,
+            reason: None,
+        });
+    }
+
+    None
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Category: Data exfiltration (High risk)
+// ═══════════════════════════════════════════════════════════════════════════
+
+fn check_data_exfiltration(lower: &str) -> Option<CommandClassification> {
+    // curl/wget POST with file data — uploading files to remote
+    if (lower.contains("curl") || lower.contains("wget"))
+        && (lower.contains("-d @")
+            || lower.contains("--data @")
+            || lower.contains("--data-binary @")
+            || lower.contains("-f @")
+            || lower.contains("--upload-file")
+            || lower.contains("-t "))
+    {
+        return Some(CommandClassification {
+            risk_level: RiskLevel::High,
+            tags: vec![SafetyTag::NetworkAccess],
+            warnings: vec!["Uploading file data to remote server".to_string()],
+            blocked: false,
+            reason: None,
+        });
+    }
+
+    // curl POST with inline data that looks like it could contain secrets
+    if lower.contains("curl") && lower.contains("-x post") && lower.contains("-d") {
+        return Some(CommandClassification {
+            risk_level: RiskLevel::High,
+            tags: vec![SafetyTag::NetworkAccess],
+            warnings: vec!["HTTP POST may exfiltrate data".to_string()],
+            blocked: false,
+            reason: None,
+        });
+    }
+
+    // base64 encode piped to curl/wget (encode-and-exfil pattern)
+    if lower.contains("base64") && (lower.contains("curl") || lower.contains("wget")) {
+        return Some(CommandClassification {
+            risk_level: RiskLevel::High,
+            tags: vec![SafetyTag::NetworkAccess],
+            warnings: vec![
+                "Base64 encoding combined with network command — potential exfiltration"
+                    .to_string(),
+            ],
+            blocked: false,
+            reason: None,
+        });
+    }
+
+    // DNS exfiltration via dig/nslookup with crafted subdomains
+    if (lower.contains("dig ") || lower.contains("nslookup ") || lower.contains("host "))
+        && lower.contains("$(")
+    {
+        return Some(CommandClassification {
+            risk_level: RiskLevel::High,
+            tags: vec![SafetyTag::NetworkAccess],
+            warnings: vec!["Potential DNS exfiltration via command substitution".to_string()],
+            blocked: false,
+            reason: None,
+        });
+    }
+
+    // tar/zip piped to nc — sending archives over network
+    if (lower.contains("tar ") || lower.contains("zip "))
+        && (lower.contains("| nc ") || lower.contains("|nc ") || lower.contains("| ncat"))
+    {
+        return Some(CommandClassification {
+            risk_level: RiskLevel::High,
+            tags: vec![SafetyTag::NetworkAccess, SafetyTag::Destructive],
+            warnings: vec!["Piping archive to network command — potential exfiltration".to_string()],
+            blocked: false,
+            reason: None,
+        });
+    }
+
+    None
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Category: Privilege escalation (High risk)
+// ═══════════════════════════════════════════════════════════════════════════
+
+fn check_privilege_escalation(lower: &str) -> Option<CommandClassification> {
+    // setuid/setgid bit setting
+    if lower.contains("chmod")
+        && (lower.contains("+s") || lower.contains("u+s") || lower.contains("g+s"))
+    {
+        return Some(CommandClassification {
+            risk_level: RiskLevel::High,
+            tags: vec![SafetyTag::Privileged, SafetyTag::SystemModification],
+            warnings: vec!["Setting SUID/SGID bit — potential privilege escalation".to_string()],
+            blocked: false,
+            reason: None,
+        });
+    }
+    // Numeric setuid: chmod 4755, chmod 2755, chmod 6755
+    if lower.contains("chmod") {
+        let tokens: Vec<&str> = lower.split_ascii_whitespace().collect();
+        for token in &tokens {
+            if token.len() == 4 && token.chars().all(|c| c.is_ascii_digit()) {
+                let first_digit = token.chars().next().unwrap_or('0');
+                if matches!(first_digit, '4' | '2' | '6') {
+                    return Some(CommandClassification {
+                        risk_level: RiskLevel::High,
+                        tags: vec![SafetyTag::Privileged, SafetyTag::SystemModification],
+                        warnings: vec!["Setting SUID/SGID bit via numeric mode".to_string()],
+                        blocked: false,
+                        reason: None,
+                    });
+                }
+            }
+        }
+    }
+
+    // chown root / chgrp root (matches "chown root", "chown root:root", etc.)
+    if (lower.contains("chown root")
+        || lower.contains("chgrp root")
+        || lower.contains("chown 0:")
+        || lower.contains("chgrp 0:"))
+        && !lower.contains("/tmp/")
+    {
+        return Some(CommandClassification {
+            risk_level: RiskLevel::High,
+            tags: vec![SafetyTag::Privileged, SafetyTag::SystemModification],
+            warnings: vec!["Changing file ownership to root".to_string()],
+            blocked: false,
+            reason: None,
+        });
+    }
+
+    // Writing to /etc/passwd, /etc/shadow, /etc/sudoers
+    if (lower.contains("/etc/passwd")
+        || lower.contains("/etc/shadow")
+        || lower.contains("/etc/sudoers")
+        || lower.contains("/etc/group"))
+        && (lower.contains(">")
+            || lower.contains("tee")
+            || lower.contains("sed -i")
+            || lower.contains("echo")
+            || lower.contains("usermod")
+            || lower.contains("useradd"))
+    {
+        return Some(CommandClassification {
+            risk_level: RiskLevel::High,
+            tags: vec![SafetyTag::Privileged, SafetyTag::SystemModification],
+            warnings: vec![
+                "Modifying authentication files — potential privilege escalation".to_string(),
+            ],
+            blocked: false,
+            reason: None,
+        });
+    }
+
+    // visudo / direct sudoers modification
+    if lower.starts_with("visudo") || lower.contains("sudoers.d/") {
+        return Some(CommandClassification {
+            risk_level: RiskLevel::High,
+            tags: vec![SafetyTag::Privileged],
+            warnings: vec!["Modifying sudo configuration".to_string()],
+            blocked: false,
+            reason: None,
+        });
+    }
+
+    // LD_PRELOAD / LD_LIBRARY_PATH injection
+    if lower.contains("ld_preload=") || lower.contains("ld_library_path=") {
+        return Some(CommandClassification {
+            risk_level: RiskLevel::High,
+            tags: vec![SafetyTag::Privileged, SafetyTag::SystemModification],
+            warnings: vec![
+                "Dynamic linker variable injection — potential privilege escalation".to_string(),
+            ],
+            blocked: false,
+            reason: None,
+        });
+    }
+
+    // Capability manipulation
+    if lower.contains("setcap") || lower.contains("getcap") {
+        return Some(CommandClassification {
+            risk_level: RiskLevel::High,
+            tags: vec![SafetyTag::Privileged],
+            warnings: vec!["Manipulating Linux capabilities".to_string()],
+            blocked: false,
+            reason: None,
+        });
+    }
+
+    // nsenter / unshare for namespace escape
+    if lower.starts_with("nsenter") || (lower.starts_with("unshare") && lower.contains("-r")) {
+        return Some(CommandClassification {
+            risk_level: RiskLevel::High,
+            tags: vec![SafetyTag::Privileged],
+            warnings: vec!["Namespace manipulation — potential container escape".to_string()],
+            blocked: false,
+            reason: None,
+        });
+    }
+
+    None
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Category: PATH hijacking (High risk)
+// ═══════════════════════════════════════════════════════════════════════════
+
+fn check_path_hijacking(lower: &str) -> Option<CommandClassification> {
+    // Prepending to PATH (PATH=/tmp:$PATH, export PATH=/evil:...)
+    if lower.contains("path=") && (lower.contains("export") || lower.contains("=")) {
+        // Look for suspicious path prepending
+        let has_tmp_or_dev =
+            lower.contains("/tmp") || lower.contains("/dev/shm") || lower.contains("/var/tmp");
+        if has_tmp_or_dev && lower.contains("path") {
+            return Some(CommandClassification {
+                risk_level: RiskLevel::High,
+                tags: vec![SafetyTag::SystemModification],
+                warnings: vec![
+                    "PATH manipulation with writable directory — potential hijacking".to_string(),
+                ],
+                blocked: false,
+                reason: None,
+            });
+        }
+    }
+
+    // alias hijacking of common commands
+    if lower.starts_with("alias ") {
+        let hijack_targets = [
+            "alias sudo=",
+            "alias su=",
+            "alias ssh=",
+            "alias login=",
+            "alias passwd=",
+            "alias curl=",
+            "alias wget=",
+            "alias git=",
+            "alias docker=",
+            "alias kubectl=",
+        ];
+        for target in &hijack_targets {
+            if lower.contains(target) {
+                return Some(CommandClassification {
+                    risk_level: RiskLevel::High,
+                    tags: vec![SafetyTag::SystemModification],
+                    warnings: vec![format!("Alias hijacking of security-sensitive command")],
+                    blocked: false,
+                    reason: None,
+                });
+            }
+        }
     }
 
     None

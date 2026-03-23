@@ -75,6 +75,8 @@ pub struct AgentLoop {
     /// When set, the resulting session will use this ID, allowing
     /// external callers (e.g., web frontend) to pre-assign the ID.
     session_id: Option<uuid::Uuid>,
+    /// Shadow git snapshot manager for full project-state undo/rollback.
+    snapshot_manager: ava_tools::core::file_snapshot::SharedSnapshotManager,
 }
 
 /// Configuration for a single agent loop run — turn limits, cost caps, and model identity.
@@ -236,6 +238,14 @@ pub enum AgentEvent {
         /// Estimated cost in USD for the sub-agent's LLM calls.
         cost_usd: f64,
     },
+    /// A project-state snapshot was taken before a write/edit tool execution.
+    /// The TUI can use the commit hash for rewind/restore operations.
+    SnapshotTaken {
+        /// The git commit hash in the shadow snapshot repo.
+        commit_hash: String,
+        /// Human-readable label for the snapshot.
+        message: String,
+    },
 }
 
 impl AgentLoop {
@@ -259,6 +269,7 @@ impl AgentLoop {
             diff_tracker: crate::streaming_diff::StreamingDiffTracker::new(),
             session_logger: None,
             session_id: None,
+            snapshot_manager: ava_tools::core::file_snapshot::new_shared_snapshot_manager(),
         }
     }
 
@@ -266,6 +277,15 @@ impl AgentLoop {
     /// instead of generating a new one via `Uuid::new_v4()`.
     pub fn with_session_id(mut self, id: uuid::Uuid) -> Self {
         self.session_id = Some(id);
+        self
+    }
+
+    /// Attach a shared snapshot manager for project-state undo/rollback.
+    pub fn with_snapshot_manager(
+        mut self,
+        manager: ava_tools::core::file_snapshot::SharedSnapshotManager,
+    ) -> Self {
+        self.snapshot_manager = manager;
         self
     }
 
@@ -302,6 +322,13 @@ impl AgentLoop {
     pub fn with_images(mut self, images: Vec<ImageContent>) -> Self {
         self.images = images;
         self
+    }
+
+    /// Get a clone of the shared snapshot manager handle.
+    ///
+    /// The TUI uses this to perform restore/revert operations via `/rewind`.
+    pub fn snapshot_manager(&self) -> ava_tools::core::file_snapshot::SharedSnapshotManager {
+        self.snapshot_manager.clone()
     }
 
     /// Merge token usage from a single turn into a running total.
@@ -499,7 +526,16 @@ impl AgentLoop {
     /// Returns the (possibly modified) message list. If no plugins subscribe or the
     /// hook returns unchanged content, the original context messages are returned as-is.
     async fn apply_messages_transform(&mut self) -> Vec<Message> {
-        let messages = self.context.get_messages().to_vec();
+        // Only send agent-visible messages to the LLM. Compacted messages
+        // (agent_visible=false) are preserved for UI display but excluded
+        // from the context window.
+        let messages: Vec<Message> = self
+            .context
+            .get_messages()
+            .iter()
+            .filter(|m| m.agent_visible)
+            .cloned()
+            .collect();
         let Some(ref pm) = self.plugin_manager.clone() else {
             return messages;
         };
@@ -806,7 +842,34 @@ impl AgentLoop {
         }
 
         // Write tools sequentially — check steering between each
-        if !steering_triggered {
+        if !steering_triggered && !write_calls.is_empty() {
+            // Take a shadow git snapshot before any write tools execute.
+            // This enables full project-state rollback via /rewind.
+            {
+                let manager_guard = self.snapshot_manager.read().await;
+                if let Some(ref manager) = *manager_guard {
+                    let tool_names: Vec<&str> =
+                        write_calls.iter().map(|(_, tc)| tc.name.as_str()).collect();
+                    let snap_msg = format!("before: {}", tool_names.join(", "));
+                    match manager.take_snapshot(&snap_msg).await {
+                        Ok(hash) => {
+                            debug!(hash = %hash, "shadow snapshot taken before write tools");
+                            Self::emit(
+                                event_tx,
+                                AgentEvent::SnapshotTaken {
+                                    commit_hash: hash,
+                                    message: snap_msg,
+                                },
+                            );
+                        }
+                        Err(e) => {
+                            // Non-fatal — log but don't block tool execution
+                            warn!(error = %e, "failed to take shadow snapshot");
+                        }
+                    }
+                }
+            }
+
             for (i, tc) in &write_calls {
                 // Snapshot file before write/edit tools for diff tracking
                 let diff_path =
@@ -924,6 +987,32 @@ impl AgentLoop {
         let is_subscription = self.llm.capabilities().is_subscription;
 
         // --- Setup ---
+
+        // Initialize the shadow snapshot manager for project-state rollback.
+        // This is best-effort: if initialization fails, we continue without snapshots.
+        {
+            let mut manager_guard = self.snapshot_manager.write().await;
+            if manager_guard.is_none() {
+                let project_root = std::env::current_dir().unwrap_or_default();
+                match ava_tools::core::file_snapshot::SnapshotManager::new(&project_root) {
+                    Ok(mut mgr) => {
+                        if let Err(e) = mgr.init().await {
+                            debug!(error = %e, "snapshot manager init failed (non-fatal)");
+                        } else {
+                            // Take an initial baseline snapshot
+                            if let Err(e) = mgr.take_snapshot("session start").await {
+                                debug!(error = %e, "initial snapshot failed (non-fatal)");
+                            }
+                            *manager_guard = Some(mgr);
+                        }
+                    }
+                    Err(e) => {
+                        debug!(error = %e, "snapshot manager creation failed (non-fatal)");
+                    }
+                }
+            }
+        }
+
         self.inject_system_prompt().await;
 
         // Inject conversation history from previous turns

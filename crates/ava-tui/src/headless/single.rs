@@ -138,7 +138,7 @@ pub(super) async fn run_single_agent(cli: CliArgs, goal: &str) -> Result<()> {
                 } => {
                     serde_json::json!({"type": "mcp_tools_changed", "server_name": server_name, "tool_count": tool_count})
                 }
-                AgentEvent::Checkpoint(_) => continue,
+                AgentEvent::Checkpoint(_) | AgentEvent::SnapshotTaken { .. } => continue,
             };
             println!("{json}");
         }
@@ -228,8 +228,9 @@ pub(super) async fn run_single_agent(cli: CliArgs, goal: &str) -> Result<()> {
                     eprintln!("[error: {e}]");
                     break;
                 }
-                AgentEvent::Checkpoint(_) => {
-                    // Checkpoint: session saved by caller after handle.await
+                AgentEvent::Checkpoint(_)
+                | AgentEvent::SnapshotTaken { .. } => {
+                    // Checkpoint / snapshot: session saved by caller after handle.await
                 }
             }
         }

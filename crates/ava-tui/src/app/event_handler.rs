@@ -481,6 +481,13 @@ impl App {
                 // Incremental save so progress survives unexpected exits
                 self.state.session.save_session(&session);
             }
+            ava_agent::AgentEvent::SnapshotTaken {
+                commit_hash,
+                message,
+            } => {
+                debug!(hash = %commit_hash, msg = %message, "snapshot recorded for rewind");
+                self.state.rewind.record_snapshot_hash(commit_hash);
+            }
             ava_agent::AgentEvent::Error(err) => {
                 info!(error = %err, "TUI received AgentEvent::Error");
                 self.finalize_assistant_stream();

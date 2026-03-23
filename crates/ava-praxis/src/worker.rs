@@ -91,7 +91,8 @@ pub(crate) async fn run_worker(
             | AgentEvent::SubAgentComplete { .. }
             | AgentEvent::DiffPreview { .. }
             | AgentEvent::MCPToolsChanged { .. }
-            | AgentEvent::Checkpoint(_) => {}
+            | AgentEvent::Checkpoint(_)
+            | AgentEvent::SnapshotTaken { .. } => {}
         }
     }
 

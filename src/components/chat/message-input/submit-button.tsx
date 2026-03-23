@@ -71,7 +71,7 @@ export const SubmitButton: Component<SubmitButtonProps> = (props) => {
   }
 
   return (
-    <div class="absolute right-3 top-0 bottom-0 flex items-center gap-2">
+    <div class="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-2">
       {/* Double-Escape hint */}
       <Show when={props.escapeHint?.()}>
         <span

@@ -74,6 +74,7 @@
     "eslint": "^9.39.2",
     "eslint-plugin-oxlint": "^1.42.0",
     "eslint-plugin-solid": "^0.14.5",
+    "get-port": "^7.2.0",
     "jsdom": "^27.4.0",
     "knip": "^5.82.1",
     "lefthook": "^2.0.16",

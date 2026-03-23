@@ -5,7 +5,7 @@
   "identifier": "com.xn3.ava",
   "build": {
     "beforeDevCommand": "pnpm run dev",
-    "devUrl": "http://localhost:1420",
+    "devUrl": "http://localhost:1490",
     "beforeBuildCommand": "pnpm run build",
     "frontendDist": "../dist"
   },

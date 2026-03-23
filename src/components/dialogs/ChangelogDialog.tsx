@@ -7,7 +7,7 @@
 import { Megaphone } from 'lucide-solid'
 import { type Component, For, Show } from 'solid-js'
 
-export const APP_VERSION = '2.1.0'
+export const APP_VERSION = '2.2.6'
 
 interface ChangelogEntry {
   version: string
@@ -17,15 +17,32 @@ interface ChangelogEntry {
 
 const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '2.2.6',
+    date: '2026-03-22',
+    items: [
+      '21 LLM providers: + Azure OpenAI, AWS Bedrock, xAI, Mistral, Groq, DeepSeek',
+      'Mid-stream messaging: Enter = queue, Ctrl+Enter = interrupt, Alt+Enter = post-complete',
+      'Message queue UI with reorder, edit, and remove',
+      'Shadow git snapshots for file undo/rollback',
+      'Crash recovery: per-turn checkpoints, file backups, interrupted tool cleanup',
+      'Context overflow auto-compact with retry (12 provider patterns)',
+      'Conversation repair before LLM calls',
+      '100+ security patterns: credential theft, reverse shells, crypto mining, exfiltration',
+      'Collapsible agent activity cards with live stats',
+      'Right panel redesign: icon tabs, activity toggle, todos auto-open',
+      'Double-Escape abort, send button context menu',
+      'Incremental message persistence (crash-safe)',
+      'Retry-after header parsing, quota error classification',
+    ],
+  },
+  {
     version: '2.1.0',
     date: '2026-03-08',
     items: [
-      '8 LLM providers: Anthropic, OpenAI, Gemini, Ollama, OpenRouter, Copilot, Inception, Mock',
       '9 default tools: read, write, edit, bash, glob, grep, web_fetch, web_search, git_read',
       '21 Rust crates powering the full agent, CLI, and desktop backend',
       'Thinking + tool interleaving for reasoning-capable models',
       'Multi-agent orchestration via Praxis (Director → Leads → Workers)',
-      'Three-tier mid-stream messaging: steer, follow-up, post-complete',
       'MCP protocol support with hot-reload and per-project trust',
       'Persistent memory, session history, and codebase indexing (BM25 + PageRank)',
       '29 built-in themes with live preview and custom TOML theme support',

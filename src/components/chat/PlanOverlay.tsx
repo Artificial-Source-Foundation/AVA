@@ -942,9 +942,15 @@ export const PlanOverlay: Component = () => {
               'background-size': '100% 100%, 24px 24px',
             }}
           >
-            <div class="flex justify-center">
+            <div class="flex">
               {/* TOC sidebar */}
-              <div class="w-[180px] flex-shrink-0 sticky top-0 self-start hidden lg:block">
+              <div
+                class="w-[200px] flex-shrink-0 sticky top-0 self-start hidden lg:block border-r"
+                style={{
+                  'border-color': 'var(--border-subtle)',
+                  background: 'color-mix(in srgb, var(--surface) 50%, transparent)',
+                }}
+              >
                 <div class="py-8 pl-6 pr-2">
                   <span
                     class="text-[10px] font-semibold tracking-[0.1em] uppercase mb-3 block"
@@ -1009,23 +1015,16 @@ export const PlanOverlay: Component = () => {
                 </div>
               </div>
 
-              {/* Document card — centered, max-width, elevated */}
+              {/* Document card — fills remaining width like Plannotator */}
               <div
-                class="my-8 rounded-xl border overflow-hidden flex-shrink-0"
+                class="flex-1 min-w-0 overflow-hidden"
                 style={{
-                  'max-width': '780px',
                   background: 'var(--surface)',
-                  'border-color': 'var(--border-subtle)',
-                  'box-shadow': `
-                  0 4px 6px -1px rgba(0, 0, 0, 0.15),
-                  0 10px 15px -3px rgba(0, 0, 0, 0.12),
-                  0 20px 40px -4px rgba(0, 0, 0, 0.08)
-                `,
                 }}
               >
                 {/* ── Document header (inside card) ── */}
                 <div
-                  class="px-8 pt-8 pb-6"
+                  class="px-10 pt-8 pb-6"
                   style={{
                     'border-bottom': '1px solid var(--border-subtle)',
                     background: `linear-gradient(180deg, ${PLAN_ACCENT_GLOW} 0%, transparent 100%)`,
@@ -1097,7 +1096,7 @@ export const PlanOverlay: Component = () => {
                 </div>
 
                 {/* ── Steps section (inside card) ── */}
-                <div class="px-8 py-6">
+                <div class="px-10 py-6">
                   <div class="flex items-center gap-2 mb-4">
                     <span
                       class="text-[11px] font-semibold tracking-[0.1em] uppercase"
@@ -1159,7 +1158,7 @@ export const PlanOverlay: Component = () => {
 
                 {/* ── Footer with action buttons (inside card) ── */}
                 <div
-                  class="px-8 py-5"
+                  class="px-10 py-5"
                   style={{
                     'border-top': '1px solid var(--border-subtle)',
                     background: 'var(--surface-raised)',

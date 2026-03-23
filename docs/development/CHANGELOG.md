@@ -1,5 +1,61 @@
 # Changelog
 
+## v2.2.6 (2026-03-22)
+
+### Providers
+
+- **Azure OpenAI provider** — `crates/ava-llm/src/providers/azure.rs`. API key + deployment-based routing, configurable API version, full streaming support.
+- **AWS Bedrock provider** — `crates/ava-llm/src/providers/bedrock.rs`. Self-contained SigV4 signing (SHA-256 + HMAC-SHA256), Anthropic Messages API format, separate invoke/streaming endpoints, 12 tests including crypto test vectors.
+- **xAI, Mistral, Groq, DeepSeek providers** — OpenAI-compatible providers with correct base URLs and model routing.
+- **ChatGPT provider alias** — explicit `chatgpt` provider name for Responses API routing (in addition to auto-detection via OpenAI OAuth).
+- **Total: 21 providers** (was 15). Full list: Anthropic, OpenAI, ChatGPT, Gemini, Ollama, OpenRouter, Copilot, Inception, Alibaba, Alibaba CN, ZAI, ZhipuAI, Kimi, MiniMax, MiniMax CN, Azure OpenAI, AWS Bedrock, xAI, Mistral, Groq, DeepSeek, Mock.
+
+### Mid-Stream Messaging Refactor
+
+- **Queue/Interrupt/Post-complete** — renamed from Steering/Follow-up/Post-complete for clarity.
+- **New keybindings**: Enter=queue, Ctrl+Enter=interrupt, Alt+Enter=post-complete, Double-Escape=cancel.
+- **MessageQueueWidget** — renders above composer showing queued messages with reorder (up/down), edit (inline), remove per message.
+- **Queue badges** — QUEUED (blue), INTERRUPT (amber) badges in UI.
+- **Backward compatibility** — old steering/follow-up tier names still accepted.
+
+### Session Persistence
+
+- **Incremental message persistence** — messages saved incrementally as they arrive, not just on session close.
+- **Session context preserved across cancel/continue** — context maintained when user cancels and resumes.
+- **Crash recovery** — session state survives unexpected exits.
+
+### Security
+
+- **100+ security patterns** — command classifier expanded with comprehensive pattern matching (`crates/ava-permissions/src/classifier/rules.rs`, 728 LOC).
+- **Symlink escape detection** — path guard detects and blocks symlink traversal outside project boundaries.
+- **Quota error classification** — typed error variants for rate limits, quota exceeded, retry-after parsing.
+
+### Context Management
+
+- **Context overflow auto-compact** — 12 context overflow patterns detected (`crates/ava-llm/src/providers/common/overflow.rs`), agent loop auto-compacts and retries on overflow.
+- **Conversation repair** — typed error recovery for malformed conversation state.
+- **Dual compaction visibility** — compaction events visible in both TUI and web mode.
+
+### File Operations
+
+- **Shadow git snapshots** — `crates/ava-tools/src/core/file_snapshot.rs` creates git snapshots before file edits, enabling `revert_file` capability.
+- **File edit backups** — every edit/write operation backed by snapshot for safe rollback.
+
+### Agent / Core
+
+- **Retry-after header parsing** — `crates/ava-llm/src/retry.rs` extracts and respects `Retry-After` headers from provider responses.
+- **Typed error expansion** — `crates/ava-types/src/error.rs` expanded with 189+ LOC of new error variants for quota, overflow, and provider-specific errors.
+- **Session types** — `crates/ava-types/src/session.rs` with 344 LOC of session metadata and state types.
+- **Todo panel fix** — todos now correctly visible in sidebar panel.
+- **Subagent stream error fix** — subagent streaming errors no longer crash parent agent.
+
+### UI
+
+- **Edit-and-resend** — properly deletes old messages when editing and resending.
+- **Steering message position** — fixed incorrect positioning of steering messages in chat.
+- **Chat completion flash** — eliminated visual flash when agent completes response.
+- **Reasoning sentinel test** — steering loop correctly handles reasoning sentinel tokens.
+
 ## v2.2.5 (2026-03-21)
 
 ### Web Mode

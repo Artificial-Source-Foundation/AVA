@@ -1,6 +1,6 @@
 # AVA Backlog
 
-> Last updated: 2026-03-21
+> Last updated: 2026-03-22
 > Related: [roadmap.md](roadmap.md), [epics.md](epics.md)
 > SOTA gap research: [sota-gap-analysis.md](sota-gap-analysis.md) (60 items from 12 codebases — reference only, not a todo list)
 
@@ -8,6 +8,17 @@ Tool surface policy: default tools are now 9 (`read`, `write`, `edit`, `bash`, `
 
 ## Recently Completed
 
+- **21 LLM providers** — added Azure OpenAI, AWS Bedrock, xAI, Mistral, Groq, DeepSeek, ChatGPT alias (was 15)
+- **Mid-stream messaging refactor** — renamed to Queue/Interrupt/Post-complete; new keybindings (Enter=queue, Ctrl+Enter=interrupt, Alt+Enter=post-complete, Double-Escape=cancel); MessageQueueWidget with reorder/edit/remove
+- **Context overflow auto-compact** — 12 overflow patterns detected, agent loop auto-compacts and retries
+- **Shadow git snapshots** — file_snapshot.rs creates git snapshots before edits, enabling revert_file
+- **100+ security patterns** — command classifier rules.rs (728 LOC), symlink escape detection in path guard
+- **Incremental message persistence** — messages saved as they arrive, session context preserved across cancel/continue
+- **Retry-after header parsing** — retry.rs extracts and respects Retry-After headers from providers
+- **Quota error classification** — typed error variants for rate limits, quota exceeded
+- **Conversation repair** — typed error recovery for malformed conversation state
+- **Edit-and-resend fix** — properly deletes old messages when editing and resending
+- **Subagent stream error fix** — subagent streaming errors no longer crash parent agent
 - **Web mode session persistence** — frontend→backend session ID mapping, UUID v4 message IDs, backend-only persistence model, WebSocket reuse, PUT endpoint for message updates
 - **MCP reliability** — NDJSON framing fix, race condition fix (await init), lazy init with 30s timeout, tool name underscores for OpenAI compat
 - **Plugin hooks complete** — all 23 plugin hooks wired into agent runtime (full OpenCode parity), MCP HTTP transport, plugin settings UI
@@ -17,7 +28,7 @@ Tool surface policy: default tools are now 9 (`read`, `write`, `edit`, `bash`, `
 - **Security audit round 1-6** — SBPL injection, env scrubbing, rm -rf hardening, find -delete blocking, regex compile safety
 - **Performance audit** — blocking I/O → async, trust caching, connection pooling, ToolCall clone elimination, CodebaseIndex sharing
 - **Error handling** — `From<io::Error>` preserves ErrorKind; typed AvaError variants; deprecated `Other`/`Internal` variants
-- **Test coverage** — 1,798 tests (was 1,712); +86 tests across permission middleware, budget tracking, agent loop integration
+- **Test coverage** — 1,895+ tests (was 1,798); includes Azure/Bedrock crypto tests, overflow patterns, security classifier rules
 - **Web mode endpoint parity** — 14 new endpoints for desktop↔web feature parity
 - **Frontend audit** — debug logs removed, dead code cleaned, async prop fixed
 - **`--verbose` CLI flag** — `-v` info, `-vv` debug, `-vvv` trace to stderr

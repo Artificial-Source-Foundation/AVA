@@ -1,4 +1,4 @@
-<!-- Last verified: 2026-03-20 (v2.2.4 doc update). Run 'just check' to revalidate. -->
+<!-- Last verified: 2026-03-22 (v2.2.6 doc update). Run 'just check' to revalidate. -->
 
 # AVA Architecture & Conventions (v3)
 
@@ -44,13 +44,14 @@ AVA uses a **Rust-first architecture**. All agent, CLI, and backend code is Rust
 
 ### Codebase Stats
 
-- **21 Rust crates**, ~40K LOC, 1,798 tests (0 failures)
-- **15 LLM providers**: Anthropic (with prompt caching), OpenAI, Gemini, Ollama, OpenRouter, Copilot, Inception, Alibaba, ZAI, ZhipuAI, Kimi, MiniMax, Mock
+- **21 Rust crates**, ~40K LOC, 1,895+ tests (0 failures)
+- **21 LLM providers**: Anthropic (with prompt caching), OpenAI, ChatGPT (OAuth), Gemini, Ollama, OpenRouter, Copilot, Inception, Alibaba, Alibaba CN, ZAI, ZhipuAI, Kimi, MiniMax, MiniMax CN, Azure OpenAI, AWS Bedrock, xAI, Mistral, Groq, DeepSeek, Mock
 - **9 default tools**: `read`, `write`, `edit` (15 strategies incl. ellipsis handling, 3-way merge + diff-match-patch), `bash`, `glob`, `grep`, `web_fetch`, `web_search`, `git_read`
 - **Extended tools** (not auto-registered): `apply_patch`, `multiedit`, `ast_ops`, `lsp_ops`, `code_search`, `lint`, `test_runner` — available as plugins
 - **1 agent tool**: `plan` (Plannotator-style inline plan editing via PlanBridge)
 - **Dynamic tools**: MCP servers + TOML custom tools (`~/.ava/tools/`, `.ava/tools/`)
-- **Key capabilities**: Anthropic prompt caching (`cache_control` on system + tools), auto-retry middleware (2x exponential backoff for read-only tools), stream silence timeout (90s configurable per-chunk reset), tiktoken-rs BPE token counting, tool schema pre-validation, persistent audit log (SQLite, opt-out), auto-compaction settings (toggle + threshold slider), JSONL session logging (`~/.ava/log/`, opt-in), rich edit error feedback (similar lines + "did you mean?"), SBPL injection hardening, env scrubbing in bash, rm -rf and find -delete blocking
+- **File snapshots**: Shadow git snapshots before file edits, `revert_file` capability for undoing changes
+- **Key capabilities**: Anthropic prompt caching (`cache_control` on system + tools), auto-retry middleware (2x exponential backoff for read-only tools), stream silence timeout (90s configurable per-chunk reset), tiktoken-rs BPE token counting, tool schema pre-validation, persistent audit log (SQLite, opt-out), auto-compaction settings (toggle + threshold slider), JSONL session logging (`~/.ava/log/`, opt-in), rich edit error feedback (similar lines + "did you mean?"), SBPL injection hardening, env scrubbing in bash, rm -rf and find -delete blocking, context overflow auto-compact (12 overflow patterns with auto-retry), conversation repair, symlink escape detection in path guard, shadow git snapshots for file edit backups, incremental message persistence, retry-after header parsing, quota error classification, 100+ security patterns in command classifier, dual compaction visibility
 
 ### Mid-Stream Messaging
 
@@ -58,9 +59,11 @@ Three-tier message queue for interacting with the agent while it runs:
 
 | Tier | TUI Trigger | Headless Flag | Injection Point |
 |------|-------------|---------------|-----------------|
-| **Steering** | Enter | (stdin) | After current tool -- skips remaining tools |
-| **Follow-up** | Alt+Enter | `--follow-up` | After agent completes current task |
-| **Post-complete** | Ctrl+Alt+Enter | `--later` / `--later-group` | After agent stops -- grouped pipeline (G1, G2, G3...) |
+| **Queue** | Enter | (stdin) | Agent finishes current turn, then processes as new turn |
+| **Interrupt** | Ctrl+Enter | `--follow-up` | Stops at tool boundary, sends immediately |
+| **Post-complete** | Alt+Enter | `--later` / `--later-group` | After agent stops -- grouped pipeline (G1, G2, G3...) |
+
+Cancel: Double-Escape aborts everything.
 
 Commands: `/later` (add post-complete message), `/queue` (view/manage pending messages).
 
@@ -71,7 +74,7 @@ AVA/
 +-- crates/                   # 21 Rust crates (agent stack + TUI + services)
 |   +-- ava-tui/              # CLI/TUI binary (Ratatui) -- THE primary interface
 |   +-- ava-agent/            # Agent execution loop + reflection
-|   +-- ava-llm/              # LLM providers (8 built-in)
+|   +-- ava-llm/              # LLM providers (21 built-in)
 |   +-- ava-tools/            # Tool trait + registry + 9 default tools (extended available as plugins)
 |   +-- ava-praxis/           # Multi-agent orchestration (Praxis)
 |   +-- ava-permissions/      # Permission rules + bash command classifier
@@ -105,7 +108,7 @@ New capabilities should ship as Extended (available as plugins), MCP, or custom 
 | Extended (plugin) | 7 | apply_patch, multiedit, ast_ops, lsp_ops, code_search, lint, test_runner |
 | Agent | 1 | plan (Praxis plan tool with PlanBridge for agent-to-TUI communication) |
 
-Extended tools are **not auto-registered**; they must be explicitly loaded via plugin/MCP configuration. Additional helpers (todo_read/write, question, task, codebase_search, memory/session tools) are always available when initialized. Dynamic MCP tools and TOML custom tools load at runtime from `~/.ava/tools/`, `.ava/tools/`, `~/.ava/mcp.json`, `.ava/mcp.json`.
+Extended tools are **not auto-registered**; they must be explicitly loaded via plugin/MCP configuration. Additional helpers (todo_read/write, question, task, codebase_search, memory/session tools) are always available when initialized. Dynamic MCP tools and TOML custom tools load at runtime from `~/.ava/tools/`, `.ava/tools/`, `~/.ava/mcp.json`, `.ava/mcp.json`. File edits create shadow git snapshots enabling `revert_file` capability.
 
 ## Project Instructions
 
@@ -304,8 +307,9 @@ Lower number = earlier execution. Register via `ToolRegistry::add_middleware()`.
 | `Ctrl+Shift+R` | Restore prompt |
 | `Ctrl+Shift+C` | Save checkpoint |
 | `Tab` / `Shift+Tab` | Cycle Plan/Act mode (when composer not focused) |
-| `Alt+Enter` | Submit follow-up (Tier 2) |
-| `Ctrl+Alt+Enter` | Submit post-complete (Tier 3) |
+| `Ctrl+Enter` | Interrupt & send (while agent running) |
+| `Alt+Enter` | Submit post-complete message |
+| `Double-Escape` | Cancel agent (abort everything) |
 
 ## CLI Testing
 

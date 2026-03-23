@@ -41,13 +41,16 @@ ava serve                    # web browser UI
 
 ## Features
 
-- **15 LLM providers** — Anthropic, OpenAI, Gemini, Ollama, OpenRouter, Copilot, Inception, Alibaba, ZAI, ZhipuAI, Kimi, MiniMax, and more
+- **21 LLM providers** — Anthropic, OpenAI, Gemini, Ollama, OpenRouter, Copilot, Inception, Alibaba, Azure OpenAI, AWS Bedrock, xAI, Mistral, Groq, DeepSeek, and more
 - **9 built-in tools** — read, write, edit, bash, glob, grep, web_fetch, web_search, git_read
 - **Multi-agent mode** — a Director assembles Leads and Workers to tackle complex tasks
 - **MCP support** — connect any MCP server for extra tools
 - **Plugin system** — extend with TOML tools, JSON-RPC plugins, or custom hooks
-- **Mid-stream messaging** — steer, follow up, or queue tasks while the agent works
-- **Session persistence** — pick up where you left off, with crash recovery
+- **Mid-stream messaging** — queue, interrupt, or schedule tasks while the agent works
+- **Session persistence** — pick up where you left off, with crash recovery and incremental saves
+- **File snapshots** — shadow git snapshots before edits, revert any file change
+- **Context overflow auto-compact** — automatic conversation compaction when context limit is hit
+- **100+ security patterns** — command classification, symlink escape detection, env scrubbing
 - **29 themes** — or bring your own via TOML
 - **Runs everywhere** — TUI, desktop app (Tauri), or web browser
 
@@ -62,6 +65,12 @@ ava serve                    # web browser UI
 | OpenRouter | API key | 100+ models |
 | GitHub Copilot | GitHub OAuth | GPT-5.4 |
 | Inception | API key | Mercury 2 |
+| Azure OpenAI | API key | GPT-5.4, o3 |
+| AWS Bedrock | IAM credentials | Claude, Llama |
+| xAI | API key | Grok-3 |
+| Mistral | API key | Mistral Large |
+| Groq | API key | Llama 3.3 70B |
+| DeepSeek | API key | DeepSeek Chat |
 | Alibaba | API key | Qwen 3.5 Plus |
 | ZAI / ZhipuAI | API key | GLM-4.7 |
 | Kimi | API key | K2P5 |
@@ -71,8 +80,10 @@ ava serve                    # web browser UI
 
 | Shortcut | Action |
 |----------|--------|
-| `Enter` | Send message / steer running agent |
-| `Alt+Enter` | Queue follow-up for after current task |
+| `Enter` | Send message / queue while agent runs |
+| `Ctrl+Enter` | Interrupt & send (while agent running) |
+| `Alt+Enter` | Queue post-complete message |
+| `Double-Escape` | Cancel agent |
 | `Ctrl+L` | Session picker |
 | `Ctrl+M` | Switch model |
 | `Ctrl+Y` | Copy last response |

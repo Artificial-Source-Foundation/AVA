@@ -105,30 +105,11 @@ pub(super) fn parse_tool_calls(content: &str) -> Result<Vec<ToolCall>> {
         .collect())
 }
 
-/// Tools allowed in Plan mode. The LLM only sees these — write/edit are hidden.
-/// Bash is included but restricted at execution time to read-only commands.
-const PLAN_MODE_ALLOWED_TOOLS: &[&str] = &[
-    "read",
-    "glob",
-    "grep",
-    "web_fetch",
-    "web_search",
-    "git_read",
-    "plan",
-    "todo_read",
-    "todo_write",
-    "question",
-    "codebase_search",
-    "memory_read",
-    "bash", // allowed but restricted to read-only commands at execution time
-];
-
 impl AgentLoop {
     /// Return the tool definitions that should be sent to the LLM, respecting
-    /// the `extended_tools` config flag to filter by tier, and `plan_mode` to
-    /// restrict to read-only tools.
+    /// the `extended_tools` config flag to filter by tier.
     pub(super) fn active_tool_defs(&self) -> Vec<ava_types::Tool> {
-        let all_tools = if self.config.extended_tools {
+        if self.config.extended_tools {
             self.tools.list_tools_for_tiers(&[
                 ToolTier::Default,
                 ToolTier::Extended,
@@ -137,15 +118,6 @@ impl AgentLoop {
         } else {
             self.tools
                 .list_tools_for_tiers(&[ToolTier::Default, ToolTier::Plugin])
-        };
-
-        if self.config.plan_mode {
-            all_tools
-                .into_iter()
-                .filter(|t| PLAN_MODE_ALLOWED_TOOLS.contains(&t.name.as_str()))
-                .collect()
-        } else {
-            all_tools
         }
     }
 

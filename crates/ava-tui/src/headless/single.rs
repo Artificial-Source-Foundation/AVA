@@ -142,7 +142,8 @@ pub(super) async fn run_single_agent(cli: CliArgs, goal: &str) -> Result<()> {
                 }
                 AgentEvent::Checkpoint(_)
                 | AgentEvent::SnapshotTaken { .. }
-                | AgentEvent::PlanStepComplete { .. } => continue,
+                | AgentEvent::PlanStepComplete { .. }
+                | AgentEvent::StreamingEditProgress { .. } => continue,
             };
             println!("{json}");
         }
@@ -234,8 +235,9 @@ pub(super) async fn run_single_agent(cli: CliArgs, goal: &str) -> Result<()> {
                 }
                 AgentEvent::Checkpoint(_)
                 | AgentEvent::SnapshotTaken { .. }
-                | AgentEvent::PlanStepComplete { .. } => {
-                    // Checkpoint / snapshot / plan step: handled elsewhere
+                | AgentEvent::PlanStepComplete { .. }
+                | AgentEvent::StreamingEditProgress { .. } => {
+                    // Checkpoint / snapshot / plan step / streaming edit: handled elsewhere
                 }
             }
         }

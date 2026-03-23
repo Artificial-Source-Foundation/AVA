@@ -93,7 +93,8 @@ pub(crate) async fn run_worker(
             | AgentEvent::MCPToolsChanged { .. }
             | AgentEvent::Checkpoint(_)
             | AgentEvent::SnapshotTaken { .. }
-            | AgentEvent::PlanStepComplete { .. } => {}
+            | AgentEvent::PlanStepComplete { .. }
+            | AgentEvent::StreamingEditProgress { .. } => {}
         }
     }
 

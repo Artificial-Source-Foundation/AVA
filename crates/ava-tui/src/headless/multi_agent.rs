@@ -49,6 +49,7 @@ pub(super) async fn run_multi_agent(cli: CliArgs, goal: &str) -> Result<()> {
         worker_names: vec![],
         enabled_leads: vec![],
         lead_prompts: std::collections::HashMap::new(),
+        worker_provider: None,
     });
 
     let cancel = CancellationToken::new();

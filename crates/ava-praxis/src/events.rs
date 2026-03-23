@@ -149,6 +149,36 @@ pub enum PraxisEvent {
         succeeded: usize,
         failed: usize,
     },
+    // External CLI agent worker events
+    ExternalWorkerStarted {
+        worker_id: Uuid,
+        lead: String,
+        agent_name: String,
+        task_description: String,
+    },
+    ExternalWorkerText {
+        worker_id: Uuid,
+        content: String,
+    },
+    ExternalWorkerToolUse {
+        worker_id: Uuid,
+        tool_name: String,
+    },
+    ExternalWorkerThinking {
+        worker_id: Uuid,
+        content: String,
+    },
+    ExternalWorkerCompleted {
+        worker_id: Uuid,
+        success: bool,
+        session_id: Option<String>,
+        cost_usd: Option<f64>,
+        turns: usize,
+    },
+    ExternalWorkerFailed {
+        worker_id: Uuid,
+        error: String,
+    },
     // Scout events
     ScoutStarted {
         id: Uuid,

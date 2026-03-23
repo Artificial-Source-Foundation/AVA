@@ -79,6 +79,8 @@ pub struct AgentLoop {
     activated_rule_paths: std::sync::Mutex<HashSet<std::path::PathBuf>>,
     /// When false, skip on-demand project rule injection entirely.
     enable_dynamic_rules: bool,
+    /// Cached active tool definitions for this loop configuration.
+    cached_tool_defs: std::sync::Mutex<Option<Vec<ava_types::Tool>>>,
 }
 
 /// Configuration for a single agent loop run — turn limits, cost caps, and model identity.
@@ -262,6 +264,17 @@ pub enum AgentEvent {
     PlanStepComplete {
         step_id: String,
     },
+    /// A file edit tool is streaming its arguments (in-progress indicator).
+    StreamingEditProgress {
+        /// Tool call ID
+        call_id: String,
+        /// Name of the tool (write, edit, multiedit, apply_patch)
+        tool_name: String,
+        /// File path being edited (extracted from partial arguments if available)
+        file_path: Option<String>,
+        /// Approximate progress: bytes accumulated so far
+        bytes_received: usize,
+    },
 }
 
 impl AgentLoop {
@@ -291,6 +304,7 @@ impl AgentLoop {
             project_root,
             activated_rule_paths: std::sync::Mutex::new(HashSet::new()),
             enable_dynamic_rules,
+            cached_tool_defs: std::sync::Mutex::new(None),
         }
     }
 

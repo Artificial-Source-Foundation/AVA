@@ -3,6 +3,7 @@ mod stack_run;
 pub(crate) mod stack_tools;
 
 pub use stack_config::{AgentRunResult, AgentStackConfig};
+pub use stack_run::parse_model_spec;
 pub use stack_tools::{MCPServerInfo, McpServerStatus};
 
 use std::path::PathBuf;
@@ -34,12 +35,15 @@ use ava_tools::permission_middleware::{convert_tool_source, ApprovalBridge, Shar
 use ava_tools::registry::{ToolRegistry, ToolSource};
 use ava_types::{AvaError, PlanState, QueuedMessage, Result, ThinkingLevel, TodoState};
 use tokio::sync::{mpsc, RwLock};
+use tokio::time::{timeout, Duration};
 use tracing::{error, info, instrument, warn};
 
 use stack_tools::{
     build_tool_registry, build_tool_registry_with_plugins, init_mcp_with_disabled,
     resolve_workspace_roots, MCPRuntime,
 };
+
+const CONFIG_HOOK_TIMEOUT_MS: u64 = 150;
 
 pub struct AgentStack {
     pub router: Arc<ModelRouter>,
@@ -287,15 +291,26 @@ impl AgentStack {
         // never block startup on a plugin's config response.
         {
             let cfg_value = serde_json::to_value(&cfg).unwrap_or_default();
-            let hook_responses = plugin_manager
-                .lock()
-                .await
-                .trigger_hook(ava_plugin::HookEvent::Config, cfg_value)
-                .await;
-            for resp in hook_responses {
-                if let Some(err) = resp.error {
-                    warn!(plugin = resp.plugin_name, "config hook error: {err}");
+            match timeout(
+                Duration::from_millis(CONFIG_HOOK_TIMEOUT_MS),
+                plugin_manager
+                    .lock()
+                    .await
+                    .trigger_hook(ava_plugin::HookEvent::Config, cfg_value),
+            )
+            .await
+            {
+                Ok(hook_responses) => {
+                    for resp in hook_responses {
+                        if let Some(err) = resp.error {
+                            warn!(plugin = resp.plugin_name, "config hook error: {err}");
+                        }
+                    }
                 }
+                Err(_) => warn!(
+                    timeout_ms = CONFIG_HOOK_TIMEOUT_MS,
+                    "config hook timed out; continuing startup"
+                ),
             }
         }
 
@@ -313,7 +328,37 @@ impl AgentStack {
                 &effective_cwd,
             ),
             tool_source: None, // Set per-tool-call by middleware
-            glob_rules: ava_permissions::glob_rules::GlobRuleset::load_merged(&effective_cwd),
+            glob_rules: {
+                let mut ruleset =
+                    ava_permissions::glob_rules::GlobRuleset::load_merged(&effective_cwd);
+                // Merge path_rules from config.yaml (appended after permissions.toml rules,
+                // so permissions.toml takes priority via first-match-wins).
+                let config_rules = cfg
+                    .permissions
+                    .path_rules
+                    .iter()
+                    .filter_map(|r| {
+                        let action = match r.action.as_str() {
+                            "allow" => ava_permissions::glob_rules::GlobAction::Allow,
+                            "ask" => ava_permissions::glob_rules::GlobAction::Ask,
+                            "deny" => ava_permissions::glob_rules::GlobAction::Deny,
+                            other => {
+                                warn!(
+                                    "Unknown permission action '{}' for pattern '{}', skipping",
+                                    other, r.pattern
+                                );
+                                return None;
+                            }
+                        };
+                        Some(ava_permissions::glob_rules::GlobRule {
+                            pattern: r.pattern.clone(),
+                            action,
+                        })
+                    })
+                    .collect::<Vec<_>>();
+                ruleset.extend(config_rules);
+                ruleset
+            },
         }));
         let permission_inspector: Arc<dyn PermissionInspector> = Arc::new(DefaultInspector::new(
             PermissionSystem::load(effective_cwd.clone(), vec![]),
@@ -729,6 +774,11 @@ impl AgentStack {
     /// Get the list of discovered CLI agents (Claude Code, Gemini CLI, etc.)
     pub fn cli_agents(&self) -> &[ava_cli_providers::DiscoveredAgent] {
         &self.cli_agents
+    }
+
+    /// Get the sub-agent configuration loaded from agents.toml files.
+    pub fn agents_config(&self) -> &AgentsConfig {
+        &self.agents_config
     }
 
     // ========================================================================

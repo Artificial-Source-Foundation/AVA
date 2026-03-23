@@ -22,6 +22,29 @@ use crate::system_prompt::{build_system_prompt, provider_prompt_suffix};
 
 use super::response::parse_tool_calls;
 
+/// Tools that modify files — used to decide when to emit `StreamingEditProgress`.
+const EDIT_TOOL_NAMES: &[&str] = &["write", "edit", "multiedit", "apply_patch"];
+
+/// Extract a file path from partially-accumulated JSON arguments.
+///
+/// Looks for `"file_path":"..."` or `"path":"..."` patterns using simple string
+/// search (no JSON parser needed since the JSON may be incomplete).
+fn extract_file_path_from_partial(json: &str) -> Option<String> {
+    for key in &["file_path", "path"] {
+        let pattern = format!("\"{}\":\"", key);
+        if let Some(start) = json.find(&pattern) {
+            let value_start = start + pattern.len();
+            if let Some(end) = json[value_start..].find('"') {
+                let path = &json[value_start..value_start + end];
+                if !path.is_empty() {
+                    return Some(path.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
 fn estimate_tokens(text: &str) -> usize {
     ava_context::count_tokens_default(text)
 }
@@ -46,8 +69,9 @@ impl AgentLoop {
             custom.clone()
         } else {
             let native = self.llm.supports_tools();
+            let provider_kind = self.llm.provider_kind();
             let tool_defs = self.active_tool_defs_with_hooks().await;
-            build_system_prompt(&tool_defs, native)
+            build_system_prompt(&tool_defs, native, provider_kind, &self.config.model)
         };
         // Append provider-specific instructions (additive — does not replace the base prompt).
         let provider_kind = self.llm.provider_kind();
@@ -196,6 +220,14 @@ impl AgentLoop {
         let Some(ref pm) = self.plugin_manager.clone() else {
             return messages;
         };
+
+        if !pm
+            .lock()
+            .await
+            .has_hook_subscribers(ava_plugin::HookEvent::ChatMessagesTransform)
+        {
+            return messages;
+        }
 
         // Serialize messages to JSON for the hook.
         let json_messages: Vec<serde_json::Value> = messages
@@ -363,7 +395,31 @@ impl AgentLoop {
             }
             // Accumulate tool call fragments
             if let Some(ref tc) = chunk.tool_call {
+                let delta_len = tc.arguments_delta.as_ref().map_or(0, |d| d.len());
                 response::accumulate_tool_call(&mut accumulated_tool_calls, tc);
+
+                // Emit StreamingEditProgress for file-editing tools
+                if let Some(acc) = accumulated_tool_calls.iter().find(|a| a.index == tc.index) {
+                    if EDIT_TOOL_NAMES.contains(&acc.name.as_str()) {
+                        // First progress: as soon as we know it's an edit tool (even before file path)
+                        // Subsequent progress: every ~500 bytes of accumulated arguments
+                        let should_emit = acc.arguments_json.len() <= delta_len // first delta
+                            || (acc.arguments_json.len() > 100
+                                && acc.arguments_json.len() % 500 < delta_len.max(1));
+                        if should_emit {
+                            let file_path = extract_file_path_from_partial(&acc.arguments_json);
+                            Self::emit(
+                                event_tx,
+                                AgentEvent::StreamingEditProgress {
+                                    call_id: acc.id.clone(),
+                                    tool_name: acc.name.clone(),
+                                    file_path,
+                                    bytes_received: acc.arguments_json.len(),
+                                },
+                            );
+                        }
+                    }
+                }
             }
             // Capture usage (may arrive in message_start and message_delta)
             if let Some(ref usage) = chunk.usage {

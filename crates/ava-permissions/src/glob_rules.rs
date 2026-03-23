@@ -87,6 +87,17 @@ impl GlobRuleset {
         self.rules.is_empty()
     }
 
+    /// Returns a reference to the ordered list of rules.
+    pub fn rules(&self) -> &[GlobRule] {
+        &self.rules
+    }
+
+    /// Append additional rules to the end of the ruleset.
+    /// Since first match wins, existing rules take priority over appended ones.
+    pub fn extend(&mut self, rules: impl IntoIterator<Item = GlobRule>) {
+        self.rules.extend(rules);
+    }
+
     /// Load glob rules from a TOML file path. Returns empty ruleset on error.
     pub fn load_from(path: &Path) -> Self {
         let Ok(content) = std::fs::read_to_string(path) else {

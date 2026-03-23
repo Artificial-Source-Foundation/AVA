@@ -30,6 +30,9 @@ pub mod spec_workflow;
 pub mod worker;
 pub mod workflow;
 
+#[cfg(feature = "cli-providers")]
+pub mod external_worker;
+
 pub use acp::{AcpError, AcpMethod, AcpRequest, AcpResponse};
 pub use acp_handler::AcpHandler;
 pub use acp_transport::InProcessAcpTransport;
@@ -39,6 +42,8 @@ pub use board::{Board, BoardMember, BoardOpinion, BoardPersonality, BoardResult,
 pub use conflict::{ConflictDetector, ConflictReport, WorkerIntent};
 pub use director::{Director, DirectorConfig};
 pub use events::PraxisEvent;
+#[cfg(feature = "cli-providers")]
+pub use external_worker::ExternalWorker;
 pub use lead::Lead;
 pub use mailbox::{Mailbox, PeerMessage, PeerMessageKind};
 pub use plan::{ExecutionGroup, PlannerConfig, PraxisPlan, PraxisTask, TaskComplexity};

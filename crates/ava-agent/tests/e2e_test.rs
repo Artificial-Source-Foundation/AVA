@@ -175,6 +175,7 @@ async fn director_multi_agent_coordination() {
         worker_names: vec![],
         enabled_leads: vec![],
         lead_prompts: std::collections::HashMap::new(),
+        worker_provider: None,
     });
 
     let worker_a = director

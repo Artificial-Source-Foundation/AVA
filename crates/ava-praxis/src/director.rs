@@ -53,6 +53,9 @@ pub struct DirectorConfig {
     pub enabled_leads: Vec<Domain>,
     /// Custom system prompt overrides per lead domain.
     pub lead_prompts: HashMap<Domain, String>,
+    /// Optional separate provider for workers (cheaper/faster than the lead's provider).
+    /// When set, workers will use this provider instead of inheriting the lead's provider.
+    pub worker_provider: Option<Arc<dyn LLMProvider>>,
 }
 
 impl DirectorConfig {
@@ -112,14 +115,18 @@ impl Director {
                     .get(&domain)
                     .cloned()
                     .unwrap_or_default();
-                Lead::new(
+                let mut lead = Lead::new(
                     name,
                     domain.clone(),
                     config.provider_for(domain),
                     platform.clone(),
                 )
                 .with_worker_names(worker_names.clone())
-                .with_custom_prompt(custom_prompt)
+                .with_custom_prompt(custom_prompt);
+                if let Some(ref wp) = config.worker_provider {
+                    lead = lead.with_worker_provider(wp.clone());
+                }
+                lead
             })
             .collect();
 

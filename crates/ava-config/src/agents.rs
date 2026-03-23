@@ -305,6 +305,90 @@ pub fn default_agents() -> HashMap<String, AgentOverride> {
         },
     );
 
+    // Praxis multi-agent role templates.
+    // No default model values — users override via agents.toml:
+    //   [agents.director]
+    //   model = "anthropic/claude-opus-4"
+    //   [agents.scout]
+    //   model = "anthropic/claude-haiku-4.5"
+    agents.insert(
+        "director".into(),
+        AgentOverride {
+            prompt: Some(
+                "You are the Director of a multi-agent team. Analyze task complexity, \
+                 create plans, and coordinate domain-specific leads to deliver results."
+                    .into(),
+            ),
+            max_turns: Some(30),
+            ..Default::default()
+        },
+    );
+
+    agents.insert(
+        "scout".into(),
+        AgentOverride {
+            prompt: Some(
+                "You are a lightweight scout agent. Quickly investigate the codebase \
+                 using read-only tools and produce concise summaries. Be fast and cheap."
+                    .into(),
+            ),
+            max_turns: Some(5),
+            ..Default::default()
+        },
+    );
+
+    agents.insert(
+        "worker".into(),
+        AgentOverride {
+            prompt: Some(
+                "You are a Praxis worker. Execute the assigned coding task \
+                 efficiently using available tools. Focus on correctness and completeness."
+                    .into(),
+            ),
+            max_turns: Some(15),
+            ..Default::default()
+        },
+    );
+
+    agents.insert(
+        "frontend-lead".into(),
+        AgentOverride {
+            prompt: Some(
+                "You are the Frontend Lead. Coordinate frontend development tasks \
+                 including UI components, styling, and client-side logic."
+                    .into(),
+            ),
+            max_turns: Some(20),
+            ..Default::default()
+        },
+    );
+
+    agents.insert(
+        "backend-lead".into(),
+        AgentOverride {
+            prompt: Some(
+                "You are the Backend Lead. Coordinate backend development tasks \
+                 including APIs, data models, and server-side logic."
+                    .into(),
+            ),
+            max_turns: Some(20),
+            ..Default::default()
+        },
+    );
+
+    agents.insert(
+        "qa-lead".into(),
+        AgentOverride {
+            prompt: Some(
+                "You are the QA Lead. Coordinate testing, code review, and quality \
+                 assurance tasks. Ensure correctness and catch regressions."
+                    .into(),
+            ),
+            max_turns: Some(20),
+            ..Default::default()
+        },
+    );
+
     agents
 }
 

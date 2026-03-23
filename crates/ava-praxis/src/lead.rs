@@ -37,6 +37,9 @@ pub struct Lead {
     pub(crate) domain: Domain,
     pub(crate) workers: Vec<Worker>,
     provider: Arc<dyn LLMProvider>,
+    /// Optional separate provider for workers (cheaper/faster than the lead's provider).
+    /// When set, `build_worker()` uses this instead of `self.provider`.
+    worker_provider: Option<Arc<dyn LLMProvider>>,
     platform: Option<Arc<StandardPlatform>>,
     /// Custom worker names pool (empty = use built-in default).
     worker_names: Vec<String>,
@@ -56,6 +59,7 @@ impl Lead {
             domain,
             workers: Vec::new(),
             provider,
+            worker_provider: None,
             platform,
             worker_names: Vec::new(),
             custom_prompt: String::new(),
@@ -65,6 +69,12 @@ impl Lead {
     /// Create a new lead with custom worker names.
     pub fn with_worker_names(mut self, names: Vec<String>) -> Self {
         self.worker_names = names;
+        self
+    }
+
+    /// Set a separate provider for workers (cheaper/faster than the lead's provider).
+    pub fn with_worker_provider(mut self, provider: Arc<dyn LLMProvider>) -> Self {
+        self.worker_provider = Some(provider);
         self
     }
 
@@ -382,7 +392,13 @@ impl Lead {
     }
 
     pub(crate) fn build_worker(&self, task: Task, worker_budget: Budget) -> Result<Worker> {
-        let model_name = self.provider.model_name().to_string();
+        // Use the worker-specific provider if configured, otherwise fall back to the lead's provider.
+        let effective_provider = self
+            .worker_provider
+            .as_ref()
+            .unwrap_or(&self.provider)
+            .clone();
+        let model_name = effective_provider.model_name().to_string();
         let worker_id = Uuid::new_v4();
 
         // Pick a worker name from the custom pool or fall back to the built-in default
@@ -409,7 +425,7 @@ impl Lead {
         }
 
         let agent = AgentLoop::new(
-            Box::new(SharedProvider::new(self.provider.clone())),
+            Box::new(SharedProvider::new(effective_provider.clone())),
             registry,
             ContextManager::new(worker_budget.max_tokens),
             AgentConfig {
@@ -440,7 +456,7 @@ impl Lead {
             agent: Arc::new(Mutex::new(agent)),
             budget: worker_budget,
             task,
-            provider: self.provider.clone(),
+            provider: effective_provider,
         })
     }
 }

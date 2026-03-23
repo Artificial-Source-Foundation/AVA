@@ -38,6 +38,7 @@ fn director_with_default(provider: Arc<dyn LLMProvider>) -> Director {
         worker_names: vec![],
         enabled_leads: vec![],
         lead_prompts: HashMap::new(),
+        worker_provider: None,
     })
 }
 
@@ -52,6 +53,7 @@ fn director_with_platform(provider: Arc<dyn LLMProvider>) -> Director {
         worker_names: vec![],
         enabled_leads: vec![],
         lead_prompts: HashMap::new(),
+        worker_provider: None,
     })
 }
 
@@ -177,6 +179,7 @@ fn worker_spawning_uses_domain_provider_model_name() {
         worker_names: vec![],
         enabled_leads: vec![],
         lead_prompts: HashMap::new(),
+        worker_provider: None,
     });
 
     let worker = director
@@ -358,6 +361,7 @@ async fn one_worker_failure_isolated_from_successful_worker() {
         worker_names: vec![],
         enabled_leads: vec![],
         lead_prompts: HashMap::new(),
+        worker_provider: None,
     });
 
     let good_worker = director

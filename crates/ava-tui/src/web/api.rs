@@ -119,6 +119,12 @@ pub enum WebAgentEvent {
     TodoUpdate { todos: Vec<TodoItemFrontend> },
     #[serde(rename = "plan_step_complete")]
     PlanStepComplete { step_id: String },
+    #[serde(rename = "streaming_edit_progress")]
+    StreamingEditProgress {
+        tool_name: String,
+        file_path: Option<String>,
+        bytes_received: usize,
+    },
 }
 
 /// A single todo item for the frontend.
@@ -264,6 +270,16 @@ pub fn convert_agent_event(event: &ava_agent::agent_loop::AgentEvent) -> Option<
         }),
         BE::PlanStepComplete { step_id } => Some(WebAgentEvent::PlanStepComplete {
             step_id: step_id.clone(),
+        }),
+        BE::StreamingEditProgress {
+            tool_name,
+            file_path,
+            bytes_received,
+            ..
+        } => Some(WebAgentEvent::StreamingEditProgress {
+            tool_name: tool_name.clone(),
+            file_path: file_path.clone(),
+            bytes_received: *bytes_received,
         }),
         // ToolStats, DiffPreview, SubAgentComplete have no direct frontend representation.
         _ => None,

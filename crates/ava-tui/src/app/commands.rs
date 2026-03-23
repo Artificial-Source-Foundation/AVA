@@ -369,13 +369,51 @@ impl App {
                 None
             }
             "/bookmark" | "/bm" => self.handle_bookmark_command(arg),
-            "/permissions" => {
-                self.state.permission.permission_level =
-                    self.state.permission.permission_level.toggle();
-                let label = self.state.permission.permission_level.label();
-                self.set_status(format!("Permissions: {label}"), StatusLevel::Info);
-                None
-            }
+            "/permissions" => match arg {
+                Some("list" | "rules") => {
+                    let cwd = std::env::current_dir().unwrap_or_default();
+                    let ruleset = ava_permissions::glob_rules::GlobRuleset::load_merged(&cwd);
+                    let rules = ruleset.rules();
+                    let content = if rules.is_empty() {
+                        "No glob permission rules active.\n\n\
+                         Define rules in:\n  \
+                         ~/.ava/permissions.toml   (global)\n  \
+                         .ava/permissions.toml     (project)\n  \
+                         ~/.ava/config.yaml        (permissions.path_rules)"
+                            .to_string()
+                    } else {
+                        let mut lines = vec![format!("{} active path rules:\n", rules.len())];
+                        for (i, rule) in rules.iter().enumerate() {
+                            let action = match rule.action {
+                                ava_permissions::glob_rules::GlobAction::Allow => "allow",
+                                ava_permissions::glob_rules::GlobAction::Ask => "ask",
+                                ava_permissions::glob_rules::GlobAction::Deny => "deny",
+                            };
+                            lines.push(format!("  {}. {} -> {}", i + 1, rule.pattern, action));
+                        }
+                        lines.push(String::new());
+                        lines.push("Sources (in priority order):".to_string());
+                        lines.push("  1. ~/.ava/permissions.toml (global)".to_string());
+                        lines.push("  2. .ava/permissions.toml  (project, allow->ask)".to_string());
+                        lines.push("  3. config.yaml permissions.path_rules".to_string());
+                        lines.join("\n")
+                    };
+                    self.state.active_modal = Some(ModalType::InfoPanel);
+                    self.state.info_panel = Some(super::InfoPanelState {
+                        title: "Permission Rules".to_string(),
+                        content,
+                        scroll: 0,
+                    });
+                    None
+                }
+                _ => {
+                    self.state.permission.permission_level =
+                        self.state.permission.permission_level.toggle();
+                    let label = self.state.permission.permission_level.label();
+                    self.set_status(format!("Permissions: {label}"), StatusLevel::Info);
+                    None
+                }
+            },
             "/theme" => {
                 match arg {
                     Some(name) => {
@@ -442,7 +480,7 @@ impl App {
 /model [provider/model]  \u{2014} show or switch model (alias: /models)
 /think [show|hide]       \u{2014} toggle thinking block visibility
 /theme [name]            \u{2014} cycle or switch theme (default/dracula/nord)
-/permissions             \u{2014} toggle permission level
+/permissions [list]      \u{2014} toggle level or list glob rules
 /connect [provider]      \u{2014} add provider credentials
 /providers               \u{2014} show provider status
 /disconnect <provider>   \u{2014} remove provider credentials

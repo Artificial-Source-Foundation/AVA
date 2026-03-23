@@ -262,6 +262,26 @@ impl Default for ClaudeCodeConfig {
     }
 }
 
+/// A single path-based permission rule defined in config.yaml.
+///
+/// This is a config-level mirror of `ava_permissions::glob_rules::GlobRule`
+/// so that `ava-config` does not depend on `ava-permissions`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PathRule {
+    /// Glob pattern (e.g., `*.env`, `src/**/*.rs`, `/etc/*`).
+    pub pattern: String,
+    /// Action to take when the pattern matches: `"allow"`, `"ask"`, or `"deny"`.
+    pub action: String,
+}
+
+/// Permission rules that can be defined in config.yaml alongside permissions.toml.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct PermissionsConfig {
+    /// Glob-based path rules. First match wins. Merged after permissions.toml rules.
+    #[serde(default)]
+    pub path_rules: Vec<PathRule>,
+}
+
 /// Main configuration struct
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Config {
@@ -292,6 +312,19 @@ pub struct Config {
     /// Paths may be absolute or relative to the active working directory.
     #[serde(default)]
     pub workspace_roots: Vec<String>,
+    /// Path-based permission rules (merged with permissions.toml).
+    ///
+    /// Example in config.yaml:
+    /// ```yaml
+    /// permissions:
+    ///   path_rules:
+    ///     - pattern: "*.env"
+    ///       action: deny
+    ///     - pattern: "src/**/*.rs"
+    ///       action: allow
+    /// ```
+    #[serde(default)]
+    pub permissions: PermissionsConfig,
 }
 
 /// Per-project ephemeral state (stored in `.ava/state.json` in the project root).

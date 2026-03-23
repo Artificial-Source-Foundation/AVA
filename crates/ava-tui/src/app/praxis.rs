@@ -1,7 +1,8 @@
 use super::*;
 use crate::state::messages::UiMessage;
 use crate::state::praxis::{PraxisTaskStatus, PraxisWorkerState};
-use ava_praxis::{Budget, Director, DirectorConfig, PraxisEvent};
+use ava_agent::stack::parse_model_spec;
+use ava_praxis::{Budget, Director, DirectorConfig, Domain, PraxisEvent};
 use std::collections::HashMap;
 
 impl App {
@@ -35,10 +36,23 @@ impl App {
         let max_turns = self.state.agent.max_turns;
         let max_budget_usd = self.state.agent.max_budget_usd;
 
+        // Snapshot agents.toml config for the async task.
+        let agents_config = stack.agents_config().clone();
+
         tokio::spawn(async move {
+            // Resolve the director provider: check agents.toml [agents.director]
+            // for a model override, otherwise use the TUI's current provider/model.
+            let director_resolved = agents_config.get_agent("director");
+            let (dir_provider_name, dir_model_name) =
+                if let Some(ref model_spec) = director_resolved.model {
+                    parse_model_spec(model_spec)
+                } else {
+                    (provider_name.clone(), model_name.clone())
+                };
+
             let provider = match stack
                 .router
-                .route_required(&provider_name, &model_name)
+                .route_required(&dir_provider_name, &dir_model_name)
                 .await
             {
                 Ok(provider) => provider,
@@ -51,17 +65,80 @@ impl App {
                 }
             };
 
+            // Resolve per-lead domain providers from agents.toml.
+            let lead_domain_map: &[(&str, Domain)] = &[
+                ("frontend-lead", Domain::Frontend),
+                ("backend-lead", Domain::Backend),
+                ("qa-lead", Domain::QA),
+                ("research-lead", Domain::Research),
+                ("debug-lead", Domain::Debug),
+                ("fullstack-lead", Domain::Fullstack),
+                ("devops-lead", Domain::DevOps),
+            ];
+
+            let mut domain_providers = HashMap::new();
+            let mut lead_prompts = HashMap::new();
+            for &(agent_name, ref domain) in lead_domain_map {
+                let resolved = agents_config.get_agent(agent_name);
+                if let Some(ref model_spec) = resolved.model {
+                    let (prov, model) = parse_model_spec(model_spec);
+                    if let Ok(p) = stack.router.route_required(&prov, &model).await {
+                        domain_providers.insert(domain.clone(), p);
+                    } else {
+                        tracing::warn!(
+                            agent = agent_name,
+                            model_spec,
+                            "failed to resolve lead model override, using default"
+                        );
+                    }
+                }
+                if let Some(ref prompt) = resolved.prompt {
+                    lead_prompts.insert(domain.clone(), prompt.clone());
+                }
+            }
+
+            // Resolve scout provider from agents.toml [agents.scout].
+            let scout_resolved = agents_config.get_agent("scout");
+            let scout_provider = if let Some(ref model_spec) = scout_resolved.model {
+                let (prov, model) = parse_model_spec(model_spec);
+                match stack.router.route_required(&prov, &model).await {
+                    Ok(p) => Some(p),
+                    Err(e) => {
+                        tracing::warn!(model_spec, error = %e, "failed to resolve scout model override");
+                        None
+                    }
+                }
+            } else {
+                None
+            };
+
+            // Resolve worker provider from agents.toml [agents.worker].
+            let worker_resolved = agents_config.get_agent("worker");
+            let worker_provider = if let Some(ref model_spec) = worker_resolved.model {
+                let (prov, model) = parse_model_spec(model_spec);
+                match stack.router.route_required(&prov, &model).await {
+                    Ok(p) => Some(p),
+                    Err(e) => {
+                        tracing::warn!(model_spec, error = %e, "failed to resolve worker model override");
+                        None
+                    }
+                }
+            } else {
+                None
+            };
+
             let platform = Arc::new(ava_platform::StandardPlatform);
             let mut director = Director::new(DirectorConfig {
                 budget: Budget::interactive(max_turns, max_budget_usd),
                 default_provider: provider,
-                domain_providers: HashMap::new(),
+                domain_providers,
                 platform: Some(platform),
-                scout_provider: None,
+                scout_provider,
                 board_providers: vec![],
                 worker_names: vec![],
                 enabled_leads: vec![],
-                lead_prompts: std::collections::HashMap::new(),
+                lead_prompts,
+                worker_provider,
             });
 
             let (tx, mut rx) = mpsc::unbounded_channel();

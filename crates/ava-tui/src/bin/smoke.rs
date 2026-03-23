@@ -67,7 +67,8 @@ async fn main() -> Result<()> {
             | AgentEvent::MCPToolsChanged { .. }
             | AgentEvent::Checkpoint(_)
             | AgentEvent::SnapshotTaken { .. }
-            | AgentEvent::PlanStepComplete { .. } => {}
+            | AgentEvent::PlanStepComplete { .. }
+            | AgentEvent::StreamingEditProgress { .. } => {}
             AgentEvent::Error(e) => {
                 eprintln!("[error: {e}]");
                 break;

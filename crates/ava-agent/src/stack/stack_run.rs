@@ -855,7 +855,7 @@ impl AgentTaskSpawner {
 /// - `provider/model` -> ("provider", "model")
 /// - `provider/org/model` -> ("provider", "org/model") (for OpenRouter-style specs)
 /// - `model` (no slash) -> uses model catalog to infer provider, or defaults to "openrouter"
-pub(crate) fn parse_model_spec(spec: &str) -> (String, String) {
+pub fn parse_model_spec(spec: &str) -> (String, String) {
     if let Some(idx) = spec.find('/') {
         let provider = &spec[..idx];
         let model = &spec[idx + 1..];

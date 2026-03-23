@@ -439,6 +439,21 @@ impl App {
                 // Progress tracking is handled by the web frontend via
                 // WebSocket events. The TUI logs the event for diagnostics.
             }
+            ava_agent::AgentEvent::StreamingEditProgress {
+                tool_name,
+                file_path,
+                bytes_received,
+                ..
+            } => {
+                if let Some(path) = file_path {
+                    self.set_status(
+                        format!("{} {}... ({} bytes)", tool_name, path, bytes_received),
+                        StatusLevel::Info,
+                    );
+                } else {
+                    self.set_status(format!("{}...", tool_name), StatusLevel::Info);
+                }
+            }
             ava_agent::AgentEvent::Error(err) => {
                 info!(error = %err, "TUI received AgentEvent::Error");
                 self.finalize_assistant_stream();

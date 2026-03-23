@@ -10,6 +10,8 @@ use crate::pool::ConnectionPool;
 use crate::provider::LLMProvider;
 
 pub mod anthropic;
+pub mod azure;
+pub mod bedrock;
 pub mod copilot;
 pub mod gemini;
 pub mod inception;
@@ -19,6 +21,8 @@ pub mod openai;
 pub mod openrouter;
 
 pub use anthropic::AnthropicProvider;
+pub use azure::AzureOpenAIProvider;
+pub use bedrock::BedrockProvider;
 pub use copilot::CopilotProvider;
 pub use gemini::GeminiProvider;
 pub use inception::InceptionProvider;

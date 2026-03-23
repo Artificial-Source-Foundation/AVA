@@ -779,9 +779,9 @@ mod tests {
 
     #[test]
     fn format_iso8601_known_date() {
-        // 2026-03-22T00:00:00Z = 1774051200 seconds since epoch
+        // 2026-03-21T00:00:00Z = 1774051200 seconds since epoch
         let result = format_iso8601(1774051200);
-        assert_eq!(result, "20260322T000000Z");
+        assert_eq!(result, "20260321T000000Z");
     }
 
     #[test]

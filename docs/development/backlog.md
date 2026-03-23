@@ -53,6 +53,7 @@ Tool surface policy: default tools are now 9 (`read`, `write`, `edit`, `bash`, `
 - **Copilot verification cleanup** — `auth test copilot` now recognizes OAuth credentials, installed AVA binary was refreshed from the current repo build, and benchmark reporting is more useful for flaky external-provider runs
 - **Fast-path benchmark controls** — AVA `--fast` now isolates prompt/indexing overhead during headless benchmarking, and runtime project instruction loading no longer pulls in `CLAUDE.md`
 - **Hybrid instruction loading** — startup prompt now stays AGENTS-first while `.ava/rules` load on demand after touched-file detection, reducing simple-task prompt bloat
+- **Second lean-runtime pass** — on-demand rules now also wake up from search results, prompt token telemetry is logged, and startup hot paths are tighter around plugin/memory overhead
 
 ## Execution Order
 
@@ -75,6 +76,13 @@ Tool surface policy: default tools are now 9 (`read`, `write`, `edit`, `bash`, `
 6. **Plugin Phase 3** — OpenCode compatibility bridge, plugin marketplace.
 7. **Message revert** — undo specific tool call results. Important for trust.
 8. **Shared daemon for multi-project** — Single background process owns expensive shared resources (LLM connections, credential store, model registry, global memory). Each project gets a lightweight agent context (codebase index, MCP, session, permissions). Reduces RAM from ~30MB×N to ~30MB+5MB×N for N projects. Lock file at `~/.ava/daemon.lock` with `{ pid, port }`. CLI/desktop detects running daemon and connects instead of spawning new process. Similar to Docker daemon / VS Code server architecture.
+
+### Release MVP (do once product is ready)
+
+9. **Tauri code signing** — Run `npx tauri signer generate -w ~/.tauri/ava.key`, add public key to `tauri.conf.json` `plugins.updater.pubkey`, add `TAURI_SIGNING_PRIVATE_KEY` + `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` as GitHub Actions secrets. Required for desktop auto-updates to work.
+10. **First GitHub Release** — Tag `v2.2.0`, push tag to trigger release workflow. Produces CLI binaries (5 targets), desktop installers (.deb/.AppImage/.dmg/.msi), and `latest.json` for the Tauri updater. After this, `curl | sh` installer and `ava update` work.
+11. **Homebrew formula** — `brew install ava` for macOS users. Submit to homebrew-core or host a tap at `ASF-GROUP/homebrew-ava`.
+12. **npm wrapper** — `npm install -g @ava-ai/cli` that downloads the prebuilt binary. No Node runtime needed at execution time.
 
 ### Platform Verification
 

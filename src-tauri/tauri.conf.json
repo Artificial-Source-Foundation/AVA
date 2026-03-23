@@ -26,6 +26,12 @@
       "csp": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' asset: https://asset.localhost data:; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self' ipc: http://ipc.localhost https://*.anthropic.com https://openrouter.ai https://api.openai.com https://auth.openai.com https://chatgpt.com https://generativelanguage.googleapis.com https://api.deepseek.com https://github.com"
     }
   },
+  "plugins": {
+    "updater": {
+      "endpoints": ["https://github.com/ASF-GROUP/AVA/releases/latest/download/latest.json"],
+      "pubkey": ""
+    }
+  },
   "bundle": {
     "active": true,
     "targets": "all",

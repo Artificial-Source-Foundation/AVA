@@ -26,6 +26,7 @@ tauri-plugin-shell = "2"
 tauri-plugin-fs = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-window-state = "2"
+tauri-plugin-updater = "2"
 portable-pty = "0.8"
 uuid = { version = "1", features = ["v4"] }
 serde = { version = "1", features = ["derive"] }

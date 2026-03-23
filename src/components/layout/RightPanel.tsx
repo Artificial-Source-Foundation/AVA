@@ -272,7 +272,7 @@ export function RightPanel(props: RightPanelProps) {
             </Show>
             <Show when={rightPanelTab() === 'todos'}>
               <PanelErrorBoundary panelName="Todos">
-                <TodoPanel />
+                <TodoPanel todos={rustAgent.todos()} />
               </PanelErrorBoundary>
             </Show>
             <Show when={rightPanelTab() === 'changes'}>

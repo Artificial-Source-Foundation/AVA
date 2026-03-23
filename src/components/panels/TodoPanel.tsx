@@ -72,10 +72,14 @@ const TodoRow: Component<TodoRowProps> = (props) => {
 
 // ── Main panel ───────────────────────────────────────────────────────────────
 
-export const TodoPanel: Component = () => {
-  const rustAgent = useRustAgent()
+interface TodoPanelProps {
+  todos?: TodoItem[]
+}
 
-  const todos = (): TodoItem[] => rustAgent.todos()
+export const TodoPanel: Component<TodoPanelProps> = (props) => {
+  // Use passed todos if available, otherwise fall back to own useRustAgent
+  const rustAgent = props.todos ? null : useRustAgent()
+  const todos = (): TodoItem[] => props.todos ?? rustAgent?.todos() ?? []
 
   const incompleteCount = createMemo(
     () => todos().filter((t) => t.status === 'pending' || t.status === 'in_progress').length

@@ -34,6 +34,10 @@ export interface ThinkingSegment {
   toolCallIds: string[]
 }
 
+// Module-level shared signal for todos — all useRustAgent instances share this
+// so TodoPanel can read todos set by the agent event handler.
+const [todos, setTodos] = createSignal<TodoItem[]>([])
+
 export function useRustAgent() {
   const [isRunning, setIsRunning] = createSignal(false)
   const [streamingContent, setStreamingContent] = createSignal('')
@@ -52,8 +56,7 @@ export function useRustAgent() {
   const [pendingPlan, setPendingPlan] = createSignal<PlanData | null>(null)
   // Interleaved thinking segments: each entry is a block of thinking + the tool calls that followed
   const [thinkingSegments, setThinkingSegments] = createSignal<ThinkingSegment[]>([])
-  // Current todo list — updated whenever the agent calls todo_write
-  const [todos, setTodos] = createSignal<TodoItem[]>([])
+  // Current todo list — uses module-level signal so all useRustAgent instances share it
 
   let unlisten: UnlistenFn | null = null
   let eventSocket: WebSocket | null = null

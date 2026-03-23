@@ -77,6 +77,7 @@ export const DEFAULT_BEHAVIOR: BehaviorSettings = {
   fileWatcher: false,
   voiceDeviceId: '',
   clipboardWatcher: false,
+  updateCheck: true,
 }
 
 export const DEFAULT_NOTIFICATIONS: NotificationSettings = {

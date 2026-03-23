@@ -116,6 +116,7 @@ export interface BehaviorSettings {
   fileWatcher: boolean // Watch project files for AI comments (// AI!, // AI?)
   voiceDeviceId: string // Preferred audio input device ('' = system default)
   clipboardWatcher: boolean // Detect clipboard changes with code or LLM output
+  updateCheck: boolean // Check for updates automatically on startup
 }
 
 export interface NotificationSettings {

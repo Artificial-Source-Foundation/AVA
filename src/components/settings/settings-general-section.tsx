@@ -170,7 +170,7 @@ export const GeneralSection: Component = () => {
         </div>
         <div class="pt-3">
           <span class="text-[var(--settings-text-input)] font-mono text-[var(--gray-8)]">
-            AVA v0.1.0-alpha
+            AVA v2.1.0
           </span>
         </div>
       </SettingsCard>

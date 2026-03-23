@@ -149,3 +149,55 @@ jobs:
           releaseDraft: true
           prerelease: false
           args: --target ${{ matrix.target }}
+
+  # ---------------------------------------------------------------------------
+  # Job 3: Generate latest.json for Tauri auto-updater
+  # ---------------------------------------------------------------------------
+  updater-json:
+    name: Generate latest.json
+    needs: [desktop]
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate latest.json
+        shell: bash
+        run: |
+          VERSION="${{ github.ref_name }}"
+          PUB_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          REPO="ASF-GROUP/AVA"
+          BASE_URL="https://github.com/${REPO}/releases/download/${VERSION}"
+
+          cat > latest.json <<EOF
+          {
+            "version": "${VERSION}",
+            "notes": "AVA ${VERSION} — see release page for details.",
+            "pub_date": "${PUB_DATE}",
+            "platforms": {
+              "linux-x86_64": {
+                "signature": "",
+                "url": "${BASE_URL}/ava_${VERSION#v}_amd64.AppImage.tar.gz"
+              },
+              "darwin-aarch64": {
+                "signature": "",
+                "url": "${BASE_URL}/AVA.app.tar.gz"
+              },
+              "darwin-x86_64": {
+                "signature": "",
+                "url": "${BASE_URL}/AVA.app.tar.gz"
+              },
+              "windows-x86_64": {
+                "signature": "",
+                "url": "${BASE_URL}/AVA_${VERSION#v}_x64-setup.nsis.zip"
+              }
+            }
+          }
+          EOF
+
+      - name: Upload latest.json
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          files: latest.json
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

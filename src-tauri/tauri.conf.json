@@ -29,7 +29,7 @@
   "plugins": {
     "updater": {
       "endpoints": ["https://github.com/ASF-GROUP/AVA/releases/latest/download/latest.json"],
-      "pubkey": ""
+      "pubkey": "GENERATE_WITH: npx tauri signer generate -w ~/.tauri/ava.key"
     }
   },
   "bundle": {

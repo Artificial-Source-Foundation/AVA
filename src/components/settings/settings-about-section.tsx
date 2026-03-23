@@ -1,13 +1,30 @@
-import { ExternalLink } from 'lucide-solid'
-import { type Component, For, Show } from 'solid-js'
+import { ExternalLink, RefreshCw } from 'lucide-solid'
+import { type Component, createResource, For, Show } from 'solid-js'
+import { apiInvoke } from '../../lib/api-client'
 import { useSettings } from '../../stores/settings'
+
+interface HealthResponse {
+  cwd: string
+  status: string
+  version: string
+}
+
+async function fetchVersion(): Promise<string> {
+  try {
+    const health = await apiInvoke<HealthResponse>('health')
+    return health.version
+  } catch {
+    return '2.1.0'
+  }
+}
 
 export const AboutSection: Component = () => {
   const { settings, updateSettings } = useSettings()
+  const [version, { refetch }] = createResource(fetchVersion)
 
   const info: [string, string][] = [
     ['Runtime', 'Tauri v2 + SolidJS'],
-    ['Language', 'TypeScript (strict)'],
+    ['Backend', 'Rust (21 crates)'],
     ['License', 'MIT'],
     ['Platform', 'Linux / macOS / Windows'],
   ]
@@ -17,11 +34,21 @@ export const AboutSection: Component = () => {
       <div>
         <h3 class="text-sm font-semibold text-[var(--text-primary)]">AVA</h3>
         <p class="text-xs text-[var(--text-muted)] mt-1">
-          Desktop AI coding app with a virtual dev team and community plugins.
+          AI dev team — lean by default, infinitely extensible
         </p>
-        <span class="inline-block mt-2 px-2 py-0.5 text-[var(--settings-text-badge)] font-mono text-[var(--accent)] bg-[var(--accent-subtle)] rounded-[var(--radius-sm)]">
-          v0.1.0-alpha
-        </span>
+        <div class="flex items-center gap-2 mt-2">
+          <span class="inline-block px-2 py-0.5 text-[var(--settings-text-badge)] font-mono text-[var(--accent)] bg-[var(--accent-subtle)] rounded-[var(--radius-sm)]">
+            v{version() ?? '...'}
+          </span>
+          <button
+            type="button"
+            onClick={() => refetch()}
+            class="p-1 text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors rounded"
+            title="Refresh version"
+          >
+            <RefreshCw class="w-3 h-3" />
+          </button>
+        </div>
       </div>
 
       <div class="space-y-0.5">
@@ -36,7 +63,7 @@ export const AboutSection: Component = () => {
       </div>
 
       <a
-        href="https://github.com/ava-ai/ava"
+        href="https://github.com/ASF-GROUP/AVA"
         target="_blank"
         rel="noopener noreferrer"
         class="inline-flex items-center gap-1.5 text-xs text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors"

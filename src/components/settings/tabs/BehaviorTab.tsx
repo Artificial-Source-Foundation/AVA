@@ -5,7 +5,7 @@
  * code blocks (lineNumbers, wordWrap), and notifications.
  */
 
-import { Bell, Code2, Keyboard, MessageCircle, Wrench } from 'lucide-solid'
+import { Bell, Code2, Download, Keyboard, MessageCircle, Wrench } from 'lucide-solid'
 import { type Component, Show } from 'solid-js'
 import type { SendKey, ToolResponseStyle } from '../../../stores/settings'
 import { useSettings } from '../../../stores/settings'
@@ -115,6 +115,15 @@ export const BehaviorTab: Component = () => {
             </button>
           </div>
         </div>
+      </SettingsCard>
+
+      <SettingsCard icon={Download} title="Updates" description="Automatic update behavior">
+        <ToggleRow
+          label="Auto-update"
+          description="Check for updates automatically on startup"
+          checked={settings().behavior.updateCheck !== false}
+          onChange={(v) => updateBehavior({ updateCheck: v })}
+        />
       </SettingsCard>
 
       <SettingsCard icon={Bell} title="Notifications" description="Desktop and sound alerts">

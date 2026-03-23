@@ -238,9 +238,22 @@ export interface PlanData {
   codename?: string
 }
 
+export interface PlanSummary {
+  filename: string
+  codename: string | null
+  summary: string
+  stepCount: number
+  created: string
+}
+
 export interface PlanCreatedEvent {
   type: 'plan_created'
   plan: PlanData
+}
+
+export interface PlanStepCompleteEvent {
+  type: 'plan_step_complete'
+  step_id: string
 }
 
 export type PlanResponse = 'approved' | 'rejected' | 'modified'
@@ -295,6 +308,7 @@ export type AgentEvent =
   | ApprovalRequestEvent
   | QuestionRequestEvent
   | PlanCreatedEvent
+  | PlanStepCompleteEvent
   | TodoUpdateEvent
   | PraxisEvent
 
@@ -448,6 +462,13 @@ export interface CurrentModel {
 
 export interface ProviderInfo {
   name: string
+}
+
+export interface CLIAgentInfo {
+  name: string
+  binary: string
+  version: string
+  installed: boolean
 }
 
 export interface AgentToolInfo {

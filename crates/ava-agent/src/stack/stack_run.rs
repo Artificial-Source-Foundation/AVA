@@ -203,16 +203,31 @@ impl AgentStack {
             .resolve(&resolved_provider_name, provider.model_name());
         let plan_mode = *self.plan_mode.read().await;
         let mode_suffix = self.mode_prompt_suffix.read().await.clone();
+        // Consume any pending plan context (one-shot: only applies to this run).
+        let plan_context = self.plan_context.write().await.take();
 
         // Build system prompt suffix: mode instructions + project instructions.
         // Uses spawn_blocking internally to avoid blocking the async executor
         // on synchronous file I/O while reading instruction files.
-        let system_prompt_suffix = crate::instruction_resolver::build_system_prompt_suffix_async(
-            mode_suffix,
-            provider.model_name().to_string(),
-            cfg.instructions.clone(),
-        )
-        .await;
+        let mut system_prompt_suffix =
+            crate::instruction_resolver::build_system_prompt_suffix_async(
+                mode_suffix,
+                provider.model_name().to_string(),
+                cfg.instructions.clone(),
+            )
+            .await;
+
+        // Append approved plan context so the agent knows which steps to follow.
+        if let Some(plan) = plan_context {
+            let plan_section = format!(
+                "\n\n## Approved Plan\n\
+                 Follow this plan step by step. Mark each step as complete when done.\n\n{plan}"
+            );
+            match system_prompt_suffix.as_mut() {
+                Some(suffix) => suffix.push_str(&plan_section),
+                None => system_prompt_suffix = Some(plan_section),
+            }
+        }
 
         // Look up the model's actual context window from the compiled-in registry.
         // This drives context compaction thresholds and ensures large-context models

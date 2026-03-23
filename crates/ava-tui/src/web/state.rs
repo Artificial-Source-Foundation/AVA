@@ -61,6 +61,8 @@ pub enum WebEvent {
     },
     /// Updated todo list after a `todo_write` tool call.
     TodoUpdate { todos: Vec<TodoItemPayload> },
+    /// A plan step was completed by the agent.
+    PlanStepComplete { step_id: String },
 }
 
 /// A single todo item for the frontend.

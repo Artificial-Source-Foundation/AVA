@@ -102,10 +102,15 @@ pub struct AgentStack {
     /// Set to `true` before the background init task is spawned so multiple
     /// concurrent first-`run()` calls don't double-init.
     mcp_init_done: Arc<AtomicBool>,
+    /// Approved plan to inject as system context for the next run.
+    /// Consumed (taken) at the start of each `run()` call so it only applies once.
+    pub plan_context: RwLock<Option<String>>,
     /// Shared handle for persistent file edit backups. Populated with the
     /// session ID when `run()` starts so that write/edit tools can save
     /// pre-mutation snapshots to `~/.ava/file-history/`.
     file_backup_session: FileBackupSession,
+    /// Discovered CLI agents (Claude Code, Gemini CLI, etc.) found on PATH.
+    cli_agents: Vec<ava_cli_providers::DiscoveredAgent>,
 }
 
 impl AgentStack {
@@ -248,6 +253,23 @@ impl AgentStack {
         }
         let plugin_manager = Arc::new(tokio::sync::Mutex::new(plugin_mgr));
 
+        // Discover installed CLI agents and register the factory with the router
+        // so that `provider="cli", model="claude-code"` routes work.
+        let (cli_agents, cli_factory) =
+            ava_cli_providers::discover_and_create_factory(config.yolo).await;
+        if !cli_agents.is_empty() {
+            info!(
+                "Discovered {} CLI agents: {}",
+                cli_agents.len(),
+                cli_agents
+                    .iter()
+                    .map(|a| format!("{} v{}", a.name, a.version))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+            router.register_factory(Arc::new(cli_factory));
+        }
+
         // Wire plugin manager into the router so the `request.headers` hook fires
         // before each outgoing LLM API request.
         router.set_plugin_manager(Arc::clone(&plugin_manager));
@@ -366,7 +388,9 @@ impl AgentStack {
                 plugin_manager,
                 index_task: std::sync::Mutex::new(Some(index_handle)),
                 mcp_init_done: Arc::new(AtomicBool::new(false)),
+                plan_context: RwLock::new(None),
                 file_backup_session,
+                cli_agents,
             },
             question_rx,
             approval_rx,
@@ -691,6 +715,15 @@ impl AgentStack {
     }
 
     // ========================================================================
+    // CLI Agents
+    // ========================================================================
+
+    /// Get the list of discovered CLI agents (Claude Code, Gemini CLI, etc.)
+    pub fn cli_agents(&self) -> &[ava_cli_providers::DiscoveredAgent] {
+        &self.cli_agents
+    }
+
+    // ========================================================================
     // Model and mode switching
     // ========================================================================
 
@@ -715,6 +748,13 @@ impl AgentStack {
 
     pub async fn set_plan_mode(&self, enabled: bool) -> Result<()> {
         *self.plan_mode.write().await = enabled;
+        Ok(())
+    }
+
+    /// Set an approved plan to inject as system context for the next `run()` call.
+    /// The plan is consumed (taken) once, so it only applies to a single run.
+    pub async fn set_plan_context(&self, plan: Option<String>) -> Result<()> {
+        *self.plan_context.write().await = plan;
         Ok(())
     }
 

@@ -134,6 +134,50 @@ export function refreshAllProviderModels(): void {
       autoFetchModels(provider.id)
     }
   }
+  // Also refresh CLI agents (no credentials needed — they're discovered by binary)
+  refreshCLIAgents()
+}
+
+/**
+ * Discover installed CLI agents from the backend and update the cli-agents provider.
+ * CLI agents don't need API keys — they're detected by checking if their binary is on PATH.
+ */
+export async function refreshCLIAgents(): Promise<void> {
+  try {
+    const { apiInvoke } = await import('../../lib/api-client')
+    const agents =
+      await apiInvoke<Array<{ name: string; binary: string; version: string; installed: boolean }>>(
+        'discover_cli_agents'
+      )
+
+    if (!agents || agents.length === 0) {
+      updateProvider('cli-agents', { status: 'disconnected', models: [] })
+      return
+    }
+
+    const models: ProviderModel[] = agents.map(
+      (a: { name: string; binary: string; version: string; installed: boolean }) => ({
+        id: a.name,
+        name: `${a.name
+          .split('-')
+          .map((w: string) => w.charAt(0).toUpperCase() + w.slice(1))
+          .join(' ')} (CLI)`,
+        contextWindow: 200000,
+        capabilities: ['tools'],
+      })
+    )
+
+    updateProvider('cli-agents', {
+      status: 'connected',
+      models,
+    })
+    log.info(
+      'settings',
+      `Discovered ${agents.length} CLI agents: ${agents.map((a: { name: string; version: string }) => `${a.name} v${a.version}`).join(', ')}`
+    )
+  } catch {
+    // Backend may not support this endpoint yet — keep static fallbacks
+  }
 }
 
 /**

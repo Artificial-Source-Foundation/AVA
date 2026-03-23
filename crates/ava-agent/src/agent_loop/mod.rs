@@ -241,6 +241,10 @@ pub enum AgentEvent {
         /// Human-readable label for the snapshot.
         message: String,
     },
+    /// Agent completed a plan step.
+    PlanStepComplete {
+        step_id: String,
+    },
 }
 
 impl AgentLoop {

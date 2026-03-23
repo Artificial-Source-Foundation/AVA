@@ -46,10 +46,13 @@
 //! | GET    | `/api/models/current`             | Get the currently-active model            |
 //! | POST   | `/api/models/switch`              | Switch the active model                   |
 //! | GET    | `/api/providers`                  | List configured providers                 |
+//! | GET    | `/api/cli-agents`                 | List discovered CLI agents                |
 //! | GET    | `/api/config`                     | Get full configuration as JSON            |
 //! | GET    | `/api/permissions`                | Get current permission level              |
 //! | POST   | `/api/permissions`                | Set permission level                      |
 //! | POST   | `/api/permissions/toggle`         | Toggle permission level                   |
+//! | GET    | `/api/plans`                      | List saved plans from `.ava/plans/`       |
+//! | GET    | `/api/plans/{filename}`           | Load a specific saved plan                |
 //! | POST   | `/api/log`                        | Ingest frontend log entry                 |
 //! | GET    | `/api/health`                     | Health check                              |
 //! | GET    | `/ws`                             | WebSocket for streaming events            |
@@ -58,6 +61,7 @@ pub mod api;
 mod api_agent;
 mod api_config;
 mod api_interactive;
+mod api_plans;
 mod api_sessions;
 pub mod state;
 pub mod ws;
@@ -160,6 +164,7 @@ fn build_router(state: WebState) -> Router {
         .route("/api/models/current", get(api::get_current_model))
         .route("/api/models/switch", post(api::switch_model))
         .route("/api/providers", get(api::list_providers))
+        .route("/api/cli-agents", get(api::list_cli_agents))
         // Config
         .route("/api/config", get(api::get_config))
         // Permission level
@@ -171,6 +176,9 @@ fn build_router(state: WebState) -> Router {
             "/api/permissions/toggle",
             post(api::toggle_permission_level),
         )
+        // Plan persistence
+        .route("/api/plans", get(api_plans::list_plans))
+        .route("/api/plans/{filename}", get(api_plans::get_plan))
         // WebSocket
         .route("/ws", get(ws::ws_handler))
         // Frontend log ingestion

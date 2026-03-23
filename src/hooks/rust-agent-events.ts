@@ -3,6 +3,7 @@ import { batch } from 'solid-js'
 import { debugLog } from '../lib/debug-log'
 import { log } from '../lib/logger'
 import { useLayout } from '../stores/layout'
+import { usePlanOverlay } from '../stores/planOverlayStore'
 import type { ToolCall } from '../types'
 import type {
   AgentEvent,
@@ -10,6 +11,7 @@ import type {
   CompleteEvent,
   PlanCreatedEvent,
   PlanData,
+  PlanStepCompleteEvent,
   SubmitGoalResult,
   TodoItem,
   TodoUpdateEvent,
@@ -331,6 +333,13 @@ export function createAgentEventHandler(deps: EventHandlerDeps): (event: AgentEv
         debugLog('plan', 'plan_created event', (event as PlanCreatedEvent).plan?.summary)
         const planEvent = event as PlanCreatedEvent
         setPendingPlan(planEvent.plan)
+        break
+      }
+
+      case 'plan_step_complete': {
+        const stepEvent = event as PlanStepCompleteEvent
+        debugLog('plan', 'plan_step_complete event', stepEvent.step_id)
+        usePlanOverlay().markStepComplete(stepEvent.step_id)
         break
       }
 

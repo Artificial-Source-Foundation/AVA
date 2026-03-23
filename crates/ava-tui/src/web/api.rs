@@ -35,8 +35,8 @@ pub(crate) use super::api_agent::{
 };
 pub(crate) use super::api_config::{
     disable_mcp_server, enable_mcp_server, get_config, get_current_model, get_permission_level,
-    ingest_frontend_log, list_mcp_servers, list_models, list_plugins, list_providers, reload_mcp,
-    set_permission_level, switch_model, toggle_permission_level,
+    ingest_frontend_log, list_cli_agents, list_mcp_servers, list_models, list_plugins,
+    list_providers, reload_mcp, set_permission_level, switch_model, toggle_permission_level,
 };
 pub(crate) use super::api_interactive::{
     resolve_approval, resolve_plan, resolve_question, undo_last_edit,
@@ -117,6 +117,8 @@ pub enum WebAgentEvent {
     PlanCreated { plan: PlanPayload },
     #[serde(rename = "todo_update")]
     TodoUpdate { todos: Vec<TodoItemFrontend> },
+    #[serde(rename = "plan_step_complete")]
+    PlanStepComplete { step_id: String },
 }
 
 /// A single todo item for the frontend.
@@ -205,6 +207,9 @@ pub fn convert_web_event(event: &WebEvent) -> Option<WebAgentEvent> {
                 })
                 .collect(),
         }),
+        WebEvent::PlanStepComplete { step_id } => Some(WebAgentEvent::PlanStepComplete {
+            step_id: step_id.clone(),
+        }),
     }
 }
 
@@ -256,6 +261,9 @@ pub fn convert_agent_event(event: &ava_agent::agent_loop::AgentEvent) -> Option<
             threshold_percent: *threshold_percent,
             current_cost_usd: *current_cost_usd,
             max_budget_usd: *max_budget_usd,
+        }),
+        BE::PlanStepComplete { step_id } => Some(WebAgentEvent::PlanStepComplete {
+            step_id: step_id.clone(),
         }),
         // ToolStats, DiffPreview, SubAgentComplete have no direct frontend representation.
         _ => None,

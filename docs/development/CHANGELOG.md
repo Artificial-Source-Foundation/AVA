@@ -10,6 +10,7 @@
 - **Legacy helper scripts refreshed** — `scripts/testing/verify-mvp.sh`, `scripts/testing/rust-migration-smoke.sh`, and `.opencode/context.md` now reflect the Rust-first + pnpm workflow.
 - **CLI shootout harness** — `scripts/benchmarks/cli-shootout.mjs` adds a reproducible AVA-vs-OpenCode benchmark for offline startup costs and optional matched-model online tasks, with JSON/Markdown artifacts under `.tmp/benchmarks/`.
 - **Copilot auth test fixed** — `ava auth test copilot` now accepts OAuth-only Copilot credentials instead of incorrectly requiring an API key.
+- **OAuth auth-test clarity** — `ava auth test` now reports when OAuth credentials exist but are already expired, avoiding false confidence from presence-only checks.
 - **Benchmark reporting improved** — the CLI shootout now defaults to 5 online samples and includes per-sample failure summaries in the Markdown report, making flaky Copilot/OpenAI runs easier to diagnose.
 
 ### Providers

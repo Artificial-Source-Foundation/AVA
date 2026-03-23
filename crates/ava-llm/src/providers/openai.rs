@@ -651,50 +651,67 @@ impl LLMProvider for OpenAIProvider {
         messages: &[Message],
         tools: &[ava_types::Tool],
     ) -> Result<LLMResponse> {
-        let provider_label = self.provider_label();
-        let body = if self.use_responses_api {
-            self.build_responses_request_body(messages, tools, false)
-        } else {
-            self.build_request_body_with_tools(messages, tools, false)
-        };
-        tracing::debug!(
-            message_count = messages.len(),
-            tool_count = tools.len(),
-            responses_api = self.use_responses_api,
-            "Sending generate_with_tools request"
-        );
-        let client = self.client().await?;
-        let request = client.post(self.completions_url()).json(&body);
-        let request = self.auth_request(request);
-
-        let response = self.send_request(request).await?;
-        let response = common::validate_status(response, &provider_label).await?;
-        let payload: Value = response
-            .json()
-            .await
-            .map_err(|error| AvaError::SerializationError(error.to_string()))?;
-
-        if self.use_responses_api {
-            let (content, tool_calls, usage, thinking) =
-                common::parse_responses_api_payload(&payload);
-            Ok(LLMResponse {
-                content,
-                tool_calls,
-                usage,
-                thinking,
-            })
-        } else {
-            let content = Self::parse_response_payload(&payload).unwrap_or_default();
-            let tool_calls = common::parse_openai_tool_calls(&payload);
-            let usage = common::parse_usage(&payload);
-
-            Ok(LLMResponse {
-                content,
-                tool_calls,
-                usage,
-                thinking: None,
-            })
+        // OpenAI's newer models (GPT-5.x, o-series) require stream=true.
+        // Use the streaming endpoint and collect chunks, same as generate().
+        let stream = self.generate_stream_with_tools(messages, tools).await?;
+        use futures::StreamExt;
+        let mut content = String::new();
+        let mut tool_calls = Vec::new();
+        let mut usage = None;
+        let mut thinking = None;
+        futures::pin_mut!(stream);
+        while let Some(chunk) = stream.next().await {
+            if let Some(text) = chunk.content {
+                content.push_str(&text);
+            }
+            if let Some(tc) = chunk.tool_call {
+                // Accumulate tool call fragments
+                while tool_calls.len() <= tc.index {
+                    tool_calls.push(ava_types::ToolCall {
+                        id: String::new(),
+                        name: String::new(),
+                        arguments: serde_json::Value::Null,
+                    });
+                }
+                if let Some(id) = tc.id {
+                    tool_calls[tc.index].id = id;
+                }
+                if let Some(name) = tc.name {
+                    tool_calls[tc.index].name = name;
+                }
+                if let Some(args_delta) = tc.arguments_delta {
+                    let existing = &mut tool_calls[tc.index].arguments;
+                    if existing.is_null() {
+                        *existing = serde_json::Value::String(args_delta);
+                    } else if let Some(s) = existing.as_str().map(String::from) {
+                        *existing = serde_json::Value::String(s + &args_delta);
+                    }
+                }
+            }
+            if let Some(u) = chunk.usage {
+                usage = Some(u);
+            }
+            if let Some(t) = chunk.thinking {
+                thinking = Some(match thinking {
+                    Some(prev) => format!("{prev}{t}"),
+                    None => t,
+                });
+            }
         }
+        // Parse accumulated JSON argument strings
+        for tc in &mut tool_calls {
+            if let Some(s) = tc.arguments.as_str().map(String::from) {
+                tc.arguments = serde_json::from_str(&s).unwrap_or(serde_json::json!({}));
+            }
+        }
+        // Filter out empty tool calls (unfilled slots)
+        tool_calls.retain(|tc| !tc.name.is_empty());
+        Ok(LLMResponse {
+            content,
+            tool_calls,
+            usage,
+            thinking,
+        })
     }
 
     #[instrument(skip(self, messages, tools), fields(model = %self.model))]

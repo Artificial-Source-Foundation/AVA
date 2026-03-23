@@ -12,7 +12,7 @@ use serde_json::Value;
 use tokio::sync::mpsc;
 use tracing::info;
 
-use super::state::{FileEditRecord, PlanStepPayload, WebEvent, WebState};
+use super::state::{FileEditRecord, PlanStepPayload, TodoItemPayload, WebEvent, WebState};
 
 // ============================================================================
 // Health
@@ -145,16 +145,18 @@ pub async fn submit_goal(
         let event_broadcast = inner.event_tx.clone();
         let edit_hist = edit_history.clone();
 
-        // Forward raw agent events to the WS broadcast channel, tracking edits
+        // Forward raw agent events to the WS broadcast channel, tracking edits and todos
         let checkpoint_stack = stack.clone();
+        let todo_state = stack.todo_state.clone();
         let forwarder = tokio::spawn(async move {
+            let mut last_tool_was_todo_write = false;
             while let Some(event) = rx.recv().await {
                 // Checkpoint: incrementally save session so progress survives crashes
                 if let ava_agent::agent_loop::AgentEvent::Checkpoint(ref session) = event {
                     let _ = checkpoint_stack.session_manager.save(session);
                     continue; // Don't forward checkpoint events to WebSocket clients
                 }
-                // Track write/edit tool calls for undo support
+                // Track write/edit tool calls for undo support, and detect todo_write
                 if let ava_agent::agent_loop::AgentEvent::ToolCall(ref tc) = event {
                     if tc.name == "edit" || tc.name == "write" {
                         if let Some(path) = tc.arguments.get("file_path").and_then(|v| v.as_str()) {
@@ -170,6 +172,24 @@ pub async fn submit_goal(
                             }
                         }
                     }
+                    last_tool_was_todo_write = tc.name == "todo_write";
+                } else if let ava_agent::agent_loop::AgentEvent::ToolResult(_) = event {
+                    // After a todo_write result, emit the updated todo list
+                    if last_tool_was_todo_write {
+                        last_tool_was_todo_write = false;
+                        let items = todo_state.get();
+                        let todos = items
+                            .iter()
+                            .map(|item| TodoItemPayload {
+                                content: item.content.clone(),
+                                status: item.status.to_string(),
+                                priority: item.priority.to_string(),
+                            })
+                            .collect();
+                        let _ = event_broadcast.send(WebEvent::TodoUpdate { todos });
+                    }
+                } else {
+                    last_tool_was_todo_write = false;
                 }
                 let _ = event_broadcast.send(WebEvent::Agent(event));
             }
@@ -2014,6 +2034,16 @@ pub enum WebAgentEvent {
     },
     #[serde(rename = "plan_created")]
     PlanCreated { plan: PlanPayload },
+    #[serde(rename = "todo_update")]
+    TodoUpdate { todos: Vec<TodoItemFrontend> },
+}
+
+/// A single todo item for the frontend.
+#[derive(Clone, Serialize)]
+pub struct TodoItemFrontend {
+    pub content: String,
+    pub status: String,
+    pub priority: String,
 }
 
 /// Plan payload for the frontend (matches `PlanPayload` in `src-tauri/src/events.rs`).
@@ -2083,6 +2113,16 @@ pub fn convert_web_event(event: &WebEvent) -> Option<WebAgentEvent> {
                     .collect(),
                 estimated_turns: *estimated_turns,
             },
+        }),
+        WebEvent::TodoUpdate { todos } => Some(WebAgentEvent::TodoUpdate {
+            todos: todos
+                .iter()
+                .map(|t| TodoItemFrontend {
+                    content: t.content.clone(),
+                    status: t.status.clone(),
+                    priority: t.priority.clone(),
+                })
+                .collect(),
         }),
     }
 }

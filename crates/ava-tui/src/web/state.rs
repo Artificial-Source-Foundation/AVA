@@ -59,6 +59,16 @@ pub enum WebEvent {
         steps: Vec<PlanStepPayload>,
         estimated_turns: usize,
     },
+    /// Updated todo list after a `todo_write` tool call.
+    TodoUpdate { todos: Vec<TodoItemPayload> },
+}
+
+/// A single todo item for the frontend.
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct TodoItemPayload {
+    pub content: String,
+    pub status: String,
+    pub priority: String,
 }
 
 /// A single step in a plan payload for the frontend.

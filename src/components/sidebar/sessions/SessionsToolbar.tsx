@@ -24,7 +24,7 @@ const iconBtnClass =
 export function SessionsToolbar(props: SessionsToolbarProps): JSX.Element {
   return (
     <div class="flex items-center justify-between px-4 py-3.5 flex-shrink-0">
-      <span class="text-[13px] font-semibold text-[var(--gray-9)]">Sessions</span>
+      <span class="text-[var(--text-base)] font-semibold text-[var(--gray-9)]">Sessions</span>
 
       <div class="flex items-center gap-1.5">
         <ProjectDropdown />
@@ -57,7 +57,7 @@ export function SessionsToolbar(props: SessionsToolbarProps): JSX.Element {
           aria-label="New chat"
         >
           <Plus class="w-3 h-3 flex-shrink-0" />
-          <span class="text-[12px] leading-none">New</span>
+          <span class="text-[var(--text-sm)] leading-none">New</span>
         </button>
       </div>
     </div>

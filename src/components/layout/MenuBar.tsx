@@ -189,7 +189,7 @@ export const MenuBar: Component = () => {
                       >
                         <span>{item.label}</span>
                         <Show when={item.shortcut}>
-                          <span class="text-[10px] text-[var(--text-muted)] ml-4">
+                          <span class="text-[var(--text-2xs)] text-[var(--text-muted)] ml-4">
                             {item.shortcut}
                           </span>
                         </Show>

@@ -79,7 +79,7 @@ export const ReasoningDropdown: Component<ReasoningDropdownProps> = (props) => {
       onClick={props.onCycle}
       class={`
         flex items-center gap-1 px-1.5 py-1
-        text-[11px] font-medium rounded-[var(--radius-md)]
+        text-[var(--text-xs)] font-medium rounded-[var(--radius-md)]
         transition-all duration-200
         ${
           isActive()
@@ -130,7 +130,7 @@ export const DelegationToggle: Component<DelegationToggleProps> = (props) => (
     onClick={props.onToggle}
     class={`
       flex items-center gap-1 px-1.5 py-1
-      text-[11px] font-medium rounded-[var(--radius-md)]
+      text-[var(--text-xs)] font-medium rounded-[var(--radius-md)]
       transition-all duration-200
       ${
         props.enabled()
@@ -164,7 +164,7 @@ export const PlanActSlider: Component<PlanActSliderProps> = (props) => (
       relative flex items-center
       h-[22px] w-[88px] rounded-[var(--radius-md)]
       bg-[var(--surface-raised)] border border-[var(--border-subtle)]
-      text-[10px] font-semibold
+      text-[var(--text-2xs)] font-semibold
       disabled:opacity-50 disabled:cursor-not-allowed
       overflow-hidden select-none
       transition-colors
@@ -227,7 +227,7 @@ export const PermissionBadge: Component<PermissionBadgeProps> = (props) => {
       onClick={props.onCyclePermission}
       class="
         flex items-center gap-1 px-2 py-1
-        text-[11px] font-medium rounded-[var(--radius-md)]
+        text-[var(--text-xs)] font-medium rounded-[var(--radius-md)]
         transition-all duration-200
         border
       "

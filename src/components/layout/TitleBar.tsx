@@ -100,7 +100,7 @@ export const TitleBar: Component = () => {
     >
       {/* Left - App name + menus */}
       <div class="flex items-center gap-3 min-w-0">
-        <span class="text-[11px] font-bold tracking-widest text-[var(--accent)] uppercase font-[var(--font-ui-mono)] pointer-events-none">
+        <span class="text-[var(--text-xs)] font-bold tracking-widest text-[var(--accent)] uppercase font-[var(--font-ui-mono)] pointer-events-none">
           AVA
         </span>
 
@@ -111,7 +111,7 @@ export const TitleBar: Component = () => {
 
       {/* Center - window title + directory switcher */}
       <div class="absolute left-1/2 -translate-x-1/2 flex items-center gap-2">
-        <span class="text-[10px] font-medium tracking-wide text-[var(--text-muted)] font-[var(--font-ui-mono)] pointer-events-none">
+        <span class="text-[var(--text-2xs)] font-medium tracking-wide text-[var(--text-muted)] font-[var(--font-ui-mono)] pointer-events-none">
           {windowTitle()}
         </span>
         <Show when={currentProject()}>

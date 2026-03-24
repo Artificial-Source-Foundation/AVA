@@ -69,7 +69,7 @@ export const MessageQueueBar: Component<MessageQueueBarProps> = (props) => {
             <span class="text-xs font-medium text-[var(--text-secondary)]">
               {count()} queued message{count() > 1 ? 's' : ''}
             </span>
-            <span class="text-[10px] text-[var(--text-muted)]">
+            <span class="text-[var(--text-2xs)] text-[var(--text-muted)]">
               {expanded() ? '(click to collapse)' : '(click to expand)'}
             </span>
           </button>
@@ -77,7 +77,7 @@ export const MessageQueueBar: Component<MessageQueueBarProps> = (props) => {
           <button
             type="button"
             onClick={props.onClear}
-            class="text-[10px] text-[var(--text-muted)] hover:text-[var(--error)] transition-colors cursor-pointer px-1.5 py-0.5 rounded hover:bg-[var(--alpha-white-5)]"
+            class="text-[var(--text-2xs)] text-[var(--text-muted)] hover:text-[var(--error)] transition-colors cursor-pointer px-1.5 py-0.5 rounded hover:bg-[var(--alpha-white-5)]"
           >
             Clear all
           </button>
@@ -90,7 +90,7 @@ export const MessageQueueBar: Component<MessageQueueBarProps> = (props) => {
               {(msg, index) => (
                 <div class="flex items-start gap-2 py-1 px-2 rounded bg-[var(--alpha-white-5)] group">
                   <span
-                    class="text-[10px] font-mono font-bold mt-0.5 flex-shrink-0"
+                    class="text-[var(--text-2xs)] font-mono font-bold mt-0.5 flex-shrink-0"
                     style={{ color: tierColor(msg) }}
                   >
                     {tierBadge(msg) || `#${index() + 1}`}

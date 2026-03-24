@@ -76,7 +76,7 @@ export const SubmitButton: Component<SubmitButtonProps> = (props) => {
       <Show when={props.escapeHint?.()}>
         <span
           class="
-            text-[11px] text-[var(--warning)] font-medium
+            text-[var(--text-xs)] text-[var(--warning)] font-medium
             animate-pulse whitespace-nowrap
           "
         >
@@ -90,7 +90,7 @@ export const SubmitButton: Component<SubmitButtonProps> = (props) => {
           class="
             flex items-center justify-center
             min-w-[20px] h-[20px] px-1.5
-            text-[10px] font-semibold tabular-nums
+            text-[var(--text-2xs)] font-semibold tabular-nums
             bg-[var(--accent)] text-white
             rounded-full
           "
@@ -102,7 +102,7 @@ export const SubmitButton: Component<SubmitButtonProps> = (props) => {
 
       {/* Streaming elapsed time */}
       <Show when={props.isStreaming()}>
-        <span class="flex items-center gap-1.5 text-[11px] text-[var(--text-tertiary)] tabular-nums">
+        <span class="flex items-center gap-1.5 text-[var(--text-xs)] text-[var(--text-tertiary)] tabular-nums">
           <span class="w-2 h-2 bg-[var(--accent)] rounded-full animate-pulse" />
           {props.elapsedSeconds()}s
         </span>
@@ -197,10 +197,14 @@ export const SubmitButton: Component<SubmitButtonProps> = (props) => {
             >
               <MessageSquare class="w-4 h-4 text-[var(--accent)] shrink-0" />
               <div class="flex-1 min-w-0">
-                <div class="text-[13px] text-[var(--text-primary)] font-medium">Queue</div>
-                <div class="text-[11px] text-[var(--text-muted)]">Queue for next turn</div>
+                <div class="text-[var(--text-base)] text-[var(--text-primary)] font-medium">
+                  Queue
+                </div>
+                <div class="text-[var(--text-xs)] text-[var(--text-muted)]">
+                  Queue for next turn
+                </div>
               </div>
-              <span class="text-[11px] text-[var(--text-tertiary)] tabular-nums shrink-0">
+              <span class="text-[var(--text-xs)] text-[var(--text-tertiary)] tabular-nums shrink-0">
                 Enter
               </span>
             </button>
@@ -215,12 +219,12 @@ export const SubmitButton: Component<SubmitButtonProps> = (props) => {
             >
               <Zap class="w-4 h-4 text-[var(--warning)] shrink-0" />
               <div class="flex-1 min-w-0">
-                <div class="text-[13px] text-[var(--text-primary)] font-medium">
+                <div class="text-[var(--text-base)] text-[var(--text-primary)] font-medium">
                   Interrupt & Send
                 </div>
-                <div class="text-[11px] text-[var(--text-muted)]">Stop and send now</div>
+                <div class="text-[var(--text-xs)] text-[var(--text-muted)]">Stop and send now</div>
               </div>
-              <span class="text-[11px] text-[var(--text-tertiary)] tabular-nums shrink-0">
+              <span class="text-[var(--text-xs)] text-[var(--text-tertiary)] tabular-nums shrink-0">
                 Ctrl+Enter
               </span>
             </button>
@@ -235,10 +239,14 @@ export const SubmitButton: Component<SubmitButtonProps> = (props) => {
             >
               <Clock class="w-4 h-4 text-[var(--violet-4,var(--accent))] shrink-0" />
               <div class="flex-1 min-w-0">
-                <div class="text-[13px] text-[var(--text-primary)] font-medium">Post-complete</div>
-                <div class="text-[11px] text-[var(--text-muted)]">Queue for after agent stops</div>
+                <div class="text-[var(--text-base)] text-[var(--text-primary)] font-medium">
+                  Post-complete
+                </div>
+                <div class="text-[var(--text-xs)] text-[var(--text-muted)]">
+                  Queue for after agent stops
+                </div>
               </div>
-              <span class="text-[11px] text-[var(--text-tertiary)] tabular-nums shrink-0">
+              <span class="text-[var(--text-xs)] text-[var(--text-tertiary)] tabular-nums shrink-0">
                 Alt+Enter
               </span>
             </button>

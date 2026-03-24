@@ -61,7 +61,7 @@ export const ToolbarStrip: Component<ToolbarStripProps> = (props) => {
   const sandbox = useSandbox()
 
   return (
-    <div class="flex items-center justify-between gap-2 text-[10px] text-[var(--text-tertiary)] font-[var(--font-ui-mono)] select-none overflow-x-auto flex-wrap min-w-0">
+    <div class="flex items-center justify-between gap-2 text-[var(--text-2xs)] text-[var(--text-tertiary)] font-[var(--font-ui-mono)] select-none overflow-x-auto flex-wrap min-w-0">
       {/* Left: model + thinking + plan/act + permission */}
       <div class="flex items-center gap-2 flex-wrap min-w-0">
         <ModelSelector
@@ -115,7 +115,7 @@ export const ToolbarStrip: Component<ToolbarStripProps> = (props) => {
             title="Sandbox mode ON (changes are queued)"
           >
             <Shield class="w-3 h-3" />
-            <span class="text-[10px]">Sandbox</span>
+            <span class="text-[var(--text-2xs)]">Sandbox</span>
             <Show when={sandbox.pendingCount() > 0}>
               <button
                 type="button"
@@ -144,7 +144,7 @@ export const ToolbarStrip: Component<ToolbarStripProps> = (props) => {
           <button
             type="button"
             onClick={() => props.sessionStore.startBackgroundPlan()}
-            class="inline-flex items-center gap-1 text-[10px] text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors"
+            class="inline-flex items-center gap-1 text-[var(--text-2xs)] text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors"
             title="Continue plan execution in background"
           >
             <Layers class="w-2.5 h-2.5" />
@@ -157,7 +157,7 @@ export const ToolbarStrip: Component<ToolbarStripProps> = (props) => {
           <StripDivider />
           <span class="inline-flex items-center gap-1 text-[var(--accent)]">
             <span class="w-1.5 h-1.5 bg-[var(--accent)] rounded-full animate-pulse" />
-            <span class="text-[10px]">Plan running</span>
+            <span class="text-[var(--text-2xs)]">Plan running</span>
           </span>
         </Show>
       </div>

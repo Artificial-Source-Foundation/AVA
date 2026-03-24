@@ -128,7 +128,7 @@ export const AppShell: Component = () => {
                         role="tab"
                         aria-selected={bottomPanelTab() === tab.id}
                         onClick={() => switchBottomPanelTab(tab.id)}
-                        class="flex items-center gap-1.5 px-3 h-full text-[10px] font-semibold uppercase tracking-wider transition-colors"
+                        class="flex items-center gap-1.5 px-3 h-full text-[var(--text-2xs)] font-semibold uppercase tracking-wider transition-colors"
                         classList={{
                           'text-[var(--accent)] border-b border-[var(--accent)]':
                             bottomPanelTab() === tab.id,

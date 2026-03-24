@@ -76,7 +76,7 @@ const GroupHeader: Component<GroupHeaderProps> = (props) => {
       <div
         role="button"
         tabIndex={0}
-        class="flex items-center gap-2.5 px-3 py-2 text-[13px] cursor-pointer select-none hover:bg-[var(--alpha-white-3)] transition-colors duration-[var(--duration-fast)]"
+        class="flex items-center gap-2.5 px-3 py-2 text-[var(--text-base)] cursor-pointer select-none hover:bg-[var(--alpha-white-3)] transition-colors duration-[var(--duration-fast)]"
         onClick={() => setExpanded((v) => !v)}
         onKeyDown={(e) => {
           if (e.key === 'Enter' || e.key === ' ') {
@@ -90,20 +90,20 @@ const GroupHeader: Component<GroupHeaderProps> = (props) => {
         <div class="flex flex-col min-w-0 flex-1">
           <span class="text-[var(--text-secondary)] truncate">{label()}</span>
           <Show when={activeSubtitle()}>
-            <span class="text-[11px] text-[var(--text-muted)] truncate mt-0.5">
+            <span class="text-[var(--text-xs)] text-[var(--text-muted)] truncate mt-0.5">
               {activeSubtitle()}
             </span>
           </Show>
         </div>
 
         {/* Count badge */}
-        <span class="text-[10px] font-medium text-[var(--text-muted)] bg-[var(--alpha-white-5)] px-1.5 py-0.5 rounded-[var(--radius-sm)] tabular-nums">
+        <span class="text-[var(--text-2xs)] font-medium text-[var(--text-muted)] bg-[var(--alpha-white-5)] px-1.5 py-0.5 rounded-[var(--radius-sm)] tabular-nums">
           {props.group.calls.length}
         </span>
 
         {/* Duration */}
         <Show when={duration()}>
-          <span class="text-[11px] text-[var(--text-muted)] tabular-nums whitespace-nowrap">
+          <span class="text-[var(--text-xs)] text-[var(--text-muted)] tabular-nums whitespace-nowrap">
             {duration()}
           </span>
         </Show>
@@ -198,7 +198,7 @@ export const ContextGroupHeader: Component<ContextGroupHeaderProps> = (props) =>
       <div
         role="button"
         tabIndex={0}
-        class="flex items-center gap-2.5 px-3 py-2 text-[13px] cursor-pointer select-none hover:bg-[var(--alpha-white-3)] transition-colors duration-[var(--duration-fast)]"
+        class="flex items-center gap-2.5 px-3 py-2 text-[var(--text-base)] cursor-pointer select-none hover:bg-[var(--alpha-white-3)] transition-colors duration-[var(--duration-fast)]"
         onClick={() => setExpanded((v) => !v)}
         onKeyDown={(e) => {
           if (e.key === 'Enter' || e.key === ' ') {
@@ -212,20 +212,20 @@ export const ContextGroupHeader: Component<ContextGroupHeaderProps> = (props) =>
         <div class="flex flex-col min-w-0 flex-1">
           <span class="text-[var(--text-secondary)] truncate">{label()}</span>
           <Show when={activeSubtitle()}>
-            <span class="text-[11px] text-[var(--text-muted)] truncate mt-0.5">
+            <span class="text-[var(--text-xs)] text-[var(--text-muted)] truncate mt-0.5">
               {activeSubtitle()}
             </span>
           </Show>
         </div>
 
         {/* Count badge */}
-        <span class="text-[10px] font-medium text-[var(--text-muted)] bg-[var(--alpha-white-5)] px-1.5 py-0.5 rounded-[var(--radius-sm)] tabular-nums">
+        <span class="text-[var(--text-2xs)] font-medium text-[var(--text-muted)] bg-[var(--alpha-white-5)] px-1.5 py-0.5 rounded-[var(--radius-sm)] tabular-nums">
           {props.calls.length}
         </span>
 
         {/* Duration */}
         <Show when={totalDuration()}>
-          <span class="text-[11px] text-[var(--text-muted)] tabular-nums whitespace-nowrap">
+          <span class="text-[var(--text-xs)] text-[var(--text-muted)] tabular-nums whitespace-nowrap">
             {totalDuration()}
           </span>
         </Show>
@@ -353,7 +353,7 @@ export const ToolCallGroup: Component<ToolCallGroupProps> = (props) => {
         <div
           role="button"
           tabIndex={0}
-          class="flex items-center gap-2.5 px-3 py-2 text-[13px] cursor-pointer select-none hover:bg-[var(--alpha-white-3)] transition-colors"
+          class="flex items-center gap-2.5 px-3 py-2 text-[var(--text-base)] cursor-pointer select-none hover:bg-[var(--alpha-white-3)] transition-colors"
           onClick={() => setExpanded((v) => !v)}
           onKeyDown={(e) => {
             if (e.key === 'Enter' || e.key === ' ') {
@@ -375,12 +375,12 @@ export const ToolCallGroup: Component<ToolCallGroupProps> = (props) => {
             </span>
           </div>
 
-          <span class="text-[10px] font-medium text-[var(--text-muted)] bg-[var(--alpha-white-5)] px-1.5 py-0.5 rounded-[var(--radius-sm)] tabular-nums">
+          <span class="text-[var(--text-2xs)] font-medium text-[var(--text-muted)] bg-[var(--alpha-white-5)] px-1.5 py-0.5 rounded-[var(--radius-sm)] tabular-nums">
             {props.toolCalls.length}
           </span>
 
           <Show when={totalDuration()}>
-            <span class="text-[11px] text-[var(--text-muted)] tabular-nums whitespace-nowrap">
+            <span class="text-[var(--text-xs)] text-[var(--text-muted)] tabular-nums whitespace-nowrap">
               {totalDuration()}
             </span>
           </Show>

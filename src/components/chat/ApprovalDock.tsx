@@ -116,7 +116,7 @@ export const ApprovalDock: Component<ApprovalDockProps> = (props) => {
 
           {/* Risk badge */}
           <div
-            class="flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium flex-shrink-0"
+            class="flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[var(--text-2xs)] font-medium flex-shrink-0"
             style={{ background: risk().bg, color: risk().color }}
           >
             <Dynamic component={risk().icon} class="w-3 h-3" />
@@ -144,7 +144,7 @@ export const ApprovalDock: Component<ApprovalDockProps> = (props) => {
           <button
             type="button"
             onClick={() => props.onResolve(false)}
-            class="inline-flex items-center gap-1 rounded-[var(--radius-sm)] border border-[var(--error)] px-2 py-1 text-[11px] font-medium text-[var(--error)] hover:bg-[var(--error)] hover:text-white transition-colors"
+            class="inline-flex items-center gap-1 rounded-[var(--radius-sm)] border border-[var(--error)] px-2 py-1 text-[var(--text-xs)] font-medium text-[var(--error)] hover:bg-[var(--error)] hover:text-white transition-colors"
             title="Deny (Esc)"
           >
             <X class="w-3 h-3" />
@@ -155,7 +155,7 @@ export const ApprovalDock: Component<ApprovalDockProps> = (props) => {
           <button
             type="button"
             onClick={() => props.onResolve(true, false)}
-            class="inline-flex items-center gap-1 rounded-[var(--radius-sm)] border px-2 py-1 text-[11px] font-medium transition-colors"
+            class="inline-flex items-center gap-1 rounded-[var(--radius-sm)] border px-2 py-1 text-[var(--text-xs)] font-medium transition-colors"
             classList={{
               'border-[var(--error)] text-[var(--error)] hover:bg-[var(--error)] hover:text-white':
                 riskLevel() === 'critical',
@@ -175,7 +175,7 @@ export const ApprovalDock: Component<ApprovalDockProps> = (props) => {
             <button
               type="button"
               onClick={() => props.onResolve(true, true)}
-              class="inline-flex items-center gap-1 rounded-[var(--radius-sm)] bg-[var(--success)] px-2 py-1 text-[11px] font-medium text-white hover:opacity-90 transition-opacity"
+              class="inline-flex items-center gap-1 rounded-[var(--radius-sm)] bg-[var(--success)] px-2 py-1 text-[var(--text-xs)] font-medium text-white hover:opacity-90 transition-opacity"
               title="Always allow this tool for the session (Shift+Enter)"
             >
               <CheckCheck class="w-3 h-3" />

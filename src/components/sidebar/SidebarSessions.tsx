@@ -109,7 +109,7 @@ export const SidebarSessions: Component = () => {
             <For each={groupedSessions()}>
               {(group, groupIdx) => (
                 <div class={groupIdx() > 0 ? 'mt-3' : ''}>
-                  <p class="text-[11px] font-semibold tracking-wider text-[var(--gray-7)] uppercase mb-1 px-2 font-mono">
+                  <p class="text-[var(--text-xs)] font-semibold tracking-wider text-[var(--gray-7)] uppercase mb-1 px-2 font-mono">
                     {group.label}
                   </p>
                   <div class="space-y-0.5">
@@ -141,7 +141,7 @@ export const SidebarSessions: Component = () => {
                 <MessageSquare class="w-6 h-6 mx-auto mb-2 opacity-50" />
                 <p class="text-xs">{search() ? 'No matching sessions' : 'No chats yet'}</p>
                 <Show when={!search()}>
-                  <p class="text-[10px] mt-1">Start a new conversation</p>
+                  <p class="text-[var(--text-2xs)] mt-1">Start a new conversation</p>
                 </Show>
               </div>
             </Show>

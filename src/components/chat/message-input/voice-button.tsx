@@ -133,7 +133,7 @@ export const VoiceButton: Component<VoiceButtonProps> = (props) => {
       {/* Device picker */}
       <Show when={audioDevices().length > 1}>
         <select
-          class="h-[18px] text-[10px] max-w-[80px] truncate bg-transparent border-none outline-none text-[var(--text-tertiary)] cursor-pointer"
+          class="h-[18px] text-[var(--text-2xs)] max-w-[80px] truncate bg-transparent border-none outline-none text-[var(--text-tertiary)] cursor-pointer"
           style={{ 'font-family': 'var(--font-ui-mono)' }}
           value={settings().behavior.voiceDeviceId}
           onChange={(e) => {

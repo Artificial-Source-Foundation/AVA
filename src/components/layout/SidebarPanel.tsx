@@ -183,7 +183,7 @@ export const SidebarPanel: Component = () => {
             autofocus
             class="
               w-full px-2.5 py-1.5
-              text-[12px] text-[var(--text-primary)]
+              text-[var(--text-sm)] text-[var(--text-primary)]
               bg-[var(--gray-3)]
               border-none
               rounded-[var(--radius-md)]
@@ -222,14 +222,14 @@ export const SidebarPanel: Component = () => {
                 style={{ color: 'var(--text-secondary)' }}
               />
               <span
-                class="text-[12px] font-medium truncate"
+                class="text-[var(--text-sm)] font-medium truncate"
                 style={{ color: 'var(--text-primary)' }}
               >
                 Estela
               </span>
               <Show when={filteredSessions().length > 0}>
                 <span
-                  class="text-[10px] ml-auto flex-shrink-0"
+                  class="text-[var(--text-2xs)] ml-auto flex-shrink-0"
                   style={{ color: 'var(--text-muted)' }}
                 >
                   {filteredSessions().length}
@@ -265,7 +265,7 @@ export const SidebarPanel: Component = () => {
                   <button
                     type="button"
                     onClick={() => setShowAll(true)}
-                    class="text-[11px] px-2 py-1 mt-0.5 rounded-[var(--radius-sm)] hover:bg-[var(--alpha-white-5)] transition-colors"
+                    class="text-[var(--text-xs)] px-2 py-1 mt-0.5 rounded-[var(--radius-sm)] hover:bg-[var(--alpha-white-5)] transition-colors"
                     style={{ color: 'var(--accent)' }}
                   >
                     Show {hiddenCount()} more sessions
@@ -276,7 +276,7 @@ export const SidebarPanel: Component = () => {
                   <button
                     type="button"
                     onClick={() => setShowAll(false)}
-                    class="text-[11px] px-2 py-1 mt-0.5 rounded-[var(--radius-sm)] hover:bg-[var(--alpha-white-5)] transition-colors"
+                    class="text-[var(--text-xs)] px-2 py-1 mt-0.5 rounded-[var(--radius-sm)] hover:bg-[var(--alpha-white-5)] transition-colors"
                     style={{ color: 'var(--text-muted)' }}
                   >
                     Show fewer
@@ -289,9 +289,11 @@ export const SidebarPanel: Component = () => {
           <Show when={filteredSessions().length === 0}>
             <div class="text-center py-6 px-4" style={{ color: 'var(--text-muted)' }}>
               <MessageSquare class="w-4 h-4 mx-auto mb-1.5 opacity-40" />
-              <p class="text-[11px]">{search() ? 'No matching sessions' : 'No chats yet'}</p>
+              <p class="text-[var(--text-xs)]">
+                {search() ? 'No matching sessions' : 'No chats yet'}
+              </p>
               <Show when={!search()}>
-                <p class="text-[10px] mt-0.5 opacity-60">Press Ctrl+N to start</p>
+                <p class="text-[var(--text-2xs)] mt-0.5 opacity-60">Press Ctrl+N to start</p>
               </Show>
             </div>
           </Show>

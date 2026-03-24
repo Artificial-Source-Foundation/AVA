@@ -100,8 +100,8 @@ export const StatusBar: Component<StatusBarProps> = (props) => {
 
   const isRunning = () => agent.isRunning()
 
-  // Shared text size class — 11px throughout
-  const textSm = 'text-[11px]'
+  // Shared text size class — uses design token
+  const textSm = 'text-[var(--text-xs)]'
 
   return (
     <div class={`flex items-center gap-1.5 shrink-0 ${textSm}`}>
@@ -245,7 +245,7 @@ export const StatusBar: Component<StatusBarProps> = (props) => {
                 setIsCompacting(false)
               }
             }}
-            class="px-2 py-0.5 text-[11px] border border-[var(--warning)] rounded-full bg-[var(--warning-subtle,rgba(234,179,8,0.1))] text-[var(--warning)] hover:text-[var(--accent)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            class="px-2 py-0.5 text-[var(--text-xs)] border border-[var(--warning)] rounded-full bg-[var(--warning-subtle,rgba(234,179,8,0.1))] text-[var(--warning)] hover:text-[var(--accent)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             title="Compact context now"
           >
             <Show when={isCompacting()} fallback="Compact">

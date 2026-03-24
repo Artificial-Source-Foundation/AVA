@@ -349,10 +349,11 @@
   --font-mono: "Geist Mono", "JetBrains Mono", "Fira Code", "SF Mono", monospace;
   --font-ui-mono: var(--font-mono); /* For labels, badges, status, agent names */
 
+  --text-2xs: 0.625rem; /* 10px */
   --text-xs: 0.6875rem; /* 11px */
-  --text-sm: 0.8125rem; /* 13px */
-  --text-base: 0.875rem; /* 14px */
-  --text-md: 0.9375rem; /* 15px */
+  --text-sm: 0.8125rem; /* 13px — bumped from 12px */
+  --text-base: 0.875rem; /* 14px — bumped from 13px */
+  --text-md: 0.9375rem; /* 15px — bumped from 14px */
   --text-lg: 1rem; /* 16px */
   --text-xl: 1.125rem; /* 18px */
   --text-2xl: 1.25rem; /* 20px */

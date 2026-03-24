@@ -153,7 +153,7 @@ const QueueRow: Component<QueueRowProps> = (props) => (
   <div class="flex items-center gap-1.5 py-1 px-2 rounded bg-[var(--alpha-white-5)] group">
     {/* Position / tier badge */}
     <span
-      class="text-[10px] font-mono font-bold flex-shrink-0 w-5 text-center"
+      class="text-[var(--text-2xs)] font-mono font-bold flex-shrink-0 w-5 text-center"
       style={{ color: tierColor(props.item.tier) }}
     >
       {props.item.tier === 'post-complete'
@@ -254,10 +254,10 @@ export const MessageQueueWidget: Component<MessageQueueWidgetProps> = (props) =>
             class="flex items-center gap-2 flex-1 min-w-0 text-left cursor-pointer hover:opacity-80 transition-opacity"
           >
             <ListOrdered class="w-3.5 h-3.5 text-[var(--accent)] flex-shrink-0" />
-            <span class="text-[11px] font-medium text-[var(--text-secondary)]">
+            <span class="text-[var(--text-xs)] font-medium text-[var(--text-secondary)]">
               {count()} queued message{count() > 1 ? 's' : ''}
             </span>
-            <span class="text-[10px] text-[var(--text-muted)]">
+            <span class="text-[var(--text-2xs)] text-[var(--text-muted)]">
               {expanded() ? '\u25B4' : '\u25BE'}
             </span>
           </button>
@@ -265,7 +265,7 @@ export const MessageQueueWidget: Component<MessageQueueWidgetProps> = (props) =>
           <button
             type="button"
             onClick={props.onClearAll}
-            class="text-[10px] text-[var(--text-muted)] hover:text-[var(--error)] transition-colors cursor-pointer px-1.5 py-0.5 rounded hover:bg-[var(--alpha-white-5)]"
+            class="text-[var(--text-2xs)] text-[var(--text-muted)] hover:text-[var(--error)] transition-colors cursor-pointer px-1.5 py-0.5 rounded hover:bg-[var(--alpha-white-5)]"
           >
             Clear all
           </button>
@@ -309,7 +309,7 @@ export const MessageQueueWidget: Component<MessageQueueWidgetProps> = (props) =>
             {/* Post-complete section */}
             <Show when={postCompleteItems().length > 0}>
               <div class="pt-1 mt-1 border-t border-[var(--border-subtle)]">
-                <span class="text-[10px] font-medium text-[var(--text-muted)] uppercase tracking-wide">
+                <span class="text-[var(--text-2xs)] font-medium text-[var(--text-muted)] uppercase tracking-wide">
                   Post-complete
                 </span>
                 <div class="mt-1 space-y-1">

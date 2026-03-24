@@ -77,7 +77,7 @@ export const MessageRow: Component<MessageRowProps> = (props) => (
     />
     <Show when={props.checkpoint}>
       {(checkpoint) => (
-        <div class="flex items-center gap-2 py-1 text-[10px] text-[var(--text-muted)]">
+        <div class="flex items-center gap-2 py-1 text-[var(--text-2xs)] text-[var(--text-muted)]">
           <Bookmark class="w-3 h-3 text-[var(--accent)]" />
           <span>{checkpoint().description}</span>
           <button

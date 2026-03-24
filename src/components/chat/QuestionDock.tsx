@@ -131,7 +131,7 @@ export const QuestionDock: Component<QuestionDockProps> = (props) => {
           <button
             type="button"
             onClick={handleDismiss}
-            class="inline-flex items-center gap-1 rounded-[var(--radius-sm)] border border-[var(--border-default)] bg-[var(--surface)] px-2 py-1 text-[11px] font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-raised)] transition-colors"
+            class="inline-flex items-center gap-1 rounded-[var(--radius-sm)] border border-[var(--border-default)] bg-[var(--surface)] px-2 py-1 text-[var(--text-xs)] font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-raised)] transition-colors"
             title="Skip question (Escape)"
           >
             <X class="w-3 h-3" />
@@ -184,7 +184,7 @@ export const QuestionDock: Component<QuestionDockProps> = (props) => {
                     rounded-[var(--radius-sm)]
                     border border-[var(--accent)]
                     px-3 py-2
-                    text-[12px] font-medium
+                    text-[var(--text-sm)] font-medium
                     text-[var(--accent)]
                     hover:bg-[var(--accent)] hover:text-white
                     disabled:opacity-40 disabled:pointer-events-none

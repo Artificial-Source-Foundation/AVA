@@ -25,7 +25,7 @@ export function SessionsSearch(props: SessionsSearchProps): JSX.Element {
           onInput={(event) => props.onInput(event)}
           class="
             w-full pl-8 pr-3 py-2
-            text-[13px] text-[var(--text-primary)]
+            text-[var(--text-base)] text-[var(--text-primary)]
             bg-[var(--gray-3)]
             border-none
             rounded-[var(--radius-xl)]

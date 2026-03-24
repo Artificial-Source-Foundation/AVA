@@ -131,7 +131,7 @@ function TabBar(props: TabBarProps) {
                       props.onSwitch(tab.id)
                       setMoreOpen(false)
                     }}
-                    class="w-full flex items-center gap-2 px-3 py-1.5 text-[11px] transition-colors"
+                    class="w-full flex items-center gap-2 px-3 py-1.5 text-[var(--text-xs)] transition-colors"
                     classList={{
                       'text-[var(--accent)] bg-[var(--alpha-white-5)]': props.currentTab === tab.id,
                       'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--alpha-white-5)]':

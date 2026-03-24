@@ -123,7 +123,7 @@ export const MessageList: Component = () => {
                 <button
                   type="button"
                   onClick={data.loadOlderMessages}
-                  class="rounded-[var(--radius-sm)] border border-[var(--border-subtle)] bg-[var(--surface-raised)] px-2.5 py-1 text-[10px] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+                  class="rounded-[var(--radius-sm)] border border-[var(--border-subtle)] bg-[var(--surface-raised)] px-2.5 py-1 text-[var(--text-2xs)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
                 >
                   Load{' '}
                   {Math.min(

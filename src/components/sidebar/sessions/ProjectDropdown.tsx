@@ -99,7 +99,7 @@ export const ProjectDropdown: Component = () => {
         class={`
           inline-flex items-center gap-1 max-w-[120px]
           rounded-[var(--radius-md)] px-2.5 py-1
-          text-[11px] font-medium transition-colors
+          text-[var(--text-xs)] font-medium transition-colors
           bg-[var(--gray-3)]
           ${
             dropdownOpen()

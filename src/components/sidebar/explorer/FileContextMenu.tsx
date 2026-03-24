@@ -66,13 +66,13 @@ export const FileContextMenu: Component<{
               when={props.editors.length > 0}
               fallback={
                 <Show when={state().isDir}>
-                  <div class="px-3 py-1.5 text-[10px] text-[var(--text-muted)]">
+                  <div class="px-3 py-1.5 text-[var(--text-2xs)] text-[var(--text-muted)]">
                     No editors detected
                   </div>
                 </Show>
               }
             >
-              <div class="px-3 py-1 text-[10px] text-[var(--text-muted)] uppercase tracking-wider">
+              <div class="px-3 py-1 text-[var(--text-2xs)] text-[var(--text-muted)] uppercase tracking-wider">
                 Open in
               </div>
               <For each={props.editors}>

@@ -186,7 +186,7 @@ export const SidebarExplorer: Component = () => {
               </span>
             </div>
             <Show when={currentProject()?.directory}>
-              <div class="mt-1 text-[10px] text-[var(--text-muted)] truncate pl-5">
+              <div class="mt-1 text-[var(--text-2xs)] text-[var(--text-muted)] truncate pl-5">
                 {currentProject()?.directory}
               </div>
             </Show>
@@ -223,7 +223,7 @@ export const SidebarExplorer: Component = () => {
           <Show when={!loading() && rootEntries().length === 0 && currentProject()?.directory}>
             <div class="px-2 py-4 text-center">
               <File class="w-5 h-5 mx-auto mb-2 text-[var(--text-muted)] opacity-50" />
-              <p class="text-[10px] text-[var(--text-muted)]">No files found</p>
+              <p class="text-[var(--text-2xs)] text-[var(--text-muted)]">No files found</p>
             </div>
           </Show>
         </div>

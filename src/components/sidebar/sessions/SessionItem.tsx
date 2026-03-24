@@ -1,15 +1,15 @@
 /**
- * Session Item
+ * Session Item — Windsurf/Cascade style
  *
- * Compact single-line session row: title... timestamp
- * With optional status dot for busy sessions.
- * Hover reveals rename/delete actions.
+ * Two-line layout: title on line 1, relative timestamp on line 2.
+ * Clean design with no hover action icons — use right-click context menu instead.
+ * Active session gets a subtle background highlight.
  */
 
-import { Check, Pencil, Trash2, X } from 'lucide-solid'
+import { Check, Trash2, X } from 'lucide-solid'
 import { type Component, createEffect, createSignal, Show } from 'solid-js'
 import type { SessionWithStats } from '../../../types'
-import { formatRelativeTime, formatSessionName } from './session-utils'
+import { formatRelativeTimeVerbose, formatSessionName } from './session-utils'
 
 export interface SessionItemProps {
   session: SessionWithStats
@@ -72,9 +72,11 @@ export const SessionItem: Component<SessionItemProps> = (props) => {
           when={isRenaming()}
           fallback={
             /* Delete confirmation row */
-            <div class="flex items-center gap-1.5 px-2 py-1.5 mx-1 rounded-[var(--radius-md)] bg-[var(--error-subtle)] border border-[var(--error)]">
+            <div class="flex items-center gap-1.5 px-2 py-1.5 rounded-[var(--radius-md)] bg-[var(--error-subtle)] border border-[var(--error)]">
               <Trash2 class="w-3 h-3 text-[var(--error)] flex-shrink-0" />
-              <span class="text-[10px] text-[var(--error)] flex-1 truncate">Delete?</span>
+              <span class="text-[var(--text-2xs)] text-[var(--error)] flex-1 truncate">
+                Delete?
+              </span>
               <button
                 type="button"
                 onClick={() => {
@@ -100,7 +102,7 @@ export const SessionItem: Component<SessionItemProps> = (props) => {
           }
         >
           {/* Rename input */}
-          <div class="px-2 py-1">
+          <div class="px-1 py-0.5">
             <input
               type="text"
               value={renameValue()}
@@ -134,69 +136,30 @@ export const SessionItem: Component<SessionItemProps> = (props) => {
         }}
         onContextMenu={(e) => props.onContextMenu(e, props.session.id)}
         class={`
-          group relative flex items-center w-full
-          py-1.5 px-2 gap-2
+          relative flex flex-col w-full
+          py-1.5 px-2
           rounded-[var(--radius-md)]
           text-left transition-colors cursor-pointer
-          ${
-            props.isActive
-              ? 'bg-[var(--alpha-white-8)] text-[var(--text-primary)]'
-              : 'text-[var(--text-secondary)] hover:bg-[var(--alpha-white-5)] hover:text-[var(--text-primary)]'
-          }
+          ${props.isActive ? 'bg-[var(--alpha-white-8)]' : 'hover:bg-[var(--alpha-white-5)]'}
         `}
       >
-        {/* Active indicator — subtle left border */}
-        <Show when={props.isActive}>
+        {/* Line 1: Session title */}
+        <div class="flex items-center gap-1.5">
+          <Show when={props.isBusy}>
+            <span class="flex-shrink-0 w-1.5 h-1.5 rounded-full bg-[var(--accent)] animate-pulse" />
+          </Show>
           <span
-            class="
-              absolute left-0 top-1 bottom-1 w-[2px]
-              rounded-r-full bg-[var(--accent)]
-            "
-          />
-        </Show>
-
-        {/* Status dot for busy sessions */}
-        <Show when={props.isBusy}>
-          <span class="flex-shrink-0 w-1.5 h-1.5 rounded-full bg-[var(--accent)] animate-pulse" />
-        </Show>
-
-        {/* Session title */}
-        <span class="flex-1 min-w-0 text-[13px] truncate">
-          {formatSessionName(props.session.name)}
-        </span>
-
-        {/* Relative timestamp — hidden when hover actions show */}
-        <span class="text-[11px] text-[var(--text-muted)] flex-shrink-0 group-hover:hidden">
-          {formatRelativeTime(props.session.updatedAt)}
-        </span>
-
-        {/* Hover actions */}
-        <div class="hidden group-hover:flex items-center gap-0.5 flex-shrink-0">
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation()
-              startRename()
-            }}
-            class="p-0.5 rounded-[var(--radius-sm)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--alpha-white-8)]"
-            title="Rename"
-            aria-label="Rename session"
+            class="flex-1 min-w-0 text-[var(--text-sm)] truncate"
+            style={{ color: 'var(--text-primary)' }}
           >
-            <Pencil class="w-3 h-3" />
-          </button>
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation()
-              setIsConfirmingDelete(true)
-            }}
-            class="p-0.5 rounded-[var(--radius-sm)] text-[var(--text-muted)] hover:text-[var(--error)] hover:bg-[var(--error-subtle)]"
-            title="Delete"
-            aria-label="Delete session"
-          >
-            <Trash2 class="w-3 h-3" />
-          </button>
+            {formatSessionName(props.session.name)}
+          </span>
         </div>
+
+        {/* Line 2: Relative timestamp */}
+        <span class="text-[var(--text-2xs)] mt-0.5" style={{ color: 'var(--text-muted)' }}>
+          {formatRelativeTimeVerbose(props.session.updatedAt)}
+        </span>
       </div>
     </Show>
   )

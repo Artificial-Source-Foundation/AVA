@@ -27,7 +27,7 @@ export const ArchivedSection: Component<ArchivedSectionProps> = (props) => {
           setShowArchived(next)
           if (next) void props.loadArchived()
         }}
-        class="w-full flex items-center gap-1.5 px-3.5 py-2 text-[11px] font-medium text-[var(--gray-7)] hover:text-[var(--gray-9)] transition-colors"
+        class="w-full flex items-center gap-1.5 px-3.5 py-2 text-[var(--text-xs)] font-medium text-[var(--gray-7)] hover:text-[var(--gray-9)] transition-colors"
       >
         <ChevronRight class={`w-3 h-3 transition-transform ${showArchived() ? 'rotate-90' : ''}`} />
         <Archive class="w-3 h-3" />
@@ -56,7 +56,7 @@ export const ArchivedSection: Component<ArchivedSectionProps> = (props) => {
             )}
           </For>
           <Show when={props.archivedSessions().length === 0}>
-            <p class="text-[10px] text-[var(--text-muted)] px-2 py-1 text-center">
+            <p class="text-[var(--text-2xs)] text-[var(--text-muted)] px-2 py-1 text-center">
               No archived sessions
             </p>
           </Show>

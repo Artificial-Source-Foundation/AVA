@@ -84,21 +84,21 @@ const PasteModal: Component = () => {
           onClick={(e) => e.stopPropagation()}
         >
           <div class="flex items-center justify-between px-4 py-3 border-b border-[var(--border-subtle)]">
-            <span class="text-[13px] font-medium text-[var(--text-primary)]">
+            <span class="text-[var(--text-base)] font-medium text-[var(--text-primary)]">
               Edit pasted text ({data()!.content.split('\n').length} lines)
             </span>
             <div class="flex items-center gap-2">
               <button
                 type="button"
                 onClick={() => setPasteModalData(null)}
-                class="px-3 py-1 text-[12px] rounded-[var(--radius-md)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--alpha-white-5)] transition-colors"
+                class="px-3 py-1 text-[var(--text-sm)] rounded-[var(--radius-md)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--alpha-white-5)] transition-colors"
               >
                 Cancel
               </button>
               <button
                 type="button"
                 onClick={handleSave}
-                class="px-3 py-1 text-[12px] rounded-[var(--radius-md)] bg-[var(--accent)] text-white hover:opacity-90 transition-opacity"
+                class="px-3 py-1 text-[var(--text-sm)] rounded-[var(--radius-md)] bg-[var(--accent)] text-white hover:opacity-90 transition-opacity"
               >
                 Save
               </button>
@@ -106,7 +106,7 @@ const PasteModal: Component = () => {
           </div>
           <textarea
             ref={textareaRef}
-            class="flex-1 w-full p-4 bg-transparent text-[13px] leading-relaxed text-[var(--text-primary)] font-[var(--font-ui-mono)] resize-none outline-none scrollbar-thin"
+            class="flex-1 w-full p-4 bg-transparent text-[var(--text-base)] leading-relaxed text-[var(--text-primary)] font-[var(--font-ui-mono)] resize-none outline-none scrollbar-thin"
             spellcheck={false}
           >
             {data()!.content}
@@ -153,7 +153,7 @@ export const ImagePreviews: Component<ImagePreviewsProps> = (props) => (
                     e.stopPropagation()
                     props.onRemove(i())
                   }}
-                  class="absolute -top-1 -right-1 w-4 h-4 bg-[var(--error)] text-white rounded-full text-[10px] leading-none flex items-center justify-center"
+                  class="absolute -top-1 -right-1 w-4 h-4 bg-[var(--error)] text-white rounded-full text-[var(--text-2xs)] leading-none flex items-center justify-center"
                 >
                   <X class="w-2.5 h-2.5" />
                 </button>
@@ -180,7 +180,7 @@ export const FileChips: Component<FileChipsProps> = (props) => (
     <div class="flex gap-1.5 mb-2 flex-wrap px-3">
       <For each={props.files}>
         {(file, i) => (
-          <div class="flex items-center gap-1.5 px-2 py-1 rounded-[var(--radius-md)] bg-[var(--surface-raised)] border border-[var(--border-subtle)] text-[11px] text-[var(--text-secondary)]">
+          <div class="flex items-center gap-1.5 px-2 py-1 rounded-[var(--radius-md)] bg-[var(--surface-raised)] border border-[var(--border-subtle)] text-[var(--text-xs)] text-[var(--text-secondary)]">
             <FileText class="w-3 h-3 text-[var(--text-muted)]" />
             <span class="truncate max-w-[120px]">{file.name}</span>
             <button
@@ -216,7 +216,7 @@ export const PasteChips: Component<PasteChipsProps> = (props) => (
       <div class="flex gap-1.5 mb-2 flex-wrap px-3">
         <For each={props.pastes}>
           {(paste, i) => (
-            <div class="flex items-center gap-1.5 px-2 py-1 rounded-[var(--radius-md)] bg-[var(--surface-raised)] border border-[var(--border-subtle)] text-[11px] text-[var(--text-secondary)]">
+            <div class="flex items-center gap-1.5 px-2 py-1 rounded-[var(--radius-md)] bg-[var(--surface-raised)] border border-[var(--border-subtle)] text-[var(--text-xs)] text-[var(--text-secondary)]">
               <Clipboard class="w-3 h-3 text-[var(--text-muted)]" />
               <button
                 type="button"

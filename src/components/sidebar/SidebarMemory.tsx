@@ -45,14 +45,16 @@ export const SidebarMemory: Component = () => {
         <span class="text-xs font-semibold text-[var(--text-secondary)] uppercase tracking-wider">
           Memory
         </span>
-        <span class="text-[10px] text-[var(--text-muted)]">{formatTokens(tokens().total)}</span>
+        <span class="text-[var(--text-2xs)] text-[var(--text-muted)]">
+          {formatTokens(tokens().total)}
+        </span>
       </div>
 
       {/* Context Usage Bar */}
       <div class="px-3 py-2 flex-shrink-0">
         <div class="flex items-center justify-between mb-1">
-          <span class="text-[10px] text-[var(--text-muted)]">Context</span>
-          <span class="text-[10px] font-medium" style={{ color: usageColor() }}>
+          <span class="text-[var(--text-2xs)] text-[var(--text-muted)]">Context</span>
+          <span class="text-[var(--text-2xs)] font-medium" style={{ color: usageColor() }}>
             {usage().percentage.toFixed(0)}%
           </span>
         </div>
@@ -66,7 +68,7 @@ export const SidebarMemory: Component = () => {
           />
         </div>
         <Show when={usage().percentage > 80}>
-          <p class="text-[10px] text-[var(--error)] mt-1">Context nearly full</p>
+          <p class="text-[var(--text-2xs)] text-[var(--error)] mt-1">Context nearly full</p>
         </Show>
       </div>
 
@@ -77,7 +79,7 @@ export const SidebarMemory: Component = () => {
           fallback={
             <div class="text-center py-6 px-4 text-[var(--text-muted)]">
               <Brain class="w-5 h-5 mx-auto mb-2 opacity-50" />
-              <p class="text-[10px]">No memory items</p>
+              <p class="text-[var(--text-2xs)]">No memory items</p>
             </div>
           }
         >
@@ -98,7 +100,7 @@ export const SidebarMemory: Component = () => {
                     <Icon class="w-3.5 h-3.5 flex-shrink-0" style={{ color: config.color }} />
                     <div class="flex-1 min-w-0">
                       <div class="text-xs text-[var(--text-primary)] truncate">{item.title}</div>
-                      <div class="text-[10px] text-[var(--text-muted)] truncate">
+                      <div class="text-[var(--text-2xs)] text-[var(--text-muted)] truncate">
                         {formatTokens(item.tokens ?? 0)} tokens
                       </div>
                     </div>
@@ -127,11 +129,13 @@ export const SidebarMemory: Component = () => {
       {/* Footer */}
       <Show when={memoryItems().length > 0}>
         <div class="px-3 py-1.5 border-t border-[var(--border-subtle)] flex items-center justify-between">
-          <span class="text-[10px] text-[var(--text-muted)]">{memoryItems().length} items</span>
+          <span class="text-[var(--text-2xs)] text-[var(--text-muted)]">
+            {memoryItems().length} items
+          </span>
           <button
             type="button"
             onClick={clearMemoryItems}
-            class="text-[10px] text-[var(--text-muted)] hover:text-[var(--error)] transition-colors"
+            class="text-[var(--text-2xs)] text-[var(--text-muted)] hover:text-[var(--error)] transition-colors"
           >
             Clear All
           </button>

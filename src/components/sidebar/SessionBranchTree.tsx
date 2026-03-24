@@ -68,7 +68,7 @@ const TreeNode: Component<{
         <Show when={props.depth > 0}>
           <GitBranch class="w-3 h-3 text-[var(--text-muted)] flex-shrink-0" />
         </Show>
-        <span class="text-[12px] truncate flex-1">{props.session.name}</span>
+        <span class="text-[var(--text-sm)] truncate flex-1">{props.session.name}</span>
         <Show when={props.session.messageCount > 0}>
           <span class="text-[9px] text-[var(--text-muted)] tabular-nums">
             {props.session.messageCount}
@@ -106,7 +106,7 @@ export const SessionBranchTree: Component<SessionBranchTreeProps> = (props) => (
       )}
     </For>
     <Show when={props.roots.length === 0}>
-      <p class="text-[11px] text-[var(--text-muted)] text-center py-4">No sessions</p>
+      <p class="text-[var(--text-xs)] text-[var(--text-muted)] text-center py-4">No sessions</p>
     </Show>
   </div>
 )

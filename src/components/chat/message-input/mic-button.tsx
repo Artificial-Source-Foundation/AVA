@@ -14,7 +14,7 @@ export const MicButton: Component<MicButtonProps> = (props) => (
       onClick={props.onToggle}
       class={`
         flex items-center gap-1 px-1.5 py-1
-        text-[11px] font-medium rounded-[var(--radius-md)]
+        text-[var(--text-xs)] font-medium rounded-[var(--radius-md)]
         transition-all duration-200
         ${
           props.isRecording()

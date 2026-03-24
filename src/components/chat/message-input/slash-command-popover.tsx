@@ -145,7 +145,11 @@ const CommandRow: Component<{
     ) : (
       <Puzzle class="w-3.5 h-3.5 text-[var(--success)] flex-shrink-0 opacity-70" />
     )}
-    <span class="font-semibold font-[var(--font-mono)] text-[11px]">/{props.cmd.name}</span>
-    <span class="text-[var(--text-muted)] text-[10px] truncate">{props.cmd.description}</span>
+    <span class="font-semibold font-[var(--font-mono)] text-[var(--text-xs)]">
+      /{props.cmd.name}
+    </span>
+    <span class="text-[var(--text-muted)] text-[var(--text-2xs)] truncate">
+      {props.cmd.description}
+    </span>
   </button>
 )

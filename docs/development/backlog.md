@@ -68,6 +68,7 @@ Tool surface policy: default tools are now 9 (`read`, `write`, `edit`, `bash`, `
 2. ~~**Per-agent model override**~~ — DONE: agents.toml supports director/scout/worker/lead models for Praxis.
 3. ~~**StreamingDiff**~~ — DONE (MVP): StreamingEditProgress events during tool argument streaming.
 4. **Merge CLI agents under providers** — Claude Code should be an option under Anthropic provider (API key OR CLI tool), not a separate "CLI Agents" provider. Requires dual-backend provider support.
+5. **Open Project / Switch Project** — Wire Tauri native folder dialog (`tauri-plugin-dialog`) for Open Project menu item and project hub. Track recent projects in `~/.ava/state.json`. Switch working directory on project change.
 2. **Per-agent model override** — each agent uses different provider/model. Already half-built in agents.toml config.
 3. ~~**Fuzzy matching upgrade**~~ — DONE: edit reliability cascade now has 15 strategies including ellipsis handling, 3-way merge + diff-match-patch.
 4. **StreamingDiff** — apply edits as tokens stream. Users see changes instantly instead of waiting.

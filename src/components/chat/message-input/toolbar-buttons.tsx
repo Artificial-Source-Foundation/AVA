@@ -164,7 +164,7 @@ export const PlanActSlider: Component<PlanActSliderProps> = (props) => (
       relative flex items-center
       h-[22px] w-[88px] rounded-[var(--radius-md)]
       bg-[var(--surface-raised)] border border-[var(--border-subtle)]
-      text-[var(--text-2xs)] font-semibold
+      text-[var(--text-xs)] font-semibold
       disabled:opacity-50 disabled:cursor-not-allowed
       overflow-hidden select-none
       transition-colors

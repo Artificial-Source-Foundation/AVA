@@ -13,8 +13,8 @@ import { ProviderCard } from './provider-card'
 
 interface ProvidersTabGridProps {
   providers: LLMProviderConfig[]
-  expandedId: string | null
-  onExpand: (id: string | null) => void
+  expandedIds: Set<string>
+  onToggleExpand: (id: string) => void
   onToggle?: (id: string, enabled: boolean) => void
   onSaveApiKey?: (id: string, key: string) => void
   onClearApiKey?: (id: string) => void
@@ -38,8 +38,8 @@ export const ProvidersTabGrid: Component<ProvidersTabGridProps> = (props) => (
         {(provider) => (
           <ProviderCard
             provider={provider}
-            isExpanded={props.expandedId === provider.id}
-            onExpand={() => props.onExpand(props.expandedId === provider.id ? null : provider.id)}
+            isExpanded={props.expandedIds.has(provider.id)}
+            onExpand={() => props.onToggleExpand(provider.id)}
             onToggle={(enabled) => props.onToggle?.(provider.id, enabled)}
             onSaveApiKey={(key) => props.onSaveApiKey?.(provider.id, key)}
             onClearApiKey={() => props.onClearApiKey?.(provider.id)}

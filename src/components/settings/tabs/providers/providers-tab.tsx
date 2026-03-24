@@ -25,7 +25,7 @@ export interface ProvidersTabProps {
 }
 
 export const ProvidersTab: Component<ProvidersTabProps> = (props) => {
-  const [expandedId, setExpandedId] = createSignal<string | null>(null)
+  const [expandedIds, setExpandedIds] = createSignal<Set<string>>(new Set())
   const [searchQuery, setSearchQuery] = createSignal('')
 
   const connectedCount = createMemo(
@@ -55,8 +55,15 @@ export const ProvidersTab: Component<ProvidersTabProps> = (props) => {
 
         <ProvidersTabGrid
           providers={filteredProviders()}
-          expandedId={expandedId()}
-          onExpand={setExpandedId}
+          expandedIds={expandedIds()}
+          onToggleExpand={(id) =>
+            setExpandedIds((prev) => {
+              const next = new Set(prev)
+              if (next.has(id)) next.delete(id)
+              else next.add(id)
+              return next
+            })
+          }
           onToggle={props.onToggle}
           onSaveApiKey={props.onSaveApiKey}
           onClearApiKey={props.onClearApiKey}

@@ -53,6 +53,7 @@ export type CodeTheme =
   | 'nord'
   | 'solarized-dark'
   | 'catppuccin'
+export type FontSize = 'small' | 'medium' | 'large'
 export type DarkStyle = 'dark' | 'midnight' | 'charcoal'
 export type ThinkingDisplay = 'bubble' | 'preview' | 'hidden'
 export type ActivityDisplay = 'collapsed' | 'expanded' | 'hidden'
@@ -64,6 +65,7 @@ export interface AppearanceSettings {
   fontMono: MonoFont
   fontSans: SansFont
   fontLigatures: boolean
+  fontSize: FontSize // 'small' | 'medium' | 'large', default 'medium'
   chatFontSize: number // 11–20, default 13 (px, independent of uiScale)
   borderRadius: BorderRadius
   density: UIDensity

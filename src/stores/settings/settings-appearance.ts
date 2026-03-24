@@ -4,7 +4,14 @@
  * Reads the settings signal but does not own it (avoids circular deps).
  */
 
-import type { AppSettings, BorderRadius, MonoFont, SansFont, UIDensity } from './settings-types'
+import type {
+  AppSettings,
+  BorderRadius,
+  FontSize,
+  MonoFont,
+  SansFont,
+  UIDensity,
+} from './settings-types'
 
 // ============================================================================
 // Font & Scale Lookup Tables
@@ -51,6 +58,33 @@ export const RADIUS_SCALES: Record<BorderRadius, Record<string, string>> = {
     '--radius-lg': '18px',
     '--radius-xl': '24px',
     '--radius-2xl': '9999px',
+  },
+}
+
+export const FONT_SIZE_SCALES: Record<FontSize, Record<string, string>> = {
+  small: {
+    '--text-2xs': '9px',
+    '--text-xs': '10px',
+    '--text-sm': '12px',
+    '--text-base': '13px',
+    '--text-md': '14px',
+    '--text-lg': '15px',
+  },
+  medium: {
+    '--text-2xs': '10px',
+    '--text-xs': '11px',
+    '--text-sm': '13px',
+    '--text-base': '14px',
+    '--text-md': '15px',
+    '--text-lg': '16px',
+  },
+  large: {
+    '--text-2xs': '11px',
+    '--text-xs': '12px',
+    '--text-sm': '14px',
+    '--text-base': '15px',
+    '--text-md': '16px',
+    '--text-lg': '17px',
   },
 }
 
@@ -218,6 +252,12 @@ export function applyAppearanceToDOM(s: AppSettings): void {
 
   // Chat font size (absolute px, independent of uiScale)
   el.style.setProperty('--chat-font-size', `${s.appearance.chatFontSize}px`)
+
+  // Font size preset (text-2xs through text-lg)
+  const fontSizes = FONT_SIZE_SCALES[s.appearance.fontSize ?? 'medium']
+  for (const [prop, val] of Object.entries(fontSizes)) {
+    el.style.setProperty(prop, val)
+  }
 
   // Border radius
   const radii = RADIUS_SCALES[s.appearance.borderRadius]

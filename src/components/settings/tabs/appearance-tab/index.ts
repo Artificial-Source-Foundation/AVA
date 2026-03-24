@@ -3,7 +3,7 @@
  */
 
 export { SectionHeader, segmentedBtn, Toggle } from './appearance-utils'
-export { CodeThemeSection, FontSection } from './FontSettings'
+export { CodeThemeSection, FontSection, FontSizeSection } from './FontSettings'
 export {
   AccessibilitySection,
   BorderRadiusSection,

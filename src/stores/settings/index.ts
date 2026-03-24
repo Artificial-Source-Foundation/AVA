@@ -59,6 +59,7 @@ export type {
   CustomMicroagent,
   CustomSkill,
   DarkStyle,
+  FontSize,
   GenerationSettings,
   GitSettings,
   LeadConfig,

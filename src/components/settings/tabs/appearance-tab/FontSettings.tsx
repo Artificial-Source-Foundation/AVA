@@ -5,7 +5,7 @@
  */
 
 import { type Component, For } from 'solid-js'
-import type { CodeTheme, MonoFont, SansFont } from '../../../../stores/settings'
+import type { CodeTheme, FontSize, MonoFont, SansFont } from '../../../../stores/settings'
 import { useSettings } from '../../../../stores/settings'
 import { SectionHeader, segmentedBtn, Toggle } from './appearance-utils'
 
@@ -34,6 +34,51 @@ const CODE_THEME_OPTIONS: { id: CodeTheme; label: string }[] = [
   { id: 'solarized-dark', label: 'Solarized' },
   { id: 'catppuccin', label: 'Catppuccin' },
 ]
+
+const FONT_SIZE_OPTIONS: { id: FontSize; label: string }[] = [
+  { id: 'small', label: 'Small' },
+  { id: 'medium', label: 'Medium' },
+  { id: 'large', label: 'Large' },
+]
+
+const FONT_SIZE_DESCRIPTIONS: Record<FontSize, string> = {
+  small: 'Compact text for more content density',
+  medium: 'Default text size for comfortable reading',
+  large: 'Larger text for improved readability',
+}
+
+// ---------------------------------------------------------------------------
+// Font Size Section
+// ---------------------------------------------------------------------------
+
+export const FontSizeSection: Component = () => {
+  const { settings, updateAppearance } = useSettings()
+
+  return (
+    <div>
+      <SectionHeader title="Font Size" />
+      <div class="flex items-center justify-between py-2">
+        <span class="text-[var(--settings-text-label)] text-[var(--text-secondary)]">Size</span>
+        <div class="flex gap-1">
+          <For each={FONT_SIZE_OPTIONS}>
+            {(opt) => (
+              <button
+                type="button"
+                onClick={() => updateAppearance({ fontSize: opt.id })}
+                class={segmentedBtn(settings().appearance.fontSize === opt.id)}
+              >
+                {opt.label}
+              </button>
+            )}
+          </For>
+        </div>
+      </div>
+      <p class="text-[var(--settings-text-description)] text-[var(--gray-8)]">
+        {FONT_SIZE_DESCRIPTIONS[settings().appearance.fontSize ?? 'medium']}
+      </p>
+    </div>
+  )
+}
 
 // ---------------------------------------------------------------------------
 // Font Section

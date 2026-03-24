@@ -37,6 +37,7 @@ export const DEFAULT_APPEARANCE: AppearanceSettings = {
   fontMono: 'default',
   fontSans: 'default',
   fontLigatures: true,
+  fontSize: 'medium',
   chatFontSize: 13,
   borderRadius: 'default',
   density: 'default',

@@ -32,6 +32,7 @@ import {
   ColorModeSection,
   DensitySection,
   FontSection,
+  FontSizeSection,
   InterfaceScaleSection,
   SidebarOrderSection,
   segmentedBtn,
@@ -169,6 +170,10 @@ export const AppearanceTab: Component = () => {
         description="Spacing between elements"
       >
         <DensitySection />
+      </SettingsCard>
+
+      <SettingsCard icon={Type} title="Font Size" description="Base text size throughout the UI">
+        <FontSizeSection />
       </SettingsCard>
 
       <SettingsCard icon={Type} title="Font" description="UI and monospace font settings">

@@ -10,6 +10,7 @@ use tokio::time::{timeout, Duration};
 use tracing::{info, warn};
 
 const MEMORY_ENRICHMENT_TIMEOUT_MS: u64 = 150;
+const MIN_KEYWORDS_FOR_MEMORY_ENRICHMENT: usize = 3;
 
 /// Enrich a goal string with relevant memories from the memory system.
 ///
@@ -18,7 +19,7 @@ const MEMORY_ENRICHMENT_TIMEOUT_MS: u64 = 150;
 /// unchanged if no relevant memories are found.
 pub async fn enrich_goal_with_memories(memory: &MemorySystem, goal: &str) -> String {
     let keywords = extract_goal_keywords(goal);
-    if keywords.is_empty() {
+    if keywords.len() < MIN_KEYWORDS_FOR_MEMORY_ENRICHMENT {
         return goal.to_string();
     }
     let query = keywords.join(" ");

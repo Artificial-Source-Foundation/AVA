@@ -81,6 +81,9 @@ pub struct AgentLoop {
     enable_dynamic_rules: bool,
     /// Cached active tool definitions for this loop configuration.
     cached_tool_defs: std::sync::Mutex<Option<Vec<ava_types::Tool>>>,
+    /// Cached post-hook tool definitions for this loop configuration.
+    /// Plugin tool-definition hooks are treated as stable for the loop lifetime.
+    cached_hooked_tool_defs: std::sync::Mutex<Option<Vec<ava_types::Tool>>>,
 }
 
 /// Configuration for a single agent loop run — turn limits, cost caps, and model identity.
@@ -305,6 +308,7 @@ impl AgentLoop {
             activated_rule_paths: std::sync::Mutex::new(HashSet::new()),
             enable_dynamic_rules,
             cached_tool_defs: std::sync::Mutex::new(None),
+            cached_hooked_tool_defs: std::sync::Mutex::new(None),
         }
     }
 

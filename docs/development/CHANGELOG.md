@@ -22,6 +22,8 @@
 - **Simple-task concurrency widened** — `git` and `web_search` now run in the read-only concurrent batch, helping research-style turns overlap more I/O instead of serializing it.
 - **Lazy snapshot startup** — shadow git snapshots now initialize on the first write batch instead of every run, so read-only tasks avoid extra rollback setup cost.
 - **More plugin fast paths** — `SessionStart`, `SessionEnd`, `ChatMessage`, `AgentBefore`, `AgentAfter`, `ToolBefore`, `ToolAfter`, and event broadcast paths now skip hook work when no plugin subscribes.
+- **Chat hook fast paths** — `chat.params`, `chat.messages.transform`, and `text.complete` now skip cloning/serde work when no plugin subscribes.
+- **Cheaper trivial requests** — memory enrichment now skips obviously tiny prompts, index-status checks run in parallel with memory enrichment, and post-hook tool definitions are cached per loop.
 
 ### Providers
 

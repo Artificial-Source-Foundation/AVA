@@ -22,6 +22,8 @@ pub struct ContextManager {
     /// Messages that have been compacted (hidden from agent, visible to user).
     /// Accumulated across compaction rounds so the UI can display the full history.
     compacted_messages: Vec<Message>,
+    /// When true, conversation repair should run before the next LLM request.
+    needs_repair: bool,
 }
 
 impl ContextManager {
@@ -34,6 +36,7 @@ impl ContextManager {
             condenser: CondenserKind::Sync(create_condenser(token_limit)),
             last_summary: None,
             compacted_messages: Vec::new(),
+            needs_repair: false,
         }
     }
 
@@ -47,6 +50,7 @@ impl ContextManager {
             condenser: CondenserKind::Hybrid(condenser),
             last_summary: None,
             compacted_messages: Vec::new(),
+            needs_repair: false,
         }
     }
 
@@ -58,10 +62,16 @@ impl ContextManager {
             self.tracker.add_message(&msg);
             self.messages.push(msg);
         }
+        if !self.messages.is_empty() {
+            self.needs_repair = true;
+        }
     }
 
     pub fn add_message(&mut self, message: Message) {
         self.tracker.add_message(&message);
+        if matches!(message.role, Role::Assistant | Role::Tool | Role::User) {
+            self.needs_repair = true;
+        }
         self.messages.push(message);
     }
 
@@ -83,6 +93,19 @@ impl ContextManager {
             self.tracker.add_message(msg);
         }
         self.messages = messages;
+        self.needs_repair = false;
+    }
+
+    pub fn needs_repair(&self) -> bool {
+        self.needs_repair
+    }
+
+    pub fn mark_needs_repair(&mut self) {
+        self.needs_repair = true;
+    }
+
+    pub fn clear_needs_repair(&mut self) {
+        self.needs_repair = false;
     }
 
     pub fn token_count(&self) -> usize {
@@ -106,6 +129,7 @@ impl ContextManager {
         if pruned > 0 {
             self.tracker.reset();
             self.tracker.add_messages(&self.messages);
+            self.needs_repair = true;
         }
         pruned
     }
@@ -120,6 +144,7 @@ impl ContextManager {
                 self.messages = condensed.messages;
                 self.tracker.reset();
                 self.tracker.add_messages(&self.messages);
+                self.needs_repair = true;
                 Ok(())
             }
             CondenserKind::Hybrid(_) => {
@@ -136,6 +161,7 @@ impl ContextManager {
                 self.messages = condensed;
                 self.tracker.reset();
                 self.tracker.add_messages(&self.messages);
+                self.needs_repair = true;
                 Ok(())
             }
         }
@@ -178,6 +204,7 @@ impl ContextManager {
 
         self.tracker.reset();
         self.tracker.add_messages(&self.messages);
+        self.needs_repair = true;
         Ok(())
     }
 

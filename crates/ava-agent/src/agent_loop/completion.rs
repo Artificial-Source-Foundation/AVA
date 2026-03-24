@@ -140,22 +140,28 @@ impl AgentLoop {
 
         // chat.params hook: allow plugins to modify per-call LLM parameters.
         if let Some(ref pm) = self.plugin_manager.clone() {
-            let params = serde_json::json!({
-                "model": self.config.model,
-                "max_tokens": self.config.token_limit,
-                "thinking_level": format!("{:?}", self.config.thinking_level).to_lowercase(),
-                "thinking_budget_tokens": self.config.thinking_budget_tokens,
-            });
-            let modified = pm.lock().await.apply_chat_params_hook(params).await;
-            // Apply supported overrides back to config.
-            if let Some(v) = modified.get("max_tokens").and_then(|v| v.as_u64()) {
-                self.config.token_limit = v as usize;
-            }
-            if let Some(v) = modified.get("thinking_budget_tokens") {
-                if v.is_null() {
-                    self.config.thinking_budget_tokens = None;
-                } else if let Some(n) = v.as_u64() {
-                    self.config.thinking_budget_tokens = Some(n as u32);
+            let has_hook = pm
+                .lock()
+                .await
+                .has_hook_subscribers(ava_plugin::HookEvent::ChatParams);
+            if has_hook {
+                let params = serde_json::json!({
+                    "model": self.config.model,
+                    "max_tokens": self.config.token_limit,
+                    "thinking_level": format!("{:?}", self.config.thinking_level).to_lowercase(),
+                    "thinking_budget_tokens": self.config.thinking_budget_tokens,
+                });
+                let modified = pm.lock().await.apply_chat_params_hook(params).await;
+                // Apply supported overrides back to config.
+                if let Some(v) = modified.get("max_tokens").and_then(|v| v.as_u64()) {
+                    self.config.token_limit = v as usize;
+                }
+                if let Some(v) = modified.get("thinking_budget_tokens") {
+                    if v.is_null() {
+                        self.config.thinking_budget_tokens = None;
+                    } else if let Some(n) = v.as_u64() {
+                        self.config.thinking_budget_tokens = Some(n as u32);
+                    }
                 }
             }
         }
@@ -163,7 +169,7 @@ impl AgentLoop {
         // Repair conversation history before sending to LLM — fix orphaned tool
         // results, empty assistant messages, consecutive user messages, and duplicates
         // that would cause cryptic API errors.
-        {
+        if self.context.needs_repair() {
             let mut msgs = self.context.get_messages().to_vec();
             let before = msgs.len();
             ava_types::repair_conversation(&mut msgs);
@@ -175,6 +181,10 @@ impl AgentLoop {
                     "repaired conversation history before LLM call"
                 );
                 self.context.replace_messages(msgs);
+            } else {
+                // `repair_conversation` only removes invalid messages today, so an
+                // unchanged length means there was nothing to fix.
+                self.context.clear_needs_repair();
             }
         }
 
@@ -208,6 +218,30 @@ impl AgentLoop {
     /// Returns the (possibly modified) message list. If no plugins subscribe or the
     /// hook returns unchanged content, the original context messages are returned as-is.
     async fn apply_messages_transform(&mut self) -> Vec<Message> {
+        let Some(ref pm) = self.plugin_manager.clone() else {
+            return self
+                .context
+                .get_messages()
+                .iter()
+                .filter(|m| m.agent_visible)
+                .cloned()
+                .collect();
+        };
+
+        if !pm
+            .lock()
+            .await
+            .has_hook_subscribers(ava_plugin::HookEvent::ChatMessagesTransform)
+        {
+            return self
+                .context
+                .get_messages()
+                .iter()
+                .filter(|m| m.agent_visible)
+                .cloned()
+                .collect();
+        }
+
         // Only send agent-visible messages to the LLM. Compacted messages
         // (agent_visible=false) are preserved for UI display but excluded
         // from the context window.
@@ -218,17 +252,6 @@ impl AgentLoop {
             .filter(|m| m.agent_visible)
             .cloned()
             .collect();
-        let Some(ref pm) = self.plugin_manager.clone() else {
-            return messages;
-        };
-
-        if !pm
-            .lock()
-            .await
-            .has_hook_subscribers(ava_plugin::HookEvent::ChatMessagesTransform)
-        {
-            return messages;
-        }
 
         // Serialize messages to JSON for the hook.
         let json_messages: Vec<serde_json::Value> = messages
@@ -455,17 +478,23 @@ impl AgentLoop {
         // --- text.complete hook (notification) ---
         if !full_text.is_empty() {
             if let Some(ref pm) = self.plugin_manager {
-                let token_count = last_usage.as_ref().map(|u| u.output_tokens).unwrap_or(0);
-                let mut pm = pm.lock().await;
-                pm.trigger_hook(
-                    ava_plugin::HookEvent::TextComplete,
-                    serde_json::json!({
-                        "session_id": "",
-                        "content": full_text,
-                        "token_count": token_count,
-                    }),
-                )
-                .await;
+                let has_hook = pm
+                    .lock()
+                    .await
+                    .has_hook_subscribers(ava_plugin::HookEvent::TextComplete);
+                if has_hook {
+                    let token_count = last_usage.as_ref().map(|u| u.output_tokens).unwrap_or(0);
+                    let mut pm = pm.lock().await;
+                    pm.trigger_hook(
+                        ava_plugin::HookEvent::TextComplete,
+                        serde_json::json!({
+                            "session_id": "",
+                            "content": full_text,
+                            "token_count": token_count,
+                        }),
+                    )
+                    .await;
+                }
             }
         }
 

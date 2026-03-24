@@ -268,11 +268,12 @@ impl AgentStack {
         };
 
         // Surface any panic from the background indexing task before we read
-        // the index.  If the task panicked the index will be None (empty), and
+        // the index. If the task panicked the index will be None (empty), and
         // `check_index_status` will have already logged an actionable error.
-        self.check_index_status().await;
-
-        let enriched_goal = self.enrich_goal_with_memories(goal).await;
+        let (_, enriched_goal) = tokio::join!(
+            self.check_index_status(),
+            self.enrich_goal_with_memories(goal)
+        );
         let relevance_scores = {
             let guard = self.codebase_index.read().await;
             guard.as_ref().map(|idx| idx.pagerank.clone())

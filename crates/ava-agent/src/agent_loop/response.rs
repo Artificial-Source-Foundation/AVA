@@ -176,6 +176,15 @@ impl AgentLoop {
     /// Definitions that fail to deserialise after a plugin modifies them are silently
     /// dropped.
     pub(super) async fn active_tool_defs_with_hooks(&self) -> Vec<ava_types::Tool> {
+        if let Some(cached) = self
+            .cached_hooked_tool_defs
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone()
+        {
+            return cached;
+        }
+
         let base = self.active_tool_defs();
 
         let Some(ref pm) = self.plugin_manager else {
@@ -187,6 +196,11 @@ impl AgentLoop {
             .await
             .has_hook_subscribers(ava_plugin::HookEvent::ToolDefinition)
         {
+            let mut cache = self
+                .cached_hooked_tool_defs
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            *cache = Some(base.clone());
             return base;
         }
 
@@ -205,7 +219,7 @@ impl AgentLoop {
         let modified = pm.lock().await.apply_tool_definition_hook(tool_json).await;
 
         // Deserialise back to Tool structs.
-        modified
+        let tools: Vec<_> = modified
             .into_iter()
             .filter_map(|v| {
                 let name = v.get("name")?.as_str()?.to_string();
@@ -224,7 +238,14 @@ impl AgentLoop {
                     parameters,
                 })
             })
-            .collect()
+            .collect();
+
+        let mut cache = self
+            .cached_hooked_tool_defs
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        *cache = Some(tools.clone());
+        tools
     }
 
     /// Generate a response, using native tool calling when the provider supports it.

@@ -726,14 +726,15 @@ const PlanDocument: Component<{
     <article
       ref={props.cardRef}
       onMouseUp={(e) => props.onMouseUp(e)}
-      class="relative mx-auto select-text"
+      class="relative select-text w-full"
       style={{
-        'max-width': '880px',
         background: 'var(--surface)',
-        'border-radius': '12px',
-        'box-shadow': '0 20px 25px -5px rgba(0,0,0,0.15), 0 8px 10px -6px rgba(0,0,0,0.1)',
-        border: '1px solid var(--border-subtle)',
-        padding: '40px',
+        'border-radius': '0',
+        border: 'none',
+        'border-left': '1px solid var(--border-subtle)',
+        'border-right': '1px solid var(--border-subtle)',
+        padding: '40px 48px',
+        'min-height': '100%',
         animation: 'planCardIn 250ms ease-out',
       }}
     >
@@ -1252,14 +1253,8 @@ export const PlanOverlay: Component = () => {
               onLoadPlan={loadPlanFromHistory}
             />
 
-            {/* Center: Grid canvas + document card */}
-            <main
-              class="flex-1 overflow-y-auto plan-grid-bg"
-              style={{
-                background: 'var(--bg)',
-                padding: '24px',
-              }}
-            >
+            {/* Center: Document area */}
+            <main class="flex-1 overflow-y-auto" style={{ background: 'var(--surface)' }}>
               {/* Annotation toolstrip */}
               <AnnotationToolstrip activeMode={toolMode()} onModeChange={setToolMode} />
 

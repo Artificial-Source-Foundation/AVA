@@ -14,6 +14,7 @@ import { DoomLoopBanner } from './DoomLoopBanner'
 import { FileMentionPopover } from './message-input/file-mention-popover'
 import { InputDialogs } from './message-input/input-dialogs'
 import type { QueuedItem } from './message-input/MessageQueueWidget'
+import { SlashCommandPopover } from './message-input/slash-command-popover'
 import { InputTextArea } from './message-input/text-area'
 import { ToolbarStrip } from './message-input/toolbar-strip'
 import { useInputState } from './message-input/use-input-state'
@@ -54,6 +55,12 @@ export const MessageInput: Component = () => {
             files={state.mentionFiltered}
             onSelect={state.handleMentionSelect}
             selectedIndex={state.mentionIndex}
+          />
+          <SlashCommandPopover
+            open={state.slashOpen}
+            commands={state.slashCommands}
+            onSelect={state.handleSlashSelect}
+            selectedIndex={state.slashIndex}
           />
         </div>
         <InputTextArea

@@ -3,6 +3,7 @@ import { useAgent } from '../../../hooks/useAgent'
 import { useChat } from '../../../hooks/useChat'
 import { useElapsedTimer } from '../../../hooks/useElapsedTimer'
 import { generateMessageId } from '../../../lib/ids'
+import type { CommandEntry } from '../../../services/command-resolver'
 import { parseSlashCommand } from '../../../services/command-resolver'
 import type { SearchableFile } from '../../../services/file-search'
 import { openInExternalEditor } from '../../../services/ide-integration'
@@ -13,6 +14,7 @@ import { createAttachmentState } from './attachment-bar'
 import { buildFullMessage } from './attachments'
 import { useMentionState } from './use-mention-state'
 import { type ModelState, useModelState } from './use-model-state'
+import { useSlashState } from './use-slash-state'
 export interface InputState extends ModelState {
   input: Accessor<string>
   setInput: (v: string) => void
@@ -29,6 +31,10 @@ export interface InputState extends ModelState {
   mentionFiltered: Accessor<SearchableFile[]>
   mentionIndex: Accessor<number>
   handleMentionSelect: (file: SearchableFile) => void
+  slashOpen: Accessor<boolean>
+  slashCommands: Accessor<CommandEntry[]>
+  slashIndex: Accessor<number>
+  handleSlashSelect: (cmd: CommandEntry) => void
   handleSubmit: (e: Event) => Promise<void>
   handleKeyDown: (e: KeyboardEvent) => void
   handleCancel: () => void
@@ -70,6 +76,7 @@ export function useInputState(): InputState {
   const { settings } = settingsStore
   const modelState = useModelState()
   const mention = useMentionState()
+  const slash = useSlashState()
   const setTextareaRef = (el: HTMLTextAreaElement): void => {
     textareaRef = el
   }
@@ -248,6 +255,30 @@ export function useInputState(): InputState {
 
   // Keydown — mention, history, send
   const handleKeyDown = (e: KeyboardEvent): void => {
+    // Slash command popover navigation
+    if (slash.slashOpen() && slash.slashCommands().length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault()
+        slash.setSlashIndex((i: number) => Math.min(i + 1, slash.slashCommands().length - 1))
+        return
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        slash.setSlashIndex((i: number) => Math.max(i - 1, 0))
+        return
+      }
+      if (e.key === 'Enter' || e.key === 'Tab') {
+        e.preventDefault()
+        const cmd = slash.slashCommands()[slash.slashIndex()]
+        if (cmd) slash.handleSlashSelect(cmd, input, setInput, textareaRef)
+        return
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        slash.setSlashOpen(false)
+        return
+      }
+    }
     if (mention.mentionOpen() && mention.mentionFiltered().length > 0) {
       if (e.key === 'ArrowDown') {
         e.preventDefault()
@@ -474,6 +505,7 @@ export function useInputState(): InputState {
     if (historyIndex() >= 0) setHistoryIndex(-1)
     autoResize()
     mention.checkMention(v, textareaRef?.selectionStart ?? v.length)
+    slash.checkSlash(v, textareaRef?.selectionStart ?? v.length)
   }
 
   return {
@@ -493,6 +525,11 @@ export function useInputState(): InputState {
     mentionIndex: mention.mentionIndex,
     handleMentionSelect: (file: SearchableFile) =>
       mention.handleMentionSelect(file, input, setInput, textareaRef),
+    slashOpen: slash.slashOpen,
+    slashCommands: slash.slashCommands,
+    slashIndex: slash.slashIndex,
+    handleSlashSelect: (cmd: CommandEntry) =>
+      slash.handleSlashSelect(cmd, input, setInput, textareaRef),
     handleSubmit,
     handleKeyDown,
     handleCancel,

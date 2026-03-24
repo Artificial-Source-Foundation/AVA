@@ -1531,6 +1531,32 @@ button {
   pointer-events: none;
 }
 
+/* ========================================
+   TYPING INDICATOR
+   ======================================== */
+
+.typing-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: typingBounce 1.4s ease-in-out infinite;
+  opacity: 0.6;
+}
+
+@keyframes typingBounce {
+  0%,
+  60%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.6;
+  }
+  30% {
+    transform: translateY(-4px);
+    opacity: 1;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .onboarding-bg::before,
   .onboarding-logo,
@@ -1543,7 +1569,8 @@ button {
   .splash-dot,
   .splash-progress-bar::after,
   .animate-tool-card-in,
-  .animate-message-in {
+  .animate-message-in,
+  .typing-dot {
     animation: none;
     transition: none;
   }

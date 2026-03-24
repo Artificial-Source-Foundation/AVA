@@ -30,6 +30,7 @@ import { useMessageActions } from './message-list/useMessageActions'
 import { useMessageData } from './message-list/useMessageData'
 import { useMessageScroll } from './message-list/useMessageScroll'
 import { SearchBar } from './SearchBar'
+import { TypingIndicator } from './TypingIndicator'
 
 // ============================================================================
 // Component
@@ -206,6 +207,12 @@ export const MessageList: Component = () => {
                 )
               }}
             </For>
+
+            <Show when={agent.isRunning()}>
+              <div class="px-7 py-3">
+                <TypingIndicator label="AVA is thinking..." />
+              </div>
+            </Show>
 
             {/* Scroll anchor sentinel — overflow-anchor:auto keeps the viewport
                 pinned to new content at the bottom during streaming. */}

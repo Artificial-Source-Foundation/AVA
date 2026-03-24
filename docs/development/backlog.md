@@ -57,12 +57,17 @@ Tool surface policy: default tools are now 9 (`read`, `write`, `edit`, `bash`, `
 - **Model-aware lean prompts** — frontier/reasoning models now use a shorter native-tool prompt profile so benchmark runs spend less time on repeated workflow prose
 - **Hot-path concurrency + hook pass** — more read-only tools now run concurrently, snapshot manager init is write-triggered, and additional plugin hooks short-circuit when unused
 - **Third lean-runtime pass** — remaining chat hook fast paths are now guarded, trivial prompts skip memory enrichment, and more per-turn message/tool work is cached or overlapped
+- **Auto-lean + telemetry pass** — simple headless prompts now skip eager indexing automatically, prompt profiles use model capabilities, and startup phase timings/tokens are logged for future tuning
+- **Routing + startup overlap pass** — short edit-style prompts now hit the cheaper route more often, prompt-suffix work overlaps with other startup prep, and empty MCP setups no longer pay init cost
 
 ## Execution Order
 
 ### Next Sprint (high impact, aligned with vision)
 
-1. **Wildcard permission patterns** — `*.env` → ask, `src/**/*.rs` → allow. Glob-based rules. Simple, high UX impact.
+1. ~~**Wildcard permission patterns**~~ — DONE: config.yaml `permissions.path_rules`, `/permissions list` command.
+2. ~~**Per-agent model override**~~ — DONE: agents.toml supports director/scout/worker/lead models for Praxis.
+3. ~~**StreamingDiff**~~ — DONE (MVP): StreamingEditProgress events during tool argument streaming.
+4. **Merge CLI agents under providers** — Claude Code should be an option under Anthropic provider (API key OR CLI tool), not a separate "CLI Agents" provider. Requires dual-backend provider support.
 2. **Per-agent model override** — each agent uses different provider/model. Already half-built in agents.toml config.
 3. ~~**Fuzzy matching upgrade**~~ — DONE: edit reliability cascade now has 15 strategies including ellipsis handling, 3-way merge + diff-match-patch.
 4. **StreamingDiff** — apply edits as tokens stream. Users see changes instantly instead of waiting.

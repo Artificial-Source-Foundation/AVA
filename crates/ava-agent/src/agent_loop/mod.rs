@@ -347,6 +347,41 @@ impl AgentLoop {
         self
     }
 
+    async fn has_plugin_hook_subscribers(&self, event: ava_plugin::HookEvent) -> bool {
+        let Some(ref pm) = self.plugin_manager else {
+            return false;
+        };
+
+        pm.lock().await.has_hook_subscribers(event)
+    }
+
+    async fn ensure_snapshot_manager_initialized(&self) {
+        let mut manager_guard = self.snapshot_manager.write().await;
+        if manager_guard.is_some() {
+            return;
+        }
+
+        let project_root = self
+            .project_root
+            .clone()
+            .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+        match ava_tools::core::file_snapshot::SnapshotManager::new(&project_root) {
+            Ok(mut mgr) => {
+                if let Err(e) = mgr.init().await {
+                    debug!(error = %e, "snapshot manager init failed (non-fatal)");
+                } else {
+                    if let Err(e) = mgr.take_snapshot("pre-write baseline").await {
+                        debug!(error = %e, "initial snapshot failed (non-fatal)");
+                    }
+                    *manager_guard = Some(mgr);
+                }
+            }
+            Err(e) => {
+                debug!(error = %e, "snapshot manager creation failed (non-fatal)");
+            }
+        }
+    }
+
     /// Set conversation history to inject after the system prompt.
     ///
     /// Runs [`ava_types::cleanup_interrupted_tools`] so that any tool calls
@@ -401,16 +436,21 @@ impl AgentLoop {
     /// fire-and-forget). Plugins that subscribe to `event` can observe the full
     /// agent event stream without blocking execution.
     async fn broadcast_event_to_plugins(&self, event: &AgentEvent) {
-        let Some(ref pm) = self.plugin_manager else {
+        if !self
+            .has_plugin_hook_subscribers(ava_plugin::HookEvent::Event)
+            .await
+        {
             return;
-        };
+        }
         let Ok(payload) = serde_json::to_value(event) else {
             return;
         };
-        pm.lock()
-            .await
-            .trigger_hook(ava_plugin::HookEvent::Event, payload)
-            .await;
+        if let Some(pm) = self.plugin_manager.as_ref() {
+            pm.lock()
+                .await
+                .trigger_hook(ava_plugin::HookEvent::Event, payload)
+                .await;
+        }
     }
 
     /// Unified agent execution engine. Both `run()` (headless) and `run_streaming()`
@@ -435,31 +475,6 @@ impl AgentLoop {
 
         // --- Setup ---
 
-        // Initialize the shadow snapshot manager for project-state rollback.
-        // This is best-effort: if initialization fails, we continue without snapshots.
-        {
-            let mut manager_guard = self.snapshot_manager.write().await;
-            if manager_guard.is_none() {
-                let project_root = std::env::current_dir().unwrap_or_default();
-                match ava_tools::core::file_snapshot::SnapshotManager::new(&project_root) {
-                    Ok(mut mgr) => {
-                        if let Err(e) = mgr.init().await {
-                            debug!(error = %e, "snapshot manager init failed (non-fatal)");
-                        } else {
-                            // Take an initial baseline snapshot
-                            if let Err(e) = mgr.take_snapshot("session start").await {
-                                debug!(error = %e, "initial snapshot failed (non-fatal)");
-                            }
-                            *manager_guard = Some(mgr);
-                        }
-                    }
-                    Err(e) => {
-                        debug!(error = %e, "snapshot manager creation failed (non-fatal)");
-                    }
-                }
-            }
-        }
-
         self.inject_system_prompt().await;
 
         // Inject conversation history from previous turns
@@ -478,19 +493,24 @@ impl AgentLoop {
         session.add_message(goal_message.clone());
 
         // --- chat.message hook (notification) ---
-        if let Some(ref pm) = self.plugin_manager {
-            let mut pm = pm.lock().await;
-            pm.trigger_hook(
-                ava_plugin::HookEvent::ChatMessage,
-                serde_json::json!({
-                    "session_id": session.id.to_string(),
-                    "message": {
-                        "role": "user",
-                        "content": goal,
-                    }
-                }),
-            )
-            .await;
+        if self
+            .has_plugin_hook_subscribers(ava_plugin::HookEvent::ChatMessage)
+            .await
+        {
+            if let Some(pm) = self.plugin_manager.as_ref() {
+                let mut pm = pm.lock().await;
+                pm.trigger_hook(
+                    ava_plugin::HookEvent::ChatMessage,
+                    serde_json::json!({
+                        "session_id": session.id.to_string(),
+                        "message": {
+                            "role": "user",
+                            "content": goal,
+                        }
+                    }),
+                )
+                .await;
+            }
         }
 
         let mut turn: usize = 0;
@@ -517,13 +537,18 @@ impl AgentLoop {
             Self::emit(&event_tx, AgentEvent::Progress(format!("turn {turn}")));
 
             // --- Fire AgentBefore plugin hook ---
-            if let Some(ref pm) = self.plugin_manager {
-                let mut pm = pm.lock().await;
-                pm.trigger_hook(
-                    ava_plugin::HookEvent::AgentBefore,
-                    serde_json::json!({ "turn": turn, "model": self.config.model }),
-                )
-                .await;
+            if self
+                .has_plugin_hook_subscribers(ava_plugin::HookEvent::AgentBefore)
+                .await
+            {
+                if let Some(pm) = self.plugin_manager.as_ref() {
+                    let mut pm = pm.lock().await;
+                    pm.trigger_hook(
+                        ava_plugin::HookEvent::AgentBefore,
+                        serde_json::json!({ "turn": turn, "model": self.config.model }),
+                    )
+                    .await;
+                }
             }
 
             // --- Generate LLM response (with context overflow recovery) ---
@@ -589,17 +614,22 @@ impl AgentLoop {
             };
 
             // --- Fire AgentAfter plugin hook ---
-            if let Some(ref pm) = self.plugin_manager {
-                let mut pm = pm.lock().await;
-                pm.trigger_hook(
-                    ava_plugin::HookEvent::AgentAfter,
-                    serde_json::json!({
-                        "turn": turn,
-                        "tool_calls": tool_calls.len(),
-                        "response_len": response_text.len(),
-                    }),
-                )
-                .await;
+            if self
+                .has_plugin_hook_subscribers(ava_plugin::HookEvent::AgentAfter)
+                .await
+            {
+                if let Some(pm) = self.plugin_manager.as_ref() {
+                    let mut pm = pm.lock().await;
+                    pm.trigger_hook(
+                        ava_plugin::HookEvent::AgentAfter,
+                        serde_json::json!({
+                            "turn": turn,
+                            "tool_calls": tool_calls.len(),
+                            "response_len": response_text.len(),
+                        }),
+                    )
+                    .await;
+                }
             }
 
             Self::merge_usage(&mut total_usage, &usage);
@@ -1321,7 +1351,7 @@ mod tests {
             "todo_read",
             "web_fetch",
             "web_search",
-            "git_read",
+            "git",
             "plan",
             "question",
             "memory_read",

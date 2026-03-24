@@ -113,7 +113,7 @@ const PLAN_MODE_ALLOWED_TOOLS: &[&str] = &[
     "grep",
     "web_fetch",
     "web_search",
-    "git_read",
+    "git",
     "plan",
     "todo_read",
     "todo_write",

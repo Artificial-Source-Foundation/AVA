@@ -90,10 +90,12 @@ pub const READ_ONLY_TOOLS: &[&str] = &[
     "read",
     "glob",
     "grep",
+    "git",
     "hover",
     "references",
     "definition",
     "web_fetch",
+    "web_search",
     "todo_read",
 ];
 
@@ -337,10 +339,13 @@ impl AgentLoop {
         }
 
         // --- Fire ToolBefore plugin hook ---
-        if let Some(ref pm) = self.plugin_manager {
-            let mut pm = pm.lock().await;
-            let responses = pm
-                .trigger_hook(
+        if self
+            .has_plugin_hook_subscribers(ava_plugin::HookEvent::ToolBefore)
+            .await
+        {
+            let responses = if let Some(pm) = self.plugin_manager.as_ref() {
+                let mut pm = pm.lock().await;
+                pm.trigger_hook(
                     ava_plugin::HookEvent::ToolBefore,
                     serde_json::json!({
                         "tool": tool_call.name,
@@ -348,7 +353,10 @@ impl AgentLoop {
                         "args": tool_call.arguments,
                     }),
                 )
-                .await;
+                .await
+            } else {
+                Vec::new()
+            };
 
             // Check for blocks — if any plugin returns an error, skip execution
             for resp in &responses {
@@ -455,18 +463,23 @@ impl AgentLoop {
         }
 
         // --- Fire ToolAfter plugin hook ---
-        if let Some(ref pm) = self.plugin_manager {
-            let mut pm = pm.lock().await;
-            pm.trigger_hook(
-                ava_plugin::HookEvent::ToolAfter,
-                serde_json::json!({
-                    "tool": tool_call.name,
-                    "call_id": tool_call.id,
-                    "is_error": result.is_error,
-                    "duration_ms": duration.as_millis() as u64,
-                }),
-            )
-            .await;
+        if self
+            .has_plugin_hook_subscribers(ava_plugin::HookEvent::ToolAfter)
+            .await
+        {
+            if let Some(pm) = self.plugin_manager.as_ref() {
+                let mut pm = pm.lock().await;
+                pm.trigger_hook(
+                    ava_plugin::HookEvent::ToolAfter,
+                    serde_json::json!({
+                        "tool": tool_call.name,
+                        "call_id": tool_call.id,
+                        "is_error": result.is_error,
+                        "duration_ms": duration.as_millis() as u64,
+                    }),
+                )
+                .await;
+            }
         }
 
         (result, execution)
@@ -651,6 +664,8 @@ impl AgentLoop {
 
         // Write tools sequentially — check steering between each
         if !steering_triggered && !write_calls.is_empty() {
+            self.ensure_snapshot_manager_initialized().await;
+
             // Take a shadow git snapshot before any write tools execute.
             // This enables full project-state rollback via /rewind.
             {
@@ -954,9 +969,8 @@ pub fn check_plan_mode_tool(tool_call: &ToolCall) -> Option<String> {
         || name == "codebase_search"
         || name == "todo_read"
         || name == "todo_write"
-        || name == "web_search"
         || name == "web_fetch"
-        || name == "git_read"
+        || name == "git"
         || name == "plan"
         || name == "question"
         || name == "memory_read"

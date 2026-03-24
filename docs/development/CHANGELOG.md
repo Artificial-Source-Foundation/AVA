@@ -19,6 +19,9 @@
 - **Prompt telemetry** — AVA now logs estimated system-prompt token counts and on-demand rule token activation totals, making prompt-bloat regressions easier to spot.
 - **Hot-path leanups** — native-tool providers no longer get duplicated tool descriptions in the system prompt, tool-definition hooks short-circuit when unused, model registry loading is cached, and memory/plugin startup enrichment now has tighter latency bounds.
 - **Model-aware prompt profiles** — stronger native-tool models now get a leaner base prompt profile, reducing orchestration text without changing the default safety/instruction path for smaller models.
+- **Simple-task concurrency widened** — `git` and `web_search` now run in the read-only concurrent batch, helping research-style turns overlap more I/O instead of serializing it.
+- **Lazy snapshot startup** — shadow git snapshots now initialize on the first write batch instead of every run, so read-only tasks avoid extra rollback setup cost.
+- **More plugin fast paths** — `SessionStart`, `SessionEnd`, `ChatMessage`, `AgentBefore`, `AgentAfter`, `ToolBefore`, `ToolAfter`, and event broadcast paths now skip hook work when no plugin subscribes.
 
 ### Providers
 

@@ -55,6 +55,7 @@ Tool surface policy: default tools are now 9 (`read`, `write`, `edit`, `bash`, `
 - **Hybrid instruction loading** — startup prompt now stays AGENTS-first while `.ava/rules` load on demand after touched-file detection, reducing simple-task prompt bloat
 - **Second lean-runtime pass** — on-demand rules now also wake up from search results, prompt token telemetry is logged, and startup hot paths are tighter around plugin/memory overhead
 - **Model-aware lean prompts** — frontier/reasoning models now use a shorter native-tool prompt profile so benchmark runs spend less time on repeated workflow prose
+- **Hot-path concurrency + hook pass** — more read-only tools now run concurrently, snapshot manager init is write-triggered, and additional plugin hooks short-circuit when unused
 
 ## Execution Order
 

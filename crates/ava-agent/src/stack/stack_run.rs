@@ -125,11 +125,13 @@ impl AgentStack {
         // Fire SessionStart plugin hook
         {
             let mut pm = self.plugin_manager.lock().await;
-            pm.trigger_hook(
-                ava_plugin::HookEvent::SessionStart,
-                serde_json::json!({ "goal": raw_goal }),
-            )
-            .await;
+            if pm.has_hook_subscribers(ava_plugin::HookEvent::SessionStart) {
+                pm.trigger_hook(
+                    ava_plugin::HookEvent::SessionStart,
+                    serde_json::json!({ "goal": raw_goal }),
+                )
+                .await;
+            }
         }
 
         let cfg = self.config.get().await;
@@ -574,11 +576,13 @@ impl AgentStack {
             // Fire SessionEnd plugin hook
             {
                 let mut pm = self.plugin_manager.lock().await;
-                pm.trigger_hook(
-                    ava_plugin::HookEvent::SessionEnd,
-                    serde_json::json!({ "turns": session.messages.len() }),
-                )
-                .await;
+                if pm.has_hook_subscribers(ava_plugin::HookEvent::SessionEnd) {
+                    pm.trigger_hook(
+                        ava_plugin::HookEvent::SessionEnd,
+                        serde_json::json!({ "turns": session.messages.len() }),
+                    )
+                    .await;
+                }
             }
 
             return Ok(AgentRunResult {
@@ -602,11 +606,13 @@ impl AgentStack {
         // Fire SessionEnd plugin hook
         {
             let mut pm = self.plugin_manager.lock().await;
-            pm.trigger_hook(
-                ava_plugin::HookEvent::SessionEnd,
-                serde_json::json!({ "turns": session.messages.len() }),
-            )
-            .await;
+            if pm.has_hook_subscribers(ava_plugin::HookEvent::SessionEnd) {
+                pm.trigger_hook(
+                    ava_plugin::HookEvent::SessionEnd,
+                    serde_json::json!({ "turns": session.messages.len() }),
+                )
+                .await;
+            }
         }
 
         Ok(AgentRunResult {

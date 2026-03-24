@@ -1,6 +1,6 @@
 //! Auto-retry middleware for read-only tools on transient failures.
 //!
-//! Read-only tools (read, glob, grep, web_fetch, code_search, git_read) are
+//! Read-only tools (read, glob, grep, web_fetch, code_search, git) are
 //! automatically retried up to 2 times (3 total attempts) with exponential
 //! backoff when the error looks transient. The retry is completely transparent
 //! to the agent — if retry succeeds, the result is returned normally; if all
@@ -9,14 +9,7 @@
 use std::time::Duration;
 
 /// Set of tool names that are safe to retry (read-only, no side effects).
-const RETRYABLE_TOOLS: &[&str] = &[
-    "read",
-    "glob",
-    "grep",
-    "web_fetch",
-    "code_search",
-    "git_read",
-];
+const RETRYABLE_TOOLS: &[&str] = &["read", "glob", "grep", "web_fetch", "code_search", "git"];
 
 /// Backoff durations for each retry attempt.
 const BACKOFF_DURATIONS: &[Duration] = &[Duration::from_millis(100), Duration::from_millis(200)];

@@ -280,6 +280,26 @@ fn value_type_name(value: &Value) -> &'static str {
 }
 
 impl AgentLoop {
+    fn check_tool_visibility(&self, tool_call: &ToolCall) -> Option<String> {
+        match self.tool_visibility_profile {
+            crate::routing::ToolVisibilityProfile::Full => None,
+            crate::routing::ToolVisibilityProfile::ReadOnly => {
+                if READ_ONLY_TOOLS.contains(&tool_call.name.as_str()) {
+                    None
+                } else {
+                    Some(format!(
+                        "Tool '{}' is hidden for this read-only task.",
+                        tool_call.name
+                    ))
+                }
+            }
+            crate::routing::ToolVisibilityProfile::AnswerOnly => Some(format!(
+                "Tool '{}' is hidden for this answer-only task.",
+                tool_call.name
+            )),
+        }
+    }
+
     /// Execute a tool call and return both the result and a timed execution record.
     /// In plan mode, write/edit tools are restricted to `.ava/plans/*.md` paths.
     pub(super) async fn execute_tool_call_timed(
@@ -336,6 +356,22 @@ impl AgentLoop {
                 };
                 return (result, execution);
             }
+        }
+
+        if let Some(rejection) = self.check_tool_visibility(tool_call) {
+            let result = ToolResult {
+                call_id: tool_call.id.clone(),
+                content: rejection,
+                is_error: true,
+            };
+            let execution = ToolExecution {
+                tool_name: tool_call.name.clone(),
+                arguments_hash: hash_arguments(&tool_call.arguments),
+                success: false,
+                duration: std::time::Duration::ZERO,
+                timestamp: Instant::now(),
+            };
+            return (result, execution);
         }
 
         // --- Fire ToolBefore plugin hook ---

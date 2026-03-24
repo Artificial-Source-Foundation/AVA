@@ -4,7 +4,7 @@ use ava_types::{AvaError, Message, Result, Role, StreamChunk};
 use futures::{Stream, StreamExt};
 use std::pin::Pin;
 
-use crate::config::{CLIAgentConfig, CLIAgentEvent};
+use crate::config::{CLIAgentConfig, CLIAgentEvent, ContentBlock};
 use crate::runner::{CLIAgentRunner, RunOptions};
 
 /// Wraps a CLI agent as an LLMProvider.
@@ -98,10 +98,40 @@ impl LLMProvider for CLIAgentLLMProvider {
         });
 
         let stream = tokio_stream::wrappers::ReceiverStream::new(rx).filter_map(|event| {
-            futures::future::ready(match event {
+            let chunk = match event {
                 CLIAgentEvent::Text { content } => Some(StreamChunk::text(content)),
+                // Agent SDK: extract text or thinking from assistant messages
+                CLIAgentEvent::Assistant { content, .. } => {
+                    let mut text = String::new();
+                    let mut thinking = None;
+                    for block in content {
+                        match block {
+                            ContentBlock::Text { text: t } => text.push_str(&t),
+                            ContentBlock::Thinking { thinking: t } => {
+                                thinking = Some(t);
+                            }
+                            _ => {}
+                        }
+                    }
+                    if let Some(t) = thinking {
+                        Some(StreamChunk {
+                            thinking: Some(t),
+                            content: if text.is_empty() { None } else { Some(text) },
+                            ..Default::default()
+                        })
+                    } else if !text.is_empty() {
+                        Some(StreamChunk::text(text))
+                    } else {
+                        None
+                    }
+                }
+                // Agent SDK: emit result text
+                CLIAgentEvent::Result { result, .. } if !result.is_empty() => {
+                    Some(StreamChunk::text(result))
+                }
                 _ => None,
-            })
+            };
+            futures::future::ready(chunk)
         });
 
         Ok(Box::pin(stream))
@@ -212,17 +242,8 @@ mod tests {
                 name: "opencode".to_string(),
                 binary: "opencode".to_string(),
                 prompt_flag: crate::config::PromptMode::Subcommand("run".to_string()),
-                non_interactive_flags: vec![],
-                yolo_flags: vec![],
-                output_format_flag: None,
-                allowed_tools_flag: None,
-                cwd_flag: None,
-                model_flag: None,
-                session_flag: None,
-                supports_stream_json: false,
-                supports_tool_scoping: false,
-                tier_tool_scopes: None,
                 version_command: vec!["opencode".to_string(), "--version".to_string()],
+                ..Default::default()
             },
             Some("test-model".to_string()),
             false,
@@ -238,17 +259,8 @@ mod tests {
                 name: "aider".to_string(),
                 binary: "aider".to_string(),
                 prompt_flag: crate::config::PromptMode::Flag("--message".to_string()),
-                non_interactive_flags: vec![],
-                yolo_flags: vec![],
-                output_format_flag: None,
-                allowed_tools_flag: None,
-                cwd_flag: None,
-                model_flag: None,
-                session_flag: None,
-                supports_stream_json: false,
-                supports_tool_scoping: false,
-                tier_tool_scopes: None,
                 version_command: vec!["aider".to_string(), "--version".to_string()],
+                ..Default::default()
             },
             Some("my-model".to_string()),
             false,
@@ -264,17 +276,13 @@ mod tests {
                 name: "codex".to_string(),
                 binary: "codex".to_string(),
                 prompt_flag: crate::config::PromptMode::Subcommand("exec".to_string()),
-                non_interactive_flags: vec![],
                 yolo_flags: vec!["--full-auto".to_string()],
                 output_format_flag: Some("--json".to_string()),
-                allowed_tools_flag: None,
                 cwd_flag: Some("--cwd".to_string()),
                 model_flag: Some("--model".to_string()),
-                session_flag: None,
                 supports_stream_json: true,
-                supports_tool_scoping: false,
-                tier_tool_scopes: None,
                 version_command: vec!["codex".to_string(), "--version".to_string()],
+                ..Default::default()
             },
             None,
             true,

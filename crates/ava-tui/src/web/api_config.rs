@@ -98,6 +98,36 @@ pub(crate) async fn list_providers(State(state): State<WebState>) -> impl IntoRe
 }
 
 // ============================================================================
+// CLI Agents
+// ============================================================================
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CLIAgentInfo {
+    pub name: String,
+    pub binary: String,
+    pub version: String,
+    pub installed: bool,
+}
+
+/// List discovered CLI agents (Claude Code, Gemini CLI, etc.)
+pub(crate) async fn list_cli_agents(State(state): State<WebState>) -> impl IntoResponse {
+    let agents: Vec<CLIAgentInfo> = state
+        .inner
+        .stack
+        .cli_agents()
+        .iter()
+        .map(|a| CLIAgentInfo {
+            name: a.name.clone(),
+            binary: a.binary.clone(),
+            version: a.version.clone(),
+            installed: true,
+        })
+        .collect();
+    Json(agents)
+}
+
+// ============================================================================
 // Config
 // ============================================================================
 

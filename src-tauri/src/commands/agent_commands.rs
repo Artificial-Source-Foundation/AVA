@@ -8,17 +8,17 @@
 //! 4. The resolve command sends the response through the stored oneshot channel
 //! 5. The permission middleware receives it and continues or blocks the tool
 
-use ava_types::MessageTier;
 use ava_tools::permission_middleware::ToolApproval;
+use ava_types::MessageTier;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
 use tokio::sync::mpsc;
 use tracing::info;
 use uuid::Uuid;
 
+use super::helpers::collect_history_before_last_user;
 use crate::bridge::DesktopBridge;
 use crate::events::{emit_backend_event, AgentEvent};
-use super::helpers::collect_history_before_last_user;
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -90,11 +90,7 @@ async fn run_agent_inner(
             // Track write/edit tool calls for undo support
             if let ava_agent::agent_loop::AgentEvent::ToolCall(ref tc) = event {
                 if tc.name == "edit" || tc.name == "write" {
-                    if let Some(path) = tc
-                        .arguments
-                        .get("file_path")
-                        .and_then(|v| v.as_str())
-                    {
+                    if let Some(path) = tc.arguments.get("file_path").and_then(|v| v.as_str()) {
                         if let Ok(content) = tokio::fs::read_to_string(path).await {
                             let mut hist = edit_history.write().await;
                             if hist.len() >= 100 {
@@ -125,7 +121,10 @@ async fn run_agent_inner(
                         .collect();
                     let _ = app_clone.emit("agent-event", AgentEvent::TodoUpdate { todos });
                 }
-            } else if !matches!(event, ava_agent::agent_loop::AgentEvent::SnapshotTaken { .. }) {
+            } else if !matches!(
+                event,
+                ava_agent::agent_loop::AgentEvent::SnapshotTaken { .. }
+            ) {
                 // Only reset the flag for events that aren't snapshots —
                 // SnapshotTaken fires between ToolCall and ToolResult and would
                 // incorrectly reset last_tool_was_todo_write.
@@ -244,11 +243,18 @@ async fn run_agent_inner(
 
     // Debug: write to file so we can trace desktop issues
     let _ = std::fs::OpenOptions::new()
-        .create(true).append(true)
+        .create(true)
+        .append(true)
         .open("/tmp/ava-debug/rust-agent.log")
         .and_then(|mut f| {
             use std::io::Write;
-            writeln!(f, "[{}] run_agent_inner: goal={}, max_turns={}", chrono::Utc::now(), goal, max_turns)
+            writeln!(
+                f,
+                "[{}] run_agent_inner: goal={}, max_turns={}",
+                chrono::Utc::now(),
+                goal,
+                max_turns
+            )
         });
 
     let result = bridge
@@ -277,12 +283,20 @@ async fn run_agent_inner(
 
     // Debug log result
     let _ = std::fs::OpenOptions::new()
-        .create(true).append(true)
+        .create(true)
+        .append(true)
         .open("/tmp/ava-debug/rust-agent.log")
         .and_then(|mut f| {
             use std::io::Write;
             match &result {
-                Ok(r) => writeln!(f, "[{}] run_agent_inner: success={}, turns={}, session={}", chrono::Utc::now(), r.success, r.turns, r.session.id),
+                Ok(r) => writeln!(
+                    f,
+                    "[{}] run_agent_inner: success={}, turns={}, session={}",
+                    chrono::Utc::now(),
+                    r.success,
+                    r.turns,
+                    r.session.id
+                ),
                 Err(e) => writeln!(f, "[{}] run_agent_inner: ERROR={}", chrono::Utc::now(), e),
             }
         });
@@ -488,8 +502,7 @@ pub async fn resolve_plan(
                 .modified_plan
                 .ok_or_else(|| "Modified plan is required for 'modified' response".to_string())
                 .and_then(|v| {
-                    serde_json::from_value(v)
-                        .map_err(|e| format!("Invalid modified plan: {e}"))
+                    serde_json::from_value(v).map_err(|e| format!("Invalid modified plan: {e}"))
                 })?;
             ava_types::PlanDecision::Modified { plan, feedback }
         }
@@ -513,16 +526,11 @@ pub async fn resolve_plan(
 
 /// Inject a steering message (Tier 1).
 #[tauri::command]
-pub async fn steer_agent(
-    message: String,
-    bridge: State<'_, DesktopBridge>,
-) -> Result<(), String> {
+pub async fn steer_agent(message: String, bridge: State<'_, DesktopBridge>) -> Result<(), String> {
     if message.is_empty() {
         return Err("Steering message must not be empty.".to_string());
     }
-    bridge
-        .send_message(message, MessageTier::Steering)
-        .await
+    bridge.send_message(message, MessageTier::Steering).await
 }
 
 /// Queue a follow-up message (Tier 2).
@@ -534,9 +542,7 @@ pub async fn follow_up_agent(
     if message.is_empty() {
         return Err("Follow-up message must not be empty.".to_string());
     }
-    bridge
-        .send_message(message, MessageTier::FollowUp)
-        .await
+    bridge.send_message(message, MessageTier::FollowUp).await
 }
 
 #[derive(Deserialize)]
@@ -731,9 +737,7 @@ pub struct UndoResult {
 
 /// Undo the last file edit made by the agent.
 #[tauri::command]
-pub async fn undo_last_edit(
-    bridge: State<'_, DesktopBridge>,
-) -> Result<UndoResult, String> {
+pub async fn undo_last_edit(bridge: State<'_, DesktopBridge>) -> Result<UndoResult, String> {
     let record = bridge.pop_last_edit().await;
 
     match record {

@@ -10,6 +10,17 @@ pub enum AgentRole {
     Subagent,
 }
 
+/// Options for Agent SDK-aware CLI execution.
+#[derive(Debug, Clone, Default)]
+pub struct BridgeOptions {
+    /// Max turns for the agent loop (from budget).
+    pub max_turns: Option<usize>,
+    /// System prompt override.
+    pub system_prompt: Option<String>,
+    /// Resume a specific session by ID.
+    pub resume_session: Option<String>,
+}
+
 /// Execute a task using a CLI agent with tier-appropriate settings.
 pub async fn execute_with_cli_agent(
     runner: &CLIAgentRunner,
@@ -19,6 +30,28 @@ pub async fn execute_with_cli_agent(
     files: Option<&[String]>,
     event_tx: Option<tokio::sync::mpsc::Sender<CLIAgentEvent>>,
 ) -> Result<CLIAgentResult> {
+    execute_with_cli_agent_ext(
+        runner,
+        task,
+        role,
+        cwd,
+        files,
+        event_tx,
+        &BridgeOptions::default(),
+    )
+    .await
+}
+
+/// Execute a task with full Agent SDK bridge options.
+pub async fn execute_with_cli_agent_ext(
+    runner: &CLIAgentRunner,
+    task: &str,
+    role: AgentRole,
+    cwd: &str,
+    files: Option<&[String]>,
+    event_tx: Option<tokio::sync::mpsc::Sender<CLIAgentEvent>>,
+    bridge_opts: &BridgeOptions,
+) -> Result<CLIAgentResult> {
     let prompt = build_tier_prompt(task, role, files);
 
     let options = RunOptions {
@@ -27,6 +60,10 @@ pub async fn execute_with_cli_agent(
         yolo: matches!(role, AgentRole::Engineer),
         allowed_tools: get_tier_tools(runner, role),
         timeout_ms: get_tier_timeout(role),
+        max_turns: bridge_opts.max_turns,
+        permission_mode: Some(get_tier_permission_mode(role).to_string()),
+        system_prompt: bridge_opts.system_prompt.clone(),
+        resume_session: bridge_opts.resume_session.clone(),
         ..RunOptions::default()
     };
 
@@ -83,6 +120,15 @@ pub(crate) fn get_tier_timeout(role: AgentRole) -> Option<u64> {
     }
 }
 
+/// Get the Agent SDK permission mode for a given role.
+pub(crate) fn get_tier_permission_mode(role: AgentRole) -> &'static str {
+    match role {
+        AgentRole::Engineer => "bypassPermissions",
+        AgentRole::Reviewer => "default",
+        AgentRole::Subagent => "default",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -94,13 +140,11 @@ mod tests {
             name: "claude-code".to_string(),
             binary: "claude".to_string(),
             prompt_flag: PromptMode::Flag("-p".to_string()),
-            non_interactive_flags: vec![],
             yolo_flags: vec!["--dangerously-skip-permissions".to_string()],
             output_format_flag: Some("--output-format".to_string()),
             allowed_tools_flag: Some("--allowedTools".to_string()),
             cwd_flag: Some("--cwd".to_string()),
             model_flag: Some("--model".to_string()),
-            session_flag: None,
             supports_stream_json: true,
             supports_tool_scoping: true,
             tier_tool_scopes: Some(HashMap::from([
@@ -115,6 +159,7 @@ mod tests {
                 ("subagent".to_string(), vec!["Read".to_string()]),
             ])),
             version_command: vec!["claude".to_string(), "--version".to_string()],
+            ..Default::default()
         })
     }
 
@@ -165,5 +210,15 @@ mod tests {
         assert_eq!(get_tier_timeout(AgentRole::Engineer), Some(600_000));
         assert_eq!(get_tier_timeout(AgentRole::Reviewer), Some(300_000));
         assert_eq!(get_tier_timeout(AgentRole::Subagent), Some(120_000));
+    }
+
+    #[test]
+    fn tier_permission_modes() {
+        assert_eq!(
+            get_tier_permission_mode(AgentRole::Engineer),
+            "bypassPermissions"
+        );
+        assert_eq!(get_tier_permission_mode(AgentRole::Reviewer), "default");
+        assert_eq!(get_tier_permission_mode(AgentRole::Subagent), "default");
     }
 }

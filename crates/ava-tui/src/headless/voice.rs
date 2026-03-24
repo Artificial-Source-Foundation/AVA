@@ -10,6 +10,7 @@ use tokio_util::sync::CancellationToken;
 pub(super) async fn run_voice_loop(cli: CliArgs) -> Result<()> {
     let data_dir = dirs::home_dir().unwrap_or_default().join(".ava");
     let (provider, model) = cli.resolve_provider_model().await?;
+    let runtime_lean = cli.runtime_lean_settings();
     if provider.is_none() {
         return Err(eyre!(crate::config::cli::NO_PROVIDER_ERROR));
     }
@@ -84,8 +85,8 @@ pub(super) async fn run_voice_loop(cli: CliArgs) -> Result<()> {
             max_turns: cli.max_turns,
             max_budget_usd: cli.max_budget_usd,
             yolo: cli.auto_approve,
-            include_project_instructions: !cli.fast,
-            eager_codebase_indexing: !cli.fast,
+            include_project_instructions: runtime_lean.include_project_instructions,
+            eager_codebase_indexing: runtime_lean.eager_codebase_indexing,
             ..Default::default()
         })
         .await?;

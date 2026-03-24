@@ -344,6 +344,7 @@ impl App {
             cli.max_turns,
             cli.max_budget_usd,
             cli.auto_approve,
+            cli.fast,
         )
         .await?;
         let todo_state = agent.todo_state();

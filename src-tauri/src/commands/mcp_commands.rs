@@ -43,11 +43,7 @@ pub struct McpReloadResult {
 pub async fn reload_mcp_servers(
     bridge: State<'_, DesktopBridge>,
 ) -> Result<McpReloadResult, String> {
-    let (server_count, tool_count) = bridge
-        .stack
-        .reload_mcp()
-        .await
-        .map_err(|e| e.to_string())?;
+    let (server_count, tool_count) = bridge.stack.reload_mcp().await.map_err(|e| e.to_string())?;
     Ok(McpReloadResult {
         server_count,
         tool_count,

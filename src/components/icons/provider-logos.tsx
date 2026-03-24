@@ -122,6 +122,13 @@ export const OllamaLogo: Component<LogoProps> = (props) => (
   </svg>
 )
 
+/** CLI Agents — terminal prompt icon */
+export const TerminalLogo: Component<LogoProps> = (props) => (
+  <svg viewBox="0 0 24 24" fill="currentColor" class={props.class} aria-hidden="true">
+    <path d="M2 4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h20a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2H2zm.5 2h19a.5.5 0 0 1 .5.5v11a.5.5 0 0 1-.5.5h-19a.5.5 0 0 1-.5-.5v-11a.5.5 0 0 1 .5-.5zM6.146 8.146a.5.5 0 0 0 0 .708L8.793 11.5l-2.647 2.646a.5.5 0 0 0 .708.708l3-3a.5.5 0 0 0 0-.708l-3-3a.5.5 0 0 0-.708 0zM12 14a.5.5 0 0 0 0 1h4a.5.5 0 0 0 0-1h-4z" />
+  </svg>
+)
+
 /** Alibaba Cloud — cloud mark (Simple Icons) */
 export const AlibabaCloudLogo: Component<LogoProps> = (props) => (
   <svg viewBox="0 0 24 24" fill="currentColor" class={props.class} aria-hidden="true">

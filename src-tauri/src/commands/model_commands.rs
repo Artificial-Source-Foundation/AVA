@@ -6,8 +6,8 @@
 use serde::Serialize;
 use tauri::State;
 
-use ava_config::model_catalog::registry;
 use crate::bridge::DesktopBridge;
+use ava_config::model_catalog::registry;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -54,9 +54,7 @@ pub struct CurrentModel {
 
 /// Get the currently-active provider and model.
 #[tauri::command]
-pub async fn get_current_model(
-    bridge: State<'_, DesktopBridge>,
-) -> Result<CurrentModel, String> {
+pub async fn get_current_model(bridge: State<'_, DesktopBridge>) -> Result<CurrentModel, String> {
     let (provider, model) = bridge.stack.current_model().await;
     Ok(CurrentModel { provider, model })
 }

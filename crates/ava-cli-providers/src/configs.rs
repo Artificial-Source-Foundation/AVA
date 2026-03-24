@@ -50,6 +50,14 @@ fn claude_code_config() -> CLIAgentConfig {
             ),
         ])),
         version_command: vec!["claude".into(), "--version".into()],
+        // Agent SDK extensions
+        max_turns_flag: Some("--max-turns".into()),
+        permission_mode_flag: Some("--permission-mode".into()),
+        system_prompt_flag: Some("--system-prompt".into()),
+        resume_flag: Some("--resume".into()),
+        continue_flag: Some("--continue".into()),
+        disallowed_tools_flag: Some("--disallowedTools".into()),
+        supports_agent_sdk_events: true,
     }
 }
 
@@ -58,17 +66,11 @@ fn gemini_cli_config() -> CLIAgentConfig {
         name: "gemini-cli".into(),
         binary: "gemini".into(),
         prompt_flag: PromptMode::Flag("-p".into()),
-        non_interactive_flags: vec![],
         yolo_flags: vec!["--yolo".into()],
-        output_format_flag: None,
-        allowed_tools_flag: None,
         cwd_flag: Some("--cwd".into()),
         model_flag: Some("--model".into()),
-        session_flag: None,
-        supports_stream_json: false,
-        supports_tool_scoping: false,
-        tier_tool_scopes: None,
         version_command: vec!["gemini".into(), "--version".into()],
+        ..Default::default()
     }
 }
 
@@ -77,17 +79,14 @@ fn codex_config() -> CLIAgentConfig {
         name: "codex".into(),
         binary: "codex".into(),
         prompt_flag: PromptMode::Subcommand("exec".into()),
-        non_interactive_flags: vec![],
         yolo_flags: vec!["--full-auto".into()],
         output_format_flag: Some("--json".into()),
-        allowed_tools_flag: None,
         cwd_flag: Some("--cwd".into()),
         model_flag: Some("--model".into()),
         session_flag: Some("--session".into()),
         supports_stream_json: true,
-        supports_tool_scoping: false,
-        tier_tool_scopes: None,
         version_command: vec!["codex".into(), "--version".into()],
+        ..Default::default()
     }
 }
 
@@ -96,17 +95,11 @@ fn opencode_config() -> CLIAgentConfig {
         name: "opencode".into(),
         binary: "opencode".into(),
         prompt_flag: PromptMode::Subcommand("run".into()),
-        non_interactive_flags: vec![],
-        yolo_flags: vec![],
-        output_format_flag: None,
-        allowed_tools_flag: None,
         cwd_flag: Some("--cwd".into()),
         model_flag: Some("--model".into()),
         session_flag: Some("--session".into()),
-        supports_stream_json: false,
-        supports_tool_scoping: false,
-        tier_tool_scopes: None,
         version_command: vec!["opencode".into(), "--version".into()],
+        ..Default::default()
     }
 }
 
@@ -115,17 +108,11 @@ fn aider_config() -> CLIAgentConfig {
         name: "aider".into(),
         binary: "aider".into(),
         prompt_flag: PromptMode::Flag("--message".into()),
-        non_interactive_flags: vec![],
         yolo_flags: vec!["--yes-always".into()],
-        output_format_flag: None,
-        allowed_tools_flag: None,
         cwd_flag: Some("--cwd".into()),
         model_flag: Some("--model".into()),
-        session_flag: None,
-        supports_stream_json: false,
-        supports_tool_scoping: false,
-        tier_tool_scopes: None,
         version_command: vec!["aider".into(), "--version".into()],
+        ..Default::default()
     }
 }
 
@@ -160,6 +147,7 @@ mod tests {
         let claude = &configs["claude-code"];
         assert!(claude.supports_stream_json);
         assert!(claude.supports_tool_scoping);
+        assert!(claude.supports_agent_sdk_events);
     }
 
     #[test]

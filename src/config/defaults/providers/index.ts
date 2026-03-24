@@ -8,6 +8,7 @@
 import type { LLMProviderConfig } from '../provider-defaults'
 import { alibaba } from './alibaba'
 import { anthropic } from './anthropic'
+import { cliAgents } from './cli-agents'
 import { cohere } from './cohere'
 import { copilot } from './copilot'
 import { deepseek } from './deepseek'
@@ -38,4 +39,5 @@ export const defaultProviders: LLMProviderConfig[] = [
   kimi,
   glm,
   ollama,
+  cliAgents,
 ]

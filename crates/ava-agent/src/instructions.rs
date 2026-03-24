@@ -77,13 +77,40 @@ pub fn load_project_instructions() -> Option<String> {
 /// demand after the agent touches matching files.
 pub fn load_startup_project_instructions_with_config(extra_paths: &[String]) -> Option<String> {
     let cwd = std::env::current_dir().ok()?;
-    load_startup_project_instructions_from_root_with_config(&cwd, extra_paths)
+    load_startup_project_instructions_from_root_with_profile(
+        &cwd,
+        extra_paths,
+        StartupInstructionProfile::Full,
+    )
 }
 
 pub fn load_startup_project_instructions_from_root_with_config(
     root: &Path,
     extra_paths: &[String],
 ) -> Option<String> {
+    load_startup_project_instructions_from_root_with_profile(
+        root,
+        extra_paths,
+        StartupInstructionProfile::Full,
+    )
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StartupInstructionProfile {
+    Full,
+    AgentsOnly,
+    None,
+}
+
+pub fn load_startup_project_instructions_from_root_with_profile(
+    root: &Path,
+    extra_paths: &[String],
+    profile: StartupInstructionProfile,
+) -> Option<String> {
+    if profile == StartupInstructionProfile::None {
+        return None;
+    }
+
     let home = dirs::home_dir();
     let project_trusted = ava_config::is_project_trusted(root);
     if !project_trusted {
@@ -92,7 +119,7 @@ pub fn load_startup_project_instructions_from_root_with_config(
              Run with --trust to approve."
         );
     }
-    load_startup_from_root_with_extras(root, home.as_deref(), extra_paths, project_trusted)
+    load_startup_from_root_with_extras(root, home.as_deref(), extra_paths, project_trusted, profile)
 }
 
 /// Load project instructions with additional user-configured paths.
@@ -122,6 +149,7 @@ fn load_startup_from_root_with_extras(
     home: Option<&Path>,
     extra_paths: &[String],
     project_trusted: bool,
+    profile: StartupInstructionProfile,
 ) -> Option<String> {
     let mut seen = HashSet::new();
     let mut sections = Vec::new();
@@ -154,24 +182,28 @@ fn load_startup_from_root_with_extras(
         let project_ava_agents = root.join(".ava").join("AGENTS.md");
         try_load_file_bounded(&project_ava_agents, root, &mut seen, &mut sections);
 
-        for extra in extra_paths {
-            if extra.contains('*') {
-                let full_pattern = root.join(extra);
-                if let Ok(paths) = glob::glob(&full_pattern.to_string_lossy()) {
-                    let mut matched: Vec<PathBuf> = paths.filter_map(|p| p.ok()).collect();
-                    matched.sort();
-                    for path in matched {
-                        try_load_file_bounded(&path, root, &mut seen, &mut sections);
+        if profile == StartupInstructionProfile::Full {
+            for extra in extra_paths {
+                if extra.contains('*') {
+                    let full_pattern = root.join(extra);
+                    if let Ok(paths) = glob::glob(&full_pattern.to_string_lossy()) {
+                        let mut matched: Vec<PathBuf> = paths.filter_map(|p| p.ok()).collect();
+                        matched.sort();
+                        for path in matched {
+                            try_load_file_bounded(&path, root, &mut seen, &mut sections);
+                        }
                     }
+                } else {
+                    let path = root.join(extra);
+                    try_load_file_bounded(&path, root, &mut seen, &mut sections);
                 }
-            } else {
-                let path = root.join(extra);
-                try_load_file_bounded(&path, root, &mut seen, &mut sections);
             }
         }
     }
 
-    load_skill_sections(root, home, project_trusted, &mut seen, &mut sections);
+    if profile == StartupInstructionProfile::Full {
+        load_skill_sections(root, home, project_trusted, &mut seen, &mut sections);
+    }
 
     if sections.is_empty() {
         return None;
@@ -956,9 +988,14 @@ mod tests {
         fs::create_dir_all(&rules).unwrap();
         fs::write(rules.join("rust.md"), "Always use anyhow.").unwrap();
 
-        let result =
-            load_startup_from_root_with_extras(tmp.path(), Some(fake_home.path()), &[], true)
-                .unwrap();
+        let result = load_startup_from_root_with_extras(
+            tmp.path(),
+            Some(fake_home.path()),
+            &[],
+            true,
+            StartupInstructionProfile::Full,
+        )
+        .unwrap();
         assert!(result.contains("Global rules."));
         assert!(result.contains("Project rules."));
         assert!(!result.contains("Always use anyhow."));

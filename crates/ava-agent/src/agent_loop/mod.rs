@@ -84,6 +84,8 @@ pub struct AgentLoop {
     /// Cached post-hook tool definitions for this loop configuration.
     /// Plugin tool-definition hooks are treated as stable for the loop lifetime.
     cached_hooked_tool_defs: std::sync::Mutex<Option<Vec<ava_types::Tool>>>,
+    /// Visible tool subset for the current goal.
+    tool_visibility_profile: crate::routing::ToolVisibilityProfile,
 }
 
 /// Configuration for a single agent loop run — turn limits, cost caps, and model identity.
@@ -309,6 +311,7 @@ impl AgentLoop {
             enable_dynamic_rules,
             cached_tool_defs: std::sync::Mutex::new(None),
             cached_hooked_tool_defs: std::sync::Mutex::new(None),
+            tool_visibility_profile: crate::routing::ToolVisibilityProfile::Full,
         }
     }
 
@@ -337,6 +340,14 @@ impl AgentLoop {
     /// Attach a plugin manager for hook dispatch during the agent loop.
     pub fn with_plugin_manager(mut self, pm: Arc<tokio::sync::Mutex<PluginManager>>) -> Self {
         self.plugin_manager = Some(pm);
+        self
+    }
+
+    pub fn with_tool_visibility_profile(
+        mut self,
+        profile: crate::routing::ToolVisibilityProfile,
+    ) -> Self {
+        self.tool_visibility_profile = profile;
         self
     }
 
@@ -479,6 +490,14 @@ impl AgentLoop {
 
         // --- Setup ---
 
+        *self
+            .cached_tool_defs
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()) = None;
+        *self
+            .cached_hooked_tool_defs
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()) = None;
         self.inject_system_prompt().await;
 
         // Inject conversation history from previous turns

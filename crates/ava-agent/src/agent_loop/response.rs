@@ -151,13 +151,22 @@ impl AgentLoop {
                 .list_tools_for_tiers(&[ToolTier::Default, ToolTier::Plugin])
         };
 
-        let tools = if self.config.plan_mode {
+        let mut tools = if self.config.plan_mode {
             all_tools
                 .into_iter()
                 .filter(|t| PLAN_MODE_ALLOWED_TOOLS.contains(&t.name.as_str()))
                 .collect()
         } else {
             all_tools
+        };
+
+        tools = match self.tool_visibility_profile {
+            crate::routing::ToolVisibilityProfile::Full => tools,
+            crate::routing::ToolVisibilityProfile::ReadOnly => tools
+                .into_iter()
+                .filter(|t| crate::agent_loop::READ_ONLY_TOOLS.contains(&t.name.as_str()))
+                .collect(),
+            crate::routing::ToolVisibilityProfile::AnswerOnly => Vec::new(),
         };
 
         let mut cache = self

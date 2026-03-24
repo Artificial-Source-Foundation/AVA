@@ -27,16 +27,18 @@ pub fn build_system_prompt_suffix(
     model_name: &str,
     project_root: &std::path::Path,
     extra_instruction_paths: &[String],
-    include_project_instructions: bool,
+    startup_instruction_profile: crate::instructions::StartupInstructionProfile,
 ) -> Option<String> {
-    let project_instructions = if include_project_instructions {
-        crate::instructions::load_startup_project_instructions_from_root_with_config(
-            project_root,
-            extra_instruction_paths,
-        )
-    } else {
-        None
-    };
+    let project_instructions =
+        if startup_instruction_profile != crate::instructions::StartupInstructionProfile::None {
+            crate::instructions::load_startup_project_instructions_from_root_with_profile(
+                project_root,
+                extra_instruction_paths,
+                startup_instruction_profile,
+            )
+        } else {
+            None
+        };
 
     let project_instructions =
         project_instructions.map(|pi| trim_instructions_for_model(&pi, model_name));
@@ -61,7 +63,7 @@ pub async fn build_system_prompt_suffix_async(
     model_name: String,
     project_root: std::path::PathBuf,
     extra_instruction_paths: Vec<String>,
-    include_project_instructions: bool,
+    startup_instruction_profile: crate::instructions::StartupInstructionProfile,
 ) -> Option<String> {
     tokio::task::spawn_blocking(move || {
         build_system_prompt_suffix(
@@ -69,7 +71,7 @@ pub async fn build_system_prompt_suffix_async(
             &model_name,
             &project_root,
             &extra_instruction_paths,
-            include_project_instructions,
+            startup_instruction_profile,
         )
     })
     .await
@@ -84,8 +86,12 @@ pub fn build_sub_agent_instructions(
     model_name: &str,
     project_root: &std::path::Path,
 ) -> Option<String> {
-    crate::instructions::load_startup_project_instructions_from_root_with_config(project_root, &[])
-        .map(|pi| trim_instructions_for_model(&pi, model_name))
+    crate::instructions::load_startup_project_instructions_from_root_with_profile(
+        project_root,
+        &[],
+        crate::instructions::StartupInstructionProfile::AgentsOnly,
+    )
+    .map(|pi| trim_instructions_for_model(&pi, model_name))
 }
 
 /// Trim project instructions to fit within the model's context window (max 33%).

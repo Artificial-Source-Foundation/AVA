@@ -74,7 +74,15 @@ pub struct ProviderConnectState {
 impl ProviderConnectState {
     /// Build provider list from credential store.
     pub fn from_credentials(credentials: &CredentialStore) -> Self {
-        let providers = build_provider_list(credentials);
+        Self::from_credentials_with_cli(credentials, &[])
+    }
+
+    /// Build provider list including discovered CLI agents.
+    pub fn from_credentials_with_cli(
+        credentials: &CredentialStore,
+        cli_agents: &[ava_cli_providers::DiscoveredAgent],
+    ) -> Self {
+        let providers = build_provider_list_with_cli(credentials, cli_agents);
         let items = build_select_items(&providers);
         Self {
             screen: ConnectScreen::List,
@@ -538,7 +546,14 @@ pub fn render_provider_connect(frame: &mut Frame<'_>, area: Rect, state: &mut Ap
 }
 
 fn build_provider_list(credentials: &CredentialStore) -> Vec<ProviderStatus> {
-    ava_auth::all_providers()
+    build_provider_list_with_cli(credentials, &[])
+}
+
+fn build_provider_list_with_cli(
+    credentials: &CredentialStore,
+    cli_agents: &[ava_cli_providers::DiscoveredAgent],
+) -> Vec<ProviderStatus> {
+    let mut list: Vec<ProviderStatus> = ava_auth::all_providers()
         .iter()
         .map(|info| {
             let is_local = info.id == "ollama";
@@ -573,7 +588,38 @@ fn build_provider_list(credentials: &CredentialStore) -> Vec<ProviderStatus> {
                 group: info.group,
             }
         })
-        .collect()
+        .collect();
+
+    // Append discovered CLI agents
+    for agent in cli_agents {
+        list.push(ProviderStatus {
+            id: format!("cli:{}", agent.name),
+            display_name: format!(
+                "{} (CLI)",
+                agent
+                    .name
+                    .split('-')
+                    .map(|w| {
+                        let mut c = w.chars();
+                        match c.next() {
+                            None => String::new(),
+                            Some(f) => f.to_uppercase().to_string() + c.as_str(),
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            ),
+            description: format!("v{} — installed, no API key needed", agent.version),
+            configured: true,
+            is_local: true,
+            auth_flows: vec![],
+            redacted_key: Some("installed".to_string()),
+            env_var_hint: None,
+            group: ava_auth::ProviderGroup::Other,
+        });
+    }
+
+    list
 }
 
 fn spinner_char(elapsed: u64) -> char {

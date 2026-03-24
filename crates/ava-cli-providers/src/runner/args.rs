@@ -65,6 +65,45 @@ impl CLIAgentRunner {
             args.push(session.clone());
         }
 
+        // --- Agent SDK extensions ---
+        if let (Some(turns), Some(flag)) = (options.max_turns, &self.config.max_turns_flag) {
+            args.push(flag.clone());
+            args.push(turns.to_string());
+        }
+
+        if let (Some(mode), Some(flag)) =
+            (&options.permission_mode, &self.config.permission_mode_flag)
+        {
+            args.push(flag.clone());
+            args.push(mode.clone());
+        }
+
+        if let (Some(prompt), Some(flag)) =
+            (&options.system_prompt, &self.config.system_prompt_flag)
+        {
+            args.push(flag.clone());
+            args.push(prompt.clone());
+        }
+
+        if let (Some(session), Some(flag)) = (&options.resume_session, &self.config.resume_flag) {
+            args.push(flag.clone());
+            args.push(session.clone());
+        }
+
+        if options.continue_last {
+            if let Some(flag) = &self.config.continue_flag {
+                args.push(flag.clone());
+            }
+        }
+
+        if let (Some(tools), Some(flag)) = (
+            &options.disallowed_tools,
+            &self.config.disallowed_tools_flag,
+        ) {
+            args.push(flag.clone());
+            args.push(tools.join(","));
+        }
+
         args
     }
 }

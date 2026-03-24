@@ -2,6 +2,13 @@ use ava_config::RoutingProfile;
 use ava_llm::RouteRequirements;
 use ava_types::{ImageContent, ThinkingLevel};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolVisibilityProfile {
+    Full,
+    ReadOnly,
+    AnswerOnly,
+}
+
 #[derive(Debug, Clone)]
 pub struct TaskRoutingIntent {
     pub profile: RoutingProfile,
@@ -35,6 +42,7 @@ pub fn analyze_task(
         "migrate",
         "performance",
         "security",
+        "bug",
         "failing test",
         "design",
         "implement",
@@ -48,6 +56,18 @@ pub fn analyze_task(
         "draft",
         "quick",
         "short",
+        "fix",
+        "add",
+        "rename",
+        "change",
+        "update",
+        "move",
+        "delete",
+        "remove",
+        "create",
+        "comment",
+        "docstring",
+        "typo",
     ];
 
     let mut reasons = Vec::new();
@@ -77,8 +97,8 @@ pub fn analyze_task(
         };
     }
 
-    if trimmed.len() <= 240
-        && line_count <= 3
+    if trimmed.len() <= 400
+        && line_count <= 4
         && cheap_keywords
             .iter()
             .any(|keyword| contains_keyword(&lower, keyword))
@@ -97,6 +117,82 @@ pub fn analyze_task(
             "defaulting to capable route until work looks obviously lightweight".to_string(),
         ],
     }
+}
+
+pub fn infer_tool_visibility(
+    goal: &str,
+    images: &[ImageContent],
+    thinking: ThinkingLevel,
+    plan_mode: bool,
+) -> ToolVisibilityProfile {
+    let trimmed = goal.trim();
+    let lower = trimmed.to_lowercase();
+    let line_count = trimmed.lines().count();
+
+    if !images.is_empty() || thinking != ThinkingLevel::Off || plan_mode {
+        return ToolVisibilityProfile::Full;
+    }
+
+    let answer_only_phrases = [
+        "reply exactly",
+        "and nothing else",
+        "answer with only",
+        "respond with only",
+    ];
+    let read_only_keywords = [
+        "read",
+        "find",
+        "list",
+        "show",
+        "search",
+        "grep",
+        "glob",
+        "package.json",
+        "repo",
+        "repository",
+        "file",
+        "directory",
+    ];
+    let write_keywords = [
+        "edit",
+        "write",
+        "rename",
+        "fix",
+        "change",
+        "update",
+        "move",
+        "delete",
+        "remove",
+        "create",
+        "implement",
+        "refactor",
+        "migrate",
+        "add",
+    ];
+
+    let mentions_repo_read = read_only_keywords
+        .iter()
+        .any(|keyword| contains_keyword(&lower, keyword));
+    let mentions_write = write_keywords
+        .iter()
+        .any(|keyword| contains_keyword(&lower, keyword));
+
+    if trimmed.len() <= 160
+        && line_count <= 3
+        && !mentions_repo_read
+        && !mentions_write
+        && answer_only_phrases
+            .iter()
+            .any(|phrase| lower.contains(phrase))
+    {
+        return ToolVisibilityProfile::AnswerOnly;
+    }
+
+    if trimmed.len() <= 260 && line_count <= 4 && mentions_repo_read && !mentions_write {
+        return ToolVisibilityProfile::ReadOnly;
+    }
+
+    ToolVisibilityProfile::Full
 }
 
 fn contains_keyword(text: &str, keyword: &str) -> bool {
@@ -141,6 +237,30 @@ mod tests {
     }
 
     #[test]
+    fn routing_analysis_prefers_cheap_for_small_edit_requests() {
+        let intent = analyze_task(
+            "Rename the helper function from loadConfig to load_config.",
+            &[],
+            ThinkingLevel::Off,
+            false,
+        );
+
+        assert_eq!(intent.profile, RoutingProfile::Cheap);
+    }
+
+    #[test]
+    fn routing_analysis_keeps_bug_fixing_on_capable_route() {
+        let intent = analyze_task(
+            "Fix the authentication bug in the login flow.",
+            &[],
+            ThinkingLevel::Off,
+            false,
+        );
+
+        assert_eq!(intent.profile, RoutingProfile::Capable);
+    }
+
+    #[test]
     fn routing_analysis_avoids_obvious_substring_false_positive() {
         let intent = analyze_task(
             "Please shortlist the options.",
@@ -154,5 +274,29 @@ mod tests {
             .reasons
             .iter()
             .any(|reason| reason.contains("deeper reasoning")));
+    }
+
+    #[test]
+    fn tool_visibility_prefers_answer_only_for_exact_reply_tasks() {
+        let profile = infer_tool_visibility(
+            "Reply exactly with BENCHMARK_OK and nothing else.",
+            &[],
+            ThinkingLevel::Off,
+            false,
+        );
+
+        assert_eq!(profile, ToolVisibilityProfile::AnswerOnly);
+    }
+
+    #[test]
+    fn tool_visibility_prefers_read_only_for_repo_lookup_tasks() {
+        let profile = infer_tool_visibility(
+            "Read package.json in the current directory and reply with only the package name.",
+            &[],
+            ThinkingLevel::Off,
+            false,
+        );
+
+        assert_eq!(profile, ToolVisibilityProfile::ReadOnly);
     }
 }

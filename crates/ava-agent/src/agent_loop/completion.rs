@@ -72,7 +72,13 @@ impl AgentLoop {
             let native = self.llm.supports_tools();
             let provider_kind = self.llm.provider_kind();
             let tool_defs = self.active_tool_defs_with_hooks().await;
-            build_system_prompt(&tool_defs, native, provider_kind, &self.config.model)
+            build_system_prompt(
+                &tool_defs,
+                native,
+                provider_kind,
+                &self.config.model,
+                self.tool_visibility_profile,
+            )
         };
         // Append provider-specific instructions (additive — does not replace the base prompt).
         let provider_kind = self.llm.provider_kind();
@@ -330,6 +336,7 @@ impl AgentLoop {
 
         // --- chat.messages.transform hook (request/response) ---
         let messages = self.apply_messages_transform().await;
+        let provider_request_start = Instant::now();
 
         let stream_result = if native_tools {
             let tool_defs = self.active_tool_defs_with_hooks().await;
@@ -361,10 +368,14 @@ impl AgentLoop {
         };
 
         let mut stream = stream_result?;
+        let provider_stream_ready_ms = provider_request_start.elapsed().as_millis() as u64;
         let mut full_text = String::new();
         let mut accumulated_tool_calls: Vec<response::ToolCallAccumulator> = Vec::new();
         let mut last_usage: Option<TokenUsage> = None;
         let mut chunk_count: usize = 0;
+        let mut first_chunk_ms: Option<u64> = None;
+        let mut first_text_ms: Option<u64> = None;
+        let mut first_tool_ms: Option<u64> = None;
 
         // Per-chunk silence timeout: if no chunk arrives within this window,
         // the stream is cancelled. A value of 0 disables the timeout.
@@ -396,6 +407,9 @@ impl AgentLoop {
                 break;
             };
 
+            if first_chunk_ms.is_none() {
+                first_chunk_ms = Some(provider_request_start.elapsed().as_millis() as u64);
+            }
             chunk_count += 1;
             trace!(
                 chunk_count,
@@ -408,6 +422,9 @@ impl AgentLoop {
             );
             // Emit text tokens as they arrive
             if let Some(text) = chunk.text_content() {
+                if first_text_ms.is_none() {
+                    first_text_ms = Some(provider_request_start.elapsed().as_millis() as u64);
+                }
                 full_text.push_str(text);
                 Self::emit(event_tx, AgentEvent::Token(text.to_string()));
             }
@@ -419,6 +436,9 @@ impl AgentLoop {
             }
             // Accumulate tool call fragments
             if let Some(ref tc) = chunk.tool_call {
+                if first_tool_ms.is_none() {
+                    first_tool_ms = Some(provider_request_start.elapsed().as_millis() as u64);
+                }
                 let delta_len = tc.arguments_delta.as_ref().map_or(0, |d| d.len());
                 response::accumulate_tool_call(&mut accumulated_tool_calls, tc);
 
@@ -472,6 +492,10 @@ impl AgentLoop {
             text_len = full_text.len(),
             tool_calls = accumulated_tool_calls.len(),
             has_usage = last_usage.is_some(),
+            provider_stream_ready_ms,
+            first_chunk_ms,
+            first_text_ms,
+            first_tool_ms,
             "stream completed"
         );
 

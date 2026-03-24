@@ -82,17 +82,8 @@ mod tests {
             name: name.to_string(),
             binary: binary.to_string(),
             prompt_flag: PromptMode::Flag("-p".to_string()),
-            non_interactive_flags: vec![],
-            yolo_flags: vec![],
-            output_format_flag: None,
-            allowed_tools_flag: None,
-            cwd_flag: None,
-            model_flag: None,
-            session_flag: None,
-            supports_stream_json: false,
-            supports_tool_scoping: false,
-            tier_tool_scopes: None,
             version_command: version_cmd,
+            ..Default::default()
         }
     }
 

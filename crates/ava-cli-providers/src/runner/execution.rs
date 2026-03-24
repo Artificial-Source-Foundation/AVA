@@ -9,7 +9,7 @@ use std::process::Stdio;
 use ava_types::{AvaError, Result};
 
 use super::{CLIAgentRunner, RunOptions};
-use crate::config::{CLIAgentEvent, CLIAgentResult, TokenUsage};
+use crate::config::{CLIAgentEvent, CLIAgentResult, ContentBlock, TokenUsage};
 
 impl CLIAgentRunner {
     /// Parse a line of stream-json output into an event.
@@ -52,30 +52,79 @@ impl CLIAgentRunner {
             .ok_or_else(|| AvaError::PlatformError("failed to capture stderr".to_string()))?;
 
         let supports_json = self.config.supports_stream_json;
+        let supports_sdk = self.config.supports_agent_sdk_events;
         let tx_stdout = tx.clone();
         let stdout_task = tokio::spawn(async move {
             let mut lines = BufReader::new(stdout).lines();
             let mut output = String::new();
             let mut events = Vec::new();
             let mut tokens = None;
+            let mut session_id: Option<String> = None;
+            let mut total_cost_usd: Option<f64> = None;
+            let mut result_subtype: Option<String> = None;
 
             while let Ok(Some(line)) = lines.next_line().await {
                 if supports_json {
                     if let Some(event) = CLIAgentRunner::parse_event(&line) {
-                        if let CLIAgentEvent::Usage {
-                            input_tokens,
-                            output_tokens,
-                        } = &event
-                        {
-                            tokens = Some(TokenUsage {
-                                input: *input_tokens,
-                                output: *output_tokens,
-                            });
-                        }
-
-                        if let CLIAgentEvent::Text { content } = &event {
-                            output.push_str(content);
-                            output.push('\n');
+                        match &event {
+                            CLIAgentEvent::Usage {
+                                input_tokens,
+                                output_tokens,
+                            } => {
+                                tokens = Some(TokenUsage {
+                                    input: *input_tokens,
+                                    output: *output_tokens,
+                                });
+                            }
+                            CLIAgentEvent::Text { content } => {
+                                output.push_str(content);
+                                output.push('\n');
+                            }
+                            // Agent SDK: assistant messages with structured content
+                            CLIAgentEvent::Assistant {
+                                content,
+                                session_id: sid,
+                            } if supports_sdk => {
+                                if session_id.is_none() {
+                                    session_id.clone_from(sid);
+                                }
+                                for block in content {
+                                    if let ContentBlock::Text { text } = block {
+                                        output.push_str(text);
+                                        output.push('\n');
+                                    }
+                                }
+                            }
+                            // Agent SDK: final result with cost/usage
+                            CLIAgentEvent::Result {
+                                result,
+                                session_id: sid,
+                                total_cost_usd: cost,
+                                usage,
+                                subtype,
+                            } if supports_sdk => {
+                                output.push_str(result);
+                                if session_id.is_none() {
+                                    session_id.clone_from(sid);
+                                }
+                                total_cost_usd = *cost;
+                                result_subtype.clone_from(subtype);
+                                if let Some(u) = usage {
+                                    tokens = Some(TokenUsage {
+                                        input: u.input_tokens,
+                                        output: u.output_tokens,
+                                    });
+                                }
+                            }
+                            // Agent SDK: system messages
+                            CLIAgentEvent::System {
+                                session_id: sid, ..
+                            } if supports_sdk => {
+                                if session_id.is_none() {
+                                    session_id.clone_from(sid);
+                                }
+                            }
+                            _ => {}
                         }
 
                         if let Some(sender) = &tx_stdout {
@@ -95,7 +144,14 @@ impl CLIAgentRunner {
                 }
             }
 
-            (output, events, tokens)
+            (
+                output,
+                events,
+                tokens,
+                session_id,
+                total_cost_usd,
+                result_subtype,
+            )
         });
 
         let stderr_task = tokio::spawn(async move {
@@ -161,9 +217,10 @@ impl CLIAgentRunner {
             }
         };
 
-        let (mut output, events, tokens_used) = stdout_task
-            .await
-            .map_err(|e| AvaError::PlatformError(format!("stdout task failed: {e}")))?;
+        let (mut output, events, tokens_used, session_id, total_cost_usd, result_subtype) =
+            stdout_task
+                .await
+                .map_err(|e| AvaError::PlatformError(format!("stdout task failed: {e}")))?;
         let stderr_output = stderr_task
             .await
             .map_err(|e| AvaError::PlatformError(format!("stderr task failed: {e}")))?;
@@ -185,6 +242,9 @@ impl CLIAgentRunner {
             events,
             tokens_used,
             duration_ms,
+            session_id,
+            total_cost_usd,
+            result_subtype,
         })
     }
 }

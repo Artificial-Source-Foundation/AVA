@@ -12,6 +12,7 @@ use tokio_util::sync::CancellationToken;
 
 pub(super) async fn run_multi_agent(cli: CliArgs, goal: &str) -> Result<()> {
     let data_dir = dirs::home_dir().unwrap_or_default().join(".ava");
+    let runtime_lean = cli.runtime_lean_settings();
 
     let (provider, model) = cli.resolve_provider_model().await?;
     if provider.is_none() {
@@ -25,8 +26,8 @@ pub(super) async fn run_multi_agent(cli: CliArgs, goal: &str) -> Result<()> {
         max_turns: cli.max_turns,
         max_budget_usd: cli.max_budget_usd,
         yolo: cli.auto_approve,
-        include_project_instructions: !cli.fast,
-        eager_codebase_indexing: !cli.fast,
+        include_project_instructions: runtime_lean.include_project_instructions,
+        eager_codebase_indexing: runtime_lean.eager_codebase_indexing,
         ..Default::default()
     })
     .await?;

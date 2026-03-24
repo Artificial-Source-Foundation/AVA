@@ -151,6 +151,153 @@ pub struct CliArgs {
     pub command: Option<Command>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RuntimeLeanSettings {
+    pub include_project_instructions: bool,
+    pub eager_codebase_indexing: bool,
+    /// Informational only; actual behavior is expressed via the other fields.
+    pub auto_lean: bool,
+}
+
+impl CliArgs {
+    fn qualifies_for_auto_lean(&self) -> bool {
+        let Some(goal) = self.goal.as_deref() else {
+            return false;
+        };
+
+        if !self.headless
+            || self.resume
+            || self.session.is_some()
+            || self.command.is_some()
+            || self.multi_agent
+            || self.plan_only
+            || self.board
+            || self.workflow.is_some()
+            || self.watch
+            || self.voice
+            || self.benchmark
+            || self.harness
+            || !self.image.is_empty()
+            || !self.follow_up.is_empty()
+            || !self.later.is_empty()
+            || !self.later_group.is_empty()
+        {
+            return false;
+        }
+
+        let trimmed = goal.trim();
+        // `max_turns == 0` means "use the normal default cap" in CLI UX; simple
+        // one-shot prompts should still benefit from the auto-lean path.
+        trimmed.len() <= 180
+            && trimmed.lines().count() <= 3
+            && (self.max_turns == 0 || self.max_turns <= 4)
+    }
+
+    pub fn runtime_lean_settings(&self) -> RuntimeLeanSettings {
+        if self.fast {
+            return RuntimeLeanSettings {
+                include_project_instructions: false,
+                eager_codebase_indexing: false,
+                auto_lean: false,
+            };
+        }
+
+        if self.qualifies_for_auto_lean() {
+            return RuntimeLeanSettings {
+                include_project_instructions: true,
+                eager_codebase_indexing: false,
+                auto_lean: true,
+            };
+        }
+
+        RuntimeLeanSettings {
+            include_project_instructions: true,
+            eager_codebase_indexing: true,
+            auto_lean: false,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn base_cli() -> CliArgs {
+        CliArgs {
+            goal: Some("Reply exactly with ok".to_string()),
+            resume: false,
+            session: None,
+            model: None,
+            provider: None,
+            max_turns: 3,
+            max_budget_usd: 0.0,
+            auto_approve: false,
+            theme: "default".to_string(),
+            verbose: 0,
+            headless: true,
+            fast: false,
+            json: false,
+            watch: false,
+            watch_path: Vec::new(),
+            trust: false,
+            thinking: "off".to_string(),
+            multi_agent: false,
+            plan_only: false,
+            board: false,
+            workflow: None,
+            no_update_check: false,
+            image: Vec::new(),
+            voice: false,
+            benchmark: false,
+            models: None,
+            judges: None,
+            suite: "all".to_string(),
+            language: None,
+            harness: false,
+            director: None,
+            worker: None,
+            import_polyglot: None,
+            follow_up: Vec::new(),
+            later: Vec::new(),
+            later_group: Vec::new(),
+            command: None,
+        }
+    }
+
+    #[test]
+    fn auto_lean_enables_for_simple_headless_goals() {
+        let cli = base_cli();
+        let settings = cli.runtime_lean_settings();
+        assert!(settings.auto_lean);
+        assert!(settings.include_project_instructions);
+        assert!(!settings.eager_codebase_indexing);
+    }
+
+    #[test]
+    fn explicit_fast_still_overrides_auto_lean() {
+        let mut cli = base_cli();
+        cli.fast = true;
+        let settings = cli.runtime_lean_settings();
+        assert!(!settings.auto_lean);
+        assert!(!settings.include_project_instructions);
+        assert!(!settings.eager_codebase_indexing);
+    }
+
+    #[test]
+    fn complex_goal_keeps_full_runtime_defaults() {
+        let mut cli = base_cli();
+        cli.goal = Some(
+            "Inspect the auth flow, update the Rust backend, run the tests, and summarize the API changes in detail."
+                .to_string(),
+        );
+        cli.max_turns = 8;
+        let settings = cli.runtime_lean_settings();
+        assert!(!settings.auto_lean);
+        assert!(settings.include_project_instructions);
+        assert!(settings.eager_codebase_indexing);
+    }
+}
+
 #[derive(Debug, Clone, Subcommand)]
 pub enum Command {
     /// Review code changes using an LLM agent

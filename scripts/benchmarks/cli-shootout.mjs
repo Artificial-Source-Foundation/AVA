@@ -334,17 +334,51 @@ function makeOnlineTasks(options) {
 
 function detectStructuredSuccess(cliName, result, task) {
   const cleanStdout = stripAnsi(result.stdout)
+  const extractedText = extractStructuredText(cliName, cleanStdout)
   if (cliName === 'ava') {
     // AVA can emit an explicit final success event even if the shell exit code is noisy,
     // so prefer the structured completion payload when the task output also verifies.
-    return cleanStdout.includes('"success":true') && task.verify(cleanStdout, 0)
+    return (
+      cleanStdout.includes('"success":true') &&
+      (task.verify(extractedText, 0) || task.verify(cleanStdout, 0))
+    )
   }
   if (cliName === 'opencode') {
     // OpenCode JSON mode may still be usable when the stream ends with a stop event,
     // so accept structured success when the task output itself matches expectations.
-    return cleanStdout.includes('"reason":"stop"') && task.verify(cleanStdout, 0)
+    return (
+      cleanStdout.includes('"reason":"stop"') &&
+      (task.verify(extractedText, 0) || task.verify(cleanStdout, 0))
+    )
   }
   return false
+}
+
+function extractStructuredText(cliName, stdout) {
+  const parts = []
+  for (const line of stdout.split('\n')) {
+    const trimmed = line.trim()
+    if (!trimmed.startsWith('{')) continue
+    try {
+      const value = JSON.parse(trimmed)
+      if (cliName === 'ava') {
+        if (value.type === 'text' && typeof value.content === 'string') {
+          parts.push(value.content)
+        }
+      } else if (cliName === 'opencode') {
+        if (
+          value.type === 'text' &&
+          value.part?.type === 'text' &&
+          typeof value.part.text === 'string'
+        ) {
+          parts.push(value.part.text)
+        }
+      }
+    } catch {
+      // ignore non-JSON or partial lines
+    }
+  }
+  return parts.join('')
 }
 
 async function benchmarkCliTask(cliName, command, args, task, options, sampleIndex) {
@@ -353,8 +387,11 @@ async function benchmarkCliTask(cliName, command, args, task, options, sampleInd
     timeoutMs: options.timeoutMs,
   })
   const combinedOutput = stripAnsi(`${result.stdout}\n${result.stderr}`)
+  const extractedText = extractStructuredText(cliName, stripAnsi(result.stdout))
   const success =
-    task.verify(combinedOutput, result.exitCode) || detectStructuredSuccess(cliName, result, task)
+    task.verify(extractedText, result.exitCode) ||
+    task.verify(combinedOutput, result.exitCode) ||
+    detectStructuredSuccess(cliName, result, task)
   return {
     cli: cliName,
     task: task.name,
@@ -367,6 +404,7 @@ async function benchmarkCliTask(cliName, command, args, task, options, sampleInd
     exitCode: result.exitCode,
     timedOut: result.timedOut,
     success,
+    extractedTextPreview: extractedText.trim().slice(0, 200),
     stdoutPreview: stripAnsi(result.stdout).trim().slice(0, 400),
     stderrPreview: stripAnsi(result.stderr).trim().slice(0, 400),
   }

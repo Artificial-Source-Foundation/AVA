@@ -267,7 +267,10 @@ mod tests {
             .expect("state should initialize");
 
         let tool_result = state
-            .execute_tool("edit", json!({ "content": "hello world", "old_text": "world", "new_text": "ava" }))
+            .execute_tool(
+                "edit",
+                json!({ "content": "hello world", "old_text": "world", "new_text": "ava" }),
+            )
             .await;
         assert_eq!(tool_result["is_error"], false);
 

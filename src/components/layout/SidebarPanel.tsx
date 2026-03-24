@@ -12,7 +12,6 @@
 import {
   ChevronDown,
   ChevronRight,
-  ExternalLink,
   FolderOpen,
   MessageSquare,
   Plus,
@@ -133,14 +132,6 @@ export const SidebarPanel: Component = () => {
             aria-label="New chat"
           >
             <Plus class="w-4 h-4" />
-          </button>
-          <button
-            type="button"
-            class="flex items-center justify-center w-7 h-7 rounded-[var(--radius-md)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--alpha-white-8)] transition-colors"
-            title="New window"
-            aria-label="New window"
-          >
-            <ExternalLink class="w-4 h-4" />
           </button>
         </div>
         <div class="flex items-center gap-0.5">

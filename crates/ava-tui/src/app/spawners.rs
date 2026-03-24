@@ -6,6 +6,12 @@ impl App {
         let recent_models = self.state.agent.recent_models.clone();
         let current_model = self.state.agent.model_name.clone();
         let current_provider = self.state.agent.provider_name.clone();
+        let cli_agents = self
+            .state
+            .agent
+            .stack_handle()
+            .map(|s| s.cli_agents().to_vec())
+            .unwrap_or_default();
         let app_tx_for_load = app_tx.clone();
         let load = async move {
             let credentials = ava_config::CredentialStore::load_default()
@@ -18,12 +24,13 @@ impl App {
                 catalog
             };
             effective_catalog.merge_fallback();
-            let selector = ModelSelectorState::from_catalog(
+            let selector = ModelSelectorState::from_catalog_with_cli(
                 &effective_catalog,
                 &credentials,
                 &recent_models,
                 &current_model,
                 &current_provider,
+                &cli_agents,
             );
             let _ = app_tx_for_load.send(AppEvent::ModelSelectorLoaded(Ok(selector)));
         };
@@ -184,6 +191,12 @@ impl App {
         provider: Option<String>,
         app_tx: mpsc::UnboundedSender<AppEvent>,
     ) {
+        let cli_agents = self
+            .state
+            .agent
+            .stack_handle()
+            .map(|s| s.cli_agents().to_vec())
+            .unwrap_or_default();
         tokio::spawn(async move {
             let credentials = ava_config::CredentialStore::load_default()
                 .await
@@ -191,7 +204,7 @@ impl App {
             let state = if let Some(provider) = provider {
                 ProviderConnectState::for_provider(&credentials, &provider)
             } else {
-                ProviderConnectState::from_credentials(&credentials)
+                ProviderConnectState::from_credentials_with_cli(&credentials, &cli_agents)
             };
             let _ = app_tx.send(AppEvent::ProviderConnectLoaded(Ok(state)));
         });

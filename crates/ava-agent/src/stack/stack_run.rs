@@ -1,5 +1,6 @@
 //! Agent execution: the `run()` method and sub-agent spawning.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -12,11 +13,11 @@ use ava_session::SessionManager;
 use ava_tools::core::register_core_tools;
 use ava_tools::core::task::{TaskResult, TaskSpawner};
 use ava_tools::core::{
-    register_custom_tools, register_plan_tool, register_question_tool, register_task_tool,
-    register_todo_tools,
+    file_backup::new_backup_session, register_custom_tools, register_plan_tool,
+    register_question_tool, register_task_tool, register_todo_tools,
 };
 use ava_tools::mcp_bridge::MCPBridgeTool;
-use ava_tools::permission_middleware::convert_tool_source;
+use ava_tools::permission_middleware::{convert_tool_source, SharedToolSources};
 use ava_tools::registry::{ToolRegistry, ToolSource};
 use ava_types::{AvaError, Result, Role, Session, ThinkingLevel};
 use futures::StreamExt;
@@ -120,7 +121,10 @@ impl AgentStack {
 
         // Ensure MCP is initialized before building the per-run tool registry.
         // This awaits completion so MCP tools are available when we read self.mcp below.
-        self.ensure_mcp_initialized().await;
+        // Best-effort skip: configs created mid-run will be picked up on the next run.
+        if self.mcp_global_config.exists() || self.mcp_project_config.exists() {
+            self.ensure_mcp_initialized().await;
+        }
 
         // Fire SessionStart plugin hook
         {
@@ -204,6 +208,23 @@ impl AgentStack {
             .thinking_budgets
             .resolve(&resolved_provider_name, provider.model_name());
         let plan_mode = *self.plan_mode.read().await;
+        let tool_visibility_profile =
+            crate::routing::infer_tool_visibility(goal, &images, thinking, plan_mode);
+        let startup_instruction_profile = if !self.include_project_instructions {
+            crate::instructions::StartupInstructionProfile::None
+        } else {
+            match tool_visibility_profile {
+                crate::routing::ToolVisibilityProfile::AnswerOnly => {
+                    crate::instructions::StartupInstructionProfile::None
+                }
+                crate::routing::ToolVisibilityProfile::ReadOnly => {
+                    crate::instructions::StartupInstructionProfile::AgentsOnly
+                }
+                crate::routing::ToolVisibilityProfile::Full => {
+                    crate::instructions::StartupInstructionProfile::Full
+                }
+            }
+        };
         let mode_suffix = self.mode_prompt_suffix.read().await.clone();
         let project_root = self.permission_context.read().await.workspace_root.clone();
         // Consume any pending plan context (one-shot: only applies to this run).
@@ -212,15 +233,50 @@ impl AgentStack {
         // Build system prompt suffix: mode instructions + project instructions.
         // Uses spawn_blocking internally to avoid blocking the async executor
         // on synchronous file I/O while reading instruction files.
-        let mut system_prompt_suffix =
-            crate::instruction_resolver::build_system_prompt_suffix_async(
-                mode_suffix,
-                provider.model_name().to_string(),
-                project_root.clone(),
-                cfg.instructions.clone(),
-                self.include_project_instructions,
-            )
-            .await;
+        let prompt_suffix_start = std::time::Instant::now();
+        let prompt_suffix_fut = crate::instruction_resolver::build_system_prompt_suffix_async(
+            mode_suffix,
+            provider.model_name().to_string(),
+            project_root.clone(),
+            cfg.instructions.clone(),
+            startup_instruction_profile,
+        );
+
+        let startup_context_fut = async {
+            // Surface any panic from the background indexing task before we read
+            // the index. If the task panicked the index will be None (empty), and
+            // `check_index_status` will have already logged an actionable error.
+            let index_status_fut = async {
+                let start = std::time::Instant::now();
+                self.check_index_status().await;
+                start.elapsed()
+            };
+            let enrich_goal_fut = async {
+                let start = std::time::Instant::now();
+                let enriched = self.enrich_goal_with_memories(goal).await;
+                (start.elapsed(), enriched)
+            };
+            tokio::join!(index_status_fut, enrich_goal_fut)
+        };
+
+        let (mut system_prompt_suffix, (index_status_elapsed, (memory_elapsed, enriched_goal))) =
+            tokio::join!(prompt_suffix_fut, startup_context_fut);
+        tracing::info!(
+            elapsed_ms = prompt_suffix_start.elapsed().as_millis() as u64,
+            suffix_chars = system_prompt_suffix.as_ref().map(|s| s.len()).unwrap_or(0),
+            suffix_tokens = system_prompt_suffix
+                .as_ref()
+                .map(|s| ava_context::count_tokens_default(s))
+                .unwrap_or(0),
+            include_project_instructions = self.include_project_instructions,
+            "system prompt suffix resolved"
+        );
+        tracing::info!(
+            index_status_ms = index_status_elapsed.as_millis() as u64,
+            memory_enrichment_ms = memory_elapsed.as_millis() as u64,
+            goal_chars = goal.len(),
+            "startup context preparation complete"
+        );
 
         // Append approved plan context so the agent knows which steps to follow.
         if let Some(plan) = plan_context {
@@ -246,6 +302,98 @@ impl AgentStack {
                 .unwrap_or(128_000)
         };
 
+        let relevance_scores = {
+            let guard = self.codebase_index.read().await;
+            guard.as_ref().map(|idx| idx.pagerank.clone())
+        };
+        let summarizer: Arc<dyn ava_context::Summarizer> =
+            Arc::new(LlmSummarizer(provider.clone()));
+        let compaction_pct = self.compaction_threshold_pct as f32 / 100.0;
+        let condenser_config = ava_context::CondenserConfig {
+            max_tokens: model_context_window,
+            target_tokens: model_context_window * 3 / 4,
+            compaction_threshold_pct: compaction_pct,
+            ..Default::default()
+        };
+        let condenser = ava_context::create_hybrid_condenser_with_relevance(
+            condenser_config.clone(),
+            Some(summarizer),
+            relevance_scores,
+        );
+        let context = ContextManager::new_with_condenser(condenser_config, condenser);
+
+        let tool_registry_start = std::time::Instant::now();
+        let (registry, run_tool_sources, run_backup_session): (
+            ToolRegistry,
+            SharedToolSources,
+            ava_tools::core::file_backup::FileBackupSession,
+        ) = if tool_visibility_profile == crate::routing::ToolVisibilityProfile::AnswerOnly {
+            (
+                ToolRegistry::new(),
+                Arc::new(std::sync::RwLock::new(HashMap::new())),
+                new_backup_session(),
+            )
+        } else {
+            let (mut registry, run_tool_sources, run_backup_session) = build_tool_registry(
+                self.platform.clone(),
+                Arc::clone(&self.permission_inspector),
+                Arc::clone(&self.permission_context),
+                self.approval_bridge.clone(),
+            );
+            register_todo_tools(&mut registry, self.todo_state.clone());
+            register_question_tool(&mut registry, self.question_bridge.clone());
+            register_plan_tool(
+                &mut registry,
+                self.plan_bridge.clone(),
+                self.plan_state.clone(),
+            );
+            register_custom_tools(&mut registry, &self.custom_tool_dirs);
+
+            let spawner: Arc<dyn TaskSpawner> = Arc::new(AgentTaskSpawner {
+                provider: provider.clone(),
+                platform: self.platform.clone(),
+                model_name: provider.model_name().to_string(),
+                max_turns: turns_limit,
+                agents_config: self.agents_config.clone(),
+                router: self.router.clone(),
+                event_tx: event_tx.clone(),
+                session_manager: Some(self.session_manager.clone()),
+                parent_session_id: {
+                    let guard = self.parent_session_id.read().await;
+                    guard.clone()
+                },
+                depth: 0,
+            });
+            register_task_tool(&mut registry, spawner);
+
+            {
+                let mcp_guard = self.mcp.read().await;
+                if let Some(ref runtime) = *mcp_guard {
+                    for (server_name, tool_def) in &runtime.tools_with_source {
+                        let source = ToolSource::MCP {
+                            server: server_name.clone(),
+                        };
+                        registry.register_with_source(
+                            MCPBridgeTool::new(
+                                tool_def.clone(),
+                                runtime.caller.clone(),
+                                server_name,
+                            ),
+                            source,
+                        );
+                    }
+                }
+            }
+
+            (registry, run_tool_sources, run_backup_session)
+        };
+        tracing::info!(
+            elapsed_ms = tool_registry_start.elapsed().as_millis() as u64,
+            tool_count = registry.list_tools().len(),
+            tool_profile = ?tool_visibility_profile,
+            "run-scoped tool registry prepared"
+        );
+
         let config = AgentConfig {
             max_turns: turns_limit,
             max_budget_usd: self.max_budget_usd,
@@ -267,80 +415,6 @@ impl AgentStack {
             prompt_caching: true,
         };
 
-        // Surface any panic from the background indexing task before we read
-        // the index. If the task panicked the index will be None (empty), and
-        // `check_index_status` will have already logged an actionable error.
-        let (_, enriched_goal) = tokio::join!(
-            self.check_index_status(),
-            self.enrich_goal_with_memories(goal)
-        );
-        let relevance_scores = {
-            let guard = self.codebase_index.read().await;
-            guard.as_ref().map(|idx| idx.pagerank.clone())
-        };
-        let summarizer: Arc<dyn ava_context::Summarizer> =
-            Arc::new(LlmSummarizer(provider.clone()));
-        let compaction_pct = self.compaction_threshold_pct as f32 / 100.0;
-        let condenser_config = ava_context::CondenserConfig {
-            max_tokens: config.token_limit,
-            target_tokens: config.token_limit * 3 / 4,
-            compaction_threshold_pct: compaction_pct,
-            ..Default::default()
-        };
-        let condenser = ava_context::create_hybrid_condenser_with_relevance(
-            condenser_config.clone(),
-            Some(summarizer),
-            relevance_scores,
-        );
-        let context = ContextManager::new_with_condenser(condenser_config, condenser);
-
-        let (mut registry, run_tool_sources, run_backup_session) = build_tool_registry(
-            self.platform.clone(),
-            Arc::clone(&self.permission_inspector),
-            Arc::clone(&self.permission_context),
-            self.approval_bridge.clone(),
-        );
-        register_todo_tools(&mut registry, self.todo_state.clone());
-        register_question_tool(&mut registry, self.question_bridge.clone());
-        register_plan_tool(
-            &mut registry,
-            self.plan_bridge.clone(),
-            self.plan_state.clone(),
-        );
-        register_custom_tools(&mut registry, &self.custom_tool_dirs);
-
-        let spawner: Arc<dyn TaskSpawner> = Arc::new(AgentTaskSpawner {
-            provider: provider.clone(),
-            platform: self.platform.clone(),
-            model_name: provider.model_name().to_string(),
-            max_turns: turns_limit,
-            agents_config: self.agents_config.clone(),
-            router: self.router.clone(),
-            event_tx: event_tx.clone(),
-            session_manager: Some(self.session_manager.clone()),
-            parent_session_id: {
-                let guard = self.parent_session_id.read().await;
-                guard.clone()
-            },
-            depth: 0,
-        });
-        register_task_tool(&mut registry, spawner);
-
-        {
-            let mcp_guard = self.mcp.read().await;
-            if let Some(ref runtime) = *mcp_guard {
-                for (server_name, tool_def) in &runtime.tools_with_source {
-                    let source = ToolSource::MCP {
-                        server: server_name.clone(),
-                    };
-                    registry.register_with_source(
-                        MCPBridgeTool::new(tool_def.clone(), runtime.caller.clone(), server_name),
-                        source,
-                    );
-                }
-            }
-        }
-
         // Populate tool sources for the permission middleware (run-scoped registry).
         {
             let mut sources = run_tool_sources.write().unwrap_or_else(|e| e.into_inner());
@@ -355,6 +429,7 @@ impl AgentStack {
             context,
             config,
         )
+        .with_tool_visibility_profile(tool_visibility_profile)
         .with_history(history)
         .with_plugin_manager(Arc::clone(&self.plugin_manager));
 

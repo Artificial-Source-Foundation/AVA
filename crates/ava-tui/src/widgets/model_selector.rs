@@ -1,3 +1,4 @@
+use ava_cli_providers::DiscoveredAgent;
 use ava_config::model_catalog::ModelCatalog;
 use ava_config::CredentialStore;
 
@@ -23,6 +24,7 @@ pub enum ModelSection {
     Kimi,
     MiniMax,
     Ollama,
+    CLIAgents,
 }
 
 impl ModelSection {
@@ -39,6 +41,7 @@ impl ModelSection {
             Self::Kimi => "Kimi".to_string(),
             Self::MiniMax => "MiniMax".to_string(),
             Self::Ollama => "Ollama".to_string(),
+            Self::CLIAgents => "CLI Agents".to_string(),
         }
     }
 }
@@ -58,12 +61,32 @@ impl ModelSelectorState {
         current_model: &str,
         current_provider: &str,
     ) -> Self {
+        Self::from_catalog_with_cli(
+            catalog,
+            credentials,
+            recent,
+            current_model,
+            current_provider,
+            &[],
+        )
+    }
+
+    /// Build model list including discovered CLI agents.
+    pub fn from_catalog_with_cli(
+        catalog: &ModelCatalog,
+        credentials: &CredentialStore,
+        recent: &[String],
+        current_model: &str,
+        current_provider: &str,
+        cli_agents: &[DiscoveredAgent],
+    ) -> Self {
         let items = build_select_items(
             catalog,
             credentials,
             recent,
             current_model,
             current_provider,
+            cli_agents,
         );
         Self {
             list: SelectListState::new(items),
@@ -99,6 +122,7 @@ fn build_select_items(
     recent: &[String],
     current_model: &str,
     current_provider: &str,
+    cli_agents: &[DiscoveredAgent],
 ) -> Vec<SelectItem<ModelValue>> {
     let mut items = Vec::new();
     let current_key = format!("{current_provider}/{current_model}");
@@ -225,7 +249,43 @@ fn build_select_items(
         });
     }
 
+    // CLI Agents — discovered external coding agents
+    for agent in cli_agents {
+        let display = format!("{} (CLI)", capitalize_agent_name(&agent.name));
+        let is_current = format!("cli/{}", agent.name) == current_key;
+        items.push(SelectItem {
+            title: display.clone(),
+            detail: format!("v{}", agent.version),
+            section: Some(ModelSection::CLIAgents.label()),
+            status: if is_current {
+                Some(ItemStatus::Active)
+            } else {
+                Some(ItemStatus::Info("installed".to_string()))
+            },
+            value: ModelValue {
+                display,
+                provider: "cli".to_string(),
+                model: agent.name.clone(),
+            },
+            enabled: true,
+        });
+    }
+
     items
+}
+
+/// Capitalize a kebab-case agent name for display (e.g., "claude-code" → "Claude Code").
+fn capitalize_agent_name(name: &str) -> String {
+    name.split('-')
+        .map(|word| {
+            let mut chars = word.chars();
+            match chars.next() {
+                None => String::new(),
+                Some(c) => c.to_uppercase().to_string() + chars.as_str(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 type ProviderEntry = (&'static str, &'static str, fn() -> ModelSection);

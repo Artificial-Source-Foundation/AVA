@@ -22,6 +22,19 @@ pub struct RunOptions {
     pub session_id: Option<String>,
     pub timeout_ms: Option<u64>,
     pub env: Option<Vec<(String, String)>>,
+    // --- Agent SDK extensions ---
+    /// Max turns for the agent loop.
+    pub max_turns: Option<usize>,
+    /// Permission mode: "default", "acceptEdits", "bypassPermissions", "plan".
+    pub permission_mode: Option<String>,
+    /// System prompt to inject.
+    pub system_prompt: Option<String>,
+    /// Resume a specific session by ID.
+    pub resume_session: Option<String>,
+    /// Continue the most recent session.
+    pub continue_last: bool,
+    /// Tools to block.
+    pub disallowed_tools: Option<Vec<String>>,
 }
 
 impl CLIAgentRunner {
@@ -111,8 +124,8 @@ mod tests {
             session_flag: Some("--session-id".to_string()),
             supports_stream_json: true,
             supports_tool_scoping: true,
-            tier_tool_scopes: None,
             version_command: vec!["claude".to_string(), "--version".to_string()],
+            ..Default::default()
         }
     }
 
@@ -123,11 +136,7 @@ mod tests {
             prompt: "implement feature".to_string(),
             cwd: "/tmp/project".to_string(),
             model: Some("sonnet".to_string()),
-            yolo: false,
-            allowed_tools: None,
-            session_id: None,
-            timeout_ms: None,
-            env: None,
+            ..Default::default()
         };
 
         let args = runner.build_args(&options);
@@ -184,6 +193,40 @@ mod tests {
 
         assert!(args.contains(&"--allowedTools".to_string()));
         assert!(args.contains(&"Read,Edit".to_string()));
+    }
+
+    #[test]
+    fn includes_sdk_args_when_configured() {
+        let mut cfg = claude_test_config();
+        cfg.max_turns_flag = Some("--max-turns".to_string());
+        cfg.permission_mode_flag = Some("--permission-mode".to_string());
+        cfg.resume_flag = Some("--resume".to_string());
+        cfg.continue_flag = Some("--continue".to_string());
+        cfg.disallowed_tools_flag = Some("--disallowedTools".to_string());
+        cfg.system_prompt_flag = Some("--system-prompt".to_string());
+
+        let runner = CLIAgentRunner::new(cfg);
+        let args = runner.build_args(&RunOptions {
+            prompt: "test".to_string(),
+            cwd: "/tmp".to_string(),
+            max_turns: Some(10),
+            permission_mode: Some("bypassPermissions".to_string()),
+            resume_session: Some("sess-abc".to_string()),
+            system_prompt: Some("Be helpful".to_string()),
+            disallowed_tools: Some(vec!["Bash".to_string()]),
+            ..RunOptions::default()
+        });
+
+        assert!(args.contains(&"--max-turns".to_string()));
+        assert!(args.contains(&"10".to_string()));
+        assert!(args.contains(&"--permission-mode".to_string()));
+        assert!(args.contains(&"bypassPermissions".to_string()));
+        assert!(args.contains(&"--resume".to_string()));
+        assert!(args.contains(&"sess-abc".to_string()));
+        assert!(args.contains(&"--system-prompt".to_string()));
+        assert!(args.contains(&"Be helpful".to_string()));
+        assert!(args.contains(&"--disallowedTools".to_string()));
+        assert!(args.contains(&"Bash".to_string()));
     }
 
     #[test]

@@ -52,10 +52,7 @@ fn format_git_error(error: GitToolError) -> String {
 #[tauri::command]
 pub async fn execute_git_tool(payload: String) -> Result<GitCommandOutput, String> {
     let action = parse_action(&payload)?;
-    let result = GitTool::new()
-        .run(action)
-        .await
-        .map_err(format_git_error)?;
+    let result = GitTool::new().run(action).await.map_err(format_git_error)?;
     Ok(result.into())
 }
 

@@ -13,10 +13,19 @@ use tracing::debug;
 
 pub(super) async fn run_single_agent(cli: CliArgs, goal: &str) -> Result<()> {
     let data_dir = dirs::home_dir().unwrap_or_default().join(".ava");
+    let runtime_lean = cli.runtime_lean_settings();
 
     let (provider, model) = cli.resolve_provider_model().await?;
     if provider.is_none() {
         return Err(eyre!(crate::config::cli::NO_PROVIDER_ERROR));
+    }
+
+    if runtime_lean.auto_lean {
+        tracing::info!(
+            goal_chars = goal.len(),
+            max_turns = cli.max_turns,
+            "auto-lean runtime enabled for simple headless goal"
+        );
     }
 
     let (stack, _question_rx, approval_rx, _plan_rx) = AgentStack::new(AgentStackConfig {
@@ -26,8 +35,8 @@ pub(super) async fn run_single_agent(cli: CliArgs, goal: &str) -> Result<()> {
         max_turns: cli.max_turns,
         max_budget_usd: cli.max_budget_usd,
         yolo: cli.auto_approve,
-        include_project_instructions: !cli.fast,
-        eager_codebase_indexing: !cli.fast,
+        include_project_instructions: runtime_lean.include_project_instructions,
+        eager_codebase_indexing: runtime_lean.eager_codebase_indexing,
         ..Default::default()
     })
     .await?;

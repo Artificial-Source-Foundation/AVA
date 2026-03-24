@@ -24,6 +24,11 @@
 - **More plugin fast paths** — `SessionStart`, `SessionEnd`, `ChatMessage`, `AgentBefore`, `AgentAfter`, `ToolBefore`, `ToolAfter`, and event broadcast paths now skip hook work when no plugin subscribes.
 - **Chat hook fast paths** — `chat.params`, `chat.messages.transform`, and `text.complete` now skip cloning/serde work when no plugin subscribes.
 - **Cheaper trivial requests** — memory enrichment now skips obviously tiny prompts, index-status checks run in parallel with memory enrichment, and post-hook tool definitions are cached per loop.
+- **Auto-lean runtime** — simple headless goals now keep `AGENTS.md`/project instructions but automatically skip eager codebase indexing, reducing normal-mode startup cost without requiring `--fast`.
+- **Capability-driven lean prompts** — prompt-profile selection now uses model-registry capabilities and context limits instead of hardcoded model-name allowlists.
+- **Phase telemetry** — startup logs now capture prompt-suffix resolution time/tokens, memory-enrichment time, index-status time, and run-scoped tool-registry build time.
+- **Cheaper simple-task routing** — short edit-style requests now route to the cheaper profile more often instead of defaulting to the capable model for almost everything.
+- **Startup work overlaps more** — prompt suffix resolution now overlaps with index-status and memory-enrichment startup work, and MCP init is skipped entirely when no MCP config files exist.
 
 ### Providers
 

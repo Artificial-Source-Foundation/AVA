@@ -38,6 +38,7 @@ pnpm run bench:cli-shootout
 
 By default the harness resolves `ava` and `opencode` from `PATH`. Override them with `--ava-bin`, `--opencode-bin`, `AVA_BENCH_BIN`, or `OPENCODE_BENCH_BIN` when needed.
 Use `--ava-fast` to benchmark AVA with lower-overhead startup settings (`--fast` skips project instruction injection and eager codebase indexing).
+Even without `--ava-fast`, current AVA builds may auto-lean simple headless prompts by keeping project instructions but skipping eager codebase indexing.
 
 Online with the same provider/model pair for both CLIs:
 

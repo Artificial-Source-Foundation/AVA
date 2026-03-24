@@ -73,9 +73,7 @@ pub async fn load_session(
 
 /// Create a new empty session.
 #[tauri::command]
-pub async fn create_session(
-    bridge: State<'_, DesktopBridge>,
-) -> Result<SessionSummary, String> {
+pub async fn create_session(bridge: State<'_, DesktopBridge>) -> Result<SessionSummary, String> {
     let session = bridge
         .stack
         .session_manager
@@ -86,10 +84,7 @@ pub async fn create_session(
 
 /// Delete a session by ID.
 #[tauri::command]
-pub async fn delete_session(
-    id: String,
-    bridge: State<'_, DesktopBridge>,
-) -> Result<(), String> {
+pub async fn delete_session(id: String, bridge: State<'_, DesktopBridge>) -> Result<(), String> {
     let uuid = Uuid::parse_str(&id).map_err(|e| format!("invalid session ID: {e}"))?;
     bridge
         .stack

@@ -5,9 +5,7 @@
 //! and returns the compacted result with token stats.
 
 use ava_context::strategies::CondensationStrategy;
-use ava_context::{
-    estimate_tokens_for_message, SlidingWindowStrategy, ToolTruncationStrategy,
-};
+use ava_context::{estimate_tokens_for_message, SlidingWindowStrategy, ToolTruncationStrategy};
 use ava_types::{Message, Role};
 use serde::{Deserialize, Serialize};
 
@@ -92,10 +90,7 @@ pub async fn compact_context(
         .map(|m| Message::new(parse_role(&m.role), &m.content))
         .collect();
 
-    let before_tokens: usize = typed_messages
-        .iter()
-        .map(estimate_tokens_for_message)
-        .sum();
+    let before_tokens: usize = typed_messages.iter().map(estimate_tokens_for_message).sum();
     let before_count = messages.len();
 
     let ctx_window = context_window.unwrap_or(128_000);
@@ -180,10 +175,7 @@ pub async fn compact_context(
         condensed
     };
 
-    let after_tokens: usize = final_messages
-        .iter()
-        .map(estimate_tokens_for_message)
-        .sum();
+    let after_tokens: usize = final_messages.iter().map(estimate_tokens_for_message).sum();
     let after_count = final_messages.len();
     let saved_tokens = before_tokens.saturating_sub(after_tokens);
     let dropped_count = before_count.saturating_sub(after_count);

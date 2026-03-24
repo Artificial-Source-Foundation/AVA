@@ -6,8 +6,8 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::sync::mpsc;
 use tracing::info;
 
-use crate::bridge::DesktopBridge;
 use super::helpers::{parse_domain, resolve_model_spec};
+use crate::bridge::DesktopBridge;
 
 #[allow(dead_code)] // Fields deserialized from frontend, wired incrementally
 #[derive(Deserialize, Clone)]
@@ -180,6 +180,7 @@ pub async fn start_praxis(
             worker_names,
             enabled_leads,
             lead_prompts,
+            worker_provider: None,
         });
 
         let worker = match director.delegate(ava_praxis::Task {
@@ -237,9 +238,7 @@ pub async fn start_praxis(
 
 /// Get the current Praxis status (running state).
 #[tauri::command]
-pub async fn get_praxis_status(
-    bridge: State<'_, DesktopBridge>,
-) -> Result<PraxisStatus, String> {
+pub async fn get_praxis_status(bridge: State<'_, DesktopBridge>) -> Result<PraxisStatus, String> {
     let running = *bridge.running.read().await;
     Ok(PraxisStatus {
         running,
@@ -251,9 +250,7 @@ pub async fn get_praxis_status(
 
 /// Cancel a running Praxis task (uses the same cancel token as single-agent).
 #[tauri::command]
-pub async fn cancel_praxis(
-    bridge: State<'_, DesktopBridge>,
-) -> Result<(), String> {
+pub async fn cancel_praxis(bridge: State<'_, DesktopBridge>) -> Result<(), String> {
     bridge.cancel().await;
     Ok(())
 }
@@ -271,7 +268,5 @@ pub async fn steer_lead(
         return Err("Steering message must not be empty.".to_string());
     }
     info!(lead_id = %lead_id, message = %message, "steer_lead: forwarding as steering message");
-    bridge
-        .send_message(message, MessageTier::Steering)
-        .await
+    bridge.send_message(message, MessageTier::Steering).await
 }

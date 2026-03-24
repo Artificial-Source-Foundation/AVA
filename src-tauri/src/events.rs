@@ -71,10 +71,7 @@ pub enum AgentEvent {
         max_turns: usize,
     },
     #[serde(rename = "praxis_worker_token")]
-    PraxisWorkerToken {
-        worker_id: String,
-        token: String,
-    },
+    PraxisWorkerToken { worker_id: String, token: String },
     #[serde(rename = "praxis_worker_completed")]
     PraxisWorkerCompleted {
         worker_id: String,
@@ -82,10 +79,7 @@ pub enum AgentEvent {
         turns: usize,
     },
     #[serde(rename = "praxis_worker_failed")]
-    PraxisWorkerFailed {
-        worker_id: String,
-        error: String,
-    },
+    PraxisWorkerFailed { worker_id: String, error: String },
     #[serde(rename = "praxis_all_complete")]
     PraxisAllComplete {
         total_workers: usize,
@@ -114,10 +108,7 @@ pub enum AgentEvent {
         output_preview: String,
     },
     #[serde(rename = "praxis_spec_created")]
-    PraxisSpecCreated {
-        spec_id: String,
-        title: String,
-    },
+    PraxisSpecCreated { spec_id: String, title: String },
     #[serde(rename = "praxis_artifact_created")]
     PraxisArtifactCreated {
         artifact_id: String,
@@ -132,9 +123,7 @@ pub enum AgentEvent {
     },
 
     #[serde(rename = "plan_created")]
-    PlanCreated {
-        plan: PlanPayload,
-    },
+    PlanCreated { plan: PlanPayload },
 }
 
 /// Flattened plan data for the desktop frontend.
@@ -234,9 +223,7 @@ impl EventEmitter {
 /// Convert an `ava_agent::AgentEvent` to a Tauri `AgentEvent` payload.
 /// Returns `None` for events that have no direct desktop representation
 /// (e.g. `ToolStats`, `SubAgentComplete`).
-pub fn from_backend_event(
-    event: &ava_agent::agent_loop::AgentEvent,
-) -> Option<AgentEvent> {
+pub fn from_backend_event(event: &ava_agent::agent_loop::AgentEvent) -> Option<AgentEvent> {
     use ava_agent::agent_loop::AgentEvent as BE;
     match event {
         BE::Token(content) => Some(AgentEvent::Token {

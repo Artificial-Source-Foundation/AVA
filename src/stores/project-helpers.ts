@@ -32,10 +32,12 @@ export async function resolveProjectFromDirectory(directory: string): Promise<Pr
 }
 
 /**
- * Expand the Tauri FS scope for the project directory and persist
- * the project ID as the last-active project in localStorage.
+ * Expand the Tauri FS scope for the project directory, change the
+ * Rust process working directory, and persist the project ID as
+ * the last-active project in localStorage.
  */
 export function activateProject(project: Project): void {
   invoke('allow_project_path', { path: project.directory }).catch(() => {})
+  invoke('set_cwd', { path: project.directory }).catch(() => {})
   localStorage.setItem(STORAGE_KEYS.LAST_PROJECT, project.id)
 }

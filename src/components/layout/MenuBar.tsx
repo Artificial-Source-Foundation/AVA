@@ -8,6 +8,7 @@
 
 import { open } from '@tauri-apps/plugin-dialog'
 import { type Component, createSignal, For, onCleanup, Show } from 'solid-js'
+import { logError } from '../../services/logger'
 import { useLayout } from '../../stores/layout'
 import { useProject } from '../../stores/project'
 import { useSession } from '../../stores/session'
@@ -23,7 +24,7 @@ interface MenuItem {
 }
 
 export const MenuBar: Component = () => {
-  const { createNewSession } = useSession()
+  const { createNewSession, loadSessionsForCurrentProject, restoreForCurrentProject } = useSession()
   const { openProjectHub, toggleSidebar, toggleBottomPanel, toggleRightPanel, openSettings } =
     useLayout()
   const { openDirectory } = useProject()
@@ -32,14 +33,30 @@ export const MenuBar: Component = () => {
   let menuBarRef: HTMLDivElement | undefined
 
   const handleOpenProject = async () => {
+    let selected: string | string[] | null = null
     try {
-      const selected = await open({
+      selected = await open({
         directory: true,
         title: 'Select Project Folder',
       })
-      if (selected) await openDirectory(selected as string)
     } catch {
       /* ignore in non-Tauri */
+      return
+    }
+    if (!selected || typeof selected !== 'string') return
+
+    try {
+      await openDirectory(selected)
+    } catch (error) {
+      logError('MenuBar', 'Failed to open directory', error)
+      return
+    }
+
+    try {
+      await loadSessionsForCurrentProject()
+      await restoreForCurrentProject()
+    } catch (error) {
+      logError('MenuBar', 'Session restore failed after open', error)
     }
   }
 
@@ -141,7 +158,7 @@ export const MenuBar: Component = () => {
           <div class="relative">
             <button
               type="button"
-              class={`text-[11px] font-medium px-2 py-1 rounded-[var(--radius-sm)] transition-colors ${
+              class={`text-[var(--text-xs)] font-medium px-2 py-1 rounded-[var(--radius-sm)] transition-colors ${
                 openMenu() === menu.id
                   ? 'text-[var(--text-primary)] bg-[var(--alpha-white-8)]'
                   : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--alpha-white-8)]'

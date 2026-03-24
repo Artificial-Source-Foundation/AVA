@@ -45,6 +45,19 @@ pub fn get_cwd() -> Result<String, String> {
         .map_err(|e| e.to_string())
 }
 
+/// Change the process working directory to a new project path.
+///
+/// Called when the user opens or switches to a different project so that
+/// relative paths, project-local config, and agent tools resolve correctly.
+#[tauri::command]
+pub fn set_cwd(path: String) -> Result<(), String> {
+    let p = std::path::Path::new(&path);
+    if !p.is_dir() {
+        return Err(format!("Not a directory: {path}"));
+    }
+    std::env::set_current_dir(p).map_err(|e| format!("Failed to change directory to {path}: {e}"))
+}
+
 /// Append text to a log file, creating parent directories if needed.
 ///
 /// TODO(security): This command accepts caller-supplied paths with no

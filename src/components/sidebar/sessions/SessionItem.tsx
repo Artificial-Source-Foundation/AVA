@@ -1,13 +1,15 @@
 /**
  * Session Item
  *
- * A single session row in the sidebar list, with rename/delete inline states.
+ * Compact single-line session row: title... timestamp
+ * With optional status dot for busy sessions.
+ * Hover reveals rename/delete actions.
  */
 
-import { Check, Loader2, MessageSquare, Pencil, Trash2, X } from 'lucide-solid'
+import { Check, Pencil, Trash2, X } from 'lucide-solid'
 import { type Component, createEffect, createSignal, Show } from 'solid-js'
 import type { SessionWithStats } from '../../../types'
-import { formatDate, formatSessionName } from './session-utils'
+import { formatRelativeTime, formatSessionName } from './session-utils'
 
 export interface SessionItemProps {
   session: SessionWithStats
@@ -70,16 +72,16 @@ export const SessionItem: Component<SessionItemProps> = (props) => {
           when={isRenaming()}
           fallback={
             /* Delete confirmation row */
-            <div class="flex items-center gap-1.5 density-px density-py rounded-[var(--radius-md)] bg-[var(--error-subtle)] border border-[var(--error)]">
+            <div class="flex items-center gap-1.5 px-2 py-1.5 mx-1 rounded-[var(--radius-md)] bg-[var(--error-subtle)] border border-[var(--error)]">
               <Trash2 class="w-3 h-3 text-[var(--error)] flex-shrink-0" />
-              <span class="text-[10px] text-[var(--error)] flex-1 truncate">Delete session?</span>
+              <span class="text-[10px] text-[var(--error)] flex-1 truncate">Delete?</span>
               <button
                 type="button"
                 onClick={() => {
                   props.onDelete(props.session.id)
                   setIsConfirmingDelete(false)
                 }}
-                class="p-1 rounded-[var(--radius-sm)] text-[var(--error)] hover:bg-[var(--error)] hover:text-white"
+                class="p-0.5 rounded-[var(--radius-sm)] text-[var(--error)] hover:bg-[var(--error)] hover:text-white"
                 title="Confirm delete"
                 aria-label="Confirm delete"
               >
@@ -88,7 +90,7 @@ export const SessionItem: Component<SessionItemProps> = (props) => {
               <button
                 type="button"
                 onClick={() => setIsConfirmingDelete(false)}
-                class="p-1 rounded-[var(--radius-sm)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--alpha-white-8)]"
+                class="p-0.5 rounded-[var(--radius-sm)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--alpha-white-8)]"
                 title="Cancel"
                 aria-label="Cancel"
               >
@@ -133,48 +135,50 @@ export const SessionItem: Component<SessionItemProps> = (props) => {
         onContextMenu={(e) => props.onContextMenu(e, props.session.id)}
         class={`
           group relative flex items-center w-full
-          py-2.5 gap-2.5
-          rounded-[var(--radius-xl)]
+          py-1.5 px-2 gap-2
+          rounded-[var(--radius-md)]
           text-left transition-colors cursor-pointer
           ${
             props.isActive
-              ? 'bg-[var(--accent-subtle,rgba(139,92,246,0.08))] text-[var(--gray-12)] border-l-2 border-[var(--accent)] pl-[calc(0.75rem-2px)] pr-3'
-              : 'text-[var(--gray-9)] hover:bg-[var(--alpha-white-5)] hover:text-[var(--text-primary)] border-l-2 border-transparent pl-[calc(0.75rem-2px)] pr-3'
+              ? 'bg-[var(--alpha-white-8)] text-[var(--text-primary)]'
+              : 'text-[var(--text-secondary)] hover:bg-[var(--alpha-white-5)] hover:text-[var(--text-primary)]'
           }
         `}
       >
-        <Show
-          when={props.isBusy}
-          fallback={
-            <MessageSquare
-              class={`w-3.5 h-3.5 flex-shrink-0 ${props.isActive ? 'text-[var(--accent)]' : ''}`}
-            />
-          }
-        >
-          <Loader2 class="w-3.5 h-3.5 flex-shrink-0 text-[var(--accent)] animate-spin" />
+        {/* Active indicator — subtle left border */}
+        <Show when={props.isActive}>
+          <span
+            class="
+              absolute left-0 top-1 bottom-1 w-[2px]
+              rounded-r-full bg-[var(--accent)]
+            "
+          />
         </Show>
-        <div class="flex-1 min-w-0 flex flex-col gap-[3px]">
-          <div class="text-[13px] font-medium truncate">
-            {formatSessionName(props.session.name)}
-          </div>
-          <div class="text-[11px] text-[var(--gray-8)] truncate flex items-center gap-1.5">
-            <Show when={props.session.slug}>
-              <span class="opacity-70">{props.session.slug}</span>
-              <span class="opacity-30">|</span>
-            </Show>
-            <span>{formatDate(props.session.updatedAt)}</span>
-          </div>
-        </div>
+
+        {/* Status dot for busy sessions */}
+        <Show when={props.isBusy}>
+          <span class="flex-shrink-0 w-1.5 h-1.5 rounded-full bg-[var(--accent)] animate-pulse" />
+        </Show>
+
+        {/* Session title */}
+        <span class="flex-1 min-w-0 text-[13px] truncate">
+          {formatSessionName(props.session.name)}
+        </span>
+
+        {/* Relative timestamp — hidden when hover actions show */}
+        <span class="text-[11px] text-[var(--text-muted)] flex-shrink-0 group-hover:hidden">
+          {formatRelativeTime(props.session.updatedAt)}
+        </span>
 
         {/* Hover actions */}
-        <div class="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+        <div class="hidden group-hover:flex items-center gap-0.5 flex-shrink-0">
           <button
             type="button"
             onClick={(e) => {
               e.stopPropagation()
               startRename()
             }}
-            class="p-1 rounded-[var(--radius-sm)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--alpha-white-8)]"
+            class="p-0.5 rounded-[var(--radius-sm)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--alpha-white-8)]"
             title="Rename"
             aria-label="Rename session"
           >
@@ -186,7 +190,7 @@ export const SessionItem: Component<SessionItemProps> = (props) => {
               e.stopPropagation()
               setIsConfirmingDelete(true)
             }}
-            class="p-1 rounded-[var(--radius-sm)] text-[var(--text-muted)] hover:text-[var(--error)] hover:bg-[var(--error-subtle)]"
+            class="p-0.5 rounded-[var(--radius-sm)] text-[var(--text-muted)] hover:text-[var(--error)] hover:bg-[var(--error-subtle)]"
             title="Delete"
             aria-label="Delete session"
           >

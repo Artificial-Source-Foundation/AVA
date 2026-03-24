@@ -23,6 +23,23 @@ export const formatDate = (timestamp: number): string => {
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 }
 
+/** Compact relative time: "2m", "34m", "1h", "3d", "2w", "Jan 5" */
+export const formatRelativeTime = (timestamp: number): string => {
+  const now = Date.now()
+  const diff = now - timestamp
+  const minutes = Math.floor(diff / 60_000)
+  const hours = Math.floor(diff / 3_600_000)
+  const days = Math.floor(diff / 86_400_000)
+  const weeks = Math.floor(days / 7)
+
+  if (minutes < 1) return 'now'
+  if (minutes < 60) return `${minutes}m`
+  if (hours < 24) return `${hours}h`
+  if (days < 7) return `${days}d`
+  if (weeks < 5) return `${weeks}w`
+  return new Date(timestamp).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+}
+
 const getDateGroup = (timestamp: number): string => {
   const now = new Date()
   const date = new Date(timestamp)

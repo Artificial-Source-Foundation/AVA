@@ -9,7 +9,6 @@ import { TerminalPanel } from '../panels/TerminalPanel'
 import { SettingsModal } from '../settings'
 import { SidebarMemory } from '../sidebar/SidebarMemory'
 import { PanelErrorBoundary } from '../ui/PanelErrorBoundary'
-import { ActivityBar } from './ActivityBar'
 import { MainArea } from './MainArea'
 import { RightPanel } from './RightPanel'
 import { SidebarPanel } from './SidebarPanel'
@@ -66,9 +65,7 @@ export const AppShell: Component = () => {
         class="flex-1 flex overflow-hidden"
         style={{ visibility: settingsOpen() ? 'hidden' : 'visible' }}
       >
-        <ActivityBar />
-
-        {/* Sidebar — width transition with overflow:hidden (no bleed, smooth) */}
+        {/* Sidebar — unified panel (no separate activity bar) */}
         <div
           class="flex-shrink-0 overflow-hidden"
           style={{

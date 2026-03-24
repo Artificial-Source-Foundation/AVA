@@ -27,11 +27,10 @@ export const ModelSelector: Component<ModelSelectorProps> = (props) => (
     onClick={props.onToggle}
     class="
       flex items-center gap-1 px-2.5 py-1
-      text-[var(--text-xs)] text-[var(--gray-9)]
-      bg-[var(--gray-3)]
-      border border-[var(--gray-5)]
-      rounded-[var(--radius-full)]
-      hover:border-[var(--violet-8)]
+      text-[var(--text-xs)] text-[var(--text-secondary)]
+      bg-[var(--alpha-white-5)]
+      rounded-full
+      hover:bg-[var(--alpha-white-8)]
       transition-colors
     "
   >

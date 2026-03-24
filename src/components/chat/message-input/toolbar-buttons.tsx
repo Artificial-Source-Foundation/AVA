@@ -162,9 +162,9 @@ export const PlanActSlider: Component<PlanActSliderProps> = (props) => (
     disabled={props.isProcessing()}
     class="
       relative flex items-center
-      h-[22px] w-[88px] rounded-[var(--radius-md)]
-      bg-[var(--surface-raised)] border border-[var(--border-subtle)]
-      text-[var(--text-xs)] font-semibold
+      h-[24px] w-[92px] rounded-full
+      bg-[var(--alpha-white-5)]
+      text-[var(--text-xs)] font-medium
       disabled:opacity-50 disabled:cursor-not-allowed
       overflow-hidden select-none
       transition-colors
@@ -174,13 +174,13 @@ export const PlanActSlider: Component<PlanActSliderProps> = (props) => (
     {/* Sliding highlight */}
     <div
       class="
-        absolute top-[1px] bottom-[1px] w-[44px]
-        rounded-[calc(var(--radius-md)-2px)]
+        absolute top-[2px] bottom-[2px] w-[44px]
+        rounded-full
         transition-all duration-300 ease-[cubic-bezier(0.4,0,0.2,1)]
       "
       style={{
-        left: props.isPlanMode() ? '1px' : '42px',
-        'background-color': props.isPlanMode() ? 'var(--accent)' : 'var(--accent)',
+        left: props.isPlanMode() ? '2px' : '44px',
+        'background-color': 'var(--accent)',
       }}
     />
     {/* Labels */}

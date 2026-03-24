@@ -162,7 +162,7 @@ export const PlanActSlider: Component<PlanActSliderProps> = (props) => (
     disabled={props.isProcessing()}
     class="
       relative flex items-center
-      h-[24px] w-[92px] rounded-full
+      h-[28px] w-[120px] rounded-full
       bg-[var(--alpha-white-5)]
       text-[var(--text-xs)] font-medium
       disabled:opacity-50 disabled:cursor-not-allowed
@@ -174,12 +174,12 @@ export const PlanActSlider: Component<PlanActSliderProps> = (props) => (
     {/* Sliding highlight */}
     <div
       class="
-        absolute top-[2px] bottom-[2px] w-[44px]
+        absolute top-[2px] bottom-[2px] w-[56px]
         rounded-full
         transition-all duration-300 ease-[cubic-bezier(0.4,0,0.2,1)]
       "
       style={{
-        left: props.isPlanMode() ? '2px' : '44px',
+        left: props.isPlanMode() ? '2px' : '60px',
         'background-color': 'var(--accent)',
       }}
     />
@@ -191,7 +191,7 @@ export const PlanActSlider: Component<PlanActSliderProps> = (props) => (
       }}
     >
       <span class="flex items-center justify-center gap-0.5">
-        <FileSearch class="w-2.5 h-2.5" />
+        <FileSearch class="w-3 h-3" />
         Plan
       </span>
     </span>
@@ -202,7 +202,7 @@ export const PlanActSlider: Component<PlanActSliderProps> = (props) => (
       }}
     >
       <span class="flex items-center justify-center gap-0.5">
-        <Play class="w-2.5 h-2.5" />
+        <Play class="w-3 h-3" />
         Act
       </span>
     </span>

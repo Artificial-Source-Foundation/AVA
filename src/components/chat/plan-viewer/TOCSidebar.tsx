@@ -164,12 +164,59 @@ export const TOCSidebar: Component<{
           </Show>
         </Show>
 
-        {/* Versions tab (placeholder) */}
+        {/* Versions tab */}
         <Show when={activeTab() === 'versions'}>
-          <div class="flex-1 flex items-center justify-center px-4">
-            <span class="text-[12px] text-center" style={{ color: 'var(--text-muted)' }}>
-              Version history coming soon
-            </span>
+          <div class="flex-1 overflow-y-auto p-3">
+            <Show
+              when={props.planHistory.length > 0}
+              fallback={
+                <div class="text-center py-8">
+                  <span class="text-[11px]" style={{ color: 'var(--text-muted)' }}>
+                    No saved versions yet.
+                    <br />
+                    Versions are saved when plans are approved or refined.
+                  </span>
+                </div>
+              }
+            >
+              <div class="space-y-1">
+                <For each={props.planHistory}>
+                  {(entry, index) => (
+                    <button
+                      type="button"
+                      onClick={() => props.onLoadPlan(entry.filename)}
+                      class="w-full text-left p-2 rounded-lg border transition-colors"
+                      style={{
+                        'border-color': 'var(--border-subtle)',
+                        background: 'var(--alpha-white-3)',
+                      }}
+                    >
+                      <div class="flex items-center justify-between mb-0.5">
+                        <span
+                          class="text-[11px] font-medium"
+                          style={{ color: 'var(--text-primary)' }}
+                        >
+                          {entry.codename || `Version ${props.planHistory.length - index()}`}
+                        </span>
+                        <span class="text-[9px]" style={{ color: 'var(--text-muted)' }}>
+                          {entry.created}
+                        </span>
+                      </div>
+                      <span
+                        class="text-[10px] truncate block"
+                        style={{ color: 'var(--text-muted)' }}
+                      >
+                        {entry.summary.slice(0, 50)}
+                        {entry.summary.length > 50 ? '...' : ''}
+                      </span>
+                      <span class="text-[9px]" style={{ color: 'var(--text-muted)' }}>
+                        {entry.stepCount} steps
+                      </span>
+                    </button>
+                  )}
+                </For>
+              </div>
+            </Show>
           </div>
         </Show>
       </aside>

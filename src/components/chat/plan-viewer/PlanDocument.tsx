@@ -1,7 +1,8 @@
 import { Check, FileCode, GitBranch } from 'lucide-solid'
-import { type Component, For, Show } from 'solid-js'
+import { type Component, createMemo, For, Show } from 'solid-js'
 import type { PlanAnnotation } from '../../../stores/planOverlayStore'
 import type { PlanData, PlanStep, PlanStepAction } from '../../../types/rust-ipc'
+import { diffPlans, type StepDiff } from '../../../utils/planDiff'
 import { ACTION_CONFIG, type InputMethod, PLAN_ACCENT, PLAN_ACCENT_SUBTLE } from './types'
 
 /** Format a plan as markdown text for copy/download */
@@ -75,6 +76,8 @@ export const PlanDocument: Component<{
   plan: PlanData
   annotations: PlanAnnotation[]
   inputMethod?: InputMethod
+  showDiff?: boolean
+  previousPlan?: PlanData | null
   onMouseUp: (e: MouseEvent) => void
   onTextSelected?: (text: string, rect: DOMRect) => void
   onGlobalComment: () => void
@@ -82,6 +85,23 @@ export const PlanDocument: Component<{
   cardRef: (el: HTMLElement) => void
 }> = (props) => {
   const isPinpoint = (): boolean => props.inputMethod === 'pinpoint'
+
+  const diffResult = createMemo(() => {
+    if (!props.showDiff || !props.previousPlan) return null
+    return diffPlans(props.previousPlan, props.plan)
+  })
+
+  const getDiffForStep = (stepId: string): StepDiff | undefined => {
+    const result = diffResult()
+    if (!result) return undefined
+    return result.steps.find((sd) => sd.step.id === stepId)
+  }
+
+  const removedSteps = createMemo((): StepDiff[] => {
+    const result = diffResult()
+    if (!result) return []
+    return result.steps.filter((sd) => sd.diffType === 'removed')
+  })
 
   const handlePinpointClick = (e: MouseEvent): void => {
     if (!isPinpoint() || !props.onTextSelected) return
@@ -179,11 +199,48 @@ export const PlanDocument: Component<{
                   const idx = props.plan.steps.findIndex((s) => s.id === depId)
                   return idx >= 0 ? `Step ${idx + 1}` : depId
                 })
+              const stepDiff = () => getDiffForStep(step.id)
+              const diffBorder = (): string => {
+                const sd = stepDiff()
+                if (!sd) return 'none'
+                switch (sd.diffType) {
+                  case 'added':
+                    return '3px solid rgba(34, 197, 94, 0.6)'
+                  case 'modified':
+                    return '3px solid rgba(234, 179, 8, 0.6)'
+                  default:
+                    return 'none'
+                }
+              }
+              const diffBg = (): string => {
+                const sd = stepDiff()
+                if (!sd) return 'transparent'
+                switch (sd.diffType) {
+                  case 'added':
+                    return 'rgba(34, 197, 94, 0.04)'
+                  case 'modified':
+                    return 'rgba(234, 179, 8, 0.04)'
+                  default:
+                    return 'transparent'
+                }
+              }
 
               return (
                 <section
                   id={`plan-step-${step.id}`}
                   data-step-id={step.id}
+                  style={{
+                    'border-left': diffBorder(),
+                    background: diffBg(),
+                    'padding-left':
+                      stepDiff()?.diffType === 'added' || stepDiff()?.diffType === 'modified'
+                        ? '12px'
+                        : undefined,
+                    'border-radius':
+                      stepDiff()?.diffType === 'added' || stepDiff()?.diffType === 'modified'
+                        ? '4px'
+                        : undefined,
+                  }}
                   {...(isPinpoint()
                     ? {
                         'data-pinpoint-target': '',
@@ -200,6 +257,20 @@ export const PlanDocument: Component<{
                       }
                     : {})}
                 >
+                  {/* Modified step: show old description as strikethrough */}
+                  <Show when={stepDiff()?.diffType === 'modified' && stepDiff()?.oldStep}>
+                    <p
+                      class="text-[13px] mb-1"
+                      style={{
+                        color: 'var(--text-muted)',
+                        'text-decoration': 'line-through',
+                        opacity: '0.6',
+                      }}
+                    >
+                      {stepDiff()!.oldStep!.description}
+                    </p>
+                  </Show>
+
                   {/* Step heading */}
                   <div class="flex items-center gap-3 mb-2">
                     <h3 class="text-[16px] font-semibold" style={{ color: 'var(--text-primary)' }}>
@@ -261,6 +332,43 @@ export const PlanDocument: Component<{
                 </section>
               )
             }}
+          </For>
+
+          {/* Removed steps (only shown in diff mode) */}
+          <For each={removedSteps()}>
+            {(sd) => (
+              <section
+                style={{
+                  'border-left': '3px solid rgba(239, 68, 68, 0.6)',
+                  background: 'rgba(239, 68, 68, 0.04)',
+                  'padding-left': '12px',
+                  'border-radius': '4px',
+                  opacity: '0.5',
+                }}
+              >
+                <div class="flex items-center gap-3 mb-2">
+                  <h3
+                    class="text-[16px] font-semibold"
+                    style={{
+                      color: 'var(--text-muted)',
+                      'text-decoration': 'line-through',
+                    }}
+                  >
+                    {sd.step.description}
+                  </h3>
+                  <span
+                    class="inline-flex items-center px-2 py-0.5 rounded-full text-[9px] font-semibold tracking-wider uppercase border flex-shrink-0"
+                    style={{
+                      background: 'rgba(239, 68, 68, 0.1)',
+                      color: 'rgba(239, 68, 68, 0.8)',
+                      'border-color': 'rgba(239, 68, 68, 0.2)',
+                    }}
+                  >
+                    Removed
+                  </span>
+                </div>
+              </section>
+            )}
           </For>
         </div>
       </article>

@@ -42,6 +42,10 @@ export const PlanOverlay: Component = () => {
     annotations,
     addAnnotation,
     removeAnnotation,
+    previousPlan,
+    showDiff,
+    toggleDiff,
+    hasDiff,
   } = usePlanOverlay()
   const agent = useAgent()
 
@@ -351,6 +355,8 @@ export const PlanOverlay: Component = () => {
             codename={plan().codename}
             copied={copied()}
             shareCopied={shareCopied()}
+            hasDiff={hasDiff()}
+            showDiff={showDiff()}
             onBack={() => closePlan()}
             onApprove={() => handleApprove('code')}
             onSendFeedback={handleReject}
@@ -358,6 +364,7 @@ export const PlanOverlay: Component = () => {
             onDownload={handleDownload}
             onShare={handleShare}
             onClose={() => closePlan()}
+            onToggleDiff={toggleDiff}
           />
 
           {/* 3-Panel body */}
@@ -395,6 +402,8 @@ export const PlanOverlay: Component = () => {
                 plan={plan()}
                 annotations={annotations()}
                 inputMethod={inputMethod()}
+                showDiff={showDiff()}
+                previousPlan={previousPlan()}
                 onMouseUp={handleDocumentMouseUp}
                 onTextSelected={handleTextSelected}
                 onGlobalComment={() => setGlobalCommentOpen(true)}

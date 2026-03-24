@@ -1,4 +1,13 @@
-import { ArrowLeft, Check, ClipboardList, Copy, Download, Link2, X } from 'lucide-solid'
+import {
+  ArrowLeft,
+  Check,
+  ClipboardList,
+  Copy,
+  Download,
+  GitCompareArrows,
+  Link2,
+  X,
+} from 'lucide-solid'
 import type { Component } from 'solid-js'
 import { Show } from 'solid-js'
 import { PLAN_ACCENT, PLAN_ACCENT_SUBTLE } from './types'
@@ -7,6 +16,8 @@ export const PlanHeader: Component<{
   codename: string | undefined
   copied: boolean
   shareCopied: boolean
+  hasDiff?: boolean
+  showDiff?: boolean
   onBack: () => void
   onApprove: () => void
   onSendFeedback: () => void
@@ -14,6 +25,7 @@ export const PlanHeader: Component<{
   onDownload: () => void
   onShare: () => void
   onClose: () => void
+  onToggleDiff?: () => void
 }> = (props) => {
   return (
     <header
@@ -43,6 +55,22 @@ export const PlanHeader: Component<{
           <span class="text-[13px] font-bold tracking-wide" style={{ color: PLAN_ACCENT }}>
             {props.codename}
           </span>
+        </Show>
+        <Show when={props.hasDiff}>
+          <button
+            type="button"
+            onClick={() => props.onToggleDiff?.()}
+            class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium border transition-colors"
+            classList={{
+              'text-[#22C55E] border-[rgba(34,197,94,0.3)] bg-[rgba(34,197,94,0.08)]':
+                props.showDiff,
+              'text-[var(--text-muted)] border-[var(--border-subtle)]': !props.showDiff,
+            }}
+            title="Toggle diff view"
+          >
+            <GitCompareArrows class="w-3 h-3" />
+            Diff
+          </button>
         </Show>
       </div>
 

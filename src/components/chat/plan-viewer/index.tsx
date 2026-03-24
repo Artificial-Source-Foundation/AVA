@@ -82,7 +82,7 @@ export const PlanOverlay: Component = () => {
       // Number keys 1-9, 0 for quick labels when picker is open
       if (quickLabelPicker() && /^[0-9]$/.test(e.key)) {
         e.preventDefault()
-        const idx = e.key === '0' ? 9 : parseInt(e.key) - 1
+        const idx = e.key === '0' ? 9 : parseInt(e.key, 10) - 1
         const label = QUICK_LABELS[idx]
         if (label && quickLabelPicker()) {
           const info = quickLabelPicker()!
@@ -394,7 +394,9 @@ export const PlanOverlay: Component = () => {
               <PlanDocument
                 plan={plan()}
                 annotations={annotations()}
+                inputMethod={inputMethod()}
                 onMouseUp={handleDocumentMouseUp}
+                onTextSelected={handleTextSelected}
                 onGlobalComment={() => setGlobalCommentOpen(true)}
                 onCopyPlan={handleCopy}
                 cardRef={() => {}}

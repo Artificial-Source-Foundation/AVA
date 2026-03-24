@@ -2,7 +2,7 @@ import { Check, FileCode, GitBranch } from 'lucide-solid'
 import { type Component, For, Show } from 'solid-js'
 import type { PlanAnnotation } from '../../../stores/planOverlayStore'
 import type { PlanData, PlanStep, PlanStepAction } from '../../../types/rust-ipc'
-import { ACTION_CONFIG, PLAN_ACCENT, PLAN_ACCENT_SUBTLE } from './types'
+import { ACTION_CONFIG, type InputMethod, PLAN_ACCENT, PLAN_ACCENT_SUBTLE } from './types'
 
 /** Format a plan as markdown text for copy/download */
 export function formatPlanMarkdown(plan: PlanData): string {
@@ -74,11 +74,25 @@ export function parsePlanMarkdown(content: string): PlanData | null {
 export const PlanDocument: Component<{
   plan: PlanData
   annotations: PlanAnnotation[]
+  inputMethod?: InputMethod
   onMouseUp: (e: MouseEvent) => void
+  onTextSelected?: (text: string, rect: DOMRect) => void
   onGlobalComment: () => void
   onCopyPlan: () => void
   cardRef: (el: HTMLElement) => void
 }> = (props) => {
+  const isPinpoint = (): boolean => props.inputMethod === 'pinpoint'
+
+  const handlePinpointClick = (e: MouseEvent): void => {
+    if (!isPinpoint() || !props.onTextSelected) return
+    e.stopPropagation()
+    const target = e.currentTarget as HTMLElement
+    const text = target.textContent || ''
+    if (text.trim()) {
+      const rect = target.getBoundingClientRect()
+      props.onTextSelected(text.trim(), rect)
+    }
+  }
   const approvedCount = () => props.plan.steps.filter((s) => s.approved).length
   const estimatedCost = () =>
     props.plan.estimatedBudgetUsd != null ? `~$${props.plan.estimatedBudgetUsd.toFixed(2)}` : null
@@ -167,7 +181,25 @@ export const PlanDocument: Component<{
                 })
 
               return (
-                <section id={`plan-step-${step.id}`} data-step-id={step.id}>
+                <section
+                  id={`plan-step-${step.id}`}
+                  data-step-id={step.id}
+                  {...(isPinpoint()
+                    ? {
+                        'data-pinpoint-target': '',
+                        role: 'button' as const,
+                        tabIndex: 0,
+                        onClick: handlePinpointClick,
+                        onKeyDown: (e: KeyboardEvent) => {
+                          if (e.key === 'Enter')
+                            handlePinpointClick(
+                              e as unknown as MouseEvent & { currentTarget: HTMLElement }
+                            )
+                        },
+                        class: 'cursor-crosshair',
+                      }
+                    : {})}
+                >
                   {/* Step heading */}
                   <div class="flex items-center gap-3 mb-2">
                     <h3 class="text-[16px] font-semibold" style={{ color: 'var(--text-primary)' }}>

@@ -995,6 +995,13 @@ button {
   background-size: 24px 24px;
 }
 
+/* Plan pinpoint mode — hover outline on selectable elements */
+[data-pinpoint-target]:hover {
+  outline: 2px dashed rgba(139, 92, 246, 0.5);
+  outline-offset: 4px;
+  border-radius: 4px;
+}
+
 /* Plan annotation highlights */
 .plan-highlight-deletion {
   background: rgba(239, 68, 68, 0.25);

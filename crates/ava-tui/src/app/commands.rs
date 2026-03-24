@@ -1,3 +1,5 @@
+use base64::Engine as _;
+
 use ava_agent::stack::MCPServerInfo;
 
 use super::*;
@@ -437,6 +439,97 @@ impl App {
                     }
                 }
             }
+            "/plan" => {
+                let sub = arg.unwrap_or("");
+                match sub {
+                    "view" => {
+                        let plan = self.state.agent.plan_state().and_then(|ps| ps.get());
+                        if let Some(plan) = plan {
+                            let json = serde_json::to_string(&plan).unwrap_or_default();
+                            let encoded = base64::engine::general_purpose::URL_SAFE_NO_PAD
+                                .encode(json.as_bytes());
+                            let url = format!("http://localhost:8080/#plan={encoded}");
+
+                            let open_result = {
+                                #[cfg(target_os = "linux")]
+                                {
+                                    std::process::Command::new("xdg-open")
+                                        .arg(&url)
+                                        .stdin(std::process::Stdio::null())
+                                        .stdout(std::process::Stdio::null())
+                                        .stderr(std::process::Stdio::null())
+                                        .spawn()
+                                }
+                                #[cfg(target_os = "macos")]
+                                {
+                                    std::process::Command::new("open")
+                                        .arg(&url)
+                                        .stdin(std::process::Stdio::null())
+                                        .stdout(std::process::Stdio::null())
+                                        .stderr(std::process::Stdio::null())
+                                        .spawn()
+                                }
+                                #[cfg(target_os = "windows")]
+                                {
+                                    std::process::Command::new("cmd")
+                                        .args(["/c", "start", &url])
+                                        .stdin(std::process::Stdio::null())
+                                        .stdout(std::process::Stdio::null())
+                                        .stderr(std::process::Stdio::null())
+                                        .spawn()
+                                }
+                            };
+
+                            match open_result {
+                                Ok(_) => {
+                                    self.set_status("Plan opened in browser", StatusLevel::Info);
+                                    Some((
+                                        MessageKind::System,
+                                        "Plan opened in browser".to_string(),
+                                    ))
+                                }
+                                Err(e) => {
+                                    self.set_status(
+                                        format!("Failed to open browser: {e}"),
+                                        StatusLevel::Error,
+                                    );
+                                    Some((
+                                        MessageKind::Error,
+                                        format!("Failed to open browser: {e}"),
+                                    ))
+                                }
+                            }
+                        } else {
+                            self.set_status(
+                                "No active plan. Use Plan mode to create one.",
+                                StatusLevel::Info,
+                            );
+                            Some((
+                                MessageKind::System,
+                                "No active plan. Use Plan mode to create one.".to_string(),
+                            ))
+                        }
+                    }
+                    _ => {
+                        let plan = self.state.agent.plan_state().and_then(|ps| ps.get());
+                        if let Some(plan) = plan {
+                            let step_count = plan.steps.len();
+                            let codename = plan
+                                .codename
+                                .as_deref()
+                                .map(|c| format!("{c} \u{2014} "))
+                                .unwrap_or_default();
+                            let msg =
+                                format!("Plan: {codename}{} ({step_count} steps)", plan.summary,);
+                            self.set_status(&msg, StatusLevel::Info);
+                            Some((MessageKind::System, msg))
+                        } else {
+                            self.set_status("No active plan", StatusLevel::Info);
+                            Some((MessageKind::System, "No active plan".to_string()))
+                        }
+                    }
+                }
+            }
             "/commit" => {
                 if let Some(app_tx) = app_tx {
                     self.spawn_commit_prep(app_tx);
@@ -491,6 +584,7 @@ impl App {
 /new [title]             \u{2014} start a new session (optional title)
 /sessions                \u{2014} session picker
 /bookmark [label]        \u{2014} bookmark current point (list/clear/remove)
+/plan [view]              \u{2014} show plan status or open in browser
 /commit                  \u{2014} inspect commit readiness and suggest a message
 /export [filename]       \u{2014} export conversation to file (.md or .json)
 /copy [all]              \u{2014} copy last response (picks code block if multiple)

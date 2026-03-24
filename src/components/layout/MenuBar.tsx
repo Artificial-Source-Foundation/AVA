@@ -179,7 +179,7 @@ export const MenuBar: Component = () => {
                     >
                       <button
                         type="button"
-                        class={`w-full flex items-center justify-between px-3 py-1.5 text-xs transition-colors ${
+                        class={`w-full flex items-center justify-between px-3 py-1.5 text-[var(--text-sm)] transition-colors ${
                           item.disabled
                             ? 'text-[var(--text-muted)] opacity-40 cursor-not-allowed'
                             : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--alpha-white-5)]'

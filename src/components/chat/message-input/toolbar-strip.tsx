@@ -13,7 +13,6 @@ import { useLayout } from '../../../stores/layout'
 import { useSandbox } from '../../../stores/sandbox'
 import type { useSession } from '../../../stores/session'
 import { useSettings } from '../../../stores/settings'
-import { PlanBranchSelector } from '../PlanBranchSelector'
 import { ModelSelector } from './model-selector'
 import { StatusBar } from './status-bar'
 import {
@@ -82,14 +81,6 @@ export const ToolbarStrip: Component<ToolbarStripProps> = (props) => {
           togglePlanMode={() => props.agent.togglePlanMode()}
           isProcessing={props.isProcessing}
         />
-
-        <Show when={props.agent.isPlanMode()}>
-          <PlanBranchSelector
-            isPlanMode={props.agent.isPlanMode}
-            messages={props.sessionStore.messages}
-            onMessagesChange={(msgs) => props.sessionStore.setMessages(msgs)}
-          />
-        </Show>
 
         <DelegationToggle
           enabled={() => settings().generation.delegationEnabled}

@@ -539,6 +539,7 @@ name = "ava-praxis"
 version = "2.2.7"
 dependencies = [
  "async-trait",
+ "ava-acp",
  "ava-agent",
  "ava-cli-providers",
  "ava-context",

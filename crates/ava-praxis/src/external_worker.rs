@@ -1,25 +1,35 @@
-//! ExternalWorker — delegates task execution to an external CLI agent (e.g., Claude Code Agent SDK).
+//! ExternalWorker — delegates task execution to an external agent via ACP transport.
 //!
-//! Instead of running AVA's internal AgentLoop, an ExternalWorker spawns a CLI agent
-//! process that runs its own autonomous agent loop. Results are mapped back to AVA's
-//! Session format for seamless Praxis session merging.
+//! Instead of running AVA's internal AgentLoop, an ExternalWorker uses an
+//! `AgentTransport` to communicate with an external agent (Claude Code, Codex, etc.).
+//! Results are mapped back to AVA's Session format for seamless Praxis session merging.
 
-use ava_cli_providers::bridge::AgentRole;
-use ava_cli_providers::config::CLIAgentEvent;
-use ava_cli_providers::runner::CLIAgentRunner;
-use ava_cli_providers::BridgeOptions;
+use ava_acp::protocol::{AgentMessage, AgentQuery, ContentBlock, PermissionMode};
+use ava_acp::transport::AgentTransport;
 use ava_types::{Message, Result, Role, Session};
+use futures::StreamExt;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
 use crate::events::PraxisEvent;
 use crate::{Budget, Task};
 
-/// A worker that delegates to an external CLI agent instead of an internal AgentLoop.
+/// Role determines tool scoping and timeout for external workers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AgentRole {
+    /// Full tool access, longer timeout.
+    Engineer,
+    /// Read-only tools, shorter timeout.
+    Reviewer,
+    /// Limited tools, shortest timeout.
+    Subagent,
+}
+
+/// A worker that delegates to an external agent via ACP transport.
 pub struct ExternalWorker {
     pub(crate) id: Uuid,
     pub(crate) lead: String,
-    pub(crate) runner: CLIAgentRunner,
+    pub(crate) transport: Box<dyn AgentTransport>,
     pub(crate) budget: Budget,
     pub(crate) task: Task,
     pub(crate) agent_name: String,
@@ -31,18 +41,18 @@ pub struct ExternalWorker {
 impl ExternalWorker {
     pub fn new(
         lead: String,
-        runner: CLIAgentRunner,
+        transport: Box<dyn AgentTransport>,
         budget: Budget,
         task: Task,
         cwd: String,
         role: AgentRole,
         system_prompt: Option<String>,
     ) -> Self {
-        let agent_name = runner.config().name.clone();
+        let agent_name = transport.name().to_string();
         Self {
             id: Uuid::new_v4(),
             lead,
-            runner,
+            transport,
             budget,
             task,
             agent_name,
@@ -67,25 +77,43 @@ impl ExternalWorker {
     pub fn task(&self) -> &Task {
         &self.task
     }
-}
 
-impl Clone for ExternalWorker {
-    fn clone(&self) -> Self {
-        Self {
-            id: self.id,
-            lead: self.lead.clone(),
-            runner: self.runner.clone(),
-            budget: self.budget.clone(),
-            task: self.task.clone(),
-            agent_name: self.agent_name.clone(),
-            cwd: self.cwd.clone(),
-            role: self.role,
+    /// Build an `AgentQuery` from the worker's task and configuration.
+    fn build_query(&self) -> AgentQuery {
+        let permission_mode = match self.role {
+            AgentRole::Engineer => Some(PermissionMode::AcceptEdits),
+            AgentRole::Reviewer => Some(PermissionMode::Plan),
+            AgentRole::Subagent => Some(PermissionMode::Default),
+        };
+
+        let allowed_tools = match self.role {
+            AgentRole::Engineer => None, // Full access
+            AgentRole::Reviewer => Some(vec!["Read".into(), "Glob".into(), "Grep".into()]),
+            AgentRole::Subagent => Some(vec![
+                "Read".into(),
+                "Glob".into(),
+                "Grep".into(),
+                "WebSearch".into(),
+                "WebFetch".into(),
+            ]),
+        };
+
+        AgentQuery {
+            prompt: self.task.description.clone(),
             system_prompt: self.system_prompt.clone(),
+            working_directory: Some(self.cwd.clone()),
+            max_turns: Some(self.budget.max_turns),
+            permission_mode,
+            allowed_tools,
+            disallowed_tools: None,
+            session_id: None,
+            resume: false,
+            model: None,
         }
     }
 }
 
-/// Run an external CLI agent worker, streaming events and returning a Session.
+/// Run an external agent worker, streaming events and returning a Session.
 pub(crate) async fn run_external_worker(
     worker: &ExternalWorker,
     event_tx: mpsc::UnboundedSender<PraxisEvent>,
@@ -97,61 +125,35 @@ pub(crate) async fn run_external_worker(
         task_description: worker.task.description.clone(),
     });
 
-    let bridge_opts = BridgeOptions {
-        max_turns: Some(worker.budget.max_turns),
-        system_prompt: worker.system_prompt.clone(),
-        ..Default::default()
-    };
+    let query = worker.build_query();
+    let mut stream = worker.transport.query(query).await?;
 
-    let (tx, mut rx) = tokio::sync::mpsc::channel(256);
-
-    let runner = worker.runner.clone();
-    let task_desc = worker.task.description.clone();
-    let cwd = worker.cwd.clone();
-    let role = worker.role;
-    let files: Vec<String> = worker.task.files.clone();
-    let files_ref: Option<Vec<String>> = if files.is_empty() { None } else { Some(files) };
-
-    let run_handle = tokio::spawn(async move {
-        let files_slice: Option<&[String]> = files_ref.as_deref();
-        ava_cli_providers::execute_with_cli_agent_ext(
-            &runner,
-            &task_desc,
-            role,
-            &cwd,
-            files_slice,
-            Some(tx),
-            &bridge_opts,
-        )
-        .await
-    });
-
-    // Stream events to Praxis
     let worker_id = worker.id;
-    while let Some(event) = rx.recv().await {
-        match &event {
-            CLIAgentEvent::Text { content } => {
-                let _ = event_tx.send(PraxisEvent::ExternalWorkerText {
-                    worker_id,
-                    content: content.clone(),
-                });
-            }
-            CLIAgentEvent::Assistant { content, .. } => {
+    let mut output = String::new();
+    let mut session_id = None;
+    let mut cost_usd = None;
+    let mut event_count = 0usize;
+
+    while let Some(msg) = stream.next().await {
+        event_count += 1;
+        match &msg {
+            AgentMessage::Assistant { content, .. } => {
                 for block in content {
                     match block {
-                        ava_cli_providers::ContentBlock::Text { text } => {
+                        ContentBlock::Text { text } => {
+                            output.push_str(text);
                             let _ = event_tx.send(PraxisEvent::ExternalWorkerText {
                                 worker_id,
                                 content: text.clone(),
                             });
                         }
-                        ava_cli_providers::ContentBlock::ToolUse { name, .. } => {
+                        ContentBlock::ToolUse { name, .. } => {
                             let _ = event_tx.send(PraxisEvent::ExternalWorkerToolUse {
                                 worker_id,
                                 tool_name: name.clone(),
                             });
                         }
-                        ava_cli_providers::ContentBlock::Thinking { thinking } => {
+                        ContentBlock::Thinking { thinking } => {
                             let _ = event_tx.send(PraxisEvent::ExternalWorkerThinking {
                                 worker_id,
                                 content: thinking.clone(),
@@ -161,34 +163,31 @@ pub(crate) async fn run_external_worker(
                     }
                 }
             }
-            CLIAgentEvent::ToolUse { tool_name, .. } => {
-                let _ = event_tx.send(PraxisEvent::ExternalWorkerToolUse {
-                    worker_id,
-                    tool_name: tool_name.clone(),
-                });
+            AgentMessage::Result { result, details } => {
+                output.push_str(result);
+                session_id = details.session_id.clone();
+                cost_usd = details.total_cost_usd;
+            }
+            AgentMessage::Error { message, .. } => {
+                output.push_str(&format!("Error: {message}"));
             }
             _ => {}
         }
     }
 
-    // Collect result
-    let cli_result = run_handle.await.map_err(|e| {
-        ava_types::AvaError::ToolError(format!("external worker task failed: {e}"))
-    })??;
-
     // Emit completion event
     let _ = event_tx.send(PraxisEvent::ExternalWorkerCompleted {
         worker_id,
-        success: cli_result.success,
-        session_id: cli_result.session_id.clone(),
-        cost_usd: cli_result.total_cost_usd,
-        turns: cli_result.events.len(),
+        success: true,
+        session_id,
+        cost_usd,
+        turns: event_count,
     });
 
     // Convert to AVA Session
     let mut session = Session::new();
     session.add_message(Message::new(Role::User, worker.task.description.clone()));
-    session.add_message(Message::new(Role::Assistant, cli_result.output));
+    session.add_message(Message::new(Role::Assistant, output));
 
     Ok(session)
 }
@@ -206,19 +205,43 @@ mod tests {
         }
     }
 
+    // Mock transport for testing
+    struct MockTransport;
+
+    #[async_trait::async_trait]
+    impl AgentTransport for MockTransport {
+        async fn query(
+            &self,
+            _query: AgentQuery,
+        ) -> Result<ava_acp::transport::AgentMessageStream> {
+            let stream = futures::stream::iter(vec![
+                AgentMessage::Assistant {
+                    content: vec![ContentBlock::Text {
+                        text: "Fixed!".into(),
+                    }],
+                    session_id: None,
+                },
+                AgentMessage::Result {
+                    result: "done".into(),
+                    details: Default::default(),
+                },
+            ]);
+            Ok(Box::pin(stream))
+        }
+
+        fn name(&self) -> &str {
+            "mock-agent"
+        }
+    }
+
     #[test]
     fn external_worker_creation() {
-        let config = ava_cli_providers::CLIAgentConfig {
-            name: "claude-code".to_string(),
-            binary: "claude".to_string(),
-            ..Default::default()
-        };
-        let runner = CLIAgentRunner::new(config);
+        let transport = Box::new(MockTransport);
         let budget = Budget::new(100_000, 20, 5.0);
 
         let worker = ExternalWorker::new(
             "Backend Lead".to_string(),
-            runner,
+            transport,
             budget,
             test_task(),
             "/tmp/project".to_string(),
@@ -227,32 +250,42 @@ mod tests {
         );
 
         assert_eq!(worker.lead(), "Backend Lead");
-        assert_eq!(worker.agent_name, "claude-code");
+        assert_eq!(worker.agent_name, "mock-agent");
         assert_eq!(worker.task().description, "Fix the bug");
         assert_eq!(worker.budget().max_turns, 20);
     }
 
-    #[test]
-    fn external_worker_clones() {
-        let config = ava_cli_providers::CLIAgentConfig {
-            name: "test".to_string(),
-            binary: "test".to_string(),
-            ..Default::default()
-        };
-        let runner = CLIAgentRunner::new(config);
+    #[tokio::test]
+    async fn run_external_worker_streams_events() {
+        let transport = Box::new(MockTransport);
+        let budget = Budget::new(100_000, 10, 2.0);
         let worker = ExternalWorker::new(
             "QA Lead".to_string(),
-            runner,
-            Budget::new(50_000, 10, 2.0),
+            transport,
+            budget,
             test_task(),
             "/tmp".to_string(),
             AgentRole::Reviewer,
-            Some("Be thorough".to_string()),
+            None,
         );
 
-        let cloned = worker.clone();
-        assert_eq!(cloned.id(), worker.id());
-        assert_eq!(cloned.lead(), worker.lead());
-        assert_eq!(cloned.system_prompt, Some("Be thorough".to_string()));
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let session = run_external_worker(&worker, tx).await.unwrap();
+
+        // Collect events
+        let mut events = Vec::new();
+        while let Ok(event) = rx.try_recv() {
+            events.push(event);
+        }
+
+        // Should have started + text + completed
+        assert!(events.len() >= 2);
+        assert!(matches!(
+            &events[0],
+            PraxisEvent::ExternalWorkerStarted { .. }
+        ));
+
+        // Session should have user + assistant messages
+        assert_eq!(session.messages().len(), 2);
     }
 }

@@ -116,7 +116,7 @@ pub struct AgentStack {
     /// pre-mutation snapshots to `~/.ava/file-history/`.
     file_backup_session: FileBackupSession,
     /// Discovered CLI agents (Claude Code, Gemini CLI, etc.) found on PATH.
-    cli_agents: Vec<ava_cli_providers::DiscoveredAgent>,
+    cli_agents: Vec<ava_acp::DiscoveredAgent>,
 }
 
 impl AgentStack {
@@ -763,7 +763,7 @@ impl AgentStack {
     // ========================================================================
 
     /// Get the list of discovered CLI agents (Claude Code, Gemini CLI, etc.)
-    pub fn cli_agents(&self) -> &[ava_cli_providers::DiscoveredAgent] {
+    pub fn cli_agents(&self) -> &[ava_acp::DiscoveredAgent] {
         &self.cli_agents
     }
 

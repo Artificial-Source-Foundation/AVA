@@ -26,6 +26,7 @@ pub enum AgentRole {
 }
 
 /// A worker that delegates to an external agent via ACP transport.
+#[allow(dead_code)]
 pub struct ExternalWorker {
     pub(crate) id: Uuid,
     pub(crate) lead: String,
@@ -79,6 +80,7 @@ impl ExternalWorker {
     }
 
     /// Build an `AgentQuery` from the worker's task and configuration.
+    #[allow(dead_code)]
     fn build_query(&self) -> AgentQuery {
         let permission_mode = match self.role {
             AgentRole::Engineer => Some(PermissionMode::AcceptEdits),
@@ -114,6 +116,7 @@ impl ExternalWorker {
 }
 
 /// Run an external agent worker, streaming events and returning a Session.
+#[allow(dead_code)]
 pub(crate) async fn run_external_worker(
     worker: &ExternalWorker,
     event_tx: mpsc::UnboundedSender<PraxisEvent>,
@@ -286,6 +289,6 @@ mod tests {
         ));
 
         // Session should have user + assistant messages
-        assert_eq!(session.messages().len(), 2);
+        assert_eq!(session.messages.len(), 2);
     }
 }

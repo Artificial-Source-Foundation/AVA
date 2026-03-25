@@ -15,7 +15,6 @@ workspace = true
 async-trait.workspace = true
 ava-agent = { path = "../ava-agent" }
 ava-acp = { path = "../ava-acp" }
-ava-cli-providers = { path = "../ava-cli-providers", optional = true }
 ava-context = { path = "../ava-context" }
 ava-llm = { path = "../ava-llm" }
 ava-platform = { path = "../ava-platform" }
@@ -32,4 +31,3 @@ uuid.workspace = true
 
 [features]
 default = []
-cli-providers = ["dep:ava-cli-providers"]

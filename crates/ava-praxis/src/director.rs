@@ -66,26 +66,8 @@ impl DirectorConfig {
             .unwrap_or_else(|| self.default_provider.clone())
     }
 
-    #[cfg(feature = "cli-providers")]
-    pub async fn apply_cli_tier_routes(
-        &mut self,
-        tier_providers: &HashMap<Domain, String>,
-        yolo: bool,
-    ) {
-        use ava_cli_providers::{create_providers, discover_agents};
-
-        let discovered = discover_agents().await;
-        let cli_providers = create_providers(&discovered, yolo);
-
-        for (domain, provider_name) in tier_providers {
-            if provider_name.starts_with("cli:") {
-                if let Some(provider) = cli_providers.get(provider_name) {
-                    self.domain_providers
-                        .insert(domain.clone(), provider.clone());
-                }
-            }
-        }
-    }
+    // CLI tier routing is now handled by AcpProviderFactory registered on the ModelRouter.
+    // No need for separate discovery — agents are created on-demand via provider="acp".
 }
 
 impl Director {

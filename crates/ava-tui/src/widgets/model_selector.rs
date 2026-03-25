@@ -1,4 +1,4 @@
-use ava_cli_providers::DiscoveredAgent;
+use ava_acp::DiscoveredAgent;
 use ava_config::model_catalog::ModelCatalog;
 use ava_config::CredentialStore;
 

@@ -80,7 +80,7 @@ impl ProviderConnectState {
     /// Build provider list including discovered CLI agents.
     pub fn from_credentials_with_cli(
         credentials: &CredentialStore,
-        cli_agents: &[ava_cli_providers::DiscoveredAgent],
+        cli_agents: &[ava_acp::DiscoveredAgent],
     ) -> Self {
         let providers = build_provider_list_with_cli(credentials, cli_agents);
         let items = build_select_items(&providers);
@@ -551,7 +551,7 @@ fn build_provider_list(credentials: &CredentialStore) -> Vec<ProviderStatus> {
 
 fn build_provider_list_with_cli(
     credentials: &CredentialStore,
-    cli_agents: &[ava_cli_providers::DiscoveredAgent],
+    cli_agents: &[ava_acp::DiscoveredAgent],
 ) -> Vec<ProviderStatus> {
     let mut list: Vec<ProviderStatus> = ava_auth::all_providers()
         .iter()

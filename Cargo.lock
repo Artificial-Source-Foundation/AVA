@@ -280,7 +280,6 @@ dependencies = [
  "async-stream",
  "async-trait",
  "ava-acp",
- "ava-cli-providers",
  "ava-codebase",
  "ava-config",
  "ava-context",
@@ -328,22 +327,6 @@ dependencies = [
  "tracing",
  "url",
  "urlencoding",
-]
-
-[[package]]
-name = "ava-cli-providers"
-version = "2.2.7"
-dependencies = [
- "async-trait",
- "ava-llm",
- "ava-types",
- "futures",
- "serde",
- "serde_json",
- "tokio",
- "tokio-stream",
- "tokio-util",
- "tracing",
 ]
 
 [[package]]
@@ -541,7 +524,6 @@ dependencies = [
  "async-trait",
  "ava-acp",
  "ava-agent",
- "ava-cli-providers",
  "ava-context",
  "ava-llm",
  "ava-platform",
@@ -628,7 +610,6 @@ dependencies = [
  "ava-acp",
  "ava-agent",
  "ava-auth",
- "ava-cli-providers",
  "ava-codebase",
  "ava-config",
  "ava-context",

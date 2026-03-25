@@ -19,3 +19,11 @@ pub mod transport;
 pub use factory::AcpProviderFactory;
 pub use protocol::*;
 pub use transport::*;
+
+/// Info about a discovered external agent (for display in UI).
+#[derive(Debug, Clone)]
+pub struct DiscoveredAgent {
+    pub name: String,
+    pub binary: String,
+    pub version: String,
+}

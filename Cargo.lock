@@ -294,7 +294,7 @@ dependencies = [
 
 [[package]]
 name = "ava-auth"
-version = "2.1.0"
+version = "2.2.7"
 dependencies = [
  "base64",
  "open",
@@ -313,7 +313,7 @@ dependencies = [
 
 [[package]]
 name = "ava-cli-providers"
-version = "2.1.0"
+version = "2.2.7"
 dependencies = [
  "async-trait",
  "ava-llm",
@@ -407,7 +407,7 @@ dependencies = [
 
 [[package]]
 name = "ava-llm"
-version = "2.1.0"
+version = "2.2.7"
 dependencies = [
  "async-trait",
  "ava-auth",
@@ -430,7 +430,7 @@ dependencies = [
 
 [[package]]
 name = "ava-mcp"
-version = "2.1.0"
+version = "2.2.7"
 dependencies = [
  "async-trait",
  "ava-tools",
@@ -517,7 +517,7 @@ dependencies = [
 
 [[package]]
 name = "ava-praxis"
-version = "2.1.0"
+version = "2.2.7"
 dependencies = [
  "async-trait",
  "ava-agent",
@@ -549,7 +549,7 @@ dependencies = [
 
 [[package]]
 name = "ava-session"
-version = "2.1.0"
+version = "2.2.7"
 dependencies = [
  "ava-types",
  "chrono",
@@ -601,7 +601,7 @@ dependencies = [
 
 [[package]]
 name = "ava-tui"
-version = "2.1.0"
+version = "2.2.7"
 dependencies = [
  "arboard",
  "async-trait",

@@ -116,7 +116,7 @@ struct RouteCandidate {
 pub struct ModelRouter {
     credentials: Arc<RwLock<CredentialStore>>,
     providers: RwLock<HashMap<String, Arc<dyn LLMProvider>>>,
-    factories: Vec<Arc<dyn ProviderFactory>>,
+    factories: RwLock<Vec<Arc<dyn ProviderFactory>>>,
     pool: Arc<ConnectionPool>,
     credentials_path: Option<PathBuf>,
     refresh_locks: Arc<Mutex<HashMap<String, Arc<Mutex<()>>>>>,
@@ -149,7 +149,7 @@ impl ModelRouter {
         Self {
             credentials: Arc::new(RwLock::new(credentials)),
             providers: RwLock::new(HashMap::new()),
-            factories: Vec::new(),
+            factories: RwLock::new(Vec::new()),
             pool,
             credentials_path,
             refresh_locks: Arc::new(Mutex::new(HashMap::new())),
@@ -165,7 +165,12 @@ impl ModelRouter {
 
     /// Register an external provider factory (e.g., for CLI agent providers).
     pub fn register_factory(&mut self, factory: Arc<dyn ProviderFactory>) {
-        self.factories.push(factory);
+        self.factories.get_mut().push(factory);
+    }
+
+    /// Register an external provider factory from a shared reference (for late/background registration).
+    pub async fn register_factory_async(&self, factory: Arc<dyn ProviderFactory>) {
+        self.factories.write().await.push(factory);
     }
 
     pub fn pool(&self) -> &Arc<ConnectionPool> {
@@ -222,10 +227,15 @@ impl ModelRouter {
         }
 
         // Try external factories first
-        let created: Box<dyn LLMProvider> = if let Some(factory) =
-            self.factories.iter().find(|f| f.handles(provider))
-        {
-            factory.create(provider, model)?
+        let factory_result = {
+            let factories = self.factories.read().await;
+            factories
+                .iter()
+                .find(|f| f.handles(provider))
+                .map(|f| f.create(provider, model))
+        };
+        let created: Box<dyn LLMProvider> = if let Some(result) = factory_result {
+            result?
         } else {
             let snapshot = resolve_credentials_snapshot(
                 &self.credentials,

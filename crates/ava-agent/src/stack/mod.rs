@@ -264,27 +264,33 @@ impl AgentStack {
         }
         let plugin_manager = Arc::new(tokio::sync::Mutex::new(plugin_mgr));
 
-        // Discover installed CLI agents and register the factory with the router
-        // so that `provider="cli", model="claude-code"` routes work.
-        let (cli_agents, cli_factory) =
-            ava_cli_providers::discover_and_create_factory(config.yolo).await;
-        if !cli_agents.is_empty() {
-            info!(
-                "Discovered {} CLI agents: {}",
-                cli_agents.len(),
-                cli_agents
-                    .iter()
-                    .map(|a| format!("{} v{}", a.name, a.version))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            );
-            router.register_factory(Arc::new(cli_factory));
-        }
-
         // Wire plugin manager into the router so the `request.headers` hook fires
         // before each outgoing LLM API request.
         router.set_plugin_manager(Arc::clone(&plugin_manager));
         let router = Arc::new(router);
+
+        // Discover installed CLI agents lazily in the background so it doesn't
+        // block startup (~3s when multiple CLI agents are installed).
+        let cli_agents = Vec::new();
+        {
+            let router_ref = Arc::clone(&router);
+            let yolo = config.yolo;
+            tokio::spawn(async move {
+                let (agents, factory) = ava_cli_providers::discover_and_create_factory(yolo).await;
+                if !agents.is_empty() {
+                    info!(
+                        "Discovered {} CLI agents: {}",
+                        agents.len(),
+                        agents
+                            .iter()
+                            .map(|a| format!("{} v{}", a.name, a.version))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    );
+                    router_ref.register_factory_async(Arc::new(factory)).await;
+                }
+            });
+        }
 
         // Trigger the `config` hook so plugins can observe (and optionally
         // override) the loaded configuration. We fire-and-check-errors but

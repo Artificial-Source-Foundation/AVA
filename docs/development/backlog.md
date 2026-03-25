@@ -1,6 +1,6 @@
 # AVA Backlog
 
-> Last updated: 2026-03-23
+> Last updated: 2026-03-25
 > Related: [roadmap.md](roadmap.md), [epics.md](epics.md)
 > SOTA gap research: [sota-gap-analysis.md](sota-gap-analysis.md) (60 items from 12 codebases — reference only, not a todo list)
 
@@ -8,6 +8,7 @@ Tool surface policy: default tools are now 9 (`read`, `write`, `edit`, `bash`, `
 
 ## Recently Completed
 
+- **GitHub Issues Sprint (v2.2.7)** — fixed 8 bugs (#17, #19, #20, #21, #23, #24, #26), added 2 features (#18, #25), closed 1 already-implemented (#22)
 - **22 LLM providers** — added Azure OpenAI, AWS Bedrock, xAI, Mistral, Groq, DeepSeek, ChatGPT alias (was 15)
 - **Mid-stream messaging refactor** — renamed to Queue/Interrupt/Post-complete; new keybindings (Enter=queue, Ctrl+Enter=interrupt, Alt+Enter=post-complete, Double-Escape=cancel); MessageQueueWidget with reorder/edit/remove
 - **Context overflow auto-compact** — 12 overflow patterns detected, agent loop auto-compacts and retries
@@ -59,6 +60,7 @@ Tool surface policy: default tools are now 9 (`read`, `write`, `edit`, `bash`, `
 - **Third lean-runtime pass** — remaining chat hook fast paths are now guarded, trivial prompts skip memory enrichment, and more per-turn message/tool work is cached or overlapped
 - **Auto-lean + telemetry pass** — simple headless prompts now skip eager indexing automatically, prompt profiles use model capabilities, and startup phase timings/tokens are logged for future tuning
 - **Routing + startup overlap pass** — short edit-style prompts now hit the cheaper route more often, prompt-suffix work overlaps with other startup prep, and empty MCP setups no longer pay init cost
+- **Answer-only / read-only execution profiles** — tiny prompts can now skip tool-registry work or expose only read-safe tools, and the benchmark harness now evaluates streamed JSON output more accurately
 
 ## Execution Order
 

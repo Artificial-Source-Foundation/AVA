@@ -626,8 +626,8 @@ impl AgentLoop {
                     .with_tool_results(vec![result.clone()]);
                 self.context.add_message(tool_message.clone());
                 session.add_message(tool_message);
+                ri += 1;
             }
-            ri += 1;
         }
     }
 

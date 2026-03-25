@@ -259,7 +259,10 @@ impl UiMessage {
                         }
                         if output_lines.len() > max_lines {
                             result.push(Line::from(Span::styled(
-                                format!("  ... ({} more lines)", output_lines.len() - max_lines),
+                                format!(
+                                    "  ... ({} more lines \u{2014} Ctrl+E to expand)",
+                                    output_lines.len() - max_lines
+                                ),
                                 dim_style,
                             )));
                         }
@@ -288,7 +291,10 @@ impl UiMessage {
                         }
                         if truncated {
                             result.push(Line::from(Span::styled(
-                                format!("  ... ({} more lines)", total - 5),
+                                format!(
+                                    "  ... ({} more lines \u{2014} Ctrl+E to expand)",
+                                    total - 5
+                                ),
                                 dim_style,
                             )));
                         }
@@ -419,6 +425,14 @@ impl UiMessage {
                     (
                         Some("Context window exceeded \u{2014} try /compact to reduce context"),
                         Some("  \u{2192} Use /compact to reduce context, or switch to a larger model"),
+                    )
+                } else if lower.contains("500")
+                    || lower.contains("server_error")
+                    || lower.contains("internal server error")
+                {
+                    (
+                        Some("Server error \u{2014} the provider returned a 500 error"),
+                        Some("  \u{2192} Press Enter to retry, or switch to a different model with Ctrl+M"),
                     )
                 } else {
                     (None, None)

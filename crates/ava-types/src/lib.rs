@@ -272,7 +272,7 @@ impl ThinkingLevel {
             Self::Low => "low",
             Self::Medium => "med",
             Self::High => "high",
-            Self::Max => "max",
+            Self::Max => "xhigh",
         }
     }
 
@@ -349,7 +349,7 @@ mod tests {
         assert_eq!(ThinkingLevel::Low.label(), "low");
         assert_eq!(ThinkingLevel::Medium.label(), "med");
         assert_eq!(ThinkingLevel::High.label(), "high");
-        assert_eq!(ThinkingLevel::Max.label(), "max");
+        assert_eq!(ThinkingLevel::Max.label(), "xhigh");
     }
 
     #[test]

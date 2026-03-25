@@ -158,6 +158,21 @@ impl MessageState {
         }
     }
 
+    /// Toggle all tool action groups between expanded and collapsed.
+    /// If any are collapsed, expand all; otherwise collapse all.
+    pub fn toggle_all_tool_groups(&mut self) {
+        let any_collapsed = self.messages.iter().any(|m| {
+            matches!(m.kind, MessageKind::ToolCall | MessageKind::ToolResult)
+                && !m.tool_group_expanded
+        });
+        let new_state = any_collapsed;
+        for msg in &mut self.messages {
+            if matches!(msg.kind, MessageKind::ToolCall | MessageKind::ToolResult) {
+                msg.tool_group_expanded = new_state;
+            }
+        }
+    }
+
     /// Given an absolute screen row, return the source message index if it
     /// falls inside the messages area. Uses `messages_area`, `scroll_offset`,
     /// and `message_line_ranges` (all set by the renderer each frame).

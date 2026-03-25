@@ -1,5 +1,27 @@
 # Changelog
 
+## v2.2.7 (2026-03-25)
+
+### Bug Fixes
+
+- **Critical: Fix agent loop crash on missing tool output (#26)** — `add_tool_results()` index counter now only increments when a result is consumed, fixing index misalignment when `attempt_completion` tool calls are skipped. This caused "No tool output found for function call" 400 errors with OpenAI-format APIs.
+- **Fix thinking level label 'max' → 'xhigh' (#24)** — `ThinkingLevel::Max.label()` now returns `"xhigh"` matching OpenAI API naming convention.
+- **Fix ZAI provider doubled API path (#20)** — `completions_url()` now detects base URLs ending with `/v4` or `/v3` and appends only `/chat/completions` instead of `/v1/chat/completions`, fixing 404 errors for ZAI/ZhipuAI providers.
+- **Fix collapsed tool results expansion (#23)** — Ctrl+E now toggles both thinking blocks AND tool action groups. Truncation hints updated to mention Ctrl+E.
+- **Hot-reload provider credentials (#19)** — Newly added provider credentials via `/connect` or OAuth are now hot-reloaded into the agent stack's ModelRouter, no restart required.
+- **Fix TUI composer text wrapping (#21)** — Long input lines in the composer now wrap at word boundaries instead of being truncated with "...".
+- **Add 500 error hint to error rendering (#17)** — Server errors now show contextual hints suggesting retry or model switch.
+- **Fix `git_read` retryable tool recognition** — Added `git_read` to the retry middleware's retryable tool list.
+
+### Features
+
+- **Implement `/init` slash command (#25)** — Scans project directory, detects tech stack (Rust/Node/Python/Go), and creates `AGENTS.md`, `.ava/mcp.json`, and `.ava/tools/hello.toml` with project-specific configuration.
+- **Add ZAI/ZhipuAI models to registry (#18)** — Added 19 models to compiled-in registry: GLM-4.7, GLM-4.6, GLM-4.5, GLM-4.5 Flash, GLM-4.7 Flash, GLM-4 Plus, GLM-4 Long, GLM-4V Plus, CodeGeeX-4 for both `zai-coding-plan` and `zhipuai-coding-plan` providers.
+
+### Closed (Already Implemented)
+
+- **Bash tool default timeout (#22)** — Already has 120s default timeout with optional `timeout_ms` parameter override.
+
 ## v2.2.6 (2026-03-22)
 
 ### DX / Repo Hygiene
@@ -29,6 +51,8 @@
 - **Phase telemetry** — startup logs now capture prompt-suffix resolution time/tokens, memory-enrichment time, index-status time, and run-scoped tool-registry build time.
 - **Cheaper simple-task routing** — short edit-style requests now route to the cheaper profile more often instead of defaulting to the capable model for almost everything.
 - **Startup work overlaps more** — prompt suffix resolution now overlaps with index-status and memory-enrichment startup work, and MCP init is skipped entirely when no MCP config files exist.
+- **Answer-only and read-only task modes** — exact-reply tasks can now avoid tool exposure and registry setup entirely, while simple repo lookups keep only read-safe tools plus `AGENTS`-level startup context.
+- **Harness accuracy improved** — the CLI shootout now reconstructs streamed AVA/OpenCode text from structured JSON events so exact-reply tasks are scored correctly.
 
 ### Providers
 

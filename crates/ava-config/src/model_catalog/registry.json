@@ -455,6 +455,332 @@
         "input_per_million": 0.25,
         "output_per_million": 0.75
       }
+    },
+    {
+      "id": "glm-4.7",
+      "provider": "zai-coding-plan",
+      "name": "GLM-4.7",
+      "aliases": ["glm4.7"],
+      "capabilities": {
+        "tool_call": true,
+        "streaming": true
+      },
+      "limits": {
+        "context_window": 204800,
+        "max_output": 131072
+      },
+      "cost": {
+        "input_per_million": 0.0,
+        "output_per_million": 0.0
+      }
+    },
+    {
+      "id": "glm-4.6",
+      "provider": "zai-coding-plan",
+      "name": "GLM-4.6",
+      "aliases": ["glm4.6"],
+      "capabilities": {
+        "tool_call": true,
+        "streaming": true
+      },
+      "limits": {
+        "context_window": 204800,
+        "max_output": 131072
+      },
+      "cost": {
+        "input_per_million": 0.0,
+        "output_per_million": 0.0
+      }
+    },
+    {
+      "id": "glm-4.5",
+      "provider": "zai-coding-plan",
+      "name": "GLM-4.5",
+      "aliases": ["glm4.5"],
+      "capabilities": {
+        "tool_call": true,
+        "streaming": true
+      },
+      "limits": {
+        "context_window": 131072,
+        "max_output": 98304
+      },
+      "cost": {
+        "input_per_million": 0.0,
+        "output_per_million": 0.0
+      }
+    },
+    {
+      "id": "glm-4.5-flash",
+      "provider": "zai-coding-plan",
+      "name": "GLM-4.5 Flash",
+      "aliases": ["glm4.5-flash"],
+      "capabilities": {
+        "tool_call": true,
+        "streaming": true
+      },
+      "limits": {
+        "context_window": 131072,
+        "max_output": 98304
+      },
+      "cost": {
+        "input_per_million": 0.0,
+        "output_per_million": 0.0
+      }
+    },
+    {
+      "id": "glm-4.7-flash",
+      "provider": "zai-coding-plan",
+      "name": "GLM-4.7 Flash",
+      "aliases": ["glm4.7-flash"],
+      "capabilities": {
+        "tool_call": true,
+        "streaming": true
+      },
+      "limits": {
+        "context_window": 204800,
+        "max_output": 131072
+      },
+      "cost": {
+        "input_per_million": 0.0,
+        "output_per_million": 0.0
+      }
+    },
+    {
+      "id": "glm-4-plus",
+      "provider": "zai-coding-plan",
+      "name": "GLM-4 Plus",
+      "aliases": ["glm4-plus"],
+      "capabilities": {
+        "tool_call": true,
+        "streaming": true
+      },
+      "limits": {
+        "context_window": 131072,
+        "max_output": 4096
+      },
+      "cost": {
+        "input_per_million": 0.0,
+        "output_per_million": 0.0
+      }
+    },
+    {
+      "id": "glm-4-long",
+      "provider": "zai-coding-plan",
+      "name": "GLM-4 Long",
+      "aliases": ["glm4-long"],
+      "capabilities": {
+        "tool_call": true,
+        "streaming": true
+      },
+      "limits": {
+        "context_window": 1048576,
+        "max_output": 4096
+      },
+      "cost": {
+        "input_per_million": 0.0,
+        "output_per_million": 0.0
+      }
+    },
+    {
+      "id": "glm-4v-plus",
+      "provider": "zai-coding-plan",
+      "name": "GLM-4V Plus",
+      "aliases": ["glm4v-plus"],
+      "capabilities": {
+        "tool_call": true,
+        "vision": true,
+        "streaming": true
+      },
+      "limits": {
+        "context_window": 8192,
+        "max_output": 4096
+      },
+      "cost": {
+        "input_per_million": 0.0,
+        "output_per_million": 0.0
+      }
+    },
+    {
+      "id": "codegeex-4",
+      "provider": "zai-coding-plan",
+      "name": "CodeGeeX-4",
+      "aliases": ["codegeex4"],
+      "capabilities": {
+        "tool_call": true,
+        "streaming": true
+      },
+      "limits": {
+        "context_window": 131072,
+        "max_output": 4096
+      },
+      "cost": {
+        "input_per_million": 0.0,
+        "output_per_million": 0.0
+      }
+    },
+    {
+      "id": "glm-4.7",
+      "provider": "zhipuai-coding-plan",
+      "name": "GLM-4.7",
+      "aliases": [],
+      "capabilities": {
+        "tool_call": true,
+        "streaming": true
+      },
+      "limits": {
+        "context_window": 204800,
+        "max_output": 131072
+      },
+      "cost": {
+        "input_per_million": 0.0,
+        "output_per_million": 0.0
+      }
+    },
+    {
+      "id": "glm-4.6",
+      "provider": "zhipuai-coding-plan",
+      "name": "GLM-4.6",
+      "aliases": [],
+      "capabilities": {
+        "tool_call": true,
+        "streaming": true
+      },
+      "limits": {
+        "context_window": 204800,
+        "max_output": 131072
+      },
+      "cost": {
+        "input_per_million": 0.0,
+        "output_per_million": 0.0
+      }
+    },
+    {
+      "id": "glm-4.5",
+      "provider": "zhipuai-coding-plan",
+      "name": "GLM-4.5",
+      "aliases": [],
+      "capabilities": {
+        "tool_call": true,
+        "streaming": true
+      },
+      "limits": {
+        "context_window": 131072,
+        "max_output": 98304
+      },
+      "cost": {
+        "input_per_million": 0.0,
+        "output_per_million": 0.0
+      }
+    },
+    {
+      "id": "glm-4.5-flash",
+      "provider": "zhipuai-coding-plan",
+      "name": "GLM-4.5 Flash",
+      "aliases": [],
+      "capabilities": {
+        "tool_call": true,
+        "streaming": true
+      },
+      "limits": {
+        "context_window": 131072,
+        "max_output": 98304
+      },
+      "cost": {
+        "input_per_million": 0.0,
+        "output_per_million": 0.0
+      }
+    },
+    {
+      "id": "glm-4.7-flash",
+      "provider": "zhipuai-coding-plan",
+      "name": "GLM-4.7 Flash",
+      "aliases": [],
+      "capabilities": {
+        "tool_call": true,
+        "streaming": true
+      },
+      "limits": {
+        "context_window": 204800,
+        "max_output": 131072
+      },
+      "cost": {
+        "input_per_million": 0.0,
+        "output_per_million": 0.0
+      }
+    },
+    {
+      "id": "glm-4-plus",
+      "provider": "zhipuai-coding-plan",
+      "name": "GLM-4 Plus",
+      "aliases": [],
+      "capabilities": {
+        "tool_call": true,
+        "streaming": true
+      },
+      "limits": {
+        "context_window": 131072,
+        "max_output": 4096
+      },
+      "cost": {
+        "input_per_million": 0.0,
+        "output_per_million": 0.0
+      }
+    },
+    {
+      "id": "glm-4-long",
+      "provider": "zhipuai-coding-plan",
+      "name": "GLM-4 Long",
+      "aliases": [],
+      "capabilities": {
+        "tool_call": true,
+        "streaming": true
+      },
+      "limits": {
+        "context_window": 1048576,
+        "max_output": 4096
+      },
+      "cost": {
+        "input_per_million": 0.0,
+        "output_per_million": 0.0
+      }
+    },
+    {
+      "id": "glm-4v-plus",
+      "provider": "zhipuai-coding-plan",
+      "name": "GLM-4V Plus",
+      "aliases": [],
+      "capabilities": {
+        "tool_call": true,
+        "vision": true,
+        "streaming": true
+      },
+      "limits": {
+        "context_window": 8192,
+        "max_output": 4096
+      },
+      "cost": {
+        "input_per_million": 0.0,
+        "output_per_million": 0.0
+      }
+    },
+    {
+      "id": "codegeex-4",
+      "provider": "zhipuai-coding-plan",
+      "name": "CodeGeeX-4",
+      "aliases": [],
+      "capabilities": {
+        "tool_call": true,
+        "streaming": true
+      },
+      "limits": {
+        "context_window": 131072,
+        "max_output": 4096
+      },
+      "cost": {
+        "input_per_million": 0.0,
+        "output_per_million": 0.0
+      }
     }
   ]
 }

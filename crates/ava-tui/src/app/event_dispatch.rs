@@ -365,6 +365,16 @@ impl App {
                         self.set_status(&msg, StatusLevel::Info);
                         self.state.provider_connect = None;
                         self.state.active_modal = None;
+                        // Hot-reload credentials into the agent stack so newly
+                        // added providers are usable without restarting.
+                        if let Some(stack) = self.state.agent.stack_handle() {
+                            tokio::spawn(async move {
+                                if let Ok(store) = ava_config::CredentialStore::load_default().await
+                                {
+                                    stack.router.update_credentials(store).await;
+                                }
+                            });
+                        }
                     }
                     Err(err) => {
                         if let Some(ref mut pc) = self.state.provider_connect {
@@ -381,6 +391,16 @@ impl App {
                             );
                             self.state.provider_connect = None;
                             self.state.active_modal = None;
+                            // Hot-reload credentials after OAuth flow
+                            if let Some(stack) = self.state.agent.stack_handle() {
+                                tokio::spawn(async move {
+                                    if let Ok(store) =
+                                        ava_config::CredentialStore::load_default().await
+                                    {
+                                        stack.router.update_credentials(store).await;
+                                    }
+                                });
+                            }
                         }
                         Err(err) => {
                             self.set_status(

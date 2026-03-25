@@ -9,7 +9,15 @@
 use std::time::Duration;
 
 /// Set of tool names that are safe to retry (read-only, no side effects).
-const RETRYABLE_TOOLS: &[&str] = &["read", "glob", "grep", "web_fetch", "code_search", "git"];
+const RETRYABLE_TOOLS: &[&str] = &[
+    "read",
+    "glob",
+    "grep",
+    "web_fetch",
+    "code_search",
+    "git",
+    "git_read",
+];
 
 /// Backoff durations for each retry attempt.
 const BACKOFF_DURATIONS: &[Duration] = &[Duration::from_millis(100), Duration::from_millis(200)];

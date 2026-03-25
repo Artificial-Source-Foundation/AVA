@@ -705,6 +705,97 @@ impl App {
                     .push(UiMessage::transient(MessageKind::System, text));
                 None
             }
+            "/init" => {
+                let cwd = std::env::current_dir().unwrap_or_default();
+                let ava_dir = cwd.join(".ava");
+                let mut created = Vec::new();
+
+                // Detect tech stack
+                let mut stack_info = Vec::new();
+                if cwd.join("Cargo.toml").exists() {
+                    stack_info.push("Rust (Cargo)");
+                }
+                if cwd.join("package.json").exists() {
+                    stack_info.push("Node.js (npm/yarn/pnpm)");
+                }
+                if cwd.join("pyproject.toml").exists() || cwd.join("requirements.txt").exists() {
+                    stack_info.push("Python");
+                }
+                if cwd.join("go.mod").exists() {
+                    stack_info.push("Go");
+                }
+                if cwd.join("Makefile").exists() || cwd.join("Justfile").exists() {
+                    stack_info.push("Make/Just");
+                }
+                let stack_str = if stack_info.is_empty() {
+                    "Unknown".to_string()
+                } else {
+                    stack_info.join(", ")
+                };
+
+                // Create .ava/ directory
+                let _ = std::fs::create_dir_all(&ava_dir);
+
+                // Create AGENTS.md if it doesn't exist
+                let agents_path = cwd.join("AGENTS.md");
+                if !agents_path.exists() {
+                    let project_name = cwd.file_name().unwrap_or_default().to_string_lossy();
+                    let agents_content = format!(
+                        "# {project_name}\n\n\
+                         ## Stack\n\
+                         {stack_str}\n\n\
+                         ## Conventions\n\
+                         - Follow existing code style and patterns\n\
+                         - Write tests for new functionality\n\
+                         - Keep changes focused and minimal\n\n\
+                         ## Build & Test\n\
+                         ```bash\n\
+                         # Add your build/test commands here\n\
+                         ```\n"
+                    );
+                    if std::fs::write(&agents_path, agents_content).is_ok() {
+                        created.push("AGENTS.md");
+                    }
+                }
+
+                // Create .ava/mcp.json if it doesn't exist
+                let mcp_path = ava_dir.join("mcp.json");
+                if !mcp_path.exists() {
+                    let mcp_content = "{\n  \"mcpServers\": {}\n}\n";
+                    if std::fs::write(&mcp_path, mcp_content).is_ok() {
+                        created.push(".ava/mcp.json");
+                    }
+                }
+
+                // Create example TOML tools directory
+                let tools_dir = ava_dir.join("tools");
+                let _ = std::fs::create_dir_all(&tools_dir);
+                let hello_path = tools_dir.join("hello.toml");
+                if !hello_path.exists() {
+                    let hello_content = "\
+[tool]\nname = \"hello\"\ndescription = \"Example custom tool \u{2014} prints a greeting\"\n\n\
+[tool.parameters.name]\ntype = \"string\"\ndescription = \"Name to greet\"\nrequired = true\n\n\
+[execute]\ncommand = \"echo 'Hello, {{name}}!'\"\n";
+                    if std::fs::write(&hello_path, hello_content).is_ok() {
+                        created.push(".ava/tools/hello.toml");
+                    }
+                }
+
+                if created.is_empty() {
+                    Some((
+                        MessageKind::System,
+                        "Project already initialized \u{2014} all config files exist.".to_string(),
+                    ))
+                } else {
+                    let mut msg =
+                        format!("Detected: {stack_str}\n\nCreated project configuration:\n");
+                    for file in &created {
+                        msg.push_str(&format!("  \u{2713} {file}\n"));
+                    }
+                    msg.push_str("\nEdit these files to customize AVA for your project.");
+                    Some((MessageKind::System, msg))
+                }
+            }
             _ => {
                 // Check custom commands before reporting unknown
                 let cmd_name = cmd.trim_start_matches('/');

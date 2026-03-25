@@ -264,7 +264,14 @@ impl OpenAIProvider {
                 format!("{base}/v1/responses")
             }
         } else {
-            format!("{}/v1/chat/completions", self.base_url)
+            let base = self.base_url.trim_end_matches('/');
+            // ZAI/ZhipuAI base URLs already include the versioned path (e.g. /v4),
+            // so only append /chat/completions instead of /v1/chat/completions.
+            if base.ends_with("/v4") || base.ends_with("/v3") {
+                format!("{base}/chat/completions")
+            } else {
+                format!("{base}/v1/chat/completions")
+            }
         }
     }
 

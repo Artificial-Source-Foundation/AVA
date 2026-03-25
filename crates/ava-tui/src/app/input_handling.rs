@@ -187,6 +187,7 @@ impl App {
                 }
                 Action::ExpandThinking => {
                     self.state.messages.toggle_all_thinking();
+                    self.state.messages.toggle_all_tool_groups();
                 }
                 Action::ShowShortcuts => {
                     self.show_shortcuts_overlay();

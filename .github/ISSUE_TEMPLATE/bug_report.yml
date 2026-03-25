@@ -1,0 +1,93 @@
+name: Bug Report
+description: Something isn't working as expected
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug! Fill out the sections below to help us fix it quickly.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear description of the bug.
+      placeholder: "When I do X, Y happens instead of Z."
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Minimal steps to trigger the bug.
+      placeholder: |
+        1. Run `ava` with provider X, model Y
+        2. Send message "..."
+        3. Agent calls tool Z
+        4. Error appears
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What should have happened instead?
+    validations:
+      required: true
+
+  - type: textarea
+    id: error
+    attributes:
+      label: Error output
+      description: Paste any error messages, logs, or stack traces.
+      render: text
+
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots
+      description: If applicable, add screenshots to help explain the problem.
+
+  - type: dropdown
+    id: interface
+    attributes:
+      label: Interface
+      options:
+        - TUI (terminal)
+        - Desktop (Tauri)
+        - Web (browser)
+        - Headless
+    validations:
+      required: true
+
+  - type: input
+    id: provider-model
+    attributes:
+      label: Provider / Model
+      description: Which LLM provider and model were you using?
+      placeholder: "openai / gpt-5.4"
+
+  - type: input
+    id: version
+    attributes:
+      label: AVA version
+      description: Run `ava --help` and check the version, or use the git commit hash.
+      placeholder: "v2.1.0 or commit abc1234"
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: OS / Platform
+      placeholder: "Fedora 43, macOS 16, Windows 11, etc."
+    validations:
+      required: true
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional context
+      description: Anything else that might be relevant (terminal emulator, config, plugins, etc.)

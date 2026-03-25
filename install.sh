@@ -3,14 +3,19 @@
 # Usage: curl -fsSL https://raw.githubusercontent.com/ASF-GROUP/AVA/master/install.sh | sh
 #
 # Installs the `ava` CLI binary to ~/.ava/bin/ and adds it to PATH.
+#
+# For private repos, either:
+#   1. Have `gh` CLI authenticated (recommended)
+#   2. Set GITHUB_TOKEN to a PAT with repo scope
+#
 # Set AVA_INSTALL_DIR to override the installation directory:
-#   AVA_INSTALL_DIR=/usr/local/bin curl -fsSL ... | sh
+#   AVA_INSTALL_DIR=/usr/local/bin ... | sh
 
 set -eu
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
-REPO="ASF-GROUP/AVA"
+REPO="Artificial-Source-Foundation/AVA"
 INSTALL_DIR="${AVA_INSTALL_DIR:-${HOME}/.ava/bin}"
 TMP_DIR=""
 
@@ -44,8 +49,7 @@ detect_os() {
         MINGW*|MSYS*|CYGWIN*)
             die "Windows detected. Please build from source:
   git clone https://github.com/${REPO}.git && cd AVA
-  cargo build --release --bin ava
-  # Binary will be at target/release/ava.exe" ;;
+  cargo build --release --bin ava" ;;
         *)
             die "Unsupported OS: $(uname -s). AVA supports Linux and macOS.
   Build from source: cargo build --release --bin ava" ;;
@@ -60,11 +64,9 @@ detect_arch() {
     esac
 }
 
-# Map OS + arch to Rust target triple
 get_target() {
     _os="$1"
     _arch="$2"
-
     case "${_os}-${_arch}" in
         linux-x86_64)   echo "x86_64-unknown-linux-gnu" ;;
         linux-aarch64)  echo "aarch64-unknown-linux-gnu" ;;
@@ -74,60 +76,84 @@ get_target() {
     esac
 }
 
-# ── Resolve latest release tag ───────────────────────────────────────────────
+# ── GitHub helpers ────────────────────────────────────────────────────────────
 
-get_latest_tag() {
-    _url="https://github.com/${REPO}/releases/latest"
-
-    if command -v curl >/dev/null 2>&1; then
-        _location=$(curl -fsSI -o /dev/null -w '%{url_effective}' "${_url}" 2>/dev/null) || {
-            warn "Failed to fetch latest release from GitHub."
-            warn "No releases published yet. Build from source instead:"
-            printf '\n    \033[1mgit clone https://github.com/%s.git && cd AVA\033[0m\n' "${REPO}"
-            printf '    \033[1mcargo build --release --bin ava\033[0m\n\n'
-            exit 1
-        }
-    elif command -v wget >/dev/null 2>&1; then
-        _location=$(wget --spider --max-redirect=0 -S "${_url}" 2>&1 | \
-            sed -n 's/.*Location: *//p' | tr -d '\r') || {
-            warn "Failed to fetch latest release from GitHub."
-            warn "Build from source: cargo build --release --bin ava"
-            exit 1
-        }
-    else
-        die "Neither curl nor wget found. Please install one of them."
+# Get a usable auth token (from env or gh CLI)
+get_auth_token() {
+    if [ -n "${GITHUB_TOKEN:-}" ]; then
+        echo "${GITHUB_TOKEN}"
+    elif [ -n "${GH_TOKEN:-}" ]; then
+        echo "${GH_TOKEN}"
+    elif command -v gh >/dev/null 2>&1; then
+        gh auth token 2>/dev/null || true
     fi
-
-    # Extract tag from URL: .../releases/tag/v2.1.0 -> v2.1.0
-    _tag="${_location##*/}"
-
-    # Validate we actually got a tag, not just "releases" or empty
-    case "${_tag}" in
-        releases|latest|"")
-            warn "No releases published yet. Build from source instead:"
-            printf '\n    \033[1mgit clone https://github.com/%s.git && cd AVA\033[0m\n' "${REPO}"
-            printf '    \033[1mcargo build --release --bin ava\033[0m\n'
-            printf '    \033[1mcp target/release/ava ~/.ava/bin/\033[0m\n\n'
-            exit 1
-            ;;
-    esac
-
-    echo "${_tag}"
 }
 
-# ── Download helper ──────────────────────────────────────────────────────────
-
-download() {
-    _url="$1"
-    _dest="$2"
-
-    if command -v curl >/dev/null 2>&1; then
-        curl -fsSL -o "${_dest}" "${_url}"
-    elif command -v wget >/dev/null 2>&1; then
-        wget -qO "${_dest}" "${_url}"
-    else
-        die "Neither curl nor wget found."
+get_latest_tag() {
+    # Try gh CLI first (handles auth automatically)
+    if command -v gh >/dev/null 2>&1; then
+        _tag=$(gh release view --repo "${REPO}" --json tagName -q '.tagName' 2>/dev/null) || true
+        if [ -n "${_tag:-}" ]; then
+            echo "${_tag}"
+            return 0
+        fi
     fi
+
+    # Fallback: GitHub API with optional auth
+    _api_url="https://api.github.com/repos/${REPO}/releases/latest"
+    _token=$(get_auth_token)
+
+    if [ -n "${_token}" ]; then
+        _response=$(curl -fsSL -H "Authorization: token ${_token}" "${_api_url}" 2>/dev/null) || true
+    else
+        _response=$(curl -fsSL "${_api_url}" 2>/dev/null) || true
+    fi
+
+    if [ -n "${_response:-}" ]; then
+        _tag=$(echo "${_response}" | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
+        if [ -n "${_tag}" ]; then
+            echo "${_tag}"
+            return 0
+        fi
+    fi
+
+    warn "Could not fetch latest release from GitHub."
+    warn "If the repo is private, install the gh CLI and run: gh auth login"
+    warn "Or build from source:"
+    printf '\n    \033[1mgit clone https://github.com/%s.git && cd AVA\033[0m\n' "${REPO}"
+    printf '    \033[1mcargo build --release --bin ava\033[0m\n\n'
+    exit 1
+}
+
+# Download a release asset (handles private repos via gh CLI)
+download_asset() {
+    _asset_name="$1"
+    _dest="$2"
+    _tag="$3"
+
+    # Try gh CLI first (best for private repos)
+    if command -v gh >/dev/null 2>&1; then
+        if gh release download "${_tag}" --repo "${REPO}" -p "${_asset_name}" -D "$(dirname "${_dest}")" --clobber 2>/dev/null; then
+            # gh downloads to dirname with original name
+            _dl_path="$(dirname "${_dest}")/${_asset_name}"
+            if [ "${_dl_path}" != "${_dest}" ] && [ -f "${_dl_path}" ]; then
+                mv "${_dl_path}" "${_dest}"
+            fi
+            return 0
+        fi
+    fi
+
+    # Fallback: direct curl download (public repos only)
+    _url="https://github.com/${REPO}/releases/download/${_tag}/${_asset_name}"
+    _token=$(get_auth_token)
+
+    if [ -n "${_token}" ]; then
+        curl -fsSL -H "Authorization: token ${_token}" -o "${_dest}" "${_url}" 2>/dev/null && return 0
+    else
+        curl -fsSL -o "${_dest}" "${_url}" 2>/dev/null && return 0
+    fi
+
+    return 1
 }
 
 # ── Checksum verification ────────────────────────────────────────────────────
@@ -168,7 +194,6 @@ add_to_path() {
     _path_line='export PATH="$HOME/.ava/bin:$PATH"'
     _marker="# AVA"
 
-    # Add to whichever shell configs exist
     for _rcfile in "${HOME}/.bashrc" "${HOME}/.zshrc" "${HOME}/.bash_profile" "${HOME}/.profile"; do
         if [ -f "${_rcfile}" ]; then
             if ! grep -q "${_marker}" "${_rcfile}" 2>/dev/null; then
@@ -178,7 +203,6 @@ add_to_path() {
         fi
     done
 
-    # Fish shell
     _fish_config="${HOME}/.config/fish/config.fish"
     if [ -f "${_fish_config}" ]; then
         if ! grep -q "ava/bin" "${_fish_config}" 2>/dev/null; then
@@ -193,7 +217,6 @@ add_to_path() {
 main() {
     printf '\n\033[1m  AVA Installer\033[0m\n\n'
 
-    # Check dependencies
     need_cmd tar
 
     # Detect platform
@@ -204,29 +227,24 @@ main() {
 
     # Resolve latest version
     _tag=$(get_latest_tag)
-    if [ -z "${_tag}" ]; then
-        die "Could not determine latest release tag."
-    fi
     info "Latest release: ${_tag}"
 
-    # Prepare asset URLs
+    # Asset name
     _archive="ava-${_target}.tar.gz"
-    _base_url="https://github.com/${REPO}/releases/download/${_tag}"
-    _archive_url="${_base_url}/${_archive}"
-    _checksum_url="${_base_url}/${_archive}.sha256"
 
     # Create temp directory
     TMP_DIR=$(mktemp -d 2>/dev/null || mktemp -d -t 'ava-install')
 
     # Download archive
     info "Downloading ${_archive}..."
-    download "${_archive_url}" "${TMP_DIR}/${_archive}" || \
-        die "Failed to download ${_archive_url}
+    if ! download_asset "${_archive}" "${TMP_DIR}/${_archive}" "${_tag}"; then
+        die "Failed to download ${_archive} from release ${_tag}.
 No binary available for ${_target}.
 Build from source: cargo build --release --bin ava"
+    fi
 
     # Download and verify checksum (optional)
-    if download "${_checksum_url}" "${TMP_DIR}/${_archive}.sha256" 2>/dev/null; then
+    if download_asset "${_archive}.sha256" "${TMP_DIR}/${_archive}.sha256" "${_tag}" 2>/dev/null; then
         verify_checksum "${TMP_DIR}/${_archive}" "${TMP_DIR}/${_archive}.sha256"
     else
         warn "No checksum file available; skipping verification."
@@ -236,7 +254,7 @@ Build from source: cargo build --release --bin ava"
     info "Extracting..."
     tar -xzf "${TMP_DIR}/${_archive}" -C "${TMP_DIR}"
 
-    # Find the binary (may be at top level or in a subdirectory)
+    # Find the binary
     _binary=""
     if [ -f "${TMP_DIR}/ava" ]; then
         _binary="${TMP_DIR}/ava"
@@ -256,10 +274,8 @@ Build from source: cargo build --release --bin ava"
     chmod +x "${INSTALL_DIR}/ava"
     ok "Installed ava to ${INSTALL_DIR}/ava"
 
-    # Add to PATH automatically
+    # Add to PATH
     add_to_path
-
-    # Export for current session
     export PATH="${INSTALL_DIR}:${PATH}"
 
     printf '\n'
@@ -272,7 +288,6 @@ Build from source: cargo build --release --bin ava"
         ok "AVA ${_tag} installed."
     fi
 
-    # Success message
     printf '\n\033[1;32m  AVA %s installed successfully!\033[0m\n\n' "${_tag}"
     printf '  Get started:\n\n'
     printf '    \033[1mava\033[0m                                    # Interactive TUI\n'

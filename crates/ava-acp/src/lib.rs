@@ -12,6 +12,7 @@ pub mod adapters;
 pub mod factory;
 pub mod protocol;
 pub mod provider;
+pub mod server;
 pub mod stdio;
 pub mod transport;
 

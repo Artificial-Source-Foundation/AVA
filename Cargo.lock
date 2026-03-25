@@ -625,6 +625,7 @@ version = "2.2.7"
 dependencies = [
  "arboard",
  "async-trait",
+ "ava-acp",
  "ava-agent",
  "ava-auth",
  "ava-cli-providers",

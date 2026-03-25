@@ -48,6 +48,13 @@ async fn main() -> Result<()> {
         });
     }
 
+    // ACP server mode — run as an Agent Client Protocol server on stdio
+    if cli.acp_server {
+        return ava_acp::server::run_acp_server()
+            .await
+            .map_err(|e| color_eyre::eyre::eyre!("{e}"));
+    }
+
     // Subcommand routing
     match cli.command.clone() {
         Some(Command::Update | Command::SelfUpdate) => {

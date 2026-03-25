@@ -91,6 +91,10 @@ pub struct CliArgs {
     #[arg(long)]
     pub no_update_check: bool,
 
+    /// Run as ACP (Agent Client Protocol) server on stdio for IDE integration
+    #[arg(long)]
+    pub acp_server: bool,
+
     /// Attach image files to the prompt (repeatable). Supported: png, jpg, jpeg, gif, webp
     #[arg(long)]
     pub image: Vec<String>,
@@ -246,6 +250,7 @@ mod tests {
             board: false,
             workflow: None,
             no_update_check: false,
+            acp_server: false,
             image: Vec::new(),
             voice: false,
             benchmark: false,

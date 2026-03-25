@@ -691,9 +691,19 @@ impl App {
                     self.is_streaming.store(false, Ordering::Relaxed);
                     self.state.agent.is_running = false;
                     self.state.agent.activity = AgentActivity::Idle;
-                    self.state
+                    // Only push the error if the agent loop didn't already emit
+                    // an AgentEvent::Error for the same failure (avoid duplicates).
+                    let already_shown = self
+                        .state
                         .messages
-                        .push(UiMessage::new(MessageKind::Error, err));
+                        .messages
+                        .last()
+                        .is_some_and(|m| matches!(m.kind, MessageKind::Error));
+                    if !already_shown {
+                        self.state
+                            .messages
+                            .push(UiMessage::new(MessageKind::Error, err));
+                    }
                 }
             }
             return;

@@ -2,7 +2,7 @@
 # AVA CLI installer
 # Usage: curl -fsSL https://raw.githubusercontent.com/ASF-GROUP/AVA/master/install.sh | sh
 #
-# Installs the `ava` CLI binary to ~/.ava/bin/ and prints PATH instructions.
+# Installs the `ava` CLI binary to ~/.ava/bin/ and adds it to PATH.
 # Set AVA_INSTALL_DIR to override the installation directory:
 #   AVA_INSTALL_DIR=/usr/local/bin curl -fsSL ... | sh
 
@@ -31,7 +31,7 @@ trap cleanup EXIT INT TERM
 
 need_cmd() {
     if ! command -v "$1" >/dev/null 2>&1; then
-        die "Required command not found: $1"
+        die "Required command not found: $1. Please install it and try again."
     fi
 }
 
@@ -39,9 +39,16 @@ need_cmd() {
 
 detect_os() {
     case "$(uname -s)" in
-        Linux*)  echo "linux" ;;
-        Darwin*) echo "macos" ;;
-        *)       die "Unsupported OS: $(uname -s). AVA supports Linux and macOS." ;;
+        Linux*)           echo "linux" ;;
+        Darwin*)          echo "macos" ;;
+        MINGW*|MSYS*|CYGWIN*)
+            die "Windows detected. Please build from source:
+  git clone https://github.com/${REPO}.git && cd AVA
+  cargo build --release --bin ava
+  # Binary will be at target/release/ava.exe" ;;
+        *)
+            die "Unsupported OS: $(uname -s). AVA supports Linux and macOS.
+  Build from source: cargo build --release --bin ava" ;;
     esac
 }
 
@@ -58,41 +65,54 @@ get_target() {
     _os="$1"
     _arch="$2"
 
-    case "${_os}" in
-        linux)
-            case "${_arch}" in
-                x86_64)  echo "x86_64-unknown-linux-gnu" ;;
-                aarch64) echo "aarch64-unknown-linux-gnu" ;;
-            esac
-            ;;
-        macos)
-            case "${_arch}" in
-                x86_64)  echo "x86_64-apple-darwin" ;;
-                aarch64) echo "aarch64-apple-darwin" ;;
-            esac
-            ;;
+    case "${_os}-${_arch}" in
+        linux-x86_64)   echo "x86_64-unknown-linux-gnu" ;;
+        linux-aarch64)  echo "aarch64-unknown-linux-gnu" ;;
+        macos-x86_64)   echo "x86_64-apple-darwin" ;;
+        macos-aarch64)  echo "aarch64-apple-darwin" ;;
+        *)              die "Unsupported platform: ${_os}-${_arch}" ;;
     esac
 }
 
 # ── Resolve latest release tag ───────────────────────────────────────────────
 
 get_latest_tag() {
-    # Follow the redirect from /releases/latest to get the tag
     _url="https://github.com/${REPO}/releases/latest"
 
     if command -v curl >/dev/null 2>&1; then
-        _location=$(curl -fsSI -o /dev/null -w '%{url_effective}' "${_url}" 2>/dev/null) || \
-            die "Failed to fetch latest release. Check your network connection."
+        _location=$(curl -fsSI -o /dev/null -w '%{url_effective}' "${_url}" 2>/dev/null) || {
+            warn "Failed to fetch latest release from GitHub."
+            warn "No releases published yet. Build from source instead:"
+            printf '\n    \033[1mgit clone https://github.com/%s.git && cd AVA\033[0m\n' "${REPO}"
+            printf '    \033[1mcargo build --release --bin ava\033[0m\n\n'
+            exit 1
+        }
     elif command -v wget >/dev/null 2>&1; then
         _location=$(wget --spider --max-redirect=0 -S "${_url}" 2>&1 | \
-            sed -n 's/.*Location: *//p' | tr -d '\r') || \
-            die "Failed to fetch latest release. Check your network connection."
+            sed -n 's/.*Location: *//p' | tr -d '\r') || {
+            warn "Failed to fetch latest release from GitHub."
+            warn "Build from source: cargo build --release --bin ava"
+            exit 1
+        }
     else
         die "Neither curl nor wget found. Please install one of them."
     fi
 
-    # Extract tag from URL: .../releases/tag/v1.2.3
-    echo "${_location##*/}"
+    # Extract tag from URL: .../releases/tag/v2.1.0 -> v2.1.0
+    _tag="${_location##*/}"
+
+    # Validate we actually got a tag, not just "releases" or empty
+    case "${_tag}" in
+        releases|latest|"")
+            warn "No releases published yet. Build from source instead:"
+            printf '\n    \033[1mgit clone https://github.com/%s.git && cd AVA\033[0m\n' "${REPO}"
+            printf '    \033[1mcargo build --release --bin ava\033[0m\n'
+            printf '    \033[1mcp target/release/ava ~/.ava/bin/\033[0m\n\n'
+            exit 1
+            ;;
+    esac
+
+    echo "${_tag}"
 }
 
 # ── Download helper ──────────────────────────────────────────────────────────
@@ -142,10 +162,39 @@ The download may be corrupted. Please try again."
     ok "Checksum verified."
 }
 
+# ── Add to PATH ──────────────────────────────────────────────────────────────
+
+add_to_path() {
+    _path_line='export PATH="$HOME/.ava/bin:$PATH"'
+    _marker="# AVA"
+
+    # Add to whichever shell configs exist
+    for _rcfile in "${HOME}/.bashrc" "${HOME}/.zshrc" "${HOME}/.bash_profile" "${HOME}/.profile"; do
+        if [ -f "${_rcfile}" ]; then
+            if ! grep -q "${_marker}" "${_rcfile}" 2>/dev/null; then
+                printf '\n%s\n%s\n' "${_marker}" "${_path_line}" >> "${_rcfile}"
+                ok "Added to PATH in $(basename "${_rcfile}")"
+            fi
+        fi
+    done
+
+    # Fish shell
+    _fish_config="${HOME}/.config/fish/config.fish"
+    if [ -f "${_fish_config}" ]; then
+        if ! grep -q "ava/bin" "${_fish_config}" 2>/dev/null; then
+            printf '\n# AVA\nfish_add_path "$HOME/.ava/bin"\n' >> "${_fish_config}"
+            ok "Added to PATH in config.fish"
+        fi
+    fi
+}
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 main() {
     printf '\n\033[1m  AVA Installer\033[0m\n\n'
+
+    # Check dependencies
+    need_cmd tar
 
     # Detect platform
     _os=$(detect_os)
@@ -173,14 +222,14 @@ main() {
     info "Downloading ${_archive}..."
     download "${_archive_url}" "${TMP_DIR}/${_archive}" || \
         die "Failed to download ${_archive_url}
-Please check that a release exists for your platform at:
-  https://github.com/${REPO}/releases/tag/${_tag}"
+No binary available for ${_target}.
+Build from source: cargo build --release --bin ava"
 
     # Download and verify checksum (optional)
     if download "${_checksum_url}" "${TMP_DIR}/${_archive}.sha256" 2>/dev/null; then
         verify_checksum "${TMP_DIR}/${_archive}" "${TMP_DIR}/${_archive}.sha256"
     else
-        warn "No .sha256 checksum file available; skipping verification."
+        warn "No checksum file available; skipping verification."
     fi
 
     # Extract
@@ -194,7 +243,6 @@ Please check that a release exists for your platform at:
     elif [ -f "${TMP_DIR}/ava-${_target}/ava" ]; then
         _binary="${TMP_DIR}/ava-${_target}/ava"
     else
-        # Search for it -- try GNU find first, then BSD find
         _binary=$(find "${TMP_DIR}" -name "ava" -type f 2>/dev/null | head -1) || true
     fi
 
@@ -208,53 +256,30 @@ Please check that a release exists for your platform at:
     chmod +x "${INSTALL_DIR}/ava"
     ok "Installed ava to ${INSTALL_DIR}/ava"
 
-    # Check PATH
-    _path_configured=false
-    case ":${PATH}:" in
-        *":${INSTALL_DIR}:"*) _path_configured=true ;;
-    esac
+    # Add to PATH automatically
+    add_to_path
+
+    # Export for current session
+    export PATH="${INSTALL_DIR}:${PATH}"
 
     printf '\n'
 
-    if [ "${_path_configured}" = true ]; then
-        ok "~/.ava/bin is already in your PATH."
+    # Check if it works
+    if "${INSTALL_DIR}/ava" --version >/dev/null 2>&1; then
+        _version=$("${INSTALL_DIR}/ava" --version 2>/dev/null || echo "${_tag}")
+        ok "AVA ${_version} is ready!"
     else
-        warn "~/.ava/bin is not in your PATH."
-        printf '\n  Add it by appending this line to your shell config:\n\n'
-
-        # Detect shell rc file
-        _shell_name=$(basename "${SHELL:-/bin/sh}")
-        case "${_shell_name}" in
-            zsh)  _rc_file="~/.zshrc" ;;
-            bash) _rc_file="~/.bashrc" ;;
-            fish) _rc_file="~/.config/fish/config.fish" ;;
-            *)    _rc_file="~/.profile" ;;
-        esac
-
-        if [ "${_shell_name}" = "fish" ]; then
-            printf '    \033[1mset -gx PATH \$HOME/.ava/bin \$PATH\033[0m\n\n'
-        else
-            printf '    \033[1mexport PATH="$HOME/.ava/bin:$PATH"\033[0m\n\n'
-        fi
-        printf '  Then restart your shell or run:\n\n'
-        printf '    \033[1msource %s\033[0m\n' "${_rc_file}"
+        ok "AVA ${_tag} installed."
     fi
 
     # Success message
     printf '\n\033[1;32m  AVA %s installed successfully!\033[0m\n\n' "${_tag}"
     printf '  Get started:\n\n'
-    printf '    1. Add your API key:\n'
-    printf '       \033[1mmkdir -p ~/.ava && cat > ~/.ava/credentials.json << '\''EOF'\''\n'
-    printf '       {\n'
-    printf '         "providers": {\n'
-    printf '           "openrouter": { "api_key": "YOUR_KEY" }\n'
-    printf '         }\n'
-    printf '       }\n'
-    printf '       EOF\033[0m\n\n'
-    printf '    2. Launch the TUI:\n'
-    printf '       \033[1mava\033[0m\n\n'
-    printf '    3. Or run headless:\n'
-    printf '       \033[1mava "your prompt" --headless --provider openrouter --model anthropic/claude-sonnet-4\033[0m\n\n'
+    printf '    \033[1mava\033[0m                                    # Interactive TUI\n'
+    printf '    \033[1mava "your goal" --headless\033[0m              # Headless mode\n'
+    printf '    \033[1mava --help\033[0m                              # All options\n'
+    printf '\n'
+    printf '  First time? Run \033[1mava\033[0m and use \033[1m/connect\033[0m to add your API key.\n'
     printf '  Docs: https://github.com/%s\n\n' "${REPO}"
 }
 

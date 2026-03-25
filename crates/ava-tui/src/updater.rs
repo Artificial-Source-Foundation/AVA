@@ -6,7 +6,8 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-const GITHUB_API_URL: &str = "https://api.github.com/repos/ASF-GROUP/AVA/releases/latest";
+const GITHUB_API_URL: &str =
+    "https://api.github.com/repos/Artificial-Source-Foundation/AVA/releases/latest";
 const CHECK_INTERVAL_SECS: u64 = 86400; // 24 hours
 
 /// Info about an available update.
@@ -152,6 +153,58 @@ pub async fn check_for_update() -> color_eyre::Result<Option<UpdateInfo>> {
     }))
 }
 
+/// Render a changelog string with ANSI colors for terminal output.
+fn render_changelog(changelog: &str) -> String {
+    // ANSI codes
+    const BOLD: &str = "\x1b[1m";
+    const DIM: &str = "\x1b[2m";
+    const GREEN: &str = "\x1b[32m";
+    const CYAN: &str = "\x1b[36m";
+    const YELLOW: &str = "\x1b[33m";
+    const RESET: &str = "\x1b[0m";
+
+    let mut out = String::new();
+    for line in changelog.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            out.push('\n');
+        } else if let Some(h) = trimmed.strip_prefix("### ") {
+            // Section header: ### Bug Fixes → colored + bold
+            out.push_str(&format!("\n  {BOLD}{CYAN}{h}{RESET}\n"));
+        } else if trimmed.starts_with("## ") || trimmed.starts_with("# ") {
+            // Skip top-level headers (already shown in version line)
+        } else if let Some(item) = trimmed.strip_prefix("- **") {
+            // Bullet: - **Fix foo (#23)** — description
+            // Split at first ** to get the bold part
+            if let Some(bold_end) = item.find("**") {
+                let bold_part = &item[..bold_end];
+                let rest = &item[bold_end + 2..];
+                // Clean up the rest (remove leading " — " or " - ")
+                let rest = rest
+                    .strip_prefix(" \u{2014} ")
+                    .or_else(|| rest.strip_prefix(" — "))
+                    .or_else(|| rest.strip_prefix(" - "))
+                    .unwrap_or(rest);
+                out.push_str(&format!(
+                    "    {GREEN}\u{2022}{RESET} {BOLD}{bold_part}{RESET}"
+                ));
+                if !rest.is_empty() {
+                    out.push_str(&format!(" {DIM}{rest}{RESET}"));
+                }
+                out.push('\n');
+            } else {
+                out.push_str(&format!("    {GREEN}\u{2022}{RESET} {item}\n"));
+            }
+        } else if let Some(item) = trimmed.strip_prefix("- ") {
+            // Plain bullet
+            out.push_str(&format!("    {YELLOW}\u{2022}{RESET} {item}\n"));
+        } else {
+            out.push_str(&format!("    {DIM}{trimmed}{RESET}\n"));
+        }
+    }
+    out
+}
+
 /// Download the update and replace the current binary.
 pub async fn download_and_replace(info: &UpdateInfo) -> color_eyre::Result<()> {
     use std::io::Write;
@@ -162,7 +215,7 @@ pub async fn download_and_replace(info: &UpdateInfo) -> color_eyre::Result<()> {
         ));
     }
 
-    eprintln!("Downloading AVA v{}...", info.latest_version);
+    eprint!("\x1b[2m  Downloading...\x1b[0m");
 
     let client = reqwest::Client::builder()
         .user_agent("ava-cli")
@@ -178,7 +231,8 @@ pub async fn download_and_replace(info: &UpdateInfo) -> color_eyre::Result<()> {
     }
 
     let bytes = response.bytes().await?;
-    eprintln!("Downloaded {} bytes", bytes.len());
+    let size_mb = bytes.len() as f64 / 1_048_576.0;
+    eprintln!("\r\x1b[2K  \x1b[1;32m\u{2022}\x1b[0m Downloaded {size_mb:.1} MB");
 
     // Extract tarball
     let decoder = flate2::read::GzDecoder::new(&bytes[..]);
@@ -198,7 +252,6 @@ pub async fn download_and_replace(info: &UpdateInfo) -> color_eyre::Result<()> {
             std::io::copy(&mut entry, &mut file)?;
             file.flush()?;
 
-            // Make executable on unix
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
@@ -217,43 +270,52 @@ pub async fn download_and_replace(info: &UpdateInfo) -> color_eyre::Result<()> {
 
     // Replace current binary (atomic rename on unix)
     let backup_path = current_exe.with_extension("old");
-    let _ = std::fs::remove_file(&backup_path); // remove old backup if exists
+    let _ = std::fs::remove_file(&backup_path);
     std::fs::rename(&current_exe, &backup_path)?;
     std::fs::rename(&temp_path, &current_exe)?;
-    let _ = std::fs::remove_file(&backup_path); // clean up backup
+    let _ = std::fs::remove_file(&backup_path);
 
-    eprintln!("Updated to AVA v{}", info.latest_version);
+    eprintln!(
+        "  \x1b[1;32m\u{2022}\x1b[0m Installed to {}",
+        current_exe.display()
+    );
     Ok(())
 }
 
 /// Run the `ava update` command.
 pub async fn run_update_command() -> color_eyre::Result<()> {
-    eprintln!("Checking for updates...");
+    eprintln!("\n\x1b[1m  AVA Update\x1b[0m\n");
 
     match check_for_update().await {
         Ok(Some(info)) => {
             eprintln!(
-                "AVA v{} available (current: v{})",
-                info.latest_version, info.current_version
+                "  \x1b[1;34m\u{2022}\x1b[0m \x1b[2mv{}\x1b[0m \u{2192} \x1b[1;32mv{}\x1b[0m",
+                info.current_version, info.latest_version
             );
+
             if !info.changelog.is_empty() {
-                let summary: String = info
-                    .changelog
-                    .lines()
-                    .take(8)
-                    .collect::<Vec<_>>()
-                    .join("\n");
-                eprintln!("\n{summary}\n");
+                let rendered = render_changelog(&info.changelog);
+                eprint!("{rendered}");
             }
+
+            eprintln!();
             download_and_replace(&info).await?;
+            eprintln!(
+                "\n  \x1b[1;32m\u{2713} AVA v{} installed successfully!\x1b[0m\n",
+                info.latest_version
+            );
         }
         Ok(None) => {
-            eprintln!("AVA v{} is already the latest version.", current_version());
+            eprintln!(
+                "  \x1b[1;32m\u{2713}\x1b[0m AVA v{} is already the latest version.\n",
+                current_version()
+            );
         }
         Err(e) => {
-            eprintln!("Failed to check for updates: {e}");
-            eprintln!("You can download the latest version from:");
-            eprintln!("  https://github.com/ASF-GROUP/AVA/releases/latest");
+            eprintln!("  \x1b[1;31m\u{2717}\x1b[0m Failed to check for updates: {e}");
+            eprintln!(
+                "  \x1b[2mDownload manually: https://github.com/Artificial-Source-Foundation/AVA/releases/latest\x1b[0m\n"
+            );
         }
     }
     Ok(())

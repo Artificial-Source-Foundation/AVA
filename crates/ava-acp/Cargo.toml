@@ -12,6 +12,7 @@ workspace = true
 
 [dependencies]
 async-trait.workspace = true
+ava-llm = { path = "../ava-llm" }
 ava-types = { path = "../ava-types" }
 futures.workspace = true
 serde.workspace = true

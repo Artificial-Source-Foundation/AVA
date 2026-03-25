@@ -269,27 +269,12 @@ impl AgentStack {
         router.set_plugin_manager(Arc::clone(&plugin_manager));
         let router = Arc::new(router);
 
-        // Discover installed CLI agents lazily in the background so it doesn't
-        // block startup (~3s when multiple CLI agents are installed).
+        // Register ACP provider factory for external agents (claude-code, codex, etc.).
+        // No startup discovery — agents are spawned on-demand when requested.
         let cli_agents = Vec::new();
         {
-            let router_ref = Arc::clone(&router);
-            let yolo = config.yolo;
-            tokio::spawn(async move {
-                let (agents, factory) = ava_cli_providers::discover_and_create_factory(yolo).await;
-                if !agents.is_empty() {
-                    info!(
-                        "Discovered {} CLI agents: {}",
-                        agents.len(),
-                        agents
-                            .iter()
-                            .map(|a| format!("{} v{}", a.name, a.version))
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    );
-                    router_ref.register_factory_async(Arc::new(factory)).await;
-                }
-            });
+            let acp_factory = ava_acp::AcpProviderFactory::with_builtins(config.yolo);
+            router.register_factory_async(Arc::new(acp_factory)).await;
         }
 
         // Trigger the `config` hook so plugins can observe (and optionally

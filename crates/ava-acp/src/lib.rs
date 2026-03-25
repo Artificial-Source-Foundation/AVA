@@ -9,9 +9,12 @@
 //! Replaces the old `ava-cli-providers` crate with a proper protocol-based approach.
 
 pub mod adapters;
+pub mod factory;
 pub mod protocol;
+pub mod provider;
 pub mod stdio;
 pub mod transport;
 
+pub use factory::AcpProviderFactory;
 pub use protocol::*;
 pub use transport::*;

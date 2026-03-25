@@ -26,12 +26,12 @@ exclude = ["src-tauri"]
 resolver = "2"
 
 [workspace.package]
-version = "2.1.0"
+version = "2.2.7"
 edition = "2021"
 rust-version = "1.75"
 authors = ["ASF Group"]
 license = "MIT"
-repository = "https://github.com/ASF-GROUP/AVA"
+repository = "https://github.com/Artificial-Source-Foundation/AVA"
 homepage = "https://github.com/ASF-GROUP/AVA"
 
 [workspace.dependencies]

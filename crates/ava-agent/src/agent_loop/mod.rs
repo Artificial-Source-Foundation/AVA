@@ -537,6 +537,7 @@ impl AgentLoop {
         }
 
         let mut turn: usize = 0;
+        let mut last_turn_all_failed = false;
 
         // --- Main loop ---
         loop {
@@ -780,6 +781,25 @@ impl AgentLoop {
             // BUT first check the steering queue — the user may have sent a message
             // while we were waiting for the LLM response.
             if tool_calls.is_empty() {
+                // Failure-aware completion guard: if ALL tools failed last turn,
+                // nudge the agent to retry instead of silently completing.
+                if last_turn_all_failed && turn < self.effective_max_turns() {
+                    last_turn_all_failed = false; // fire once to avoid infinite nudge loop
+                    let nudge = Message::new(
+                        Role::User,
+                        "Your previous tool calls all failed. Review the errors above and try a different approach to complete the task.".to_string(),
+                    );
+                    self.context.add_message(nudge.clone());
+                    session.add_message(nudge);
+                    Self::emit(
+                        &event_tx,
+                        AgentEvent::Progress(
+                            "nudging agent to retry after all tool calls failed".to_string(),
+                        ),
+                    );
+                    continue;
+                }
+
                 if self
                     .handle_natural_completion(
                         &response_text,
@@ -799,6 +819,10 @@ impl AgentLoop {
             // Add tool results to context
             self.add_tool_results(&tool_calls, &tool_results, &mut session);
 
+            // Track whether ALL tool calls failed (for failure-aware completion guard)
+            last_turn_all_failed =
+                !tool_results.is_empty() && tool_results.iter().all(|r| r.is_error);
+
             // Checkpoint: emit the session state so callers can persist progress.
             // If the process exits before the final Complete event, this is recoverable.
             {
@@ -814,9 +838,10 @@ impl AgentLoop {
                     .find(|result| result.is_error || has_validation_failure(result))
                 {
                     let (prefix, first_line) = correction_hint_parts(err_result);
-                    let hint = format!(
-                        "{prefix}: {first_line}. Try a different approach — don't repeat the same call."
-                    );
+                    let smart = crate::error_hints::smart_error_hint(&err_result.content);
+                    let suffix =
+                        smart.unwrap_or("Try a different approach — don't repeat the same call.");
+                    let hint = format!("{prefix}: {first_line}. {suffix}");
                     let hint_msg = Message::new(Role::User, hint);
                     self.context.add_message(hint_msg.clone());
                     session.add_message(hint_msg);

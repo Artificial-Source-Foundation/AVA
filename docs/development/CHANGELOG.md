@@ -1,5 +1,14 @@
 # Changelog
 
+## v2.2.8 (2026-03-25)
+
+### Agent Intelligence
+
+- **Smart error recovery hints** — Agent now provides actionable, pattern-matched suggestions when tools fail (e.g., "create a virtual environment" for pip sandbox errors, "add dependency to Cargo.toml" for Rust import errors) instead of the generic "try a different approach". 13 error patterns covering Python/Node/Rust/general failures. New module: `crates/ava-agent/src/error_hints.rs`.
+- **Sandbox-aware system prompt** — System prompt now includes sandbox constraints (read-only .git/.ava, pip venv workaround, npm local installs) so the agent knows its environment before hitting errors.
+- **Failure-aware completion guard** — When ALL tool calls in a turn fail, the agent now gets a one-time nudge to retry instead of silently completing. Prevents premature task abandonment.
+- **Optional post-completion code review** — `--review` flag runs the existing Praxis review agent after task completion. Collects working tree diff, runs bug-focused review, reports critical/warning issues. Reuses `crates/ava-praxis/src/review.rs` infrastructure.
+
 ## v2.2.7 (2026-03-25)
 
 ### Bug Fixes

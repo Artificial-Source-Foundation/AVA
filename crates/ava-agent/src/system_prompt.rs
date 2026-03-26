@@ -196,10 +196,11 @@ pub fn build_system_prompt(
     prompt.push_str("- Consider reversibility before destructive actions (force push, delete, rm -rf). Ask the user first for hard-to-reverse operations.\n");
     prompt.push_str("- When encountering obstacles, investigate — don't use destructive actions as shortcuts. Files you find may be in-progress work.\n");
     if profile == PromptProfile::Standard {
-        prompt.push_str("- If your approach is blocked after a fair attempt, reconsider instead of brute-forcing.\n\n");
+        prompt.push_str("- If your approach is blocked after a fair attempt, reconsider instead of brute-forcing.\n");
     } else {
-        prompt.push_str("- Reconsider when blocked instead of brute-forcing.\n\n");
+        prompt.push_str("- Reconsider when blocked instead of brute-forcing.\n");
     }
+    prompt.push_str("- Package installation commands (pip, npm, cargo add, etc.) run in a restricted sandbox. The .git and .ava directories are read-only. If pip fails with \"externally-managed-environment\", create a virtual environment first (`python -m venv .venv`). For npm, use local installs (not -g).\n\n");
 
     prompt.push_str("### Communication\n");
     prompt

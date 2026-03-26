@@ -99,6 +99,10 @@ pub struct CliArgs {
     #[arg(long)]
     pub image: Vec<String>,
 
+    /// Run a code review pass after the agent completes (catches bugs in generated code)
+    #[arg(long)]
+    pub review: bool,
+
     /// Enable continuous voice input (requires --features voice)
     #[arg(long)]
     pub voice: bool,
@@ -252,6 +256,7 @@ mod tests {
             no_update_check: false,
             acp_server: false,
             image: Vec::new(),
+            review: false,
             voice: false,
             benchmark: false,
             models: None,

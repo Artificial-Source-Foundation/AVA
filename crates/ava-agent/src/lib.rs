@@ -7,6 +7,7 @@
 
 pub mod agent_loop;
 pub(crate) mod budget;
+pub mod error_hints;
 pub mod instruction_resolver;
 pub mod instructions;
 pub mod llm_trait;

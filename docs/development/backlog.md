@@ -8,6 +8,7 @@ Tool surface policy: default tools are now 9 (`read`, `write`, `edit`, `bash`, `
 
 ## Recently Completed
 
+- **Agent Intelligence Improvements (v2.2.8)** — smart error recovery hints (13 patterns), sandbox-aware system prompt, failure-aware completion guard, optional `--review` post-completion code review pass. Closes self-correction gap vs OpenCode benchmark.
 - **GitHub Issues Sprint (v2.2.7)** — fixed 8 bugs (#17, #19, #20, #21, #23, #24, #26), added 2 features (#18, #25), closed 1 already-implemented (#22)
 - **22 LLM providers** — added Azure OpenAI, AWS Bedrock, xAI, Mistral, Groq, DeepSeek, ChatGPT alias (was 15)
 - **Mid-stream messaging refactor** — renamed to Queue/Interrupt/Post-complete; new keybindings (Enter=queue, Ctrl+Enter=interrupt, Alt+Enter=post-complete, Double-Escape=cancel); MessageQueueWidget with reorder/edit/remove

@@ -7,6 +7,7 @@ use ava_agent::AgentEvent;
 use ava_types::ImageContent;
 use color_eyre::eyre::{eyre, Result};
 use std::path::Path;
+use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing::debug;
@@ -303,7 +304,127 @@ pub(super) async fn run_single_agent(cli: CliArgs, goal: &str) -> Result<()> {
         );
     }
 
+    // Optional post-completion code review pass
+    if cli.review && result.success {
+        let review_exit = run_post_completion_review(&cli).await;
+        if review_exit != 0 {
+            std::process::exit(review_exit);
+        }
+    }
+
     std::process::exit(if result.success { 0 } else { 1 });
+}
+
+/// Run a code review on working directory changes after the agent completes.
+/// Returns 0 if no actionable issues, 1 if critical/warning issues found.
+async fn run_post_completion_review(cli: &CliArgs) -> i32 {
+    use ava_platform::StandardPlatform;
+    use ava_praxis::review::{
+        build_review_system_prompt, collect_diff, format_text, parse_review_output,
+        run_review_agent, DiffMode, Severity,
+    };
+
+    eprintln!("\n[review] Running post-completion code review...");
+
+    // Collect working tree diff (changes made by the agent)
+    let review_context = match collect_diff(&DiffMode::Working).await {
+        Ok(ctx) if ctx.diff.is_empty() => {
+            eprintln!("[review] No changes to review.");
+            return 0;
+        }
+        Ok(ctx) => ctx,
+        Err(e) => {
+            eprintln!("[review] Failed to collect diff: {e}");
+            return 0; // Don't fail the run for review errors
+        }
+    };
+
+    eprintln!(
+        "[review] {} file(s) changed, {} bytes of diff",
+        review_context.stats.len(),
+        review_context.diff.len()
+    );
+
+    // Resolve provider (reuse CLI's provider/model)
+    let (provider, model) = match crate::config::cli::resolve_provider_model(
+        cli.provider.as_deref(),
+        cli.model.as_deref(),
+    )
+    .await
+    {
+        Ok(pm) => pm,
+        Err(e) => {
+            eprintln!("[review] Failed to resolve provider: {e}");
+            return 0;
+        }
+    };
+
+    let data_dir = dirs::home_dir().unwrap_or_default().join(".ava");
+    let (stack, _question_rx, _approval_rx, _plan_rx) = match AgentStack::new(AgentStackConfig {
+        data_dir,
+        provider,
+        model,
+        max_turns: 5,
+        yolo: true, // Review agent doesn't need approval prompts
+        ..Default::default()
+    })
+    .await
+    {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("[review] Failed to create review stack: {e}");
+            return 0;
+        }
+    };
+
+    let (provider_name, model_name) = stack.current_model().await;
+    let resolved_provider = match stack
+        .router
+        .route_required(&provider_name, &model_name)
+        .await
+    {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("[review] Failed to route provider: {e}");
+            return 0;
+        }
+    };
+
+    let system_prompt = build_review_system_prompt("bugs");
+    let platform = Arc::new(StandardPlatform);
+
+    let output = match run_review_agent(
+        resolved_provider,
+        platform,
+        &review_context,
+        &system_prompt,
+        5,
+    )
+    .await
+    {
+        Ok(o) => o,
+        Err(e) => {
+            eprintln!("[review] Review agent failed: {e}");
+            return 0;
+        }
+    };
+
+    let result = parse_review_output(&output);
+    let has_actionable = result
+        .issues
+        .iter()
+        .any(|i| matches!(i.severity, Severity::Critical | Severity::Warning));
+
+    let formatted = format_text(&result);
+    eprintln!("\n{formatted}");
+
+    if has_actionable {
+        eprintln!("[review] Found actionable issues. Consider fixing them.");
+        1
+    } else {
+        eprintln!("[review] No critical issues found.");
+        0
+    }
 }
 
 /// Produce a compact one-line summary of tool arguments for headless text output.

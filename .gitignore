@@ -34,10 +34,13 @@ logs/
 *.log
 npm-debug.log*
 
-# Environment
+# Environment & secrets
 .env
 .env.local
 .env.*.local
+*.pem
+*.key
+credentials.json
 
 # Test coverage
 coverage/

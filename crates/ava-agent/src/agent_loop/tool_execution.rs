@@ -620,14 +620,24 @@ impl AgentLoop {
             if tool_call.name == "attempt_completion" {
                 continue;
             }
-            if let Some(result) = results.get(ri) {
-                let tool_message = Message::new(Role::Tool, result.content.clone())
-                    .with_tool_call_id(&tool_call.id)
-                    .with_tool_results(vec![result.clone()]);
-                self.context.add_message(tool_message.clone());
-                session.add_message(tool_message);
+            // Every tool call MUST have a corresponding tool result message,
+            // otherwise the OpenAI API rejects with "No tool output found".
+            let tool_message = if let Some(result) = results.get(ri) {
                 ri += 1;
-            }
+                Message::new(Role::Tool, result.content.clone())
+                    .with_tool_call_id(&tool_call.id)
+                    .with_tool_results(vec![result.clone()])
+            } else {
+                // Missing result (should not happen) — send error placeholder
+                // to keep the conversation valid.
+                Message::new(
+                    Role::Tool,
+                    format!("Error: tool '{}' did not produce a result", tool_call.name),
+                )
+                .with_tool_call_id(&tool_call.id)
+            };
+            self.context.add_message(tool_message.clone());
+            session.add_message(tool_message);
         }
     }
 

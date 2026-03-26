@@ -25,6 +25,52 @@ use super::response::parse_tool_calls;
 /// Tools that modify files — used to decide when to emit `StreamingEditProgress`.
 const EDIT_TOOL_NAMES: &[&str] = &["write", "edit", "multiedit", "apply_patch"];
 
+/// Ensure every assistant tool_call has a matching Tool result in the message list.
+///
+/// After visibility filtering (compaction marks some messages `agent_visible=false`),
+/// an assistant message with tool_calls may remain while its corresponding tool result
+/// messages were filtered out. OpenAI returns 400 "No tool output found for function
+/// call" in this case. This function appends synthetic error results for any orphaned
+/// tool_calls, making the history valid for all providers.
+pub(super) fn ensure_tool_call_consistency(messages: &mut Vec<Message>) {
+    use std::collections::HashSet;
+
+    let answered: HashSet<&str> = messages
+        .iter()
+        .filter(|m| m.role == Role::Tool)
+        .filter_map(|m| m.tool_call_id.as_deref())
+        .collect();
+
+    let mut synthetic = Vec::new();
+    for msg in messages.iter() {
+        if msg.role != Role::Assistant {
+            continue;
+        }
+        for tc in &msg.tool_calls {
+            if !answered.contains(tc.id.as_str()) {
+                let content = "[Tool result removed during context compaction]".to_string();
+                let result = ava_types::ToolResult {
+                    call_id: tc.id.clone(),
+                    content: content.clone(),
+                    is_error: true,
+                };
+                let tool_msg = Message::new(Role::Tool, content)
+                    .with_tool_call_id(&tc.id)
+                    .with_tool_results(vec![result]);
+                synthetic.push(tool_msg);
+            }
+        }
+    }
+
+    if !synthetic.is_empty() {
+        tracing::debug!(
+            count = synthetic.len(),
+            "injected synthetic tool results for orphaned tool_calls after visibility filtering"
+        );
+        messages.extend(synthetic);
+    }
+}
+
 /// Extract a file path from partially-accumulated JSON arguments.
 ///
 /// Looks for `"file_path":"..."` or `"path":"..."` patterns using simple string
@@ -225,13 +271,15 @@ impl AgentLoop {
     /// hook returns unchanged content, the original context messages are returned as-is.
     async fn apply_messages_transform(&mut self) -> Vec<Message> {
         let Some(ref pm) = self.plugin_manager.clone() else {
-            return self
+            let mut msgs: Vec<Message> = self
                 .context
                 .get_messages()
                 .iter()
                 .filter(|m| m.agent_visible)
                 .cloned()
                 .collect();
+            ensure_tool_call_consistency(&mut msgs);
+            return msgs;
         };
 
         if !pm
@@ -239,13 +287,15 @@ impl AgentLoop {
             .await
             .has_hook_subscribers(ava_plugin::HookEvent::ChatMessagesTransform)
         {
-            return self
+            let mut msgs: Vec<Message> = self
                 .context
                 .get_messages()
                 .iter()
                 .filter(|m| m.agent_visible)
                 .cloned()
                 .collect();
+            ensure_tool_call_consistency(&mut msgs);
+            return msgs;
         }
 
         // Only send agent-visible messages to the LLM. Compacted messages
@@ -317,6 +367,7 @@ impl AgentLoop {
                 result.push(Message::new(role, content));
             }
         }
+        ensure_tool_call_consistency(&mut result);
         result
     }
 

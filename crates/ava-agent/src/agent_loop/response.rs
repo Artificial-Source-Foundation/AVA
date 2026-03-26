@@ -264,13 +264,14 @@ impl AgentLoop {
     ) -> Result<(String, Vec<ToolCall>, Option<TokenUsage>)> {
         // Dedup guard: skip if identical request within 2s
         // Only send agent-visible messages to the LLM (compacted messages excluded).
-        let messages: Vec<Message> = self
+        let mut messages: Vec<Message> = self
             .context
             .get_messages()
             .iter()
             .filter(|m| m.agent_visible)
             .cloned()
             .collect();
+        super::completion::ensure_tool_call_consistency(&mut messages);
         let messages = messages.as_slice();
         let hash = {
             let mut hasher = DefaultHasher::new();
@@ -350,13 +351,14 @@ impl AgentLoop {
 
         // Dedup guard
         // Only send agent-visible messages to the LLM (compacted messages excluded).
-        let messages: Vec<Message> = self
+        let mut messages: Vec<Message> = self
             .context
             .get_messages()
             .iter()
             .filter(|m| m.agent_visible)
             .cloned()
             .collect();
+        super::completion::ensure_tool_call_consistency(&mut messages);
         let messages = messages.as_slice();
         let hash = {
             let mut hasher = DefaultHasher::new();

@@ -585,6 +585,7 @@ impl App {
 /sessions                \u{2014} session picker
 /bookmark [label]        \u{2014} bookmark current point (list/clear/remove)
 /plan [view]              \u{2014} show plan status or open in browser
+/review                  \u{2014} run code review on working directory changes
 /commit                  \u{2014} inspect commit readiness and suggest a message
 /export [filename]       \u{2014} export conversation to file (.md or .json)
 /copy [all]              \u{2014} copy last response (picks code block if multiple)
@@ -704,6 +705,17 @@ impl App {
                     .messages
                     .push(UiMessage::transient(MessageKind::System, text));
                 None
+            }
+            "/review" => {
+                if let Some(app_tx) = app_tx {
+                    self.spawn_review_pass(app_tx);
+                    return None;
+                }
+                Some((
+                    MessageKind::System,
+                    "Review requires async context. Try running it from the chat input."
+                        .to_string(),
+                ))
             }
             "/init" => {
                 let cwd = std::env::current_dir().unwrap_or_default();

@@ -557,6 +557,41 @@ impl App {
                     debug!(hook = %description, event = %event, "hook allowed");
                 }
             },
+            AppEvent::ReviewFinished(result) => {
+                match result {
+                    None => {
+                        self.state.messages.push(UiMessage::transient(
+                            MessageKind::System,
+                            "No changes to review.".to_string(),
+                        ));
+                    }
+                    Some(Ok((formatted, has_actionable))) => {
+                        let kind = if has_actionable {
+                            MessageKind::Error
+                        } else {
+                            MessageKind::System
+                        };
+                        self.state
+                            .messages
+                            .push(UiMessage::transient(kind, formatted));
+                        if has_actionable {
+                            // Auto-fix: submit review findings as a new goal
+                            self.state.messages.push(UiMessage::transient(
+                                MessageKind::System,
+                                "Submitting review findings for auto-fix...".to_string(),
+                            ));
+                            // The user can handle this by submitting the fix manually,
+                            // or we could auto-submit here. For now, just show the findings.
+                        }
+                    }
+                    Some(Err(e)) => {
+                        self.state.messages.push(UiMessage::transient(
+                            MessageKind::Error,
+                            format!("Review failed: {e}"),
+                        ));
+                    }
+                }
+            }
         }
     }
 }

@@ -163,6 +163,11 @@ pub struct FeaturesConfig {
     /// Default: false (opt-in).
     #[serde(default)]
     pub session_logging: bool,
+    /// When true, automatically run a code review after the agent edits files.
+    /// If the review finds critical/warning issues, re-run the agent to fix them.
+    /// Default: true.
+    #[serde(default = "default_true")]
+    pub auto_review: bool,
 }
 
 fn default_true() -> bool {
@@ -177,6 +182,7 @@ impl Default for FeaturesConfig {
             enable_mcp: true,
             audit_logging: true,
             session_logging: false,
+            auto_review: true,
         }
     }
 }

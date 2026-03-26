@@ -137,6 +137,10 @@ pub enum AppEvent {
         result: crate::hooks::HookResult,
         description: String,
     },
+    /// Code review finished. None = no changes to review.
+    /// Some(Ok((formatted, has_actionable))) = review complete.
+    /// Some(Err(msg)) = review failed.
+    ReviewFinished(Option<Result<(String, bool), String>>),
     Quit,
 }
 
@@ -220,6 +224,7 @@ impl std::fmt::Debug for AppEvent {
                 .field("event", event)
                 .field("description", description)
                 .finish(),
+            Self::ReviewFinished(_) => write!(f, "ReviewFinished"),
             Self::Quit => write!(f, "Quit"),
         }
     }

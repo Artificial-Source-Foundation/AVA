@@ -310,8 +310,16 @@ pub(super) async fn run_single_agent(cli: CliArgs, goal: &str) -> Result<()> {
     }
 
     // Auto-review: when the agent edited files, review and auto-fix issues.
-    // Triggered automatically when files were edited, or explicitly with --review.
-    if result.success && (files_edited || cli.review) {
+    // Triggered automatically when files were edited (if config allows), or explicitly with --review.
+    let config_auto_review = dirs::home_dir()
+        .map(|h| h.join(".ava/config.yaml"))
+        .filter(|p| p.exists())
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .and_then(|s| serde_yaml::from_str::<ava_config::Config>(&s).ok())
+        .map(|c| c.features.auto_review)
+        .unwrap_or(true);
+    let should_review = result.success && (cli.review || (files_edited && config_auto_review));
+    if should_review {
         let review_findings = run_post_completion_review(&cli).await;
         if let Some(findings) = review_findings {
             // Re-run the agent to fix the review findings

@@ -258,4 +258,85 @@ impl App {
             let _ = app_tx.send(AppEvent::SessionLoaded(result));
         });
     }
+
+    /// Spawn a code review on working directory changes. Results appear as chat messages.
+    pub(crate) fn spawn_review_pass(&mut self, app_tx: mpsc::UnboundedSender<AppEvent>) {
+        use ava_praxis::review::{
+            build_review_system_prompt, collect_diff, format_text, parse_review_output,
+            run_review_agent, DiffMode, Severity,
+        };
+
+        let Some(stack) = self.state.agent.stack_handle() else {
+            self.state.messages.push(UiMessage::transient(
+                MessageKind::Error,
+                "Cannot review: agent not initialised".to_string(),
+            ));
+            return;
+        };
+
+        self.state.messages.push(UiMessage::transient(
+            MessageKind::System,
+            "Running code review on working directory changes...".to_string(),
+        ));
+
+        tokio::spawn(async move {
+            // Collect diff
+            let review_context = match collect_diff(&DiffMode::Working).await {
+                Ok(ctx) if ctx.diff.is_empty() => {
+                    let _ = app_tx.send(AppEvent::ReviewFinished(None));
+                    return;
+                }
+                Ok(ctx) => ctx,
+                Err(e) => {
+                    let _ = app_tx.send(AppEvent::ReviewFinished(Some(Err(e))));
+                    return;
+                }
+            };
+
+            // Get provider
+            let (provider_name, model_name) = stack.current_model().await;
+            let resolved_provider = match stack
+                .router
+                .route_required(&provider_name, &model_name)
+                .await
+            {
+                Ok(p) => p,
+                Err(e) => {
+                    let _ = app_tx.send(AppEvent::ReviewFinished(Some(Err(e.to_string()))));
+                    return;
+                }
+            };
+
+            let system_prompt = build_review_system_prompt("bugs");
+            let platform = std::sync::Arc::new(ava_platform::StandardPlatform);
+
+            let output = match run_review_agent(
+                resolved_provider,
+                platform,
+                &review_context,
+                &system_prompt,
+                5,
+            )
+            .await
+            {
+                Ok(o) => o,
+                Err(e) => {
+                    let _ = app_tx.send(AppEvent::ReviewFinished(Some(Err(e))));
+                    return;
+                }
+            };
+
+            let result = parse_review_output(&output);
+            let has_actionable = result
+                .issues
+                .iter()
+                .any(|i| matches!(i.severity, Severity::Critical | Severity::Warning));
+
+            let formatted = format_text(&result);
+            let _ = app_tx.send(AppEvent::ReviewFinished(Some(Ok((
+                formatted,
+                has_actionable,
+            )))));
+        });
+    }
 }

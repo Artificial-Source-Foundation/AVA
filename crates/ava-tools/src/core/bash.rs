@@ -239,7 +239,30 @@ impl Tool for BashTool {
     }
 }
 
+/// Commands that look like package installs but are actually safe local
+/// operations (they only create files in the project directory).
+/// These bypass the sandbox entirely.
+fn is_safe_local_command(command: &str) -> bool {
+    let normalized = command.trim().to_lowercase();
+    let safe_patterns = [
+        "python3 -m venv",
+        "python -m venv",
+        "npm init",
+        "npx create-",
+        "cargo init",
+        "cargo new",
+    ];
+    safe_patterns
+        .iter()
+        .any(|pattern| normalized.contains(pattern))
+}
+
 fn is_install_class(command: &str) -> bool {
+    // Safe local commands should NOT be sandboxed even if they match install patterns
+    if is_safe_local_command(command) {
+        return false;
+    }
+
     let normalized = command.trim().to_lowercase();
     let patterns = [
         "npm install",

@@ -78,8 +78,10 @@ pub(super) async fn run_single_agent(cli: CliArgs, goal: &str) -> Result<()> {
     let goal_owned = goal.to_string();
     let max_turns = cli.max_turns;
     let cli_images = load_cli_images(&cli.image);
+    let stack = Arc::new(stack);
+    let stack_for_run = stack.clone();
     let handle = tokio::spawn(async move {
-        stack
+        stack_for_run
             .run(
                 &goal_owned,
                 max_turns,
@@ -93,6 +95,7 @@ pub(super) async fn run_single_agent(cli: CliArgs, goal: &str) -> Result<()> {
             .await
     });
 
+    let mut files_edited = false;
     if json_mode {
         while let Some(event) = rx.recv().await {
             let json = match &event {
@@ -142,6 +145,7 @@ pub(super) async fn run_single_agent(cli: CliArgs, goal: &str) -> Result<()> {
                     additions,
                     deletions,
                 } => {
+                    files_edited = true;
                     serde_json::json!({"type": "diff_preview", "file": file.display().to_string(), "diff": diff_text, "additions": additions, "deletions": deletions})
                 }
                 AgentEvent::MCPToolsChanged {
@@ -228,6 +232,7 @@ pub(super) async fn run_single_agent(cli: CliArgs, goal: &str) -> Result<()> {
                         println!();
                         in_text = false;
                     }
+                    files_edited = true;
                     eprintln!(
                         "[diff: {} +{} -{}]",
                         file.display(),
@@ -304,11 +309,72 @@ pub(super) async fn run_single_agent(cli: CliArgs, goal: &str) -> Result<()> {
         );
     }
 
-    // Optional post-completion code review pass
-    if cli.review && result.success {
-        let review_exit = run_post_completion_review(&cli).await;
-        if review_exit != 0 {
-            std::process::exit(review_exit);
+    // Auto-review: when the agent edited files, review and auto-fix issues.
+    // Triggered automatically when files were edited, or explicitly with --review.
+    if result.success && (files_edited || cli.review) {
+        let review_findings = run_post_completion_review(&cli).await;
+        if let Some(findings) = review_findings {
+            // Re-run the agent to fix the review findings
+            eprintln!("\n[review] Auto-fixing issues...");
+            let fix_goal = format!(
+                "A code review found the following issues in your recent changes. Fix them:\n\n{}",
+                findings
+            );
+            let (fix_tx, mut fix_rx) = mpsc::unbounded_channel();
+            let fix_cancel = CancellationToken::new();
+            let stack_for_fix = stack.clone();
+            let fix_handle = tokio::spawn(async move {
+                stack_for_fix
+                    .run(
+                        &fix_goal,
+                        5, // max 5 turns for fixes
+                        Some(fix_tx),
+                        fix_cancel,
+                        Vec::new(),
+                        None,
+                        Vec::new(),
+                        None,
+                    )
+                    .await
+            });
+
+            // Drain fix events
+            while let Some(event) = fix_rx.recv().await {
+                match &event {
+                    AgentEvent::Token(t) => print!("{t}"),
+                    AgentEvent::ToolCall(tc) => {
+                        let summary = summarize_tool_args(&tc.name, &tc.arguments);
+                        eprintln!("[fix: {}] {}", tc.name, summary);
+                    }
+                    AgentEvent::DiffPreview {
+                        file,
+                        additions,
+                        deletions,
+                        ..
+                    } => {
+                        eprintln!(
+                            "[fix-diff: {} +{} -{}]",
+                            file.display(),
+                            additions,
+                            deletions
+                        );
+                    }
+                    AgentEvent::Complete(_) => break,
+                    AgentEvent::Error(e) => {
+                        eprintln!("[fix-error: {e}]");
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+            println!();
+
+            if let Ok(Ok(fix_result)) = fix_handle.await {
+                eprintln!(
+                    "[review] Fix pass: success={}, turns={}",
+                    fix_result.success, fix_result.turns
+                );
+            }
         }
     }
 
@@ -316,8 +382,8 @@ pub(super) async fn run_single_agent(cli: CliArgs, goal: &str) -> Result<()> {
 }
 
 /// Run a code review on working directory changes after the agent completes.
-/// Returns 0 if no actionable issues, 1 if critical/warning issues found.
-async fn run_post_completion_review(cli: &CliArgs) -> i32 {
+/// Returns `Some(findings_text)` if actionable issues found, `None` otherwise.
+async fn run_post_completion_review(cli: &CliArgs) -> Option<String> {
     use ava_platform::StandardPlatform;
     use ava_praxis::review::{
         build_review_system_prompt, collect_diff, format_text, parse_review_output,
@@ -326,16 +392,15 @@ async fn run_post_completion_review(cli: &CliArgs) -> i32 {
 
     eprintln!("\n[review] Running post-completion code review...");
 
-    // Collect working tree diff (changes made by the agent)
     let review_context = match collect_diff(&DiffMode::Working).await {
         Ok(ctx) if ctx.diff.is_empty() => {
             eprintln!("[review] No changes to review.");
-            return 0;
+            return None;
         }
         Ok(ctx) => ctx,
         Err(e) => {
             eprintln!("[review] Failed to collect diff: {e}");
-            return 0; // Don't fail the run for review errors
+            return None;
         }
     };
 
@@ -345,7 +410,6 @@ async fn run_post_completion_review(cli: &CliArgs) -> i32 {
         review_context.diff.len()
     );
 
-    // Resolve provider (reuse CLI's provider/model)
     let (provider, model) = match crate::config::cli::resolve_provider_model(
         cli.provider.as_deref(),
         cli.model.as_deref(),
@@ -355,17 +419,17 @@ async fn run_post_completion_review(cli: &CliArgs) -> i32 {
         Ok(pm) => pm,
         Err(e) => {
             eprintln!("[review] Failed to resolve provider: {e}");
-            return 0;
+            return None;
         }
     };
 
     let data_dir = dirs::home_dir().unwrap_or_default().join(".ava");
-    let (stack, _question_rx, _approval_rx, _plan_rx) = match AgentStack::new(AgentStackConfig {
+    let (review_stack, _q, _a, _p) = match AgentStack::new(AgentStackConfig {
         data_dir,
         provider,
         model,
         max_turns: 5,
-        yolo: true, // Review agent doesn't need approval prompts
+        yolo: true,
         ..Default::default()
     })
     .await
@@ -373,12 +437,12 @@ async fn run_post_completion_review(cli: &CliArgs) -> i32 {
         Ok(s) => s,
         Err(e) => {
             eprintln!("[review] Failed to create review stack: {e}");
-            return 0;
+            return None;
         }
     };
 
-    let (provider_name, model_name) = stack.current_model().await;
-    let resolved_provider = match stack
+    let (provider_name, model_name) = review_stack.current_model().await;
+    let resolved_provider = match review_stack
         .router
         .route_required(&provider_name, &model_name)
         .await
@@ -386,7 +450,7 @@ async fn run_post_completion_review(cli: &CliArgs) -> i32 {
         Ok(p) => p,
         Err(e) => {
             eprintln!("[review] Failed to route provider: {e}");
-            return 0;
+            return None;
         }
     };
 
@@ -405,7 +469,7 @@ async fn run_post_completion_review(cli: &CliArgs) -> i32 {
         Ok(o) => o,
         Err(e) => {
             eprintln!("[review] Review agent failed: {e}");
-            return 0;
+            return None;
         }
     };
 
@@ -419,11 +483,11 @@ async fn run_post_completion_review(cli: &CliArgs) -> i32 {
     eprintln!("\n{formatted}");
 
     if has_actionable {
-        eprintln!("[review] Found actionable issues. Consider fixing them.");
-        1
+        eprintln!("[review] Found actionable issues — auto-fixing...");
+        Some(formatted)
     } else {
         eprintln!("[review] No critical issues found.");
-        0
+        None
     }
 }
 

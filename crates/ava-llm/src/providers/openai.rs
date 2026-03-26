@@ -293,78 +293,79 @@ impl OpenAIProvider {
             .collect::<Vec<_>>()
             .join("\n");
 
-        // Convert non-system messages to "input" format
-        let input: Vec<Value> = messages
+        // Convert non-system messages to "input" format.
+        //
+        // The Responses API requires each function_call to be followed by its
+        // function_call_output. We collect tool result messages into a lookup
+        // and interleave them with their corresponding function calls.
+        let non_system: Vec<&Message> = messages
             .iter()
             .filter(|m| m.role != ava_types::Role::System)
-            .map(|m| {
-                let role = match m.role {
-                    ava_types::Role::User => "user",
-                    ava_types::Role::Assistant => "assistant",
-                    ava_types::Role::Tool => "tool",
-                    ava_types::Role::System => unreachable!(),
-                };
-
-                // Handle tool result messages
-                if m.role == ava_types::Role::Tool {
-                    if let Some(ref tool_call_id) = m.tool_call_id {
-                        return json!({
-                            "type": "function_call_output",
-                            "call_id": tool_call_id,
-                            "output": m.content,
-                        });
-                    }
-                }
-
-                // Handle assistant messages with tool calls
-                if m.role == ava_types::Role::Assistant && !m.tool_calls.is_empty() {
-                    let mut items = Vec::new();
-                    // Add text content if present
-                    if !m.content.is_empty() {
-                        items.push(json!({
-                            "type": "message",
-                            "role": "assistant",
-                            "content": [{"type": "output_text", "text": m.content}],
-                        }));
-                    }
-                    // Add function calls — skip any with an empty name to avoid a
-                    // Responses API 400 "empty_string" error on `input[N].name`.
-                    for tc in &m.tool_calls {
-                        if tc.name.is_empty() {
-                            continue;
-                        }
-                        items.push(json!({
-                            "type": "function_call",
-                            "call_id": tc.id,
-                            "name": tc.name,
-                            "arguments": tc.arguments.to_string(),
-                        }));
-                    }
-                    // For a single function call with no text, return it directly
-                    if items.len() == 1 {
-                        return items
-                            .into_iter()
-                            .next()
-                            .unwrap_or_else(|| Value::Array(vec![]));
-                    }
-                    // Multiple items: return as array (the API accepts mixed arrays)
-                    return Value::Array(items);
-                }
-
-                json!({
-                    "role": role,
-                    "content": m.content,
-                })
-            })
-            .flat_map(|v| {
-                // Flatten arrays from multi-item assistant messages
-                if let Value::Array(items) = v {
-                    items
-                } else {
-                    vec![v]
-                }
-            })
             .collect();
+
+        // Build a map of tool_call_id -> tool result content for interleaving
+        let mut tool_results: std::collections::HashMap<&str, &str> =
+            std::collections::HashMap::new();
+        for m in &non_system {
+            if m.role == ava_types::Role::Tool {
+                if let Some(ref id) = m.tool_call_id {
+                    tool_results.insert(id.as_str(), m.content.as_str());
+                }
+            }
+        }
+
+        let mut input: Vec<Value> = Vec::new();
+
+        for m in &non_system {
+            // Skip standalone tool result messages — they're interleaved below
+            if m.role == ava_types::Role::Tool {
+                continue;
+            }
+
+            // Handle assistant messages with tool calls
+            if m.role == ava_types::Role::Assistant && !m.tool_calls.is_empty() {
+                // Add text content if present
+                if !m.content.is_empty() {
+                    input.push(json!({
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [{"type": "output_text", "text": m.content}],
+                    }));
+                }
+                // Add each function_call followed by its function_call_output
+                for tc in &m.tool_calls {
+                    if tc.name.is_empty() {
+                        continue;
+                    }
+                    input.push(json!({
+                        "type": "function_call",
+                        "call_id": tc.id,
+                        "name": tc.name,
+                        "arguments": tc.arguments.to_string(),
+                    }));
+                    // Interleave the matching result immediately after the call
+                    if let Some(output) = tool_results.get(tc.id.as_str()) {
+                        input.push(json!({
+                            "type": "function_call_output",
+                            "call_id": tc.id,
+                            "output": *output,
+                        }));
+                    }
+                }
+                continue;
+            }
+
+            // Regular user/assistant message
+            let role = match m.role {
+                ava_types::Role::User => "user",
+                ava_types::Role::Assistant => "assistant",
+                _ => continue,
+            };
+            input.push(json!({
+                "role": role,
+                "content": m.content,
+            }));
+        }
 
         let mut body = json!({
             "model": self.model,

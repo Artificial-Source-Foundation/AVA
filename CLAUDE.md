@@ -195,7 +195,7 @@ The Director is **LLM-powered** (not a code-driven router). It analyzes task com
 4. Worker budget exhausted → Lead asks Director → Director asks user
 5. Catastrophic → Director asks user
 
-> **Note:** Tauri bridge for Praxis events is not yet implemented. Desktop Team UI is wired to the store but Rust events don't flow to it yet. Use TUI `--multi-agent` for Praxis testing.
+> **Note:** Praxis Tauri bridge is fully wired — `start_praxis`, `get_praxis_status`, `cancel_praxis`, `steer_lead` commands registered and `emit_praxis_event` forwards all PraxisEvent variants to the desktop frontend via `agent-event` IPC. Frontend event handlers in `rust-agent-events.ts` and `useAgent.ts` map Praxis events to the team store.
 
 ## Middleware Priority
 

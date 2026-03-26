@@ -7,6 +7,13 @@
 
 import { Eye, EyeOff, Server } from 'lucide-solid'
 import { type Component, createSignal, For, Show } from 'solid-js'
+import {
+  isOAuthSupported,
+  type OAuthTokens,
+  startOAuthFlow,
+  storeOAuthCredentials,
+} from '../../../services/auth/oauth'
+import type { LLMProvider } from '../../../types/llm'
 import { AnthropicLogo, GoogleLogo, OpenAILogo, OpenRouterLogo } from '../../icons/provider-logos'
 
 // ---------------------------------------------------------------------------
@@ -50,10 +57,7 @@ const PROVIDERS: ProviderDef[] = [
     description: 'Gemini 2.5 Pro, Flash',
     color: '#4285F4',
     logo: GoogleLogo,
-    authOptions: [
-      { label: 'OAuth', type: 'oauth' },
-      { label: 'API Key', type: 'apikey' },
-    ],
+    authOptions: [{ label: 'API Key', type: 'apikey' }],
   },
   {
     id: 'openrouter',
@@ -98,13 +102,28 @@ export const ProviderStep: Component<ProviderStepProps> = (props) => {
     setShowKey((prev) => ({ ...prev, [id]: !prev[id] }))
   }
 
-  const handleAuth = (provider: ProviderDef, type: string): void => {
+  const [oauthLoading, setOauthLoading] = createSignal<string | null>(null)
+
+  const handleAuth = async (provider: ProviderDef, type: string): Promise<void> => {
     if (type === 'apikey') {
       setExpandedProvider((prev) => (prev === provider.id ? null : provider.id))
+      return
     }
-    // TODO(auth): wire 'oauth' type to invoke('start_oauth_flow', { provider: provider.id })
-    // TODO(auth): wire 'configure' type to invoke('open_provider_settings', { provider: provider.id })
-    // Until wired, OAuth and Configure buttons are disabled below to avoid misleading users.
+    if (type === 'oauth' && isOAuthSupported(provider.id as LLMProvider)) {
+      setOauthLoading(provider.id)
+      try {
+        const result = await startOAuthFlow(provider.id as LLMProvider)
+        // PKCE flow returns OAuthTokens directly; device code returns DeviceCodeResponse
+        if ('accessToken' in result) {
+          await storeOAuthCredentials(provider.id as LLMProvider, result as OAuthTokens)
+        }
+        props.onSetProviderKey(provider.id, '(oauth)')
+      } catch (e) {
+        console.error(`OAuth flow failed for ${provider.id}:`, e)
+      } finally {
+        setOauthLoading(null)
+      }
+    }
   }
 
   return (
@@ -150,23 +169,21 @@ export const ProviderStep: Component<ProviderStepProps> = (props) => {
                       <button
                         type="button"
                         onClick={() => handleAuth(provider, opt.type)}
-                        disabled={opt.type === 'oauth' || opt.type === 'configure'}
-                        title={
-                          opt.type === 'oauth' || opt.type === 'configure'
-                            ? 'Coming soon — use API Key for now'
-                            : undefined
-                        }
+                        disabled={opt.type === 'configure' || oauthLoading() === provider.id}
+                        title={opt.type === 'configure' ? 'Coming soon' : undefined}
                         class="px-3 py-1.5 text-xs font-medium rounded-lg transition-colors"
                         classList={{
-                          'bg-[var(--accent)] text-white opacity-40 cursor-not-allowed':
-                            opt.type === 'oauth',
+                          'bg-[var(--accent)] text-white hover:bg-[var(--accent-hover)]':
+                            opt.type === 'oauth' && oauthLoading() !== provider.id,
+                          'bg-[var(--accent)] text-white opacity-60 cursor-wait':
+                            opt.type === 'oauth' && oauthLoading() === provider.id,
                           'bg-[var(--gray-5)] text-[var(--text-primary)] hover:bg-[var(--gray-6)]':
                             opt.type === 'apikey',
                           'bg-[var(--gray-5)] text-[var(--text-primary)] opacity-40 cursor-not-allowed':
                             opt.type === 'configure',
                         }}
                       >
-                        {opt.label}
+                        {oauthLoading() === provider.id ? 'Connecting...' : opt.label}
                       </button>
                     )}
                   </For>

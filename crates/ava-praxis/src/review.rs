@@ -465,6 +465,7 @@ pub async fn run_review_agent(
         max_turns,
         max_budget_usd: 0.0,
         token_limit: 128_000,
+        provider: String::new(),
         model: provider.model_name().to_string(),
         max_cost_usd: 5.0,
         loop_detection: true,

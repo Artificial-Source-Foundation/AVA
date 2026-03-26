@@ -84,6 +84,7 @@ where
                     oauth_expires_at: None,
                     oauth_account_id: None,
                     litellm_compatible: None,
+                    loop_prone: None,
                 },
             );
 
@@ -261,6 +262,7 @@ mod tests {
                 oauth_expires_at: None,
                 oauth_account_id: None,
                 litellm_compatible: None,
+                loop_prone: None,
             },
         );
 
@@ -319,6 +321,7 @@ mod tests {
                 oauth_expires_at: None,
                 oauth_account_id: None,
                 litellm_compatible: None,
+                loop_prone: None,
             },
         );
 
@@ -349,6 +352,7 @@ mod tests {
                 oauth_expires_at: None,
                 oauth_account_id: None,
                 litellm_compatible: None,
+                loop_prone: None,
             },
         );
 
@@ -378,6 +382,7 @@ mod tests {
                 oauth_expires_at: Some(1),
                 oauth_account_id: None,
                 litellm_compatible: None,
+                loop_prone: None,
             },
         );
 

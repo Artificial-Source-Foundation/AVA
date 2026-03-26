@@ -208,6 +208,7 @@ impl ModelRouter {
                     oauth_expires_at: None,
                     oauth_account_id: None,
                     litellm_compatible: None,
+                    loop_prone: None,
                 });
             entry.api_key = api_key;
         }
@@ -613,6 +614,7 @@ mod tests {
                     oauth_expires_at: None,
                     oauth_account_id: None,
                     litellm_compatible: None,
+                    loop_prone: None,
                 },
             );
         }

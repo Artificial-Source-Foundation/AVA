@@ -6,8 +6,10 @@ use regex::Regex;
 use tokio::fs;
 
 use crate::graph::DependencyGraph;
-use crate::pagerank::calculate_pagerank;
+use crate::pagerank::{calculate_pagerank, calculate_symbol_pagerank};
 use crate::search::SearchIndex;
+use crate::symbol_graph::SymbolGraph;
+use crate::symbols::{extract_symbols, Symbol, SymbolRef};
 use crate::types::SearchDocument;
 use crate::{CodebaseIndex, Result};
 
@@ -56,6 +58,8 @@ pub async fn index_workspace(roots: &[PathBuf]) -> Result<CodebaseIndex> {
 async fn index_roots(roots: &[PathBuf], qualify_repo_paths: bool) -> Result<CodebaseIndex> {
     let search = SearchIndex::new()?;
     let mut graph = DependencyGraph::new();
+    let mut all_symbols: Vec<Symbol> = Vec::new();
+    let mut all_refs: Vec<SymbolRef> = Vec::new();
     #[cfg(feature = "semantic")]
     let mut semantic = crate::semantic::SemanticIndex::new();
 
@@ -71,6 +75,8 @@ async fn index_roots(roots: &[PathBuf], qualify_repo_paths: bool) -> Result<Code
             qualify_repo_paths,
             &search,
             &mut graph,
+            &mut all_symbols,
+            &mut all_refs,
             #[cfg(feature = "semantic")]
             &mut semantic,
         )
@@ -79,12 +85,23 @@ async fn index_roots(roots: &[PathBuf], qualify_repo_paths: bool) -> Result<Code
 
     search.commit()?;
     let pagerank = calculate_pagerank(&graph, 0.85, 20);
-    tracing::info!("Codebase indexed: {} files", graph.node_count());
+
+    // Build symbol-level graph and PageRank
+    let symbol_graph = SymbolGraph::build(&all_symbols, &all_refs);
+    let symbol_pagerank = calculate_symbol_pagerank(&symbol_graph, 0.85, 20);
+    tracing::info!(
+        "Codebase indexed: {} files, {} symbols, {} symbol edges",
+        graph.node_count(),
+        symbol_graph.node_count(),
+        symbol_graph.edge_count(),
+    );
 
     Ok(CodebaseIndex {
         search,
         graph,
         pagerank,
+        symbol_graph: Some(symbol_graph),
+        symbol_pagerank,
         #[cfg(feature = "semantic")]
         semantic: Some(semantic),
     })
@@ -96,6 +113,8 @@ async fn index_single_root(
     qualify_repo_paths: bool,
     search: &SearchIndex,
     graph: &mut DependencyGraph,
+    all_symbols: &mut Vec<Symbol>,
+    all_refs: &mut Vec<SymbolRef>,
     #[cfg(feature = "semantic")] semantic: &mut crate::semantic::SemanticIndex,
 ) {
     let mut stack = vec![root.to_path_buf()];
@@ -154,6 +173,11 @@ async fn index_single_root(
             for imp in imports {
                 graph.add_dependency(&qualified_path, &imp);
             }
+
+            // Extract symbols for the symbol-level graph
+            let (syms, refs) = extract_symbols(&qualified_path, &content, ext);
+            all_symbols.extend(syms);
+            all_refs.extend(refs);
         }
     }
 }
@@ -275,6 +299,8 @@ const x = require("lodash");"#;
         let index = index_project(dir.path()).await.unwrap();
         assert_eq!(index.graph.node_count(), 0);
         assert!(index.pagerank.is_empty());
+        assert!(index.symbol_pagerank.is_empty());
+        assert!(index.symbol_graph.as_ref().unwrap().node_count() == 0);
     }
 
     #[tokio::test]
@@ -302,6 +328,21 @@ const x = require("lodash");"#;
         assert!(index.graph.node_count() >= 2);
         assert!(!index.pagerank.is_empty());
 
+        // Symbol graph should be populated
+        let sg = index
+            .symbol_graph
+            .as_ref()
+            .expect("symbol graph should be present");
+        assert!(
+            sg.node_count() >= 2,
+            "symbol graph should have at least 2 symbols, got {}",
+            sg.node_count()
+        );
+        assert!(
+            !index.symbol_pagerank.is_empty(),
+            "symbol pagerank should be populated"
+        );
+
         // Search should find the files
         let hits = index
             .search
@@ -309,6 +350,50 @@ const x = require("lodash");"#;
             .unwrap();
         assert!(!hits.is_empty());
         assert!(hits[0].path.ends_with("src/main.rs") || hits[0].path.ends_with("src/lib.rs"));
+    }
+
+    #[tokio::test]
+    async fn index_builds_symbol_graph_with_cross_file_refs() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+
+        fs::write(
+            root.join("types.rs"),
+            "pub struct Config {}\npub struct Parser {}\n",
+        )
+        .await
+        .unwrap();
+        fs::write(
+            root.join("engine.rs"),
+            "pub fn run(config: Config, parser: Parser) {}\n",
+        )
+        .await
+        .unwrap();
+
+        let index = index_project(root).await.unwrap();
+        let sg = index.symbol_graph.as_ref().unwrap();
+
+        // types.rs should have Config and Parser
+        let type_syms = sg.symbols_in_file("types.rs");
+        let type_names: Vec<&str> = type_syms.iter().map(|s| s.name.as_str()).collect();
+        assert!(
+            type_names.contains(&"Config"),
+            "types.rs should have Config: {type_names:?}"
+        );
+        assert!(
+            type_names.contains(&"Parser"),
+            "types.rs should have Parser: {type_names:?}"
+        );
+
+        // engine.rs references Config and Parser, so should have edges
+        assert!(
+            sg.edge_count() > 0,
+            "should have cross-file reference edges"
+        );
+
+        // symbol_file_scores should work
+        let file_scores = index.symbol_file_scores("");
+        assert!(!file_scores.is_empty(), "file scores should not be empty");
     }
 
     #[tokio::test]

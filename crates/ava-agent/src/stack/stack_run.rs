@@ -304,7 +304,15 @@ impl AgentStack {
 
         let relevance_scores = {
             let guard = self.codebase_index.read().await;
-            guard.as_ref().map(|idx| idx.pagerank.clone())
+            guard.as_ref().map(|idx| {
+                // Prefer symbol-level PageRank (aggregated to file level) over file-level
+                if let Some(sg) = &idx.symbol_graph {
+                    if !idx.symbol_pagerank.is_empty() {
+                        return sg.aggregate_file_scores(&idx.symbol_pagerank);
+                    }
+                }
+                idx.pagerank.clone()
+            })
         };
         let summarizer: Arc<dyn ava_context::Summarizer> =
             Arc::new(LlmSummarizer(provider.clone()));
@@ -398,6 +406,7 @@ impl AgentStack {
             max_turns: turns_limit,
             max_budget_usd: self.max_budget_usd,
             token_limit: model_context_window,
+            provider: resolved_provider_name.clone(),
             model: provider.model_name().to_string(),
             max_cost_usd: 10.0,
             loop_detection: true,
@@ -811,6 +820,7 @@ impl TaskSpawner for AgentTaskSpawner {
             max_turns: sub_max_turns,
             max_budget_usd: 0.0, // sub-agents don't get CLI budget
             token_limit: sub_agent_context_window,
+            provider: String::new(), // sub-agents inherit parent's detection behavior
             model: effective_model.clone(),
             max_cost_usd: 5.0,
             loop_detection: true,

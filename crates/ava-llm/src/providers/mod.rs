@@ -529,6 +529,7 @@ mod tests {
                 oauth_expires_at: None,
                 oauth_account_id: None,
                 litellm_compatible: None,
+                loop_prone: None,
             },
         );
         let result = create_provider("copilot", "gpt-4o", &store, default_pool());
@@ -550,6 +551,7 @@ mod tests {
                 oauth_expires_at: None,
                 oauth_account_id: None,
                 litellm_compatible: None,
+                loop_prone: None,
             },
         );
         let provider = create_provider("copilot", "gpt-4o", &store, default_pool())
@@ -571,6 +573,7 @@ mod tests {
                     oauth_expires_at: None,
                     oauth_account_id: None,
                     litellm_compatible: None,
+                    loop_prone: None,
                 },
             );
         }
@@ -693,6 +696,7 @@ mod tests {
                 oauth_expires_at: Some(u64::MAX), // far future
                 oauth_account_id: None,
                 litellm_compatible: None,
+                loop_prone: None,
             },
         );
         let provider = create_provider("openai", "codex-mini", &store, default_pool())
@@ -718,6 +722,7 @@ mod tests {
             oauth_expires_at: Some(u64::MAX),
             oauth_account_id: None,
             litellm_compatible: None,
+            loop_prone: None,
         };
 
         assert_eq!(

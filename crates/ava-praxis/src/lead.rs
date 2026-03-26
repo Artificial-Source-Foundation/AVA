@@ -432,6 +432,7 @@ impl Lead {
                 max_turns: worker_budget.max_turns,
                 max_budget_usd: 0.0,
                 token_limit: worker_budget.max_tokens,
+                provider: String::new(),
                 model: model_name,
                 max_cost_usd: worker_budget.max_cost_usd,
                 loop_detection: true,

@@ -139,6 +139,7 @@ impl Scout {
             max_turns: SCOUT_MAX_TURNS,
             max_budget_usd: 0.0,
             token_limit: SCOUT_TOKEN_LIMIT,
+            provider: String::new(),
             model: model_name,
             max_cost_usd: SCOUT_MAX_COST_USD,
             loop_detection: true,

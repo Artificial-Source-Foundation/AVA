@@ -97,6 +97,9 @@ pub struct AgentConfig {
     #[serde(default)]
     pub max_budget_usd: f64,
     pub token_limit: usize,
+    /// Provider name (e.g., "anthropic", "openai", "zai-coding-plan").
+    #[serde(default)]
+    pub provider: String,
     pub model: String,
     #[serde(default = "default_max_cost")]
     pub max_cost_usd: f64,
@@ -482,8 +485,17 @@ impl AgentLoop {
         } else {
             Session::new()
         };
-        let mut detector = StuckDetector::new();
-        let mut repetition_detector = RepetitionDetector::default();
+        let loop_thresholds = crate::stuck::LoopThresholds::for_provider_model(
+            &self.config.provider,
+            &self.config.model,
+        );
+        let rep_threshold = if loop_thresholds.tool_repeat_count < 3 {
+            2
+        } else {
+            3
+        };
+        let mut detector = StuckDetector::with_thresholds(loop_thresholds);
+        let mut repetition_detector = RepetitionDetector::new(rep_threshold);
         let mut total_usage = TokenUsage::default();
         let mut total_cost_usd = 0.0;
         let is_subscription = self.llm.capabilities().is_subscription;
@@ -756,6 +768,59 @@ impl AgentLoop {
                     session.add_message(Message::new(Role::System, reason));
                     break;
                 }
+                StuckAction::NeedsJudge(context_summary) => {
+                    // Layer 3: Ask the same model (fresh, no context) if the agent is stuck
+                    debug!("Layer 3 LLM-as-judge triggered");
+                    Self::emit(
+                        &event_tx,
+                        AgentEvent::Progress(
+                            "checking if agent is stuck (LLM judge)...".to_string(),
+                        ),
+                    );
+                    let judge_prompt = format!(
+                        "You are an AI agent monitor. Analyze this agent's recent behavior and determine if it is stuck in a loop.\n\n\
+                         {context_summary}\n\n\
+                         Respond with EXACTLY one line:\n\
+                         - \"STUCK: <brief reason>\" if the agent is repeating itself or making no progress\n\
+                         - \"NOT_STUCK\" if the agent is making genuine progress"
+                    );
+                    let judge_msgs = vec![Message::new(Role::User, judge_prompt)];
+                    let judge_result = tokio::time::timeout(
+                        std::time::Duration::from_secs(10),
+                        self.llm.generate(&judge_msgs),
+                    )
+                    .await;
+
+                    match judge_result {
+                        Ok(Ok(response)) => {
+                            let trimmed = response.trim();
+                            if let Some(reason) = trimmed.strip_prefix("STUCK:") {
+                                let reason = reason.trim();
+                                let msg = format!(
+                                    "LLM judge determined agent is stuck: {reason}. Try a completely different approach."
+                                );
+                                let assistant_message =
+                                    Message::new(Role::Assistant, response_text.clone())
+                                        .with_tool_calls(tool_calls.clone());
+                                self.context.add_message(assistant_message.clone());
+                                session.add_message(assistant_message);
+                                self.add_tool_results(&tool_calls, &tool_results, &mut session);
+                                Self::emit(&event_tx, AgentEvent::Progress(msg.clone()));
+                                let nudge = Message::new(Role::User, msg);
+                                self.context.add_message(nudge.clone());
+                                session.add_message(nudge);
+                                continue;
+                            }
+                            // NOT_STUCK — continue normally
+                        }
+                        Ok(Err(e)) => {
+                            debug!(error = %e, "LLM judge call failed, continuing");
+                        }
+                        Err(_) => {
+                            debug!("LLM judge timed out after 10s, continuing");
+                        }
+                    }
+                }
             }
 
             // --- Empty response handling ---
@@ -1006,6 +1071,7 @@ mod tests {
         let config = AgentConfig {
             max_turns: 10,
             token_limit: 128_000,
+            provider: String::new(),
             model: "mock".to_string(),
             max_budget_usd: 0.0,
             max_cost_usd: 1.0,
@@ -1040,6 +1106,7 @@ mod tests {
         let config = AgentConfig {
             max_turns: 10,
             token_limit: 128_000,
+            provider: String::new(),
             model: "mock".to_string(),
             max_budget_usd: 0.0,
             max_cost_usd: 10.0,
@@ -1077,6 +1144,7 @@ mod tests {
         let config = AgentConfig {
             max_turns: 10,
             token_limit: 128_000,
+            provider: String::new(),
             model: "mock".to_string(),
             max_budget_usd: 0.0,
             max_cost_usd: 10.0,
@@ -1131,6 +1199,7 @@ mod tests {
         let config = AgentConfig {
             max_turns: 10,
             token_limit: 128_000,
+            provider: String::new(),
             model: "mock".to_string(),
             max_budget_usd: 0.0,
             max_cost_usd: 10.0,
@@ -1185,6 +1254,7 @@ mod tests {
         let config = AgentConfig {
             max_turns: 10,
             token_limit: 128_000,
+            provider: String::new(),
             model: "mock".to_string(),
             max_budget_usd: 0.0,
             max_cost_usd: 0.0, // Zero threshold = immediate stop
@@ -1214,6 +1284,7 @@ mod tests {
         let config = AgentConfig {
             max_turns: 10,
             token_limit: 128_000,
+            provider: String::new(),
             model: "mock".to_string(),
             max_budget_usd: 0.0,
             max_cost_usd: 0.0,

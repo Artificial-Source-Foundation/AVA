@@ -641,6 +641,7 @@ mod tests {
                 oauth_expires_at: None,
                 oauth_account_id: None,
                 litellm_compatible: None,
+                loop_prone: None,
             },
         );
         store.set(
@@ -654,6 +655,7 @@ mod tests {
                 oauth_expires_at: Some(1700000000),
                 oauth_account_id: None,
                 litellm_compatible: None,
+                loop_prone: None,
             },
         );
 
@@ -701,6 +703,7 @@ mod tests {
                 oauth_expires_at: None,
                 oauth_account_id: None,
                 litellm_compatible: None,
+                loop_prone: None,
             },
         );
 
@@ -735,6 +738,7 @@ mod tests {
             oauth_expires_at: None,
             oauth_account_id: None,
             litellm_compatible: None,
+            loop_prone: None,
         };
         manager.store("openrouter", &cred).unwrap();
 
@@ -774,6 +778,7 @@ mod tests {
                     oauth_expires_at: None,
                     oauth_account_id: None,
                     litellm_compatible: None,
+                    loop_prone: None,
                 },
             );
             store.save(&plaintext_path).await.unwrap();
@@ -831,6 +836,7 @@ mod tests {
                 oauth_expires_at: None,
                 oauth_account_id: None,
                 litellm_compatible: None,
+                loop_prone: None,
             },
         );
         store.set(
@@ -844,6 +850,7 @@ mod tests {
                 oauth_expires_at: None,
                 oauth_account_id: None,
                 litellm_compatible: None,
+                loop_prone: None,
             },
         );
 

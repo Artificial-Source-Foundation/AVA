@@ -35,6 +35,10 @@ pub struct ModelCapabilities {
     pub reasoning: bool,
     #[serde(default)]
     pub streaming: bool,
+    /// Models flagged as loop-prone get aggressive stuck detection thresholds.
+    /// Typically cheap Chinese models and fast inference models.
+    #[serde(default)]
+    pub loop_prone: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -101,6 +105,21 @@ impl ModelRegistry {
             .iter()
             .filter(|m| m.provider == provider)
             .collect()
+    }
+
+    /// Check if a model is flagged as loop-prone.
+    /// Falls back to provider-based heuristics for models not in the registry.
+    pub fn is_loop_prone(&self, model: &str) -> bool {
+        if let Some(m) = self.find(model) {
+            return m.capabilities.loop_prone;
+        }
+        // Fallback: heuristic for models not in the registry
+        let lower = model.to_lowercase();
+        lower.contains("glm")
+            || lower.contains("codegeex")
+            || lower.contains("minimax")
+            || lower.contains("kimi")
+            || lower.contains("mercury")
     }
 
     /// Fuzzy normalize a model name to canonical ID.
@@ -204,6 +223,58 @@ mod tests {
             .unwrap();
         assert_eq!(m.provider, "anthropic");
         assert_eq!(m.id, "claude-haiku-4.5");
+    }
+
+    #[test]
+    fn loop_prone_models_flagged() {
+        let reg = ModelRegistry::load();
+        // ZAI models should be loop-prone
+        assert!(reg.is_loop_prone("glm-4.7"), "glm-4.7 should be loop-prone");
+        assert!(
+            reg.is_loop_prone("mercury-2"),
+            "mercury-2 should be loop-prone"
+        );
+        assert!(
+            reg.is_loop_prone("deepseek-chat"),
+            "deepseek-chat should be loop-prone"
+        );
+        assert!(
+            reg.is_loop_prone("mixtral-8x7b"),
+            "mixtral-8x7b should be loop-prone"
+        );
+        // SOTA models should NOT be loop-prone
+        assert!(
+            !reg.is_loop_prone("claude-opus-4.6"),
+            "opus should not be loop-prone"
+        );
+        assert!(
+            !reg.is_loop_prone("gpt-5.4"),
+            "gpt-5.4 should not be loop-prone"
+        );
+        assert!(
+            !reg.is_loop_prone("deepseek-r1"),
+            "deepseek-r1 should not be loop-prone"
+        );
+    }
+
+    #[test]
+    fn loop_prone_fallback_for_unknown_models() {
+        let reg = ModelRegistry::load();
+        // Unknown models with loop-prone provider hints
+        assert!(
+            reg.is_loop_prone("some-glm-variant"),
+            "glm variant should fallback to loop-prone"
+        );
+        assert!(
+            reg.is_loop_prone("mercury-3-fast"),
+            "mercury variant should fallback to loop-prone"
+        );
+        assert!(
+            reg.is_loop_prone("kimi-coder"),
+            "kimi should fallback to loop-prone"
+        );
+        // Unknown SOTA-like models should not
+        assert!(!reg.is_loop_prone("some-unknown-model"));
     }
 
     #[test]

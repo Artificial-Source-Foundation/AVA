@@ -1,4 +1,4 @@
-<!-- Last verified: 2026-03-23 -->
+<!-- Last verified: 2026-03-26 -->
 # AI Coding Agent Instructions (v3)
 
 > Instructions for AI assistants working on AVA. This file is auto-injected into the AVA agent's system prompt.
@@ -41,6 +41,7 @@ AVA is a Rust-first AI coding assistant (CLI/TUI + Tauri desktop) with a 21-crat
 - New tools: `crates/ava-tools/src/core/` (implement `Tool` trait)
 - New providers: `crates/ava-llm/src/providers/`
 - New agent features: `crates/ava-agent/` or `crates/ava-praxis/`
+- External agent integration: `crates/ava-acp/` (Agent Client Protocol)
 - TUI features: `crates/ava-tui/`
 - Desktop commands: `src-tauri/src/commands/`
 - Configuration: `crates/ava-config/`

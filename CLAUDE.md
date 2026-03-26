@@ -88,7 +88,7 @@ AVA/
 |   +-- ava-auth/             # OAuth + credential flows
 |   +-- ava-platform/         # File system + shell abstractions
 |   +-- ava-sandbox/          # Command sandboxing (bwrap/sandbox-exec)
-|   +-- ava-cli-providers/    # External CLI agent integration
+|   +-- ava-acp/              # Agent Client Protocol (external agent integration)
 |   +-- ava-extensions/       # Extension system (hooks, native/WASM)
 |   +-- ava-db/               # SQLite connection pool
 |   +-- ava-types/            # Shared types

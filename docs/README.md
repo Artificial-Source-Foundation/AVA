@@ -1,10 +1,24 @@
-<!-- Last verified: 2026-03-23. Run 'just check' to revalidate. -->
+<!-- Last verified: 2026-03-26. Run 'just check' to revalidate. -->
 
 # AVA Documentation
 
-AVA is a Rust-first AI coding assistant that runs as a CLI/TUI, web server, or Tauri desktop app. It sits between minimalist tools (Pi) and batteries-included IDEs (Cursor) -- lean defaults with opt-in power via MCP servers, TOML custom tools, and multi-agent orchestration.
+AVA is a Rust-first AI coding assistant that runs as a CLI/TUI, web server, or Tauri desktop app. It sits between minimalist tools (Pi) and batteries-included IDEs (Cursor) — lean defaults with opt-in power via MCP servers, TOML custom tools, and multi-agent orchestration.
 
 **21 Rust crates in the root workspace, plus the Tauri desktop host in `src-tauri/`.**
+
+## Start Here
+
+| I want to... | Go to |
+|--------------|-------|
+| **Use AVA** | [Quick Start](#quick-start) below |
+| **Understand the architecture** | [CLAUDE.md](../CLAUDE.md) → [Architecture](architecture/) |
+| **Add a tool** | [codebase/ava-tools.md](codebase/ava-tools.md) |
+| **Add an LLM provider** | [codebase/ava-llm.md](codebase/ava-llm.md) |
+| **Work on the desktop app** | [codebase/frontend.md](codebase/frontend.md) → [tauri-commands.md](codebase/tauri-commands.md) |
+| **Work on multi-agent (Praxis)** | [codebase/ava-praxis.md](codebase/ava-praxis.md) |
+| **Contribute** | [CONTRIBUTING.md](../.github/CONTRIBUTING.md) → [AGENTS.md](../AGENTS.md) |
+| **See what changed** | [CHANGELOG](development/CHANGELOG.md) |
+| **Check the backlog** | [backlog.md](development/backlog.md) |
 
 ## Quick Start
 
@@ -20,7 +34,10 @@ just run                         # interactive TUI
 just headless "your goal"        # headless mode
 
 # Desktop app
-pnpm tauri dev
+pnpm install && pnpm tauri dev
+
+# Test (always use openai/gpt-5.4)
+cargo run --bin ava -- "Reply with OK" --headless --provider openai --model gpt-5.4 --max-turns 2
 ```
 
 Credentials live at `~/.ava/credentials.json`. See [CLI Testing](#cli-testing) below.
@@ -55,7 +72,7 @@ All three interfaces share the same Rust backend. The desktop frontend (SolidJS)
 | `ava-types` | Shared types used across the workspace |
 | `ava-plugin` | Plugin runtime and hook dispatch |
 | `ava-session` | Session persistence and conversation state |
-| `ava-cli-providers` | External CLI agent integrations |
+| `ava-acp` | Agent Client Protocol — external agent integration |
 | `ava-auth` | OAuth and API credential flows |
 | `ava-codebase` | Code indexing and search |
 | `ava-platform` | File system and shell abstractions |
@@ -134,19 +151,25 @@ See [plugins.md](plugins.md) for detailed plugin/extension documentation.
 
 ## CLI Testing
 
+**Always use `--provider openai --model gpt-5.4` for testing.**
+
 ```bash
 # Smoke test
 cargo run --bin ava -- "Reply with SMOKE_OK" --headless \
-  --provider openrouter --model anthropic/claude-haiku-4.5 --max-turns 3
+  --provider openai --model gpt-5.4 --max-turns 3
 
 # Multi-agent
 cargo run --bin ava -- "goal" --headless --multi-agent \
-  --provider openrouter --model anthropic/claude-haiku-4.5
+  --provider openai --model gpt-5.4
+
+# With auto-review
+cargo run --bin ava -- "goal" --headless --auto-approve --review \
+  --provider openai --model gpt-5.4
 
 # Mid-stream messaging
 cargo run --bin ava -- "goal" --headless \
   --follow-up "also run tests" \
-  --provider openrouter --model anthropic/claude-haiku-4.5
+  --provider openai --model gpt-5.4
 ```
 
 ## Documentation Index
@@ -170,7 +193,7 @@ Complete documentation for every crate and component:
 | [codebase/tauri-commands.md](codebase/tauri-commands.md) | 70+ Rust commands exposed to frontend |
 | [codebase/plugins.md](codebase/plugins.md) | Plugin architecture, SDKs, hooks |
 
-**Crate docs:** [ava-agent](codebase/ava-agent.md) • [ava-auth](codebase/ava-auth.md) • [ava-cli-providers](codebase/ava-cli-providers.md) • [ava-codebase](codebase/ava-codebase.md) • [ava-config](codebase/ava-config.md) • [ava-context](codebase/ava-context.md) • [ava-db](codebase/ava-db.md) • [ava-extensions](codebase/ava-extensions.md) • [ava-llm](codebase/ava-llm.md) • [ava-mcp](codebase/ava-mcp.md) • [ava-memory](codebase/ava-memory.md) • [ava-permissions](codebase/ava-permissions.md) • [ava-platform](codebase/ava-platform.md) • [ava-plugin](codebase/ava-plugin.md) • [ava-praxis](codebase/ava-praxis.md) • [ava-sandbox](codebase/ava-sandbox.md) • [ava-session](codebase/ava-session.md) • [ava-tools](codebase/ava-tools.md) • [ava-tui](codebase/ava-tui.md) • [ava-types](codebase/ava-types.md) • [ava-validator](codebase/ava-validator.md)
+**Crate docs:** [ava-acp](codebase/ava-acp.md) • [ava-agent](codebase/ava-agent.md) • [ava-auth](codebase/ava-auth.md) • [ava-codebase](codebase/ava-codebase.md) • [ava-config](codebase/ava-config.md) • [ava-context](codebase/ava-context.md) • [ava-db](codebase/ava-db.md) • [ava-extensions](codebase/ava-extensions.md) • [ava-llm](codebase/ava-llm.md) • [ava-mcp](codebase/ava-mcp.md) • [ava-memory](codebase/ava-memory.md) • [ava-permissions](codebase/ava-permissions.md) • [ava-platform](codebase/ava-platform.md) • [ava-plugin](codebase/ava-plugin.md) • [ava-praxis](codebase/ava-praxis.md) • [ava-sandbox](codebase/ava-sandbox.md) • [ava-session](codebase/ava-session.md) • [ava-tools](codebase/ava-tools.md) • [ava-tui](codebase/ava-tui.md) • [ava-types](codebase/ava-types.md) • [ava-validator](codebase/ava-validator.md)
 
 ### Architecture & Design
 
@@ -179,12 +202,6 @@ Complete documentation for every crate and component:
 | [architecture/crate-map.md](architecture/crate-map.md) | Detailed crate dependency map with key types |
 | [architecture/plugin-system.md](architecture/plugin-system.md) | Power plugin system design |
 | [architecture/](architecture/) | System design, data flow, Praxis multi-agent |
-
-### Plugins & Extensions
-
-| Document | Purpose |
-|----------|---------|
-| [plugins.md](plugins.md) | TOML custom tools and MCP server guide |
 
 ### Development
 

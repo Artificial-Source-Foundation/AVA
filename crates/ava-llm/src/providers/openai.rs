@@ -343,14 +343,18 @@ impl OpenAIProvider {
                         "name": tc.name,
                         "arguments": tc.arguments.to_string(),
                     }));
-                    // Interleave the matching result immediately after the call
-                    if let Some(output) = tool_results.get(tc.id.as_str()) {
-                        input.push(json!({
-                            "type": "function_call_output",
-                            "call_id": tc.id,
-                            "output": *output,
-                        }));
-                    }
+                    // Interleave the matching result immediately after the call.
+                    // The Responses API REQUIRES every function_call to have a
+                    // function_call_output — omitting it causes a 400 error.
+                    let output = tool_results
+                        .get(tc.id.as_str())
+                        .copied()
+                        .unwrap_or("Error: no result available for this tool call");
+                    input.push(json!({
+                        "type": "function_call_output",
+                        "call_id": tc.id,
+                        "output": output,
+                    }));
                 }
                 continue;
             }

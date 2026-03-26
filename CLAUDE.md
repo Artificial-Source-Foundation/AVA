@@ -313,19 +313,38 @@ Lower number = earlier execution. Register via `ToolRegistry::add_middleware()`.
 
 ## CLI Testing
 
+**Always use `--provider openai --model gpt-5.4` for testing.** Never use gpt-4o or other old models.
+
 ```bash
 # Smoke test
-cargo run --bin ava -- "Reply with SMOKE_OK" --headless --provider openrouter --model anthropic/claude-haiku-4.5 --max-turns 3
+cargo run --bin ava -- "Reply with SMOKE_OK" --headless --provider openai --model gpt-5.4 --max-turns 3
 
 # Multi-agent
-cargo run --bin ava -- "goal" --headless --multi-agent --provider openrouter --model anthropic/claude-haiku-4.5
+cargo run --bin ava -- "goal" --headless --multi-agent --provider openai --model gpt-5.4
 
 # Mid-stream messaging
-cargo run --bin ava -- "goal" --headless --follow-up "also run tests" --provider openrouter --model anthropic/claude-haiku-4.5
-cargo run --bin ava -- "goal" --headless --later "commit when done" --provider openrouter --model anthropic/claude-haiku-4.5
+cargo run --bin ava -- "goal" --headless --follow-up "also run tests" --provider openai --model gpt-5.4
+cargo run --bin ava -- "goal" --headless --later "commit when done" --provider openai --model gpt-5.4
+
+# Post-completion code review
+cargo run --bin ava -- "goal" --headless --provider openai --model gpt-5.4 --auto-approve --review
 
 # Verbose logging (stderr): -v info, -vv debug, -vvv trace
-cargo run --bin ava -- -v "goal" --headless --provider openrouter --model anthropic/claude-haiku-4.5
+cargo run --bin ava -- -v "goal" --headless --provider openai --model gpt-5.4
+```
+
+## Benchmarking Against OpenCode
+
+```bash
+# OpenCode headless (uses `run` subcommand + `--format json` for non-interactive)
+opencode run "goal" --model openai/gpt-5.4 --format json --dir /path/to/project
+
+# AVA headless equivalent
+cargo run --bin ava -- "goal" --headless --provider openai --model gpt-5.4 --auto-approve --json
+
+# Timed comparison
+START=$(date +%s%N) && ava "goal" --headless --provider openai --model gpt-5.4 --auto-approve 2>&1; echo "MS=$(( ($(date +%s%N) - START) / 1000000 ))"
+START=$(date +%s%N) && opencode run "goal" --model openai/gpt-5.4 --format json 2>&1; echo "MS=$(( ($(date +%s%N) - START) / 1000000 ))"
 ```
 
 ## After Making Changes

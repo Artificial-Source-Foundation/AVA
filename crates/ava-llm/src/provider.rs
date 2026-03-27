@@ -132,9 +132,25 @@ impl ProviderErrorKind {
             || msg.contains("forbidden")
         {
             Self::AuthFailure
-        } else if msg.contains("context") && (msg.contains("exceed") || msg.contains("too long")) {
+        } else if (msg.contains("context")
+            && (msg.contains("exceed") || msg.contains("too long") || msg.contains("window")))
+            || msg.contains("context_length_exceeded")
+            || msg.contains("maximum context length")
+            || msg.contains("too many tokens")
+            || msg.contains("payload too large")
+            || msg.contains("token limit")
+        {
             Self::ContextWindowExceeded
-        } else if msg.contains("model") && msg.contains("not found") {
+        } else if (msg.contains("model")
+            && (msg.contains("not found")
+                || msg.contains("does not exist")
+                || msg.contains("unknown")
+                || msg.contains("unsupported")))
+            || (msg.contains("deployment")
+                && (msg.contains("not found") || msg.contains("does not exist")))
+            || msg.contains("no such model")
+            || msg.contains("engine not found")
+        {
             Self::ModelNotFound
         } else if msg.contains("timeout") || msg.contains("timed out") {
             Self::Timeout

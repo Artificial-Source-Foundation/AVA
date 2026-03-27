@@ -52,8 +52,61 @@ pub(super) fn accumulate_tool_call(
         acc.name.clone_from(name);
     }
     if let Some(ref args) = tc.arguments_delta {
-        acc.arguments_json.push_str(args);
+        merge_tool_arguments(&mut acc.arguments_json, args);
     }
+}
+
+fn merge_tool_arguments(existing: &mut String, incoming: &str) {
+    if incoming.is_empty() {
+        return;
+    }
+
+    if existing.is_empty() {
+        existing.push_str(incoming);
+        return;
+    }
+
+    if existing == incoming {
+        return;
+    }
+
+    let parsed_existing = serde_json::from_str::<Value>(existing).ok();
+    let parsed_incoming = serde_json::from_str::<Value>(incoming).ok();
+
+    if let Some(incoming_value) = parsed_incoming {
+        if parsed_existing.as_ref() == Some(&incoming_value) {
+            return;
+        }
+
+        existing.clear();
+        existing.push_str(incoming);
+        return;
+    }
+
+    if parsed_existing.is_some() {
+        if existing.trim() == "{}" {
+            existing.clear();
+            existing.push_str(incoming);
+            return;
+        }
+
+        // Some providers flush a syntactically complete JSON object before
+        // streaming one last `,<field>:...}` fragment. Re-open the object so
+        // the trailing delta can be stitched back in instead of being dropped.
+        if incoming.trim_start().starts_with(',') && existing.trim_end().ends_with('}') {
+            while existing.ends_with(char::is_whitespace) {
+                existing.pop();
+            }
+            if existing.ends_with('}') {
+                existing.pop();
+            }
+        }
+
+        existing.push_str(incoming);
+        return;
+    }
+
+    existing.push_str(incoming);
 }
 
 pub(super) fn finalize_tool_calls(accumulators: Vec<ToolCallAccumulator>) -> Vec<ToolCall> {
@@ -96,15 +149,37 @@ pub(super) fn finalize_tool_calls(accumulators: Vec<ToolCallAccumulator>) -> Vec
 
 pub(super) fn parse_tool_calls(content: &str) -> Result<Vec<ToolCall>> {
     let Ok(value) = serde_json::from_str::<Value>(content) else {
+        if looks_like_tool_response(content) {
+            return Err(AvaError::SerializationError(format!(
+                "malformed tool response envelope: {}",
+                truncate_tool_response_preview(content)
+            )));
+        }
         return Ok(Vec::new());
     };
 
     let calls = if let Some(raw_calls) = value.get("tool_calls") {
-        serde_json::from_value::<Vec<ToolCallEnvelope>>(raw_calls.clone())
-            .map_err(|error| AvaError::SerializationError(error.to_string()))?
+        match serde_json::from_value::<Vec<ToolCallEnvelope>>(raw_calls.clone()) {
+            Ok(calls) => calls,
+            Err(error) => {
+                warn!(
+                    error = %error,
+                    "tool response had invalid tool_calls schema, treating it as plain text"
+                );
+                Vec::new()
+            }
+        }
     } else if let Some(raw_call) = value.get("tool_call") {
-        vec![serde_json::from_value::<ToolCallEnvelope>(raw_call.clone())
-            .map_err(|error| AvaError::SerializationError(error.to_string()))?]
+        match serde_json::from_value::<ToolCallEnvelope>(raw_call.clone()) {
+            Ok(call) => vec![call],
+            Err(error) => {
+                warn!(
+                    error = %error,
+                    "tool response had invalid tool_call schema, treating it as plain text"
+                );
+                Vec::new()
+            }
+        }
     } else {
         Vec::new()
     };
@@ -119,8 +194,26 @@ pub(super) fn parse_tool_calls(content: &str) -> Result<Vec<ToolCall>> {
         .collect())
 }
 
+fn looks_like_tool_response(content: &str) -> bool {
+    let trimmed = content.trim();
+    (trimmed.starts_with('{') || trimmed.starts_with('['))
+        && (trimmed.contains("\"tool_calls\"") || trimmed.contains("\"tool_call\""))
+}
+
+fn truncate_tool_response_preview(content: &str) -> String {
+    let trimmed = content.trim();
+    if trimmed.chars().count() <= 160 {
+        trimmed.to_string()
+    } else {
+        let preview: String = trimmed.chars().take(160).collect();
+        format!("{preview}...")
+    }
+}
+
 fn request_dedup_hash(messages: &[Message]) -> u64 {
     let mut hasher = DefaultHasher::new();
+    // This is intentionally lightweight: we only need a short-lived guard
+    // against immediate duplicate turns, not a globally collision-resistant key.
     messages.len().hash(&mut hasher);
     if let Some(last) = messages.last() {
         std::mem::discriminant(&last.role).hash(&mut hasher);
@@ -548,6 +641,96 @@ mod tests {
 
         let ordered_names: Vec<&str> = tool_calls.iter().map(|call| call.name.as_str()).collect();
         assert_eq!(ordered_names, vec!["first", "second", "third"]);
+    }
+
+    #[test]
+    fn accumulate_tool_call_prefers_complete_arguments_from_done_event() {
+        let mut accumulators = Vec::new();
+
+        accumulate_tool_call(
+            &mut accumulators,
+            &StreamToolCall {
+                index: 0,
+                id: Some("call-1".to_string()),
+                name: Some("glob".to_string()),
+                arguments_delta: None,
+            },
+        );
+        accumulate_tool_call(
+            &mut accumulators,
+            &StreamToolCall {
+                index: 0,
+                id: Some("call-1".to_string()),
+                name: Some("glob".to_string()),
+                arguments_delta: Some("{\"pattern\":\"**/*.md\"}".to_string()),
+            },
+        );
+
+        let tool_calls = finalize_tool_calls(accumulators);
+        assert_eq!(tool_calls.len(), 1);
+        assert_eq!(
+            tool_calls[0].arguments,
+            serde_json::json!({"pattern": "**/*.md"})
+        );
+    }
+
+    #[test]
+    fn accumulate_tool_call_ignores_duplicate_complete_arguments() {
+        let mut accumulators = Vec::new();
+
+        accumulate_tool_call(
+            &mut accumulators,
+            &StreamToolCall {
+                index: 0,
+                id: Some("call-1".to_string()),
+                name: Some("glob".to_string()),
+                arguments_delta: Some("{\"pattern\":\"**/*.md\"}".to_string()),
+            },
+        );
+        accumulate_tool_call(
+            &mut accumulators,
+            &StreamToolCall {
+                index: 0,
+                id: Some("call-1".to_string()),
+                name: Some("glob".to_string()),
+                arguments_delta: Some("{\"pattern\":\"**/*.md\"}".to_string()),
+            },
+        );
+
+        let tool_calls = finalize_tool_calls(accumulators);
+        assert_eq!(tool_calls.len(), 1);
+        assert_eq!(
+            tool_calls[0].arguments,
+            serde_json::json!({"pattern": "**/*.md"})
+        );
+    }
+
+    #[test]
+    fn parse_tool_calls_accepts_plain_text_responses() {
+        let calls = parse_tool_calls("I checked the file and it looks good.").unwrap();
+        assert!(calls.is_empty());
+    }
+
+    #[test]
+    fn merge_tool_arguments_keeps_appending_after_valid_partial_json() {
+        let mut existing = r#"{"pattern":"*.rs"}"#.to_string();
+        merge_tool_arguments(&mut existing, r#","path":"src"}"#);
+        assert_eq!(existing, r#"{"pattern":"*.rs","path":"src"}"#);
+    }
+
+    #[test]
+    fn parse_tool_calls_rejects_malformed_tool_envelope() {
+        let error = parse_tool_calls("{\"tool_calls\":[")
+            .expect_err("malformed tool envelope should error");
+        assert!(error
+            .to_string()
+            .contains("malformed tool response envelope"));
+    }
+
+    #[test]
+    fn parse_tool_calls_treats_schema_mismatches_as_plain_text() {
+        let calls = parse_tool_calls("{\"tool_calls\":\"not-an-array\"}").unwrap();
+        assert!(calls.is_empty());
     }
 
     #[tokio::test]

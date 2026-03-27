@@ -30,6 +30,7 @@ const ADAPTIVE_THINKING_MODELS: &[&str] = &[
 #[derive(Clone)]
 pub struct AnthropicProvider {
     pool: Arc<ConnectionPool>,
+    provider_label: String,
     api_key: String,
     model: String,
     max_tokens: usize,
@@ -49,6 +50,7 @@ impl AnthropicProvider {
     ) -> Self {
         Self {
             pool,
+            provider_label: "anthropic".to_string(),
             api_key: api_key.into(),
             model: model.into(),
             max_tokens: 4096,
@@ -67,6 +69,7 @@ impl AnthropicProvider {
     ) -> Self {
         Self {
             pool,
+            provider_label: "anthropic".to_string(),
             api_key: api_key.into(),
             model: model.into(),
             max_tokens: 4096,
@@ -82,6 +85,11 @@ impl AnthropicProvider {
     /// headers (auth tokens, tracing IDs, etc.).
     pub fn with_plugin_manager(mut self, pm: Arc<tokio::sync::Mutex<PluginManager>>) -> Self {
         self.plugin_manager = Some(pm);
+        self
+    }
+
+    pub fn with_provider_label(mut self, provider_label: impl Into<String>) -> Self {
+        self.provider_label = provider_label.into();
         self
     }
 
@@ -262,7 +270,7 @@ impl AnthropicProvider {
     async fn send_request(&self, request: reqwest::RequestBuilder) -> Result<reqwest::Response> {
         common::send_with_retry_cb(
             request,
-            "Anthropic",
+            &self.provider_label,
             common::DEFAULT_MAX_RETRIES,
             self.circuit_breaker.as_deref(),
         )
@@ -275,7 +283,7 @@ impl AnthropicProvider {
         let Some(pm) = &self.plugin_manager else {
             return HashMap::new();
         };
-        let params = serde_json::json!({ "provider": "anthropic" });
+        let params = serde_json::json!({ "provider": self.provider_label.clone() });
         let responses = pm
             .lock()
             .await
@@ -324,14 +332,16 @@ impl LLMProvider for AnthropicProvider {
         let request = self.with_plugin_headers(request).await;
 
         let response = self.send_request(request).await?;
-        let response = common::validate_status(response, "Anthropic").await?;
+        let response =
+            common::validate_status_for_model(response, &self.provider_label, Some(&self.model))
+                .await?;
         let payload: Value = response
             .json()
             .await
             .map_err(|error| AvaError::SerializationError(error.to_string()))?;
 
         debug!(
-            provider = "Anthropic",
+            provider = %self.provider_label,
             third_party = self.third_party,
             "raw response payload: {payload}"
         );
@@ -351,8 +361,14 @@ impl LLMProvider for AnthropicProvider {
         let request = self.with_plugin_headers(request).await;
 
         let response = self.send_request(request).await?;
-        let response = common::validate_status(response, "Anthropic").await?;
-        Ok(Box::pin(sse_to_stream(response, self.third_party)))
+        let response =
+            common::validate_status_for_model(response, &self.provider_label, Some(&self.model))
+                .await?;
+        Ok(Box::pin(sse_to_stream(
+            response,
+            self.provider_label.clone(),
+            self.third_party,
+        )))
     }
 
     fn estimate_tokens(&self, input: &str) -> usize {
@@ -401,32 +417,31 @@ impl LLMProvider for AnthropicProvider {
         let request = self.with_plugin_headers(request).await;
 
         let response = self.send_request(request).await?;
-        let response = common::validate_status(response, "Anthropic").await?;
+        let response =
+            common::validate_status_for_model(response, &self.provider_label, Some(&self.model))
+                .await?;
         let payload: Value = response
             .json()
             .await
             .map_err(|error| AvaError::SerializationError(error.to_string()))?;
 
         debug!(
-            provider = "Anthropic",
+            provider = %self.provider_label,
             third_party = self.third_party,
             "raw response payload: {payload}"
         );
 
-        let content = common::parse_anthropic_completion_payload(&payload).unwrap_or_else(|e| {
-            warn!(
-                provider = "Anthropic",
-                third_party = self.third_party,
-                "failed to parse completion: {e}"
-            );
-            String::new()
-        });
         let tool_calls = common::parse_anthropic_tool_calls(&payload);
+        let content = common::completion_text_or_tool_calls(
+            common::parse_anthropic_completion_payload(&payload),
+            &self.provider_label,
+            tool_calls.len(),
+        )?;
         let usage = common::parse_usage(&payload);
 
         if content.is_empty() && tool_calls.is_empty() {
             warn!(
-                provider = "Anthropic",
+                provider = %self.provider_label,
                 third_party = self.third_party,
                 model = %self.model,
                 "empty response from provider — no content and no tool calls. \
@@ -457,8 +472,14 @@ impl LLMProvider for AnthropicProvider {
         let request = self.with_plugin_headers(request).await;
 
         let response = self.send_request(request).await?;
-        let response = common::validate_status(response, "Anthropic").await?;
-        Ok(Box::pin(sse_to_stream(response, self.third_party)))
+        let response =
+            common::validate_status_for_model(response, &self.provider_label, Some(&self.model))
+                .await?;
+        Ok(Box::pin(sse_to_stream(
+            response,
+            self.provider_label.clone(),
+            self.third_party,
+        )))
     }
 
     #[instrument(skip(self, messages, tools), fields(model = %self.model, thinking = ?thinking))]
@@ -484,8 +505,14 @@ impl LLMProvider for AnthropicProvider {
         let request = self.with_plugin_headers(request).await;
 
         let response = self.send_request(request).await?;
-        let response = common::validate_status(response, "Anthropic").await?;
-        Ok(Box::pin(sse_to_stream(response, self.third_party)))
+        let response =
+            common::validate_status_for_model(response, &self.provider_label, Some(&self.model))
+                .await?;
+        Ok(Box::pin(sse_to_stream(
+            response,
+            self.provider_label.clone(),
+            self.third_party,
+        )))
     }
 
     async fn generate_stream_with_thinking_config(
@@ -510,8 +537,14 @@ impl LLMProvider for AnthropicProvider {
         let request = self.with_plugin_headers(request).await;
 
         let response = self.send_request(request).await?;
-        let response = common::validate_status(response, "Anthropic").await?;
-        Ok(Box::pin(sse_to_stream(response, self.third_party)))
+        let response =
+            common::validate_status_for_model(response, &self.provider_label, Some(&self.model))
+                .await?;
+        Ok(Box::pin(sse_to_stream(
+            response,
+            self.provider_label.clone(),
+            self.third_party,
+        )))
     }
 
     fn supports_thinking(&self) -> bool {
@@ -582,16 +615,19 @@ impl LLMProvider for AnthropicProvider {
             request = request.header("anthropic-beta", "interleaved-thinking-2025-05-14");
         }
         let request = request.json(&body);
+        let request = self.with_plugin_headers(request).await;
 
         let response = self.send_request(request).await?;
-        let response = common::validate_status(response, "Anthropic").await?;
+        let response =
+            common::validate_status_for_model(response, &self.provider_label, Some(&self.model))
+                .await?;
         let payload: Value = response
             .json()
             .await
             .map_err(|error| AvaError::SerializationError(error.to_string()))?;
 
         debug!(
-            provider = "Anthropic",
+            provider = %self.provider_label,
             third_party = self.third_party,
             "raw thinking response payload: {payload}"
         );
@@ -616,7 +652,7 @@ impl LLMProvider for AnthropicProvider {
 
         if content.is_empty() && tool_calls.is_empty() {
             warn!(
-                provider = "Anthropic",
+                provider = %self.provider_label,
                 third_party = self.third_party,
                 model = %self.model,
                 "empty thinking response — no content and no tool calls. \
@@ -653,16 +689,19 @@ impl LLMProvider for AnthropicProvider {
             request = request.header("anthropic-beta", "interleaved-thinking-2025-05-14");
         }
         let request = request.json(&body);
+        let request = self.with_plugin_headers(request).await;
 
         let response = self.send_request(request).await?;
-        let response = common::validate_status(response, "Anthropic").await?;
+        let response =
+            common::validate_status_for_model(response, &self.provider_label, Some(&self.model))
+                .await?;
         let payload: Value = response
             .json()
             .await
             .map_err(|error| AvaError::SerializationError(error.to_string()))?;
 
         debug!(
-            provider = "Anthropic",
+            provider = %self.provider_label,
             third_party = self.third_party,
             "raw thinking response payload: {payload}"
         );
@@ -683,6 +722,17 @@ impl LLMProvider for AnthropicProvider {
         let usage = common::parse_usage(&payload);
         let thinking_content = self.parse_thinking(&payload);
 
+        if content.is_empty() && tool_calls.is_empty() {
+            warn!(
+                provider = %self.provider_label,
+                third_party = self.third_party,
+                model = %self.model,
+                "empty thinking response — no content and no tool calls. Raw payload keys: {:?}. Content field: {:?}.",
+                payload.as_object().map(|o| o.keys().collect::<Vec<_>>()),
+                payload.get("content"),
+            );
+        }
+
         Ok(LLMResponse {
             content,
             tool_calls,
@@ -696,18 +746,18 @@ impl LLMProvider for AnthropicProvider {
 /// Logs parsing details at debug level so they appear in the always-on file log.
 fn sse_to_stream(
     response: reqwest::Response,
+    provider_label: String,
     third_party: bool,
 ) -> impl Stream<Item = StreamChunk> {
     let mut sse_parser = common::SseParser::new();
+    let mut utf8 = common::Utf8Accumulator::new();
     response.bytes_stream().flat_map(move |chunk| {
-        let chunks = chunk
-            .ok()
-            .and_then(|bytes| String::from_utf8(bytes.to_vec()).ok())
+        let chunks = common::decode_stream_chunk(&mut utf8, chunk, provider_label.as_str())
             .map(|text| {
-                trace!(provider = "Anthropic", third_party, "SSE raw: {text}");
+                trace!(provider = %provider_label, third_party, "SSE raw: {text}");
                 let sse_lines = sse_parser.feed(&text);
                 trace!(
-                    provider = "Anthropic",
+                    provider = %provider_label,
                     third_party,
                     lines = sse_lines.len(),
                     "SSE parsed data lines"
@@ -715,14 +765,7 @@ fn sse_to_stream(
                 sse_lines
                     .into_iter()
                     .filter_map(|line| {
-                        let parsed = serde_json::from_str::<Value>(&line);
-                        if let Err(ref e) = parsed {
-                            warn!(
-                                provider = "Anthropic",
-                                third_party, "SSE JSON parse error: {e} — line: {line}"
-                            );
-                        }
-                        parsed.ok()
+                        common::parse_json_stream_payload(&line, provider_label.as_str())
                     })
                     .filter_map(|payload| {
                         let event_type = payload
@@ -733,7 +776,7 @@ fn sse_to_stream(
                         if result.is_none() && event_type != "ping" && event_type != "message_stop"
                         {
                             trace!(
-                                provider = "Anthropic",
+                                provider = %provider_label,
                                 third_party,
                                 event_type,
                                 "SSE event produced no StreamChunk"

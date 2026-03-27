@@ -146,6 +146,8 @@ impl CopilotProvider {
         let mut body = self.build_request_body(messages, stream);
         if !tools.is_empty() {
             body["tools"] = json!(common::tools_to_openai_format(tools));
+            body["tool_choice"] = json!("auto");
+            body["parallel_tool_calls"] = json!(true);
         }
         body
     }
@@ -228,7 +230,8 @@ impl LLMProvider for CopilotProvider {
             .json(&self.build_request_body(messages, false));
 
         let response = self.send_request(request).await?;
-        let response = common::validate_status(response, "Copilot").await?;
+        let response =
+            common::validate_status_for_model(response, "Copilot", Some(&self.model)).await?;
         let payload: Value = response
             .json()
             .await
@@ -254,17 +257,17 @@ impl LLMProvider for CopilotProvider {
             .json(&self.build_request_body(messages, true));
 
         let response = self.send_request(request).await?;
-        let response = common::validate_status(response, "Copilot").await?;
+        let response =
+            common::validate_status_for_model(response, "Copilot", Some(&self.model)).await?;
         let mut sse_parser = common::SseParser::new();
+        let mut utf8 = common::Utf8Accumulator::new();
         let stream = response.bytes_stream().flat_map(move |chunk| {
-            let chunks = chunk
-                .ok()
-                .and_then(|bytes| String::from_utf8(bytes.to_vec()).ok())
+            let chunks = common::decode_stream_chunk(&mut utf8, chunk, "Copilot")
                 .map(|text| {
                     sse_parser
                         .feed(&text)
                         .into_iter()
-                        .filter_map(|line| serde_json::from_str::<Value>(&line).ok())
+                        .filter_map(|line| common::parse_json_stream_payload(&line, "Copilot"))
                         .filter_map(|payload| common::parse_openai_stream_chunk(&payload))
                         .collect::<Vec<_>>()
                 })
@@ -328,17 +331,17 @@ impl LLMProvider for CopilotProvider {
         let request = client.post(&url).headers(headers).json(&body);
 
         let response = self.send_request(request).await?;
-        let response = common::validate_status(response, "Copilot").await?;
+        let response =
+            common::validate_status_for_model(response, "Copilot", Some(&self.model)).await?;
         let mut sse_parser = common::SseParser::new();
+        let mut utf8 = common::Utf8Accumulator::new();
         let stream = response.bytes_stream().flat_map(move |chunk| {
-            let chunks = chunk
-                .ok()
-                .and_then(|bytes| String::from_utf8(bytes.to_vec()).ok())
+            let chunks = common::decode_stream_chunk(&mut utf8, chunk, "Copilot")
                 .map(|text| {
                     sse_parser
                         .feed(&text)
                         .into_iter()
-                        .filter_map(|line| serde_json::from_str::<serde_json::Value>(&line).ok())
+                        .filter_map(|line| common::parse_json_stream_payload(&line, "Copilot"))
                         .filter_map(|payload| common::parse_openai_stream_chunk(&payload))
                         .collect::<Vec<_>>()
                 })
@@ -372,14 +375,19 @@ impl LLMProvider for CopilotProvider {
         let request = client.post(&url).headers(headers).json(&body);
 
         let response = self.send_request(request).await?;
-        let response = common::validate_status(response, "Copilot").await?;
+        let response =
+            common::validate_status_for_model(response, "Copilot", Some(&self.model)).await?;
         let payload: Value = response
             .json()
             .await
             .map_err(|e| AvaError::SerializationError(e.to_string()))?;
 
-        let content = common::parse_openai_completion_payload(&payload).unwrap_or_default();
         let tool_calls = common::parse_openai_tool_calls(&payload);
+        let content = common::completion_text_or_tool_calls(
+            common::parse_openai_completion_payload(&payload),
+            "Copilot",
+            tool_calls.len(),
+        )?;
         let usage = common::parse_usage(&payload);
 
         Ok(LLMResponse {
@@ -435,14 +443,19 @@ impl LLMProvider for CopilotProvider {
         let request = client.post(&url).headers(headers).json(&body);
 
         let response = self.send_request(request).await?;
-        let response = common::validate_status(response, "Copilot").await?;
+        let response =
+            common::validate_status_for_model(response, "Copilot", Some(&self.model)).await?;
         let payload: Value = response
             .json()
             .await
             .map_err(|e| AvaError::SerializationError(e.to_string()))?;
 
-        let content = common::parse_openai_completion_payload(&payload).unwrap_or_default();
         let tool_calls = common::parse_openai_tool_calls(&payload);
+        let content = common::completion_text_or_tool_calls(
+            common::parse_openai_completion_payload(&payload),
+            "Copilot",
+            tool_calls.len(),
+        )?;
         let usage = common::parse_usage(&payload);
         let thinking_content = Self::parse_reasoning(&payload);
 
@@ -477,17 +490,17 @@ impl LLMProvider for CopilotProvider {
         let request = client.post(&url).headers(headers).json(&body);
 
         let response = self.send_request(request).await?;
-        let response = common::validate_status(response, "Copilot").await?;
+        let response =
+            common::validate_status_for_model(response, "Copilot", Some(&self.model)).await?;
         let mut sse_parser = common::SseParser::new();
+        let mut utf8 = common::Utf8Accumulator::new();
         let stream = response.bytes_stream().flat_map(move |chunk| {
-            let chunks = chunk
-                .ok()
-                .and_then(|bytes| String::from_utf8(bytes.to_vec()).ok())
+            let chunks = common::decode_stream_chunk(&mut utf8, chunk, "Copilot")
                 .map(|text| {
                     sse_parser
                         .feed(&text)
                         .into_iter()
-                        .filter_map(|line| serde_json::from_str::<serde_json::Value>(&line).ok())
+                        .filter_map(|line| common::parse_json_stream_payload(&line, "Copilot"))
                         .filter_map(|payload| common::parse_openai_stream_chunk(&payload))
                         .collect::<Vec<_>>()
                 })
@@ -675,6 +688,22 @@ mod tests {
             provider.build_request_body_with_thinking(&messages, &[], false, ThinkingLevel::Medium);
 
         assert_eq!(body["reasoning_effort"], "medium");
+    }
+
+    #[test]
+    fn build_request_body_with_tools_enables_parallel_tool_calls() {
+        let pool = Arc::new(ConnectionPool::new());
+        let provider = CopilotProvider::new(pool, "token", "gpt-4o");
+        let messages = vec![Message::new(Role::User, "Hello")];
+        let tools = vec![ava_types::Tool {
+            name: "read".to_string(),
+            description: "Read a file".to_string(),
+            parameters: json!({"type": "object", "properties": {"path": {"type": "string"}}}),
+        }];
+
+        let body = provider.build_request_body_with_tools(&messages, &tools, false);
+        assert_eq!(body["tool_choice"], json!("auto"));
+        assert_eq!(body["parallel_tool_calls"], json!(true));
     }
 
     #[test]

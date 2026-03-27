@@ -249,14 +249,8 @@ impl AgentLoop {
         };
 
         // Set dedup hash on success with non-empty response
-        match &result {
-            Ok((text, calls, _)) => {
-                if !text.trim().is_empty() || !calls.is_empty() {
-                    self.last_request_hash = Some(dedup_hash);
-                    self.last_request_time = Some(Instant::now());
-                }
-            }
-            Err(_) => {
+        if let Ok((text, calls, _)) = &result {
+            if !text.trim().is_empty() || !calls.is_empty() {
                 self.last_request_hash = Some(dedup_hash);
                 self.last_request_time = Some(Instant::now());
             }
@@ -577,7 +571,7 @@ impl AgentLoop {
         let tool_calls = if native_tools && !accumulated_tool_calls.is_empty() {
             response::finalize_tool_calls(accumulated_tool_calls)
         } else if !native_tools {
-            parse_tool_calls(&full_text).unwrap_or_default()
+            parse_tool_calls(&full_text)?
         } else {
             vec![]
         };

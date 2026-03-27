@@ -64,9 +64,8 @@ impl ReasoningTimer {
 
 /// Heuristic check for whether a base URL likely points to a LiteLLM proxy.
 ///
-/// Returns `true` if the URL contains common LiteLLM proxy indicators:
+/// Returns `true` if the URL contains a common LiteLLM proxy indicator:
 /// - The hostname contains "litellm"
-/// - The URL path ends with `/v1` (common for self-hosted proxies on non-standard ports)
 ///
 /// This is used for auto-detection when `litellm_compatible` is not explicitly set.
 pub fn looks_like_litellm_proxy(base_url: &str) -> bool {
@@ -108,9 +107,11 @@ pub enum ThinkingFormat {
 #[derive(Clone)]
 pub struct OpenAIProvider {
     pool: Arc<ConnectionPool>,
+    provider_label: String,
     api_key: String,
     model: String,
     base_url: String,
+    request_defaults: Option<Value>,
     thinking_format: ThinkingFormat,
     circuit_breaker: Option<Arc<CircuitBreaker>>,
     /// When true, use the OpenAI Responses API format (`/responses` endpoint)
@@ -152,9 +153,11 @@ impl OpenAIProvider {
         let use_responses_api = is_native;
         Self {
             pool,
+            provider_label: "openai".to_string(),
             api_key: api_key.into(),
             model: model.into(),
             base_url,
+            request_defaults: None,
             thinking_format: ThinkingFormat::OpenAI,
             circuit_breaker: Some(Arc::new(CircuitBreaker::default_provider())),
             use_responses_api,
@@ -167,6 +170,16 @@ impl OpenAIProvider {
     /// Returns `true` if using OAuth subscription (ChatGPT Plus/Pro — no per-token cost).
     fn is_subscription(&self) -> bool {
         self.subscription
+    }
+
+    pub fn with_provider_label(mut self, provider_label: impl Into<String>) -> Self {
+        self.provider_label = provider_label.into();
+        self
+    }
+
+    pub fn with_request_defaults(mut self, request_defaults: Value) -> Self {
+        self.request_defaults = Some(request_defaults);
+        self
     }
 
     /// Set the thinking format for this provider (DashScope, Zhipu, etc.).
@@ -252,6 +265,19 @@ impl OpenAIProvider {
         }
     }
 
+    fn prefers_low_text_verbosity(&self) -> bool {
+        self.use_responses_api && matches!(self.thinking_format, ThinkingFormat::OpenAI) && {
+            let model_lower = self.model.to_lowercase();
+            model_lower.contains("gpt-5") || model_lower.contains("codex")
+        }
+    }
+
+    fn apply_request_defaults(&self, body: &mut Value) {
+        if let Some(defaults) = &self.request_defaults {
+            merge_json_values(body, defaults);
+        }
+    }
+
     /// The completions endpoint URL, respecting the Responses API mode.
     fn completions_url(&self) -> String {
         if self.use_responses_api {
@@ -293,83 +319,7 @@ impl OpenAIProvider {
             .collect::<Vec<_>>()
             .join("\n");
 
-        // Convert non-system messages to "input" format.
-        //
-        // The Responses API requires each function_call to be followed by its
-        // function_call_output. We collect tool result messages into a lookup
-        // and interleave them with their corresponding function calls.
-        let non_system: Vec<&Message> = messages
-            .iter()
-            .filter(|m| m.role != ava_types::Role::System)
-            .collect();
-
-        // Build a map of tool_call_id -> tool result content for interleaving
-        let mut tool_results: std::collections::HashMap<&str, &str> =
-            std::collections::HashMap::new();
-        for m in &non_system {
-            if m.role == ava_types::Role::Tool {
-                if let Some(ref id) = m.tool_call_id {
-                    tool_results.insert(id.as_str(), m.content.as_str());
-                }
-            }
-        }
-
-        let mut input: Vec<Value> = Vec::new();
-
-        for m in &non_system {
-            // Skip standalone tool result messages — they're interleaved below
-            if m.role == ava_types::Role::Tool {
-                continue;
-            }
-
-            // Handle assistant messages with tool calls
-            if m.role == ava_types::Role::Assistant && !m.tool_calls.is_empty() {
-                // Add text content if present
-                if !m.content.is_empty() {
-                    input.push(json!({
-                        "type": "message",
-                        "role": "assistant",
-                        "content": [{"type": "output_text", "text": m.content}],
-                    }));
-                }
-                // Add each function_call followed by its function_call_output
-                for tc in &m.tool_calls {
-                    if tc.name.is_empty() {
-                        continue;
-                    }
-                    input.push(json!({
-                        "type": "function_call",
-                        "call_id": tc.id,
-                        "name": tc.name,
-                        "arguments": tc.arguments.to_string(),
-                    }));
-                    // Interleave the matching result immediately after the call.
-                    // The Responses API REQUIRES every function_call to have a
-                    // function_call_output — omitting it causes a 400 error.
-                    let output = tool_results
-                        .get(tc.id.as_str())
-                        .copied()
-                        .unwrap_or("Error: no result available for this tool call");
-                    input.push(json!({
-                        "type": "function_call_output",
-                        "call_id": tc.id,
-                        "output": output,
-                    }));
-                }
-                continue;
-            }
-
-            // Regular user/assistant message
-            let role = match m.role {
-                ava_types::Role::User => "user",
-                ava_types::Role::Assistant => "assistant",
-                _ => continue,
-            };
-            input.push(json!({
-                "role": role,
-                "content": m.content,
-            }));
-        }
+        let input = Self::build_responses_input(messages);
 
         let mut body = json!({
             "model": self.model,
@@ -379,6 +329,10 @@ impl OpenAIProvider {
             "store": false,
         });
 
+        if self.prefers_low_text_verbosity() {
+            body["text"] = json!({"verbosity": "low"});
+        }
+
         // Add tools in Responses API format
         if !tools.is_empty() {
             body["tools"] = json!(common::tools_to_responses_api_format(tools));
@@ -386,7 +340,129 @@ impl OpenAIProvider {
             body["tools"] = json!(litellm_dummy_tools());
         }
 
+        self.apply_request_defaults(&mut body);
+
         body
+    }
+
+    fn build_responses_input(messages: &[Message]) -> Vec<Value> {
+        let mut input = Vec::new();
+        let mut pending_tool_calls: Vec<String> = Vec::new();
+
+        for message in messages
+            .iter()
+            .filter(|message| message.role != ava_types::Role::System)
+        {
+            if message.role != ava_types::Role::Tool && !pending_tool_calls.is_empty() {
+                Self::flush_pending_responses_tool_outputs(&mut input, &mut pending_tool_calls);
+            }
+
+            match message.role {
+                ava_types::Role::User => {
+                    let content = Self::responses_user_content(message);
+                    if !content.is_empty() {
+                        input.push(json!({
+                            "type": "message",
+                            "role": "user",
+                            "content": content,
+                        }));
+                    }
+                }
+                ava_types::Role::Assistant if !message.tool_calls.is_empty() => {
+                    if !message.content.is_empty() {
+                        input.push(json!({
+                            "type": "message",
+                            "role": "assistant",
+                            "content": [{"type": "output_text", "text": message.content}],
+                        }));
+                    }
+
+                    for tool_call in &message.tool_calls {
+                        if tool_call.name.is_empty() {
+                            continue;
+                        }
+
+                        input.push(json!({
+                            "type": "function_call",
+                            "call_id": tool_call.id,
+                            "name": tool_call.name,
+                            "arguments": tool_call.arguments.to_string(),
+                        }));
+                        pending_tool_calls.push(tool_call.id.clone());
+                    }
+                }
+                ava_types::Role::Assistant => {
+                    if !message.content.is_empty() {
+                        input.push(json!({
+                            "type": "message",
+                            "role": "assistant",
+                            "content": [{"type": "output_text", "text": message.content}],
+                        }));
+                    }
+                }
+                ava_types::Role::Tool => {
+                    let Some(call_id) = message.tool_call_id.as_deref().filter(|id| !id.is_empty())
+                    else {
+                        continue;
+                    };
+
+                    let Some(index) = pending_tool_calls.iter().position(|id| id == call_id) else {
+                        continue;
+                    };
+
+                    input.push(json!({
+                        "type": "function_call_output",
+                        "call_id": call_id,
+                        "output": message.content,
+                    }));
+                    pending_tool_calls.remove(index);
+                }
+                ava_types::Role::System => {}
+            }
+        }
+
+        if !pending_tool_calls.is_empty() {
+            Self::flush_pending_responses_tool_outputs(&mut input, &mut pending_tool_calls);
+        }
+
+        input
+    }
+
+    fn responses_user_content(message: &Message) -> Vec<Value> {
+        let mut content = Vec::new();
+
+        if !message.content.is_empty() {
+            content.push(json!({
+                "type": "input_text",
+                "text": message.content,
+            }));
+        }
+
+        for image in &message.images {
+            content.push(json!({
+                "type": "input_image",
+                "image_url": format!(
+                    "data:{};base64,{}",
+                    image.media_type.as_mime(),
+                    image.data
+                ),
+            }));
+        }
+
+        content
+    }
+
+    fn flush_pending_responses_tool_outputs(
+        input: &mut Vec<Value>,
+        pending_tool_calls: &mut Vec<String>,
+    ) {
+        for call_id in pending_tool_calls.drain(..) {
+            input.push(json!({
+                "type": "function_call_output",
+                "call_id": call_id,
+                "output": "Error: no result available for this tool call",
+            }));
+        }
     }
 
     /// Build a Responses API request body with reasoning support.
@@ -418,11 +494,13 @@ impl OpenAIProvider {
     }
 
     pub fn build_request_body(&self, messages: &[Message], stream: bool) -> Value {
-        json!({
+        let mut body = json!({
             "model": self.model,
             "messages": common::map_messages_openai(messages),
             "stream": stream,
-        })
+        });
+        self.apply_request_defaults(&mut body);
+        body
     }
 
     pub fn build_request_body_with_tools(
@@ -434,6 +512,8 @@ impl OpenAIProvider {
         let mut body = self.build_request_body(messages, stream);
         if !tools.is_empty() {
             body["tools"] = json!(common::tools_to_openai_format(tools));
+            body["tool_choice"] = json!("auto");
+            body["parallel_tool_calls"] = json!(true);
         } else if self.litellm_compatible {
             body["tools"] = json!(litellm_dummy_tools());
         }
@@ -452,6 +532,8 @@ impl OpenAIProvider {
 
         if !tools.is_empty() {
             body["tools"] = json!(common::tools_to_openai_format(tools));
+            body["tool_choice"] = json!("auto");
+            body["parallel_tool_calls"] = json!(true);
         } else if self.litellm_compatible {
             body["tools"] = json!(litellm_dummy_tools());
         }
@@ -487,31 +569,13 @@ impl OpenAIProvider {
         body
     }
 
-    /// Parse reasoning content from OpenAI response.
-    fn parse_reasoning(&self, payload: &Value) -> Option<String> {
-        // OpenAI returns reasoning in message.reasoning_content or similar field
-        // The exact field may vary by model, try common locations
-        payload
-            .get("choices")
-            .and_then(Value::as_array)
-            .and_then(|choices| choices.first())
-            .and_then(|choice| choice.get("message"))
-            .and_then(|message| {
-                message
-                    .get("reasoning_content")
-                    .or_else(|| message.get("reasoning"))
-            })
-            .and_then(Value::as_str)
-            .map(String::from)
-    }
-
     pub fn parse_response_payload(payload: &Value) -> Result<String> {
         common::parse_openai_completion_payload(payload)
     }
 
     /// Label used in error messages and credential lookups.
     fn provider_label(&self) -> String {
-        "openai".to_string()
+        self.provider_label.clone()
     }
 
     async fn client(&self) -> Result<Arc<reqwest::Client>> {
@@ -540,6 +604,23 @@ impl OpenAIProvider {
     }
 }
 
+fn merge_json_values(target: &mut Value, source: &Value) {
+    match (target, source) {
+        (Value::Object(target_obj), Value::Object(source_obj)) => {
+            for (key, value) in source_obj {
+                if let Some(existing) = target_obj.get_mut(key) {
+                    merge_json_values(existing, value);
+                } else {
+                    target_obj.insert(key.clone(), value.clone());
+                }
+            }
+        }
+        (target_value, source_value) => {
+            *target_value = source_value.clone();
+        }
+    }
+}
+
 #[async_trait]
 impl LLMProvider for OpenAIProvider {
     #[instrument(skip(self, messages), fields(model = %self.model))]
@@ -547,7 +628,6 @@ impl LLMProvider for OpenAIProvider {
         // OpenAI's newer models (GPT-5.x, o-series) require stream=true.
         // Use the streaming endpoint and collect chunks into a single response.
         let stream = self.generate_stream(messages).await?;
-        use futures::StreamExt;
         let mut content = String::new();
         futures::pin_mut!(stream);
         while let Some(chunk) = stream.next().await {
@@ -581,19 +661,21 @@ impl LLMProvider for OpenAIProvider {
         let request = self.auth_request(request);
 
         let response = self.send_request(request).await?;
-        let response = common::validate_status(response, &provider_label).await?;
+        let response =
+            common::validate_status_for_model(response, &provider_label, Some(&self.model)).await?;
         let use_responses = self.use_responses_api;
         let mut sse_parser = common::SseParser::new();
+        let mut utf8 = common::Utf8Accumulator::new();
         let mut reasoning_timer = ReasoningTimer::new();
         let stream = response.bytes_stream().flat_map(move |chunk| {
-            let chunks = chunk
-                .ok()
-                .and_then(|bytes| String::from_utf8(bytes.to_vec()).ok())
+            let chunks = common::decode_stream_chunk(&mut utf8, chunk, provider_label.as_str())
                 .map(|text| {
                     sse_parser
                         .feed(&text)
                         .into_iter()
-                        .filter_map(|line| serde_json::from_str::<Value>(&line).ok())
+                        .filter_map(|line| {
+                            common::parse_json_stream_payload(&line, provider_label.as_str())
+                        })
                         .filter_map(|payload| {
                             if use_responses {
                                 common::parse_responses_api_stream_chunk(&payload)
@@ -666,7 +748,6 @@ impl LLMProvider for OpenAIProvider {
         // OpenAI's newer models (GPT-5.x, o-series) require stream=true.
         // Use the streaming endpoint and collect chunks, same as generate().
         let stream = self.generate_stream_with_tools(messages, tools).await?;
-        use futures::StreamExt;
         let mut content = String::new();
         let mut tool_calls = Vec::new();
         let mut usage = None;
@@ -747,19 +828,21 @@ impl LLMProvider for OpenAIProvider {
         let request = self.auth_request(request);
 
         let response = self.send_request(request).await?;
-        let response = common::validate_status(response, &provider_label).await?;
+        let response =
+            common::validate_status_for_model(response, &provider_label, Some(&self.model)).await?;
         let use_responses = self.use_responses_api;
         let mut sse_parser = common::SseParser::new();
+        let mut utf8 = common::Utf8Accumulator::new();
         let mut reasoning_timer = ReasoningTimer::new();
         let stream = response.bytes_stream().flat_map(move |chunk| {
-            let chunks = chunk
-                .ok()
-                .and_then(|bytes| String::from_utf8(bytes.to_vec()).ok())
+            let chunks = common::decode_stream_chunk(&mut utf8, chunk, provider_label.as_str())
                 .map(|text| {
                     sse_parser
                         .feed(&text)
                         .into_iter()
-                        .filter_map(|line| serde_json::from_str::<Value>(&line).ok())
+                        .filter_map(|line| {
+                            common::parse_json_stream_payload(&line, provider_label.as_str())
+                        })
                         .filter_map(|payload| {
                             if use_responses {
                                 common::parse_responses_api_stream_chunk(&payload)
@@ -809,19 +892,21 @@ impl LLMProvider for OpenAIProvider {
         let request = self.auth_request(request);
 
         let response = self.send_request(request).await?;
-        let response = common::validate_status(response, &provider_label).await?;
+        let response =
+            common::validate_status_for_model(response, &provider_label, Some(&self.model)).await?;
         let use_responses = self.use_responses_api;
         let mut sse_parser = common::SseParser::new();
+        let mut utf8 = common::Utf8Accumulator::new();
         let mut reasoning_timer = ReasoningTimer::new();
         let stream = response.bytes_stream().flat_map(move |chunk| {
-            let chunks = chunk
-                .ok()
-                .and_then(|bytes| String::from_utf8(bytes.to_vec()).ok())
+            let chunks = common::decode_stream_chunk(&mut utf8, chunk, provider_label.as_str())
                 .map(|text| {
                     sse_parser
                         .feed(&text)
                         .into_iter()
-                        .filter_map(|line| serde_json::from_str::<Value>(&line).ok())
+                        .filter_map(|line| {
+                            common::parse_json_stream_payload(&line, provider_label.as_str())
+                        })
                         .filter_map(|payload| {
                             if use_responses {
                                 common::parse_responses_api_stream_chunk(&payload)
@@ -882,44 +967,271 @@ impl LLMProvider for OpenAIProvider {
             return self.generate_with_tools(messages, tools).await;
         }
 
-        let provider_label = self.provider_label();
-        let body = if self.use_responses_api {
-            self.build_responses_request_body_with_thinking(messages, tools, false, thinking)
-        } else {
-            self.build_request_body_with_thinking(messages, tools, false, thinking)
-        };
-        let client = self.client().await?;
-        let request = client.post(self.completions_url()).json(&body);
-        let request = self.auth_request(request);
-
-        let response = self.send_request(request).await?;
-        let response = common::validate_status(response, &provider_label).await?;
-        let payload: Value = response
-            .json()
-            .await
-            .map_err(|error| AvaError::SerializationError(error.to_string()))?;
-
-        if self.use_responses_api {
-            let (content, tool_calls, usage, thinking) =
-                common::parse_responses_api_payload(&payload);
-            Ok(LLMResponse {
-                content,
-                tool_calls,
-                usage,
-                thinking,
-            })
-        } else {
-            let content = Self::parse_response_payload(&payload).unwrap_or_default();
-            let tool_calls = common::parse_openai_tool_calls(&payload);
-            let usage = common::parse_usage(&payload);
-            let thinking_content = self.parse_reasoning(&payload);
-
-            Ok(LLMResponse {
-                content,
-                tool_calls,
-                usage,
-                thinking: thinking_content,
-            })
+        let stream = self
+            .generate_stream_with_thinking(messages, tools, thinking)
+            .await?;
+        let mut content = String::new();
+        let mut tool_calls = Vec::new();
+        let mut usage = None;
+        let mut thinking_content = None;
+        futures::pin_mut!(stream);
+        while let Some(chunk) = stream.next().await {
+            if let Some(text) = chunk.content {
+                content.push_str(&text);
+            }
+            if let Some(tc) = chunk.tool_call {
+                while tool_calls.len() <= tc.index {
+                    tool_calls.push(ava_types::ToolCall {
+                        id: String::new(),
+                        name: String::new(),
+                        arguments: serde_json::Value::Null,
+                    });
+                }
+                if let Some(id) = tc.id {
+                    tool_calls[tc.index].id = id;
+                }
+                if let Some(name) = tc.name {
+                    tool_calls[tc.index].name = name;
+                }
+                if let Some(args_delta) = tc.arguments_delta {
+                    let existing = &mut tool_calls[tc.index].arguments;
+                    if existing.is_null() {
+                        *existing = serde_json::Value::String(args_delta);
+                    } else if let Some(existing_str) = existing.as_str().map(String::from) {
+                        *existing = serde_json::Value::String(existing_str + &args_delta);
+                    }
+                }
+            }
+            if let Some(chunk_usage) = chunk.usage {
+                usage = Some(chunk_usage);
+            }
+            if let Some(thinking_delta) = chunk.thinking {
+                thinking_content = Some(match thinking_content {
+                    Some(previous) => format!("{previous}{thinking_delta}"),
+                    None => thinking_delta,
+                });
+            }
         }
+
+        for tc in &mut tool_calls {
+            if let Some(arguments) = tc.arguments.as_str().map(String::from) {
+                tc.arguments = serde_json::from_str(&arguments).unwrap_or(serde_json::json!({}));
+            }
+        }
+        tool_calls.retain(|tc| !tc.name.is_empty());
+
+        Ok(LLMResponse {
+            content,
+            tool_calls,
+            usage,
+            thinking: thinking_content,
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use ava_types::{ImageContent, ImageMediaType, Role, ToolCall};
+    use serde_json::json;
+
+    use super::*;
+
+    fn provider() -> OpenAIProvider {
+        OpenAIProvider::new(Arc::new(ConnectionPool::new()), "key", "gpt-5.4")
+    }
+
+    #[test]
+    fn responses_request_body_preserves_tool_outputs_in_message_order() {
+        let body = provider().build_responses_request_body(
+            &[
+                Message::new(Role::System, "Be concise."),
+                Message::new(Role::User, "Read the docs"),
+                Message::new(Role::Assistant, "Searching the repo").with_tool_calls(vec![
+                    ToolCall {
+                        id: "call_1".to_string(),
+                        name: "glob".to_string(),
+                        arguments: json!({"pattern": "**/*.md"}),
+                    },
+                    ToolCall {
+                        id: "call_2".to_string(),
+                        name: "grep".to_string(),
+                        arguments: json!({"pattern": "AGENTS"}),
+                    },
+                ]),
+                Message::new(Role::Tool, "Found README.md").with_tool_call_id("call_1"),
+                Message::new(Role::Tool, "Matched AGENTS.md").with_tool_call_id("call_2"),
+                Message::new(Role::Assistant, "I found the docs you need."),
+            ],
+            &[],
+            false,
+        );
+
+        assert_eq!(body["instructions"], "Be concise.");
+        assert_eq!(
+            body["input"],
+            json!([
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "Read the docs"}],
+                },
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": "Searching the repo"}],
+                },
+                {
+                    "type": "function_call",
+                    "call_id": "call_1",
+                    "name": "glob",
+                    "arguments": "{\"pattern\":\"**/*.md\"}",
+                },
+                {
+                    "type": "function_call",
+                    "call_id": "call_2",
+                    "name": "grep",
+                    "arguments": "{\"pattern\":\"AGENTS\"}",
+                },
+                {
+                    "type": "function_call_output",
+                    "call_id": "call_1",
+                    "output": "Found README.md",
+                },
+                {
+                    "type": "function_call_output",
+                    "call_id": "call_2",
+                    "output": "Matched AGENTS.md",
+                },
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": "I found the docs you need."}],
+                },
+            ])
+        );
+    }
+
+    #[test]
+    fn responses_request_body_injects_placeholder_for_missing_tool_output_before_next_message() {
+        let body = provider().build_responses_request_body(
+            &[
+                Message::new(Role::User, "Check the docs"),
+                Message::new(Role::Assistant, "Let me search").with_tool_calls(vec![ToolCall {
+                    id: "call_missing".to_string(),
+                    name: "glob".to_string(),
+                    arguments: json!({"pattern": "**/*.md"}),
+                }]),
+                Message::new(Role::User, "Any updates?"),
+            ],
+            &[],
+            false,
+        );
+
+        assert_eq!(
+            body["input"],
+            json!([
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "Check the docs"}],
+                },
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": "Let me search"}],
+                },
+                {
+                    "type": "function_call",
+                    "call_id": "call_missing",
+                    "name": "glob",
+                    "arguments": "{\"pattern\":\"**/*.md\"}",
+                },
+                {
+                    "type": "function_call_output",
+                    "call_id": "call_missing",
+                    "output": "Error: no result available for this tool call",
+                },
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "Any updates?"}],
+                },
+            ])
+        );
+    }
+
+    #[test]
+    fn responses_request_body_keeps_user_images() {
+        let body = provider().build_responses_request_body(
+            &[Message::new(Role::User, "What is in this image?")
+                .with_images(vec![ImageContent::new("abc123", ImageMediaType::Png)])],
+            &[],
+            false,
+        );
+
+        assert_eq!(
+            body["input"],
+            json!([
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": [
+                        {"type": "input_text", "text": "What is in this image?"},
+                        {"type": "input_image", "image_url": "data:image/png;base64,abc123"},
+                    ],
+                },
+            ])
+        );
+    }
+
+    #[test]
+    fn responses_request_body_uses_low_verbosity_for_gpt5_and_codex() {
+        let body = provider().build_responses_request_body(
+            &[Message::new(Role::User, "Fix the failing test")],
+            &[],
+            false,
+        );
+
+        assert_eq!(body["text"]["verbosity"], json!("low"));
+    }
+
+    #[test]
+    fn provider_label_can_be_overridden_for_aliases() {
+        let provider = OpenAIProvider::new(Arc::new(ConnectionPool::new()), "key", "gpt-4o")
+            .with_provider_label("xai");
+
+        assert_eq!(provider.provider_label(), "xai");
+    }
+
+    #[test]
+    fn chat_tool_requests_enable_parallel_tool_calls() {
+        let body = provider().build_request_body_with_tools(
+            &[Message::new(Role::User, "Search then read")],
+            &[ava_types::Tool {
+                name: "read".to_string(),
+                description: "Read a file".to_string(),
+                parameters: json!({"type": "object", "properties": {"path": {"type": "string"}}}),
+            }],
+            true,
+        );
+
+        assert_eq!(body["tool_choice"], json!("auto"));
+        assert_eq!(body["parallel_tool_calls"], json!(true));
+    }
+
+    #[test]
+    fn request_defaults_merge_nested_objects() {
+        let provider = provider().with_request_defaults(json!({
+            "provider": {
+                "allow_fallbacks": false,
+                "require_parameters": true
+            }
+        }));
+
+        let body = provider.build_request_body(&[Message::new(Role::User, "Hi")], false);
+        assert_eq!(body["provider"]["allow_fallbacks"], json!(false));
+        assert_eq!(body["provider"]["require_parameters"], json!(true));
     }
 }

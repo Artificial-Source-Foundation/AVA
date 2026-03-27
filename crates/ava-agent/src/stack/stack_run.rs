@@ -1014,9 +1014,7 @@ pub fn parse_model_spec(spec: &str) -> (String, String) {
         let provider = &spec[..idx];
         let model = &spec[idx + 1..];
         // Verify the first segment looks like a known provider name
-        if ava_llm::providers::base_url_for_provider(provider).is_some()
-            || provider.starts_with("cli:")
-        {
+        if ava_llm::providers::is_known_provider(provider) || provider.starts_with("cli:") {
             return (provider.to_string(), model.to_string());
         }
     }

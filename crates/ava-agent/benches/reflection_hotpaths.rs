@@ -38,7 +38,7 @@ fn reflection_error_classification(c: &mut Criterion) {
         |b, error| b.iter(|| ReflectionLoop::analyze_error(black_box(error))),
     );
     group.bench_with_input(BenchmarkId::new("kind", "type"), &type_error, |b, error| {
-        b.iter(|| ReflectionLoop::analyze_error(black_box(error)))
+        b.iter(|| ReflectionLoop::analyze_error(black_box(error)));
     });
     group.bench_with_input(
         BenchmarkId::new("kind", "command"),
@@ -61,11 +61,11 @@ fn single_fix_attempt_path(c: &mut Criterion) {
 
     c.bench_function("reflection_single_fix_attempt", |b| {
         b.iter(|| {
-            loop_controller.reflect_and_fix(ToolResult {
+            let _ = loop_controller.reflect_and_fix(ToolResult {
                 output: "failed".to_string(),
                 error: Some(black_box("SyntaxError: unexpected token".to_string())),
-            })
-        })
+            });
+        });
     });
 }
 

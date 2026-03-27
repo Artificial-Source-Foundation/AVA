@@ -1019,6 +1019,20 @@ mod tests {
     }
 
     #[test]
+    fn parse_model_spec_azure_provider() {
+        let (provider, model) = parse_model_spec("azure/gpt-4o");
+        assert_eq!(provider, "azure");
+        assert_eq!(model, "gpt-4o");
+    }
+
+    #[test]
+    fn parse_model_spec_bedrock_provider() {
+        let (provider, model) = parse_model_spec("bedrock/anthropic.claude-sonnet-4-v1:0");
+        assert_eq!(provider, "bedrock");
+        assert_eq!(model, "anthropic.claude-sonnet-4-v1:0");
+    }
+
+    #[test]
     fn parse_model_spec_cli_provider() {
         let (provider, model) = parse_model_spec("cli:claude-code/sonnet");
         assert_eq!(provider, "cli:claude-code");

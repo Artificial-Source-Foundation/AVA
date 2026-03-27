@@ -200,7 +200,7 @@ fn repeated_hot_reload_keeps_descriptor_and_hook_output_deterministic() {
             .expect("descriptor should exist");
         match descriptor {
             ExtensionDescriptor::Native(native) => {
-                assert_eq!(native.path, PathBuf::from("/tmp/deterministic.so"))
+                assert_eq!(native.path, PathBuf::from("/tmp/deterministic.so"));
             }
             ExtensionDescriptor::Wasm(_) => panic!("expected native descriptor"),
         }

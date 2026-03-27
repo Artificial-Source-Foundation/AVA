@@ -21,7 +21,7 @@ export const DoomLoopBanner: Component<DoomLoopBannerProps> = (props) => (
     <div class="flex items-center gap-1.5">
       <button
         type="button"
-        onClick={props.onStop}
+        onClick={() => props.onStop()}
         class="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded-[var(--radius-md)] bg-[var(--error)] text-white hover:brightness-110 transition-colors"
       >
         <Square class="w-3 h-3" />
@@ -29,7 +29,7 @@ export const DoomLoopBanner: Component<DoomLoopBannerProps> = (props) => (
       </button>
       <button
         type="button"
-        onClick={props.onRetry}
+        onClick={() => props.onRetry()}
         class="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded-[var(--radius-md)] bg-[var(--surface-raised)] text-[var(--text-primary)] hover:bg-[var(--alpha-white-8)] transition-colors"
       >
         <RotateCcw class="w-3 h-3" />
@@ -37,7 +37,7 @@ export const DoomLoopBanner: Component<DoomLoopBannerProps> = (props) => (
       </button>
       <button
         type="button"
-        onClick={props.onSwitchModel}
+        onClick={() => props.onSwitchModel()}
         class="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded-[var(--radius-md)] bg-[var(--surface-raised)] text-[var(--text-primary)] hover:bg-[var(--alpha-white-8)] transition-colors"
       >
         <RefreshCw class="w-3 h-3" />

@@ -80,15 +80,15 @@ const LoadingFallback = () => (
     <div class="flex gap-1.5">
       <span
         class="splash-dot w-1.5 h-1.5 rounded-full bg-[var(--accent)]"
-        style="animation-delay: 0ms"
+        style={{ 'animation-delay': '0ms' }}
       />
       <span
         class="splash-dot w-1.5 h-1.5 rounded-full bg-[var(--accent)]"
-        style="animation-delay: 150ms"
+        style={{ 'animation-delay': '150ms' }}
       />
       <span
         class="splash-dot w-1.5 h-1.5 rounded-full bg-[var(--accent)]"
-        style="animation-delay: 300ms"
+        style={{ 'animation-delay': '300ms' }}
       />
     </div>
   </div>

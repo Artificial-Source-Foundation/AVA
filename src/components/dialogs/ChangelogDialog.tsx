@@ -89,7 +89,7 @@ export const ChangelogDialog: Component<ChangelogDialogProps> = (props) => (
         <div class="flex justify-end pt-2">
           <button
             type="button"
-            onClick={props.onClose}
+            onClick={() => props.onClose()}
             class="px-3 py-1.5 text-xs font-medium bg-[var(--accent)] text-white rounded-[var(--radius-md)] hover:brightness-110 transition-colors"
           >
             Got it

@@ -76,11 +76,10 @@ const oauthStatusColor: Record<OAuthStatus, string> = {
 export const MCPServersTab: Component<MCPServersTabProps> = (props) => {
   const connectedCount = () => props.servers.filter((s) => s.status === 'connected').length
   const [oauthTarget, setOauthTarget] = createSignal<string | null>(null)
-  const [, setOauthRefresh] = createSignal(0)
+  const [oauthRefresh, setOauthRefresh] = createSignal(0)
 
   const serverOAuthStatus = (name: string): OAuthStatus => {
-    // Force reactivity
-    void setOauthRefresh
+    oauthRefresh()
     return getOAuthStatus(name)
   }
 

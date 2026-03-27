@@ -65,7 +65,7 @@ export const OllamaModelCard: Component<OllamaModelCardProps> = (props) => {
       >
         <button
           type="button"
-          onClick={props.onRequestDelete}
+          onClick={() => props.onRequestDelete()}
           class="p-1.5 text-[var(--text-muted)] hover:text-[var(--error)] rounded-[var(--radius-sm)] hover:bg-[var(--error-subtle)] transition-colors"
           title="Delete model"
         >

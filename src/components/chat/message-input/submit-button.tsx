@@ -112,7 +112,7 @@ export const SubmitButton: Component<SubmitButtonProps> = (props) => {
       <Show when={props.isProcessing()}>
         <button
           type="button"
-          onClick={props.onCancel}
+          onClick={() => props.onCancel()}
           class="
             flex items-center justify-center
             w-8 h-8

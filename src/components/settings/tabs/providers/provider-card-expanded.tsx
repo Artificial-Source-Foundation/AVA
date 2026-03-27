@@ -6,7 +6,7 @@
  */
 
 import { ExternalLink, Server, Trash2 } from 'lucide-solid'
-import { type Component, createSignal, Show } from 'solid-js'
+import { type Component, createEffect, createSignal, Show } from 'solid-js'
 import type {
   LLMProviderConfig,
   ProviderModel,
@@ -40,17 +40,23 @@ interface ProviderCardExpandedProps {
 }
 
 export const ProviderCardExpanded: Component<ProviderCardExpandedProps> = (props) => {
-  const [apiKey, setApiKey] = createSignal(props.provider.apiKey ? '••••••••••••' : '')
+  const [apiKey, setApiKey] = createSignal('')
   const [showKey, setShowKey] = createSignal(false)
-  const [baseUrl, setBaseUrl] = createSignal(props.provider.baseUrl || '')
+  const [baseUrl, setBaseUrl] = createSignal('')
   const [isLoadingModels, setIsLoadingModels] = createSignal(false)
   const [isOAuthLoading, setIsOAuthLoading] = createSignal(false)
-  const [isOAuthConnected, setIsOAuthConnected] = createSignal(checkStoredOAuth(props.provider.id))
+  const [isOAuthConnected, setIsOAuthConnected] = createSignal(false)
   const [modelError, setModelError] = createSignal<string | null>(null)
   const [oauthError, setOauthError] = createSignal<string | null>(null)
   const [deviceCode, setDeviceCode] = createSignal<DeviceCodeResponse | null>(null)
   const [showClearConfirm, setShowClearConfirm] = createSignal(false)
   const [showOllamaBrowser, setShowOllamaBrowser] = createSignal(false)
+
+  createEffect(() => {
+    setApiKey(props.provider.apiKey ? '••••••••••••' : '')
+    setBaseUrl(props.provider.baseUrl || '')
+    setIsOAuthConnected(checkStoredOAuth(props.provider.id))
+  })
 
   const hasAnyCredentials = () => !!props.provider.apiKey || isOAuthConnected()
 

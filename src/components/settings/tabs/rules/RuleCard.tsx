@@ -61,7 +61,7 @@ export const RuleCard: Component<{
   <div
     role="button"
     tabIndex={0}
-    onClick={props.onEdit}
+    onClick={() => props.onEdit()}
     onKeyDown={(e) => e.key === 'Enter' && props.onEdit()}
     class={`flex items-start gap-3 px-3 py-2.5 rounded-[var(--radius-md)] border transition-colors cursor-pointer ${
       props.rule.enabled

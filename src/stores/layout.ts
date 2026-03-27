@@ -100,8 +100,9 @@ function setRightPanelWidth(w: number): void {
 
 function switchRightPanelTab(tab: dialogs.RightPanelTab): void {
   log.debug('nav', 'Right panel tab changed', { tab })
+  const wasVisible = rightPanelVisible()
   dialogs.switchRightPanelTab(tab, () => {
-    if (!rightPanelVisible()) setRightPanelVisible(true)
+    if (!wasVisible) setRightPanelVisible(true)
   })
 }
 

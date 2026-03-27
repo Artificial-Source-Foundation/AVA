@@ -137,110 +137,110 @@ export const ToolCallOutput: Component<ToolCallOutputProps> = (props) => {
     setTimeout(() => setCopied(false), 2000)
   }
 
-  // Render structured output as JSON tree if applicable
-  if (structuredData() !== null) {
-    return (
-      <div class="border-t border-[var(--border-subtle)]">
-        <StructuredOutputView data={structuredData()!} />
-      </div>
-    )
-  }
-
   return (
-    <div class="bg-[var(--bg-inset,var(--surface-sunken))] border-t border-[var(--border-subtle)]">
-      {/* Error display */}
-      <Show when={hasError()}>
-        <div class="px-3 py-2.5">
-          <div class="flex items-start gap-2">
-            <Dynamic
-              component={ERROR_ICONS[errorCategory()]}
-              class="w-4 h-4 flex-shrink-0 mt-0.5 text-[var(--error)]"
-            />
-            <div class="flex-1 min-w-0">
-              <span class="text-[11px] font-medium text-[var(--error)] uppercase tracking-wider">
-                {getErrorLabel(errorCategory())}
-              </span>
-              <pre class="mt-1 text-[11px] font-[var(--font-ui-mono)] text-[var(--error)] whitespace-pre-wrap break-words leading-relaxed opacity-90">
-                {props.toolCall.error}
-              </pre>
+    <Show
+      when={structuredData() === null}
+      fallback={
+        <div class="border-t border-[var(--border-subtle)]">
+          <StructuredOutputView data={structuredData()!} />
+        </div>
+      }
+    >
+      <div class="bg-[var(--bg-inset,var(--surface-sunken))] border-t border-[var(--border-subtle)]">
+        {/* Error display */}
+        <Show when={hasError()}>
+          <div class="px-3 py-2.5">
+            <div class="flex items-start gap-2">
+              <Dynamic
+                component={ERROR_ICONS[errorCategory()]}
+                class="w-4 h-4 flex-shrink-0 mt-0.5 text-[var(--error)]"
+              />
+              <div class="flex-1 min-w-0">
+                <span class="text-[11px] font-medium text-[var(--error)] uppercase tracking-wider">
+                  {getErrorLabel(errorCategory())}
+                </span>
+                <pre class="mt-1 text-[11px] font-[var(--font-ui-mono)] text-[var(--error)] whitespace-pre-wrap break-words leading-relaxed opacity-90">
+                  {props.toolCall.error}
+                </pre>
+              </div>
+              <button
+                type="button"
+                onClick={copyContent}
+                class="flex-shrink-0 p-1 rounded text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--alpha-white-5)] transition-colors"
+                title="Copy error"
+              >
+                <Show when={copied()} fallback={<Copy class="w-3.5 h-3.5" />}>
+                  <Check class="w-3.5 h-3.5 text-[var(--success)]" />
+                </Show>
+              </button>
             </div>
+          </div>
+        </Show>
+
+        {/* Diff view for edit/write tools */}
+        <Show when={hasDiff() && !hasError()}>
+          <div class="scroll-fade-mask max-h-[320px] overflow-auto" data-scrollable>
+            <DiffViewer
+              oldContent={props.toolCall.diff!.oldContent}
+              newContent={props.toolCall.diff!.newContent}
+              filename={props.toolCall.filePath}
+              mode="unified"
+              showLineNumbers={false}
+              class="border-0 rounded-none"
+            />
+          </div>
+        </Show>
+
+        {/* MCP UI resource rendering (table, chart, form, image, markdown) */}
+        <Show when={hasUIResource() && !hasError()}>
+          <MCPResourceRenderer resource={props.toolCall.uiResource!} />
+        </Show>
+
+        {/* Regular output with syntax highlighting */}
+        <Show when={hasOutput() && !hasError() && !hasDiff() && !hasUIResource()}>
+          <div class="scroll-fade-mask relative max-h-[320px] overflow-auto" data-scrollable>
+            {/* Copy button (top-right) */}
             <button
               type="button"
               onClick={copyContent}
-              class="flex-shrink-0 p-1 rounded text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--alpha-white-5)] transition-colors"
-              title="Copy error"
+              class="absolute top-1.5 right-1.5 z-10 p-1 rounded text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--alpha-white-8)] transition-colors opacity-0 group-hover/output:opacity-100"
+              title="Copy output"
             >
               <Show when={copied()} fallback={<Copy class="w-3.5 h-3.5" />}>
                 <Check class="w-3.5 h-3.5 text-[var(--success)]" />
               </Show>
             </button>
-          </div>
-        </div>
-      </Show>
 
-      {/* Diff view for edit/write tools */}
-      <Show when={hasDiff() && !hasError()}>
-        <div class="scroll-fade-mask max-h-[320px] overflow-auto" data-scrollable>
-          <DiffViewer
-            oldContent={props.toolCall.diff!.oldContent}
-            newContent={props.toolCall.diff!.newContent}
-            filename={props.toolCall.filePath}
-            mode="unified"
-            showLineNumbers={false}
-            class="border-0 rounded-none"
-          />
-        </div>
-      </Show>
+            <div class="group/output px-3 py-2">
+              <HighlightedPre
+                output={displayOutput()}
+                html={highlightedOutput()}
+                hasLang={!!lang()}
+              />
+            </div>
 
-      {/* MCP UI resource rendering (table, chart, form, image, markdown) */}
-      <Show when={hasUIResource() && !hasError()}>
-        <MCPResourceRenderer resource={props.toolCall.uiResource!} />
-      </Show>
-
-      {/* Regular output with syntax highlighting */}
-      <Show when={hasOutput() && !hasError() && !hasDiff() && !hasUIResource()}>
-        <div class="scroll-fade-mask relative max-h-[320px] overflow-auto" data-scrollable>
-          {/* Copy button (top-right) */}
-          <button
-            type="button"
-            onClick={copyContent}
-            class="absolute top-1.5 right-1.5 z-10 p-1 rounded text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--alpha-white-8)] transition-colors opacity-0 group-hover/output:opacity-100"
-            title="Copy output"
-          >
-            <Show when={copied()} fallback={<Copy class="w-3.5 h-3.5" />}>
-              <Check class="w-3.5 h-3.5 text-[var(--success)]" />
-            </Show>
-          </button>
-
-          <div class="group/output px-3 py-2">
-            <HighlightedPre
-              output={displayOutput()}
-              html={highlightedOutput()}
-              hasLang={!!lang()}
-            />
-          </div>
-
-          {/* Expand/collapse for long output */}
-          <Show when={isLong()}>
-            <button
-              type="button"
-              onClick={() => setExpanded((v) => !v)}
-              class="w-full px-3 py-1.5 text-[10px] text-[var(--accent)] bg-[var(--alpha-white-3)] border-t border-[var(--border-subtle)] text-center hover:bg-[var(--alpha-white-5)] transition-colors flex items-center justify-center gap-1"
-            >
-              <Show
-                when={expanded()}
-                fallback={
-                  <>
-                    <ChevronDown class="w-3 h-3" /> Show all ({totalLineCount()} lines)
-                  </>
-                }
+            {/* Expand/collapse for long output */}
+            <Show when={isLong()}>
+              <button
+                type="button"
+                onClick={() => setExpanded((v) => !v)}
+                class="w-full px-3 py-1.5 text-[10px] text-[var(--accent)] bg-[var(--alpha-white-3)] border-t border-[var(--border-subtle)] text-center hover:bg-[var(--alpha-white-5)] transition-colors flex items-center justify-center gap-1"
               >
-                <ChevronUp class="w-3 h-3" /> Show less
-              </Show>
-            </button>
-          </Show>
-        </div>
-      </Show>
-    </div>
+                <Show
+                  when={expanded()}
+                  fallback={
+                    <>
+                      <ChevronDown class="w-3 h-3" /> Show all ({totalLineCount()} lines)
+                    </>
+                  }
+                >
+                  <ChevronUp class="w-3 h-3" /> Show less
+                </Show>
+              </button>
+            </Show>
+          </div>
+        </Show>
+      </div>
+    </Show>
   )
 }

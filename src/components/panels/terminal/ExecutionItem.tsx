@@ -46,7 +46,7 @@ export const ExecutionItem: Component<ExecutionItemProps> = (props) => {
       <div
         role="button"
         tabIndex={0}
-        onClick={props.onToggle}
+        onClick={() => props.onToggle()}
         onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && props.onToggle()}
         class="
           w-full text-left

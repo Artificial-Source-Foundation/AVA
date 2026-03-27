@@ -77,7 +77,7 @@ export const GitInstallDialog: Component<GitInstallDialogProps> = (props) => {
           <div class="flex gap-2 justify-end">
             <button
               type="button"
-              onClick={props.onClose}
+              onClick={() => props.onClose()}
               class="px-3 py-1.5 text-xs text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors"
             >
               Cancel
@@ -159,7 +159,7 @@ export const LinkLocalDialog: Component<LinkLocalDialogProps> = (props) => {
           <div class="flex gap-2 justify-end">
             <button
               type="button"
-              onClick={props.onClose}
+              onClick={() => props.onClose()}
               class="px-3 py-1.5 text-xs text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors"
             >
               Cancel

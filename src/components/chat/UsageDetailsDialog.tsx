@@ -124,7 +124,7 @@ export const UsageDetailsDialog: Component<UsageDetailsDialogProps> = (props) =>
             </div>
             <button
               type="button"
-              onClick={props.onClose}
+              onClick={() => props.onClose()}
               autofocus
               class="rounded-[var(--radius-sm)] p-1 text-[var(--text-muted)] hover:bg-[var(--alpha-white-5)] hover:text-[var(--text-primary)]"
             >

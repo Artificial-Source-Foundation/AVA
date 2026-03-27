@@ -8,7 +8,15 @@
  */
 
 import { ArrowDown, ArrowUp, Check, ListOrdered, Pencil, X } from 'lucide-solid'
-import { type Accessor, type Component, createMemo, createSignal, For, Show } from 'solid-js'
+import {
+  type Accessor,
+  type Component,
+  createEffect,
+  createMemo,
+  createSignal,
+  For,
+  Show,
+} from 'solid-js'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -81,7 +89,11 @@ interface InlineEditProps {
 
 const InlineEdit: Component<InlineEditProps> = (props) => {
   let ref: HTMLTextAreaElement | undefined
-  const [draft, setDraft] = createSignal(props.value)
+  const [draft, setDraft] = createSignal('')
+
+  createEffect(() => {
+    setDraft(props.value)
+  })
 
   const handleKeyDown = (e: KeyboardEvent): void => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -122,7 +134,7 @@ const InlineEdit: Component<InlineEditProps> = (props) => {
       </button>
       <button
         type="button"
-        onClick={props.onCancel}
+        onClick={() => props.onCancel()}
         class="p-0.5 rounded hover:bg-[var(--alpha-white-10)] text-[var(--text-muted)] cursor-pointer flex-shrink-0"
         title="Cancel"
       >
@@ -182,7 +194,7 @@ const QueueRow: Component<QueueRowProps> = (props) => (
       <div class="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
         <button
           type="button"
-          onClick={props.onStartEdit}
+          onClick={() => props.onStartEdit()}
           class="p-0.5 rounded hover:bg-[var(--alpha-white-10)] text-[var(--text-muted)] hover:text-[var(--accent)] cursor-pointer transition-colors"
           title="Edit"
         >
@@ -191,7 +203,7 @@ const QueueRow: Component<QueueRowProps> = (props) => (
         <Show when={props.index > 0}>
           <button
             type="button"
-            onClick={props.onMoveUp}
+            onClick={() => props.onMoveUp()}
             class="p-0.5 rounded hover:bg-[var(--alpha-white-10)] text-[var(--text-muted)] hover:text-[var(--text-primary)] cursor-pointer transition-colors"
             title="Move up"
           >
@@ -201,7 +213,7 @@ const QueueRow: Component<QueueRowProps> = (props) => (
         <Show when={props.index < props.total - 1}>
           <button
             type="button"
-            onClick={props.onMoveDown}
+            onClick={() => props.onMoveDown()}
             class="p-0.5 rounded hover:bg-[var(--alpha-white-10)] text-[var(--text-muted)] hover:text-[var(--text-primary)] cursor-pointer transition-colors"
             title="Move down"
           >
@@ -210,7 +222,7 @@ const QueueRow: Component<QueueRowProps> = (props) => (
         </Show>
         <button
           type="button"
-          onClick={props.onRemove}
+          onClick={() => props.onRemove()}
           class="p-0.5 rounded hover:bg-[var(--alpha-white-10)] text-[var(--text-muted)] hover:text-[var(--error)] cursor-pointer transition-colors"
           title="Remove"
         >
@@ -264,7 +276,7 @@ export const MessageQueueWidget: Component<MessageQueueWidgetProps> = (props) =>
 
           <button
             type="button"
-            onClick={props.onClearAll}
+            onClick={() => props.onClearAll()}
             class="text-[var(--text-2xs)] text-[var(--text-muted)] hover:text-[var(--error)] transition-colors cursor-pointer px-1.5 py-0.5 rounded hover:bg-[var(--alpha-white-5)]"
           >
             Clear all

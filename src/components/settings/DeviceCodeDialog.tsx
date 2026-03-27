@@ -35,30 +35,32 @@ export const DeviceCodeDialog: Component<DeviceCodeDialogProps> = (props) => {
     openUrl(props.deviceCode.verificationUri)
   }
 
+  const startPolling = async (): Promise<void> => {
+    try {
+      const tokens = await pollDeviceCodeAuth(
+        props.provider,
+        props.deviceCode.deviceCode,
+        props.deviceCode.interval,
+        abortController.signal
+      )
+      if (tokens) {
+        storeOAuthCredentials(props.provider, tokens)
+        setStatus('success')
+        setTimeout(() => props.onSuccess(tokens.accessToken), 1000)
+      } else {
+        setStatus('error')
+        setErrorMsg('Authorization expired or was denied')
+      }
+    } catch (err) {
+      if (!abortController.signal.aborted) {
+        setStatus('error')
+        setErrorMsg(err instanceof Error ? err.message : 'Authorization failed')
+      }
+    }
+  }
+
   onMount(() => {
-    // Start polling for authorization
-    pollDeviceCodeAuth(
-      props.provider,
-      props.deviceCode.deviceCode,
-      props.deviceCode.interval,
-      abortController.signal
-    )
-      .then((tokens) => {
-        if (tokens) {
-          storeOAuthCredentials(props.provider, tokens)
-          setStatus('success')
-          setTimeout(() => props.onSuccess(tokens.accessToken), 1000)
-        } else {
-          setStatus('error')
-          setErrorMsg('Authorization expired or was denied')
-        }
-      })
-      .catch((err) => {
-        if (!abortController.signal.aborted) {
-          setStatus('error')
-          setErrorMsg(err instanceof Error ? err.message : 'Authorization failed')
-        }
-      })
+    void startPolling()
   })
 
   onCleanup(() => {
@@ -83,7 +85,7 @@ export const DeviceCodeDialog: Component<DeviceCodeDialogProps> = (props) => {
           </h3>
           <button
             type="button"
-            onClick={props.onClose}
+            onClick={() => props.onClose()}
             class="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)] rounded-[var(--radius-md)] transition-colors"
           >
             <X class="w-4 h-4" />

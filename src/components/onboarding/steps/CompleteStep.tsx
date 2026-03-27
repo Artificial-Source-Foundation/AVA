@@ -70,7 +70,7 @@ export const CompleteStep: Component<CompleteStepProps> = (props) => (
     {/* Start Coding button */}
     <button
       type="button"
-      onClick={props.onComplete}
+      onClick={() => props.onComplete()}
       class="px-10 py-3 bg-[var(--accent)] hover:bg-[var(--violet-8)] text-white text-sm font-semibold rounded-xl transition-colors"
     >
       Start Coding

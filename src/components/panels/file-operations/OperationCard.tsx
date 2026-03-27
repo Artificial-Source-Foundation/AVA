@@ -31,7 +31,7 @@ export const OperationCard: Component<OperationCardProps> = (props) => {
   return (
     <button
       type="button"
-      onClick={props.onToggle}
+      onClick={() => props.onToggle()}
       class={`
         w-full text-left
         p-3

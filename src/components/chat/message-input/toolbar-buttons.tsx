@@ -76,7 +76,7 @@ export const ReasoningDropdown: Component<ReasoningDropdownProps> = (props) => {
   return (
     <button
       type="button"
-      onClick={props.onCycle}
+      onClick={() => props.onCycle()}
       class={`
         flex items-center gap-1 px-1.5 py-1
         text-[var(--text-xs)] font-medium rounded-[var(--radius-md)]
@@ -127,7 +127,7 @@ export interface DelegationToggleProps {
 export const DelegationToggle: Component<DelegationToggleProps> = (props) => (
   <button
     type="button"
-    onClick={props.onToggle}
+    onClick={() => props.onToggle()}
     class={`
       flex items-center gap-1 px-1.5 py-1
       text-[var(--text-xs)] font-medium rounded-[var(--radius-md)]
@@ -158,7 +158,7 @@ export interface PlanActSliderProps {
 export const PlanActSlider: Component<PlanActSliderProps> = (props) => (
   <button
     type="button"
-    onClick={props.togglePlanMode}
+    onClick={() => props.togglePlanMode()}
     disabled={props.isProcessing()}
     class="
       relative flex items-center
@@ -224,7 +224,7 @@ export const PermissionBadge: Component<PermissionBadgeProps> = (props) => {
   return (
     <button
       type="button"
-      onClick={props.onCyclePermission}
+      onClick={() => props.onCyclePermission()}
       class="
         flex items-center gap-1 px-2 py-1
         text-[var(--text-xs)] font-medium rounded-[var(--radius-md)]

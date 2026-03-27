@@ -11,7 +11,7 @@ export const MicButton: Component<MicButtonProps> = (props) => (
   <Show when={props.supported()}>
     <button
       type="button"
-      onClick={props.onToggle}
+      onClick={() => props.onToggle()}
       class={`
         flex items-center gap-1 px-1.5 py-1
         text-[var(--text-xs)] font-medium rounded-[var(--radius-md)]

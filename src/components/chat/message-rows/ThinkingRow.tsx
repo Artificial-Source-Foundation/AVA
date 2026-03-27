@@ -34,12 +34,15 @@ export const ThinkingRow: Component<ThinkingRowProps> = (props) => {
   const { settings } = useSettings()
   const displayMode = (): string => settings().appearance.thinkingDisplay
   const hidden = () => displayMode() === 'hidden'
-
-  debugLog('thinking', 'render check:', {
+  const debugState = createMemo(() => ({
     hidden: hidden(),
     thinkingLength: props.thinking?.length,
     isStreaming: props.isStreaming,
     thinkingDisplay: displayMode(),
+  }))
+
+  createEffect(() => {
+    debugLog('thinking', 'render check:', debugState())
   })
 
   // Track the timestamp when streaming first started (stable — never changes)
@@ -47,7 +50,13 @@ export const ThinkingRow: Component<ThinkingRowProps> = (props) => {
   // Track the elapsed time at the moment streaming ends (set once, never updated again)
   const [completedDuration, setCompletedDuration] = createSignal<number | null>(null)
   // Whether we've ever been in streaming state (so we know to show duration on completion)
-  const [wasStreaming, setWasStreaming] = createSignal(props.isStreaming)
+  const [wasStreaming, setWasStreaming] = createSignal(false)
+
+  createEffect(() => {
+    if (props.isStreaming) {
+      setWasStreaming(true)
+    }
+  })
 
   // Rendered markdown HTML for the thinking content
   const [renderedHtml, setRenderedHtml] = createSignal('')

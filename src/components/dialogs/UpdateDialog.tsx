@@ -95,7 +95,7 @@ export const UpdateDialog: Component<UpdateDialogProps> = (props) => {
           <div class="flex gap-2 justify-end pt-1">
             <button
               type="button"
-              onClick={props.onClose}
+              onClick={() => props.onClose()}
               disabled={installing()}
               class="px-3 py-1.5 text-xs text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors disabled:opacity-50"
             >

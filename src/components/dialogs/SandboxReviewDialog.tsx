@@ -143,7 +143,7 @@ export const SandboxReviewDialog: Component<SandboxReviewDialogProps> = (props) 
             </div>
             <button
               type="button"
-              onClick={props.onClose}
+              onClick={() => props.onClose()}
               class="p-1 rounded-[var(--radius-sm)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-raised)]"
               aria-label="Close"
             >
@@ -253,7 +253,7 @@ export const SandboxReviewDialog: Component<SandboxReviewDialogProps> = (props) 
           <div class="flex items-center justify-between px-5 py-3 border-t border-[var(--border-subtle)] bg-[var(--surface-sunken)]">
             <button
               type="button"
-              onClick={props.onRejectAll}
+              onClick={() => props.onRejectAll()}
               class="px-3 py-1.5 text-xs text-[var(--error)] hover:bg-[var(--error-subtle)] rounded-[var(--radius-md)]"
             >
               Reject All
@@ -261,7 +261,7 @@ export const SandboxReviewDialog: Component<SandboxReviewDialogProps> = (props) 
             <div class="flex items-center gap-2">
               <button
                 type="button"
-                onClick={props.onClose}
+                onClick={() => props.onClose()}
                 class="px-3 py-1.5 text-xs text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
               >
                 Close

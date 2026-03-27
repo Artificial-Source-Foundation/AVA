@@ -222,7 +222,7 @@ export const ProviderStep: Component<ProviderStepProps> = (props) => {
       <div class="w-full max-w-[560px] flex items-center justify-between">
         <button
           type="button"
-          onClick={props.onPrev}
+          onClick={() => props.onPrev()}
           class="text-sm text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
         >
           Back
@@ -230,14 +230,14 @@ export const ProviderStep: Component<ProviderStepProps> = (props) => {
         <div class="flex items-center gap-4">
           <button
             type="button"
-            onClick={props.onSkip}
+            onClick={() => props.onSkip()}
             class="text-sm text-[var(--text-tertiary)] hover:text-[var(--text-muted)] transition-colors"
           >
             Skip for now
           </button>
           <button
             type="button"
-            onClick={props.onNext}
+            onClick={() => props.onNext()}
             class="px-6 py-2.5 bg-[var(--accent)] hover:bg-[var(--violet-8)] text-white text-sm font-medium rounded-xl transition-colors"
           >
             Continue

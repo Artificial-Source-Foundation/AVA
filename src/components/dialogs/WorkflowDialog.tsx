@@ -168,7 +168,7 @@ export const WorkflowDialog: Component<WorkflowDialogProps> = (props) => {
           <div class="flex justify-end gap-2 px-4 py-3 border-t border-[var(--border-subtle)]">
             <button
               type="button"
-              onClick={props.onClose}
+              onClick={() => props.onClose()}
               class="px-3 py-1.5 text-xs font-medium rounded-[var(--radius-md)] text-[var(--text-secondary)] hover:bg-[var(--surface-raised)] transition-colors"
             >
               Cancel

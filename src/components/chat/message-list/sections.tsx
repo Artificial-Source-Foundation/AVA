@@ -131,7 +131,7 @@ interface ScrollToBottomButtonProps {
 export const ScrollToBottomButton: Component<ScrollToBottomButtonProps> = (props) => (
   <button
     type="button"
-    onClick={props.onClick}
+    onClick={() => props.onClick()}
     class="
       absolute bottom-4 right-8
       p-2 rounded-full

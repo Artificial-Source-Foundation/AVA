@@ -115,7 +115,7 @@ export const ToolListDialog: Component<ToolListDialogProps> = (props) => {
             </div>
             <button
               type="button"
-              onClick={props.onClose}
+              onClick={() => props.onClose()}
               class="p-1.5 rounded-[var(--radius-md)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-raised)] transition-colors"
               aria-label="Close"
             >
@@ -225,7 +225,7 @@ export const ToolListDialog: Component<ToolListDialogProps> = (props) => {
           <div class="px-5 py-3 border-t border-[var(--border-subtle)] flex justify-end">
             <button
               type="button"
-              onClick={props.onClose}
+              onClick={() => props.onClose()}
               class="px-3 py-1.5 text-xs text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors"
             >
               Close

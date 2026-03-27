@@ -24,7 +24,7 @@ export interface ModelSelectorProps {
 export const ModelSelector: Component<ModelSelectorProps> = (props) => (
   <button
     type="button"
-    onClick={props.onToggle}
+    onClick={() => props.onToggle()}
     class="
       flex items-center gap-1 px-2.5 py-1
       text-[var(--text-xs)] text-[var(--text-secondary)]

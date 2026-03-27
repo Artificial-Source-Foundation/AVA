@@ -58,12 +58,16 @@ export const VoiceButton: Component<VoiceButtonProps> = (props) => {
   // Audio device list
   const [audioDevices, setAudioDevices] = createSignal<MediaDeviceInfo[]>([])
 
-  // Load audio devices on mount when dictation is supported
-  if (dictationSupported()) {
-    getAudioDevices()
+  createEffect(() => {
+    if (!dictationSupported()) {
+      setAudioDevices([])
+      return
+    }
+
+    void getAudioDevices()
       .then(setAudioDevices)
       .catch(() => {})
-  }
+  })
 
   // Start/stop analyser when recording state changes
   createEffect(

@@ -28,7 +28,7 @@ const capabilityColors: Record<string, string> = {
 export const ModelBrowserCard: Component<ModelBrowserCardProps> = (props) => (
   <button
     type="button"
-    onClick={props.onSelect}
+    onClick={() => props.onSelect()}
     class={`
       w-full text-left p-3 rounded-[var(--radius-lg)]
       border transition-colors duration-150

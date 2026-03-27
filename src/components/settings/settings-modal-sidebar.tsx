@@ -62,7 +62,7 @@ export const SettingsModalSidebar: Component<SettingsModalSidebarProps> = (props
       {/* Back link */}
       <button
         type="button"
-        onClick={props.onBack}
+        onClick={() => props.onBack()}
         class="flex items-center gap-2 px-4 py-3 text-[var(--settings-text-input)] text-[var(--gray-7)] hover:text-[var(--gray-9)] transition-colors"
       >
         <ArrowLeft class="w-3.5 h-3.5" />

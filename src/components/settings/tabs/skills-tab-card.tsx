@@ -28,7 +28,7 @@ export const SkillCard: Component<{
   <div
     role="button"
     tabIndex={0}
-    onClick={props.onClick}
+    onClick={() => props.onClick()}
     onKeyDown={(e) => e.key === 'Enter' && props.onClick()}
     class={`flex items-start gap-3 px-3 py-2.5 rounded-[var(--radius-md)] border transition-colors cursor-pointer ${
       props.isEnabled
@@ -159,7 +159,7 @@ export const SkillForm: Component<{
         <span class="text-xs font-semibold text-[var(--text-primary)]">{props.title}</span>
         <button
           type="button"
-          onClick={props.onCancel}
+          onClick={() => props.onCancel()}
           class="p-1 rounded-[var(--radius-sm)] text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors"
         >
           <X class="w-3.5 h-3.5" />
@@ -210,7 +210,7 @@ export const SkillForm: Component<{
       <div class="flex justify-end gap-2">
         <button
           type="button"
-          onClick={props.onCancel}
+          onClick={() => props.onCancel()}
           class="px-3 py-1 text-[var(--settings-text-button)] rounded-[var(--radius-md)] bg-[var(--surface-raised)] text-[var(--text-secondary)] hover:bg-[var(--alpha-white-8)] transition-colors"
         >
           Cancel

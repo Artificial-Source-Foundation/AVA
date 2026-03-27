@@ -432,7 +432,7 @@ export const AssistantMessageBubble: Component<AssistantMessageBubbleProps> = (p
         <Show when={isTruncated() && props.isLastMessage}>
           <button
             type="button"
-            onClick={props.onRegenerate}
+            onClick={() => props.onRegenerate()}
             class="mt-1 flex items-center gap-1.5 text-[11px] text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors"
             title="Response may be truncated — continue generation"
           >

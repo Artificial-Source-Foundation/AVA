@@ -95,7 +95,7 @@ export const OllamaModelBrowser: Component<OllamaModelBrowserProps> = (props) =>
             </div>
             <button
               type="button"
-              onClick={props.onClose}
+              onClick={() => props.onClose()}
               class="p-1 rounded-[var(--radius-sm)] hover:bg-[var(--surface-raised)] text-[var(--text-muted)] transition-colors"
             >
               <X class="w-4 h-4" />

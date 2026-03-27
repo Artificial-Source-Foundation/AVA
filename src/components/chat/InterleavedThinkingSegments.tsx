@@ -1,4 +1,4 @@
-import { type Component, createSignal, Index, Match, Show, Switch } from 'solid-js'
+import { type Component, createEffect, createSignal, Index, Match, Show, Switch } from 'solid-js'
 import type { ThinkingSegment } from '../../hooks/use-rust-agent'
 import { useSettings } from '../../stores/settings'
 import type { ToolCall } from '../../types'
@@ -103,7 +103,13 @@ export const InterleavedThinkingSegments: Component<{
   const { settings } = useSettings()
   const activityMode = () => settings().appearance.activityDisplay ?? 'collapsed'
 
-  const [isOpen, setIsOpen] = createSignal(props.isStreaming ?? false)
+  const [isOpen, setIsOpen] = createSignal(false)
+
+  createEffect(() => {
+    if (props.isStreaming) {
+      setIsOpen(true)
+    }
+  })
 
   // Live counts
   const totalTools = () => props.segments.reduce((sum, seg) => sum + seg.toolCallIds.length, 0)

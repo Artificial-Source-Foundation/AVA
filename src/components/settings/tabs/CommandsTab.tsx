@@ -45,7 +45,7 @@ const CommandCard: Component<CommandCardProps> = (props) => {
         <div class="flex items-center gap-1 shrink-0">
           <button
             type="button"
-            onClick={props.onEdit}
+            onClick={() => props.onEdit()}
             class="p-1 rounded-[var(--radius-md)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--alpha-white-8)] transition-colors"
             title="Edit command"
           >
@@ -53,7 +53,7 @@ const CommandCard: Component<CommandCardProps> = (props) => {
           </button>
           <button
             type="button"
-            onClick={props.onDelete}
+            onClick={() => props.onDelete()}
             class="p-1 rounded-[var(--radius-md)] text-[var(--text-muted)] hover:text-[var(--error)] hover:bg-[color-mix(in_srgb,var(--error)_10%,transparent)] transition-colors"
             title="Delete command"
           >
@@ -124,11 +124,6 @@ export const CommandsTab: Component = () => {
   const handleDelete = async (filePath: string) => {
     await deleteCommand(filePath)
     await loadCommands()
-  }
-
-  // Show edit form when editing
-  if (editing() === 'new' || editing()) {
-    // This is reactive — handled below in JSX
   }
 
   return (

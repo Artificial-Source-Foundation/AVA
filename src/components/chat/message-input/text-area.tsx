@@ -65,7 +65,7 @@ export const InputTextArea: Component<InputTextAreaProps> = (props) => (
   // biome-ignore lint/a11y/noStaticElementInteractions: drop zone for images and files
   <div
     class="relative"
-    onDrop={props.onDrop}
+    onDrop={(e) => props.onDrop(e)}
     onDragOver={(e: DragEvent) => {
       e.preventDefault()
       props.setIsDragging(true)
@@ -106,8 +106,8 @@ export const InputTextArea: Component<InputTextAreaProps> = (props) => (
         ref={props.textareaRef}
         value={props.input()}
         onInput={(e) => props.onInput(e.currentTarget.value)}
-        onKeyDown={props.onKeyDown}
-        onPaste={props.onPaste}
+        onKeyDown={(e) => props.onKeyDown(e)}
+        onPaste={(e) => props.onPaste(e)}
         placeholder={props.placeholder()}
         disabled={props.disabled()}
         rows={1}

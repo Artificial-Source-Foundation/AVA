@@ -36,7 +36,7 @@ export const WelcomeStep: Component<WelcomeStepProps> = (props) => (
     {/* Get Started button */}
     <button
       type="button"
-      onClick={props.onNext}
+      onClick={() => props.onNext()}
       class="px-10 py-3 bg-[var(--accent)] hover:bg-[var(--violet-8)] text-white text-sm font-semibold rounded-xl transition-colors"
     >
       Get Started

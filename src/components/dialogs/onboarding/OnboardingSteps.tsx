@@ -101,7 +101,7 @@ export const WelcomeStep: Component<{
     <div class="stagger-child flex items-center gap-4">
       <button
         type="button"
-        onClick={props.onNext}
+        onClick={() => props.onNext()}
         class="onboarding-btn-primary inline-flex items-center gap-2.5 px-10 py-3.5 bg-[var(--accent)] text-white font-semibold rounded-xl text-lg"
       >
         Get Started
@@ -275,7 +275,7 @@ export const CompleteStep: Component<{
     <div class="stagger-child">
       <button
         type="button"
-        onClick={props.onComplete}
+        onClick={() => props.onComplete()}
         class="onboarding-btn-primary inline-flex items-center gap-2 px-8 py-3 bg-[var(--accent)] text-white font-medium rounded-xl text-base"
       >
         <Sparkles class="w-5 h-5" />

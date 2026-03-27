@@ -174,14 +174,14 @@ export const ThemeStep: Component<ThemeStepProps> = (props) => (
     <div class="w-full max-w-[640px] flex items-center justify-between">
       <button
         type="button"
-        onClick={props.onPrev}
+        onClick={() => props.onPrev()}
         class="text-sm text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
       >
         Back
       </button>
       <button
         type="button"
-        onClick={props.onNext}
+        onClick={() => props.onNext()}
         class="px-6 py-2.5 bg-[var(--accent)] hover:bg-[var(--violet-8)] text-white text-sm font-medium rounded-xl transition-colors"
       >
         Continue

@@ -53,7 +53,7 @@ export const ProviderCard: Component<ProviderCardProps> = (props) => {
       <div class="flex items-center gap-3 p-3">
         <button
           type="button"
-          onClick={props.onExpand}
+          onClick={() => props.onExpand()}
           class="flex items-center gap-3 flex-1 min-w-0 text-left"
         >
           {/* Icon */}

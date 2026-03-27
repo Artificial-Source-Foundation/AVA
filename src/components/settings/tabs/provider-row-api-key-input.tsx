@@ -19,14 +19,14 @@ export const ProviderRowApiKeyInput: Component<ProviderRowApiKeyInputProps> = (p
       value={props.apiKey()}
       onInput={(e) => props.onInput(e.currentTarget.value)}
       onFocus={() => props.apiKey().includes('••••') && props.onInput('')}
-      onBlur={props.onBlur}
+      onBlur={() => props.onBlur()}
       placeholder={`${props.providerName} API key`}
       class="w-full px-3 py-2 pr-16 bg-[var(--input-background)] text-xs text-[var(--text-primary)] font-mono placeholder:text-[var(--input-placeholder)] border border-[var(--input-border)] rounded-[var(--radius-md)] focus:outline-none focus:border-[var(--input-border-focus)] transition-colors"
     />
     <div class="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
       <button
         type="button"
-        onClick={props.onToggleVisibility}
+        onClick={() => props.onToggleVisibility()}
         class="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
       >
         <Show when={props.showKey()} fallback={<Eye class="w-3 h-3" />}>
@@ -36,7 +36,7 @@ export const ProviderRowApiKeyInput: Component<ProviderRowApiKeyInputProps> = (p
       <Show when={props.hasStoredApiKey}>
         <button
           type="button"
-          onClick={props.onClearClick}
+          onClick={() => props.onClearClick()}
           class="p-1 text-[var(--text-muted)] hover:text-[var(--error)] transition-colors"
           title="Clear API key"
         >

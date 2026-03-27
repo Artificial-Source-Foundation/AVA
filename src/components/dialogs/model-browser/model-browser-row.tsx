@@ -26,7 +26,7 @@ export const ModelBrowserRow: Component<ModelBrowserRowProps> = (props) => {
     <button
       type="button"
       data-active={props.isKeyboardSelected ? 'true' : undefined}
-      onClick={props.onSelect}
+      onClick={() => props.onSelect()}
       class="
         w-full flex items-center gap-3
         px-3 py-[7px]

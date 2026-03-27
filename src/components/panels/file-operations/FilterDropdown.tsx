@@ -22,7 +22,7 @@ export const FilterDropdown: Component<FilterDropdownProps> = (props) => {
     <div class="relative">
       <button
         type="button"
-        onClick={props.onToggleMenu}
+        onClick={() => props.onToggleMenu()}
         class={`
           flex items-center gap-1.5 px-2.5 py-1.5
           rounded-[var(--radius-md)]

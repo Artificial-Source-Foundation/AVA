@@ -149,7 +149,7 @@ export const SearchBar: Component<SearchBarProps> = (props) => {
       {/* Close */}
       <button
         type="button"
-        onClick={props.onClose}
+        onClick={() => props.onClose()}
         class="p-0.5 rounded text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--alpha-white-5)] transition-colors"
         title="Close search (Escape)"
         aria-label="Close search"

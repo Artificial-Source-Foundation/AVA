@@ -157,6 +157,7 @@ function setupShortcutListener(): () => void {
   }
 
   document.addEventListener('keydown', handler)
+  // eslint-disable-next-line solid/reactivity -- cleanup only captures the concrete DOM listener
   return () => document.removeEventListener('keydown', handler)
 }
 

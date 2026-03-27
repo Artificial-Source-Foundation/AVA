@@ -42,7 +42,7 @@ export const OAuthSection: Component<OAuthSectionProps> = (props) => {
           </div>
           <button
             type="button"
-            onClick={props.onDisconnect}
+            onClick={() => props.onDisconnect()}
             class="px-2 py-1.5 text-[var(--settings-text-button)] text-[var(--text-muted)] hover:text-[var(--error)] bg-[var(--surface-sunken)] border border-[var(--border-subtle)] rounded-[var(--radius-md)] transition-colors"
             title="Disconnect OAuth"
           >

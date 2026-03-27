@@ -143,7 +143,7 @@ export const CommandEditForm: Component<EditFormProps> = (props) => {
         </button>
         <button
           type="button"
-          onClick={props.onCancel}
+          onClick={() => props.onCancel()}
           class="px-3 py-1.5 text-xs font-medium rounded-[var(--radius-md)] text-[var(--text-secondary)] hover:bg-[var(--surface-raised)] transition-colors"
         >
           Cancel

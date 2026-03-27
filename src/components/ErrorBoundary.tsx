@@ -17,6 +17,7 @@ import {
 } from 'lucide-solid'
 import {
   type Component,
+  createEffect,
   createSignal,
   type JSX,
   Show,
@@ -34,9 +35,10 @@ const ErrorFallback: Component<ErrorFallbackProps> = (props) => {
   const [showDetails, setShowDetails] = createSignal(false)
   const [copied, setCopied] = createSignal(false)
 
-  // eslint-disable-next-line solid/reactivity -- one-time log at mount
-  log.error('error', `Caught render error: ${props.error.message}`, props.error.stack)
-  logFatal('ErrorBoundary', `Caught render error: ${props.error.message}`, props.error.stack)
+  createEffect(() => {
+    log.error('error', `Caught render error: ${props.error.message}`, props.error.stack)
+    logFatal('ErrorBoundary', `Caught render error: ${props.error.message}`, props.error.stack)
+  })
 
   const copyError = async () => {
     const errorText = `Error: ${props.error.message}\n\nStack:\n${props.error.stack || 'No stack trace'}`

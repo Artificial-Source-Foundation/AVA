@@ -75,6 +75,7 @@ export const GitControlStrip: Component = () => {
 
   const loadBranches = async () => {
     const dir = projectDir()
+    const currentBranch = branch()
     if (!dir || dir === '~' || !isGitProject()) {
       setBranches([])
       return
@@ -83,7 +84,7 @@ export const GitControlStrip: Component = () => {
     await runGitAction('refresh', async () => {
       const allBranches = await listBranches(dir)
       setBranches(allBranches)
-      setSelectedBranch(branch())
+      setSelectedBranch(currentBranch)
       logInfo('git-strip', 'Loaded git branches', { count: allBranches.length })
     })
   }
@@ -101,19 +102,21 @@ export const GitControlStrip: Component = () => {
 
   const handlePull = async () => {
     const dir = projectDir()
+    const currentBranch = branch()
     if (!dir || dir === '~') return
     await runGitAction('pull', async () => {
       await pullCurrentBranch(dir)
-      logInfo('git-strip', 'Pulled branch', { branch: branch() })
+      logInfo('git-strip', 'Pulled branch', { branch: currentBranch })
     })
   }
 
   const handlePush = async () => {
     const dir = projectDir()
+    const currentBranch = branch()
     if (!dir || dir === '~') return
     await runGitAction('push', async () => {
       await pushCurrentBranch(dir)
-      logInfo('git-strip', 'Pushed branch', { branch: branch() })
+      logInfo('git-strip', 'Pushed branch', { branch: currentBranch })
     })
   }
 

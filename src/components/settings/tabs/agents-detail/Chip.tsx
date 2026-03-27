@@ -9,7 +9,7 @@ import type { Component } from 'solid-js'
 export const Chip: Component<{ label: string; active: boolean; onClick: () => void }> = (props) => (
   <button
     type="button"
-    onClick={props.onClick}
+    onClick={() => props.onClick()}
     class={`px-1.5 py-0.5 text-[var(--settings-text-badge)] rounded-[var(--radius-sm)] transition-colors ${
       props.active
         ? 'bg-[var(--accent)] text-white'

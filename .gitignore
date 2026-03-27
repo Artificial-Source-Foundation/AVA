@@ -50,12 +50,8 @@ coverage/
 *.temp
 .tmp/
 
-# Reference code (cloned repos for inspiration)
-docs/reference-code/
-docs/research/source-code/
-
-# Memory bank (personal session notes)
-docs/memory-bank/
+# Docs (local dev reference, not tracked)
+docs/
 
 # Local git worktrees
 .worktrees/

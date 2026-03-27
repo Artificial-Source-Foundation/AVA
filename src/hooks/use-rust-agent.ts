@@ -2,6 +2,7 @@ import { isTauri } from '@tauri-apps/api/core'
 import { batch, createSignal, onCleanup } from 'solid-js'
 import type { ToolCall } from '../types'
 import type { AgentEvent, PlanData, SubmitGoalResult, TodoItem } from '../types/rust-ipc'
+import { createBoundedEventHistory } from './event-history'
 import {
   type CompletionResolver,
   createAgentEventHandler,
@@ -23,6 +24,7 @@ export interface ThinkingSegment {
 // Module-level shared signal for todos — all useRustAgent instances share this
 // so TodoPanel can read todos set by the agent event handler.
 const [todos, setTodos] = createSignal<TodoItem[]>([])
+const MAX_EVENT_HISTORY = 4000
 
 export function useRustAgent() {
   const [isRunning, setIsRunning] = createSignal(false)
@@ -32,7 +34,7 @@ export function useRustAgent() {
   const [error, setError] = createSignal<string | null>(null)
   const [lastResult, setLastResult] = createSignal<SubmitGoalResult | null>(null)
   const [tokenUsage, setTokenUsage] = createSignal({ input: 0, output: 0, cost: 0 })
-  const [events, setEvents] = createSignal<AgentEvent[]>([])
+  const eventHistory = createBoundedEventHistory<AgentEvent>(MAX_EVENT_HISTORY)
   const [progressMessage, setProgressMessage] = createSignal<string | null>(null)
   const [budgetWarning, setBudgetWarning] = createSignal<{
     thresholdPercent: number
@@ -57,7 +59,7 @@ export function useRustAgent() {
   const handleAgentEvent = createAgentEventHandler({
     metrics,
     completion,
-    setEvents,
+    appendEvent: eventHistory.append,
     setStreamingContent,
     setThinkingContent,
     setActiveToolCalls,
@@ -74,7 +76,7 @@ export function useRustAgent() {
 
   const resetState = (): void => {
     batch(() => {
-      setEvents([])
+      eventHistory.clear()
       setStreamingContent('')
       setThinkingContent('')
       setActiveToolCalls([])
@@ -147,7 +149,7 @@ export function useRustAgent() {
     error,
     lastResult,
     tokenUsage,
-    events,
+    events: eventHistory.events,
     progressMessage,
     budgetWarning,
     pendingPlan,

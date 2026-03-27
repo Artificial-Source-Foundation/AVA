@@ -2,6 +2,7 @@ import { createRoot, createSignal } from 'solid-js'
 import { describe, expect, it, vi } from 'vitest'
 import type { ToolCall } from '../types'
 import type { AgentEvent, PlanData, TodoItem } from '../types/rust-ipc'
+import { createBoundedEventHistory } from './event-history'
 import {
   type CompletionResolver,
   createAgentEventHandler,
@@ -19,7 +20,7 @@ vi.mock('../stores/planOverlayStore', () => ({
 
 function createHandlerHarness() {
   return createRoot((dispose) => {
-    const [events, setEvents] = createSignal<AgentEvent[]>([])
+    const history = createBoundedEventHistory<AgentEvent>(64)
     const [streamingContent, setStreamingContent] = createSignal('')
     const [thinkingContent, setThinkingContent] = createSignal('')
     const [activeToolCalls, setActiveToolCalls] = createSignal<ToolCall[]>([])
@@ -48,7 +49,7 @@ function createHandlerHarness() {
     const handler = createAgentEventHandler({
       metrics,
       completion,
-      setEvents,
+      appendEvent: history.append,
       setStreamingContent,
       setThinkingContent,
       setActiveToolCalls,
@@ -66,7 +67,7 @@ function createHandlerHarness() {
     return {
       dispose,
       handler,
-      events,
+      events: history.events,
       streamingContent,
       thinkingContent,
       activeToolCalls,

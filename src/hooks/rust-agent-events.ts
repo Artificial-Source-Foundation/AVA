@@ -37,7 +37,7 @@ export interface CompletionResolver {
 interface EventHandlerDeps {
   metrics: StreamingMetrics
   completion: CompletionResolver
-  setEvents: Setter<AgentEvent[]>
+  appendEvent: (event: AgentEvent) => void
   setStreamingContent: Setter<string>
   setThinkingContent: Setter<string>
   setActiveToolCalls: Setter<ToolCall[]>
@@ -64,7 +64,7 @@ export function createAgentEventHandler(deps: EventHandlerDeps): (event: AgentEv
   const {
     metrics,
     completion,
-    setEvents,
+    appendEvent,
     setStreamingContent,
     setThinkingContent,
     setActiveToolCalls,
@@ -84,7 +84,7 @@ export function createAgentEventHandler(deps: EventHandlerDeps): (event: AgentEv
       ...event,
       timestamp: (event as { timestamp?: number }).timestamp ?? Date.now(),
     } as unknown as AgentEvent
-    setEvents((prev) => [...prev, timedEvent])
+    appendEvent(timedEvent)
 
     debugLog(
       'event',

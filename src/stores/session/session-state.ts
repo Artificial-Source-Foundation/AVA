@@ -19,6 +19,7 @@ import type {
   SessionWithStats,
   TerminalExecution,
 } from '../../types'
+import { installSessionWindowListeners } from './window-listeners'
 
 const SELECTED_MODEL_KEY = 'ava_selected_model'
 const SELECTED_PROVIDER_KEY = 'ava_selected_provider'
@@ -81,29 +82,9 @@ export const {
   // Compaction divider — index of the first message after the last compaction.
   // -1 means no compaction has occurred in this session view.
   const [compactionIndex, setCompactionIndex] = createSignal<number>(-1)
-  if (typeof window !== 'undefined') {
-    window.addEventListener('ava:compacted', () => {
-      // Snapshot the current message count so we know where the divider sits.
-      setCompactionIndex(messages().length)
-    })
-  }
 
   // Busy session IDs (tracked from session:status events)
   const [busySessionIds, setBusySessionIds] = createSignal<Set<string>>(new Set())
-  if (typeof window !== 'undefined') {
-    window.addEventListener('ava:session-status', (e) => {
-      const { sessionId, status } = (e as CustomEvent).detail as {
-        sessionId: string
-        status: string
-      }
-      setBusySessionIds((prev) => {
-        const next = new Set(prev)
-        if (status === 'busy') next.add(sessionId)
-        else next.delete(sessionId)
-        return next
-      })
-    })
-  }
 
   // Selected model — persisted to localStorage
   const savedModel =
@@ -157,9 +138,22 @@ export const {
   // Budget tick for reactive context usage
   const [budgetTick, setBudgetTick] = createSignal(0)
   if (typeof window !== 'undefined') {
-    window.addEventListener('ava:budget-updated', () => setBudgetTick((n) => n + 1))
-    window.addEventListener('ava:core-settings-changed', (e) => {
-      if ((e as CustomEvent).detail?.category === 'context') setBudgetTick((n) => n + 1)
+    installSessionWindowListeners({
+      onCompacted: () => {
+        setCompactionIndex(messages().length)
+      },
+      onSessionStatus: ({ sessionId, status }) => {
+        setBusySessionIds((prev) => {
+          const next = new Set(prev)
+          if (status === 'busy') next.add(sessionId)
+          else next.delete(sessionId)
+          return next
+        })
+      },
+      onBudgetUpdated: () => setBudgetTick((n) => n + 1),
+      onCoreSettingsChanged: (detail) => {
+        if (detail?.category === 'context') setBudgetTick((n) => n + 1)
+      },
     })
   }
 

@@ -338,7 +338,7 @@ pub fn render_message_list(frame: &mut Frame<'_>, area: Rect, state: &mut AppSta
     let show_thinking = state.agent.show_thinking;
 
     // Track per-source-message line ranges for mouse click hit-testing.
-    let mut line_ranges: Vec<(u16, u16)> = Vec::with_capacity(messages_source.len());
+    let mut line_ranges: Vec<(usize, usize)> = Vec::with_capacity(messages_source.len());
     // Index into messages_source — advances as we iterate render blocks.
     let mut src_idx = 0usize;
 
@@ -346,7 +346,7 @@ pub fn render_message_list(frame: &mut Frame<'_>, area: Rect, state: &mut AppSta
         if i > 0 {
             lines.push(Line::raw(""));
         }
-        let start = lines.len() as u16;
+        let start = lines.len();
         match block {
             RenderBlock::Message(message) => {
                 lines.extend(render_message_with_options(
@@ -356,7 +356,7 @@ pub fn render_message_list(frame: &mut Frame<'_>, area: Rect, state: &mut AppSta
                     content_width,
                     show_thinking,
                 ));
-                let end = lines.len() as u16;
+                let end = lines.len();
                 // Record range for this source message.
                 if src_idx < messages_source.len() {
                     line_ranges.push((start, end));
@@ -374,7 +374,7 @@ pub fn render_message_list(frame: &mut Frame<'_>, area: Rect, state: &mut AppSta
                     content_width,
                     *active || state.messages.show_tools_expanded || group_expanded,
                 ));
-                let end = lines.len() as u16;
+                let end = lines.len();
                 // Each message in the group gets the same range (the whole group).
                 for _ in 0..messages.len() {
                     if src_idx < messages_source.len() {
@@ -390,8 +390,8 @@ pub fn render_message_list(frame: &mut Frame<'_>, area: Rect, state: &mut AppSta
     lines.push(Line::raw(""));
 
     // Lines are pre-wrapped, so each Line = 1 visual row.
-    let total = lines.len() as u16;
-    let visible_height = area.height;
+    let total = lines.len();
+    let visible_height = usize::from(area.height);
 
     state.messages.messages_area = area;
     state.messages.message_line_ranges = line_ranges;
@@ -444,12 +444,12 @@ pub fn render_message_list(frame: &mut Frame<'_>, area: Rect, state: &mut AppSta
     // relying on Paragraph::scroll(). This guarantees that the Paragraph widget
     // receives only as many lines as fit in the area, preventing any possibility
     // of text bleeding past area.bottom().
-    let start = (state.messages.scroll_offset as usize).min(lines.len());
-    let end = (start + visible_height as usize).min(lines.len());
+    let start = state.messages.scroll_offset.min(lines.len());
     // Hard-cap to content_area.height — the Paragraph must NEVER receive more
     // lines than the area can display, otherwise text bleeds into the composer.
-    let max_visible = content_area.height as usize;
-    let visible_lines: Vec<Line<'static>> = lines.drain(start..end).take(max_visible).collect();
+    let max_visible = usize::from(content_area.height);
+    let visible_lines: Vec<Line<'static>> =
+        lines.into_iter().skip(start).take(max_visible).collect();
 
     // STEP 4: Hard-clamp every line to content_area.width.
     // This is the final safety net — even if wrapping or markdown rendering
@@ -474,8 +474,8 @@ pub fn render_message_list(frame: &mut Frame<'_>, area: Rect, state: &mut AppSta
     // Using the layout-split area (scrollbar_area_layout) guarantees the
     // scrollbar is exactly 1 column wide with no gap between it and the margin.
     if total > visible_height && !state.messages.auto_scroll {
-        let mut scrollbar_state = ScrollbarState::new(max_offset as usize)
-            .position(state.messages.scroll_offset as usize);
+        let mut scrollbar_state =
+            ScrollbarState::new(max_offset).position(state.messages.scroll_offset);
         let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
             .thumb_symbol("\u{2593}")
             .track_symbol(Some("\u{2591}"))

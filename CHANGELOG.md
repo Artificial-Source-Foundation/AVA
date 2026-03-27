@@ -15,6 +15,7 @@ All notable changes to AVA are documented in this file.
 - Custom TOML tools now execute with bash-style env scrubbing, plugin-provided `shell.env` variables, structured stdout/stderr/exit metadata, secret redaction, and disk spillover for oversized output. DuckDuckGo search results now validate redirects, unwrap real target URLs, decode HTML entities, and drop blocked or duplicate results.
 - Web fetches and recovery state are more resilient: `web_fetch` now enforces redirect safety as hard failures and streams response bodies under a byte cap instead of buffering arbitrarily large payloads, while file backup version discovery tolerates gaps and shadow snapshots ignore inherited `GIT_*` environment contamination.
 - The docs tree is now much leaner: `docs/README.md` points at the small set of live references, stale duplicate docs were removed, and `CLAUDE.md` now points at the current doc locations.
+- The TUI is sturdier on long sessions and richer diff output: side-by-side tool diffs now pair multi-line replacements correctly, diffs without summary prefixes still render, message scrolling no longer truncates after 65k visual lines, and the message list avoids an extra full-vector drain on every frame.
 
 ## [2.1.0] - 2026-03-08
 

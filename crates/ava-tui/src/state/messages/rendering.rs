@@ -214,23 +214,33 @@ impl UiMessage {
                 let mut result = Vec::new();
 
                 match tool {
-                    // Show full output for edit/write tools with diff coloring
+                    // Show side-by-side diff for edit/write tools when terminal is wide enough
                     "edit" | "write" | "multiedit" | "apply_patch" => {
-                        for (i, line) in content_lines.iter().enumerate() {
-                            let prefix = if i == 0 { "\u{25be} " } else { "  " };
-                            let line_style = if line.starts_with('+') {
-                                Style::default().fg(ratatui::style::Color::Green)
-                            } else if line.starts_with('-') {
-                                Style::default().fg(ratatui::style::Color::Red)
-                            } else if line.starts_with('@') {
-                                Style::default().fg(ratatui::style::Color::Cyan)
-                            } else {
-                                dim_style
-                            };
-                            result.push(Line::from(Span::styled(
-                                format!("{prefix}{line}"),
-                                line_style,
-                            )));
+                        let sbs_width = width.saturating_sub(Self::BAR_PREFIX_WIDTH);
+                        if let Some(sbs_lines) = crate::rendering::diff::render_side_by_side(
+                            &self.content,
+                            theme,
+                            sbs_width,
+                        ) {
+                            result.extend(sbs_lines);
+                        } else {
+                            // Fallback: unified diff coloring
+                            for (i, line) in content_lines.iter().enumerate() {
+                                let prefix = if i == 0 { "\u{25be} " } else { "  " };
+                                let line_style = if line.starts_with('+') {
+                                    Style::default().fg(ratatui::style::Color::Green)
+                                } else if line.starts_with('-') {
+                                    Style::default().fg(ratatui::style::Color::Red)
+                                } else if line.starts_with('@') {
+                                    Style::default().fg(ratatui::style::Color::Cyan)
+                                } else {
+                                    dim_style
+                                };
+                                result.push(Line::from(Span::styled(
+                                    format!("{prefix}{line}"),
+                                    line_style,
+                                )));
+                            }
                         }
                     }
                     // Read: show summary

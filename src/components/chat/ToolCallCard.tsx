@@ -10,7 +10,7 @@
  */
 
 import { Check, CheckCheck, ChevronRight, X } from 'lucide-solid'
-import { type Component, createMemo, createSignal, Show } from 'solid-js'
+import { type Component, createMemo, createSignal, Match, Show, Switch } from 'solid-js'
 import { useSecondTicker } from '../../hooks/useElapsedTimer'
 import { useSettings } from '../../stores/settings'
 import type { ToolCall } from '../../types'
@@ -28,49 +28,31 @@ import { formatDuration, formatElapsed, getToolDescription } from './tool-call-u
  * the ApprovalDock. Lets users scroll back and see what they approved.
  */
 const ApprovalBadge: Component<{ decision: 'once' | 'always' | 'denied' }> = (props) => {
-  if (props.decision === 'denied') {
-    return (
-      <span class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-[var(--error)]/10 text-[var(--error)] border border-[var(--error)]/30 flex-shrink-0">
-        <X class="w-2.5 h-2.5" />
-        Denied
-      </span>
-    )
-  }
-  if (props.decision === 'always') {
-    return (
-      <span class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-[var(--success)]/10 text-[var(--success)] border border-[var(--success)]/30 flex-shrink-0">
-        <CheckCheck class="w-2.5 h-2.5" />
-        Auto-approved
-      </span>
-    )
-  }
-  // 'once'
   return (
-    <span class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-[var(--success)]/10 text-[var(--success)] border border-[var(--success)]/30 flex-shrink-0">
-      <Check class="w-2.5 h-2.5" />
-      Approved
-    </span>
+    <Switch>
+      <Match when={props.decision === 'denied'}>
+        <span class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-[var(--error)]/10 text-[var(--error)] border border-[var(--error)]/30 flex-shrink-0">
+          <X class="w-2.5 h-2.5" />
+          Denied
+        </span>
+      </Match>
+      <Match when={props.decision === 'always'}>
+        <span class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-[var(--success)]/10 text-[var(--success)] border border-[var(--success)]/30 flex-shrink-0">
+          <CheckCheck class="w-2.5 h-2.5" />
+          Auto-approved
+        </span>
+      </Match>
+      <Match when={true}>
+        <span class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-[var(--success)]/10 text-[var(--success)] border border-[var(--success)]/30 flex-shrink-0">
+          <Check class="w-2.5 h-2.5" />
+          Approved
+        </span>
+      </Match>
+    </Switch>
   )
 }
 
-// ============================================================================
-// Component
-// ============================================================================
-
-interface ToolCallCardProps {
-  toolCall: ToolCall
-}
-
-function isDelegationTool(name: string): boolean {
-  return name === 'task' || name.startsWith('delegate_')
-}
-
-export const ToolCallCard: Component<ToolCallCardProps> = (props) => {
-  // Render specialized card for subagent / delegation tools
-  if (isDelegationTool(props.toolCall.name)) {
-    return <SubagentCard toolCall={props.toolCall} />
-  }
-
+const ToolCallCardContent: Component<ToolCallCardProps> = (props) => {
   const { settings } = useSettings()
   // When toolResponseStyle is 'detailed', tool results start expanded by default
   const defaultExpanded = () => settings().ui.toolResponseStyle === 'detailed'
@@ -176,5 +158,27 @@ export const ToolCallCard: Component<ToolCallCardProps> = (props) => {
         </div>
       </Show>
     </div>
+  )
+}
+
+// ============================================================================
+// Component
+// ============================================================================
+
+interface ToolCallCardProps {
+  toolCall: ToolCall
+}
+
+function isDelegationTool(name: string): boolean {
+  return name === 'task' || name.startsWith('delegate_')
+}
+
+export const ToolCallCard: Component<ToolCallCardProps> = (props) => {
+  const delegated = createMemo(() => isDelegationTool(props.toolCall.name))
+
+  return (
+    <Show when={!delegated()} fallback={<SubagentCard toolCall={props.toolCall} />}>
+      <ToolCallCardContent toolCall={props.toolCall} />
+    </Show>
   )
 }

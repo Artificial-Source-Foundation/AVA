@@ -18,7 +18,7 @@ import {
   SlidersHorizontal,
   Type,
 } from 'lucide-solid'
-import type { Component } from 'solid-js'
+import { type Component, For } from 'solid-js'
 import type { ThemePreset } from '../../../config/theme-presets'
 import { useSettings } from '../../../stores/settings'
 import type { ActivityDisplay, ThinkingDisplay } from '../../../stores/settings/settings-types'
@@ -102,15 +102,17 @@ export const AppearanceTab: Component = () => {
             Display mode
           </span>
           <div class="flex gap-1">
-            {thinkingOptions.map((opt) => (
-              <button
-                type="button"
-                onClick={() => updateAppearance({ thinkingDisplay: opt.value })}
-                class={segmentedBtn(settings().appearance.thinkingDisplay === opt.value)}
-              >
-                {opt.label}
-              </button>
-            ))}
+            <For each={thinkingOptions}>
+              {(opt) => (
+                <button
+                  type="button"
+                  onClick={() => updateAppearance({ thinkingDisplay: opt.value })}
+                  class={segmentedBtn(settings().appearance.thinkingDisplay === opt.value)}
+                >
+                  {opt.label}
+                </button>
+              )}
+            </For>
           </div>
         </div>
         <p class="text-[var(--settings-text-description)] text-[var(--gray-8)]">
@@ -132,15 +134,17 @@ export const AppearanceTab: Component = () => {
             Display mode
           </span>
           <div class="flex gap-1">
-            {activityOptions.map((opt) => (
-              <button
-                type="button"
-                onClick={() => updateAppearance({ activityDisplay: opt.value })}
-                class={segmentedBtn(settings().appearance.activityDisplay === opt.value)}
-              >
-                {opt.label}
-              </button>
-            ))}
+            <For each={activityOptions}>
+              {(opt) => (
+                <button
+                  type="button"
+                  onClick={() => updateAppearance({ activityDisplay: opt.value })}
+                  class={segmentedBtn(settings().appearance.activityDisplay === opt.value)}
+                >
+                  {opt.label}
+                </button>
+              )}
+            </For>
           </div>
         </div>
         <p class="text-[var(--settings-text-description)] text-[var(--gray-8)]">

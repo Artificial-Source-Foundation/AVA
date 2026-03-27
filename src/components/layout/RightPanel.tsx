@@ -9,7 +9,7 @@ import {
   Users,
   X,
 } from 'lucide-solid'
-import { createMemo, createSignal, Show } from 'solid-js'
+import { createMemo, createSignal, For, Show } from 'solid-js'
 import { useRustAgent } from '../../hooks/use-rust-agent'
 import { useAgent } from '../../hooks/useAgent'
 import type { RightPanelTab } from '../../stores/layout'
@@ -74,31 +74,33 @@ function TabBar(props: TabBarProps) {
     <div class="flex items-center h-8 flex-shrink-0 border-b border-[var(--border-subtle)]">
       {/* Primary tabs — icon-only with tooltip, always fit */}
       <div class="flex items-center flex-1 min-w-0">
-        {primaryTabs().map((tab) => {
-          const Icon = tab.icon
-          const count = () => badge(tab.id)
-          return (
-            <button
-              type="button"
-              onClick={() => props.onSwitch(tab.id)}
-              class="relative flex items-center justify-center w-8 h-8 transition-colors flex-shrink-0"
-              classList={{
-                'text-[var(--accent)] border-b-2 border-[var(--accent)]':
-                  props.currentTab === tab.id,
-                'text-[var(--text-muted)] hover:text-[var(--text-secondary)]':
-                  props.currentTab !== tab.id,
-              }}
-              title={tab.label}
-            >
-              <Icon class="w-4 h-4" />
-              <Show when={count() > 0}>
-                <span class="absolute -top-0.5 -right-0.5 min-w-[14px] h-[14px] px-0.5 flex items-center justify-center rounded-full bg-[var(--accent)] text-white text-[8px] font-bold leading-none">
-                  {count()}
-                </span>
-              </Show>
-            </button>
-          )
-        })}
+        <For each={primaryTabs()}>
+          {(tab) => {
+            const Icon = tab.icon
+            const count = () => badge(tab.id)
+            return (
+              <button
+                type="button"
+                onClick={() => props.onSwitch(tab.id)}
+                class="relative flex items-center justify-center w-8 h-8 transition-colors flex-shrink-0"
+                classList={{
+                  'text-[var(--accent)] border-b-2 border-[var(--accent)]':
+                    props.currentTab === tab.id,
+                  'text-[var(--text-muted)] hover:text-[var(--text-secondary)]':
+                    props.currentTab !== tab.id,
+                }}
+                title={tab.label}
+              >
+                <Icon class="w-4 h-4" />
+                <Show when={count() > 0}>
+                  <span class="absolute -top-0.5 -right-0.5 min-w-[14px] h-[14px] px-0.5 flex items-center justify-center rounded-full bg-[var(--accent)] text-white text-[8px] font-bold leading-none">
+                    {count()}
+                  </span>
+                </Show>
+              </button>
+            )
+          }}
+        </For>
 
         {/* More dropdown */}
         <div ref={moreRef} class="relative h-full flex-shrink-0">
@@ -122,27 +124,30 @@ function TabBar(props: TabBarProps) {
 
           <Show when={moreOpen()}>
             <div class="absolute top-full right-0 mt-1 min-w-[140px] py-1 bg-[var(--surface-overlay)] border border-[var(--border-default)] rounded-[var(--radius-md)] shadow-lg z-50">
-              {overflowTabs().map((tab) => {
-                const Icon = tab.icon
-                return (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      props.onSwitch(tab.id)
-                      setMoreOpen(false)
-                    }}
-                    class="w-full flex items-center gap-2 px-3 py-1.5 text-[var(--text-xs)] transition-colors"
-                    classList={{
-                      'text-[var(--accent)] bg-[var(--alpha-white-5)]': props.currentTab === tab.id,
-                      'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--alpha-white-5)]':
-                        props.currentTab !== tab.id,
-                    }}
-                  >
-                    <Icon class="w-3.5 h-3.5" />
-                    {tab.label}
-                  </button>
-                )
-              })}
+              <For each={overflowTabs()}>
+                {(tab) => {
+                  const Icon = tab.icon
+                  return (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        props.onSwitch(tab.id)
+                        setMoreOpen(false)
+                      }}
+                      class="w-full flex items-center gap-2 px-3 py-1.5 text-[var(--text-xs)] transition-colors"
+                      classList={{
+                        'text-[var(--accent)] bg-[var(--alpha-white-5)]':
+                          props.currentTab === tab.id,
+                        'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--alpha-white-5)]':
+                          props.currentTab !== tab.id,
+                      }}
+                    >
+                      <Icon class="w-3.5 h-3.5" />
+                      {tab.label}
+                    </button>
+                  )
+                }}
+              </For>
             </div>
           </Show>
         </div>

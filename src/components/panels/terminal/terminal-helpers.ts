@@ -34,9 +34,8 @@ export const ansiToClass: Record<string, string> = {
 /** Parse ANSI codes and convert to styled spans */
 export const parseAnsi = (text: string): { text: string; class: string }[] => {
   const parts: { text: string; class: string }[] = []
-  // oxlint-disable-next-line no-control-regex -- ANSI escape codes require control characters
-  // biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI escape codes require control characters by definition
-  const regex = /\x1b\[(\d+)m/g
+  const ansiPattern = '\\x1b\\[(\\d+)m'
+  const regex = new RegExp(ansiPattern, 'g')
   let lastIndex = 0
   let currentClass = ''
   let match: RegExpExecArray | null

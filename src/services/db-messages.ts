@@ -17,7 +17,7 @@ export async function saveMessage(message: Omit<Message, 'id' | 'createdAt'>): P
 
   // Merge toolCalls into metadata so they survive session restore
   const metadataToSave = {
-    ...(message.metadata || {}),
+    ...message.metadata,
     ...(message.toolCalls && message.toolCalls.length > 0 ? { toolCalls: message.toolCalls } : {}),
   }
 
@@ -117,7 +117,7 @@ export async function updateMessage(
       ? (JSON.parse(rows[0].metadata) as Record<string, unknown>)
       : {}
 
-    const merged: Record<string, unknown> = { ...existing, ...(updates.metadata ?? {}) }
+    const merged: Record<string, unknown> = { ...existing, ...updates.metadata }
     if (updates.toolCalls && updates.toolCalls.length > 0) {
       merged.toolCalls = updates.toolCalls
     }
@@ -175,7 +175,7 @@ export async function insertMessages(msgs: Message[]): Promise<void> {
   for (const msg of msgs) {
     // Merge toolCalls into metadata so they survive session restore
     const metadataToSave = {
-      ...(msg.metadata || {}),
+      ...msg.metadata,
       ...(msg.toolCalls && msg.toolCalls.length > 0 ? { toolCalls: msg.toolCalls } : {}),
     }
     await database.execute(

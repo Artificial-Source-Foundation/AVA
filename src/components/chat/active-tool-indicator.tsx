@@ -8,7 +8,8 @@
  */
 
 import { Loader2 } from 'lucide-solid'
-import { type Component, createSignal, onCleanup, Show } from 'solid-js'
+import { type Component, createMemo, Show } from 'solid-js'
+import { useSecondTicker } from '../../hooks/useElapsedTimer'
 import type { ToolCall } from '../../types'
 import { formatElapsed, summarizeAction } from './tool-call-utils'
 
@@ -18,8 +19,6 @@ interface ActiveToolIndicatorProps {
 }
 
 export const ActiveToolIndicator: Component<ActiveToolIndicatorProps> = (props) => {
-  const [elapsed, setElapsed] = createSignal('')
-
   const activeCall = (): ToolCall | undefined => {
     if (!props.toolCalls?.length) return undefined
     // Find last running tool call
@@ -34,18 +33,13 @@ export const ActiveToolIndicator: Component<ActiveToolIndicatorProps> = (props) 
     if (call) return summarizeAction(call.name, call.args)
     return 'Thinking...'
   }
-
-  // Live elapsed timer
-  const timer = setInterval(() => {
+  const nowTick = useSecondTicker(() => props.isStreaming && !!activeCall())
+  const elapsed = createMemo(() => {
     const call = activeCall()
-    if (call) {
-      setElapsed(formatElapsed(call.startedAt))
-    } else {
-      setElapsed('')
-    }
-  }, 1000)
-
-  onCleanup(() => clearInterval(timer))
+    if (!call) return ''
+    nowTick()
+    return formatElapsed(call.startedAt)
+  })
 
   return (
     <Show when={props.isStreaming}>

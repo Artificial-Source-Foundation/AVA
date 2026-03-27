@@ -23,7 +23,8 @@ function abortExecutor(_id: string): boolean {
   return false
 }
 
-import { type Component, createMemo, createSignal, For, onCleanup, Show } from 'solid-js'
+import { type Component, createMemo, createSignal, For, Show } from 'solid-js'
+import { useSecondTicker } from '../../hooks/useElapsedTimer'
 import { useTeam } from '../../stores/team'
 import type { ToolCall } from '../../types'
 import { formatDuration, formatElapsed } from './tool-call-utils'
@@ -55,13 +56,13 @@ function parseNestedToolCalls(output: string): NestedToolCall[] {
 
 export const SubagentCard: Component<SubagentCardProps> = (props) => {
   const [expanded, setExpanded] = createSignal(false)
-  const [elapsed, setElapsed] = createSignal('')
   const team = useTeam()
 
   const isRunning = () => props.toolCall.status === 'running' || props.toolCall.status === 'pending'
   const isError = () => props.toolCall.status === 'error'
   const isSuccess = () => props.toolCall.status === 'success'
   const hasOutput = () => !!(props.toolCall.output || props.toolCall.error)
+  const nowTick = useSecondTicker(isRunning)
 
   const goal = () => {
     const args = props.toolCall.args
@@ -94,13 +95,11 @@ export const SubagentCard: Component<SubagentCardProps> = (props) => {
     return parseNestedToolCalls(props.toolCall.output)
   })
 
-  const timer = setInterval(() => {
-    if (isRunning()) {
-      setElapsed(formatElapsed(props.toolCall.startedAt))
-    }
-  }, 1000)
-
-  onCleanup(() => clearInterval(timer))
+  const elapsed = createMemo(() => {
+    if (!isRunning()) return ''
+    nowTick()
+    return formatElapsed(props.toolCall.startedAt)
+  })
 
   const handleEnterChat = (e: Event) => {
     e.stopPropagation()

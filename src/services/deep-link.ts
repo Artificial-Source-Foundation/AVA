@@ -110,10 +110,16 @@ export function handleDeepLink(url: string): void {
  */
 export function initDeepLinks(): Disposable {
   const cleanups: Array<() => void> = []
+  let disposed = false
 
   // 1. Try Tauri deep-link plugin (handles OS-level ava:// URLs)
   tryTauriDeepLink().then((cleanup) => {
-    if (cleanup) cleanups.push(cleanup)
+    if (!cleanup) return
+    if (disposed) {
+      cleanup()
+      return
+    }
+    cleanups.push(cleanup)
   })
 
   // 2. In-app custom event listener (for programmatic deep links)
@@ -170,7 +176,9 @@ export function initDeepLinks(): Disposable {
 
   return {
     dispose: () => {
+      disposed = true
       for (const cleanup of cleanups) cleanup()
+      cleanups.length = 0
     },
   }
 }

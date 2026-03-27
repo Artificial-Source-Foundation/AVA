@@ -6,7 +6,8 @@
  */
 
 import { ChevronRight, Terminal } from 'lucide-solid'
-import { type Component, createEffect, createMemo, createSignal, onCleanup, Show } from 'solid-js'
+import { type Component, createMemo, createSignal, Show } from 'solid-js'
+import { useSecondTicker } from '../../../hooks/useElapsedTimer'
 import type { ToolCall } from '../../../types'
 import { formatDuration, formatElapsed } from '../tool-call-utils'
 
@@ -19,7 +20,6 @@ const COLLAPSED_LINE_LIMIT = 8
 
 export const CommandOutputRow: Component<CommandOutputRowProps> = (props) => {
   const [expanded, setExpanded] = createSignal(false)
-  const [elapsed, setElapsed] = createSignal('')
 
   const command = (): string => {
     const cmd = String(props.toolCall.args.command ?? '')
@@ -28,6 +28,7 @@ export const CommandOutputRow: Component<CommandOutputRowProps> = (props) => {
 
   const isRunning = (): boolean =>
     props.toolCall.status === 'running' || props.toolCall.status === 'pending'
+  const nowTick = useSecondTicker(isRunning)
 
   const output = (): string => props.toolCall.output ?? props.toolCall.streamingOutput ?? ''
 
@@ -51,15 +52,10 @@ export const CommandOutputRow: Component<CommandOutputRowProps> = (props) => {
     return meta.exitCode as number | undefined
   }
 
-  // Only run the elapsed timer when the tool call is actually running.
-  // Wrapping in createEffect prevents the interval from starting (and firing
-  // at least once) when the component mounts for an already-completed call.
-  createEffect(() => {
-    if (!isRunning()) return
-    const timer = setInterval(() => {
-      setElapsed(formatElapsed(props.toolCall.startedAt))
-    }, 1000)
-    onCleanup(() => clearInterval(timer))
+  const elapsed = createMemo(() => {
+    if (!isRunning()) return ''
+    nowTick()
+    return formatElapsed(props.toolCall.startedAt)
   })
 
   return (

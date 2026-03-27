@@ -135,21 +135,32 @@ function waitForInstructions(timeoutMs: number): Promise<void> {
       return
     }
 
+    const target = typeof window !== 'undefined' ? window : null
+
+    let settled = false
+    const finish = (): void => {
+      if (settled) return
+      settled = true
+      clearTimeout(timeout)
+      target?.removeEventListener('ava:instructions-loaded', handler)
+      resolve()
+    }
+
+    const handler = () => {
+      instructionsLoaded = true
+      target?.removeEventListener('ava:instructions-loaded', handler)
+      setTimeout(finish, 50)
+    }
+
     const timeout = setTimeout(() => {
       logInfo('prompt-builder', 'Instructions timeout — building prompt without waiting further')
-      resolve()
+      finish()
     }, timeoutMs)
 
-    if (typeof window !== 'undefined') {
-      const handler = () => {
-        clearTimeout(timeout)
-        instructionsLoaded = true
-        window.removeEventListener('ava:instructions-loaded', handler)
-        setTimeout(resolve, 50)
-      }
-      window.addEventListener('ava:instructions-loaded', handler)
+    if (target) {
+      target.addEventListener('ava:instructions-loaded', handler)
     } else {
-      // No window — just wait for timeout
+      finish()
     }
   })
 }

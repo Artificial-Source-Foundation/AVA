@@ -10,7 +10,8 @@
  */
 
 import { Check, CheckCheck, ChevronRight, X } from 'lucide-solid'
-import { type Component, createEffect, createSignal, onCleanup, Show } from 'solid-js'
+import { type Component, createMemo, createSignal, Show } from 'solid-js'
+import { useSecondTicker } from '../../hooks/useElapsedTimer'
 import { useSettings } from '../../stores/settings'
 import type { ToolCall } from '../../types'
 import { SubagentCard } from './SubagentCard'
@@ -74,28 +75,21 @@ export const ToolCallCard: Component<ToolCallCardProps> = (props) => {
   // When toolResponseStyle is 'detailed', tool results start expanded by default
   const defaultExpanded = () => settings().ui.toolResponseStyle === 'detailed'
   const [expanded, setExpanded] = createSignal(defaultExpanded())
-  const [elapsed, setElapsed] = createSignal('')
 
   const summary = () => getToolDescription(props.toolCall.name, props.toolCall.args)
   const isRunning = () => props.toolCall.status === 'running' || props.toolCall.status === 'pending'
   const hasOutput = () => !!(props.toolCall.output || props.toolCall.error || props.toolCall.diff)
   const hasStreamingOutput = () => isRunning() && !!props.toolCall.streamingOutput
+  const nowTick = useSecondTicker(isRunning)
 
   const duration = () => {
     if (!props.toolCall.completedAt) return null
     return formatDuration(props.toolCall.completedAt - props.toolCall.startedAt)
   }
-
-  createEffect(() => {
-    if (!isRunning()) {
-      setElapsed('')
-      return
-    }
-    setElapsed(formatElapsed(props.toolCall.startedAt))
-    const timer = setInterval(() => {
-      setElapsed(formatElapsed(props.toolCall.startedAt))
-    }, 1000)
-    onCleanup(() => clearInterval(timer))
+  const elapsed = createMemo(() => {
+    if (!isRunning()) return ''
+    nowTick()
+    return formatElapsed(props.toolCall.startedAt)
   })
 
   return (

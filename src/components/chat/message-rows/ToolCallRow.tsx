@@ -6,7 +6,8 @@
  */
 
 import { ChevronRight } from 'lucide-solid'
-import { type Component, createEffect, createMemo, createSignal, onCleanup, Show } from 'solid-js'
+import { type Component, createEffect, createMemo, createSignal, Show } from 'solid-js'
+import { useSecondTicker } from '../../../hooks/useElapsedTimer'
 import type { ToolCall } from '../../../types'
 import { ToolIcon } from '../tool-call-icon'
 import { ToolCallOutput } from '../tool-call-output'
@@ -33,11 +34,11 @@ export const ToolCallRow: Component<ToolCallRowProps> = (props) => {
   })
 
   const [expanded, setExpanded] = createSignal(false)
-  const [elapsed, setElapsed] = createSignal('')
 
   const summary = (): string => summarizeAction(props.toolCall.name, props.toolCall.args)
   const isRunning = (): boolean =>
     props.toolCall.status === 'running' || props.toolCall.status === 'pending'
+  const nowTick = useSecondTicker(isRunning)
   const hasOutput = (): boolean =>
     !!(props.toolCall.output || props.toolCall.error || props.toolCall.diff)
 
@@ -50,16 +51,10 @@ export const ToolCallRow: Component<ToolCallRowProps> = (props) => {
     if (shouldAutoExpand()) setExpanded(true)
   })
 
-  createEffect(() => {
-    if (!isRunning()) {
-      setElapsed('')
-      return
-    }
-    setElapsed(formatElapsed(props.toolCall.startedAt))
-    const timer = setInterval(() => {
-      setElapsed(formatElapsed(props.toolCall.startedAt))
-    }, 1000)
-    onCleanup(() => clearInterval(timer))
+  const elapsed = createMemo(() => {
+    if (!isRunning()) return ''
+    nowTick()
+    return formatElapsed(props.toolCall.startedAt)
   })
 
   return (

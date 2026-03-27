@@ -18,9 +18,17 @@ pub enum AgentEvent {
     #[serde(rename = "thinking")]
     Thinking { content: String },
     #[serde(rename = "tool_call")]
-    ToolCall { name: String, args: Value },
+    ToolCall {
+        id: String,
+        name: String,
+        args: Value,
+    },
     #[serde(rename = "tool_result")]
-    ToolResult { content: String, is_error: bool },
+    ToolResult {
+        call_id: String,
+        content: String,
+        is_error: bool,
+    },
     #[serde(rename = "progress")]
     Progress { message: String },
     #[serde(rename = "complete")]
@@ -44,6 +52,7 @@ pub enum AgentEvent {
     #[serde(rename = "approval_request")]
     ApprovalRequest {
         id: String,
+        tool_call_id: String,
         tool_name: String,
         args: Value,
         risk_level: String,
@@ -167,11 +176,12 @@ impl EventEmitter {
             .map_err(|e| e.to_string())
     }
 
-    pub fn emit_tool_call(&self, name: &str, args: Value) -> Result<(), String> {
+    pub fn emit_tool_call(&self, id: &str, name: &str, args: Value) -> Result<(), String> {
         self.window
             .emit(
                 "agent-event",
                 AgentEvent::ToolCall {
+                    id: id.to_string(),
                     name: name.to_string(),
                     args,
                 },
@@ -179,11 +189,17 @@ impl EventEmitter {
             .map_err(|e| e.to_string())
     }
 
-    pub fn emit_tool_result(&self, content: &str, is_error: bool) -> Result<(), String> {
+    pub fn emit_tool_result(
+        &self,
+        call_id: &str,
+        content: &str,
+        is_error: bool,
+    ) -> Result<(), String> {
         self.window
             .emit(
                 "agent-event",
                 AgentEvent::ToolResult {
+                    call_id: call_id.to_string(),
                     content: content.to_string(),
                     is_error,
                 },
@@ -233,10 +249,12 @@ pub fn from_backend_event(event: &ava_agent::agent_loop::AgentEvent) -> Option<A
             content: content.clone(),
         }),
         BE::ToolCall(tc) => Some(AgentEvent::ToolCall {
+            id: tc.id.clone(),
             name: tc.name.clone(),
             args: tc.arguments.clone(),
         }),
         BE::ToolResult(tr) => Some(AgentEvent::ToolResult {
+            call_id: tr.call_id.clone(),
             content: tr.content.clone(),
             is_error: tr.is_error,
         }),
@@ -462,6 +480,7 @@ mod tests {
     fn serializes_approval_request_event() {
         let event = AgentEvent::ApprovalRequest {
             id: "req-1".to_string(),
+            tool_call_id: "call-1".to_string(),
             tool_name: "bash".to_string(),
             args: json!({"command": "rm -rf /tmp/test"}),
             risk_level: "high".to_string(),

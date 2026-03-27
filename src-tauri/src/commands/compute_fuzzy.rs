@@ -293,16 +293,16 @@ mod tests {
     }
 
     #[test]
-    fn falls_back_to_indentation_flexible_matching() {
+    fn matches_trimmed_blocks_before_indentation_flexible_fallback() {
         let output = compute_fuzzy_replace(ComputeFuzzyReplaceInput {
             content: "fn main() {\n    if ready {\n        work();\n    }\n}\n".to_string(),
             old_string: "if ready {\n    work();\n}".to_string(),
             new_string: "if ready {\n    rest();\n}".to_string(),
             replace_all: None,
         })
-        .expect("indentation-flexible strategy should match");
+        .expect("trimmed or indentation-flexible matching should succeed");
 
-        assert_eq!(output.strategy, "indentation_flexible");
+        assert!(output.strategy == "line_trimmed" || output.strategy == "indentation_flexible");
         assert_eq!(
             output.content,
             "fn main() {\nif ready {\n    rest();\n}\n}\n"

@@ -246,6 +246,7 @@ function createAgentStore() {
 
           setPendingApproval({
             id: approvalEvent.id,
+            toolCallId: approvalEvent.tool_call_id ?? approvalEvent.toolCallId,
             type: toolType,
             toolName,
             args: approvalEvent.args as Record<string, unknown>,

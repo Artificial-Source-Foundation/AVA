@@ -196,7 +196,7 @@ export function createAgentActions(deps: ActionDeps) {
         : alwaysAllow
           ? 'always'
           : 'once'
-      rustAgent.markToolApproval(current.toolName, decision)
+      rustAgent.markToolApproval(current.toolName, decision, current.toolCallId)
     }
     setPendingApproval(null)
     void rustAgentBridge.resolveApproval(approved, alwaysAllow ?? false).catch((err) => {

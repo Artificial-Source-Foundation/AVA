@@ -74,11 +74,15 @@ export interface TokenEvent {
 }
 export interface ToolCallEvent {
   type: 'tool_call'
+  id?: string
   name: string
-  args: Record<string, JsonValue>
+  args?: Record<string, JsonValue>
+  arguments?: Record<string, JsonValue>
 }
 export interface ToolResultEvent {
   type: 'tool_result'
+  call_id?: string
+  callId?: string
   content: string
   is_error: boolean
 }
@@ -117,6 +121,8 @@ export interface BudgetWarningEvent {
 export interface ApprovalRequestEvent {
   type: 'approval_request'
   id: string
+  tool_call_id?: string
+  toolCallId?: string
   tool_name: string
   args: Record<string, JsonValue>
   risk_level: string

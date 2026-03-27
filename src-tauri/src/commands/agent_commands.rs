@@ -169,6 +169,7 @@ async fn run_agent_inner(
                 "agent-event",
                 AgentEvent::ApprovalRequest {
                     id,
+                    tool_call_id: req.call.id.clone(),
                     tool_name: req.call.name.clone(),
                     args: req.call.arguments.clone(),
                     risk_level,

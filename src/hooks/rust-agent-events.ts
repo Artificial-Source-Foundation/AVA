@@ -15,6 +15,8 @@ import type {
   SubmitGoalResult,
   TodoItem,
   TodoUpdateEvent,
+  ToolCallEvent,
+  ToolResultEvent,
 } from '../types/rust-ipc'
 import type { ThinkingSegment } from './use-rust-agent'
 
@@ -114,31 +116,39 @@ export function createAgentEventHandler(deps: EventHandlerDeps): (event: AgentEv
         })
         break
       case 'tool_call': {
+        const toolCallEvent = event as ToolCallEvent
         log.info('tools', 'Tool call started', { tool: event.name })
         debugLog(
           'tools',
           'tool_call:',
           (event as { name?: string }).name,
-          (event as { args?: unknown }).args
+          toolCallEvent.args ?? toolCallEvent.arguments
         )
         metrics.pendingToolNames.push(event.name as string)
-        const newToolId = `${event.name}-${Date.now()}`
+        const newToolId =
+          toolCallEvent.id ?? `${event.name}-${Date.now()}-${metrics.pendingToolNames.length}`
         // Extract file path from args for file-modifying tools
-        const args = event.args as Record<string, unknown>
+        const args = (toolCallEvent.args ?? toolCallEvent.arguments ?? {}) as Record<
+          string,
+          unknown
+        >
         const filePath = (args.file_path ?? args.filePath ?? args.path ?? args.output_path) as
           | string
           | undefined
-        setActiveToolCalls((prev) => [
-          ...prev,
-          {
-            id: newToolId,
-            name: event.name,
-            args: event.args,
-            status: 'running' as const,
-            startedAt: Date.now(),
-            filePath,
-          },
-        ])
+        setActiveToolCalls((prev) => {
+          if (prev.some((tc) => tc.id === newToolId)) return prev
+          return [
+            ...prev,
+            {
+              id: newToolId,
+              name: event.name,
+              args,
+              status: 'running' as const,
+              startedAt: Date.now(),
+              filePath,
+            },
+          ]
+        })
         // Associate this tool call with the current thinking segment
         setThinkingSegments((prev) => {
           if (prev.length === 0) {
@@ -154,6 +164,8 @@ export function createAgentEventHandler(deps: EventHandlerDeps): (event: AgentEv
         break
       }
       case 'tool_result': {
+        const toolResultEvent = event as ToolResultEvent
+        const callId = toolResultEvent.call_id ?? toolResultEvent.callId ?? null
         debugLog(
           'tools',
           'tool_result:',
@@ -185,8 +197,9 @@ export function createAgentEventHandler(deps: EventHandlerDeps): (event: AgentEv
           }
         }
         setActiveToolCalls((prev) => {
-          // Use indexOf (first running) — results arrive in the same order as tool_call events
-          const firstIdx = prev.findIndex((tc) => tc.status === 'running')
+          const firstIdx = callId
+            ? prev.findIndex((tc) => tc.id === callId)
+            : prev.findIndex((tc) => tc.status === 'running')
           if (firstIdx < 0) return prev
 
           const first = prev[firstIdx]
@@ -236,7 +249,7 @@ export function createAgentEventHandler(deps: EventHandlerDeps): (event: AgentEv
           updated[firstIdx] = {
             ...first,
             status: event.is_error ? 'error' : 'success',
-            output: event.content,
+            output: toolResultEvent.content,
             completedAt,
             diff,
           }

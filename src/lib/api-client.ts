@@ -85,6 +85,22 @@ const COMMAND_TO_ENDPOINT: Record<string, { path: string; method: 'GET' | 'POST'
   health: { path: '/api/health', method: 'GET' },
 }
 
+function unwrapInvokeArgs(args?: Record<string, unknown>): Record<string, unknown> | undefined {
+  if (!args) return undefined
+  if (args.args && typeof args.args === 'object') {
+    return args.args as Record<string, unknown>
+  }
+  return args
+}
+
+function toSnakeCaseRecord(payload: Record<string, unknown>): Record<string, unknown> {
+  const normalized: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(payload)) {
+    normalized[key.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`)] = value
+  }
+  return normalized
+}
+
 /**
  * Invoke a backend command over HTTP. This mirrors the signature of Tauri's
  * `invoke<T>(cmd, args?)` so call sites can switch transparently.
@@ -93,12 +109,15 @@ export async function apiInvoke<T>(cmd: string, args?: Record<string, unknown>):
   const mapping = COMMAND_TO_ENDPOINT[cmd]
   let path = mapping ? mapping.path : `/api/${cmd}`
   const method = mapping ? mapping.method : args ? 'POST' : 'GET'
+  const payload = unwrapInvokeArgs(args)
+  const pathParamKeys = new Set<string>()
 
   // Substitute path parameters like {id} from args
-  if (args) {
+  if (payload) {
     path = path.replace(/\{(\w+)\}/g, (_, key) => {
-      const val = args[key]
+      const val = payload[key]
       if (val !== undefined && val !== null) {
+        pathParamKeys.add(key)
         return encodeURIComponent(String(val))
       }
       return `{${key}}`
@@ -109,21 +128,14 @@ export async function apiInvoke<T>(cmd: string, args?: Record<string, unknown>):
   const headers: Record<string, string> = {}
   let body: string | undefined
 
-  if (method === 'POST' && args) {
+  if (method === 'POST' && payload) {
     headers['Content-Type'] = 'application/json'
-    // Tauri invoke wraps params in { args: { ... } } — unwrap for HTTP API.
-    // Also convert camelCase keys to snake_case for the Rust backend.
-    const payload =
-      args.args && typeof args.args === 'object' ? (args.args as Record<string, unknown>) : args
-    const snaked: Record<string, unknown> = {}
-    for (const [k, v] of Object.entries(payload)) {
-      snaked[k.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`)] = v
-    }
-    body = JSON.stringify(snaked)
-  } else if (method === 'GET' && args) {
+    body = JSON.stringify(toSnakeCaseRecord(payload))
+  } else if (method === 'GET' && payload) {
     // For GET requests with args, append as query parameters
     const params = new URLSearchParams()
-    for (const [key, value] of Object.entries(args)) {
+    for (const [key, value] of Object.entries(toSnakeCaseRecord(payload))) {
+      if (pathParamKeys.has(key)) continue
       if (value !== null && value !== undefined) {
         params.set(key, String(value))
       }

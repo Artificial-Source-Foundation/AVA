@@ -37,14 +37,19 @@ pub async fn agent_stream(
     info!(goal = %goal, "agent_stream called");
 
     let emitter = EventEmitter::new(window);
+    let tool_call_id = "agent-run-preview";
     emitter.emit_progress(&format!("Streaming with {}", state.database_status()))?;
-    emitter.emit_tool_call("agent_run", json!({ "goal": goal }))?;
+    emitter.emit_tool_call(tool_call_id, "agent_run", json!({ "goal": goal }))?;
     if goal.contains("error") {
         emitter.emit_error("Full agent loop not yet wired - use CLI")?;
     } else {
         emitter.emit_token("Full agent loop not yet wired - use CLI")?;
     }
-    emitter.emit_tool_result("Full agent loop not yet wired - use CLI", true)?;
+    emitter.emit_tool_result(
+        tool_call_id,
+        "Full agent loop not yet wired - use CLI",
+        true,
+    )?;
     emitter.emit_complete(json!({
         "completed": false,
         "message": "Full agent loop not yet wired - use CLI"

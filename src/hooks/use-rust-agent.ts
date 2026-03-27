@@ -110,12 +110,24 @@ export function useRustAgent() {
    * Tag the most-recently-started tool call for `toolName` with an approval decision.
    * Called by `useAgent.resolveApproval` right after the user acts on the ApprovalDock.
    */
-  const markToolApproval = (toolName: string, decision: 'once' | 'always' | 'denied'): void => {
+  const markToolApproval = (
+    toolName: string,
+    decision: 'once' | 'always' | 'denied',
+    toolCallId?: string
+  ): void => {
     setActiveToolCalls((prev) => {
-      // Find the last tool call with this name (most recent pending/running/completed)
-      const idx = [...prev].reverse().findIndex((tc) => tc.name === toolName)
-      if (idx === -1) return prev
-      const realIdx = prev.length - 1 - idx
+      let realIdx = -1
+      if (toolCallId) {
+        realIdx = prev.findIndex((tc) => tc.id === toolCallId)
+      } else {
+        for (let i = prev.length - 1; i >= 0; i -= 1) {
+          if (prev[i]?.name === toolName) {
+            realIdx = i
+            break
+          }
+        }
+      }
+      if (realIdx === -1) return prev
       const updated = [...prev]
       updated[realIdx] = { ...prev[realIdx]!, approvalDecision: decision }
       return updated

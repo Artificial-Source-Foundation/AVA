@@ -68,6 +68,35 @@ export const getSessionTree = createMemo(() => {
 const sessionListGate = createLatestRequestGate()
 const sessionSwitchGate = createLatestRequestGate()
 
+function resetSessionArtifacts(): void {
+  batch(() => {
+    setMessages([])
+    setAgents([])
+    setFileOperations([])
+    setTerminalExecutions([])
+    setMemoryItems([])
+    setCheckpoints([])
+  })
+}
+
+function hydrateSessionArtifacts(result: {
+  messages: Awaited<ReturnType<typeof getMessages>>
+  agents: Awaited<ReturnType<typeof getAgents>>
+  fileOps: Awaited<ReturnType<typeof getFileOperations>>
+  terminalExecutions: Awaited<ReturnType<typeof getTerminalExecutions>>
+  memoryItems: Awaited<ReturnType<typeof getMemoryItems>>
+  checkpoints: Awaited<ReturnType<typeof getCheckpoints>>
+}): void {
+  batch(() => {
+    setMessages(result.messages)
+    setAgents(result.agents)
+    setFileOperations(result.fileOps)
+    setTerminalExecutions(result.terminalExecutions)
+    setMemoryItems(result.memoryItems)
+    setCheckpoints(result.checkpoints)
+  })
+}
+
 export async function loadSessionsForCurrentProject(): Promise<void> {
   const { currentProject } = useProject()
   const projectId = currentProject()?.id
@@ -126,8 +155,7 @@ export async function createNewSession(name?: string): Promise<Session> {
 
   setSessions((prev) => [sessionWithStats, ...prev])
   setCurrentSession(session)
-  setMessages([])
-  setAgents([])
+  resetSessionArtifacts()
   log.info('session', 'Session created', { id: session.id, name: session.name })
   logInfo('session', 'Session created', {
     id: session.id,
@@ -155,14 +183,7 @@ export async function switchSession(id: string): Promise<void> {
   setEditingMessageId(null)
   setRetryingMessageId(null)
   setCurrentSession(session)
-  batch(() => {
-    setMessages([])
-    setAgents([])
-    setFileOperations([])
-    setTerminalExecutions([])
-    setMemoryItems([])
-    setCheckpoints([])
-  })
+  resetSessionArtifacts()
 
   // Switch to per-session log file
   import('../../lib/logger').then((m) => m.setSessionLogFile(id)).catch(() => {})
@@ -182,13 +203,13 @@ export async function switchSession(id: string): Promise<void> {
       return
     }
     log.debug('session', `switchSession: loaded ${dbMessages.length} messages from DB for ${id}`)
-    batch(() => {
-      setMessages(dbMessages)
-      setAgents(dbAgents)
-      setFileOperations(dbFileOps)
-      setTerminalExecutions(dbTerminalExecs)
-      setMemoryItems(dbMemItems)
-      setCheckpoints(dbCheckpoints)
+    hydrateSessionArtifacts({
+      messages: dbMessages,
+      agents: dbAgents,
+      fileOps: dbFileOps,
+      terminalExecutions: dbTerminalExecs,
+      memoryItems: dbMemItems,
+      checkpoints: dbCheckpoints,
     })
     log.info('session', 'Session loaded', { id, messageCount: dbMessages.length })
     logInfo('session', 'Session switched', {
@@ -201,14 +222,7 @@ export async function switchSession(id: string): Promise<void> {
       return
     }
     logError('Session', 'Failed to load messages', err)
-    batch(() => {
-      setMessages([])
-      setAgents([])
-      setFileOperations([])
-      setTerminalExecutions([])
-      setMemoryItems([])
-      setCheckpoints([])
-    })
+    resetSessionArtifacts()
   } finally {
     if (sessionSwitchGate.isCurrent(requestToken) && currentSession()?.id === id) {
       setIsLoadingMessages(false)
@@ -229,13 +243,38 @@ async function switchAfterRemoval(projectId: string | undefined): Promise<void> 
   if (remaining.length > 0) {
     const mostRecent = remaining[0]
     setCurrentSession(mostRecent)
+    resetSessionArtifacts()
     setIsLoadingMessages(true)
     try {
-      setMessages(await getMessages(mostRecent.id))
+      const [dbMessages, dbAgents, dbFileOps, dbTerminalExecs, dbMemItems, dbCheckpoints] =
+        await Promise.all([
+          getMessages(mostRecent.id),
+          getAgents(mostRecent.id),
+          getFileOperations(mostRecent.id),
+          getTerminalExecutions(mostRecent.id),
+          getMemoryItems(mostRecent.id),
+          getCheckpoints(mostRecent.id),
+        ])
+      if (currentSession()?.id !== mostRecent.id) {
+        return
+      }
+      hydrateSessionArtifacts({
+        messages: dbMessages,
+        agents: dbAgents,
+        fileOps: dbFileOps,
+        terminalExecutions: dbTerminalExecs,
+        memoryItems: dbMemItems,
+        checkpoints: dbCheckpoints,
+      })
     } catch {
-      setMessages([])
+      if (currentSession()?.id !== mostRecent.id) {
+        return
+      }
+      resetSessionArtifacts()
     } finally {
-      setIsLoadingMessages(false)
+      if (currentSession()?.id === mostRecent.id) {
+        setIsLoadingMessages(false)
+      }
     }
     localStorage.setItem(STORAGE_KEYS.LAST_SESSION, mostRecent.id)
     setLastSessionForProject(projectId, mostRecent.id)
@@ -244,7 +283,7 @@ async function switchAfterRemoval(projectId: string | undefined): Promise<void> 
     const s: SessionWithStats = { ...newSession, messageCount: 0, totalTokens: 0 }
     setSessions([s])
     setCurrentSession(newSession)
-    setMessages([])
+    resetSessionArtifacts()
     localStorage.setItem(STORAGE_KEYS.LAST_SESSION, newSession.id)
     setLastSessionForProject(projectId, newSession.id)
   }

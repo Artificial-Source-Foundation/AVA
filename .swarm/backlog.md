@@ -12,6 +12,7 @@
 9. **Desktop session race hardening** — stale async session/message loads are now ignored during rapid switching, and remaining global desktop listeners use replaceable bindings so HMR does not stack duplicate handlers.
 10. **Desktop listener/timer hardening** — prompt/diagnostic listeners now clean up more predictably, delayed deep-link plugin registration no longer leaks cleanup handlers, and chat/tool cards now share a single elapsed-time ticker instead of many per-card intervals.
 11. **Desktop scroll/focus hardening** — nested tool-output scroll regions now update listener bindings incrementally, near-top message backfill avoids repeated triggers for the same window, and focus-chain updates no longer depend on per-component listener setup.
+12. **Desktop session transition hardening** — creating or auto-switching sessions now clears and reloads the full per-session side state instead of leaving stale agents/file ops/checkpoints behind, and deep-link lazy imports now log failures instead of dropping rejected promises on the floor.
 7. **Instruction/delegation DX pass** — `.ava/rules` and contextual `AGENTS.md` now activate on direct file work without repeated spam, hidden subagents only unlock on broader tasks with explicit budgets and read-only specialist profiles, benchmark support is split into workspace/validation modules, benchmark mode now has `--task-filter` plus deterministic fallback answers for question prompts, and benchmark output surfaces delegation-heavy scenarios and helper-cost details more clearly.
 
 ## Critical

@@ -117,9 +117,19 @@ Auto-discovered and injected into the agent's system prompt (`crates/ava-agent/s
 1. `~/.ava/AGENTS.md` -- global rules
 2. Ancestor walk: `AGENTS.md`/`CLAUDE.md` from outermost ancestor to `.git` boundary
 3. Project root: `AGENTS.md`, `CLAUDE.md`, `.cursorrules`, `.github/copilot-instructions.md`
-4. `.ava/AGENTS.md`, `.ava/rules/*.md` -- project-local rules (alphabetical)
+4. `.ava/AGENTS.md` eagerly; `.ava/rules/*.md` lazily on direct file touches (activate once per session, reset after compaction)
 5. `config.yaml` `instructions:` paths/globs
 6. Skill files from `.claude/skills/`, `.agents/skills/`, `.ava/skills/`
+
+Path-scoped `.ava/rules/*.md` are intended to feel like Claude Code rules: keep them small, file-focused, and loaded only when AVA actually reads or edits matching files.
+
+## Solo Hidden Delegation
+
+Outside Praxis team mode, the main agent can still delegate quietly through the `task` tool:
+
+- Small single-file work keeps the main thread only (no hidden helper swarm).
+- Broader tasks can unlock a bounded helper budget (typically 1-2 hidden subagents, 3 only on explicit delegation requests).
+- `scout`, `explore`, `plan`, and `review` helpers run in enforced read-only specialist mode; `worker`, `build`, and `task` keep full editing access.
 
 ## Workspace Trust
 
@@ -331,6 +341,9 @@ cargo run --bin ava -- "goal" --headless --provider openai --model gpt-5.4 --aut
 
 # Verbose logging (stderr): -v info, -vv debug, -vvv trace
 cargo run --bin ava -- -v "goal" --headless --provider openai --model gpt-5.4
+
+# Focused benchmark slice (single task)
+cargo run --bin ava --features benchmark -- --benchmark --provider openai --model gpt-5.4 --suite frontier --language rust --task-filter delegated_config_bugfix --max-turns 8
 ```
 
 ## Benchmarking Against OpenCode

@@ -208,6 +208,16 @@ pub fn build_system_prompt(
     prompt.push_str("- When referencing code, use `file_path:line_number` format.\n");
     prompt.push_str("- Avoid filler, time estimates, and unnecessary verbosity.\n\n");
 
+    if tool_visibility_profile != crate::routing::ToolVisibilityProfile::AnswerOnly
+        && tools.iter().any(|tool| tool.name == "task")
+    {
+        prompt.push_str("### Delegation\n");
+        prompt.push_str("- Keep small, single-file work in the main thread.\n");
+        prompt.push_str("- Use `task` only for self-contained chunks whose result can be summarized back clearly.\n");
+        prompt.push_str("- Prefer `scout` or `explore` for read-only reconnaissance, `plan` for design-only breakdowns, `review` for a final pass, and `worker` or `task` for isolated implementation.\n");
+        prompt.push_str("- Avoid chaining sub-agents for every step; delegate only when it saves context or speeds up exploration.\n\n");
+    }
+
     if native_tools && tool_visibility_profile != crate::routing::ToolVisibilityProfile::AnswerOnly
     {
         prompt.push_str(
@@ -404,6 +414,26 @@ mod tests {
 
         assert!(!prompt.contains("## Tool use"));
         assert!(!prompt.contains("### attempt_completion"));
+    }
+
+    #[test]
+    fn prompt_adds_delegation_guidance_when_task_tool_is_available() {
+        let mut tools = mock_tools();
+        tools.push(Tool {
+            name: "task".to_string(),
+            description: "Spawn a sub-agent".to_string(),
+            parameters: json!({}),
+        });
+        let prompt = build_system_prompt(
+            &tools,
+            true,
+            ProviderKind::OpenAI,
+            "gpt-5.4",
+            crate::routing::ToolVisibilityProfile::Full,
+        );
+
+        assert!(prompt.contains("### Delegation"));
+        assert!(prompt.contains("Prefer `scout` or `explore`"));
     }
 
     // ── provider_prompt_suffix tests ──────────────────────────────────

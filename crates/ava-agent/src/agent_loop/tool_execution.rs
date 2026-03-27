@@ -13,7 +13,9 @@ use ava_tools::registry::ToolRegistry;
 
 use super::repetition::RepetitionDetector;
 use super::{AgentEvent, AgentLoop, MAX_TOOLS_PER_TURN};
-use crate::instructions::{contextual_instructions_for_file, matching_rule_instructions_for_file};
+use crate::instructions::{
+    contextual_instructions_for_file_once, matching_rule_instructions_for_file,
+};
 use crate::stuck::StuckDetector;
 
 const MAX_TOOL_RESULT_BYTES: usize = 50_000;
@@ -33,25 +35,9 @@ fn touched_file_path(tool_call: &ToolCall) -> Option<PathBuf> {
     }
 }
 
-fn touched_file_paths(tool_call: &ToolCall, result: &ToolResult) -> Vec<PathBuf> {
+fn instruction_trigger_paths(tool_call: &ToolCall) -> Vec<PathBuf> {
     match tool_call.name.as_str() {
         "read" | "write" | "edit" => touched_file_path(tool_call).into_iter().collect(),
-        "glob" => result
-            .content
-            .lines()
-            .map(str::trim)
-            .filter(|line| !line.is_empty())
-            .map(PathBuf::from)
-            .collect(),
-        "grep" => result
-            .content
-            .lines()
-            // Grep emits `path:line:content`; split on the first colon and treat the
-            // left side as the path. This assumes normal Unix-style paths.
-            .filter_map(|line| line.split_once(':').map(|(path, _)| path.trim()))
-            .filter(|path| !path.is_empty())
-            .map(PathBuf::from)
-            .collect(),
         _ => Vec::new(),
     }
 }
@@ -442,7 +428,7 @@ impl AgentLoop {
             if let Some(project_root) = self.project_root.clone() {
                 if ava_config::is_project_trusted(&project_root) {
                     let mut sections = Vec::new();
-                    let touched_paths = touched_file_paths(tool_call, &result);
+                    let touched_paths = instruction_trigger_paths(tool_call);
                     if touched_paths.len() > MAX_TOUCHED_PATHS_FOR_RULES {
                         debug!(
                             tool = %tool_call.name,
@@ -460,10 +446,23 @@ impl AgentLoop {
                         .iter()
                         .filter_map(|path| normalize_touched_path(&project_root, path))
                     {
-                        if tool_call.name == "read" {
-                            if let Some(instructions) =
-                                contextual_instructions_for_file(&file_path, &project_root)
-                            {
+                        {
+                            let mut activated_context = self
+                                .activated_context_paths
+                                .lock()
+                                .unwrap_or_else(|error| error.into_inner());
+                            if let Some(instructions) = contextual_instructions_for_file_once(
+                                &file_path,
+                                &project_root,
+                                &mut activated_context,
+                            ) {
+                                let instruction_tokens = estimate_tokens(&instructions);
+                                debug!(
+                                    file = %file_path.display(),
+                                    instruction_tokens,
+                                    tool = %tool_call.name,
+                                    "activated contextual file guidance"
+                                );
                                 sections.push(instructions);
                             }
                         }

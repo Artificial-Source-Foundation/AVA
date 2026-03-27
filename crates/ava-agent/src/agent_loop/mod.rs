@@ -75,6 +75,8 @@ pub struct AgentLoop {
     snapshot_manager: ava_tools::core::file_snapshot::SharedSnapshotManager,
     /// Trusted project root used for contextual instruction resolution.
     project_root: Option<std::path::PathBuf>,
+    /// Tracks contextual `AGENTS.md` files already injected during this session.
+    activated_context_paths: std::sync::Mutex<HashSet<std::path::PathBuf>>,
     /// Tracks `.ava/rules/*.md` files already injected during this session.
     activated_rule_paths: std::sync::Mutex<HashSet<std::path::PathBuf>>,
     /// When false, skip on-demand project rule injection entirely.
@@ -310,6 +312,7 @@ impl AgentLoop {
             session_id: None,
             snapshot_manager: ava_tools::core::file_snapshot::new_shared_snapshot_manager(),
             project_root,
+            activated_context_paths: std::sync::Mutex::new(HashSet::new()),
             activated_rule_paths: std::sync::Mutex::new(HashSet::new()),
             enable_dynamic_rules,
             cached_tool_defs: std::sync::Mutex::new(None),
@@ -363,6 +366,17 @@ impl AgentLoop {
         self.project_root = project_root;
         self.enable_dynamic_rules = enable_dynamic_rules;
         self
+    }
+
+    fn reset_dynamic_instruction_activation(&self) {
+        self.activated_context_paths
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .clear();
+        self.activated_rule_paths
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .clear();
     }
 
     async fn has_plugin_hook_subscribers(&self, event: ava_plugin::HookEvent) -> bool {
@@ -624,6 +638,7 @@ impl AgentLoop {
                         self.broadcast_event_to_plugins(&err_event).await;
                         return Err(error);
                     }
+                    self.reset_dynamic_instruction_activation();
 
                     Self::emit(
                         &event_tx,
@@ -954,6 +969,7 @@ impl AgentLoop {
                         Self::emit(&event_tx, AgentEvent::Error(error.to_string()));
                         return Err(error.into());
                     }
+                    self.reset_dynamic_instruction_activation();
                     Self::emit(
                         &event_tx,
                         AgentEvent::Progress("context compacted".to_string()),

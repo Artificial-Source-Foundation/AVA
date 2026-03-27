@@ -1,6 +1,7 @@
 //! Agent execution: the `run()` method and sub-agent spawning.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -29,7 +30,7 @@ use super::stack_tools::{build_tool_registry_with_plugins, LlmSummarizer};
 use super::{AgentRunResult, AgentStack};
 use crate::agent_loop::{AgentConfig, AgentEvent, AgentLoop, LLM_STREAM_TIMEOUT_SECS};
 use crate::budget::BudgetTelemetry;
-use crate::routing::analyze_task;
+use crate::routing::{analyze_task, infer_subagent_delegation};
 
 impl AgentStack {
     fn attach_route_metadata(session: &mut Session, decision: &RouteDecision) {
@@ -210,6 +211,7 @@ impl AgentStack {
         let plan_mode = *self.plan_mode.read().await;
         let tool_visibility_profile =
             crate::routing::infer_tool_visibility(goal, &images, thinking, plan_mode);
+        let delegation_policy = infer_subagent_delegation(goal, &images, thinking, plan_mode);
         let startup_instruction_profile = if !self.include_project_instructions {
             crate::instructions::StartupInstructionProfile::None
         } else {
@@ -290,6 +292,22 @@ impl AgentStack {
             }
         }
 
+        if delegation_policy.enable_task_tool {
+            let delegation_section = format!(
+                "\n\n## Hidden Delegation\n\
+                 - Keep small, single-file work in the main thread.\n\
+                 - You may use at most {} sub-agent(s) for this task.\n\
+                 - Prefer `scout` or `explore` for read-only reconnaissance, `plan` for design-only breakdowns, `review` for a final pass, and `worker` or `task` for isolated implementation.\n\
+                 - Delegate only when the returned result is easier to summarize than the full work.\n\
+                 - Current guidance: {}.\n",
+                delegation_policy.max_subagents, delegation_policy.reason
+            );
+            match system_prompt_suffix.as_mut() {
+                Some(suffix) => suffix.push_str(&delegation_section),
+                None => system_prompt_suffix = Some(delegation_section),
+            }
+        }
+
         // Look up the model's actual context window from the compiled-in registry.
         // This drives context compaction thresholds and ensures large-context models
         // (e.g. GPT-5.4 with 1M tokens) don't trigger premature compaction.
@@ -363,22 +381,26 @@ impl AgentStack {
                 Some(Arc::clone(&self.plugin_manager)),
             );
 
-            let spawner: Arc<dyn TaskSpawner> = Arc::new(AgentTaskSpawner {
-                provider: provider.clone(),
-                platform: self.platform.clone(),
-                model_name: provider.model_name().to_string(),
-                max_turns: turns_limit,
-                agents_config: self.agents_config.clone(),
-                router: self.router.clone(),
-                event_tx: event_tx.clone(),
-                session_manager: Some(self.session_manager.clone()),
-                parent_session_id: {
-                    let guard = self.parent_session_id.read().await;
-                    guard.clone()
-                },
-                depth: 0,
-            });
-            register_task_tool(&mut registry, spawner);
+            if delegation_policy.enable_task_tool {
+                let spawner: Arc<dyn TaskSpawner> = Arc::new(AgentTaskSpawner {
+                    provider: provider.clone(),
+                    platform: self.platform.clone(),
+                    model_name: provider.model_name().to_string(),
+                    max_turns: turns_limit,
+                    agents_config: self.agents_config.clone(),
+                    router: self.router.clone(),
+                    event_tx: event_tx.clone(),
+                    session_manager: Some(self.session_manager.clone()),
+                    parent_session_id: {
+                        let guard = self.parent_session_id.read().await;
+                        guard.clone()
+                    },
+                    depth: 0,
+                    max_spawns: delegation_policy.max_subagents,
+                    spawn_count: Arc::new(AtomicUsize::new(0)),
+                });
+                register_task_tool(&mut registry, spawner);
+            }
 
             {
                 let mcp_guard = self.mcp.read().await;
@@ -724,6 +746,12 @@ impl AgentStack {
 /// even if future refactors accidentally expose the task tool to sub-agents.
 const MAX_AGENT_DEPTH: u32 = 3;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SubAgentRuntimeProfile {
+    Full,
+    ReadOnly,
+}
+
 struct AgentTaskSpawner {
     provider: Arc<dyn LLMProvider>,
     platform: Arc<dyn Platform>,
@@ -740,6 +768,10 @@ struct AgentTaskSpawner {
     parent_session_id: Option<String>,
     /// Current nesting depth (0 = top-level agent).
     depth: u32,
+    /// Maximum number of sub-agents this parent run may spawn.
+    max_spawns: usize,
+    /// Total number of sub-agents already spawned in this parent run.
+    spawn_count: Arc<AtomicUsize>,
 }
 
 #[async_trait]
@@ -757,9 +789,29 @@ impl TaskSpawner for AgentTaskSpawner {
 
         let resolved = self.agents_config.get_agent(agent_type);
 
+        if self.max_spawns == 0 {
+            return Err(AvaError::ToolError(
+                "Sub-agent delegation is disabled for this task. Keep the work in the main thread."
+                    .to_string(),
+            ));
+        }
+
         if !resolved.enabled {
             return Err(AvaError::ToolError(format!(
                 "Sub-agent '{agent_type}' is disabled in agents.toml"
+            )));
+        }
+
+        if self
+            .spawn_count
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |current| {
+                (current < self.max_spawns).then_some(current + 1)
+            })
+            .is_err()
+        {
+            return Err(AvaError::ToolError(format!(
+                "Sub-agent budget exhausted for this task (max {}). Summarize what you have and continue in the main thread.",
+                self.max_spawns
             )));
         }
 
@@ -796,8 +848,10 @@ impl TaskSpawner for AgentTaskSpawner {
             model = %effective_model,
             "spawning sub-agent for task tool"
         );
+        let runtime_profile = subagent_runtime_profile(agent_type);
         let mut registry = ToolRegistry::new();
         register_core_tools(&mut registry, self.platform.clone());
+        apply_subagent_runtime_profile(&mut registry, runtime_profile);
         registry.unregister("todo_write");
         registry.unregister("todo_read");
         let context = ContextManager::new(128_000);
@@ -811,9 +865,10 @@ impl TaskSpawner for AgentTaskSpawner {
         };
 
         // Use configured prompt if set, otherwise fall back to default.
-        let system_prompt = resolved
+        let mut system_prompt = resolved
             .prompt
-            .unwrap_or_else(build_sub_agent_system_prompt);
+            .unwrap_or_else(|| build_sub_agent_system_prompt(agent_type));
+        system_prompt.push_str(subagent_runtime_guidance(runtime_profile));
 
         let sub_agent_context_window = {
             let reg = ava_config::model_catalog::registry::registry();
@@ -851,7 +906,8 @@ impl TaskSpawner for AgentTaskSpawner {
             registry,
             context,
             config,
-        );
+        )
+        .with_tool_visibility_profile(subagent_tool_visibility_profile(runtime_profile));
         let mut session = agent.run(prompt).await?;
 
         // Set parent_id metadata so the session can be linked to the parent.
@@ -972,14 +1028,50 @@ pub fn parse_model_spec(spec: &str) -> (String, String) {
     ("openrouter".to_string(), spec.to_string())
 }
 
-fn build_sub_agent_system_prompt() -> String {
-    "You are a sub-agent of AVA, an AI coding assistant. You have been given a specific task \
-     to complete autonomously. Work through the task step by step using the available tools.\n\n\
-     ## Rules\n\
-     - Read files before modifying them.\n\
-     - Prefer editing existing files over creating new ones.\n\
-     - Be thorough but efficient -- you have a limited number of turns.\n\
-     - When your task is complete, provide a clear summary of what you did as your final response.\n\
-     - Do NOT call attempt_completion -- simply respond with your final answer when done.\n"
-        .to_string()
+fn subagent_runtime_profile(agent_type: &str) -> SubAgentRuntimeProfile {
+    match agent_type {
+        "plan" | "explore" | "scout" | "review" => SubAgentRuntimeProfile::ReadOnly,
+        _ => SubAgentRuntimeProfile::Full,
+    }
+}
+
+fn apply_subagent_runtime_profile(registry: &mut ToolRegistry, profile: SubAgentRuntimeProfile) {
+    if profile == SubAgentRuntimeProfile::ReadOnly {
+        for tool in ["write", "edit", "bash", "web_fetch", "web_search"] {
+            registry.unregister(tool);
+        }
+    }
+}
+
+fn subagent_tool_visibility_profile(
+    profile: SubAgentRuntimeProfile,
+) -> crate::routing::ToolVisibilityProfile {
+    match profile {
+        SubAgentRuntimeProfile::Full => crate::routing::ToolVisibilityProfile::Full,
+        SubAgentRuntimeProfile::ReadOnly => crate::routing::ToolVisibilityProfile::ReadOnly,
+    }
+}
+
+fn subagent_runtime_guidance(profile: SubAgentRuntimeProfile) -> &'static str {
+    match profile {
+        SubAgentRuntimeProfile::Full => {
+            "\n\n## Runtime limits\n- Stay focused on the delegated task. Keep changes narrow and summarize the result clearly.\n"
+        }
+        SubAgentRuntimeProfile::ReadOnly => {
+            "\n\n## Runtime limits\n- You are running in read-only specialist mode. Do not edit files, run shell commands, or browse the web. Investigate with read, glob, grep, and git_read, then report back clearly.\n"
+        }
+    }
+}
+
+fn build_sub_agent_system_prompt(agent_type: &str) -> String {
+    format!(
+        "You are the `{agent_type}` sub-agent of AVA, an AI coding assistant. You have been given a specific task \
+         to complete autonomously. Work through it step by step using the available tools.\n\n\
+         ## Rules\n\
+         - Read files before modifying them.\n\
+         - Prefer focused, local changes over broad rewrites.\n\
+         - Be thorough but efficient -- you have a limited number of turns.\n\
+         - When your task is complete, provide a clear summary of what you did as your final response.\n\
+         - Do NOT call attempt_completion -- simply respond with your final answer when done.\n"
+    )
 }

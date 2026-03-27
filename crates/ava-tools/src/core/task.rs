@@ -63,13 +63,14 @@ impl Tool for TaskTool {
 
     fn description(&self) -> &str {
         "Spawn a sub-agent to work on a task autonomously. The sub-agent has its own \
-         conversation context and access to core tools (read, write, edit, bash, glob, \
-         grep, apply_patch). Use this when a task can be cleanly delegated — for example, \
-         writing a module, running a test suite, or researching a codebase question. \
-         The sub-agent cannot ask the user questions or spawn further sub-agents. \
-         Optionally specify an agent type (e.g. 'build', 'review', 'explore', 'plan') \
-         to use a specialized sub-agent with its own model, prompt, and turn limits \
-         configured in agents.toml."
+          conversation context and access to core tools (read, write, edit, bash, glob, \
+          grep, apply_patch). Use this only when a chunk of work is easier to delegate \
+          than to keep in the main thread — for example, codebase reconnaissance, a focused \
+          implementation slice, or a final review pass. Avoid using it for tiny single-file \
+          edits. The sub-agent cannot ask the user questions or spawn further sub-agents. \
+          Optionally specify an agent type (for example `scout`, `explore`, `plan`, `review`, \
+          `worker`, or `build`) to use a specialist with its own model, prompt, and turn limits \
+          configured in agents.toml."
     }
 
     fn parameters(&self) -> Value {
@@ -83,7 +84,7 @@ impl Tool for TaskTool {
                 },
                 "agent": {
                     "type": "string",
-                    "description": "Optional agent type to use (e.g. 'build', 'review', 'explore', 'plan'). Each agent type can have its own model, system prompt, and turn limits configured in agents.toml. Defaults to 'task'."
+                    "description": "Optional agent type to use (e.g. 'scout', 'explore', 'plan', 'review', 'worker', or 'build'). Each agent type can have its own model, system prompt, and turn limits configured in agents.toml. Defaults to 'task'."
                 }
             }
         })

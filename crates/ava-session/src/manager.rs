@@ -52,34 +52,7 @@ impl SessionManager {
             Self::upsert_message_in_tx(&tx, session.id, message)?;
         }
 
-        // Remove orphaned messages that are no longer in the session's message
-        // list.  This replaces the old DELETE-all + INSERT-all pattern with a
-        // targeted cleanup that only removes messages whose IDs are absent from
-        // the current set.
-        if !session.messages.is_empty() {
-            // Build a comma-separated list of quoted message IDs for the NOT IN clause.
-            let id_list: Vec<String> = session.messages.iter().map(|m| m.id.to_string()).collect();
-            let placeholders: String = id_list.iter().map(|_| "?").collect::<Vec<_>>().join(",");
-            let sql = format!(
-                "DELETE FROM messages WHERE session_id = ?1 AND id NOT IN ({placeholders})"
-            );
-            let mut stmt = tx.prepare(&sql).map_err(db_error)?;
-            let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> =
-                vec![Box::new(session.id.to_string())];
-            for id in &id_list {
-                param_values.push(Box::new(id.clone()));
-            }
-            let params_ref: Vec<&dyn rusqlite::types::ToSql> =
-                param_values.iter().map(|p| p.as_ref()).collect();
-            stmt.execute(params_ref.as_slice()).map_err(db_error)?;
-        } else {
-            // Session has no messages — remove all messages for this session.
-            tx.execute(
-                "DELETE FROM messages WHERE session_id = ?1",
-                params![session.id.to_string()],
-            )
-            .map_err(db_error)?;
-        }
+        Self::delete_orphaned_messages_in_tx(&tx, session.id, &session.messages)?;
 
         tx.commit().map_err(db_error)
     }
@@ -193,6 +166,58 @@ impl SessionManager {
             ],
         )
         .map_err(db_error)?;
+        Ok(())
+    }
+
+    fn delete_orphaned_messages_in_tx(
+        tx: &rusqlite::Transaction<'_>,
+        session_id: Uuid,
+        messages: &[Message],
+    ) -> Result<()> {
+        if messages.is_empty() {
+            tx.execute(
+                "DELETE FROM messages WHERE session_id = ?1",
+                params![session_id.to_string()],
+            )
+            .map_err(db_error)?;
+            return Ok(());
+        }
+
+        tx.execute_batch(
+            "CREATE TEMP TABLE IF NOT EXISTS current_session_message_ids (
+                 id TEXT PRIMARY KEY
+             );
+             DELETE FROM current_session_message_ids;",
+        )
+        .map_err(db_error)?;
+
+        {
+            let mut insert = tx
+                .prepare("INSERT INTO current_session_message_ids (id) VALUES (?1)")
+                .map_err(db_error)?;
+            for message in messages {
+                insert
+                    .execute(params![message.id.to_string()])
+                    .map_err(db_error)?;
+            }
+        }
+
+        let deleted = tx
+            .execute(
+                "DELETE FROM messages
+                 WHERE session_id = ?1
+                   AND id NOT IN (SELECT id FROM current_session_message_ids)",
+                params![session_id.to_string()],
+            )
+            .map_err(db_error)?;
+
+        tracing::debug!(
+            session_id = %session_id,
+            retained = messages.len(),
+            deleted,
+            "synchronized persisted session messages"
+        );
+
         Ok(())
     }
 
@@ -339,11 +364,12 @@ impl SessionManager {
                 "INSERT INTO messages (id, session_id, role, content, timestamp, tool_calls, tool_results, tool_call_id, images, parent_id)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
                  ON CONFLICT(id) DO UPDATE SET
-                   content = excluded.content,
-                   tool_calls = excluded.tool_calls,
-                   tool_results = excluded.tool_results,
-                   images = excluded.images,
-                   parent_id = excluded.parent_id",
+                    content = excluded.content,
+                    tool_calls = excluded.tool_calls,
+                    tool_results = excluded.tool_results,
+                    tool_call_id = excluded.tool_call_id,
+                    images = excluded.images,
+                    parent_id = excluded.parent_id",
                 params![
                     message.id.to_string(),
                     session_id.to_string(),
@@ -726,7 +752,7 @@ mod bookmark_tests {
 #[cfg(test)]
 mod incremental_tests {
     use crate::*;
-    use ava_types::{Message, Role};
+    use ava_types::{Message, Role, TokenUsage};
     use uuid::Uuid;
 
     fn temp_manager() -> (SessionManager, tempfile::TempDir) {
@@ -868,5 +894,35 @@ mod incremental_tests {
         assert_eq!(loaded.messages.len(), 2);
         assert_eq!(loaded.messages[0].id, m1_id);
         assert_eq!(loaded.messages[1].id, m2_id);
+    }
+
+    #[test]
+    fn save_incremental_updates_tool_call_id() {
+        let (mgr, _dir) = temp_manager();
+        let session = mgr.create().unwrap();
+        mgr.save(&session).unwrap();
+
+        let mut tool_message = Message::new(Role::Tool, "tool output").with_tool_call_id("call-1");
+        let message_id = tool_message.id;
+
+        mgr.save_incremental(
+            session.id,
+            &[tool_message.clone()],
+            &TokenUsage::default(),
+            None,
+        )
+        .unwrap();
+
+        let loaded = mgr.get(session.id).unwrap().unwrap();
+        assert_eq!(loaded.messages[0].tool_call_id.as_deref(), Some("call-1"));
+
+        tool_message.tool_call_id = Some("call-2".to_string());
+        mgr.save_incremental(session.id, &[tool_message], &TokenUsage::default(), None)
+            .unwrap();
+
+        let loaded = mgr.get(session.id).unwrap().unwrap();
+        assert_eq!(loaded.messages.len(), 1);
+        assert_eq!(loaded.messages[0].id, message_id);
+        assert_eq!(loaded.messages[0].tool_call_id.as_deref(), Some("call-2"));
     }
 }

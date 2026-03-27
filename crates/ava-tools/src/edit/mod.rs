@@ -36,6 +36,10 @@ pub struct EditEngine {
     speculative: Vec<Box<dyn EditStrategy>>,
 }
 
+const SPECULATIVE_EARLY_EXIT_SIMILARITY: f64 = 0.95;
+const MAX_EDIT_HINTS: usize = 5;
+const MAX_EXPENSIVE_CANDIDATES: usize = 3;
+
 impl Default for EditEngine {
     fn default() -> Self {
         Self {
@@ -83,10 +87,15 @@ impl EditEngine {
         for strategy in &self.speculative {
             match strategy.apply(request) {
                 Ok(Some(content)) => {
-                    candidates.push(EditResult {
+                    let candidate = EditResult {
                         content,
                         strategy: strategy.name().to_string(),
-                    });
+                    };
+                    let similarity = candidate_similarity(&request.content, &candidate.content);
+                    if similarity > SPECULATIVE_EARLY_EXIT_SIMILARITY {
+                        return Ok(candidate);
+                    }
+                    candidates.push(candidate);
                 }
                 Ok(None) => {}
                 Err(_) => {}
@@ -106,26 +115,32 @@ impl EditEngine {
         }
 
         // All strategies failed — produce rich error feedback with similar lines.
-        let hints = find_similar_lines(&request.content, &request.old_text, 3);
-        if hints.is_empty() {
-            return Err(EditError::NoMatch);
-        }
+        let hints = find_similar_lines(&request.content, &request.old_text, MAX_EDIT_HINTS);
+        let best_similarity = hints.iter().map(|hint| hint.similarity).fold(0.0, f64::max);
+        let replacement_exists = replacement_already_exists(&request.content, &request.new_text);
 
-        let mut message =
-            String::from("No strategy could apply edit. The most similar lines in the file are:\n");
-        // Group consecutive hints into a range suggestion
-        let first_line = hints[0].line_number;
-        let last_line = hints[hints.len() - 1].line_number;
-        for hint in &hints {
-            message.push_str(&format!(
-                "  line {}: {}\n",
-                hint.line_number,
-                hint.content.trim()
-            ));
+        let mut message = format!(
+            "No strategy could apply edit. Best similarity score achieved: {:.2}.\n\nMost similar lines in the file are:\n",
+            best_similarity
+        );
+        if hints.is_empty() {
+            message.push_str("  (no similar lines found)\n");
+        } else {
+            for hint in &hints {
+                message.push_str(&format!(
+                    "  line {} (similarity {:.2}): {}\n",
+                    hint.line_number,
+                    hint.similarity,
+                    hint.content.trim()
+                ));
+            }
         }
-        message.push_str(&format!(
-            "Did you mean this section? (lines {first_line}-{last_line})"
-        ));
+        if replacement_exists {
+            message.push_str(
+                "\nReplacement text already exists in the file. This edit may have already been applied.\n",
+            );
+        }
+        message.push_str("\nReview the line numbers above and retry with an exact match.");
 
         Err(EditError::NoMatchWithHints { message, hints })
     }
@@ -147,10 +162,12 @@ fn pick_best_candidate(candidates: &[EditResult], original: &str, new_text: &str
         return candidates[0].clone();
     }
 
-    let mut scored: Vec<(usize, f64)> = candidates
+    let finalists =
+        select_finalist_indexes(candidates, original, new_text, MAX_EXPENSIVE_CANDIDATES);
+    let mut scored: Vec<(usize, f64)> = finalists
         .iter()
-        .enumerate()
-        .map(|(i, result)| {
+        .map(|&i| {
+            let result = &candidates[i];
             let mut score = 0.0;
 
             // Bonus: result contains the new text (sanity check)
@@ -173,6 +190,54 @@ fn pick_best_candidate(candidates: &[EditResult], original: &str, new_text: &str
 
     scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
     candidates[scored[0].0].clone()
+}
+
+fn select_finalist_indexes(
+    candidates: &[EditResult],
+    original: &str,
+    new_text: &str,
+    max_candidates: usize,
+) -> Vec<usize> {
+    let mut scored: Vec<(usize, bool, usize, usize)> = candidates
+        .iter()
+        .enumerate()
+        .map(|(index, candidate)| {
+            (
+                index,
+                candidate.content.contains(new_text),
+                cheap_line_change_count(original, &candidate.content),
+                original.len().abs_diff(candidate.content.len()),
+            )
+        })
+        .collect();
+
+    scored.sort_by(|left, right| {
+        right
+            .1
+            .cmp(&left.1)
+            .then_with(|| left.2.cmp(&right.2))
+            .then_with(|| left.3.cmp(&right.3))
+            .then_with(|| left.0.cmp(&right.0))
+    });
+
+    scored
+        .into_iter()
+        .take(max_candidates.max(1))
+        .map(|(index, _, _, _)| index)
+        .collect()
+}
+
+fn cheap_line_change_count(original: &str, edited: &str) -> usize {
+    let original_lines: Vec<&str> = original.lines().collect();
+    let edited_lines: Vec<&str> = edited.lines().collect();
+    let max_len = original_lines.len().max(edited_lines.len());
+    (0..max_len)
+        .filter(|&idx| original_lines.get(idx) != edited_lines.get(idx))
+        .count()
+}
+
+fn candidate_similarity(original: &str, edited: &str) -> f64 {
+    similar::TextDiff::from_lines(original, edited).ratio() as f64
 }
 
 /// Minimum similarity ratio for auto-correcting an edit.
@@ -244,12 +309,6 @@ fn try_line_fuzzy_autocorrect(request: &EditRequest) -> Option<EditResult> {
 
     let (best_start, _best_ratio) = best_match?;
 
-    // Determine the actual byte range in content for the matched block
-    let mut byte_start = 0;
-    for line in &content_lines[..best_start] {
-        byte_start += line.len() + 1; // +1 for newline
-    }
-
     // Find the end of the matched block — try exact line count first, then ±1
     let best_end_line = find_best_end_line(
         &content_lines,
@@ -257,12 +316,9 @@ fn try_line_fuzzy_autocorrect(request: &EditRequest) -> Option<EditResult> {
         old_line_count,
         &request.old_text,
     );
-    let matched_lines = &content_lines[best_start..best_end_line];
-    let matched_text = matched_lines.join("\n");
-
-    // Compute byte_end from the matched text
-    let byte_end = byte_start + matched_text.len();
-
+    let line_ranges = line_byte_ranges(&request.content);
+    let &(byte_start, _) = line_ranges.get(best_start)?;
+    let (_, byte_end) = line_ranges.get(best_end_line.saturating_sub(1)).copied()?;
     // Ensure we don't go out of bounds
     if byte_end > request.content.len() {
         return None;
@@ -312,6 +368,31 @@ fn find_best_end_line(
     }
 
     best_end
+}
+
+fn line_byte_ranges(content: &str) -> Vec<(usize, usize)> {
+    let mut ranges = Vec::new();
+    let mut start = 0;
+
+    for chunk in content.split_inclusive('\n') {
+        let line = chunk
+            .strip_suffix("\r\n")
+            .or_else(|| chunk.strip_suffix('\n'))
+            .unwrap_or(chunk);
+        let end = start + line.len();
+        ranges.push((start, end));
+        start += chunk.len();
+    }
+
+    if content.is_empty() {
+        return ranges;
+    }
+
+    if !content.ends_with('\n') && ranges.is_empty() {
+        ranges.push((0, content.len()));
+    }
+
+    ranges
 }
 
 /// Compute block-level similarity using line-by-line comparison.
@@ -367,7 +448,6 @@ fn find_similar_lines(
             let ratio = line_similarity_ratio(needle, trimmed);
             (i + 1, line.to_string(), ratio) // 1-based line numbers
         })
-        .filter(|(_, _, ratio)| *ratio > 0.4) // Only reasonably similar lines
         .collect();
 
     scored.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
@@ -388,6 +468,33 @@ fn find_similar_lines(
         .collect()
 }
 
+fn replacement_already_exists(content: &str, new_text: &str) -> bool {
+    if new_text.trim().is_empty() {
+        return false;
+    }
+    if content.contains(new_text) {
+        return true;
+    }
+
+    let new_lines: Vec<&str> = new_text.lines().collect();
+    if new_lines.is_empty() {
+        return false;
+    }
+
+    let target: Vec<&str> = new_lines.iter().map(|line| line.trim()).collect();
+    let content_lines: Vec<&str> = content.lines().collect();
+    if content_lines.len() < target.len() {
+        return false;
+    }
+
+    (0..=content_lines.len() - target.len()).any(|start| {
+        content_lines[start..start + target.len()]
+            .iter()
+            .map(|line| line.trim())
+            .eq(target.iter().copied())
+    })
+}
+
 /// Compute similarity ratio between two strings using character-level diff.
 /// Returns a value between 0.0 (completely different) and 1.0 (identical).
 fn line_similarity_ratio(a: &str, b: &str) -> f64 {
@@ -403,7 +510,28 @@ fn line_similarity_ratio(a: &str, b: &str) -> f64 {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
     use super::*;
+    use crate::edit::strategies::EditStrategy;
+
+    struct TestStrategy {
+        name: &'static str,
+        result: Option<String>,
+        calls: Arc<AtomicUsize>,
+    }
+
+    impl EditStrategy for TestStrategy {
+        fn name(&self) -> &'static str {
+            self.name
+        }
+
+        fn apply(&self, _request: &EditRequest) -> Result<Option<String>, EditError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Ok(self.result.clone())
+        }
+    }
 
     #[test]
     fn engine_has_fifteen_strategies() {
@@ -498,6 +626,20 @@ mod tests {
     }
 
     #[test]
+    fn line_fuzzy_autocorrect_handles_crlf_offsets() {
+        let content = "fn main() {\r\n    let x = 42;\r\n    println!(\"{}\", x);\r\n}\r\n";
+        let old_text = "  let x = 42;\r\n  println!(\"{}\", x);";
+        let new_text = "    let x = 99;\r\n    println!(\"{}\", x);";
+
+        let req = EditRequest::new(content, old_text, new_text);
+        let result = try_line_fuzzy_autocorrect(&req).expect("should auto-correct CRLF content");
+        assert_eq!(
+            result.content,
+            "fn main() {\r\n    let x = 99;\r\n    println!(\"{}\", x);\r\n}\r\n"
+        );
+    }
+
+    #[test]
     fn tiered_racing_confident_tier_short_circuits() {
         // ExactMatch is in confident tier — should short-circuit without running speculative
         let engine = EditEngine::new();
@@ -555,6 +697,89 @@ mod tests {
             best.strategy, "strategy_a",
             "should prefer more surgical edit"
         );
+    }
+
+    #[test]
+    fn speculative_early_exit_skips_late_strategies() {
+        let original = (0..100)
+            .map(|index| format!("line {index}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let surgical = original.replacen("line 50", "line 50 updated", 1);
+        let first_calls = Arc::new(AtomicUsize::new(0));
+        let second_calls = Arc::new(AtomicUsize::new(0));
+        let engine = EditEngine {
+            confident: Vec::new(),
+            speculative: vec![
+                Box::new(TestStrategy {
+                    name: "surgical",
+                    result: Some(surgical.clone()),
+                    calls: first_calls.clone(),
+                }),
+                Box::new(TestStrategy {
+                    name: "expensive",
+                    result: Some(original.replace("line 90", "line 90 changed")),
+                    calls: second_calls.clone(),
+                }),
+            ],
+        };
+
+        let result = engine
+            .apply(&EditRequest::new(&original, "line 50", "line 50 updated"))
+            .unwrap();
+
+        assert_eq!(result.strategy, "surgical");
+        assert_eq!(first_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(second_calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn select_finalists_prefers_candidates_with_fewer_changed_lines() {
+        let original = "a\nb\nc\nd\ne";
+        let candidates = vec![
+            EditResult {
+                content: "x\ny\nz".to_string(),
+                strategy: "large_change".to_string(),
+            },
+            EditResult {
+                content: "a\nB\nc\nd\ne".to_string(),
+                strategy: "small_change".to_string(),
+            },
+            EditResult {
+                content: "a\nb\nc\nD\ne".to_string(),
+                strategy: "small_change_two".to_string(),
+            },
+            EditResult {
+                content: "a\nb\nc\nd\nE\nF".to_string(),
+                strategy: "medium_change".to_string(),
+            },
+        ];
+
+        let finalists = select_finalist_indexes(&candidates, original, "B", 2);
+        assert_eq!(finalists, vec![1, 2]);
+    }
+
+    #[test]
+    fn replacement_already_exists_detects_trimmed_blocks() {
+        let content = "fn main() {\n    println!(\"done\");\n}\n";
+        assert!(replacement_already_exists(
+            content,
+            "fn main() {\nprintln!(\"done\");\n}"
+        ));
+    }
+
+    #[test]
+    fn failure_message_reports_similarity_and_existing_replacement() {
+        let engine = EditEngine {
+            confident: Vec::new(),
+            speculative: Vec::new(),
+        };
+        let request = EditRequest::new("alpha\nbeta\ngamma\nreplacement\n", "betta", "replacement");
+
+        let error = engine.apply(&request).unwrap_err().to_string();
+        assert!(error.contains("Best similarity score achieved"));
+        assert!(error.contains("line 2"));
+        assert!(error.contains("Replacement text already exists in the file"));
     }
 
     #[test]

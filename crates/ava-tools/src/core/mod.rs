@@ -10,6 +10,7 @@ pub mod grep;
 pub mod hashline;
 pub mod output_fallback;
 pub mod path_guard;
+pub mod path_suggest;
 pub mod plan;
 pub mod question;
 pub mod read;
@@ -150,4 +151,12 @@ pub fn register_claude_code_tool(
 
 pub fn register_custom_tools(registry: &mut ToolRegistry, dirs: &[std::path::PathBuf]) {
     custom_tool::register_custom_tools(registry, dirs);
+}
+
+pub fn register_custom_tools_with_plugins(
+    registry: &mut ToolRegistry,
+    dirs: &[std::path::PathBuf],
+    plugin_manager: Option<Arc<tokio::sync::Mutex<PluginManager>>>,
+) {
+    custom_tool::register_custom_tools_with_plugins(registry, dirs, plugin_manager);
 }

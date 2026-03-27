@@ -13,7 +13,7 @@ use ava_session::SessionManager;
 use ava_tools::core::register_core_tools;
 use ava_tools::core::task::{TaskResult, TaskSpawner};
 use ava_tools::core::{
-    file_backup::new_backup_session, register_custom_tools, register_plan_tool,
+    file_backup::new_backup_session, register_custom_tools_with_plugins, register_plan_tool,
     register_question_tool, register_task_tool, register_todo_tools,
 };
 use ava_tools::mcp_bridge::MCPBridgeTool;
@@ -25,7 +25,7 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing::{info, instrument, warn};
 
-use super::stack_tools::{build_tool_registry, LlmSummarizer};
+use super::stack_tools::{build_tool_registry_with_plugins, LlmSummarizer};
 use super::{AgentRunResult, AgentStack};
 use crate::agent_loop::{AgentConfig, AgentEvent, AgentLoop, LLM_STREAM_TIMEOUT_SECS};
 use crate::budget::BudgetTelemetry;
@@ -342,12 +342,14 @@ impl AgentStack {
                 new_backup_session(),
             )
         } else {
-            let (mut registry, run_tool_sources, run_backup_session) = build_tool_registry(
-                self.platform.clone(),
-                Arc::clone(&self.permission_inspector),
-                Arc::clone(&self.permission_context),
-                self.approval_bridge.clone(),
-            );
+            let (mut registry, run_tool_sources, run_backup_session) =
+                build_tool_registry_with_plugins(
+                    self.platform.clone(),
+                    Arc::clone(&self.permission_inspector),
+                    Arc::clone(&self.permission_context),
+                    self.approval_bridge.clone(),
+                    Some(Arc::clone(&self.plugin_manager)),
+                );
             register_todo_tools(&mut registry, self.todo_state.clone());
             register_question_tool(&mut registry, self.question_bridge.clone());
             register_plan_tool(
@@ -355,7 +357,11 @@ impl AgentStack {
                 self.plan_bridge.clone(),
                 self.plan_state.clone(),
             );
-            register_custom_tools(&mut registry, &self.custom_tool_dirs);
+            register_custom_tools_with_plugins(
+                &mut registry,
+                &self.custom_tool_dirs,
+                Some(Arc::clone(&self.plugin_manager)),
+            );
 
             let spawner: Arc<dyn TaskSpawner> = Arc::new(AgentTaskSpawner {
                 provider: provider.clone(),

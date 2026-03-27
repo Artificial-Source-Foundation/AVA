@@ -179,25 +179,6 @@ pub(crate) fn resolve_workspace_roots(
     roots
 }
 
-pub(crate) fn build_tool_registry(
-    platform: Arc<dyn Platform>,
-    permission_inspector: Arc<dyn PermissionInspector>,
-    permission_context: Arc<RwLock<InspectionContext>>,
-    approval_bridge: ApprovalBridge,
-) -> (
-    ToolRegistry,
-    SharedToolSources,
-    ava_tools::core::file_backup::FileBackupSession,
-) {
-    build_tool_registry_with_plugins(
-        platform,
-        permission_inspector,
-        permission_context,
-        approval_bridge,
-        None,
-    )
-}
-
 pub(crate) fn build_tool_registry_with_plugins(
     platform: Arc<dyn Platform>,
     permission_inspector: Arc<dyn PermissionInspector>,

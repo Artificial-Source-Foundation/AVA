@@ -210,6 +210,7 @@ fn build_loop(responses: Vec<String>, token_limit: usize, max_turns: usize) -> A
         AgentConfig {
             max_turns,
             token_limit,
+            provider: String::new(),
             model: "mock-model".to_string(),
             max_budget_usd: 0.0,
             max_cost_usd: 10.0,

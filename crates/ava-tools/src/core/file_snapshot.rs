@@ -669,7 +669,7 @@ mod tests {
         assert_eq!(content, "modified content");
 
         // Restore to first snapshot
-        let changed = manager.restore(&hash1).await.unwrap();
+        let _changed = manager.restore(&hash1).await.unwrap();
         let content = tokio::fs::read_to_string(&file).await.unwrap();
         assert_eq!(content, "original content");
     }

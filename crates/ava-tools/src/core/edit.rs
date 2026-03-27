@@ -95,6 +95,9 @@ impl Tool for EditTool {
         tracing::debug!(tool = "edit", %path, %replace_all, "executing edit tool");
 
         let file_path = crate::core::path_guard::enforce_workspace_path(path, "edit")?;
+        if !self.platform.exists(&file_path).await {
+            return Err(crate::core::path_suggest::missing_file_error(path, &file_path).await);
+        }
         let original = self.platform.read_file(&file_path).await?;
 
         // Strategy 0: Try hash-anchored resolution before the fuzzy cascade.

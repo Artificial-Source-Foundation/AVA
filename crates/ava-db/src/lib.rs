@@ -24,6 +24,7 @@ pub struct Database {
 impl Database {
     /// Create a new database connection pool
     pub async fn new(database_url: &str) -> Result<Self> {
+        let in_memory = is_in_memory_sqlite(database_url);
         let options = SqliteConnectOptions::from_str(database_url)
             .map_err(|e| ava_types::AvaError::DatabaseError(e.to_string()))?
             .journal_mode(SqliteJournalMode::Wal)
@@ -32,8 +33,15 @@ impl Database {
             .busy_timeout(std::time::Duration::from_millis(5000))
             .pragma("cache_size", "-64000");
 
+        if in_memory {
+            tracing::debug!(
+                database_url,
+                "forcing single SQLite connection for in-memory database"
+            );
+        }
+
         let pool = SqlitePoolOptions::new()
-            .max_connections(5)
+            .max_connections(if in_memory { 1 } else { 5 })
             .connect_with(options)
             .await
             .map_err(|e| ava_types::AvaError::DatabaseError(e.to_string()))?;
@@ -85,6 +93,11 @@ impl Database {
     }
 }
 
+fn is_in_memory_sqlite(database_url: &str) -> bool {
+    let normalized = database_url.to_ascii_lowercase();
+    normalized.starts_with("sqlite::memory:") || normalized.contains("mode=memory")
+}
+
 /// Initialize an in-memory database for testing
 #[cfg(test)]
 pub async fn create_test_db() -> Result<Database> {
@@ -112,5 +125,32 @@ mod tests {
             .await
             .unwrap();
         assert!(row.0 >= 2); // At least sessions and messages tables
+    }
+
+    #[tokio::test]
+    async fn in_memory_pool_reuses_single_schema_across_concurrent_queries() {
+        let db = create_test_db().await.unwrap();
+
+        let handles: Vec<_> = (0..4)
+            .map(|_| {
+                let pool = db.pool().clone();
+                tokio::spawn(async move {
+                    let row: (i64,) =
+                        sqlx::query_as("SELECT COUNT(*) FROM sqlite_master WHERE type='table'")
+                            .fetch_one(&pool)
+                            .await
+                            .unwrap();
+                    row.0
+                })
+            })
+            .collect();
+
+        for handle in handles {
+            let table_count = handle.await.unwrap();
+            assert!(
+                table_count >= 2,
+                "expected migrated tables, got {table_count}"
+            );
+        }
     }
 }

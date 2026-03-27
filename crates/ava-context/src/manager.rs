@@ -193,6 +193,7 @@ impl ContextManager {
         self.last_summary = self
             .messages
             .iter()
+            .rev()
             .filter(|m| m.role == Role::System)
             .find(|m| {
                 m.content.starts_with("[Summary of")
@@ -201,6 +202,17 @@ impl ContextManager {
                     || m.content.contains("Files modified:")
             })
             .map(|m| m.content.clone());
+
+        tracing::debug!(
+            messages = self.messages.len(),
+            compacted = self.compacted_messages.len(),
+            has_summary = self.last_summary.is_some(),
+            summary_chars = self
+                .last_summary
+                .as_ref()
+                .map_or(0, |summary| summary.len()),
+            "context compaction state updated"
+        );
 
         self.tracker.reset();
         self.tracker.add_messages(&self.messages);

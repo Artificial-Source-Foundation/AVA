@@ -10,6 +10,9 @@ All notable changes to AVA are documented in this file.
 ### Changed
 - Desktop frontend (SolidJS) retained in `src/` but all backend logic is now pure Rust via `src-tauri/`.
 - The `dispatchCompute` pattern is no longer present anywhere in the codebase (previously deprecated for new work, now fully removed).
+- Agent/tool hot paths are more robust: streamed tool calls preserve provider ordering, read-only tool fan-out is bounded, transient retries stop once failures turn permanent, context compaction tracks the latest summary, and in-memory SQLite pools now reuse a single connection safely.
+- Default tool runtime is leaner and more diagnosable: `grep` walks repos in parallel with deterministic ordering, `glob` avoids per-match metadata calls, missing-file errors suggest sibling paths, and edit failures now report similarity hints plus already-applied detection.
+- Custom TOML tools now execute with bash-style env scrubbing, plugin-provided `shell.env` variables, structured stdout/stderr/exit metadata, secret redaction, and disk spillover for oversized output. DuckDuckGo search results now validate redirects, unwrap real target URLs, decode HTML entities, and drop blocked or duplicate results.
 
 ## [2.1.0] - 2026-03-08
 

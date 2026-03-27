@@ -74,6 +74,10 @@ impl Tool for ReadTool {
         // Enforce workspace boundaries before reading file contents.
         let file_path = crate::core::path_guard::enforce_workspace_path(path, "read")?;
 
+        if !self.platform.exists(&file_path).await {
+            return Err(crate::core::path_suggest::missing_file_error(path, &file_path).await);
+        }
+
         // Guard against OOM: reject files larger than MAX_READ_SIZE before
         // loading them into memory.
         match tokio::fs::metadata(&file_path).await {
@@ -94,10 +98,9 @@ impl Tool for ReadTool {
             .read_file(&file_path)
             .await
             .map_err(|err| match err {
-                AvaError::IoError(message) if message.contains("No such file") => {
-                    AvaError::NotFound(format!("file not found: {path}"))
-                }
-                AvaError::IoError(message) if message.contains("Permission denied") => {
+                AvaError::PermissionDenied(message) | AvaError::IoError(message)
+                    if message.contains("Permission denied") =>
+                {
                     AvaError::PermissionDenied(format!("permission denied: {path} ({message})"))
                 }
                 other => other,

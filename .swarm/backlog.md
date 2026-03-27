@@ -1,5 +1,9 @@
 # Swarm Backlog — 2026-03-20
 
+## Recently Completed
+1. **Backend/runtime hardening** — fixed streamed tool-call ordering, bounded read-only tool concurrency, tightened retry stop conditions, corrected context summary tracking, hardened session persistence, and made in-memory SQLite tests/runtime deterministic.
+2. **Tooling SOTA pass** — parallelized `grep`, removed `glob` metadata sort tax, added file-not-found suggestions for `read`/`edit`, improved edit candidate selection and diagnostics, and hardened custom/web tool runtime safety.
+
 ## Critical
 1. **Tool calls failing — parameter name mismatch** — `read` rejects "missing required parameter 'path'", `glob` rejects "missing required parameter 'pattern'". Model sends args but validation fails.
 

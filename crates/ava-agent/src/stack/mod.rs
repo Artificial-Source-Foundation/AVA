@@ -29,7 +29,8 @@ use ava_tools::core::file_backup::FileBackupSession;
 use ava_tools::core::plan::PlanBridge;
 use ava_tools::core::question::QuestionBridge;
 use ava_tools::core::{
-    register_custom_tools, register_plan_tool, register_question_tool, register_todo_tools,
+    register_custom_tools_with_plugins, register_plan_tool, register_question_tool,
+    register_todo_tools,
 };
 use ava_tools::permission_middleware::{convert_tool_source, ApprovalBridge, SharedToolSources};
 use ava_tools::registry::{ToolRegistry, ToolSource};
@@ -39,8 +40,7 @@ use tokio::time::{timeout, Duration};
 use tracing::{error, info, instrument, warn};
 
 use stack_tools::{
-    build_tool_registry, build_tool_registry_with_plugins, init_mcp_with_disabled,
-    resolve_workspace_roots, MCPRuntime,
+    build_tool_registry_with_plugins, init_mcp_with_disabled, resolve_workspace_roots, MCPRuntime,
 };
 
 const CONFIG_HOOK_TIMEOUT_MS: u64 = 150;
@@ -372,7 +372,11 @@ impl AgentStack {
         register_todo_tools(&mut registry, todo_state.clone());
         register_question_tool(&mut registry, question_bridge.clone());
         register_plan_tool(&mut registry, plan_bridge.clone(), plan_state.clone());
-        register_custom_tools(&mut registry, &custom_tool_dirs);
+        register_custom_tools_with_plugins(
+            &mut registry,
+            &custom_tool_dirs,
+            Some(Arc::clone(&plugin_manager)),
+        );
 
         // MCP init is deferred to the first run() call via ensure_mcp_initialized().
         // This avoids blocking startup on potentially-slow server connections while
@@ -679,7 +683,11 @@ impl AgentStack {
     pub async fn reload_custom_tools(&self) -> usize {
         let mut registry = self.tools.write().await;
         registry.remove_by_source(|src| matches!(src, ToolSource::Custom { .. }));
-        register_custom_tools(&mut registry, &self.custom_tool_dirs);
+        register_custom_tools_with_plugins(
+            &mut registry,
+            &self.custom_tool_dirs,
+            Some(Arc::clone(&self.plugin_manager)),
+        );
         registry
             .list_tools_with_source()
             .iter()
@@ -688,11 +696,12 @@ impl AgentStack {
     }
 
     pub async fn reload_tools(&self) -> Result<usize> {
-        let (mut registry, reload_sources, _backup_session) = build_tool_registry(
+        let (mut registry, reload_sources, _backup_session) = build_tool_registry_with_plugins(
             self.platform.clone(),
             Arc::clone(&self.permission_inspector),
             Arc::clone(&self.permission_context),
             self.approval_bridge.clone(),
+            Some(Arc::clone(&self.plugin_manager)),
         );
         register_todo_tools(&mut registry, self.todo_state.clone());
         register_question_tool(&mut registry, self.question_bridge.clone());
@@ -701,7 +710,11 @@ impl AgentStack {
             self.plan_bridge.clone(),
             self.plan_state.clone(),
         );
-        register_custom_tools(&mut registry, &self.custom_tool_dirs);
+        register_custom_tools_with_plugins(
+            &mut registry,
+            &self.custom_tool_dirs,
+            Some(Arc::clone(&self.plugin_manager)),
+        );
         let disabled = self.disabled_mcp_servers.read().await.clone();
         let runtime = init_mcp_with_disabled(
             &self.mcp_global_config,

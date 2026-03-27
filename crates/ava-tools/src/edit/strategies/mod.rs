@@ -29,6 +29,9 @@ impl EditStrategy for ExactMatchStrategy {
         if request.old_text.is_empty() || !request.content.contains(&request.old_text) {
             return Ok(None);
         }
+        if request.content.matches(&request.old_text).count() != 1 {
+            return Ok(None);
+        }
         Ok(Some(request.content.replacen(
             &request.old_text,
             &request.new_text,
@@ -95,6 +98,12 @@ mod tests {
         let req = EditRequest::new("hello world", "world", "ava");
         let out = ExactMatchStrategy.apply(&req).unwrap().unwrap();
         assert_eq!(out, "hello ava");
+    }
+
+    #[test]
+    fn exact_match_requires_unique_occurrence() {
+        let req = EditRequest::new("world world", "world", "ava");
+        assert!(ExactMatchStrategy.apply(&req).unwrap().is_none());
     }
 
     #[test]

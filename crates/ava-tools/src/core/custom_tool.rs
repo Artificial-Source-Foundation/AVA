@@ -1,14 +1,18 @@
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use ava_permissions::classifier::classify_bash_command;
 use ava_permissions::tags::RiskLevel;
+use ava_plugin::{HookEvent, PluginManager};
 use ava_types::{AvaError, Result, ToolResult};
 use serde::Deserialize;
 use serde_json::Value;
 use tracing::{info, warn};
 
 use crate::registry::{Tool, ToolRegistry, ToolSource};
+
+const MAX_OUTPUT_BYTES: usize = 100 * 1024;
 
 /// A tool defined via a TOML file.
 #[derive(Debug, Clone, Deserialize)]
@@ -57,11 +61,20 @@ pub enum ExecutionDef {
 pub struct CustomTool {
     def: CustomToolDef,
     source_path: String,
+    plugin_manager: Option<Arc<tokio::sync::Mutex<PluginManager>>>,
 }
 
 impl CustomTool {
-    pub fn new(def: CustomToolDef, source_path: String) -> Self {
-        Self { def, source_path }
+    pub fn new(
+        def: CustomToolDef,
+        source_path: String,
+        plugin_manager: Option<Arc<tokio::sync::Mutex<PluginManager>>>,
+    ) -> Self {
+        Self {
+            def,
+            source_path,
+            plugin_manager,
+        }
     }
 
     fn build_parameters_schema(&self) -> Value {
@@ -119,6 +132,35 @@ impl CustomTool {
     /// Source path for this tool definition file.
     pub fn source_path(&self) -> &str {
         &self.source_path
+    }
+
+    async fn plugin_env_vars(&self) -> Vec<(String, String)> {
+        let Some(pm) = &self.plugin_manager else {
+            return Vec::new();
+        };
+        let responses = pm
+            .lock()
+            .await
+            .trigger_hook(HookEvent::ShellEnv, serde_json::json!({}))
+            .await;
+        let mut vars = Vec::new();
+        for response in responses {
+            if response.error.is_some() {
+                warn!(
+                    plugin = response.plugin_name,
+                    "shell.env hook error for custom tool: {:?}", response.error
+                );
+                continue;
+            }
+            if let Some(map) = response.result.as_object() {
+                for (key, value) in map {
+                    if let Some(value) = value.as_str() {
+                        vars.push((key.clone(), value.to_string()));
+                    }
+                }
+            }
+        }
+        vars
     }
 }
 
@@ -190,13 +232,21 @@ impl Tool for CustomTool {
             )));
         }
 
-        let output = tokio::time::timeout(
-            std::time::Duration::from_secs(timeout),
-            tokio::process::Command::new(&cmd)
+        let mut env = super::bash::filtered_env();
+        env.extend(self.plugin_env_vars().await);
+
+        let output = tokio::time::timeout(std::time::Duration::from_secs(timeout), async {
+            let mut command = tokio::process::Command::new(&cmd);
+            command
                 .args(&cmd_args)
                 .kill_on_drop(true)
-                .output(),
-        )
+                .env_clear()
+                .envs(env);
+            if let Ok(workspace_root) = super::path_guard::workspace_root() {
+                command.current_dir(workspace_root);
+            }
+            command.output().await
+        })
         .await
         .map_err(|_| {
             AvaError::ToolError(format!(
@@ -208,13 +258,18 @@ impl Tool for CustomTool {
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
-        let content = if stderr.is_empty() {
-            stdout.to_string()
-        } else if stdout.is_empty() {
-            stderr.to_string()
-        } else {
-            format!("{stdout}\n{stderr}")
-        };
+        let content = format!(
+            "stdout:\n{}\n\nstderr:\n{}\n\nexit_code: {}",
+            stdout,
+            stderr,
+            output.status.code().unwrap_or(-1)
+        );
+        let content = super::output_fallback::save_tool_output_fallback_tail(
+            &format!("custom-{}", self.def.name),
+            &content,
+            MAX_OUTPUT_BYTES,
+        );
+        let content = super::secret_redaction::redact_secrets(&content);
 
         Ok(ToolResult {
             call_id: format!("custom-{}", self.def.name),
@@ -262,6 +317,14 @@ fn load_tool_file(path: &Path) -> Result<CustomToolDef> {
 /// Skips tools whose name collides with an already-registered tool to prevent
 /// shadowing built-in, MCP, or previously loaded custom tools.
 pub fn register_custom_tools(registry: &mut ToolRegistry, dirs: &[PathBuf]) {
+    register_custom_tools_with_plugins(registry, dirs, None);
+}
+
+pub fn register_custom_tools_with_plugins(
+    registry: &mut ToolRegistry,
+    dirs: &[PathBuf],
+    plugin_manager: Option<Arc<tokio::sync::Mutex<PluginManager>>>,
+) {
     for dir in dirs {
         let tools = load_custom_tools(dir);
         for (def, path) in tools {
@@ -275,7 +338,8 @@ pub fn register_custom_tools(registry: &mut ToolRegistry, dirs: &[PathBuf]) {
                 continue;
             }
             let source = ToolSource::Custom { path: path.clone() };
-            registry.register_with_source(CustomTool::new(def, path), source);
+            registry
+                .register_with_source(CustomTool::new(def, path, plugin_manager.clone()), source);
         }
     }
 }
@@ -453,14 +517,57 @@ script = "print('hello')"
                 timeout_secs: Some(5),
             },
         };
-        let tool = CustomTool::new(def, "test.toml".to_string());
+        let tool = CustomTool::new(def, "test.toml".to_string(), None);
         let result = tool
             .execute(serde_json::json!({"msg": "hello"}))
             .await
             .unwrap();
-        // Shell-escaped param is passed through sh -c, which strips the quotes
-        assert_eq!(result.content.trim(), "hello");
+        assert!(result.content.contains("stdout:\nhello"));
+        assert!(result.content.contains("exit_code: 0"));
         assert!(!result.is_error);
+    }
+
+    #[tokio::test]
+    async fn custom_tool_formats_output_and_redacts_secrets() {
+        let def = CustomToolDef {
+            name: "secret_test".to_string(),
+            description: "test".to_string(),
+            params: vec![],
+            execution: ExecutionDef::Shell {
+                command:
+                    "printf 'sk-proj-abcdefghijklmnopqrstuvwxyz123456'; printf 'warn' >&2; exit 7"
+                        .to_string(),
+                timeout_secs: Some(5),
+            },
+        };
+        let tool = CustomTool::new(def, "secret.toml".to_string(), None);
+        let result = tool.execute(serde_json::json!({})).await.unwrap();
+
+        assert!(result.is_error);
+        assert!(result.content.contains("stdout:"));
+        assert!(result.content.contains("stderr:\nwarn"));
+        assert!(result.content.contains("exit_code: 7"));
+        assert!(result.content.contains("[REDACTED]"));
+        assert!(!result
+            .content
+            .contains("sk-proj-abcdefghijklmnopqrstuvwxyz123456"));
+    }
+
+    #[tokio::test]
+    async fn custom_tool_large_output_spills_to_disk() {
+        let def = CustomToolDef {
+            name: "large_output".to_string(),
+            description: "test".to_string(),
+            params: vec![],
+            execution: ExecutionDef::Shell {
+                command: "printf '%*s' 120000 '' | tr ' ' x".to_string(),
+                timeout_secs: Some(5),
+            },
+        };
+        let tool = CustomTool::new(def, "large.toml".to_string(), None);
+        let result = tool.execute(serde_json::json!({})).await.unwrap();
+
+        assert!(result.content.contains("full output saved to"));
     }
 
     #[test]
@@ -486,7 +593,7 @@ script = "print('hello')"
                 timeout_secs: Some(5),
             },
         };
-        let tool = CustomTool::new(def, "evil.toml".to_string());
+        let tool = CustomTool::new(def, "evil.toml".to_string(), None);
         let result = tool.execute(serde_json::json!({})).await;
         assert!(result.is_err(), "dangerous command should be blocked");
         let err = result.unwrap_err().to_string();
@@ -507,7 +614,7 @@ script = "print('hello')"
                 timeout_secs: Some(5),
             },
         };
-        let tool = CustomTool::new(def, "bomb.toml".to_string());
+        let tool = CustomTool::new(def, "bomb.toml".to_string(), None);
         let result = tool.execute(serde_json::json!({})).await;
         assert!(result.is_err(), "fork bomb should be blocked");
     }
@@ -529,7 +636,7 @@ script = "print('hello')"
                 timeout_secs: Some(5),
             },
         };
-        let tool = CustomTool::new(def, "rm.toml".to_string());
+        let tool = CustomTool::new(def, "rm.toml".to_string(), None);
         let result = tool.execute(serde_json::json!({"target": "/tmp"})).await;
         assert!(result.is_err(), "sudo rm -rf should be blocked");
     }

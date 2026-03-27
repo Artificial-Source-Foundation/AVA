@@ -57,6 +57,9 @@ pub(super) fn accumulate_tool_call(
 }
 
 pub(super) fn finalize_tool_calls(accumulators: Vec<ToolCallAccumulator>) -> Vec<ToolCall> {
+    let mut accumulators = accumulators;
+    accumulators.sort_by_key(|acc| acc.index);
+
     accumulators
         .into_iter()
         // Skip accumulators with no name — these are incomplete fragments from
@@ -65,8 +68,19 @@ pub(super) fn finalize_tool_calls(accumulators: Vec<ToolCallAccumulator>) -> Vec
         // name back to the Responses API triggers a 400 "empty_string" error.
         .filter(|acc| !acc.name.is_empty())
         .map(|acc| {
-            let arguments =
-                serde_json::from_str(&acc.arguments_json).unwrap_or(serde_json::json!({}));
+            let arguments = match serde_json::from_str(&acc.arguments_json) {
+                Ok(arguments) => arguments,
+                Err(error) => {
+                    warn!(
+                        tool_index = acc.index,
+                        tool_name = %acc.name,
+                        error = %error,
+                        payload_len = acc.arguments_json.len(),
+                        "failed to parse streamed tool arguments; falling back to empty object"
+                    );
+                    serde_json::json!({})
+                }
+            };
             ToolCall {
                 id: if acc.id.is_empty() {
                     Uuid::new_v4().to_string()
@@ -103,6 +117,16 @@ pub(super) fn parse_tool_calls(content: &str) -> Result<Vec<ToolCall>> {
             arguments: call.arguments,
         })
         .collect())
+}
+
+fn request_dedup_hash(messages: &[Message]) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    messages.len().hash(&mut hasher);
+    if let Some(last) = messages.last() {
+        std::mem::discriminant(&last.role).hash(&mut hasher);
+        last.content.hash(&mut hasher);
+    }
+    hasher.finish()
 }
 
 /// Tools allowed in Plan mode. The LLM only sees these — write/edit are hidden.
@@ -273,13 +297,7 @@ impl AgentLoop {
             .collect();
         super::completion::ensure_tool_call_consistency(&mut messages);
         let messages = messages.as_slice();
-        let hash = {
-            let mut hasher = DefaultHasher::new();
-            if let Some(last) = messages.last() {
-                last.content.hash(&mut hasher);
-            }
-            hasher.finish()
-        };
+        let hash = request_dedup_hash(messages);
         if let (Some(prev_hash), Some(prev_time)) = (self.last_request_hash, self.last_request_time)
         {
             if hash == prev_hash && prev_time.elapsed().as_secs() < 2 {
@@ -333,9 +351,6 @@ impl AgentLoop {
                 self.last_request_hash = Some(hash);
                 self.last_request_time = Some(Instant::now());
             }
-        } else {
-            self.last_request_hash = Some(hash);
-            self.last_request_time = Some(Instant::now());
         }
 
         result
@@ -360,13 +375,7 @@ impl AgentLoop {
             .collect();
         super::completion::ensure_tool_call_consistency(&mut messages);
         let messages = messages.as_slice();
-        let hash = {
-            let mut hasher = DefaultHasher::new();
-            if let Some(last) = messages.last() {
-                last.content.hash(&mut hasher);
-            }
-            hasher.finish()
-        };
+        let hash = request_dedup_hash(messages);
         if let (Some(prev_hash), Some(prev_time)) = (self.last_request_hash, self.last_request_time)
         {
             if hash == prev_hash && prev_time.elapsed().as_secs() < 2 {
@@ -434,11 +443,166 @@ impl AgentLoop {
                 self.last_request_hash = Some(hash);
                 self.last_request_time = Some(Instant::now());
             }
-        } else {
-            self.last_request_hash = Some(hash);
-            self.last_request_time = Some(Instant::now());
         }
 
         result
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::pin::Pin;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    use async_trait::async_trait;
+    use ava_context::ContextManager;
+    use ava_tools::registry::ToolRegistry;
+    use ava_types::Role;
+    use futures::Stream;
+
+    use super::*;
+
+    struct CountingProvider {
+        calls: Arc<AtomicUsize>,
+        fail: bool,
+    }
+
+    #[async_trait]
+    impl crate::llm_trait::LLMProvider for CountingProvider {
+        async fn generate(&self, _messages: &[Message]) -> Result<String> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            if self.fail {
+                Err(AvaError::TimeoutError("transient failure".to_string()))
+            } else {
+                Ok("ok".to_string())
+            }
+        }
+
+        async fn generate_stream(
+            &self,
+            _messages: &[Message],
+        ) -> Result<Pin<Box<dyn Stream<Item = ava_types::StreamChunk> + Send>>> {
+            unreachable!("streaming is not used in these tests")
+        }
+
+        fn estimate_tokens(&self, input: &str) -> usize {
+            input.len()
+        }
+
+        fn estimate_cost(&self, _input_tokens: usize, _output_tokens: usize) -> f64 {
+            0.0
+        }
+
+        fn model_name(&self) -> &str {
+            "counting-provider"
+        }
+    }
+
+    fn test_config() -> super::super::AgentConfig {
+        super::super::AgentConfig {
+            max_turns: 1,
+            max_budget_usd: 0.0,
+            token_limit: 4_096,
+            provider: String::new(),
+            model: "mock-model".to_string(),
+            max_cost_usd: 1.0,
+            loop_detection: true,
+            custom_system_prompt: None,
+            thinking_level: ThinkingLevel::Off,
+            thinking_budget_tokens: None,
+            system_prompt_suffix: None,
+            project_root: None,
+            enable_dynamic_rules: false,
+            extended_tools: false,
+            plan_mode: false,
+            auto_compact: true,
+            post_edit_validation: None,
+            stream_timeout_secs: 90,
+            prompt_caching: true,
+        }
+    }
+
+    #[test]
+    fn finalize_tool_calls_sorts_by_stream_index() {
+        let tool_calls = finalize_tool_calls(vec![
+            ToolCallAccumulator {
+                index: 2,
+                id: "call-3".to_string(),
+                name: "third".to_string(),
+                arguments_json: r#"{"path":"/tmp/three"}"#.to_string(),
+            },
+            ToolCallAccumulator {
+                index: 0,
+                id: "call-1".to_string(),
+                name: "first".to_string(),
+                arguments_json: r#"{"path":"/tmp/one"}"#.to_string(),
+            },
+            ToolCallAccumulator {
+                index: 1,
+                id: "call-2".to_string(),
+                name: "second".to_string(),
+                arguments_json: r#"{"path":"/tmp/two"}"#.to_string(),
+            },
+        ]);
+
+        let ordered_names: Vec<&str> = tool_calls.iter().map(|call| call.name.as_str()).collect();
+        assert_eq!(ordered_names, vec!["first", "second", "third"]);
+    }
+
+    #[tokio::test]
+    async fn generate_response_does_not_cache_failed_requests() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let provider = CountingProvider {
+            calls: calls.clone(),
+            fail: true,
+        };
+        let mut agent = AgentLoop::new(
+            Box::new(provider),
+            ToolRegistry::new(),
+            ContextManager::new(4_096),
+            test_config(),
+        );
+        agent
+            .context
+            .add_message(Message::new(Role::User, "same request"));
+
+        assert!(agent.generate_response().await.is_err());
+        assert!(agent.generate_response().await.is_err());
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        assert!(agent.last_request_hash.is_none());
+        assert!(agent.last_request_time.is_none());
+    }
+
+    #[tokio::test]
+    async fn generate_response_hash_changes_when_message_count_changes() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let provider = CountingProvider {
+            calls: calls.clone(),
+            fail: false,
+        };
+        let mut agent = AgentLoop::new(
+            Box::new(provider),
+            ToolRegistry::new(),
+            ContextManager::new(4_096),
+            test_config(),
+        );
+        agent.context.replace_messages(vec![
+            Message::new(Role::System, "system"),
+            Message::new(Role::User, "same request"),
+        ]);
+
+        let first = agent.generate_response().await.unwrap();
+        assert_eq!(first.0, "ok");
+
+        agent.context.replace_messages(vec![
+            Message::new(Role::System, "system"),
+            Message::new(Role::Assistant, "intermediate"),
+            Message::new(Role::User, "same request"),
+        ]);
+
+        let second = agent.generate_response().await.unwrap();
+        assert_eq!(second.0, "ok");
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
     }
 }

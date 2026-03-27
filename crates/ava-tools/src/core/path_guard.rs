@@ -2,6 +2,13 @@ use std::path::{Component, Path, PathBuf};
 
 use ava_types::{AvaError, Result};
 
+#[cfg(test)]
+static TEST_WORKSPACE_OVERRIDE: std::sync::LazyLock<std::sync::Mutex<Option<PathBuf>>> =
+    std::sync::LazyLock::new(|| std::sync::Mutex::new(None));
+#[cfg(test)]
+static TEST_WORKSPACE_LOCK: std::sync::LazyLock<std::sync::Mutex<()>> =
+    std::sync::LazyLock::new(|| std::sync::Mutex::new(()));
+
 /// Resolve a tool path to a workspace-safe absolute path.
 ///
 /// Existing files are canonicalized to catch symlink escapes. For non-existing
@@ -78,7 +85,16 @@ pub fn check_symlink_escape(
     if !resolved_path.starts_with(workspace_root) {
         // Determine if this was a symlink escape vs a plain path escape
         let raw = Path::new(original_input);
-        let is_symlink = raw.is_symlink() || raw.parent().map(|p| p.is_symlink()).unwrap_or(false);
+        let inspected = if raw.is_absolute() {
+            raw.to_path_buf()
+        } else {
+            workspace_root.join(raw)
+        };
+        let is_symlink = inspected.is_symlink()
+            || inspected
+                .parent()
+                .map(|parent| parent.is_symlink())
+                .unwrap_or(false);
         let reason = if is_symlink {
             "path escapes workspace boundary via symlink"
         } else {
@@ -93,7 +109,16 @@ pub fn check_symlink_escape(
     Ok(())
 }
 
-fn workspace_root() -> Result<PathBuf> {
+pub(crate) fn workspace_root() -> Result<PathBuf> {
+    #[cfg(test)]
+    if let Some(workspace) = TEST_WORKSPACE_OVERRIDE
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .clone()
+    {
+        return Ok(workspace);
+    }
+
     if let Ok(workspace) = std::env::var("AVA_WORKSPACE") {
         let workspace = Path::new(&workspace);
         return Ok(std::fs::canonicalize(workspace).unwrap_or_else(|_| workspace.to_path_buf()));
@@ -132,12 +157,32 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
+    fn set_workspace(path: &Path) {
+        *TEST_WORKSPACE_OVERRIDE
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()) =
+            Some(path.canonicalize().unwrap_or_else(|_| path.to_path_buf()));
+    }
+
+    fn restore_workspace(previous: Option<PathBuf>) {
+        *TEST_WORKSPACE_OVERRIDE
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()) = previous;
+    }
+
     #[test]
     fn path_guard_enforces_workspace_boundary_checks() {
+        let _guard = TEST_WORKSPACE_LOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
         let ws = TempDir::new().unwrap();
+        let ws_root = ws.path().canonicalize().unwrap();
 
-        let previous = std::env::var_os("AVA_WORKSPACE");
-        std::env::set_var("AVA_WORKSPACE", ws.path());
+        let previous = TEST_WORKSPACE_OVERRIDE
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone();
+        set_workspace(ws.path());
 
         let target = ws.path().join("src/main.rs");
         std::fs::create_dir_all(target.parent().unwrap()).unwrap();
@@ -147,7 +192,7 @@ mod tests {
         assert_eq!(resolved, target.canonicalize().unwrap());
 
         let new_file = enforce_workspace_path("new/file.txt", "write").unwrap();
-        assert!(new_file.starts_with(ws.path()));
+        assert!(new_file.starts_with(&ws_root));
 
         let outside_abs = enforce_workspace_path("/etc/passwd", "read");
         assert!(outside_abs.is_err());
@@ -155,15 +200,15 @@ mod tests {
         let traversal_escape = enforce_workspace_path("../outside.txt", "write");
         assert!(traversal_escape.is_err());
 
-        match previous {
-            Some(previous_path) => std::env::set_var("AVA_WORKSPACE", previous_path),
-            None => std::env::remove_var("AVA_WORKSPACE"),
-        }
+        restore_workspace(previous);
     }
 
     #[cfg(unix)]
     #[test]
     fn symlink_file_escape_is_detected() {
+        let _guard = TEST_WORKSPACE_LOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
         let ws = TempDir::new().unwrap();
         let outside = TempDir::new().unwrap();
 
@@ -175,8 +220,11 @@ mod tests {
         let symlink_path = ws.path().join("escape.txt");
         std::os::unix::fs::symlink(&outside_file, &symlink_path).unwrap();
 
-        let previous = std::env::var_os("AVA_WORKSPACE");
-        std::env::set_var("AVA_WORKSPACE", ws.path());
+        let previous = TEST_WORKSPACE_OVERRIDE
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone();
+        set_workspace(ws.path());
 
         let result = enforce_workspace_path("escape.txt", "write");
         assert!(result.is_err(), "symlink file escape should be blocked");
@@ -186,15 +234,15 @@ mod tests {
             "error should mention symlink escape, got: {err_msg}"
         );
 
-        match previous {
-            Some(p) => std::env::set_var("AVA_WORKSPACE", p),
-            None => std::env::remove_var("AVA_WORKSPACE"),
-        }
+        restore_workspace(previous);
     }
 
     #[cfg(unix)]
     #[test]
     fn symlink_directory_escape_is_detected() {
+        let _guard = TEST_WORKSPACE_LOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
         let ws = TempDir::new().unwrap();
         let outside = TempDir::new().unwrap();
 
@@ -207,8 +255,11 @@ mod tests {
         let symlink_dir = ws.path().join("linked");
         std::os::unix::fs::symlink(&outside_dir, &symlink_dir).unwrap();
 
-        let previous = std::env::var_os("AVA_WORKSPACE");
-        std::env::set_var("AVA_WORKSPACE", ws.path());
+        let previous = TEST_WORKSPACE_OVERRIDE
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone();
+        set_workspace(ws.path());
 
         let result = enforce_workspace_path("linked/config.toml", "edit");
         assert!(
@@ -216,15 +267,15 @@ mod tests {
             "symlink directory escape should be blocked"
         );
 
-        match previous {
-            Some(p) => std::env::set_var("AVA_WORKSPACE", p),
-            None => std::env::remove_var("AVA_WORKSPACE"),
-        }
+        restore_workspace(previous);
     }
 
     #[cfg(unix)]
     #[test]
     fn symlink_within_workspace_is_allowed() {
+        let _guard = TEST_WORKSPACE_LOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
         let ws = TempDir::new().unwrap();
 
         // Create a real file inside the workspace
@@ -235,21 +286,24 @@ mod tests {
         let symlink_path = ws.path().join("link.txt");
         std::os::unix::fs::symlink(&real_file, &symlink_path).unwrap();
 
-        let previous = std::env::var_os("AVA_WORKSPACE");
-        std::env::set_var("AVA_WORKSPACE", ws.path());
+        let previous = TEST_WORKSPACE_OVERRIDE
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone();
+        set_workspace(ws.path());
 
         let result = enforce_workspace_path("link.txt", "write");
         assert!(result.is_ok(), "symlink within workspace should be allowed");
 
-        match previous {
-            Some(p) => std::env::set_var("AVA_WORKSPACE", p),
-            None => std::env::remove_var("AVA_WORKSPACE"),
-        }
+        restore_workspace(previous);
     }
 
     #[cfg(unix)]
     #[test]
     fn new_file_under_symlinked_parent_escape_is_detected() {
+        let _guard = TEST_WORKSPACE_LOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
         let ws = TempDir::new().unwrap();
         let outside = TempDir::new().unwrap();
 
@@ -259,8 +313,11 @@ mod tests {
         let symlink_dir = ws.path().join("ext");
         std::os::unix::fs::symlink(&outside_dir, &symlink_dir).unwrap();
 
-        let previous = std::env::var_os("AVA_WORKSPACE");
-        std::env::set_var("AVA_WORKSPACE", ws.path());
+        let previous = TEST_WORKSPACE_OVERRIDE
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone();
+        set_workspace(ws.path());
 
         // Try to create a new file under the symlinked directory
         let result = enforce_workspace_path("ext/newfile.rs", "write");
@@ -269,9 +326,6 @@ mod tests {
             "new file under symlinked escape directory should be blocked"
         );
 
-        match previous {
-            Some(p) => std::env::set_var("AVA_WORKSPACE", p),
-            None => std::env::remove_var("AVA_WORKSPACE"),
-        }
+        restore_workspace(previous);
     }
 }

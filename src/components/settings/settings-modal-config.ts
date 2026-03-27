@@ -14,7 +14,6 @@ import {
   type Settings,
   ShieldCheck,
   Sliders,
-  Users,
   Zap,
 } from 'lucide-solid'
 
@@ -30,7 +29,6 @@ export type SettingsTab =
   | 'plugins'
   | 'skills-commands'
   | 'llm'
-  | 'team'
   | 'hq'
   | 'usage'
   | 'developer'
@@ -97,7 +95,7 @@ export const tabGroups: TabGroup[] = [
         id: 'agents',
         label: 'Agents',
         icon: Bot,
-        keywords: ['agent', 'team', 'worker', 'preset', 'capability'],
+        keywords: ['agent', 'preset', 'capability', 'assistant', 'automation'],
       },
       {
         id: 'llm',
@@ -118,17 +116,27 @@ export const tabGroups: TabGroup[] = [
           'instructions',
         ],
       },
-      {
-        id: 'team',
-        label: 'Team',
-        icon: Users,
-        keywords: ['team', 'multi-agent', 'lead', 'worker', 'scout', 'delegation'],
-      },
+    ],
+  },
+  {
+    label: 'HQ',
+    tabs: [
       {
         id: 'hq',
         label: 'HQ',
         icon: Building2,
-        keywords: ['hq', 'director', 'epic', 'kanban', 'orchestration', 'tone', 'review', 'cost'],
+        keywords: [
+          'hq',
+          'director',
+          'team',
+          'lead',
+          'worker',
+          'epic',
+          'kanban',
+          'orchestration',
+          'review',
+          'cost',
+        ],
       },
     ],
   },

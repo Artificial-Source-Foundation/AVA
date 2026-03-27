@@ -6,7 +6,7 @@
  */
 
 import { AlertTriangle, Github, Globe, RefreshCw, Zap } from 'lucide-solid'
-import { type Component, createResource, For, Show } from 'solid-js'
+import { type Component, createSignal, For, onMount, Show } from 'solid-js'
 import { rustBackend } from '../../../services/rust-bridge'
 import type { CopilotQuota, SubscriptionUsage, UsageWindow } from '../../../types/rust-ipc'
 import { SettingsCard } from '../SettingsCard'
@@ -23,9 +23,9 @@ function providerIcon(provider: string): Component<{ class?: string }> {
 }
 
 function usageBarColor(percent: number): string {
-  if (percent >= 85) return 'var(--red-9)'
-  if (percent >= 60) return 'var(--amber-9)'
-  return 'var(--green-9)'
+  if (percent >= 85) return '#e5484d'
+  if (percent >= 60) return '#f5a623'
+  return '#30a46c'
 }
 
 function formatResetTime(isoOrTimestamp: string | null): string | null {
@@ -66,8 +66,8 @@ const UsageBar: Component<{ window: UsageWindow }> = (props) => {
         </span>
       </div>
       <div
-        class="h-2 rounded-full overflow-hidden"
-        style={{ 'background-color': 'rgba(255,255,255,0.06)' }}
+        class="h-2.5 rounded-full overflow-hidden"
+        style={{ 'background-color': 'var(--gray-5)' }}
       >
         <div
           class="h-full rounded-full transition-all"
@@ -102,8 +102,8 @@ const CopilotQuotaDisplay: Component<{ quota: CopilotQuota }> = (props) => {
         </div>
         <Show when={!isUnlimited()}>
           <div
-            class="h-2 rounded-full overflow-hidden"
-            style={{ 'background-color': 'rgba(255,255,255,0.06)' }}
+            class="h-2.5 rounded-full overflow-hidden"
+            style={{ 'background-color': 'var(--gray-5)' }}
           >
             <div
               class="h-full rounded-full transition-all"
@@ -210,7 +210,24 @@ const ProviderUsageCard: Component<{ usage: SubscriptionUsage }> = (props) => {
 }
 
 export const UsageTab: Component = () => {
-  const [usageData, { refetch }] = createResource(() => rustBackend.getSubscriptionUsage())
+  const [usageData, setUsageData] = createSignal<SubscriptionUsage[] | null>(null)
+  const [loading, setLoading] = createSignal(false)
+  const [error, setError] = createSignal(false)
+
+  const fetchUsage = async () => {
+    setLoading(true)
+    setError(false)
+    try {
+      const data = await rustBackend.getSubscriptionUsage()
+      setUsageData(data)
+    } catch {
+      setError(true)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  onMount(() => void fetchUsage())
 
   return (
     <div class="flex flex-col" style={{ gap: SETTINGS_CARD_GAP }}>
@@ -232,16 +249,16 @@ export const UsageTab: Component = () => {
             color: 'var(--text-secondary)',
             'background-color': 'var(--surface)',
           }}
-          onClick={() => void refetch()}
-          disabled={usageData.loading}
+          onClick={() => void fetchUsage()}
+          disabled={loading()}
         >
-          <RefreshCw class={`w-3.5 h-3.5 ${usageData.loading ? 'animate-spin' : ''}`} />
+          <RefreshCw class={`w-3.5 h-3.5 ${loading() ? 'animate-spin' : ''}`} />
           Refresh
         </button>
       </div>
 
       {/* Loading state */}
-      <Show when={usageData.loading && !usageData()}>
+      <Show when={loading() && !usageData()}>
         <div class="text-[12px] py-8 text-center" style={{ color: 'var(--text-muted)' }}>
           Fetching usage data...
         </div>
@@ -249,14 +266,14 @@ export const UsageTab: Component = () => {
 
       {/* Provider cards */}
       <Show when={usageData()}>
-        <For each={usageData()}>{(usage) => <ProviderUsageCard usage={usage} />}</For>
+        <For each={usageData()!}>{(usage) => <ProviderUsageCard usage={usage} />}</For>
       </Show>
 
       {/* Error state */}
-      <Show when={usageData.error}>
+      <Show when={error()}>
         <div
           class="text-[12px] py-4 text-center rounded-lg"
-          style={{ color: 'var(--red-9)', 'background-color': 'rgba(255,0,0,0.06)' }}
+          style={{ color: '#e5484d', 'background-color': 'rgba(255,0,0,0.08)' }}
         >
           Failed to fetch usage data. Check your credentials in Providers settings.
         </div>

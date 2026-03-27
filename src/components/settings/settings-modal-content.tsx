@@ -15,7 +15,6 @@ import { PermissionsAndTrustTab } from './tabs/PermissionsAndTrustTab'
 import { PluginsTab } from './tabs/PluginsTab'
 import { ProvidersTab } from './tabs/providers/providers-tab'
 import { SkillsAndCommandsTab } from './tabs/SkillsAndCommandsTab'
-import { TeamTab } from './tabs/TeamTab'
 import { UsageTab } from './tabs/UsageTab'
 
 interface SettingsModalContentProps {
@@ -100,10 +99,6 @@ export const SettingsModalContent: Component<SettingsModalContentProps> = (props
 
       <Show when={props.activeTab() === 'agents'}>
         <AgentsTab />
-      </Show>
-
-      <Show when={props.activeTab() === 'team'}>
-        <TeamTab />
       </Show>
 
       <Show when={props.activeTab() === 'hq'}>

@@ -29,6 +29,10 @@ npx tsc --noEmit
 
 Release verification: `just check && npm run tauri build`
 
+# Desktop release (signed build + publish)
+TAURI_SIGNING_PRIVATE_KEY=$(cat ~/.tauri/ava.key) npm run tauri build
+# Then: gh release create v{VERSION} ... (see docs/releasing.md)
+
 ## Architecture
 
 AVA uses a **Rust-first architecture**. All agent, CLI, and backend code is Rust.
@@ -374,6 +378,27 @@ When you complete a significant feature, bug fix, or refactor:
 
 Do NOT let docs drift from code. Every PR-worthy change should include doc updates.
 
+## Desktop Releases & Auto-Update
+
+Signing key: `~/.tauri/ava.key` (private), pubkey in `src-tauri/tauri.conf.json`.
+Full guide: `docs/releasing.md`.
+
+```bash
+# Build signed release
+TAURI_SIGNING_PRIVATE_KEY=$(cat ~/.tauri/ava.key) npm run tauri build
+
+# Publish (uploads bundles + updater manifest)
+VERSION=$(grep '"version"' src-tauri/tauri.conf.json | head -1 | grep -oP '[\d.]+')
+git tag -a "v${VERSION}" -m "Release v${VERSION}" && git push origin "v${VERSION}"
+gh release create "v${VERSION}" --title "AVA v${VERSION}" --generate-notes \
+  src-tauri/target/release/bundle/deb/*.deb \
+  src-tauri/target/release/bundle/appimage/*.AppImage.tar.gz \
+  src-tauri/target/release/bundle/appimage/*.AppImage.tar.gz.sig
+find src-tauri/target/release/bundle -name "latest.json" -exec gh release upload "v${VERSION}" {} \;
+```
+
+Users get auto-update prompts via `tauri-plugin-updater` checking GitHub Releases.
+
 ## Documentation
 
 1. `CLAUDE.md` (this file) -- architecture, conventions, commands
@@ -383,5 +408,6 @@ Do NOT let docs drift from code. Every PR-worthy change should include doc updat
 5. `docs/backlog.md` -- open backlog items
 6. `docs/crate-map.md` -- Rust crate dependency graph
 7. `docs/plugins.md` -- TOML custom tools and MCP server guide
-8. `docs/troubleshooting/` -- platform-specific fixes
-9. `docs/reference-code/` -- competitor source code (12 repos)
+8. `docs/releasing.md` -- desktop release & auto-update guide
+9. `docs/troubleshooting/` -- platform-specific fixes
+10. `docs/reference-code/` -- competitor source code (12 repos)

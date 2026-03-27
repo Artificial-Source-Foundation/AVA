@@ -35,4 +35,5 @@ pnpm install && pnpm tauri dev             # desktop app
 | Plugins + MCP | [plugins.md](plugins.md) |
 | Changelog | [CHANGELOG.md](CHANGELOG.md) |
 | Backlog | [backlog.md](backlog.md) |
+| Releasing desktop app | [releasing.md](releasing.md) |
 | Troubleshooting | [troubleshooting/](troubleshooting/) |

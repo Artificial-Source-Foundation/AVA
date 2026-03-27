@@ -340,11 +340,11 @@ mod tests {
             .flat_map(|c| c.words.iter().map(|w| w.as_str()))
             .collect();
         assert!(
-            all_words.iter().any(|w| *w == "echo"),
+            all_words.contains(&"echo"),
             "should find echo: {all_words:?}"
         );
         assert!(
-            all_words.iter().any(|w| *w == "whoami"),
+            all_words.contains(&"whoami"),
             "should find whoami: {all_words:?}"
         );
     }
@@ -384,12 +384,9 @@ mod tests {
             .flat_map(|c| c.words.iter().map(|w| w.as_str()))
             .collect();
         // Should find both `rm` and `echo` as separate commands
+        assert!(all_words.contains(&"rm"), "should find rm: {all_words:?}");
         assert!(
-            all_words.iter().any(|w| *w == "rm"),
-            "should find rm: {all_words:?}"
-        );
-        assert!(
-            all_words.iter().any(|w| *w == "echo"),
+            all_words.contains(&"echo"),
             "should find echo: {all_words:?}"
         );
     }

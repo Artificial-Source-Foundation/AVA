@@ -234,10 +234,12 @@ mod tests {
 
     #[test]
     fn message_index_at_row_handles_large_offsets() {
-        let mut state = MessageState::default();
-        state.messages_area = ratatui::layout::Rect::new(0, 0, 80, 20);
-        state.scroll_offset = 70_000;
-        state.message_line_ranges = vec![(69_999, 70_002), (70_002, 70_010)];
+        let state = MessageState {
+            messages_area: ratatui::layout::Rect::new(0, 0, 80, 20),
+            scroll_offset: 70_000,
+            message_line_ranges: vec![(69_999, 70_002), (70_002, 70_010)],
+            ..MessageState::default()
+        };
 
         assert_eq!(state.message_index_at_row(0), Some(0));
         assert_eq!(state.message_index_at_row(3), Some(1));

@@ -7,11 +7,10 @@ use crate::tokenizer;
 /// Uses tiktoken for precise token counting. Returns at least 1 for
 /// non-empty text (matching the old API contract).
 pub fn estimate_tokens(text: &str) -> usize {
-    let count = tokenizer::count_tokens_default(text);
     if text.is_empty() {
         1
     } else {
-        count.max(1)
+        tokenizer::count_tokens_default(text).max(1)
     }
 }
 
@@ -20,11 +19,10 @@ pub fn estimate_tokens(text: &str) -> usize {
 /// Selects the appropriate encoding (cl100k_base or o200k_base) based on
 /// the model name and returns a precise token count.
 pub fn estimate_tokens_for_model(text: &str, model: &str) -> usize {
-    let count = tokenizer::count_tokens_for_model(text, model);
     if text.is_empty() {
         1
     } else {
-        count.max(1)
+        tokenizer::count_tokens_for_model(text, model).max(1)
     }
 }
 
@@ -106,7 +104,7 @@ mod tests {
         let code = "fn main() { println!(\"hello\"); }";
         let est = estimate_tokens(code);
         assert!(
-            est >= 8 && est <= 13,
+            (8..=13).contains(&est),
             "code estimate {est} out of expected range"
         );
 

@@ -114,7 +114,7 @@ mod tests {
         let count = count_tokens_default(code);
         // BPE should produce a precise count; verify it's reasonable
         assert!(
-            count >= 8 && count <= 15,
+            (8..=15).contains(&count),
             "code token count {count} out of expected range"
         );
     }
@@ -125,7 +125,7 @@ mod tests {
         let count = count_tokens_default(&text);
         // ~10 tokens per sentence, 100 repetitions
         assert!(
-            count >= 900 && count <= 1100,
+            (900..=1100).contains(&count),
             "long text count {count} out of range"
         );
     }
@@ -170,8 +170,8 @@ mod tests {
         let cl100k = count_tokens(text, TokenEncoding::Cl100kBase);
         let o200k = count_tokens(text, TokenEncoding::O200kBase);
         // Both should be reasonable
-        assert!(cl100k >= 5 && cl100k <= 10, "cl100k count {cl100k}");
-        assert!(o200k >= 5 && o200k <= 10, "o200k count {o200k}");
+        assert!((5..=10).contains(&cl100k), "cl100k count {cl100k}");
+        assert!((5..=10).contains(&o200k), "o200k count {o200k}");
     }
 
     #[test]

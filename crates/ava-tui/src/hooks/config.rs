@@ -573,8 +573,10 @@ command = "echo done"
             source: HookSource::Project,
         };
 
-        let mut ctx = HookContext::default();
-        ctx.tool_name = Some("edit".to_string());
+        let mut ctx = HookContext {
+            tool_name: Some("edit".to_string()),
+            ..HookContext::default()
+        };
         assert!(HookRegistry::matches(&hook, &ctx));
 
         ctx.tool_name = Some("write".to_string());
@@ -606,8 +608,10 @@ command = "echo done"
             source: HookSource::Project,
         };
 
-        let mut ctx = HookContext::default();
-        ctx.file_path = Some("src/main.rs".to_string());
+        let mut ctx = HookContext {
+            file_path: Some("src/main.rs".to_string()),
+            ..HookContext::default()
+        };
         assert!(HookRegistry::matches(&hook, &ctx));
 
         ctx.file_path = Some("src/main.py".to_string());

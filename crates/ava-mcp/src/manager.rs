@@ -405,9 +405,8 @@ mod tests {
 
         // tools/call (loop to handle multiple calls)
         loop {
-            let req = match transport.receive().await {
-                Ok(r) => r,
-                Err(_) => break,
+            let Ok(req) = transport.receive().await else {
+                break;
             };
 
             let resp = JsonRpcMessage {

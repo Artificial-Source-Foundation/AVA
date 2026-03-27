@@ -6,6 +6,7 @@
  */
 
 import { type Accessor, createEffect, createSignal, on, onCleanup, onMount } from 'solid-js'
+import { syncNestedScrollableBindings } from './nested-scrollables'
 
 export interface UseMessageScrollOptions {
   /** Whether auto-scroll is enabled in settings */
@@ -37,10 +38,12 @@ export function useMessageScroll(opts: UseMessageScrollOptions): MessageScrollAP
   let scrollRaf: number | undefined
   let resizeObserver: ResizeObserver | undefined
   let userScrolledUp = false
+  let lastBackfillHiddenCount = -1
   // True while the pointer is hovering over a nested [data-scrollable] region.
   // Scroll events that occur during this time come from scrolling inside tool
   // output / diff viewers — they must not disable main-chat auto-scroll.
   let pointerOverNestedScrollable = false
+  const trackedNestedScrollables = new Set<Element>()
 
   const [shouldAutoScroll, setShouldAutoScroll] = createSignal(true)
 
@@ -81,24 +84,18 @@ export function useMessageScroll(opts: UseMessageScrollOptions): MessageScrollAP
   /** Attach pointer-enter/leave tracking to all [data-scrollable] descendants. */
   const observeNestedScrollables = (): void => {
     if (!containerRef) return
-    const nested = containerRef.querySelectorAll('[data-scrollable]')
-    nested.forEach((el) => {
-      el.addEventListener('pointerenter', handlePointerEnterNested)
-      el.addEventListener('pointerleave', handlePointerLeaveNested)
-    })
+    syncNestedScrollableBindings(
+      trackedNestedScrollables,
+      containerRef.querySelectorAll('[data-scrollable]'),
+      handlePointerEnterNested,
+      handlePointerLeaveNested
+    )
   }
 
   /** Re-run whenever new [data-scrollable] nodes may have been added. */
   const nestedScrollObserver = new MutationObserver(() => {
     if (!containerRef) return
-    const nested = containerRef.querySelectorAll('[data-scrollable]')
-    nested.forEach((el) => {
-      // Add listeners idempotently by removing first
-      el.removeEventListener('pointerenter', handlePointerEnterNested)
-      el.removeEventListener('pointerleave', handlePointerLeaveNested)
-      el.addEventListener('pointerenter', handlePointerEnterNested)
-      el.addEventListener('pointerleave', handlePointerLeaveNested)
-    })
+    observeNestedScrollables()
   })
 
   const handleScroll = (_event: Event): void => {
@@ -131,7 +128,11 @@ export function useMessageScroll(opts: UseMessageScrollOptions): MessageScrollAP
       }
 
       // Scroll-up backfill: load older messages when near top
-      if (scrollTop < 200 && opts.hiddenMessageCount() > 0) {
+      const hiddenCount = opts.hiddenMessageCount()
+      if (scrollTop >= 200) {
+        lastBackfillHiddenCount = -1
+      } else if (hiddenCount > 0 && hiddenCount !== lastBackfillHiddenCount) {
+        lastBackfillHiddenCount = hiddenCount
         opts.onLoadOlder()
       }
     })
@@ -156,6 +157,12 @@ export function useMessageScroll(opts: UseMessageScrollOptions): MessageScrollAP
       containerRef?.removeEventListener('scroll', handleScroll)
       resizeObserver?.disconnect()
       nestedScrollObserver.disconnect()
+      syncNestedScrollableBindings(
+        trackedNestedScrollables,
+        [],
+        handlePointerEnterNested,
+        handlePointerLeaveNested
+      )
     })
   }
 

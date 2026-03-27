@@ -1,7 +1,13 @@
 import { ArrowLeft, Search, X } from 'lucide-solid'
 import { type Accessor, type Component, createEffect, createMemo, For, Show } from 'solid-js'
 import { useSettings } from '../../stores/settings'
-import { type SettingsTab, type TabGroup, tabGroups } from './settings-modal-config'
+import {
+  type SettingsSearchEntry,
+  type SettingsTab,
+  settingsSearchIndex,
+  type TabGroup,
+  tabGroups,
+} from './settings-modal-config'
 
 interface SettingsModalSidebarProps {
   activeTab: () => SettingsTab
@@ -18,7 +24,6 @@ export const SettingsModalSidebar: Component<SettingsModalSidebarProps> = (props
     const q = props.search().toLowerCase().trim()
     const devMode = settings().devMode ?? false
 
-    // Filter tabs: hide Developer when devMode is off
     const base = tabGroups.map((group) => ({
       ...group,
       tabs: group.tabs.filter((tab) => {
@@ -29,20 +34,55 @@ export const SettingsModalSidebar: Component<SettingsModalSidebarProps> = (props
 
     if (!q) return base.filter((group) => group.tabs.length > 0)
 
+    // Include tabs that match by name/keywords OR have matching deep settings
+    const deepMatchTabs = new Set(
+      settingsSearchIndex
+        .filter(
+          (entry) =>
+            entry.label.toLowerCase().includes(q) ||
+            (entry.description?.toLowerCase().includes(q) ?? false)
+        )
+        .map((entry) => entry.tab)
+    )
+
     return base
       .map((group) => ({
         ...group,
         tabs: group.tabs.filter(
-          (tab) => tab.label.toLowerCase().includes(q) || tab.keywords.some((kw) => kw.includes(q))
+          (tab) =>
+            tab.label.toLowerCase().includes(q) ||
+            tab.keywords.some((kw) => kw.includes(q)) ||
+            deepMatchTabs.has(tab.id)
         ),
       }))
       .filter((group) => group.tabs.length > 0)
+  })
+
+  /** Deep search results — individual settings matching the query */
+  const searchResults = createMemo((): SettingsSearchEntry[] => {
+    const q = props.search().toLowerCase().trim()
+    if (!q || q.length < 2) return []
+
+    return settingsSearchIndex
+      .filter(
+        (entry) =>
+          entry.label.toLowerCase().includes(q) ||
+          (entry.description?.toLowerCase().includes(q) ?? false)
+      )
+      .slice(0, 8)
   })
 
   // Auto-switch to first matching tab when search filters results
   createEffect(() => {
     const q = props.search().toLowerCase().trim()
     if (!q) return
+
+    // Prefer deep search results
+    const results = searchResults()
+    if (results.length > 0 && results[0].tab !== props.activeTab()) {
+      props.onSelectTab(results[0].tab)
+      return
+    }
 
     const groups = filteredGroups()
     const allMatchingTabs = groups.flatMap((g) => g.tabs)
@@ -51,13 +91,17 @@ export const SettingsModalSidebar: Component<SettingsModalSidebarProps> = (props
     }
   })
 
-  /** Separate the footer group (empty label) from named groups */
   const namedGroups = createMemo(() => filteredGroups().filter((g) => g.label !== ''))
   const footerGroup = createMemo(() => filteredGroups().find((g) => g.label === ''))
 
+  const handleResultClick = (entry: SettingsSearchEntry) => {
+    props.onSelectTab(entry.tab)
+    props.onSearchChange('')
+  }
+
   return (
     <nav
-      class="flex-shrink-0 flex flex-col border-r border-[var(--gray-5)]"
+      class="flex-shrink-0 flex flex-col min-h-0 border-r border-[var(--gray-5)]"
       style={{ width: '220px', background: '#0F0F12' }}
     >
       {/* Back link */}
@@ -71,7 +115,7 @@ export const SettingsModalSidebar: Component<SettingsModalSidebarProps> = (props
       </button>
 
       {/* Search */}
-      <div class="px-3 pb-2">
+      <div class="px-3 pb-2 relative">
         <div class="relative">
           <Search class="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[var(--gray-7)]" />
           <input
@@ -91,6 +135,42 @@ export const SettingsModalSidebar: Component<SettingsModalSidebarProps> = (props
             </button>
           </Show>
         </div>
+
+        {/* Search results dropdown */}
+        <Show when={searchResults().length > 0}>
+          <div
+            class="absolute left-3 right-3 mt-1 rounded-[var(--radius-md)] border border-[var(--gray-5)] overflow-hidden z-10"
+            style={{ 'background-color': 'var(--gray-2)' }}
+          >
+            <For each={searchResults()}>
+              {(entry) => (
+                <button
+                  type="button"
+                  onClick={() => handleResultClick(entry)}
+                  class="w-full text-left px-3 py-2 flex flex-col gap-0.5 transition-colors"
+                  style={{
+                    'border-bottom': '1px solid var(--gray-4)',
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = 'var(--gray-4)'
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = 'transparent'
+                  }}
+                >
+                  <span class="text-[12px] text-[var(--text-primary)]">{entry.label}</span>
+                  <span class="text-[10px] text-[var(--gray-8)]">
+                    {entry.tabLabel}
+                    <Show when={entry.description}>
+                      {' · '}
+                      {entry.description}
+                    </Show>
+                  </span>
+                </button>
+              )}
+            </For>
+          </div>
+        </Show>
       </div>
 
       {/* Tab groups */}

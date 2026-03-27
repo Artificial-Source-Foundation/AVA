@@ -1,4 +1,4 @@
-import { ArrowLeft } from 'lucide-solid'
+import { ArrowLeft, Search, X } from 'lucide-solid'
 import { type Accessor, type Component, createEffect, createMemo, For, Show } from 'solid-js'
 import { useSettings } from '../../stores/settings'
 import { type SettingsTab, type TabGroup, tabGroups } from './settings-modal-config'
@@ -8,6 +8,7 @@ interface SettingsModalSidebarProps {
   onSelectTab: (tab: SettingsTab) => void
   onBack: () => void
   search: Accessor<string>
+  onSearchChange: (value: string) => void
 }
 
 export const SettingsModalSidebar: Component<SettingsModalSidebarProps> = (props) => {
@@ -68,6 +69,29 @@ export const SettingsModalSidebar: Component<SettingsModalSidebarProps> = (props
         <ArrowLeft class="w-3.5 h-3.5" />
         Back to Chat
       </button>
+
+      {/* Search */}
+      <div class="px-3 pb-2">
+        <div class="relative">
+          <Search class="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[var(--gray-7)]" />
+          <input
+            type="text"
+            placeholder="Search settings..."
+            value={props.search()}
+            onInput={(e) => props.onSearchChange(e.currentTarget.value)}
+            class="w-full pl-8 pr-7 py-1.5 text-[12px] text-[var(--text-primary)] bg-[var(--gray-3)] border border-[var(--gray-5)] rounded-[var(--radius-md)] placeholder:text-[var(--gray-7)] focus:border-[var(--accent)] outline-none"
+          />
+          <Show when={props.search()}>
+            <button
+              type="button"
+              onClick={() => props.onSearchChange('')}
+              class="absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 rounded-[var(--radius-sm)] text-[var(--gray-7)] hover:text-[var(--text-primary)]"
+            >
+              <X class="w-3 h-3" />
+            </button>
+          </Show>
+        </div>
+      </div>
 
       {/* Tab groups */}
       <div class="flex-1 overflow-y-auto px-3 pb-3 space-y-4">

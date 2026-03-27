@@ -165,12 +165,7 @@ export const SettingsModal: Component = () => {
     <Show when={settingsOpen()}>
       <div class="fixed inset-0 z-50 flex flex-col bg-[var(--gray-0)]">
         {/* Title bar */}
-        <SettingsModalHeader
-          activeTab={activeTab}
-          onClose={closeSettings}
-          search={settingsSearch}
-          onSearchChange={setSettingsSearch}
-        />
+        <SettingsModalHeader onClose={closeSettings} />
 
         {/* Body: sidebar + content */}
         <div class="flex flex-1 min-h-0">
@@ -179,6 +174,7 @@ export const SettingsModal: Component = () => {
             onSelectTab={setActiveTab}
             onBack={closeSettings}
             search={settingsSearch}
+            onSearchChange={setSettingsSearch}
           />
 
           <div class="flex-1 overflow-y-auto">

@@ -270,8 +270,12 @@ impl AgentStack {
         let router = Arc::new(router);
 
         // Register ACP provider factory for external agents (claude-code, codex, etc.).
-        // No startup discovery — agents are spawned on-demand when requested.
-        let cli_agents = Vec::new();
+        // Discover installed CLI agents on PATH for the model selector.
+        let cli_agents = if config.discover_cli_agents {
+            ava_acp::discover_cli_agents().await
+        } else {
+            Vec::new()
+        };
         {
             let acp_factory = ava_acp::AcpProviderFactory::with_builtins(config.yolo);
             router.register_factory_async(Arc::new(acp_factory)).await;

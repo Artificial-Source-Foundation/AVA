@@ -3,6 +3,23 @@ use crate::state::agent::SubAgentInfo;
 use crate::state::rewind::{snapshot_file, ChangeType, FileChange};
 use tracing::{debug, info};
 
+fn normalize_subagent_description(value: &str) -> &str {
+    let trimmed = value.trim();
+    if let Some(rest) = trimmed
+        .strip_prefix('[')
+        .and_then(|rest| rest.split_once(']').map(|(_, tail)| tail.trim()))
+    {
+        if !rest.is_empty() {
+            return rest;
+        }
+    }
+    trimmed
+}
+
+fn subagent_descriptions_match(a: &str, b: &str) -> bool {
+    normalize_subagent_description(a) == normalize_subagent_description(b)
+}
+
 impl App {
     pub(crate) fn handle_agent_event(
         &mut self,
@@ -137,6 +154,10 @@ impl App {
                         session_id: None,
                         session_messages: Vec::new(),
                         provider: None,
+                        resumed: false,
+                        cost_usd: None,
+                        input_tokens: None,
+                        output_tokens: None,
                     });
 
                     // Create a SubAgent message instead of a regular ToolCall
@@ -151,6 +172,11 @@ impl App {
                         call_id: call.id.clone(),
                         session_id: None,
                         session_messages: Vec::new(),
+                        provider: None,
+                        resumed: false,
+                        cost_usd: None,
+                        input_tokens: None,
+                        output_tokens: None,
                     });
                     self.state.messages.push(msg);
                 } else {
@@ -306,6 +332,9 @@ impl App {
                 input_tokens,
                 output_tokens,
                 cost_usd,
+                provider,
+                resumed,
+                ..
             } => {
                 debug!(
                     session_id = %session_id,
@@ -350,20 +379,33 @@ impl App {
                     .sub_agents
                     .iter_mut()
                     .rev()
-                    .find(|s| s.description == description)
+                    .find(|s| subagent_descriptions_match(&s.description, &description))
                 {
                     sa.session_id = Some(session_id.clone());
                     sa.session_messages = ui_messages.clone();
+                    sa.provider = provider.clone();
+                    sa.resumed = resumed;
+                    sa.cost_usd = Some(cost_usd);
+                    sa.input_tokens = Some(input_tokens);
+                    sa.output_tokens = Some(output_tokens);
                 }
 
                 // Update the SubAgentData in the matching UI message
                 if let Some(msg) = self.state.messages.messages.iter_mut().rev().find(|m| {
                     matches!(m.kind, MessageKind::SubAgent)
-                        && m.sub_agent.as_ref().is_some_and(|d| d.call_id == call_id)
+                        && m.sub_agent.as_ref().is_some_and(|d| {
+                            (!call_id.is_empty() && d.call_id == call_id)
+                                || subagent_descriptions_match(&d.description, &description)
+                        })
                 }) {
                     if let Some(data) = msg.sub_agent.as_mut() {
                         data.session_id = Some(session_id);
                         data.session_messages = ui_messages;
+                        data.provider = provider;
+                        data.resumed = resumed;
+                        data.cost_usd = Some(cost_usd);
+                        data.input_tokens = Some(input_tokens);
+                        data.output_tokens = Some(output_tokens);
                     }
                 }
             }

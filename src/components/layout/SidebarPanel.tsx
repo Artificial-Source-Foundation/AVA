@@ -10,6 +10,7 @@
  */
 
 import {
+  Building2,
   ChevronDown,
   ChevronRight,
   FolderOpen,
@@ -19,6 +20,7 @@ import {
   Settings,
 } from 'lucide-solid'
 import { type Component, createMemo, createSignal, For, Show } from 'solid-js'
+import { useHq } from '../../stores/hq'
 import { useLayout } from '../../stores/layout'
 import { useSession } from '../../stores/session'
 import { ArchivedSection } from '../sidebar/sessions/ArchivedSection'
@@ -49,6 +51,7 @@ export const SidebarPanel: Component = () => {
     isSessionBusy,
   } = useSession()
   const { closeProjectHub, setRightPanelVisible, switchRightPanelTab, openSettings } = useLayout()
+  const { hqMode, toggleHqMode } = useHq()
   const [contextMenu, setContextMenu] = createSignal<ContextMenuState | null>(null)
   const [renameRequest, setRenameRequest] = createSignal<{ id: string; seq: number } | null>(null)
   const [showSearch, setShowSearch] = createSignal(false)
@@ -132,6 +135,19 @@ export const SidebarPanel: Component = () => {
             aria-label="New chat"
           >
             <Plus class="w-4 h-4" />
+          </button>
+          <button
+            type="button"
+            onClick={toggleHqMode}
+            class={`flex items-center justify-center w-7 h-7 rounded-[var(--radius-md)] transition-colors ${
+              hqMode()
+                ? 'text-[var(--accent)] bg-[var(--accent-subtle)]'
+                : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--alpha-white-8)]'
+            }`}
+            title={hqMode() ? 'Switch to Chat' : 'Open HQ'}
+            aria-label="Toggle HQ mode"
+          >
+            <Building2 class="w-4 h-4" />
           </button>
         </div>
         <div class="flex items-center gap-0.5">

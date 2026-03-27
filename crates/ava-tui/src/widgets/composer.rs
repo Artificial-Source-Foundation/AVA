@@ -203,7 +203,6 @@ pub fn render_composer(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
     let mode_color = match state.agent_mode {
         crate::state::agent::AgentMode::Code => state.theme.success,
         crate::state::agent::AgentMode::Plan => state.theme.primary,
-        crate::state::agent::AgentMode::Praxis => state.theme.warning,
     };
     // Clamp provider + model names so the line fits the composer width.
     // bar(1) + pad(2) + mode badge + "  " + provider + "  " + model

@@ -1,7 +1,0 @@
-{
-  "status": "fixed",
-  "files_modified": ["crates/ava-agent/src/trace.rs"],
-  "summary": "Wrapped the blocking file I/O in `append_trace_event` with `tokio::task::spawn_blocking`. Serialization (serde_json::to_string) is done synchronously before entering spawn_blocking since it is cheap and non-blocking. The traces_dir path and serialized JSON string are moved into the closure. Dir creation (create_dir_all), file open, and writeln are all performed inside the blocking task. The function remains fire-and-forget: spawn_blocking returns a JoinHandle that is intentionally dropped, matching the same pattern used in session_logger.rs. No call sites existed at the time of the fix, but the function is now async-safe for future callers.",
-  "cargo_check_pass": true,
-  "cargo_test_pass": true
-}

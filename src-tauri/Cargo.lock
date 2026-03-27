@@ -326,12 +326,12 @@ dependencies = [
  "ava-context",
  "ava-db",
  "ava-extensions",
+ "ava-hq",
  "ava-llm",
  "ava-mcp",
  "ava-memory",
  "ava-permissions",
  "ava-platform",
- "ava-praxis",
  "ava-session",
  "ava-tools",
  "ava-types",
@@ -503,6 +503,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "ava-hq"
+version = "2.2.7"
+dependencies = [
+ "async-trait",
+ "ava-acp",
+ "ava-agent",
+ "ava-context",
+ "ava-llm",
+ "ava-platform",
+ "ava-tools",
+ "ava-types",
+ "futures",
+ "regex",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "ava-llm"
 version = "2.2.7"
 dependencies = [
@@ -603,28 +625,6 @@ dependencies = [
  "serde_json",
  "tokio",
  "toml 0.8.2",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "ava-praxis"
-version = "2.2.7"
-dependencies = [
- "async-trait",
- "ava-acp",
- "ava-agent",
- "ava-context",
- "ava-llm",
- "ava-platform",
- "ava-tools",
- "ava-types",
- "futures",
- "regex",
- "serde",
- "serde_json",
- "tokio",
- "tokio-util",
  "tracing",
  "uuid",
 ]

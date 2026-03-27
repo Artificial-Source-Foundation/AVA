@@ -2,6 +2,7 @@ import type { Setter } from 'solid-js'
 import { batch } from 'solid-js'
 import { debugLog } from '../lib/debug-log'
 import { log } from '../lib/logger'
+import { useHq } from '../stores/hq'
 import { useLayout } from '../stores/layout'
 import { usePlanOverlay } from '../stores/planOverlayStore'
 import type { ToolCall } from '../types'
@@ -382,24 +383,28 @@ export function createAgentEventHandler(deps: EventHandlerDeps): (event: AgentEv
         break
       }
 
-      // Praxis events — pass through to events signal for team bridge consumption
-      case 'praxis_worker_started':
-      case 'praxis_worker_progress':
-      case 'praxis_worker_token':
-      case 'praxis_worker_completed':
-      case 'praxis_worker_failed':
-      case 'praxis_all_complete':
-      case 'praxis_summary':
-      case 'praxis_phase_started':
-      case 'praxis_phase_completed':
-      case 'praxis_spec_created':
-      case 'praxis_artifact_created':
-      case 'praxis_conflict_detected':
+      // HQ events — pass through to events signal for team bridge consumption
+      case 'hq_worker_started':
+      case 'hq_worker_progress':
+      case 'hq_worker_token':
+      case 'hq_worker_completed':
+      case 'hq_worker_failed':
+      case 'hq_all_complete':
+      case 'hq_summary':
+      case 'hq_phase_started':
+      case 'hq_phase_completed':
+      case 'hq_spec_created':
+      case 'hq_artifact_created':
+      case 'hq_conflict_detected':
+      case 'hq_external_worker_started':
+      case 'hq_external_worker_completed':
+      case 'hq_external_worker_failed':
         debugLog('team', timedEvent.type, (timedEvent as { worker_id?: string }).worker_id ?? '')
+        useHq().ingestEvent(timedEvent)
         // These are already added to events() signal above — the team bridge
         // in useAgent picks them up via the createEffect on rustAgent.events.
-        // Additional state updates for Praxis completion:
-        if (timedEvent.type === 'praxis_all_complete') {
+        // Additional state updates for HQ completion:
+        if (timedEvent.type === 'hq_all_complete') {
           setIsRunning(false)
           if (completion.resolve) {
             completion.resolve({ success: true, turns: 0, sessionId: '' })

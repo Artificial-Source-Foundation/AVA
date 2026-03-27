@@ -210,7 +210,7 @@ fn truncate_tool_response_preview(content: &str) -> String {
     }
 }
 
-fn request_dedup_hash(messages: &[Message]) -> u64 {
+pub(super) fn request_dedup_hash(messages: &[Message]) -> u64 {
     let mut hasher = DefaultHasher::new();
     // This is intentionally lightweight: we only need a short-lived guard
     // against immediate duplicate turns, not a globally collision-resistant key.
@@ -317,11 +317,8 @@ impl AgentLoop {
             return base;
         };
 
-        if !pm
-            .lock()
-            .await
-            .has_hook_subscribers(ava_plugin::HookEvent::ToolDefinition)
-        {
+        let mut pm = pm.lock().await;
+        if !pm.has_hook_subscribers(ava_plugin::HookEvent::ToolDefinition) {
             let mut cache = self
                 .cached_hooked_tool_defs
                 .lock()
@@ -342,7 +339,7 @@ impl AgentLoop {
             })
             .collect();
 
-        let modified = pm.lock().await.apply_tool_definition_hook(tool_json).await;
+        let modified = pm.apply_tool_definition_hook(tool_json).await;
 
         // Deserialise back to Tool structs.
         let tools: Vec<_> = modified

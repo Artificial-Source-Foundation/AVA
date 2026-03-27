@@ -13,12 +13,23 @@ use ava_types::MessageTier;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
 use tokio::sync::mpsc;
+use tokio::task;
 use tracing::info;
 use uuid::Uuid;
 
 use super::helpers::collect_history_before_last_user;
 use crate::bridge::DesktopBridge;
 use crate::events::{emit_backend_event, AgentEvent};
+
+async fn save_session_checkpoint(
+    session_manager: std::sync::Arc<ava_session::SessionManager>,
+    session: ava_types::Session,
+) -> Result<(), String> {
+    task::spawn_blocking(move || session_manager.save(&session))
+        .await
+        .map_err(|e| format!("session checkpoint join error: {e}"))?
+        .map_err(|e| e.to_string())
+}
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -83,7 +94,7 @@ async fn run_agent_inner(
             // Also update last_session_id so the next run can load history even
             // if the current run is cancelled/interrupted.
             if let ava_agent::agent_loop::AgentEvent::Checkpoint(ref session) = event {
-                let _ = checkpoint_sm.save(session);
+                let _ = save_session_checkpoint(checkpoint_sm.clone(), session.clone()).await;
                 *checkpoint_last_id.write().await = Some(session.id);
                 continue;
             }
@@ -304,7 +315,11 @@ async fn run_agent_inner(
 
     match result {
         Ok(run_result) => {
-            let _ = bridge.stack.session_manager.save(&run_result.session);
+            let _ = save_session_checkpoint(
+                bridge.stack.session_manager.clone(),
+                run_result.session.clone(),
+            )
+            .await;
             *bridge.last_session_id.write().await = Some(run_result.session.id);
             Ok(SubmitGoalResult {
                 success: run_result.success,

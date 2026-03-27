@@ -207,6 +207,11 @@ export const AgentsTabDetail: Component<AgentsTabDetailProps> = (props) => {
                 <span class="text-[var(--text-secondary)]">Export</span> from the list panel to
                 create shareable JSON files for manual editing.
               </p>
+              <p>
+                Built-in HQ agents like <span class="text-[var(--text-secondary)]">Commander</span>{' '}
+                and the domain leads are now honored by the desktop HQ runtime, so provider, model,
+                and prompt changes here affect new HQ planning runs.
+              </p>
               <button
                 type="button"
                 onClick={handleCopyJson}

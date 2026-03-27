@@ -6,7 +6,7 @@ use crate::widgets::provider_connect::ProviderConnectState;
 use crate::widgets::tool_list::ToolListItem;
 use ava_agent::stack::MCPServerInfo;
 use ava_agent::AgentEvent;
-use ava_praxis::PraxisEvent;
+
 use ava_types::Session;
 use crossterm::event::{Event as CEvent, EventStream, KeyEvent, MouseEvent, MouseEventKind};
 use futures::StreamExt;
@@ -84,14 +84,6 @@ pub enum AppEvent {
         run_id: u64,
         result: Result<ava_agent::stack::AgentRunResult, String>,
     },
-    PraxisRunEvent {
-        task_id: usize,
-        event: PraxisEvent,
-    },
-    PraxisRunDone {
-        task_id: usize,
-        result: Result<Session, String>,
-    },
     BackgroundCleanupResult {
         task_id: usize,
         result: Result<(), String>,
@@ -160,16 +152,6 @@ impl std::fmt::Debug for AppEvent {
             Self::AgentRunDone { run_id, result } => f
                 .debug_struct("AgentRunDone")
                 .field("run_id", run_id)
-                .field("result", result)
-                .finish(),
-            Self::PraxisRunEvent { task_id, event } => f
-                .debug_struct("PraxisRunEvent")
-                .field("task_id", task_id)
-                .field("event", event)
-                .finish(),
-            Self::PraxisRunDone { task_id, result } => f
-                .debug_struct("PraxisRunDone")
-                .field("task_id", task_id)
                 .field("result", result)
                 .finish(),
             Self::BackgroundCleanupResult { task_id, result } => f

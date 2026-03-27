@@ -1,7 +1,0 @@
-{
-  "status": "fixed",
-  "root_cause": "Race condition in session-messages.ts: addMessage() fires the DB INSERT as fire-and-forget (not awaited). When the agent run completes quickly, updateMessage() or deleteMessage() issue their DB ops (UPDATE/DELETE) before the INSERT has committed. The UPDATE/DELETE finds no matching row and silently succeeds with 0 rows affected. The INSERT then lands and permanently saves the empty placeholder with content=''. On session reload, the message shows only its timestamp and model (set at creation) but no content, thinking, or toolCalls.",
-  "files_modified": ["src/stores/session/session-messages.ts"],
-  "fix_description": "Introduced a pendingInserts Map<string, Promise<void>> module-level registry. addMessage() stores the in-flight INSERT promise (with .finally() cleanup) keyed by message ID. updateMessage() and deleteMessage() check pendingInserts for the target ID and, if present, chain their DB operation after the INSERT settles — guaranteeing INSERT-before-UPDATE and INSERT-before-DELETE ordering without blocking the UI (SolidJS store is updated synchronously as before, only the DB persistence is serialized).",
-  "tsc_pass": true
-}

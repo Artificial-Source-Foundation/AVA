@@ -4,6 +4,7 @@
 
 use serde::Serialize;
 use tauri::State;
+use tokio::task;
 use uuid::Uuid;
 
 use crate::bridge::DesktopBridge;
@@ -41,17 +42,26 @@ fn session_to_summary(s: &ava_types::Session) -> SessionSummary {
     }
 }
 
+async fn run_session_blocking<T, F>(bridge: &DesktopBridge, op: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce(&ava_session::SessionManager) -> ava_types::Result<T> + Send + 'static,
+{
+    let session_manager = bridge.stack.session_manager.clone();
+    task::spawn_blocking(move || op(&session_manager))
+        .await
+        .map_err(|e| format!("session task join error: {e}"))?
+        .map_err(|e| e.to_string())
+}
+
 /// List recent sessions, most recent first.
 #[tauri::command]
 pub async fn list_sessions(
     limit: Option<usize>,
     bridge: State<'_, DesktopBridge>,
 ) -> Result<Vec<SessionSummary>, String> {
-    let sessions = bridge
-        .stack
-        .session_manager
-        .list_recent(limit.unwrap_or(50))
-        .map_err(|e| e.to_string())?;
+    let sessions =
+        run_session_blocking(&bridge, move |sm| sm.list_recent(limit.unwrap_or(50))).await?;
     Ok(sessions.iter().map(session_to_summary).collect())
 }
 
@@ -62,11 +72,8 @@ pub async fn load_session(
     bridge: State<'_, DesktopBridge>,
 ) -> Result<serde_json::Value, String> {
     let uuid = Uuid::parse_str(&id).map_err(|e| format!("invalid session ID: {e}"))?;
-    let session = bridge
-        .stack
-        .session_manager
-        .get(uuid)
-        .map_err(|e| e.to_string())?
+    let session = run_session_blocking(&bridge, move |sm| sm.get(uuid))
+        .await?
         .ok_or_else(|| format!("session not found: {id}"))?;
     serde_json::to_value(&session).map_err(|e| e.to_string())
 }
@@ -74,11 +81,7 @@ pub async fn load_session(
 /// Create a new empty session.
 #[tauri::command]
 pub async fn create_session(bridge: State<'_, DesktopBridge>) -> Result<SessionSummary, String> {
-    let session = bridge
-        .stack
-        .session_manager
-        .create()
-        .map_err(|e| e.to_string())?;
+    let session = run_session_blocking(&bridge, |sm| sm.create()).await?;
     Ok(session_to_summary(&session))
 }
 
@@ -86,11 +89,7 @@ pub async fn create_session(bridge: State<'_, DesktopBridge>) -> Result<SessionS
 #[tauri::command]
 pub async fn delete_session(id: String, bridge: State<'_, DesktopBridge>) -> Result<(), String> {
     let uuid = Uuid::parse_str(&id).map_err(|e| format!("invalid session ID: {e}"))?;
-    bridge
-        .stack
-        .session_manager
-        .delete(uuid)
-        .map_err(|e| e.to_string())
+    run_session_blocking(&bridge, move |sm| sm.delete(uuid)).await
 }
 
 /// Rename a session by setting a custom title in its metadata.
@@ -105,11 +104,8 @@ pub async fn rename_session(
         return Err("session title cannot be empty".to_string());
     }
     let uuid = Uuid::parse_str(&id).map_err(|e| format!("invalid session ID: {e}"))?;
-    bridge
-        .stack
-        .session_manager
-        .rename(uuid, trimmed)
-        .map_err(|e| e.to_string())
+    let title = trimmed.to_string();
+    run_session_blocking(&bridge, move |sm| sm.rename(uuid, &title)).await
 }
 
 /// Search sessions using FTS5 full-text search over message content.
@@ -122,10 +118,7 @@ pub async fn search_sessions(
     if trimmed.is_empty() {
         return Ok(Vec::new());
     }
-    let sessions = bridge
-        .stack
-        .session_manager
-        .search(trimmed)
-        .map_err(|e| e.to_string())?;
+    let query = trimmed.to_string();
+    let sessions = run_session_blocking(&bridge, move |sm| sm.search(&query)).await?;
     Ok(sessions.iter().map(session_to_summary).collect())
 }

@@ -1,6 +1,0 @@
-{
-  "status": "fixed",
-  "files_modified": ["src/stores/session/session-messages.ts"],
-  "summary": "addMessage() now persists to the database via insertMessages([message]) (fire-and-forget with error logging) before updating the SolidJS state signal. Used insertMessages (accepts full Message with existing id+createdAt) rather than saveMessage (which generates its own id+createdAt). The session load path (loadSessionMessages -> getMessages) was already correct and reads from the DB. All 5 call sites in useAgent.ts automatically benefit. tsc --noEmit passed with zero errors.",
-  "tsc_pass": true
-}

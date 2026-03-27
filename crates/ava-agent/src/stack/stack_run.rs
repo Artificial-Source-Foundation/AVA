@@ -3,8 +3,13 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 
 use async_trait::async_trait;
+use ava_acp::{
+    attach_delegation_record, transport_for_builtin_agent, AgentQuery, ExternalRunDescriptor,
+    ExternalSessionMapper, PermissionMode,
+};
 use ava_config::AgentsConfig;
 use ava_context::ContextManager;
 use ava_llm::provider::{LLMProvider, SharedProvider};
@@ -20,9 +25,12 @@ use ava_tools::core::{
 use ava_tools::mcp_bridge::MCPBridgeTool;
 use ava_tools::permission_middleware::{convert_tool_source, SharedToolSources};
 use ava_tools::registry::{ToolRegistry, ToolSource};
-use ava_types::{AvaError, Result, Role, Session, ThinkingLevel};
+use ava_types::{
+    AvaError, DelegationRecord, ExternalSessionLink, Result, Role, Session, ThinkingLevel,
+};
 use futures::StreamExt;
 use tokio::sync::mpsc;
+use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
 use tracing::{info, instrument, warn};
 
@@ -30,9 +38,34 @@ use super::stack_tools::{build_tool_registry_with_plugins, LlmSummarizer};
 use super::{AgentRunResult, AgentStack};
 use crate::agent_loop::{AgentConfig, AgentEvent, AgentLoop, LLM_STREAM_TIMEOUT_SECS};
 use crate::budget::BudgetTelemetry;
-use crate::routing::{analyze_task, infer_subagent_delegation};
+use crate::routing::{analyze_task, analyze_task_full, EXPLICIT_DELEGATION_REASON};
+
+const ADAPTIVE_DELEGATION_LOOKBACK: usize = 8;
 
 impl AgentStack {
+    async fn adapt_delegation_policy(
+        &self,
+        goal: &str,
+        policy: crate::routing::SubagentDelegationPolicy,
+    ) -> crate::routing::SubagentDelegationPolicy {
+        let Some(parent_session_id) = self.parent_session_id.read().await.clone() else {
+            return policy;
+        };
+
+        let Ok(parent_uuid) = uuid::Uuid::parse_str(&parent_session_id) else {
+            return policy;
+        };
+
+        let Ok(recent) = self
+            .session_manager
+            .recent_delegation_records(parent_uuid, ADAPTIVE_DELEGATION_LOOKBACK)
+        else {
+            return policy;
+        };
+
+        adapt_delegation_policy_with_feedback(goal, policy, &recent)
+    }
+
     fn attach_route_metadata(session: &mut Session, decision: &RouteDecision) {
         session.metadata["routing"] = serde_json::json!({
             "provider": decision.provider,
@@ -209,9 +242,11 @@ impl AgentStack {
             .thinking_budgets
             .resolve(&resolved_provider_name, provider.model_name());
         let plan_mode = *self.plan_mode.read().await;
-        let tool_visibility_profile =
-            crate::routing::infer_tool_visibility(goal, &images, thinking, plan_mode);
-        let delegation_policy = infer_subagent_delegation(goal, &images, thinking, plan_mode);
+        let task_analysis = analyze_task_full(goal, &images, thinking, plan_mode);
+        let tool_visibility_profile = task_analysis.tool_visibility;
+        let delegation_policy = self
+            .adapt_delegation_policy(goal, task_analysis.delegation.clone())
+            .await;
         let startup_instruction_profile = if !self.include_project_instructions {
             crate::instructions::StartupInstructionProfile::None
         } else {
@@ -815,6 +850,12 @@ impl TaskSpawner for AgentTaskSpawner {
             )));
         }
 
+        if let Some(ref external_provider) = resolved.provider {
+            return self
+                .spawn_external_named(agent_type, prompt, external_provider, &resolved)
+                .await;
+        }
+
         // Resolve per-agent model override. If the agent has a model configured
         // in agents.toml (e.g. `model = "openrouter/google/gemini-flash-1.5"`),
         // create a provider for that model. Otherwise, use the parent's provider.
@@ -908,6 +949,7 @@ impl TaskSpawner for AgentTaskSpawner {
             config,
         )
         .with_tool_visibility_profile(subagent_tool_visibility_profile(runtime_profile));
+        let started_at = std::time::Instant::now();
         let mut session = agent.run(prompt).await?;
 
         // Set parent_id metadata so the session can be linked to the parent.
@@ -915,13 +957,6 @@ impl TaskSpawner for AgentTaskSpawner {
         session.metadata["agent_type"] = serde_json::Value::String(agent_type.to_string());
         if let Some(ref parent_id) = self.parent_session_id {
             session.metadata["parent_id"] = serde_json::Value::String(parent_id.clone());
-        }
-
-        // Persist the sub-agent session if a session manager is available.
-        if let Some(ref sm) = self.session_manager {
-            if let Err(e) = sm.save(&session) {
-                warn!(error = %e, "Failed to persist sub-agent session");
-            }
         }
 
         let text = session
@@ -960,6 +995,30 @@ impl TaskSpawner for AgentTaskSpawner {
             "sub-agent task completed"
         );
 
+        let delegation_record = DelegationRecord {
+            agent_type: Some(agent_type.to_string()),
+            provider: None,
+            parent_session_id: self.parent_session_id.clone(),
+            child_session_id: Some(session.id.to_string()),
+            external_session_id: None,
+            policy_reason: Some("native hidden subagent".to_string()),
+            policy_version: Some("v1".to_string()),
+            latency_ms: Some(started_at.elapsed().as_millis() as u64),
+            resumed: false,
+            input_tokens: Some(sub_input_tokens),
+            output_tokens: Some(sub_output_tokens),
+            cost_usd: Some(sub_cost_usd),
+            outcome: Some("success".to_string()),
+        };
+        attach_delegation_record(&mut session, &delegation_record);
+
+        // Persist the sub-agent session if a session manager is available.
+        if let Some(ref sm) = self.session_manager {
+            if let Err(e) = sm.save(&session) {
+                warn!(error = %e, "Failed to persist sub-agent session");
+            }
+        }
+
         // Emit SubAgentComplete event so the TUI can store the conversation.
         // The call_id is not available here (it's set by the tool registry),
         // so we use an empty string — the TUI matches by description instead.
@@ -972,6 +1031,9 @@ impl TaskSpawner for AgentTaskSpawner {
                 input_tokens: sub_input_tokens,
                 output_tokens: sub_output_tokens,
                 cost_usd: sub_cost_usd,
+                agent_type: Some(agent_type.to_string()),
+                provider: None,
+                resumed: false,
             });
         }
 
@@ -984,6 +1046,187 @@ impl TaskSpawner for AgentTaskSpawner {
 }
 
 impl AgentTaskSpawner {
+    fn lookup_external_resume_session(
+        &self,
+        agent_type: &str,
+        external_provider: &str,
+        cwd: &str,
+    ) -> Result<(Option<String>, bool)> {
+        let Some(parent_session_id) = self.parent_session_id.as_deref() else {
+            return Ok((None, false));
+        };
+        let Some(session_manager) = self.session_manager.as_ref() else {
+            return Ok((None, false));
+        };
+        let parent_uuid = uuid::Uuid::parse_str(parent_session_id)
+            .map_err(|error| AvaError::ValidationError(error.to_string()))?;
+        let recent = session_manager.find_recent_child_by_external_link(
+            parent_uuid,
+            agent_type,
+            external_provider,
+            cwd,
+        )?;
+        let session_id = recent.and_then(|session| {
+            session
+                .metadata
+                .get("externalLink")
+                .and_then(|value| serde_json::from_value::<ExternalSessionLink>(value.clone()).ok())
+                .and_then(|link| link.external_session_id)
+        });
+        let resume_attempted = session_id.is_some();
+        Ok((session_id, resume_attempted))
+    }
+
+    async fn spawn_external_named(
+        &self,
+        agent_type: &str,
+        prompt: &str,
+        external_provider: &str,
+        resolved: &ava_config::ResolvedAgent,
+    ) -> Result<TaskResult> {
+        let runtime_profile = subagent_runtime_profile(agent_type);
+        let cwd = std::env::current_dir().unwrap_or_default();
+        let sub_max_turns = if self.max_turns == 0 {
+            resolved.max_turns.unwrap_or(10)
+        } else {
+            resolved.max_turns.unwrap_or(10).min(self.max_turns)
+        };
+        let mut system_prompt = resolved
+            .prompt
+            .clone()
+            .unwrap_or_else(|| build_sub_agent_system_prompt(agent_type));
+        system_prompt.push_str(subagent_runtime_guidance(runtime_profile));
+
+        let cwd_str = cwd.to_string_lossy().to_string();
+        let (resume_session_id, resume_attempted) = self
+            .lookup_external_resume_session(agent_type, external_provider, &cwd_str)
+            .unwrap_or((None, false));
+
+        let transport = transport_for_builtin_agent(external_provider)?;
+        let mut stream = transport
+            .query(AgentQuery {
+                prompt: prompt.to_string(),
+                system_prompt: Some(system_prompt),
+                working_directory: Some(cwd_str.clone()),
+                max_turns: Some(sub_max_turns),
+                permission_mode: Some(external_permission_mode(runtime_profile)),
+                allowed_tools: resolved
+                    .allowed_tools
+                    .clone()
+                    .or_else(|| default_external_allowed_tools(runtime_profile)),
+                disallowed_tools: None,
+                session_id: resume_session_id.clone(),
+                resume: resume_attempted,
+                model: resolved.model.clone(),
+                max_budget_usd: resolved.max_budget_usd,
+            })
+            .await?;
+
+        let started_at = std::time::Instant::now();
+        let mut mapper = ExternalSessionMapper::new(ExternalRunDescriptor {
+            provider: Some(external_provider.to_string()),
+            agent_name: Some(external_provider.to_string()),
+            model: resolved.model.clone(),
+            cwd: Some(cwd_str.clone()),
+            resume_attempted,
+        });
+        let mut session = Session::new();
+        session.metadata["is_sub_agent"] = serde_json::Value::Bool(true);
+        session.metadata["agent_type"] = serde_json::Value::String(agent_type.to_string());
+        session.metadata["external_provider"] =
+            serde_json::Value::String(external_provider.to_string());
+        if let Some(ref parent_id) = self.parent_session_id {
+            session.metadata["parent_id"] = serde_json::Value::String(parent_id.clone());
+        }
+
+        while let Some(msg) = timeout(Duration::from_secs(LLM_STREAM_TIMEOUT_SECS), stream.next())
+            .await
+            .map_err(|_| {
+                AvaError::ToolError(format!(
+                    "External sub-agent '{external_provider}' timed out waiting for output"
+                ))
+            })?
+        {
+            mapper.apply(msg)?;
+        }
+
+        let mut mapped_session = mapper.into_session();
+        session.messages.append(&mut mapped_session.messages);
+        session.token_usage = mapped_session.token_usage;
+        if let Some(object) = mapped_session.metadata.as_object() {
+            for (key, value) in object {
+                session.metadata[key] = value.clone();
+            }
+        }
+
+        let external_link = session
+            .metadata
+            .get("externalLink")
+            .and_then(|value| serde_json::from_value::<ExternalSessionLink>(value.clone()).ok())
+            .unwrap_or_default();
+        let delegation_record = DelegationRecord {
+            agent_type: Some(agent_type.to_string()),
+            provider: Some(external_provider.to_string()),
+            parent_session_id: self.parent_session_id.clone(),
+            child_session_id: Some(session.id.to_string()),
+            external_session_id: external_link.external_session_id.clone(),
+            policy_reason: Some("configured external ACP subagent".to_string()),
+            policy_version: Some("v1".to_string()),
+            latency_ms: Some(started_at.elapsed().as_millis() as u64),
+            resumed: external_link.resumed,
+            input_tokens: Some(session.token_usage.input_tokens),
+            output_tokens: Some(session.token_usage.output_tokens),
+            cost_usd: session
+                .metadata
+                .get("externalCostUsd")
+                .and_then(|value| value.as_f64()),
+            outcome: Some("success".to_string()),
+        };
+        attach_delegation_record(&mut session, &delegation_record);
+
+        if let Some(ref sm) = self.session_manager {
+            if let Err(e) = sm.save(&session) {
+                warn!(error = %e, "Failed to persist external sub-agent session");
+            }
+        }
+
+        let text = session
+            .messages
+            .iter()
+            .rev()
+            .find(|m| m.role == Role::Assistant && !m.content.trim().is_empty())
+            .map(|m| m.content.clone())
+            .unwrap_or_else(|| "Sub-agent completed but produced no output.".to_string());
+        let session_id = session.id.to_string();
+        let messages = session.messages.clone();
+        let description = format!("[{agent_type}] {prompt}");
+
+        if let Some(ref tx) = self.event_tx {
+            let _ = tx.send(AgentEvent::SubAgentComplete {
+                call_id: String::new(),
+                session_id: session_id.clone(),
+                messages: messages.clone(),
+                description,
+                input_tokens: session.token_usage.input_tokens,
+                output_tokens: session.token_usage.output_tokens,
+                cost_usd: session
+                    .metadata
+                    .get("externalCostUsd")
+                    .and_then(|value| value.as_f64())
+                    .unwrap_or(0.0),
+                agent_type: Some(agent_type.to_string()),
+                provider: Some(external_provider.to_string()),
+                resumed: external_link.resumed,
+            });
+        }
+
+        Ok(TaskResult {
+            text,
+            session_id,
+            messages,
+        })
+    }
+
     /// Resolve a model spec from agents.toml into a provider and model name.
     ///
     /// The model spec can be in the form `provider/model` (e.g.
@@ -1001,6 +1244,93 @@ impl AgentTaskSpawner {
             .await?;
         Ok((provider, model_name))
     }
+}
+
+fn external_permission_mode(profile: SubAgentRuntimeProfile) -> PermissionMode {
+    match profile {
+        SubAgentRuntimeProfile::Full => PermissionMode::AcceptEdits,
+        SubAgentRuntimeProfile::ReadOnly => PermissionMode::Plan,
+    }
+}
+
+fn default_external_allowed_tools(profile: SubAgentRuntimeProfile) -> Option<Vec<String>> {
+    match profile {
+        SubAgentRuntimeProfile::Full => None,
+        SubAgentRuntimeProfile::ReadOnly => Some(vec![
+            "Read".to_string(),
+            "Glob".to_string(),
+            "Grep".to_string(),
+        ]),
+    }
+}
+
+fn adapt_delegation_policy_with_feedback(
+    goal: &str,
+    policy: crate::routing::SubagentDelegationPolicy,
+    recent: &[DelegationRecord],
+) -> crate::routing::SubagentDelegationPolicy {
+    if recent.len() < 3 || policy.reason == EXPLICIT_DELEGATION_REASON {
+        return policy;
+    }
+
+    let score = recent_delegation_feedback_score(recent);
+    let is_broad_goal = {
+        let lower = goal.to_lowercase();
+        [
+            "multiple files",
+            "multi-file",
+            "across files",
+            "investigate",
+            "review",
+            "audit",
+        ]
+        .iter()
+        .any(|needle| lower.contains(needle))
+    };
+
+    if score < 0.45 && policy.enable_task_tool {
+        let next_max = policy.max_subagents.saturating_sub(1);
+        return crate::routing::SubagentDelegationPolicy {
+            enable_task_tool: next_max > 0,
+            max_subagents: next_max,
+            reason: format!(
+                "{} (adaptive fallback: recent delegation quality {:.2} was weak)",
+                policy.reason, score
+            ),
+        };
+    }
+
+    if score > 0.85 && policy.enable_task_tool && is_broad_goal {
+        let next_max = (policy.max_subagents + 1).min(3);
+        return crate::routing::SubagentDelegationPolicy {
+            enable_task_tool: true,
+            max_subagents: next_max,
+            reason: format!(
+                "{} (adaptive boost: recent delegation quality {:.2} was strong)",
+                policy.reason, score
+            ),
+        };
+    }
+
+    policy
+}
+
+fn recent_delegation_feedback_score(recent: &[DelegationRecord]) -> f64 {
+    let total = recent
+        .iter()
+        .map(|record| {
+            let outcome = match record.outcome.as_deref() {
+                Some("success") => 1.0,
+                Some("error") => 0.2,
+                Some("timeout") => 0.1,
+                _ => 0.5,
+            };
+            let resumed_bonus = if record.resumed { 0.1 } else { 0.0 };
+            let cost_penalty = record.cost_usd.unwrap_or(0.0).min(1.0) * 0.1;
+            (outcome + resumed_bonus - cost_penalty).clamp(0.0, 1.0)
+        })
+        .sum::<f64>();
+    total / recent.len() as f64
 }
 
 /// Parse a model spec string into (provider, model).
@@ -1030,6 +1360,77 @@ fn subagent_runtime_profile(agent_type: &str) -> SubAgentRuntimeProfile {
     match agent_type {
         "plan" | "explore" | "scout" | "review" => SubAgentRuntimeProfile::ReadOnly,
         _ => SubAgentRuntimeProfile::Full,
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::items_after_test_module)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn adaptive_feedback_reduces_subagents_after_weak_history() {
+        let policy = crate::routing::SubagentDelegationPolicy {
+            enable_task_tool: true,
+            max_subagents: 2,
+            reason: "task looks broad enough to justify one scout or reviewer".to_string(),
+        };
+        let recent = vec![
+            DelegationRecord {
+                outcome: Some("error".into()),
+                ..Default::default()
+            },
+            DelegationRecord {
+                outcome: Some("timeout".into()),
+                ..Default::default()
+            },
+            DelegationRecord {
+                outcome: Some("error".into()),
+                ..Default::default()
+            },
+        ];
+
+        let adjusted = adapt_delegation_policy_with_feedback(
+            "investigate this across multiple files",
+            policy,
+            &recent,
+        );
+
+        assert!(adjusted.max_subagents < 2);
+        assert!(adjusted.reason.contains("adaptive fallback"));
+    }
+
+    #[test]
+    fn adaptive_feedback_boosts_subagents_after_strong_history() {
+        let policy = crate::routing::SubagentDelegationPolicy {
+            enable_task_tool: true,
+            max_subagents: 1,
+            reason: "task looks broad enough to justify one scout or reviewer".to_string(),
+        };
+        let recent = vec![
+            DelegationRecord {
+                outcome: Some("success".into()),
+                resumed: true,
+                ..Default::default()
+            },
+            DelegationRecord {
+                outcome: Some("success".into()),
+                ..Default::default()
+            },
+            DelegationRecord {
+                outcome: Some("success".into()),
+                ..Default::default()
+            },
+        ];
+
+        let adjusted = adapt_delegation_policy_with_feedback(
+            "review architecture across multiple files",
+            policy,
+            &recent,
+        );
+
+        assert!(adjusted.max_subagents > 1);
+        assert!(adjusted.reason.contains("adaptive boost"));
     }
 }
 

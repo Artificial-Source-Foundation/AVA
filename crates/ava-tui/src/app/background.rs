@@ -150,6 +150,7 @@ impl App {
                     auto_compact: true,
                     include_project_instructions: true,
                     eager_codebase_indexing: true,
+                    discover_cli_agents: true,
                 };
                 match ava_agent::stack::AgentStack::new(config).await {
                     Ok((stack, _, _, _)) => Arc::new(stack),

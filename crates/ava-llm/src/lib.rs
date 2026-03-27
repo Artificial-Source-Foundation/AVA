@@ -16,6 +16,7 @@ pub mod providers;
 pub mod retry;
 pub mod router;
 pub mod thinking;
+pub mod usage;
 
 pub use credential_test::{default_model_for_provider, test_provider_credentials};
 pub use message_transform::{normalize_messages, ProviderKind};

@@ -581,6 +581,17 @@ impl UiMessage {
                         .and_then(|d| d.duration)
                         .map(|d| format!("{:.1}s", d.as_secs_f64()))
                         .unwrap_or_default();
+                    let provider_str = data
+                        .and_then(|d| d.provider.as_deref())
+                        .map(|provider| format!("via {provider}"));
+                    let resumed_str = data.filter(|d| d.resumed).map(|_| "resumed".to_string());
+                    let cost_str = data
+                        .and_then(|d| d.cost_usd)
+                        .map(|cost| format!("${cost:.4}"));
+                    let token_str = data.and_then(|d| match (d.input_tokens, d.output_tokens) {
+                        (Some(input), Some(output)) => Some(format!("{input}/{output} tok")),
+                        _ => None,
+                    });
 
                     let (icon, icon_style) = if is_failed {
                         (
@@ -617,13 +628,26 @@ impl UiMessage {
                     ));
                     result.push(Line::from(header_line_spans));
 
-                    let stats = if !duration_str.is_empty() {
-                        format!("{tool_count} tools, {duration_str}")
-                    } else if tool_count > 0 {
-                        format!("{tool_count} tools")
-                    } else {
-                        String::new()
-                    };
+                    let mut stats_parts = Vec::new();
+                    if tool_count > 0 {
+                        stats_parts.push(format!("{tool_count} tools"));
+                    }
+                    if !duration_str.is_empty() {
+                        stats_parts.push(duration_str);
+                    }
+                    if let Some(provider_str) = provider_str {
+                        stats_parts.push(provider_str);
+                    }
+                    if let Some(resumed_str) = resumed_str {
+                        stats_parts.push(resumed_str);
+                    }
+                    if let Some(cost_str) = cost_str {
+                        stats_parts.push(cost_str);
+                    }
+                    if let Some(token_str) = token_str {
+                        stats_parts.push(token_str);
+                    }
+                    let stats = stats_parts.join(", ");
                     if !stats.is_empty() {
                         let stats_width = display_width(&stats);
                         let stats_pad = inner_width.saturating_sub(stats_width);

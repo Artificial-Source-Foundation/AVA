@@ -261,6 +261,12 @@ pub enum AgentEvent {
         output_tokens: usize,
         /// Estimated cost in USD for the sub-agent's LLM calls.
         cost_usd: f64,
+        /// Specialist/subagent type label when known.
+        agent_type: Option<String>,
+        /// External provider/runtime when applicable.
+        provider: Option<String>,
+        /// Whether this subagent reused a previous external session.
+        resumed: bool,
     },
     /// A project-state snapshot was taken before a write/edit tool execution.
     /// The TUI can use the commit hash for rewind/restore operations.

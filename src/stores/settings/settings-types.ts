@@ -100,7 +100,7 @@ export interface GenerationSettings {
   reasoningEffort: ReasoningEffort // Reasoning intensity: off, low, medium, high
   autoCompact: boolean // Automatically compact conversation when context reaches threshold
   compactionThreshold: number // 50–95, default 80
-  delegationEnabled: boolean // Enable team delegation (Praxis hierarchy)
+  delegationEnabled: boolean // Enable team delegation (HQ hierarchy)
 }
 
 export interface AgentLimitSettings {
@@ -220,6 +220,6 @@ export interface AppSettings {
   trustedFolders: TrustedFoldersSettings
   /** Which backend stack powers the agent loop (default: 'core-v2') */
   agentBackend: AgentBackend
-  /** Team (Praxis) multi-agent configuration */
+  /** Team (HQ) multi-agent configuration */
   team: TeamConfig
 }

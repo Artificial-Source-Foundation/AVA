@@ -137,90 +137,109 @@ export interface QuestionRequestEvent {
   options: string[]
 }
 
-// ── Praxis multi-agent events ──────────────────────────────────────
+// ── HQ multi-agent events ──────────────────────────────────────
 
-export interface PraxisWorkerStartedEvent {
-  type: 'praxis_worker_started'
+export interface HqWorkerStartedEvent {
+  type: 'hq_worker_started'
   worker_id: string
   lead: string
   task: string
 }
 
-export interface PraxisWorkerProgressEvent {
-  type: 'praxis_worker_progress'
+export interface HqWorkerProgressEvent {
+  type: 'hq_worker_progress'
   worker_id: string
   turn: number
   max_turns: number
 }
 
-export interface PraxisWorkerTokenEvent {
-  type: 'praxis_worker_token'
+export interface HqWorkerTokenEvent {
+  type: 'hq_worker_token'
   worker_id: string
   token: string
 }
 
-export interface PraxisWorkerCompletedEvent {
-  type: 'praxis_worker_completed'
+export interface HqWorkerCompletedEvent {
+  type: 'hq_worker_completed'
   worker_id: string
   success: boolean
   turns: number
 }
 
-export interface PraxisWorkerFailedEvent {
-  type: 'praxis_worker_failed'
+export interface HqWorkerFailedEvent {
+  type: 'hq_worker_failed'
   worker_id: string
   error: string
 }
 
-export interface PraxisAllCompleteEvent {
-  type: 'praxis_all_complete'
+export interface HqAllCompleteEvent {
+  type: 'hq_all_complete'
   total_workers: number
   succeeded: number
   failed: number
 }
 
-export interface PraxisSummaryEvent {
-  type: 'praxis_summary'
+export interface HqSummaryEvent {
+  type: 'hq_summary'
   total_workers: number
   succeeded: number
   failed: number
   total_turns: number
 }
 
-export interface PraxisPhaseStartedEvent {
-  type: 'praxis_phase_started'
+export interface HqPhaseStartedEvent {
+  type: 'hq_phase_started'
   phase_index: number
   phase_count: number
   phase_name: string
   role: string
 }
 
-export interface PraxisPhaseCompletedEvent {
-  type: 'praxis_phase_completed'
+export interface HqPhaseCompletedEvent {
+  type: 'hq_phase_completed'
   phase_index: number
   phase_name: string
   turns: number
   output_preview: string
 }
 
-export interface PraxisSpecCreatedEvent {
-  type: 'praxis_spec_created'
+export interface HqSpecCreatedEvent {
+  type: 'hq_spec_created'
   spec_id: string
   title: string
 }
 
-export interface PraxisArtifactCreatedEvent {
-  type: 'praxis_artifact_created'
+export interface HqArtifactCreatedEvent {
+  type: 'hq_artifact_created'
   artifact_id: string
   kind: string
   producer: string
   title: string
 }
 
-export interface PraxisConflictDetectedEvent {
-  type: 'praxis_conflict_detected'
+export interface HqConflictDetectedEvent {
+  type: 'hq_conflict_detected'
   workers: [string, string]
   overlapping_files: string[]
+}
+
+export interface HqExternalWorkerStartedEvent {
+  type: 'hq_external_worker_started'
+  worker_id: string
+  agent_name: string
+}
+
+export interface HqExternalWorkerCompletedEvent {
+  type: 'hq_external_worker_completed'
+  worker_id: string
+  success: boolean
+  cost_usd?: number
+}
+
+export interface HqExternalWorkerFailedEvent {
+  type: 'hq_external_worker_failed'
+  worker_id: string
+  error: string
 }
 
 // ── Plan events ──────────────────────────────────────────────────────
@@ -287,19 +306,22 @@ export interface ResolvePlanArgs {
   stepComments?: Record<string, string> | null
 }
 
-export type PraxisEvent =
-  | PraxisWorkerStartedEvent
-  | PraxisWorkerProgressEvent
-  | PraxisWorkerTokenEvent
-  | PraxisWorkerCompletedEvent
-  | PraxisWorkerFailedEvent
-  | PraxisAllCompleteEvent
-  | PraxisSummaryEvent
-  | PraxisPhaseStartedEvent
-  | PraxisPhaseCompletedEvent
-  | PraxisSpecCreatedEvent
-  | PraxisArtifactCreatedEvent
-  | PraxisConflictDetectedEvent
+export type HqEvent =
+  | HqWorkerStartedEvent
+  | HqWorkerProgressEvent
+  | HqWorkerTokenEvent
+  | HqWorkerCompletedEvent
+  | HqWorkerFailedEvent
+  | HqAllCompleteEvent
+  | HqSummaryEvent
+  | HqPhaseStartedEvent
+  | HqPhaseCompletedEvent
+  | HqSpecCreatedEvent
+  | HqArtifactCreatedEvent
+  | HqConflictDetectedEvent
+  | HqExternalWorkerStartedEvent
+  | HqExternalWorkerCompletedEvent
+  | HqExternalWorkerFailedEvent
 
 export type AgentEvent =
   | TokenEvent
@@ -316,7 +338,7 @@ export type AgentEvent =
   | PlanCreatedEvent
   | PlanStepCompleteEvent
   | TodoUpdateEvent
-  | PraxisEvent
+  | HqEvent
 
 export interface ComputeGrepMatch {
   file: string
@@ -560,13 +582,14 @@ export interface CompactContextResult {
   summary: string
 }
 
-// Praxis multi-agent IPC types
+// HQ multi-agent IPC types
 
 export interface LeadConfigPayload {
   domain: string
   enabled: boolean
   model: string
   maxWorkers: number
+  customPrompt?: string
 }
 
 export interface TeamConfigPayload {
@@ -578,15 +601,48 @@ export interface TeamConfigPayload {
   leads: LeadConfigPayload[]
 }
 
-export interface StartPraxisArgs {
+export interface StartHqArgs {
   goal: string
   domain?: string
   teamConfig?: TeamConfigPayload
 }
 
-export interface PraxisStatusResult {
+export interface HqStatusResult {
   running: boolean
   totalWorkers: number
   succeeded: number
   failed: number
+}
+
+// Subscription usage types
+
+export interface UsageWindow {
+  label: string
+  usedPercent: number
+  resetsAt: string | null
+}
+
+export interface CreditsInfo {
+  hasCredits: boolean
+  unlimited: boolean
+  balance: string | null
+}
+
+export interface CopilotQuota {
+  remaining: number
+  limit: number
+  percentRemaining: number
+  resetTime: string | null
+  completionsRemaining: number | null
+  completionsLimit: number | null
+}
+
+export interface SubscriptionUsage {
+  provider: string
+  displayName: string
+  planType: string | null
+  usageWindows: UsageWindow[]
+  credits: CreditsInfo | null
+  copilotQuota: CopilotQuota | null
+  error: string | null
 }

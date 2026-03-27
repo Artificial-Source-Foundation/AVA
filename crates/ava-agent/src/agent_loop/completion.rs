@@ -5,8 +5,6 @@
 //! messages transforms and chat params, plus completion detection helpers
 //! (turn/budget limits, natural completion, attempt_completion).
 
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
 use std::time::{Duration, Instant};
 
 use ava_llm::ThinkingConfig;
@@ -16,6 +14,7 @@ use tokio::sync::mpsc;
 use tracing::{debug, info, trace, warn};
 
 use super::response;
+use super::response::request_dedup_hash;
 use super::{AgentEvent, AgentLoop};
 use crate::stuck::StuckDetector;
 use crate::system_prompt::{build_system_prompt, provider_prompt_suffix};
@@ -173,15 +172,7 @@ impl AgentLoop {
         // Dedup guard — hash last message content + message count so context growth
         // (new tool results) breaks the dedup even if the last message content is
         // identical (e.g. same compile error).
-        let dedup_hash = {
-            let msgs = self.context.get_messages();
-            let mut hasher = DefaultHasher::new();
-            msgs.len().hash(&mut hasher);
-            if let Some(last) = msgs.last() {
-                last.content.hash(&mut hasher);
-            }
-            hasher.finish()
-        };
+        let dedup_hash = request_dedup_hash(self.context.get_messages());
         if let (Some(prev_hash), Some(prev_time)) = (self.last_request_hash, self.last_request_time)
         {
             if dedup_hash == prev_hash && prev_time.elapsed().as_secs() < 2 {
@@ -192,18 +183,15 @@ impl AgentLoop {
 
         // chat.params hook: allow plugins to modify per-call LLM parameters.
         if let Some(ref pm) = self.plugin_manager.clone() {
-            let has_hook = pm
-                .lock()
-                .await
-                .has_hook_subscribers(ava_plugin::HookEvent::ChatParams);
-            if has_hook {
+            let mut pm = pm.lock().await;
+            if pm.has_hook_subscribers(ava_plugin::HookEvent::ChatParams) {
                 let params = serde_json::json!({
                     "model": self.config.model,
                     "max_tokens": self.config.token_limit,
                     "thinking_level": format!("{:?}", self.config.thinking_level).to_lowercase(),
                     "thinking_budget_tokens": self.config.thinking_budget_tokens,
                 });
-                let modified = pm.lock().await.apply_chat_params_hook(params).await;
+                let modified = pm.apply_chat_params_hook(params).await;
                 // Apply supported overrides back to config.
                 if let Some(v) = modified.get("max_tokens").and_then(|v| v.as_u64()) {
                     self.config.token_limit = v as usize;

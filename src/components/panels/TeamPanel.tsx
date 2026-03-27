@@ -180,14 +180,14 @@ export const TeamPanel: Component<TeamPanelProps> = (props) => {
 
   return (
     <div class="flex flex-col h-full" style={{ background: 'var(--background)' }}>
-      {/* Header: "Praxis Team" with users icon + "N working" badge */}
+      {/* Header: "HQ Team" with users icon + "N working" badge */}
       <div
         class="flex items-center justify-between px-4 py-3.5"
         style={{ 'border-bottom': '1px solid var(--border-subtle)' }}
       >
         <div class="flex items-center gap-2">
           <Users class="w-4 h-4" style={{ color: 'var(--accent)' }} />
-          <span class="text-[13px] font-semibold text-[var(--text-primary)]">Praxis Team</span>
+          <span class="text-[13px] font-semibold text-[var(--text-primary)]">HQ Team</span>
         </div>
         <div class="flex items-center gap-2">
           <Show when={workingCount() > 0}>

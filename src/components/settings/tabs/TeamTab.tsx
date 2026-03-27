@@ -1,7 +1,7 @@
 /**
  * Team Settings Tab
  *
- * Configure Praxis multi-agent team: enable/disable team mode,
+ * Configure HQ multi-agent team: enable/disable team mode,
  * model selection for Director/Lead/Worker/Scout roles,
  * worker name pool, and per-lead domain configuration.
  */
@@ -203,7 +203,7 @@ export const TeamTab: Component = () => {
       <SettingsCard
         icon={Users}
         title="Team Mode"
-        description="Enable Praxis multi-agent orchestration"
+        description="Enable HQ multi-agent orchestration"
       >
         <ToggleRow
           label="Enable Team Mode"

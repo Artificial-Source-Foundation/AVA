@@ -283,13 +283,13 @@ dependencies = [
  "ava-codebase",
  "ava-config",
  "ava-context",
+ "ava-hq",
  "ava-llm",
  "ava-mcp",
  "ava-memory",
  "ava-permissions",
  "ava-platform",
  "ava-plugin",
- "ava-praxis",
  "ava-session",
  "ava-tools",
  "ava-types",
@@ -408,6 +408,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "ava-hq"
+version = "2.2.7"
+dependencies = [
+ "async-trait",
+ "ava-acp",
+ "ava-agent",
+ "ava-context",
+ "ava-llm",
+ "ava-platform",
+ "ava-tools",
+ "ava-types",
+ "futures",
+ "regex",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "ava-llm"
 version = "2.2.7"
 dependencies = [
@@ -518,28 +541,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ava-praxis"
-version = "2.2.7"
-dependencies = [
- "async-trait",
- "ava-acp",
- "ava-agent",
- "ava-context",
- "ava-llm",
- "ava-platform",
- "ava-tools",
- "ava-types",
- "futures",
- "regex",
- "serde",
- "serde_json",
- "tokio",
- "tokio-util",
- "tracing",
- "uuid",
-]
-
-[[package]]
 name = "ava-sandbox"
 version = "2.0.0"
 dependencies = [
@@ -614,12 +615,12 @@ dependencies = [
  "ava-config",
  "ava-context",
  "ava-db",
+ "ava-hq",
  "ava-llm",
  "ava-memory",
  "ava-permissions",
  "ava-platform",
  "ava-plugin",
- "ava-praxis",
  "ava-session",
  "ava-tools",
  "ava-types",

@@ -3,7 +3,7 @@
  *
  * Canonical types and default presets for AI agents.
  * Shared by the settings store and the AgentsTab UI.
- * Praxis agent presets live in praxis-presets.ts.
+ * HQ agent presets live in hq-presets.ts.
  */
 
 import { Code, FileText, GitBranch, Terminal, Zap } from 'lucide-solid'
@@ -32,7 +32,7 @@ export interface AgentPreset {
   model?: string
   isCustom?: boolean
   type?: 'coding' | 'git' | 'terminal' | 'docs' | 'fast' | 'custom'
-  /** Praxis tier — commander, lead, or worker */
+  /** HQ tier — commander, lead, or worker */
   tier?: AgentTier
   /** Concrete tool names this agent can use */
   tools?: string[]
@@ -112,9 +112,9 @@ export const legacyAgentPresets: AgentPreset[] = [
 // Combined defaults (re-exported for consumers)
 // ============================================================================
 
-// Praxis presets (the 14 built-in Praxis agents)
-import { praxisAgentPresets } from './praxis-presets'
+// HQ presets (the 14 built-in HQ agents)
+import { hqAgentPresets } from './hq-presets'
 
-export { praxisAgentPresets } from './praxis-presets'
+export { hqAgentPresets } from './hq-presets'
 
-export const defaultAgentPresets: AgentPreset[] = [...praxisAgentPresets, ...legacyAgentPresets]
+export const defaultAgentPresets: AgentPreset[] = [...hqAgentPresets, ...legacyAgentPresets]

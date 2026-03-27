@@ -31,6 +31,16 @@ pub struct SubAgentData {
     pub session_id: Option<String>,
     /// The sub-agent's full conversation as UI messages (set on completion).
     pub session_messages: Vec<UiMessage>,
+    /// Provider powering this sub-agent, if external.
+    pub provider: Option<String>,
+    /// Whether this sub-agent resumed a prior external session.
+    pub resumed: bool,
+    /// Delegated cost in USD once complete.
+    pub cost_usd: Option<f64>,
+    /// Total input tokens consumed by the sub-agent.
+    pub input_tokens: Option<usize>,
+    /// Total output tokens consumed by the sub-agent.
+    pub output_tokens: Option<usize>,
 }
 
 #[derive(Debug, Clone)]

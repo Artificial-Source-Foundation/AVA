@@ -42,7 +42,7 @@ const CHANGELOG: ChangelogEntry[] = [
       '9 default tools: read, write, edit, bash, glob, grep, web_fetch, web_search, git_read',
       '21 Rust crates powering the full agent, CLI, and desktop backend',
       'Thinking + tool interleaving for reasoning-capable models',
-      'Multi-agent orchestration via Praxis (Director → Leads → Workers)',
+      'Multi-agent orchestration via HQ (Director → Leads → Workers)',
       'MCP protocol support with hot-reload and per-project trust',
       'Persistent memory, session history, and codebase indexing (BM25 + PageRank)',
       '29 built-in themes with live preview and custom TOML theme support',

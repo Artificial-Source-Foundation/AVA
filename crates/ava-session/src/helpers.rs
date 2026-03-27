@@ -23,6 +23,11 @@ CREATE TABLE IF NOT EXISTS messages (
     tool_call_id TEXT,
     images TEXT NOT NULL DEFAULT '[]',
     parent_id TEXT,
+    agent_visible INTEGER NOT NULL DEFAULT 1,
+    user_visible INTEGER NOT NULL DEFAULT 1,
+    original_content TEXT,
+    structured_content TEXT NOT NULL DEFAULT '[]',
+    metadata TEXT NOT NULL DEFAULT '{}',
     FOREIGN KEY(session_id) REFERENCES sessions(id)
 );
 
@@ -61,6 +66,11 @@ CREATE TABLE IF NOT EXISTS bookmarks (
 pub const MIGRATION_SQL: &[&str] = &[
     "ALTER TABLE messages ADD COLUMN tool_call_id TEXT",
     "ALTER TABLE messages ADD COLUMN images TEXT NOT NULL DEFAULT '[]'",
+    "ALTER TABLE messages ADD COLUMN agent_visible INTEGER NOT NULL DEFAULT 1",
+    "ALTER TABLE messages ADD COLUMN user_visible INTEGER NOT NULL DEFAULT 1",
+    "ALTER TABLE messages ADD COLUMN original_content TEXT",
+    "ALTER TABLE messages ADD COLUMN structured_content TEXT NOT NULL DEFAULT '[]'",
+    "ALTER TABLE messages ADD COLUMN metadata TEXT NOT NULL DEFAULT '{}'",
     "ALTER TABLE sessions ADD COLUMN token_usage TEXT NOT NULL DEFAULT '{}'",
     // Bookmarks table (BG-13)
     "CREATE TABLE IF NOT EXISTS bookmarks (

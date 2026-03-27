@@ -160,9 +160,9 @@ export function createAgentRun(deps: RunDeps) {
         reasoningEffort,
       })
 
-      // Team mode: route to Praxis Director instead of solo agent
+      // Team mode: route to HQ Director instead of solo agent
       if (isTeamMode()) {
-        log.info('agent', 'Team mode — routing to Praxis Director', {
+        log.info('agent', 'Team mode — routing to HQ Director', {
           goal: goal.slice(0, 120),
         })
         try {
@@ -178,12 +178,13 @@ export function createAgentRun(deps: RunDeps) {
               enabled: l.enabled,
               model: l.model,
               maxWorkers: l.maxWorkers,
+              customPrompt: l.customPrompt,
             })),
           }
-          await rustBackend.startPraxis(goal, undefined, teamConfigPayload)
+          await rustBackend.startHq(goal, undefined, teamConfigPayload)
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err)
-          log.error('agent', 'Praxis failed', { error: msg })
+          log.error('agent', 'HQ failed', { error: msg })
           session.updateMessage(assistantMsgId, {
             content: '',
             error: { type: 'unknown', message: msg, timestamp: Date.now() },

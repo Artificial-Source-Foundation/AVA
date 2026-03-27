@@ -3,10 +3,10 @@ import { describe, expect, it } from 'vitest'
 import { TeamPanel } from './TeamPanel'
 
 describe('TeamPanel', () => {
-  it('renders Praxis Team header', () => {
+  it('renders HQ Team header', () => {
     const container = document.createElement('div')
     render(() => <TeamPanel />, container)
-    expect(container.textContent).toContain('Praxis Team')
+    expect(container.textContent).toContain('HQ Team')
   })
 
   it('shows empty state when no team active', () => {

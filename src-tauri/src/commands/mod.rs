@@ -23,14 +23,15 @@ pub mod agent_commands;
 pub mod config_commands;
 pub mod context_commands;
 mod helpers;
+pub mod hq_commands;
 pub mod mcp_commands;
 pub mod model_commands;
 pub mod permission_commands;
-pub mod praxis_commands;
 pub mod provider_commands;
 pub mod session_commands;
 pub mod tool_commands;
 pub mod updater_commands;
+pub mod usage_commands;
 
 pub use agent_integration::{agent_run, agent_stream, execute_tool, list_tools, ToolInfo};
 pub use compute_fuzzy::compute_fuzzy_replace;
@@ -60,17 +61,23 @@ pub use agent_commands::{
     get_message_queue, post_complete_agent, regenerate_response, resolve_approval, resolve_plan,
     resolve_question, retry_last_message, steer_agent, submit_goal, undo_last_edit,
 };
-pub use config_commands::get_config;
+pub use config_commands::{get_config, sync_hq_agent_overrides};
 pub use context_commands::compact_context;
+pub use hq_commands::{
+    add_comment, approve_plan, cancel_hq, create_epic, create_issue, get_activity_feed, get_agent,
+    get_agents, get_dashboard_metrics, get_director_chat, get_epic, get_hq_settings, get_hq_status,
+    get_issue, get_plan, list_epics, list_issues, move_issue, reject_plan, send_director_message,
+    start_hq, steer_lead, update_epic, update_hq_settings, update_issue,
+};
 pub use mcp_commands::{list_mcp_servers, reload_mcp_servers};
 pub use model_commands::{get_current_model, list_models, switch_model};
 pub use permission_commands::{
     get_permission_level, set_permission_level, toggle_permission_level,
 };
-pub use praxis_commands::{cancel_praxis, get_praxis_status, start_praxis, steer_lead};
 pub use provider_commands::{discover_cli_agents, list_providers};
 pub use session_commands::{
     create_session, delete_session, list_sessions, load_session, rename_session, search_sessions,
 };
 pub use tool_commands::list_agent_tools;
 pub use updater_commands::{check_desktop_update, install_desktop_update};
+pub use usage_commands::get_subscription_usage;

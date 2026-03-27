@@ -18,16 +18,16 @@ use std::time::Instant;
 
 use ava_agent::AgentEvent;
 use ava_config::CredentialStore;
+use ava_hq::{Budget, Director, DirectorConfig, Domain, HqEvent, Task, TaskType};
 use ava_llm::pool::ConnectionPool;
 use ava_llm::provider::{LLMProvider, SharedProvider};
 use ava_llm::providers::create_provider;
-use ava_praxis::{Budget, Director, DirectorConfig, Domain, PraxisEvent, Task, TaskType};
 use color_eyre::eyre::{eyre, Result};
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-use crate::benchmark::{BenchmarkResult, ModelSpec};
+use crate::benchmark::{compute_delegation_quality_score, BenchmarkResult, ModelSpec};
 use crate::benchmark_support::{
     compile_and_test, expected_min_subagents, prepare_benchmark_workspace, run_tier3_validation,
     setup_agentic_file, spawn_default_question_responses, subagent_type_from_description,
@@ -134,7 +134,7 @@ fn format_delegation_mix(results: &[BenchmarkResult]) -> Option<String> {
     )
 }
 
-/// All Praxis domains used for worker routing.
+/// All HQ domains used for worker routing.
 const ALL_DOMAINS: &[Domain] = &[
     Domain::Backend,
     Domain::Frontend,
@@ -361,7 +361,9 @@ async fn run_solo_task(
     let mut turns_used: usize = 0;
     let mut subagent_calls_count: usize = 0;
     let mut subagent_types: Vec<String> = Vec::new();
+    let mut subagent_providers: Vec<String> = Vec::new();
     let mut subagent_cost_usd: f64 = 0.0;
+    let mut resumed_subagent_calls_count: usize = 0;
     let mut in_assistant_turn = false;
 
     while let Some(event) = rx.recv().await {
@@ -393,10 +395,18 @@ async fn run_solo_task(
             AgentEvent::SubAgentComplete {
                 description,
                 cost_usd: sub_cost,
+                provider,
+                resumed,
                 ..
             } => {
                 subagent_calls_count += 1;
                 subagent_types.push(subagent_type_from_description(&description));
+                if let Some(provider) = provider {
+                    subagent_providers.push(provider);
+                }
+                if resumed {
+                    resumed_subagent_calls_count += 1;
+                }
                 subagent_cost_usd += sub_cost;
                 cost_usd += sub_cost;
             }
@@ -455,6 +465,16 @@ async fn run_solo_task(
         None
     };
 
+    let delegation_quality_score = compute_delegation_quality_score(
+        quality_pass,
+        compile_success,
+        None,
+        subagent_calls_count,
+        resumed_subagent_calls_count,
+        subagent_cost_usd,
+        cost_usd,
+    );
+
     Ok(BenchmarkResult {
         task_name: task.name.to_string(),
         task_category: task.category.to_string(),
@@ -480,16 +500,19 @@ async fn run_solo_task(
         self_corrections: 0,
         subagent_calls_count,
         subagent_types,
+        subagent_providers,
         subagent_cost_usd,
+        resumed_subagent_calls_count,
         raw_output: None,
         cost_per_task_usd,
         tool_efficiency_score,
         delegation_efficiency_score,
+        delegation_quality_score,
         consistency_hash: None,
     })
 }
 
-/// Run the harnessed-pair phase: director delegates to workers via Praxis.
+/// Run the harnessed-pair phase: director delegates to workers via HQ.
 async fn run_harness_phase(
     director_spec: &ModelSpec,
     worker_spec: &ModelSpec,
@@ -580,7 +603,7 @@ async fn run_harness_phase(
     results
 }
 
-/// Run a single task with the harnessed-pair model via Praxis Director.
+/// Run a single task with the harnessed-pair model via HQ Director.
 async fn run_harness_task(
     task: &BenchmarkTask,
     director_spec: &ModelSpec,
@@ -645,14 +668,14 @@ async fn run_harness_task(
         TaskType::Simple
     };
 
-    let praxis_task = Task {
+    let hq_task = Task {
         description: task.prompt.clone(),
         task_type,
         files: vec![],
     };
 
     let worker = director
-        .delegate(praxis_task)
+        .delegate(hq_task)
         .map_err(|e| eyre!("Failed to delegate task: {}", e))?;
 
     let cancel = CancellationToken::new();
@@ -677,17 +700,17 @@ async fn run_harness_task(
 
     while let Some(event) = rx.recv().await {
         match &event {
-            PraxisEvent::WorkerStarted { .. } => {
+            HqEvent::WorkerStarted { .. } => {
                 worker_calls += 1;
             }
-            PraxisEvent::WorkerToken { token, .. } => {
+            HqEvent::WorkerToken { token, .. } => {
                 total_output.push_str(token);
             }
-            PraxisEvent::WorkerCompleted { turns, .. } => {
+            HqEvent::WorkerCompleted { turns, .. } => {
                 total_turns += turns;
             }
-            PraxisEvent::AllComplete { .. } => break,
-            PraxisEvent::WorkerFailed { error, .. } => {
+            HqEvent::AllComplete { .. } => break,
+            HqEvent::WorkerFailed { error, .. } => {
                 return Err(eyre!("Worker failed: {}", error));
             }
             _ => {}
@@ -856,11 +879,14 @@ fn make_error_result(task: &BenchmarkTask, spec: &ModelSpec, error: &str) -> Ben
         self_corrections: 0,
         subagent_calls_count: 0,
         subagent_types: Vec::new(),
+        subagent_providers: Vec::new(),
         subagent_cost_usd: 0.0,
+        resumed_subagent_calls_count: 0,
         raw_output: None,
         cost_per_task_usd: None,
         tool_efficiency_score: None,
         delegation_efficiency_score: None,
+        delegation_quality_score: None,
         consistency_hash: None,
     }
 }

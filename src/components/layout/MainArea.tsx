@@ -6,17 +6,29 @@
 
 import { Sparkles } from 'lucide-solid'
 import { type Component, Show } from 'solid-js'
+import { useHq } from '../../stores/hq'
 import { useSession } from '../../stores/session'
 import { ChatView } from '../chat/ChatView'
+import { HqShell } from '../hq'
 
 export const MainArea: Component = () => {
   const { currentSession } = useSession()
+  const { hqMode } = useHq()
 
   return (
     <div class="flex flex-col h-full w-full min-w-0 bg-[var(--surface)]">
-      <Show when={currentSession()} fallback={<WelcomeState />}>
+      <Show
+        when={hqMode()}
+        fallback={
+          <Show when={currentSession()} fallback={<WelcomeState />}>
+            <div class="flex-1 overflow-hidden">
+              <ChatView />
+            </div>
+          </Show>
+        }
+      >
         <div class="flex-1 overflow-hidden">
-          <ChatView />
+          <HqShell />
         </div>
       </Show>
     </div>

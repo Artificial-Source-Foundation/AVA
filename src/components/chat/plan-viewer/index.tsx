@@ -124,10 +124,10 @@ export const PlanOverlay: Component = () => {
         closePlan()
         return
       }
-      // Cmd/Ctrl+Shift+Enter = Execute with Praxis
+      // Cmd/Ctrl+Shift+Enter = Execute with HQ
       if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && e.shiftKey) {
         e.preventDefault()
-        handleApprove('praxis')
+        handleApprove('hq')
       }
       // Cmd/Ctrl+Enter = Execute plan
       if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !e.shiftKey) {
@@ -226,7 +226,7 @@ export const PlanOverlay: Component = () => {
     return parts.join('\n')
   }
 
-  const handleApprove = (mode: 'code' | 'praxis'): void => {
+  const handleApprove = (mode: 'code' | 'hq'): void => {
     const plan = activePlan()
     if (!plan) return
     agent.resolvePlan('approved', plan, undefined, collectStepComments())

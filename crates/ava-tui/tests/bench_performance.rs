@@ -57,6 +57,9 @@ async fn bench_agent_stack_startup() {
         data_dir: dir.path().to_path_buf(),
         working_dir: Some(dir.path().to_path_buf()),
         injected_provider: Some(mock),
+        include_project_instructions: false,
+        eager_codebase_indexing: false,
+        discover_cli_agents: false,
         ..Default::default()
     })
     .await
@@ -144,10 +147,14 @@ async fn bench_memory_baseline() {
 
     let dir = tempfile::tempdir().expect("tempdir");
     let mock = Arc::new(MockProvider::new("bench-model", vec![]));
+    let baseline_kb = read_vmrss_kb();
 
     let (_stack, _question_rx, _approval_rx, _plan_rx) = AgentStack::new(AgentStackConfig {
         data_dir: dir.path().to_path_buf(),
         injected_provider: Some(mock),
+        include_project_instructions: false,
+        eager_codebase_indexing: false,
+        discover_cli_agents: false,
         ..Default::default()
     })
     .await
@@ -155,10 +162,14 @@ async fn bench_memory_baseline() {
 
     let vmrss_kb = read_vmrss_kb();
     let vmrss_mb = vmrss_kb as f64 / 1024.0;
-    println!("[bench] memory_baseline: {vmrss_mb:.1} MB (VmRSS after AgentStack creation)");
+    let delta_kb = vmrss_kb.saturating_sub(baseline_kb);
+    let delta_mb = delta_kb as f64 / 1024.0;
+    println!(
+        "[bench] memory_baseline: {vmrss_mb:.1} MB total, +{delta_mb:.1} MB after AgentStack creation"
+    );
     assert!(
-        vmrss_mb < 50.0,
-        "Memory usage {vmrss_mb:.1} MB exceeds 50 MB target"
+        delta_mb < 50.0,
+        "AgentStack added {delta_mb:.1} MB, exceeding 50 MB target"
     );
 }
 

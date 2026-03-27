@@ -426,6 +426,11 @@ impl ModelRouter {
             .collect()
     }
 
+    /// Clone the current credential store for read-only use (e.g., usage queries).
+    pub async fn credentials_snapshot(&self) -> CredentialStore {
+        self.credentials.read().await.clone()
+    }
+
     pub async fn cache_size(&self) -> usize {
         self.providers.read().await.len()
     }

@@ -2,9 +2,34 @@
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use uuid::Uuid;
 
 use crate::tool::{ToolCall, ToolResult};
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum StructuredContentBlock {
+    Text {
+        text: String,
+    },
+    Thinking {
+        thinking: String,
+    },
+    ToolUse {
+        id: String,
+        name: String,
+        #[serde(default)]
+        input: Value,
+    },
+    ToolResult {
+        tool_use_id: String,
+        #[serde(default)]
+        content: String,
+        #[serde(default)]
+        is_error: bool,
+    },
+}
 
 /// Supported image media types for multimodal content.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -125,10 +150,20 @@ pub struct Message {
     /// Lets the UI show original content on expansion of a dimmed/collapsed message.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub original_content: Option<String>,
+    /// Structured content blocks preserved from external agent protocols.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub structured_content: Vec<StructuredContentBlock>,
+    /// Additional metadata associated with the message.
+    #[serde(default, skip_serializing_if = "is_empty_object")]
+    pub metadata: Value,
 }
 
 fn default_true() -> bool {
     true
+}
+
+fn is_empty_object(value: &Value) -> bool {
+    matches!(value, Value::Object(map) if map.is_empty())
 }
 
 impl Message {
@@ -146,6 +181,8 @@ impl Message {
             agent_visible: true,
             user_visible: true,
             original_content: None,
+            structured_content: Vec::new(),
+            metadata: Value::Object(Default::default()),
         }
     }
 
@@ -171,6 +208,16 @@ impl Message {
 
     pub fn with_parent(mut self, parent_id: Uuid) -> Self {
         self.parent_id = Some(parent_id);
+        self
+    }
+
+    pub fn with_structured_content(mut self, blocks: Vec<StructuredContentBlock>) -> Self {
+        self.structured_content = blocks;
+        self
+    }
+
+    pub fn with_metadata(mut self, metadata: Value) -> Self {
+        self.metadata = metadata;
         self
     }
 

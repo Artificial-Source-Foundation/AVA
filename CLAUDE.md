@@ -102,6 +102,8 @@ AVA/
 
 New capabilities should ship as Extended (available as plugins), MCP, or custom tools. The default set is now 9.
 
+`ava-acp` is the external-agent bridge: Claude Code uses the Agent SDK stream format, while Codex and OpenCode are normalized from their JSONL event streams with resume-aware stale-session retry, typed external-session metadata, and structured block preservation so hidden subagents and HQ workers can switch runtimes without custom glue at each call site.
+
 | Tier | Count | Tools |
 |------|------:|-------|
 | Default | 9 | read, write, edit, bash, glob, grep, web_fetch, web_search, git_read |
@@ -205,7 +207,7 @@ The Director is **LLM-powered** (not a code-driven router). It analyzes task com
 4. Worker budget exhausted → Lead asks Director → Director asks user
 5. Catastrophic → Director asks user
 
-> **Note:** Praxis Tauri bridge is fully wired — `start_praxis`, `get_praxis_status`, `cancel_praxis`, `steer_lead` commands registered and `emit_praxis_event` forwards all PraxisEvent variants to the desktop frontend via `agent-event` IPC. Frontend event handlers in `rust-agent-events.ts` and `useAgent.ts` map Praxis events to the team store.
+> **Note:** HQ desktop wiring now extends past raw event forwarding: Tauri commands persist HQ epics/issues/comments/plans/agents/activity/director-chat state in SQLite, the frontend HQ store loads that live data instead of mock fixtures, and HQ settings are stored in `ava-config` under `config.hq`.
 
 ## Middleware Priority
 

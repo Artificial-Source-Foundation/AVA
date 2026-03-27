@@ -66,77 +66,90 @@ pub enum AgentEvent {
         options: Vec<String>,
     },
 
-    // ── Praxis multi-agent events ──────────────────────────────────────
-    #[serde(rename = "praxis_worker_started")]
-    PraxisWorkerStarted {
+    // ── HQ multi-agent events ──────────────────────────────────────
+    #[serde(rename = "hq_worker_started")]
+    HqWorkerStarted {
         worker_id: String,
         lead: String,
         task: String,
     },
-    #[serde(rename = "praxis_worker_progress")]
-    PraxisWorkerProgress {
+    #[serde(rename = "hq_worker_progress")]
+    HqWorkerProgress {
         worker_id: String,
         turn: usize,
         max_turns: usize,
     },
-    #[serde(rename = "praxis_worker_token")]
-    PraxisWorkerToken { worker_id: String, token: String },
-    #[serde(rename = "praxis_worker_completed")]
-    PraxisWorkerCompleted {
+    #[serde(rename = "hq_worker_token")]
+    HqWorkerToken { worker_id: String, token: String },
+    #[serde(rename = "hq_worker_completed")]
+    HqWorkerCompleted {
         worker_id: String,
         success: bool,
         turns: usize,
     },
-    #[serde(rename = "praxis_worker_failed")]
-    PraxisWorkerFailed { worker_id: String, error: String },
-    #[serde(rename = "praxis_all_complete")]
-    PraxisAllComplete {
+    #[serde(rename = "hq_worker_failed")]
+    HqWorkerFailed { worker_id: String, error: String },
+    #[serde(rename = "hq_all_complete")]
+    HqAllComplete {
         total_workers: usize,
         succeeded: usize,
         failed: usize,
     },
-    #[serde(rename = "praxis_summary")]
-    PraxisSummary {
+    #[serde(rename = "hq_summary")]
+    HqSummary {
         total_workers: usize,
         succeeded: usize,
         failed: usize,
         total_turns: usize,
     },
-    #[serde(rename = "praxis_phase_started")]
-    PraxisPhaseStarted {
+    #[serde(rename = "hq_phase_started")]
+    HqPhaseStarted {
         phase_index: usize,
         phase_count: usize,
         phase_name: String,
         role: String,
     },
-    #[serde(rename = "praxis_phase_completed")]
-    PraxisPhaseCompleted {
+    #[serde(rename = "hq_phase_completed")]
+    HqPhaseCompleted {
         phase_index: usize,
         phase_name: String,
         turns: usize,
         output_preview: String,
     },
-    #[serde(rename = "praxis_spec_created")]
-    PraxisSpecCreated { spec_id: String, title: String },
-    #[serde(rename = "praxis_artifact_created")]
-    PraxisArtifactCreated {
+    #[serde(rename = "hq_spec_created")]
+    HqSpecCreated { spec_id: String, title: String },
+    #[serde(rename = "hq_artifact_created")]
+    HqArtifactCreated {
         artifact_id: String,
         kind: String,
         producer: String,
         title: String,
     },
-    #[serde(rename = "praxis_conflict_detected")]
-    PraxisConflictDetected {
+    #[serde(rename = "hq_conflict_detected")]
+    HqConflictDetected {
         workers: (String, String),
         overlapping_files: Vec<String>,
     },
+    #[serde(rename = "hq_external_worker_started")]
+    HqExternalWorkerStarted {
+        worker_id: String,
+        agent_name: String,
+    },
+    #[serde(rename = "hq_external_worker_completed")]
+    HqExternalWorkerCompleted {
+        worker_id: String,
+        success: bool,
+        cost_usd: Option<f64>,
+    },
+    #[serde(rename = "hq_external_worker_failed")]
+    HqExternalWorkerFailed { worker_id: String, error: String },
 
     #[serde(rename = "plan_created")]
     PlanCreated { plan: PlanPayload },
 }
 
 /// Flattened plan data for the desktop frontend.
-/// We avoid sending the full `PraxisPlan` (which includes Budget, Domain
+/// We avoid sending the full `HqPlan` (which includes Budget, Domain
 /// enums, etc.) and instead project into a frontend-friendly shape.
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -303,15 +316,15 @@ pub fn emit_backend_event<R: tauri::Runtime>(
     }
 }
 
-/// Convert a `PraxisEvent` to a Tauri `AgentEvent` payload.
-pub fn from_praxis_event(event: &ava_praxis::PraxisEvent) -> Option<AgentEvent> {
-    use ava_praxis::PraxisEvent as PE;
+/// Convert a `HqEvent` to a Tauri `AgentEvent` payload.
+pub fn from_hq_event(event: &ava_hq::HqEvent) -> Option<AgentEvent> {
+    use ava_hq::HqEvent as PE;
     match event {
         PE::WorkerStarted {
             worker_id,
             lead,
             task_description,
-        } => Some(AgentEvent::PraxisWorkerStarted {
+        } => Some(AgentEvent::HqWorkerStarted {
             worker_id: worker_id.to_string(),
             lead: lead.clone(),
             task: task_description.clone(),
@@ -320,12 +333,12 @@ pub fn from_praxis_event(event: &ava_praxis::PraxisEvent) -> Option<AgentEvent> 
             worker_id,
             turn,
             max_turns,
-        } => Some(AgentEvent::PraxisWorkerProgress {
+        } => Some(AgentEvent::HqWorkerProgress {
             worker_id: worker_id.to_string(),
             turn: *turn,
             max_turns: *max_turns,
         }),
-        PE::WorkerToken { worker_id, token } => Some(AgentEvent::PraxisWorkerToken {
+        PE::WorkerToken { worker_id, token } => Some(AgentEvent::HqWorkerToken {
             worker_id: worker_id.to_string(),
             token: token.clone(),
         }),
@@ -333,12 +346,12 @@ pub fn from_praxis_event(event: &ava_praxis::PraxisEvent) -> Option<AgentEvent> 
             worker_id,
             success,
             turns,
-        } => Some(AgentEvent::PraxisWorkerCompleted {
+        } => Some(AgentEvent::HqWorkerCompleted {
             worker_id: worker_id.to_string(),
             success: *success,
             turns: *turns,
         }),
-        PE::WorkerFailed { worker_id, error } => Some(AgentEvent::PraxisWorkerFailed {
+        PE::WorkerFailed { worker_id, error } => Some(AgentEvent::HqWorkerFailed {
             worker_id: worker_id.to_string(),
             error: error.clone(),
         }),
@@ -346,7 +359,7 @@ pub fn from_praxis_event(event: &ava_praxis::PraxisEvent) -> Option<AgentEvent> 
             total_workers,
             succeeded,
             failed,
-        } => Some(AgentEvent::PraxisAllComplete {
+        } => Some(AgentEvent::HqAllComplete {
             total_workers: *total_workers,
             succeeded: *succeeded,
             failed: *failed,
@@ -356,7 +369,7 @@ pub fn from_praxis_event(event: &ava_praxis::PraxisEvent) -> Option<AgentEvent> 
             succeeded,
             failed,
             total_turns,
-        } => Some(AgentEvent::PraxisSummary {
+        } => Some(AgentEvent::HqSummary {
             total_workers: *total_workers,
             succeeded: *succeeded,
             failed: *failed,
@@ -367,7 +380,7 @@ pub fn from_praxis_event(event: &ava_praxis::PraxisEvent) -> Option<AgentEvent> 
             phase_count,
             phase_name,
             role,
-        } => Some(AgentEvent::PraxisPhaseStarted {
+        } => Some(AgentEvent::HqPhaseStarted {
             phase_index: *phase_index,
             phase_count: *phase_count,
             phase_name: phase_name.clone(),
@@ -378,13 +391,13 @@ pub fn from_praxis_event(event: &ava_praxis::PraxisEvent) -> Option<AgentEvent> 
             phase_name,
             turns,
             output_preview,
-        } => Some(AgentEvent::PraxisPhaseCompleted {
+        } => Some(AgentEvent::HqPhaseCompleted {
             phase_index: *phase_index,
             phase_name: phase_name.clone(),
             turns: *turns,
             output_preview: output_preview.clone(),
         }),
-        PE::SpecCreated { spec_id, title } => Some(AgentEvent::PraxisSpecCreated {
+        PE::SpecCreated { spec_id, title } => Some(AgentEvent::HqSpecCreated {
             spec_id: spec_id.to_string(),
             title: title.clone(),
         }),
@@ -393,7 +406,7 @@ pub fn from_praxis_event(event: &ava_praxis::PraxisEvent) -> Option<AgentEvent> 
             kind,
             producer,
             title,
-        } => Some(AgentEvent::PraxisArtifactCreated {
+        } => Some(AgentEvent::HqArtifactCreated {
             artifact_id: artifact_id.to_string(),
             kind: kind.clone(),
             producer: producer.clone(),
@@ -402,16 +415,38 @@ pub fn from_praxis_event(event: &ava_praxis::PraxisEvent) -> Option<AgentEvent> 
         PE::ConflictDetected {
             workers,
             overlapping_files,
-        } => Some(AgentEvent::PraxisConflictDetected {
+        } => Some(AgentEvent::HqConflictDetected {
             workers: (workers.0.to_string(), workers.1.to_string()),
             overlapping_files: overlapping_files.clone(),
         }),
+        PE::ExternalWorkerStarted {
+            worker_id,
+            agent_name,
+            ..
+        } => Some(AgentEvent::HqExternalWorkerStarted {
+            worker_id: worker_id.to_string(),
+            agent_name: agent_name.clone(),
+        }),
+        PE::ExternalWorkerCompleted {
+            worker_id,
+            success,
+            cost_usd,
+            ..
+        } => Some(AgentEvent::HqExternalWorkerCompleted {
+            worker_id: worker_id.to_string(),
+            success: *success,
+            cost_usd: *cost_usd,
+        }),
+        PE::ExternalWorkerFailed { worker_id, error } => Some(AgentEvent::HqExternalWorkerFailed {
+            worker_id: worker_id.to_string(),
+            error: error.clone(),
+        }),
         PE::PlanCreated { plan } => {
-            let domain_to_action = |d: &ava_praxis::Domain| -> String {
+            let domain_to_action = |d: &ava_hq::Domain| -> String {
                 match d {
-                    ava_praxis::Domain::Research => "research".to_string(),
-                    ava_praxis::Domain::QA => "test".to_string(),
-                    ava_praxis::Domain::Debug => "review".to_string(),
+                    ava_hq::Domain::Research => "research".to_string(),
+                    ava_hq::Domain::QA => "test".to_string(),
+                    ava_hq::Domain::Debug => "review".to_string(),
                     _ => "implement".to_string(),
                 }
             };
@@ -441,12 +476,9 @@ pub fn from_praxis_event(event: &ava_praxis::PraxisEvent) -> Option<AgentEvent> 
     }
 }
 
-/// Emit a `PraxisEvent` to all Tauri windows via the app handle.
-pub fn emit_praxis_event<R: tauri::Runtime>(
-    handle: &tauri::AppHandle<R>,
-    event: &ava_praxis::PraxisEvent,
-) {
-    if let Some(payload) = from_praxis_event(event) {
+/// Emit a `HqEvent` to all Tauri windows via the app handle.
+pub fn emit_hq_event<R: tauri::Runtime>(handle: &tauri::AppHandle<R>, event: &ava_hq::HqEvent) {
+    if let Some(payload) = from_hq_event(event) {
         let _ = handle.emit("agent-event", payload);
     }
 }

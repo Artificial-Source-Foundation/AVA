@@ -1,0 +1,1 @@
+ALTER TABLE hq_agents ADD COLUMN total_cost_usd REAL NOT NULL DEFAULT 0;

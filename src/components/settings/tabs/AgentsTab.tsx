@@ -106,7 +106,7 @@ export const AgentsTab: Component = () => {
       <SettingsCard
         icon={Users}
         title="Agent Presets"
-        description="Configure agent roles, tools, and system prompts"
+        description="Configure HQ agent roles, provider/model overrides, and system prompts used by the desktop runtime"
       >
         <div
           class="flex -mx-6 -mb-6 rounded-b-[var(--radius-xl)] overflow-hidden"

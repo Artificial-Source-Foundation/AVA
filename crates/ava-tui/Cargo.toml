@@ -34,7 +34,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 ava-acp = { path = "../ava-acp" }
 ava-agent = { path = "../ava-agent" }
-ava-praxis = { path = "../ava-praxis" }
+ava-hq = { path = "../ava-hq" }
 ava-llm = { path = "../ava-llm" }
 ava-tools = { path = "../ava-tools" }
 ava-session = { path = "../ava-session" }

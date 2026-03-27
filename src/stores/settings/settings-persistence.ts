@@ -15,6 +15,39 @@ import { DEFAULT_SETTINGS } from './settings-defaults'
 import { mergeWithDefaults } from './settings-hydration'
 import type { AppSettings } from './settings-types'
 
+interface HqAgentOverridePayload {
+  id: string
+  enabled: boolean
+  modelSpec: string
+  systemPrompt: string
+}
+
+function buildHqAgentOverrides(settings: AppSettings): HqAgentOverridePayload[] {
+  const providerDefaultModel = new Map(
+    settings.providers.map((provider) => [provider.id, provider.defaultModel])
+  )
+  return settings.agents
+    .filter((agent) => agent.tier != null)
+    .map((agent) => {
+      const modelSpec = agent.model
+        ? agent.provider
+          ? `${agent.provider}/${agent.model}`
+          : agent.model
+        : agent.provider
+          ? providerDefaultModel.get(agent.provider)
+            ? `${agent.provider}/${providerDefaultModel.get(agent.provider)}`
+            : ''
+          : ''
+
+      return {
+        id: agent.id,
+        enabled: agent.enabled,
+        modelSpec,
+        systemPrompt: agent.systemPrompt ?? '',
+      }
+    })
+}
+
 // ============================================================================
 // Credential Sync — bridges Settings UI → Core credential store
 // ============================================================================
@@ -123,6 +156,10 @@ export function pushSettingsToCore(s: AppSettings): void {
     reasoningEffort: s.generation.reasoningEffort,
     maxTurns: s.agentLimits.agentMaxTurns,
     temperature: s.generation.temperature,
+  })
+
+  invoke('sync_hq_agent_overrides', { overrides: buildHqAgentOverrides(s) }).catch((err) => {
+    logWarn('settings', 'HQ agent override sync failed', err)
   })
 }
 

@@ -51,6 +51,36 @@ pub fn route_summary(session: &Session) -> Option<String> {
     Some(summary)
 }
 
+pub fn delegation_summary(session: &Session) -> Option<String> {
+    let delegation = session.metadata.get("delegation")?.as_object()?;
+    let agent_type = delegation.get("agentType").and_then(|value| value.as_str());
+    let provider = delegation.get("provider").and_then(|value| value.as_str());
+    let resumed = delegation
+        .get("resumed")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false);
+    let outcome = delegation.get("outcome").and_then(|value| value.as_str());
+
+    let mut parts = Vec::new();
+    if let Some(agent_type) = agent_type {
+        parts.push(agent_type.to_string());
+    }
+    if let Some(provider) = provider {
+        parts.push(format!("via {provider}"));
+    }
+    if resumed {
+        parts.push("resumed".to_string());
+    }
+    if let Some(outcome) = outcome {
+        parts.push(outcome.to_string());
+    }
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join(" "))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -88,6 +118,23 @@ mod tests {
         assert_eq!(
             route_summary(&session).as_deref(),
             Some("cheap route via openai/gpt-4o-mini (configured)")
+        );
+    }
+
+    #[test]
+    fn parses_delegation_summary_fields() {
+        let session = Session::new().with_metadata(serde_json::json!({
+            "delegation": {
+                "agentType": "review",
+                "provider": "opencode",
+                "resumed": true,
+                "outcome": "success"
+            }
+        }));
+
+        assert_eq!(
+            delegation_summary(&session).as_deref(),
+            Some("review via opencode resumed success")
         );
     }
 }

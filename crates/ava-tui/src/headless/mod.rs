@@ -2,12 +2,9 @@ use crate::config::cli::CliArgs;
 use color_eyre::eyre::{eyre, Result};
 use tracing::instrument;
 
-mod common;
 mod input;
-mod multi_agent;
 mod single;
 mod watch;
-mod workflow;
 
 #[cfg(feature = "voice")]
 mod voice;
@@ -47,14 +44,6 @@ pub async fn run_headless(cli: CliArgs) -> Result<()> {
         .as_ref()
         .ok_or_else(|| eyre!("No goal provided. Usage: ava \"your goal here\""))?
         .clone();
-
-    if let Some(workflow_name) = cli.workflow.clone() {
-        return workflow::run_workflow(cli, &goal, &workflow_name).await;
-    }
-
-    if cli.multi_agent {
-        return multi_agent::run_multi_agent(cli, &goal).await;
-    }
 
     single::run_single_agent(cli, &goal).await
 }

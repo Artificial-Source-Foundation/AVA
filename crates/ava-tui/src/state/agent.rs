@@ -45,6 +45,14 @@ pub struct SubAgentInfo {
     pub session_messages: Vec<crate::state::messages::UiMessage>,
     /// Provider powering this sub-agent (e.g. "claude-code"). `None` means native AVA.
     pub provider: Option<String>,
+    /// Whether this sub-agent resumed a prior external session.
+    pub resumed: bool,
+    /// Total delegated cost in USD once complete.
+    pub cost_usd: Option<f64>,
+    /// Total input tokens consumed once complete.
+    pub input_tokens: Option<usize>,
+    /// Total output tokens consumed once complete.
+    pub output_tokens: Option<usize>,
 }
 
 /// Agent execution mode — determines tool access and prompt behavior.
@@ -52,8 +60,7 @@ pub struct SubAgentInfo {
 pub enum AgentMode {
     #[default]
     Code, // Full tool access, standard execution
-    Plan,   // Read-only tools only, analysis/planning
-    Praxis, // Multi-agent orchestration via Praxis
+    Plan, // Read-only tools only, analysis/planning
 }
 
 impl AgentMode {
@@ -61,23 +68,20 @@ impl AgentMode {
         match self {
             Self::Code => "Code",
             Self::Plan => "Plan",
-            Self::Praxis => "Praxis",
         }
     }
 
     pub fn cycle_next(&self) -> Self {
         match self {
             Self::Code => Self::Plan,
-            Self::Plan => Self::Praxis,
-            Self::Praxis => Self::Code,
+            Self::Plan => Self::Code,
         }
     }
 
     pub fn cycle_prev(&self) -> Self {
         match self {
-            Self::Code => Self::Praxis,
+            Self::Code => Self::Plan,
             Self::Plan => Self::Code,
-            Self::Praxis => Self::Plan,
         }
     }
 
@@ -85,14 +89,6 @@ impl AgentMode {
     pub fn prompt_suffix(&self) -> Option<&'static str> {
         match self {
             Self::Code => None,
-            Self::Praxis => Some(
-                "You are in Praxis mode — multi-agent orchestration. Use the task tool to decompose \
-                 complex goals into sub-tasks and delegate them to sub-agents. Each sub-agent runs \
-                 independently with its own context and tool access. Coordinate results across \
-                 sub-agents and synthesize their outputs into a coherent solution.\n\n\
-                 Prefer decomposition: break large goals into 2-5 focused sub-tasks rather than \
-                 attempting everything in a single pass."
-            ),
             Self::Plan => Some(
                 "You are in Plan mode. Your job is to analyze the codebase and create a structured plan.\n\n\
                  **Available tools**: read, glob, grep, web_fetch, web_search, git_read, bash (read-only \
@@ -684,7 +680,6 @@ impl AgentState {
         let target_model = match mode {
             AgentMode::Plan => project_state.plan_model.clone(),
             AgentMode::Code => project_state.code_model.clone(),
-            AgentMode::Praxis => None,
         };
         if let Some(stack) = &self.stack {
             let stack = stack.clone();
@@ -825,6 +820,10 @@ mod tests {
             session_id: None,
             session_messages: Vec::new(),
             provider: None,
+            resumed: false,
+            cost_usd: None,
+            input_tokens: None,
+            output_tokens: None,
         });
 
         state.clear_session_metrics();

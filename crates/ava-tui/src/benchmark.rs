@@ -124,8 +124,14 @@ pub struct BenchmarkResult {
     pub subagent_calls_count: usize,
     /// Ordered list of sub-agent types used during the task.
     pub subagent_types: Vec<String>,
+    /// Ordered list of external providers used by delegated runs when known.
+    #[serde(default)]
+    pub subagent_providers: Vec<String>,
     /// Cost attributable to hidden sub-agents.
     pub subagent_cost_usd: f64,
+    /// Number of delegated runs that resumed an existing external session.
+    #[serde(default)]
+    pub resumed_subagent_calls_count: usize,
     // Raw model output for judge evaluation
     #[serde(skip_serializing_if = "Option::is_none")]
     pub raw_output: Option<String>,
@@ -139,6 +145,9 @@ pub struct BenchmarkResult {
     /// Ratio of expected helper usage to actual helper usage (1.0 = ideal).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub delegation_efficiency_score: Option<f64>,
+    /// Closed-loop score for whether delegation helped the task outcome.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub delegation_quality_score: Option<f64>,
     /// Hash of the code output for variance tracking across runs.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub consistency_hash: Option<String>,
@@ -169,10 +178,22 @@ impl BenchmarkResult {
             parts.push(format!("mix: {mix}"));
         }
 
+        if let Some(provider_mix) = format_subagent_mix(&self.subagent_providers) {
+            parts.push(format!("providers: {provider_mix}"));
+        }
+
+        if self.resumed_subagent_calls_count > 0 {
+            parts.push(format!("resumed {}", self.resumed_subagent_calls_count));
+        }
+
         parts.push(format!("delegated cost ${:.4}", self.subagent_cost_usd));
 
         if let Some(score) = self.delegation_efficiency_score {
             parts.push(format!("efficiency {:.2}", score));
+        }
+
+        if let Some(score) = self.delegation_quality_score {
+            parts.push(format!("quality {:.2}", score));
         }
 
         Some(parts.join(" | "))
@@ -193,6 +214,52 @@ pub struct BenchmarkReport {
     /// Mean delegation efficiency across tasks that expect helper usage.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub aggregate_delegation_efficiency: Option<f64>,
+    /// Mean closed-loop delegation quality across runs that used helpers.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub aggregate_delegation_quality: Option<f64>,
+}
+
+pub(crate) fn compute_delegation_quality_score(
+    quality_pass: bool,
+    compile_success: Option<bool>,
+    judge_scores: Option<&JudgeScores>,
+    subagent_calls_count: usize,
+    resumed_subagent_calls_count: usize,
+    subagent_cost_usd: f64,
+    total_cost_usd: f64,
+) -> Option<f64> {
+    if subagent_calls_count == 0 {
+        return None;
+    }
+
+    let outcome_score = if let Some(compiled) = compile_success {
+        if compiled {
+            1.0
+        } else {
+            0.2
+        }
+    } else if quality_pass {
+        1.0
+    } else {
+        0.3
+    };
+
+    let judge_bonus = judge_scores
+        .map(|scores| (scores.average / 10.0).clamp(0.0, 1.0))
+        .unwrap_or(outcome_score);
+    let resume_bonus = if resumed_subagent_calls_count > 0 {
+        0.1
+    } else {
+        0.0
+    };
+    let delegated_cost_ratio = if total_cost_usd > 0.0 {
+        (subagent_cost_usd / total_cost_usd).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    let cost_penalty = delegated_cost_ratio * 0.25;
+
+    Some((outcome_score * 0.6 + judge_bonus * 0.4 + resume_bonus - cost_penalty).clamp(0.0, 1.2))
 }
 
 fn format_subagent_mix(types: &[String]) -> Option<String> {
@@ -459,11 +526,14 @@ pub async fn run_benchmark(
                         self_corrections: 0,
                         subagent_calls_count: 0,
                         subagent_types: Vec::new(),
+                        subagent_providers: Vec::new(),
                         subagent_cost_usd: 0.0,
+                        resumed_subagent_calls_count: 0,
                         raw_output: None,
                         cost_per_task_usd: None,
                         tool_efficiency_score: None,
                         delegation_efficiency_score: None,
+                        delegation_quality_score: None,
                         consistency_hash: None,
                     });
                 }
@@ -512,12 +582,23 @@ pub async fn run_benchmark(
         None
     };
 
+    let delegation_quality_scores: Vec<f64> = results
+        .iter()
+        .filter_map(|r| r.delegation_quality_score)
+        .collect();
+    let aggregate_delegation_quality = if !delegation_quality_scores.is_empty() {
+        Some(delegation_quality_scores.iter().sum::<f64>() / delegation_quality_scores.len() as f64)
+    } else {
+        None
+    };
+
     let report = BenchmarkReport {
         timestamp: chrono::Utc::now().to_rfc3339(),
         results,
         aggregate_cost_per_resolved,
         aggregate_tool_efficiency,
         aggregate_delegation_efficiency,
+        aggregate_delegation_quality,
     };
 
     // Print formatted table
@@ -593,7 +674,9 @@ async fn run_single_task(
     let mut self_corrections: usize = 0;
     let mut subagent_calls_count: usize = 0;
     let mut subagent_types: Vec<String> = Vec::new();
+    let mut subagent_providers: Vec<String> = Vec::new();
     let mut subagent_cost_usd: f64 = 0.0;
+    let mut resumed_subagent_calls_count: usize = 0;
     let mut last_tool_was_error = false;
     let mut in_assistant_turn = false;
 
@@ -639,10 +722,18 @@ async fn run_single_task(
             AgentEvent::SubAgentComplete {
                 description,
                 cost_usd: sub_cost,
+                provider,
+                resumed,
                 ..
             } => {
                 subagent_calls_count += 1;
                 subagent_types.push(subagent_type_from_description(&description));
+                if let Some(provider) = provider {
+                    subagent_providers.push(provider);
+                }
+                if resumed {
+                    resumed_subagent_calls_count += 1;
+                }
                 subagent_cost_usd += sub_cost;
                 cost_usd += sub_cost;
             }
@@ -709,6 +800,16 @@ async fn run_single_task(
         None
     };
 
+    let delegation_quality_score = compute_delegation_quality_score(
+        quality_pass,
+        compile_success,
+        None,
+        subagent_calls_count,
+        resumed_subagent_calls_count,
+        subagent_cost_usd,
+        cost_usd,
+    );
+
     // consistency_hash: hash of the output for variance tracking across runs
     let consistency_hash = if !total_output.trim().is_empty() {
         let mut hasher = DefaultHasher::new();
@@ -743,11 +844,14 @@ async fn run_single_task(
         self_corrections,
         subagent_calls_count,
         subagent_types,
+        subagent_providers,
         subagent_cost_usd,
+        resumed_subagent_calls_count,
         raw_output: Some(total_output),
         cost_per_task_usd,
         tool_efficiency_score,
         delegation_efficiency_score,
+        delegation_quality_score,
         consistency_hash,
     })
 }
@@ -1258,6 +1362,15 @@ async fn judge_outputs(
                 average,
                 evaluations,
             });
+            result.delegation_quality_score = compute_delegation_quality_score(
+                result.quality_pass,
+                result.compile_success,
+                result.judge_scores.as_ref(),
+                result.subagent_calls_count,
+                result.resumed_subagent_calls_count,
+                result.subagent_cost_usd,
+                result.cost_usd,
+            );
         }
     }
 }
@@ -1767,6 +1880,10 @@ fn print_results_table(report: &BenchmarkReport, suite: BenchmarkSuite) {
 
     if let Some(eff) = report.aggregate_delegation_efficiency {
         summary.push_str(&format!(", delegation efficiency: {:.2}", eff));
+    }
+
+    if let Some(score) = report.aggregate_delegation_quality {
+        summary.push_str(&format!(", delegation quality: {:.2}", score));
     }
 
     println!("{}", summary);

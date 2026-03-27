@@ -392,11 +392,11 @@ pub(super) async fn run_single_agent(cli: CliArgs, goal: &str) -> Result<()> {
 /// Run a code review on working directory changes after the agent completes.
 /// Returns `Some(findings_text)` if actionable issues found, `None` otherwise.
 async fn run_post_completion_review(cli: &CliArgs) -> Option<String> {
-    use ava_platform::StandardPlatform;
-    use ava_praxis::review::{
+    use ava_hq::review::{
         build_review_system_prompt, collect_diff, format_text, parse_review_output,
         run_review_agent, DiffMode, Severity,
     };
+    use ava_platform::StandardPlatform;
 
     eprintln!("\n[review] Running post-completion code review...");
 

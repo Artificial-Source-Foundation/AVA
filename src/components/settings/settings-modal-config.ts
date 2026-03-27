@@ -1,6 +1,8 @@
 import {
+  BarChart3,
   Bot,
   Brain,
+  Building2,
   Code2,
   Cpu,
   Info,
@@ -29,6 +31,8 @@ export type SettingsTab =
   | 'skills-commands'
   | 'llm'
   | 'team'
+  | 'hq'
+  | 'usage'
   | 'developer'
   | 'about'
 
@@ -84,6 +88,12 @@ export const tabGroups: TabGroup[] = [
         keywords: ['api', 'key', 'openai', 'anthropic', 'google', 'connection'],
       },
       {
+        id: 'usage',
+        label: 'Usage',
+        icon: BarChart3,
+        keywords: ['usage', 'quota', 'subscription', 'credits', 'plan', 'limit', 'balance'],
+      },
+      {
         id: 'agents',
         label: 'Agents',
         icon: Bot,
@@ -112,16 +122,13 @@ export const tabGroups: TabGroup[] = [
         id: 'team',
         label: 'Team',
         icon: Users,
-        keywords: [
-          'team',
-          'praxis',
-          'multi-agent',
-          'director',
-          'lead',
-          'worker',
-          'scout',
-          'delegation',
-        ],
+        keywords: ['team', 'multi-agent', 'lead', 'worker', 'scout', 'delegation'],
+      },
+      {
+        id: 'hq',
+        label: 'HQ',
+        icon: Building2,
+        keywords: ['hq', 'director', 'epic', 'kanban', 'orchestration', 'tone', 'review', 'cost'],
       },
     ],
   },

@@ -43,6 +43,9 @@ impl SessionListState {
             if let Some(route) = session_route_detail(s) {
                 detail_parts.push(route);
             }
+            if let Some(delegation) = session_delegation_detail(s) {
+                detail_parts.push(delegation);
+            }
             detail_parts.push(relative);
             let detail = detail_parts.join("  ");
             SelectItem {
@@ -121,6 +124,11 @@ fn session_route_detail(session: &Session) -> Option<String> {
     })
 }
 
+fn session_delegation_detail(session: &Session) -> Option<String> {
+    crate::session_summary::delegation_summary(session)
+        .map(|summary| format!("delegation: {summary}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -145,6 +153,25 @@ mod tests {
         let detail = &state.list.items[1].detail;
         assert!(detail.contains("$0.42/$1.00"));
         assert!(detail.contains("cheap route"));
+    }
+
+    #[test]
+    fn session_details_include_delegation_summary() {
+        let mut state = SessionListState::default();
+        let session = Session::new().with_metadata(serde_json::json!({
+            "title": "Delegated run",
+            "delegation": {
+                "agentType": "review",
+                "provider": "claude-code",
+                "resumed": true,
+                "outcome": "success"
+            }
+        }));
+
+        state.update_sessions(&[session]);
+
+        let detail = &state.list.items[1].detail;
+        assert!(detail.contains("delegation: review via claude-code resumed success"));
     }
 
     #[test]

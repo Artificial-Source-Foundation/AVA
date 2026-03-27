@@ -119,6 +119,17 @@ pub enum WebAgentEvent {
     TodoUpdate { todos: Vec<TodoItemFrontend> },
     #[serde(rename = "plan_step_complete")]
     PlanStepComplete { step_id: String },
+    #[serde(rename = "subagent_complete")]
+    SubAgentComplete {
+        session_id: String,
+        description: String,
+        input_tokens: usize,
+        output_tokens: usize,
+        cost_usd: f64,
+        agent_type: Option<String>,
+        provider: Option<String>,
+        resumed: bool,
+    },
     #[serde(rename = "streaming_edit_progress")]
     StreamingEditProgress {
         tool_name: String,
@@ -281,7 +292,27 @@ pub fn convert_agent_event(event: &ava_agent::agent_loop::AgentEvent) -> Option<
             file_path: file_path.clone(),
             bytes_received: *bytes_received,
         }),
-        // ToolStats, DiffPreview, SubAgentComplete have no direct frontend representation.
+        BE::SubAgentComplete {
+            session_id,
+            description,
+            input_tokens,
+            output_tokens,
+            cost_usd,
+            agent_type,
+            provider,
+            resumed,
+            ..
+        } => Some(WebAgentEvent::SubAgentComplete {
+            session_id: session_id.clone(),
+            description: description.clone(),
+            input_tokens: *input_tokens,
+            output_tokens: *output_tokens,
+            cost_usd: *cost_usd,
+            agent_type: agent_type.clone(),
+            provider: provider.clone(),
+            resumed: *resumed,
+        }),
+        // ToolStats and DiffPreview have no direct frontend representation.
         _ => None,
     }
 }

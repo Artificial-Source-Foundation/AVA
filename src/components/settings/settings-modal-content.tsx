@@ -7,6 +7,7 @@ import { AgentsTab } from './tabs/AgentsTab'
 import { AppearanceTab } from './tabs/AppearanceTab'
 import { BehaviorTab } from './tabs/BehaviorTab'
 import { DeveloperTab } from './tabs/DeveloperTab'
+import { HqTab } from './tabs/HqTab'
 import { type Keybinding, KeybindingsTab } from './tabs/KeybindingsTab'
 import { LLMTab } from './tabs/LLMTab'
 import { type MCPServer, MCPServersTab } from './tabs/MCPServersTab'
@@ -15,6 +16,7 @@ import { PluginsTab } from './tabs/PluginsTab'
 import { ProvidersTab } from './tabs/providers/providers-tab'
 import { SkillsAndCommandsTab } from './tabs/SkillsAndCommandsTab'
 import { TeamTab } from './tabs/TeamTab'
+import { UsageTab } from './tabs/UsageTab'
 
 interface SettingsModalContentProps {
   activeTab: () => SettingsTab
@@ -88,6 +90,10 @@ export const SettingsModalContent: Component<SettingsModalContentProps> = (props
         />
       </Show>
 
+      <Show when={props.activeTab() === 'usage'}>
+        <UsageTab />
+      </Show>
+
       <Show when={props.activeTab() === 'permissions-trust'}>
         <PermissionsAndTrustTab />
       </Show>
@@ -98,6 +104,10 @@ export const SettingsModalContent: Component<SettingsModalContentProps> = (props
 
       <Show when={props.activeTab() === 'team'}>
         <TeamTab />
+      </Show>
+
+      <Show when={props.activeTab() === 'hq'}>
+        <HqTab />
       </Show>
 
       <Show when={props.activeTab() === 'llm'}>

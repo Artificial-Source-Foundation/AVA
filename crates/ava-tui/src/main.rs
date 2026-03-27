@@ -196,7 +196,7 @@ fn init_logging(is_tui: bool, verbose: u8) -> tracing_appender::non_blocking::Wo
     let file_filter = tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
         tracing_subscriber::EnvFilter::new(
             "info,ava_agent=debug,ava_llm=debug,ava_tui=debug,ava_tools=debug,\
-             ava_praxis=debug,ava_config=debug,ava_session=debug,ava_context=debug,\
+             ava_hq=debug,ava_config=debug,ava_session=debug,ava_context=debug,\
              ava_permissions=info,ava_mcp=info,ava_auth=info,ava_platform=info",
         )
     });

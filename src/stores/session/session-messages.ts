@@ -14,6 +14,7 @@ import {
 } from '../../services/database'
 import { logError } from '../../services/logger'
 import type { Message, MessageError } from '../../types'
+import { createLatestRequestGate } from './request-gate'
 import {
   currentSession,
   messages,
@@ -36,21 +37,31 @@ import {
 // ============================================================================
 
 const pendingInserts = new Map<string, Promise<void>>()
+const loadMessagesGate = createLatestRequestGate()
 
 // ============================================================================
 // Message Management
 // ============================================================================
 
 export async function loadSessionMessages(sessionId: string): Promise<void> {
+  const requestToken = loadMessagesGate.begin()
   setIsLoadingMessages(true)
   try {
     const dbMessages = await getMessages(sessionId)
+    if (!loadMessagesGate.isCurrent(requestToken) || currentSession()?.id !== sessionId) {
+      return
+    }
     setMessages(dbMessages)
   } catch (err) {
+    if (!loadMessagesGate.isCurrent(requestToken) || currentSession()?.id !== sessionId) {
+      return
+    }
     logError('Session', 'Failed to load messages', err)
     setMessages([])
   } finally {
-    setIsLoadingMessages(false)
+    if (loadMessagesGate.isCurrent(requestToken) && currentSession()?.id === sessionId) {
+      setIsLoadingMessages(false)
+    }
   }
 }
 

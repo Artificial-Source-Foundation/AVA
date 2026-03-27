@@ -9,6 +9,7 @@
 6. **Desktop streaming hardening** — tool events now carry stable IDs through the Tauri bridge, approval state can target the exact tool call, and the browser API client now unwraps GET args cleanly without leaking path params back into the query string.
 7. **Desktop reconnect hardening** — browser-mode WebSocket reconnects now ignore stale socket callbacks, trajectory events keep stable timestamps once ingested, and targeted frontend tests cover reconnect/event ordering regressions.
 8. **Desktop state lifecycle hardening** — streaming event history is now bounded to prevent long-session growth, and session store window listeners are rebound safely so reloads do not accumulate duplicate handlers.
+9. **Desktop session race hardening** — stale async session/message loads are now ignored during rapid switching, and remaining global desktop listeners use replaceable bindings so HMR does not stack duplicate handlers.
 7. **Instruction/delegation DX pass** — `.ava/rules` and contextual `AGENTS.md` now activate on direct file work without repeated spam, hidden subagents only unlock on broader tasks with explicit budgets and read-only specialist profiles, benchmark support is split into workspace/validation modules, and benchmark output now surfaces delegation-heavy scenarios and helper-cost details more clearly.
 
 ## Critical

@@ -4,7 +4,7 @@
  * Branching operations (duplicate/fork/branch) are in session-branching.ts.
  */
 
-import { createMemo } from 'solid-js'
+import { batch, createMemo } from 'solid-js'
 import { DEFAULTS, STORAGE_KEYS } from '../../config/constants'
 import { log } from '../../lib/logger'
 import { notifySessionOpened } from '../../services/core-bridge'
@@ -26,6 +26,7 @@ import { logDebug, logError, logInfo, logWarn } from '../../services/logger'
 import type { Session, SessionWithStats } from '../../types'
 import { useProject } from '../project'
 import { getLastSessionForProject, setLastSessionForProject } from '../session-persistence'
+import { createLatestRequestGate } from './request-gate'
 import {
   archivedSessions,
   currentSession,
@@ -64,19 +65,31 @@ export const getSessionTree = createMemo(() => {
   return { roots, childMap }
 })
 
+const sessionListGate = createLatestRequestGate()
+const sessionSwitchGate = createLatestRequestGate()
+
 export async function loadSessionsForCurrentProject(): Promise<void> {
   const { currentProject } = useProject()
   const projectId = currentProject()?.id
+  const requestToken = sessionListGate.begin()
   setIsLoadingSessions(true)
   try {
     const dbSessions = await getSessionsWithStats(projectId)
+    if (!sessionListGate.isCurrent(requestToken) || currentProject()?.id !== projectId) {
+      return
+    }
     setSessions(dbSessions)
     logDebug('session', 'Loaded sessions', { count: dbSessions.length })
   } catch (err) {
+    if (!sessionListGate.isCurrent(requestToken) || currentProject()?.id !== projectId) {
+      return
+    }
     logError('Session', 'Failed to load sessions', err)
     setSessions([])
   } finally {
-    setIsLoadingSessions(false)
+    if (sessionListGate.isCurrent(requestToken)) {
+      setIsLoadingSessions(false)
+    }
   }
 }
 
@@ -138,18 +151,45 @@ export async function switchSession(id: string): Promise<void> {
     return
   }
 
+  const requestToken = sessionSwitchGate.begin()
   setEditingMessageId(null)
   setRetryingMessageId(null)
   setCurrentSession(session)
+  batch(() => {
+    setMessages([])
+    setAgents([])
+    setFileOperations([])
+    setTerminalExecutions([])
+    setMemoryItems([])
+    setCheckpoints([])
+  })
 
   // Switch to per-session log file
   import('../../lib/logger').then((m) => m.setSessionLogFile(id)).catch(() => {})
 
   setIsLoadingMessages(true)
   try {
-    const dbMessages = await getMessages(id)
+    const [dbMessages, dbAgents, dbFileOps, dbTerminalExecs, dbMemItems, dbCheckpoints] =
+      await Promise.all([
+        getMessages(id),
+        getAgents(id),
+        getFileOperations(id),
+        getTerminalExecutions(id),
+        getMemoryItems(id),
+        getCheckpoints(id),
+      ])
+    if (!sessionSwitchGate.isCurrent(requestToken) || currentSession()?.id !== id) {
+      return
+    }
     log.debug('session', `switchSession: loaded ${dbMessages.length} messages from DB for ${id}`)
-    setMessages(dbMessages)
+    batch(() => {
+      setMessages(dbMessages)
+      setAgents(dbAgents)
+      setFileOperations(dbFileOps)
+      setTerminalExecutions(dbTerminalExecs)
+      setMemoryItems(dbMemItems)
+      setCheckpoints(dbCheckpoints)
+    })
     log.info('session', 'Session loaded', { id, messageCount: dbMessages.length })
     logInfo('session', 'Session switched', {
       from: fromSessionId ?? 'none',
@@ -157,32 +197,22 @@ export async function switchSession(id: string): Promise<void> {
       messageCount: dbMessages.length,
     })
   } catch (err) {
+    if (!sessionSwitchGate.isCurrent(requestToken) || currentSession()?.id !== id) {
+      return
+    }
     logError('Session', 'Failed to load messages', err)
-    setMessages([])
+    batch(() => {
+      setMessages([])
+      setAgents([])
+      setFileOperations([])
+      setTerminalExecutions([])
+      setMemoryItems([])
+      setCheckpoints([])
+    })
   } finally {
-    setIsLoadingMessages(false)
-  }
-
-  try {
-    const [dbAgents, dbFileOps, dbTerminalExecs, dbMemItems, dbCheckpoints] = await Promise.all([
-      getAgents(id),
-      getFileOperations(id),
-      getTerminalExecutions(id),
-      getMemoryItems(id),
-      getCheckpoints(id),
-    ])
-    setAgents(dbAgents)
-    setFileOperations(dbFileOps)
-    setTerminalExecutions(dbTerminalExecs)
-    setMemoryItems(dbMemItems)
-    setCheckpoints(dbCheckpoints)
-  } catch (err) {
-    logError('Session', 'Failed to load session data', err)
-    setAgents([])
-    setFileOperations([])
-    setTerminalExecutions([])
-    setMemoryItems([])
-    setCheckpoints([])
+    if (sessionSwitchGate.isCurrent(requestToken) && currentSession()?.id === id) {
+      setIsLoadingMessages(false)
+    }
   }
 
   const { currentProject: getProject } = useProject()

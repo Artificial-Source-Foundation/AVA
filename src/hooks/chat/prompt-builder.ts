@@ -8,6 +8,7 @@
  * instructions are included in the system prompt.
  */
 
+import { installReplaceableWindowListener } from '../../lib/replaceable-window-listener'
 import { logInfo } from '../../services/logger'
 
 // Track whether instructions have been loaded for the current session.
@@ -17,11 +18,13 @@ let instructionsLoaded = false
 /** Stub event listener (replaces @ava/core-v2/extensions onEvent) */
 function _onInstructionsLoaded(): void {
   // Listen for DOM custom event instead of core-v2 event bus
-  if (typeof window !== 'undefined') {
-    window.addEventListener('ava:instructions-loaded', () => {
+  installReplaceableWindowListener('prompt-builder:instructions-loaded', (target) => {
+    const listener = () => {
       instructionsLoaded = true
-    })
-  }
+    }
+    target.addEventListener('ava:instructions-loaded', listener)
+    return () => target.removeEventListener('ava:instructions-loaded', listener)
+  })
 }
 _onInstructionsLoaded()
 

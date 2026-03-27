@@ -351,10 +351,10 @@ START=$(date +%s%N) && opencode run "goal" --model openai/gpt-5.4 --format json 
 
 When you complete a significant feature, bug fix, or refactor:
 
-1. **Update `docs/development/CHANGELOG.md`** — add entry under current version
-2. **Update `docs/development/backlog.md`** — mark completed items, add new ones
+1. **Update `docs/CHANGELOG.md`** — add entry under current version
+2. **Update `docs/backlog.md`** — mark completed items, add new ones
 3. **Update this file (`CLAUDE.md`)** if architecture, crate count, tool count, or conventions changed
-4. **Update `docs/architecture/crate-map.md`** if crates were added/removed
+4. **Update `docs/crate-map.md`** if crates were added/removed
 5. **Run `just check`** (or `cargo test --workspace && cargo clippy --workspace`) before committing
 
 Do NOT let docs drift from code. Every PR-worthy change should include doc updates.
@@ -363,14 +363,10 @@ Do NOT let docs drift from code. Every PR-worthy change should include doc updat
 
 1. `CLAUDE.md` (this file) -- architecture, conventions, commands
 2. `AGENTS.md` -- AI agent instructions for working on AVA
-3. `docs/README.md` -- documentation entry point with crate map
-4. `docs/codebase/` -- **complete codebase reference for all 21 crates, frontend, and plugins**
-5. `docs/plugins.md` -- TOML custom tools and MCP server guide
-6. `docs/architecture/crate-map.md` -- detailed crate dependency map
-7. `docs/architecture/plugin-system.md` -- power plugin system design
-8. `docs/development/CHANGELOG.md` -- version history
-9. `docs/development/roadmap.md` -- roadmap and sprint history
-10. `docs/development/backlog.md` -- open backlog items
-11. `docs/ideas/` -- archived feature designs (not implemented)
-
-**Quick links:** [Codebase docs](docs/codebase/README.md) • [Add a tool](docs/codebase/ava-tools.md) • [Add a provider](docs/codebase/ava-llm.md) • [Tauri commands](docs/codebase/tauri-commands.md) • [Plugins](docs/codebase/plugins.md)
+3. `docs/README.md` -- documentation entry point
+4. `docs/CHANGELOG.md` -- version history
+5. `docs/backlog.md` -- open backlog items
+6. `docs/crate-map.md` -- Rust crate dependency graph
+7. `docs/plugins.md` -- TOML custom tools and MCP server guide
+8. `docs/troubleshooting/` -- platform-specific fixes
+9. `docs/reference-code/` -- competitor source code (12 repos)

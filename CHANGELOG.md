@@ -18,7 +18,8 @@ All notable changes to AVA are documented in this file.
 - The docs tree is now much leaner: `docs/README.md` points at the small set of live references, stale duplicate docs were removed, and `CLAUDE.md` now points at the current doc locations.
 - The TUI is sturdier on long sessions and richer diff output: side-by-side tool diffs now pair multi-line replacements correctly, diffs without summary prefixes still render, message scrolling no longer truncates after 65k visual lines, and the message list avoids an extra full-vector drain on every frame.
 - The desktop frontend now tracks tool executions more reliably: Tauri emits real tool call IDs and approval events carry the originating tool call, so out-of-order tool results and repeated approvals no longer update the wrong card. The browser API bridge also unwraps GET args correctly, snake-cases query params, and avoids duplicating path params into the query string.
-- Benchmark infrastructure is cleaner and deeper: shared support helpers now own benchmark workspace prep, task fixtures, and tier-3 validation; benchmark runs now track hidden subagent usage/cost; and new scenarios cover file-scoped rule following plus delegation-heavy multi-file debugging.
+- Desktop streaming is more resilient across reconnects and long trajectories: stale WebSocket callbacks are ignored after reconnect, timeline events get stable timestamps at ingest time instead of being re-timestamped on every render, and targeted browser-mode tests now cover reconnect and query-param edge cases.
+- Benchmark infrastructure is cleaner and deeper: shared support helpers are now split into dedicated workspace and validation modules, benchmark runs track hidden subagent usage/cost, the CLI tables print delegation details prominently, and new scenarios cover file-scoped rule following plus delegation-heavy multi-file debugging.
 
 ## [2.1.0] - 2026-03-08
 

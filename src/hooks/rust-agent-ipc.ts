@@ -70,6 +70,10 @@ export function createAgentIpc(deps: IpcDeps): AgentIpc {
 
   let unlisten: UnlistenFn | null = null
   let eventSocket: WebSocket | null = null
+  let socketGeneration = 0
+
+  const isCurrentSocket = (ws: WebSocket, generation: number): boolean =>
+    eventSocket === ws && socketGeneration === generation
 
   const attachListener = async (): Promise<void> => {
     if (isTauri()) {
@@ -87,13 +91,17 @@ export function createAgentIpc(deps: IpcDeps): AgentIpc {
     } else {
       // Browser mode — connect via WebSocket (first run or reconnect)
       if (eventSocket) {
-        eventSocket.close()
+        const staleSocket = eventSocket
         eventSocket = null
+        socketGeneration += 1
+        staleSocket.close()
       }
       log.info('ws', 'Connecting to event WebSocket')
       const ws = createEventSocket()
+      const generation = ++socketGeneration
       eventSocket = ws
       ws.onmessage = (evt) => {
+        if (!isCurrentSocket(ws, generation)) return
         try {
           const event = JSON.parse(evt.data as string) as AgentEvent
           log.debug('ws', 'Message received', { type: event.type })
@@ -103,6 +111,7 @@ export function createAgentIpc(deps: IpcDeps): AgentIpc {
         }
       }
       ws.onerror = () => {
+        if (!isCurrentSocket(ws, generation)) return
         log.error('ws', 'WebSocket connection error')
         batch(() => {
           setError('WebSocket connection error')
@@ -114,6 +123,7 @@ export function createAgentIpc(deps: IpcDeps): AgentIpc {
         }
       }
       ws.onclose = () => {
+        if (!isCurrentSocket(ws, generation)) return
         log.warn('ws', 'WebSocket disconnected')
         // If the socket closes while the agent is still running, treat it as an error
         if (isRunning()) {
@@ -129,10 +139,24 @@ export function createAgentIpc(deps: IpcDeps): AgentIpc {
       }
       // Wait for the connection to open before returning
       await new Promise<void>((resolve, reject) => {
-        ws.addEventListener('open', () => resolve(), { once: true })
-        ws.addEventListener('error', () => reject(new Error('WebSocket connection failed')), {
-          once: true,
-        })
+        ws.addEventListener(
+          'open',
+          () => {
+            if (!isCurrentSocket(ws, generation)) return
+            resolve()
+          },
+          { once: true }
+        )
+        ws.addEventListener(
+          'error',
+          () => {
+            if (!isCurrentSocket(ws, generation)) return
+            reject(new Error('WebSocket connection failed'))
+          },
+          {
+            once: true,
+          }
+        )
       })
     }
   }
@@ -151,6 +175,7 @@ export function createAgentIpc(deps: IpcDeps): AgentIpc {
   const destroyListener = (): void => {
     detachListener()
     if (eventSocket) {
+      socketGeneration += 1
       eventSocket.close()
       eventSocket = null
     }

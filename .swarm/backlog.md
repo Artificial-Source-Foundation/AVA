@@ -7,7 +7,8 @@
 4. **Docs tree cleanup** — collapsed the docs entrypoint down to the current live references, updated `CLAUDE.md` links, and removed large stale duplicate doc trees that no longer match the repo layout.
 5. **TUI hardening pass** — fixed multi-line side-by-side diff pairing, supported diff rendering without summary preambles, removed 16-bit overflow from chat scroll state, and trimmed an extra full-vector drain from per-frame message rendering.
 6. **Desktop streaming hardening** — tool events now carry stable IDs through the Tauri bridge, approval state can target the exact tool call, and the browser API client now unwraps GET args cleanly without leaking path params back into the query string.
-7. **Instruction/delegation DX pass** — `.ava/rules` and contextual `AGENTS.md` now activate on direct file work without repeated spam, hidden subagents only unlock on broader tasks with explicit budgets and read-only specialist profiles, and benchmark support was split out while adding rule-following plus delegation-aware scenarios and metrics.
+7. **Desktop reconnect hardening** — browser-mode WebSocket reconnects now ignore stale socket callbacks, trajectory events keep stable timestamps once ingested, and targeted frontend tests cover reconnect/event ordering regressions.
+7. **Instruction/delegation DX pass** — `.ava/rules` and contextual `AGENTS.md` now activate on direct file work without repeated spam, hidden subagents only unlock on broader tasks with explicit budgets and read-only specialist profiles, benchmark support is split into workspace/validation modules, and benchmark output now surfaces delegation-heavy scenarios and helper-cost details more clearly.
 
 ## Critical
 1. **Tool calls failing — parameter name mismatch** — `read` rejects "missing required parameter 'path'", `glob` rejects "missing required parameter 'pattern'". Model sends args but validation fails.

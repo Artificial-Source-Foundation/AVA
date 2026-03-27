@@ -101,6 +101,7 @@ describe('createAgentEventHandler', () => {
 
     expect(harness.activeToolCalls()).toHaveLength(1)
     expect(harness.activeToolCalls()[0]?.id).toBe('call-123')
+    expect((harness.events()[0] as { timestamp?: number }).timestamp).toBeTypeOf('number')
 
     harness.dispose()
   })

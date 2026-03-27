@@ -54,7 +54,7 @@ const MemberDot: Component<{ member: TeamMember; onClick: () => void }> = (props
   return (
     <button
       type="button"
-      onClick={props.onClick}
+      onClick={() => props.onClick()}
       class="group relative flex items-center justify-center w-6 h-6 rounded-full transition-all duration-[var(--duration-fast)] hover:scale-110 cursor-pointer"
       style={{ background: config().colorSubtle }}
       title={`${props.member.name} — ${props.member.task ?? 'idle'}`}

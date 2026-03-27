@@ -39,7 +39,7 @@ interface GroupHeaderProps {
 }
 
 const GroupHeader: Component<GroupHeaderProps> = (props) => {
-  const [expanded, setExpanded] = createSignal(props.group.isActive)
+  const [expanded, setExpanded] = createSignal(false)
 
   // Auto-expand when active, auto-collapse when complete (but not while streaming)
   createEffect(() => {
@@ -153,7 +153,7 @@ export const ContextGroupHeader: Component<ContextGroupHeaderProps> = (props) =>
   const anyError = () => props.calls.some((c) => c.status === 'error')
   const allDone = () => props.calls.every((c) => c.status === 'success' || c.status === 'error')
 
-  const [expanded, setExpanded] = createSignal(anyRunning())
+  const [expanded, setExpanded] = createSignal(false)
 
   createEffect(() => {
     if (anyRunning()) {

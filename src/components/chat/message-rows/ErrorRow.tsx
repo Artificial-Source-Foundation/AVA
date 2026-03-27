@@ -97,56 +97,58 @@ export const ErrorRow: Component<ErrorRowProps> = (props) => {
 
   const typeLabel = (): string => ERROR_TYPE_LABELS[props.error.type] ?? 'Error'
 
-  // Cancelled sessions render as a subtle muted indicator, not a red error
-  if (props.error.type === 'cancelled') {
-    return (
-      <div class="mt-1 flex items-center gap-1.5 text-xs text-[var(--text-muted)] opacity-60 animate-fade-in">
-        <Ban class="w-3 h-3 flex-shrink-0" />
-        <span class="italic">Session interrupted</span>
-      </div>
-    )
-  }
-
   return (
-    <div class="mt-2 p-3 bg-[var(--error-subtle)] border border-[var(--error)] rounded-[var(--radius-md)] animate-fade-in">
-      <div class="flex items-center justify-between gap-3">
-        <div class="flex items-start gap-2 flex-1 min-w-0">
-          <AlertCircle class="w-4 h-4 text-[var(--error)] flex-shrink-0 mt-0.5" />
-          <div class="flex-1 min-w-0">
-            <span class="text-[10px] font-medium text-[var(--error)] uppercase tracking-wider block mb-0.5">
-              {typeLabel()}
-            </span>
-            <span class="text-sm text-[var(--error)] break-words whitespace-pre-wrap leading-relaxed">
-              {props.error.message}
-            </span>
-          </div>
+    <Show
+      when={props.error.type !== 'cancelled'}
+      fallback={
+        <div class="mt-1 flex items-center gap-1.5 text-xs text-[var(--text-muted)] opacity-60 animate-fade-in">
+          <Ban class="w-3 h-3 flex-shrink-0" />
+          <span class="italic">Session interrupted</span>
         </div>
-        <button
-          type="button"
-          onClick={() => props.onRetry()}
-          disabled={props.isStreaming || props.isRetrying || countdown() > 0}
-          class="px-3 py-1.5 bg-[var(--error)] hover:brightness-110 text-white text-xs font-medium rounded-[var(--radius-md)] transition-colors duration-[var(--duration-fast)] disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
-        >
-          <Show
-            when={props.isRetrying}
-            fallback={
-              <>
-                <RotateCcw class="w-3 h-3" />
-                Retry
-              </>
-            }
+      }
+    >
+      <div class="mt-2 p-3 bg-[var(--error-subtle)] border border-[var(--error)] rounded-[var(--radius-md)] animate-fade-in">
+        <div class="flex items-center justify-between gap-3">
+          <div class="flex items-start gap-2 flex-1 min-w-0">
+            <AlertCircle class="w-4 h-4 text-[var(--error)] flex-shrink-0 mt-0.5" />
+            <div class="flex-1 min-w-0">
+              <span class="text-[10px] font-medium text-[var(--error)] uppercase tracking-wider block mb-0.5">
+                {typeLabel()}
+              </span>
+              <span class="text-sm text-[var(--error)] break-words whitespace-pre-wrap leading-relaxed">
+                {props.error.message}
+              </span>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => props.onRetry()}
+            disabled={props.isStreaming || props.isRetrying || countdown() > 0}
+            class="px-3 py-1.5 bg-[var(--error)] hover:brightness-110 text-white text-xs font-medium rounded-[var(--radius-md)] transition-colors duration-[var(--duration-fast)] disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
           >
-            <Loader2 class="w-3 h-3 animate-spin" />
-            Retrying
-          </Show>
-        </button>
+            <Show
+              when={props.isRetrying}
+              fallback={
+                <>
+                  <RotateCcw class="w-3 h-3" />
+                  Retry
+                </>
+              }
+            >
+              <Loader2 class="w-3 h-3 animate-spin" />
+              Retrying
+            </Show>
+          </button>
+        </div>
+        <Show when={countdown() > 0}>
+          <p class="text-xs text-[var(--error)] opacity-75 mt-2">
+            Retry available in {countdown()}s
+          </p>
+        </Show>
+        <Show when={getErrorHint(props.error)}>
+          {(hint) => <p class="text-xs text-[var(--text-muted)] mt-2 pl-6 italic">{hint()}</p>}
+        </Show>
       </div>
-      <Show when={countdown() > 0}>
-        <p class="text-xs text-[var(--error)] opacity-75 mt-2">Retry available in {countdown()}s</p>
-      </Show>
-      <Show when={getErrorHint(props.error)}>
-        {(hint) => <p class="text-xs text-[var(--text-muted)] mt-2 pl-6 italic">{hint()}</p>}
-      </Show>
-    </div>
+    </Show>
   )
 }

@@ -156,7 +156,7 @@ function TabBar(props: TabBarProps) {
       {/* Close button — always visible */}
       <button
         type="button"
-        onClick={props.onClose}
+        onClick={() => props.onClose()}
         class="flex items-center justify-center w-8 h-8 flex-shrink-0 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
         aria-label="Close panel"
         title="Close panel"

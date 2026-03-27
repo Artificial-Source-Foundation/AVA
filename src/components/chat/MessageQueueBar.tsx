@@ -76,7 +76,7 @@ export const MessageQueueBar: Component<MessageQueueBarProps> = (props) => {
 
           <button
             type="button"
-            onClick={props.onClear}
+            onClick={() => props.onClear()}
             class="text-[var(--text-2xs)] text-[var(--text-muted)] hover:text-[var(--error)] transition-colors cursor-pointer px-1.5 py-0.5 rounded hover:bg-[var(--alpha-white-5)]"
           >
             Clear all

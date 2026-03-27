@@ -7,8 +7,6 @@
 //! The session ID is held in a shared [`FileBackupSession`] that is set when
 //! the agent run starts and read by the write/edit tools before each mutation.
 
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -59,8 +57,8 @@ pub async fn backup_file_before_edit(
         .await
         .map_err(|e| format!("failed to create backup dir: {e}"))?;
 
-    let path_hash = hash_path(file_path);
-    let version = next_version(&base_dir, &path_hash).await;
+    let path_hash = preferred_hash_for_path(&base_dir, file_path).await?;
+    let version = next_version(&base_dir, &path_hash).await?;
     let backup_name = format!("{path_hash}@v{version}");
     let backup_path = base_dir.join(&backup_name);
     let meta_path = base_dir.join(format!("{backup_name}.meta"));
@@ -96,16 +94,18 @@ pub async fn restore_file_backup(
     version: Option<usize>,
 ) -> Result<PathBuf, String> {
     let base_dir = backup_dir(session_id)?;
-    let path_hash = hash_path(file_path);
+    let path_hash = existing_hash_for_path(&base_dir, file_path)
+        .await?
+        .unwrap_or_else(|| stable_hash_path(file_path));
 
     let target_version = match version {
         Some(v) => v,
         None => {
-            let latest = next_version(&base_dir, &path_hash).await;
-            if latest == 0 {
+            let versions = existing_versions(&base_dir, &path_hash).await?;
+            let Some(&latest) = versions.last() else {
                 return Err(format!("no backups found for {}", file_path.display()));
-            }
-            latest - 1
+            };
+            latest
         }
     };
 
@@ -150,19 +150,14 @@ pub async fn list_backups(
     file_path: &Path,
 ) -> Result<Vec<(usize, PathBuf)>, String> {
     let base_dir = backup_dir(session_id)?;
-    let path_hash = hash_path(file_path);
-    let mut results = Vec::new();
-
-    let mut version = 0usize;
-    loop {
-        let backup_path = base_dir.join(format!("{path_hash}@v{version}"));
-        if backup_path.exists() {
-            results.push((version, backup_path));
-            version += 1;
-        } else {
-            break;
-        }
-    }
+    let path_hash = existing_hash_for_path(&base_dir, file_path)
+        .await?
+        .unwrap_or_else(|| stable_hash_path(file_path));
+    let results = existing_versions(&base_dir, &path_hash)
+        .await?
+        .into_iter()
+        .map(|version| (version, base_dir.join(format!("{path_hash}@v{version}"))))
+        .collect();
 
     Ok(results)
 }
@@ -178,27 +173,88 @@ fn backup_dir(session_id: &str) -> Result<PathBuf, String> {
 }
 
 /// Produce a stable, filesystem-safe hash of a file path.
-fn hash_path(file_path: &Path) -> String {
-    let mut hasher = DefaultHasher::new();
-    // Canonicalize if possible for stability, otherwise use as-is.
+fn stable_hash_path(file_path: &Path) -> String {
     let canonical = file_path
         .canonicalize()
         .unwrap_or_else(|_| file_path.to_path_buf());
+    format!(
+        "{:016x}",
+        super::fnv1a_64(canonical.to_string_lossy().as_bytes())
+    )
+}
+
+/// Find the next available version number for a given path hash prefix.
+async fn next_version(base_dir: &Path, path_hash: &str) -> Result<usize, String> {
+    Ok(existing_versions(base_dir, path_hash)
+        .await?
+        .into_iter()
+        .max()
+        .map_or(0, |version| version + 1))
+}
+
+async fn preferred_hash_for_path(base_dir: &Path, file_path: &Path) -> Result<String, String> {
+    Ok(existing_hash_for_path(base_dir, file_path)
+        .await?
+        .unwrap_or_else(|| stable_hash_path(file_path)))
+}
+
+async fn existing_hash_for_path(
+    base_dir: &Path,
+    file_path: &Path,
+) -> Result<Option<String>, String> {
+    let stable = stable_hash_path(file_path);
+    if !existing_versions(base_dir, &stable).await?.is_empty() {
+        return Ok(Some(stable));
+    }
+
+    let legacy = legacy_hash_path(file_path);
+    if legacy != stable && !existing_versions(base_dir, &legacy).await?.is_empty() {
+        return Ok(Some(legacy));
+    }
+
+    Ok(None)
+}
+
+fn legacy_hash_path(file_path: &Path) -> String {
+    let canonical = file_path
+        .canonicalize()
+        .unwrap_or_else(|_| file_path.to_path_buf());
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    use std::hash::{Hash, Hasher};
     canonical.to_string_lossy().hash(&mut hasher);
     format!("{:016x}", hasher.finish())
 }
 
-/// Find the next available version number for a given path hash prefix.
-async fn next_version(base_dir: &Path, path_hash: &str) -> usize {
-    let mut version = 0usize;
-    loop {
-        let candidate = base_dir.join(format!("{path_hash}@v{version}"));
-        if candidate.exists() {
-            version += 1;
-        } else {
-            return version;
+async fn existing_versions(base_dir: &Path, path_hash: &str) -> Result<Vec<usize>, String> {
+    let mut versions = Vec::new();
+    let Ok(mut entries) = tokio::fs::read_dir(base_dir).await else {
+        return Ok(versions);
+    };
+
+    let prefix = format!("{path_hash}@v");
+    while let Some(entry) = entries
+        .next_entry()
+        .await
+        .map_err(|e| format!("failed to read backup dir: {e}"))?
+    {
+        let file_name = entry.file_name();
+        let Some(file_name) = file_name.to_str() else {
+            continue;
+        };
+        if file_name.ends_with(".meta") {
+            continue;
         }
+        let Some(version) = file_name.strip_prefix(&prefix) else {
+            continue;
+        };
+        let Ok(version) = version.parse::<usize>() else {
+            continue;
+        };
+        versions.push(version);
     }
+
+    versions.sort_unstable();
+    Ok(versions)
 }
 
 #[cfg(test)]
@@ -215,8 +271,8 @@ mod tests {
         tokio::fs::create_dir_all(base)
             .await
             .map_err(|e| format!("{e}"))?;
-        let path_hash = hash_path(file_path);
-        let version = next_version(base, &path_hash).await;
+        let path_hash = stable_hash_path(file_path);
+        let version = next_version(base, &path_hash).await?;
         let name = format!("{path_hash}@v{version}");
         let backup_path = base.join(&name);
         let meta_path = base.join(format!("{name}.meta"));
@@ -253,7 +309,7 @@ mod tests {
         assert_ne!(bp, bp2);
 
         // Restore v0.
-        let path_hash = hash_path(&file);
+        let path_hash = stable_hash_path(&file);
         let v0_path = backup_base.join(format!("{path_hash}@v0"));
         let content = tokio::fs::read(&v0_path).await.unwrap();
         assert_eq!(content, b"hello v0");
@@ -266,17 +322,38 @@ mod tests {
         tokio::fs::create_dir_all(&base).await.unwrap();
 
         let hash = "abc123";
-        assert_eq!(next_version(&base, hash).await, 0);
+        assert_eq!(next_version(&base, hash).await.unwrap(), 0);
 
         tokio::fs::write(base.join(format!("{hash}@v0")), b"x")
             .await
             .unwrap();
-        assert_eq!(next_version(&base, hash).await, 1);
+        assert_eq!(next_version(&base, hash).await.unwrap(), 1);
 
         tokio::fs::write(base.join(format!("{hash}@v1")), b"y")
             .await
             .unwrap();
-        assert_eq!(next_version(&base, hash).await, 2);
+        assert_eq!(next_version(&base, hash).await.unwrap(), 2);
+    }
+
+    #[tokio::test]
+    async fn version_scanning_handles_gaps() {
+        let tmp = TempDir::new().unwrap();
+        let base = tmp.path().join("backups");
+        tokio::fs::create_dir_all(&base).await.unwrap();
+
+        let hash = "gap123";
+        tokio::fs::write(base.join(format!("{hash}@v0")), b"x")
+            .await
+            .unwrap();
+        tokio::fs::write(base.join(format!("{hash}@v2")), b"y")
+            .await
+            .unwrap();
+        tokio::fs::write(base.join(format!("{hash}@v2.meta")), b"meta")
+            .await
+            .unwrap();
+
+        assert_eq!(existing_versions(&base, hash).await.unwrap(), vec![0, 2]);
+        assert_eq!(next_version(&base, hash).await.unwrap(), 3);
     }
 
     #[tokio::test]
@@ -306,9 +383,26 @@ mod tests {
     #[test]
     fn hash_path_is_stable() {
         let p = Path::new("/some/test/path.rs");
-        let h1 = hash_path(p);
-        let h2 = hash_path(p);
+        let h1 = stable_hash_path(p);
+        let h2 = stable_hash_path(p);
         assert_eq!(h1, h2);
         assert_eq!(h1.len(), 16); // 16 hex chars
+    }
+
+    #[tokio::test]
+    async fn prefers_legacy_hash_when_history_exists() {
+        let tmp = TempDir::new().unwrap();
+        let base = tmp.path().join("backups");
+        tokio::fs::create_dir_all(&base).await.unwrap();
+
+        let file = tmp.path().join("legacy.txt");
+        tokio::fs::write(&file, b"data").await.unwrap();
+        let legacy = legacy_hash_path(&file);
+        tokio::fs::write(base.join(format!("{legacy}@v0")), b"old")
+            .await
+            .unwrap();
+
+        let selected = preferred_hash_for_path(&base, &file).await.unwrap();
+        assert_eq!(selected, legacy);
     }
 }

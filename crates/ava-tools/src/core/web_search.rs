@@ -6,7 +6,7 @@ use std::collections::HashSet;
 use std::sync::LazyLock;
 use url::form_urlencoded;
 
-use crate::core::web_fetch::is_blocked_url;
+use crate::core::web_fetch::{is_blocked_url, validate_redirect_target};
 use crate::registry::Tool;
 
 pub struct WebSearchTool;
@@ -92,15 +92,12 @@ impl Tool for WebSearchTool {
         let client = reqwest::Client::builder()
             .user_agent("ava-web-search/2.1")
             .timeout(std::time::Duration::from_secs(20))
-            .redirect(reqwest::redirect::Policy::custom(|attempt| {
-                if attempt.previous().len() >= 5 {
-                    attempt.error(std::io::Error::other("too many redirects"))
-                } else if is_blocked_url(attempt.url().as_str()).is_err() {
-                    attempt.stop()
-                } else {
-                    attempt.follow()
-                }
-            }))
+            .redirect(reqwest::redirect::Policy::custom(
+                |attempt| match validate_redirect_target(attempt.url(), attempt.previous().len()) {
+                    Ok(()) => attempt.follow(),
+                    Err(error) => attempt.error(error),
+                },
+            ))
             .build()
             .map_err(|e| AvaError::ToolError(format!("failed to create HTTP client: {e}")))?;
 
@@ -203,15 +200,22 @@ fn normalize_duckduckgo_href(href: &str) -> Option<String> {
         href.to_string()
     };
 
-    if let Ok(parsed) = url::Url::parse(&absolute) {
+    let candidate = if let Ok(parsed) = url::Url::parse(&absolute) {
         if parsed.domain() == Some("duckduckgo.com") && parsed.path() == "/l/" {
             if let Some((_, target)) = parsed.query_pairs().find(|(key, _)| key == "uddg") {
-                return Some(target.into_owned());
+                target.into_owned()
+            } else {
+                absolute
             }
+        } else {
+            absolute
         }
-    }
+    } else {
+        absolute
+    };
 
-    Some(absolute)
+    let parsed = url::Url::parse(&candidate).ok()?;
+    matches!(parsed.scheme(), "http" | "https").then(|| parsed.to_string())
 }
 
 fn decode_html_entities_basic(input: &str) -> String {
@@ -268,6 +272,16 @@ mod tests {
         let results = parse_duckduckgo_results(sample, 5);
         assert_eq!(results.len(), 1);
         assert_eq!(results[0]["url"], "https://example.com/ok");
+    }
+
+    #[test]
+    fn web_search_normalizes_protocol_relative_and_rejects_invalid_urls() {
+        assert_eq!(
+            normalize_duckduckgo_href("//example.com/path"),
+            Some("https://example.com/path".to_string())
+        );
+        assert!(normalize_duckduckgo_href("/relative/path").is_none());
+        assert!(normalize_duckduckgo_href("javascript:alert(1)").is_none());
     }
 
     #[tokio::test]

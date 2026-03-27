@@ -106,6 +106,7 @@ async fn main() -> Result<()> {
                 worker_spec,
                 cli.max_turns,
                 suite,
+                cli.task_filter.as_deref(),
             )
             .await?;
             return Ok(());
@@ -156,6 +157,7 @@ async fn main() -> Result<()> {
                 suite,
                 imported_tasks,
                 language_filter,
+                cli.task_filter.as_deref(),
             )
             .await?;
             return Ok(());

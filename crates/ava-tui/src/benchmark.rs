@@ -37,11 +37,16 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-use crate::benchmark_tasks::{
-    advanced_rust_tasks, agent_quality_tasks, agentic_tasks, default_tasks, filter_tasks_by_suite,
-    go_tasks, multi_file_tasks, python_tasks, security_tasks, test_generation_tasks,
-    typescript_tasks, BenchmarkSuite, BenchmarkTask, Language, TestHarness,
+use crate::benchmark_support::{
+    compile_and_test, expected_min_subagents, prepare_benchmark_workspace, run_tier3_validation,
+    setup_agentic_file, spawn_default_question_responses, subagent_type_from_description,
 };
+use crate::benchmark_tasks::{
+    advanced_rust_tasks, agent_quality_tasks, agentic_tasks, default_tasks, filter_tasks_by_name,
+    filter_tasks_by_suite, go_tasks, multi_file_tasks, python_tasks, security_tasks,
+    test_generation_tasks, typescript_tasks, BenchmarkSuite, BenchmarkTask, Language, TestHarness,
+};
+use crate::headless::spawn_auto_approve_requests;
 
 /// A provider:model pair to benchmark.
 #[derive(Debug, Clone)]
@@ -115,6 +120,12 @@ pub struct BenchmarkResult {
     pub turns_used: usize,
     /// Number of times the model retried after a tool error (self-corrections).
     pub self_corrections: usize,
+    /// Number of hidden sub-agent runs spawned during the task.
+    pub subagent_calls_count: usize,
+    /// Ordered list of sub-agent types used during the task.
+    pub subagent_types: Vec<String>,
+    /// Cost attributable to hidden sub-agents.
+    pub subagent_cost_usd: f64,
     // Raw model output for judge evaluation
     #[serde(skip_serializing_if = "Option::is_none")]
     pub raw_output: Option<String>,
@@ -125,9 +136,47 @@ pub struct BenchmarkResult {
     /// Only populated for tool-using tasks with `expected_min_tools` set.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_efficiency_score: Option<f64>,
+    /// Ratio of expected helper usage to actual helper usage (1.0 = ideal).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub delegation_efficiency_score: Option<f64>,
     /// Hash of the code output for variance tracking across runs.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub consistency_hash: Option<String>,
+}
+
+impl BenchmarkResult {
+    pub fn delegation_summary(&self) -> Option<String> {
+        if self.subagent_calls_count == 0 {
+            return self.delegation_efficiency_score.map(|score| {
+                format!(
+                    "0 helper runs | delegated cost ${:.4} | efficiency {:.2} | expected hidden delegation but none was used",
+                    self.subagent_cost_usd, score
+                )
+            });
+        }
+
+        let mut parts = vec![format!(
+            "{} helper run{}",
+            self.subagent_calls_count,
+            if self.subagent_calls_count == 1 {
+                ""
+            } else {
+                "s"
+            }
+        )];
+
+        if let Some(mix) = format_subagent_mix(&self.subagent_types) {
+            parts.push(format!("mix: {mix}"));
+        }
+
+        parts.push(format!("delegated cost ${:.4}", self.subagent_cost_usd));
+
+        if let Some(score) = self.delegation_efficiency_score {
+            parts.push(format!("efficiency {:.2}", score));
+        }
+
+        Some(parts.join(" | "))
+    }
 }
 
 /// Full benchmark suite results.
@@ -141,6 +190,28 @@ pub struct BenchmarkReport {
     /// Mean tool efficiency across all tool-using tasks with efficiency scores.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub aggregate_tool_efficiency: Option<f64>,
+    /// Mean delegation efficiency across tasks that expect helper usage.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub aggregate_delegation_efficiency: Option<f64>,
+}
+
+fn format_subagent_mix(types: &[String]) -> Option<String> {
+    if types.is_empty() {
+        return None;
+    }
+
+    let mut counts = std::collections::BTreeMap::new();
+    for agent_type in types {
+        *counts.entry(agent_type.as_str()).or_insert(0usize) += 1;
+    }
+
+    Some(
+        counts
+            .into_iter()
+            .map(|(agent_type, count)| format!("{agent_type} x{count}"))
+            .collect::<Vec<_>>()
+            .join(", "),
+    )
 }
 
 /// Parse a `--models` string like "openrouter:model1,openrouter:model2"
@@ -236,6 +307,7 @@ pub async fn run_benchmark(
     suite: BenchmarkSuite,
     imported_tasks: Vec<BenchmarkTask>,
     language_filter: Option<Vec<Language>>,
+    task_filter: Option<&str>,
 ) -> Result<BenchmarkReport> {
     let max_turns = if max_turns == 0 { 10 } else { max_turns };
 
@@ -251,6 +323,7 @@ pub async fn run_benchmark(
     tokio::fs::create_dir_all(&workspace_dir)
         .await
         .map_err(|e| eyre!("Failed to create benchmark workspace: {}", e))?;
+    prepare_benchmark_workspace(&workspace_dir).await?;
 
     // Copy Cargo.toml into the workspace so the `read_cargo` task can read it.
     let project_cargo = std::env::current_dir()
@@ -286,11 +359,24 @@ pub async fn run_benchmark(
     // Filter by suite
     all_tasks = filter_tasks_by_suite(all_tasks, suite);
 
+    // Filter by task name
+    all_tasks = filter_tasks_by_name(all_tasks, task_filter);
+
     // Filter by language
     if let Some(ref langs) = language_filter {
         all_tasks.retain(|t| langs.contains(&t.language()));
         let lang_names: Vec<_> = langs.iter().map(|l| l.to_string()).collect();
         eprintln!("[benchmark] Language filter: {}", lang_names.join(", "));
+    }
+
+    if let Some(filter) = task_filter.filter(|value| !value.trim().is_empty()) {
+        eprintln!("[benchmark] Task filter: {}", filter.trim());
+    }
+
+    if all_tasks.is_empty() {
+        return Err(eyre!(
+            "No benchmark tasks matched the current suite/language/task filter selection"
+        ));
     }
 
     let mut results = Vec::new();
@@ -371,9 +457,13 @@ pub async fn run_benchmark(
                         tool_calls_detail: Vec::new(),
                         turns_used: 0,
                         self_corrections: 0,
+                        subagent_calls_count: 0,
+                        subagent_types: Vec::new(),
+                        subagent_cost_usd: 0.0,
                         raw_output: None,
                         cost_per_task_usd: None,
                         tool_efficiency_score: None,
+                        delegation_efficiency_score: None,
                         consistency_hash: None,
                     });
                 }
@@ -412,11 +502,22 @@ pub async fn run_benchmark(
         None
     };
 
+    let delegation_scores: Vec<f64> = results
+        .iter()
+        .filter_map(|r| r.delegation_efficiency_score)
+        .collect();
+    let aggregate_delegation_efficiency = if !delegation_scores.is_empty() {
+        Some(delegation_scores.iter().sum::<f64>() / delegation_scores.len() as f64)
+    } else {
+        None
+    };
+
     let report = BenchmarkReport {
         timestamp: chrono::Utc::now().to_rfc3339(),
         results,
         aggregate_cost_per_resolved,
         aggregate_tool_efficiency,
+        aggregate_delegation_efficiency,
     };
 
     // Print formatted table
@@ -426,115 +527,6 @@ pub async fn run_benchmark(
     save_results_json(&report).await?;
 
     Ok(report)
-}
-
-/// Write a setup file for a Tier 3 agentic task or agent quality task.
-async fn setup_agentic_file(temp_dir: &Path, task_name: &str, setup_code: &str) -> Result<()> {
-    match task_name {
-        "bugfix_off_by_one" => {
-            let path = temp_dir.join("binary_search.rs");
-            tokio::fs::write(&path, setup_code)
-                .await
-                .map_err(|e| eyre!("Failed to write setup file {}: {}", path.display(), e))?;
-        }
-        "bugfix_lifetime" => {
-            let path = temp_dir.join("lifetime_fix.rs");
-            tokio::fs::write(&path, setup_code)
-                .await
-                .map_err(|e| eyre!("Failed to write setup file {}: {}", path.display(), e))?;
-        }
-        "refactor_extract" => {
-            let path = temp_dir.join("refactor.rs");
-            tokio::fs::write(&path, setup_code)
-                .await
-                .map_err(|e| eyre!("Failed to write setup file {}: {}", path.display(), e))?;
-        }
-        "multi_step_debug" => {
-            // Create directory structure: multi_step_debug/lib.rs + multi_step_debug/tests.rs
-            let dir = temp_dir.join("multi_step_debug");
-            tokio::fs::create_dir_all(&dir)
-                .await
-                .map_err(|e| eyre!("Failed to create dir {}: {}", dir.display(), e))?;
-            let lib_path = dir.join("lib.rs");
-            tokio::fs::write(&lib_path, setup_code)
-                .await
-                .map_err(|e| eyre!("Failed to write {}: {}", lib_path.display(), e))?;
-            // Write the test file that references lib as a module
-            let tests_path = dir.join("tests.rs");
-            let test_content = r#"
-mod lib;
-
-#[test]
-fn test_area() {
-    assert!((lib::area(3.0, 4.0) - 12.0).abs() < 1e-9);
-}
-
-#[test]
-fn test_perimeter() {
-    assert!((lib::perimeter(3.0, 4.0) - 14.0).abs() < 1e-9);
-}
-
-#[test]
-fn test_diagonal() {
-    assert!((lib::diagonal(3.0, 4.0) - 5.0).abs() < 1e-9);
-}
-"#;
-            tokio::fs::write(&tests_path, test_content)
-                .await
-                .map_err(|e| eyre!("Failed to write {}: {}", tests_path.display(), e))?;
-        }
-        "constraint_edit" => {
-            let path = temp_dir.join("validators.rs");
-            tokio::fs::write(&path, setup_code)
-                .await
-                .map_err(|e| eyre!("Failed to write {}: {}", path.display(), e))?;
-        }
-        "self_correct_compile" => {
-            let path = temp_dir.join("cache.rs");
-            tokio::fs::write(&path, setup_code)
-                .await
-                .map_err(|e| eyre!("Failed to write {}: {}", path.display(), e))?;
-        }
-        "tool_efficiency" => {
-            // Create project structure: tool_efficiency/src/{main,lib,utils,config}.rs
-            let src_dir = temp_dir.join("tool_efficiency").join("src");
-            tokio::fs::create_dir_all(&src_dir)
-                .await
-                .map_err(|e| eyre!("Failed to create dir {}: {}", src_dir.display(), e))?;
-
-            let main_code = "mod lib;\n\nfn main() {\n    let cfg = lib::config::Config::default();\n    let msg = lib::utils::greet(&cfg.name);\n    println!(\"{}\", msg);\n}\n";
-            let lib_code = "pub mod utils;\npub mod config;\n";
-            let utils_code = "/// Greets a user by name.\npub fn greet(name: &str) -> String {\n    format!(\"Hello, {}!\", name)\n}\n\n/// Formats a duration in seconds into a human-readable string.\npub fn format_duration(seconds: u64) -> String {\n    if seconds < 60 {\n        format!(\"{}s\", seconds)\n    } else if seconds < 3600 {\n        format!(\"{}m {}s\", seconds / 60, seconds % 60)\n    } else {\n        format!(\"{}h {}m\", seconds / 3600, (seconds % 3600) / 60)\n    }\n}\n";
-
-            tokio::fs::write(src_dir.join("main.rs"), main_code)
-                .await
-                .map_err(|e| eyre!("Failed to write main.rs: {}", e))?;
-            tokio::fs::write(src_dir.join("lib.rs"), lib_code)
-                .await
-                .map_err(|e| eyre!("Failed to write lib.rs: {}", e))?;
-            tokio::fs::write(src_dir.join("utils.rs"), utils_code)
-                .await
-                .map_err(|e| eyre!("Failed to write utils.rs: {}", e))?;
-            // setup_code is TOOL_EFFICIENCY_CONFIG for the config.rs file
-            tokio::fs::write(src_dir.join("config.rs"), setup_code)
-                .await
-                .map_err(|e| eyre!("Failed to write config.rs: {}", e))?;
-        }
-        "no_overengineer" => {
-            let path = temp_dir.join("math.rs");
-            tokio::fs::write(&path, setup_code)
-                .await
-                .map_err(|e| eyre!("Failed to write {}: {}", path.display(), e))?;
-        }
-        "error_recovery_loop" => {
-            let path = temp_dir.join("broken.rs");
-            tokio::fs::write(&path, setup_code)
-                .await
-                .map_err(|e| eyre!("Failed to write {}: {}", path.display(), e))?;
-        }
-        _ => return Ok(()),
-    }
-    Ok(())
 }
 
 /// Run a single task against a single model, collecting metrics.
@@ -548,7 +540,7 @@ async fn run_single_task(
 
     let effective_turns = if task.needs_tools { max_turns } else { 3 };
 
-    let (stack, _question_rx, _approval_rx, _plan_rx) = AgentStack::new(AgentStackConfig {
+    let (stack, question_rx, approval_rx, _plan_rx) = AgentStack::new(AgentStackConfig {
         data_dir,
         provider: Some(spec.provider.clone()),
         model: Some(spec.model.clone()),
@@ -558,6 +550,8 @@ async fn run_single_task(
         ..Default::default()
     })
     .await?;
+    spawn_default_question_responses(question_rx);
+    spawn_auto_approve_requests(approval_rx);
 
     let (tx, mut rx) = mpsc::unbounded_channel();
     let cancel = CancellationToken::new();
@@ -597,6 +591,9 @@ async fn run_single_task(
     let mut tool_calls_detail: Vec<String> = Vec::new();
     let mut turns_used: usize = 0;
     let mut self_corrections: usize = 0;
+    let mut subagent_calls_count: usize = 0;
+    let mut subagent_types: Vec<String> = Vec::new();
+    let mut subagent_cost_usd: f64 = 0.0;
     let mut last_tool_was_error = false;
     let mut in_assistant_turn = false;
 
@@ -638,6 +635,16 @@ async fn run_single_task(
                 // Include tool results in output for quality checking
                 total_output.push_str(&tr.content);
                 last_tool_was_error = tr.is_error;
+            }
+            AgentEvent::SubAgentComplete {
+                description,
+                cost_usd: sub_cost,
+                ..
+            } => {
+                subagent_calls_count += 1;
+                subagent_types.push(subagent_type_from_description(&description));
+                subagent_cost_usd += sub_cost;
+                cost_usd += sub_cost;
             }
             AgentEvent::Complete(_) => break,
             AgentEvent::Error(e) => {
@@ -692,6 +699,16 @@ async fn run_single_task(
         None
     };
 
+    let delegation_efficiency_score = if let Some(min) = expected_min_subagents(task.name) {
+        if subagent_calls_count > 0 {
+            Some(min as f64 / subagent_calls_count as f64)
+        } else {
+            Some(0.0)
+        }
+    } else {
+        None
+    };
+
     // consistency_hash: hash of the output for variance tracking across runs
     let consistency_hash = if !total_output.trim().is_empty() {
         let mut hasher = DefaultHasher::new();
@@ -724,9 +741,13 @@ async fn run_single_task(
         tool_calls_detail,
         turns_used,
         self_corrections,
+        subagent_calls_count,
+        subagent_types,
+        subagent_cost_usd,
         raw_output: Some(total_output),
         cost_per_task_usd,
         tool_efficiency_score,
+        delegation_efficiency_score,
         consistency_hash,
     })
 }
@@ -1119,184 +1140,6 @@ fn parse_python_test_results(output: &str) -> (usize, usize) {
     (total.saturating_sub(failed), failed)
 }
 
-/// Tier 3: Read the agent-edited file, append tests, compile and run.
-async fn run_tier3_validation(
-    temp_dir: &Path,
-    task_name: &str,
-    harness: &TestHarness,
-) -> (Option<bool>, Option<usize>, Option<usize>, Option<String>) {
-    let filename = match task_name {
-        "bugfix_off_by_one" => "binary_search.rs",
-        "bugfix_lifetime" => "lifetime_fix.rs",
-        "refactor_extract" => "refactor.rs",
-        // Agent quality tasks
-        "multi_step_debug" => "multi_step_debug/lib.rs",
-        "constraint_edit" => "validators.rs",
-        "self_correct_compile" => "cache.rs",
-        "tool_efficiency" => "tool_efficiency/src/config.rs",
-        "no_overengineer" => "math.rs",
-        "error_recovery_loop" => "broken.rs",
-        _ => return (None, None, None, None),
-    };
-
-    let file_path = temp_dir.join(filename);
-    let file_content = match tokio::fs::read_to_string(&file_path).await {
-        Ok(content) => content,
-        Err(e) => {
-            return (
-                Some(false),
-                None,
-                None,
-                Some(format!("Failed to read edited file: {}", e)),
-            );
-        }
-    };
-
-    // Combine the edited file with the test harness
-    let full_source = format!("{}\n{}", file_content, harness.test_code);
-
-    compile_and_test(&full_source, harness.test_count).await
-}
-
-/// Compile a Rust source file and run its tests. Returns (compile_success, tests_passed, tests_total, compile_error).
-async fn compile_and_test(
-    source: &str,
-    expected_test_count: usize,
-) -> (Option<bool>, Option<usize>, Option<usize>, Option<String>) {
-    // Write to a temp file
-    let temp_dir = match tempfile::tempdir() {
-        Ok(d) => d,
-        Err(e) => {
-            return (
-                Some(false),
-                None,
-                None,
-                Some(format!("Failed to create temp dir: {}", e)),
-            );
-        }
-    };
-
-    let source_path = temp_dir.path().join("bench_test.rs");
-    let test_binary = temp_dir.path().join("bench_test");
-
-    if let Err(e) = tokio::fs::write(&source_path, source).await {
-        return (
-            Some(false),
-            None,
-            None,
-            Some(format!("Failed to write source: {}", e)),
-        );
-    }
-
-    // Compile with --test flag
-    let compile_output = tokio::process::Command::new("rustc")
-        .args([
-            "--edition",
-            "2021",
-            "--test",
-            source_path.to_str().unwrap_or("bench_test.rs"),
-            "-o",
-            test_binary.to_str().unwrap_or("bench_test"),
-        ])
-        .output()
-        .await;
-
-    let compile_result = match compile_output {
-        Ok(output) => output,
-        Err(e) => {
-            return (
-                Some(false),
-                None,
-                None,
-                Some(format!("Failed to run rustc: {}", e)),
-            );
-        }
-    };
-
-    if !compile_result.status.success() {
-        let stderr = String::from_utf8_lossy(&compile_result.stderr);
-        // Truncate long compiler errors
-        let error_msg = if stderr.len() > 500 {
-            format!("{}...", &stderr[..500])
-        } else {
-            stderr.to_string()
-        };
-        return (
-            Some(false),
-            Some(0),
-            Some(expected_test_count),
-            Some(error_msg),
-        );
-    }
-
-    // Run tests
-    let test_output = tokio::process::Command::new(test_binary.to_str().unwrap_or("./bench_test"))
-        .output()
-        .await;
-
-    let test_result = match test_output {
-        Ok(output) => output,
-        Err(e) => {
-            return (
-                Some(true),
-                Some(0),
-                Some(expected_test_count),
-                Some(format!("Failed to run tests: {}", e)),
-            );
-        }
-    };
-
-    let stdout = String::from_utf8_lossy(&test_result.stdout);
-
-    // Parse test results from output: "test result: ok. X passed; Y failed; ..."
-    let (passed, failed) = parse_test_output(&stdout);
-
-    let tests_passed = passed;
-    let tests_total = passed + failed;
-    // If we couldn't parse, fall back to expected count
-    let total = if tests_total == 0 {
-        expected_test_count
-    } else {
-        tests_total
-    };
-
-    if test_result.status.success() {
-        (
-            Some(true),
-            Some(if tests_passed > 0 {
-                tests_passed
-            } else {
-                total
-            }),
-            Some(total),
-            None,
-        )
-    } else {
-        let stderr = String::from_utf8_lossy(&test_result.stderr);
-        let error_msg = if stderr.len() > 500 {
-            format!("{}...", &stderr[..500])
-        } else if stderr.is_empty() {
-            stdout.to_string()
-        } else {
-            stderr.to_string()
-        };
-        (Some(true), Some(tests_passed), Some(total), Some(error_msg))
-    }
-}
-
-/// Parse "test result: ok. N passed; M failed;" from rustc test output.
-fn parse_test_output(output: &str) -> (usize, usize) {
-    let re = Regex::new(r"test result:.*?(\d+) passed.*?(\d+) failed").ok();
-    if let Some(re) = re {
-        if let Some(cap) = re.captures(output) {
-            let passed = cap[1].parse().unwrap_or(0);
-            let failed = cap[2].parse().unwrap_or(0);
-            return (passed, failed);
-        }
-    }
-    (0, 0)
-}
-
 // ---------------------------------------------------------------------------
 // LLM-as-Judge
 // ---------------------------------------------------------------------------
@@ -1626,13 +1469,15 @@ fn print_results_table(report: &BenchmarkReport, suite: BenchmarkSuite) {
 
         let has_compile = task_results.iter().any(|r| r.compile_success.is_some());
         let has_tools = task_results.iter().any(|r| r.tool_calls_count > 0);
+        let has_subagents = task_results.iter().any(|r| r.subagent_calls_count > 0);
+        let has_activity_metrics = has_tools || has_subagents;
 
         println!();
         println!("  Task: {} [{}]", task_name, task_results[0].task_category);
 
         if has_compile && has_judges {
             println!(
-                "  {:<22} {:>9} {:>9} {:>7} {:>8} {:>7} {:>6} {:>6} {:>7}",
+                "  {:<22} {:>9} {:>9} {:>7} {:>8} {:>7} {:>6} {:>5} {:>6} {:>7}",
                 "Model",
                 "TTFT(ms)",
                 "Total(s)",
@@ -1640,30 +1485,47 @@ fn print_results_table(report: &BenchmarkReport, suite: BenchmarkSuite) {
                 "Compile",
                 "Tests",
                 "Tools",
+                "Subs",
                 "Turns",
                 "Score",
             );
             println!(
-                "  {:-<22} {:-<9} {:-<9} {:-<7} {:-<8} {:-<7} {:-<6} {:-<6} {:-<7}",
-                "", "", "", "", "", "", "", "", ""
+                "  {:-<22} {:-<9} {:-<9} {:-<7} {:-<8} {:-<7} {:-<6} {:-<5} {:-<6} {:-<7}",
+                "", "", "", "", "", "", "", "", "", ""
             );
         } else if has_compile {
             println!(
-                "  {:<22} {:>9} {:>9} {:>7} {:>8} {:>7} {:>6} {:>6}  Quality",
-                "Model", "TTFT(ms)", "Total(s)", "Tok/s", "Compile", "Tests", "Tools", "Turns",
+                "  {:<22} {:>9} {:>9} {:>7} {:>8} {:>7} {:>6} {:>5} {:>6}  Quality",
+                "Model",
+                "TTFT(ms)",
+                "Total(s)",
+                "Tok/s",
+                "Compile",
+                "Tests",
+                "Tools",
+                "Subs",
+                "Turns",
             );
             println!(
-                "  {:-<22} {:-<9} {:-<9} {:-<7} {:-<8} {:-<7} {:-<6} {:-<6}  {:-<20}",
-                "", "", "", "", "", "", "", "", ""
+                "  {:-<22} {:-<9} {:-<9} {:-<7} {:-<8} {:-<7} {:-<6} {:-<5} {:-<6}  {:-<20}",
+                "", "", "", "", "", "", "", "", "", ""
             );
-        } else if has_tools {
+        } else if has_activity_metrics {
             println!(
-                "  {:<22} {:>9} {:>9} {:>7} {:>8} {:>8} {:>6} {:>6}  Quality",
-                "Model", "TTFT(ms)", "Total(s)", "Tok/s", "In Tok", "Cost", "Tools", "Turns",
+                "  {:<22} {:>9} {:>9} {:>7} {:>8} {:>8} {:>6} {:>5} {:>6}  Quality",
+                "Model",
+                "TTFT(ms)",
+                "Total(s)",
+                "Tok/s",
+                "In Tok",
+                "Cost",
+                "Tools",
+                "Subs",
+                "Turns",
             );
             println!(
-                "  {:-<22} {:-<9} {:-<9} {:-<7} {:-<8} {:-<8} {:-<6} {:-<6}  {:-<20}",
-                "", "", "", "", "", "", "", "", ""
+                "  {:-<22} {:-<9} {:-<9} {:-<7} {:-<8} {:-<8} {:-<6} {:-<5} {:-<6}  {:-<20}",
+                "", "", "", "", "", "", "", "", "", ""
             );
         } else if has_judges {
             println!(
@@ -1742,6 +1604,12 @@ fn print_results_table(report: &BenchmarkReport, suite: BenchmarkSuite) {
                 "-".to_string()
             };
 
+            let subs_str = if r.subagent_calls_count > 0 {
+                r.subagent_calls_count.to_string()
+            } else {
+                "-".to_string()
+            };
+
             let turns_str = if r.turns_used > 0 {
                 r.turns_used.to_string()
             } else {
@@ -1750,7 +1618,7 @@ fn print_results_table(report: &BenchmarkReport, suite: BenchmarkSuite) {
 
             if has_compile && has_judges {
                 println!(
-                    "  {:<22} {:>9} {:>9} {:>7} {:>8} {:>7} {:>6} {:>6} {:>7}",
+                    "  {:<22} {:>9} {:>9} {:>7} {:>8} {:>7} {:>6} {:>5} {:>6} {:>7}",
                     model_display,
                     ttft_str,
                     total_str,
@@ -1758,12 +1626,13 @@ fn print_results_table(report: &BenchmarkReport, suite: BenchmarkSuite) {
                     compile_str,
                     tests_str,
                     tools_str,
+                    subs_str,
                     turns_str,
                     score_str,
                 );
             } else if has_compile {
                 println!(
-                    "  {:<22} {:>9} {:>9} {:>7} {:>8} {:>7} {:>6} {:>6}  {}",
+                    "  {:<22} {:>9} {:>9} {:>7} {:>8} {:>7} {:>6} {:>5} {:>6}  {}",
                     model_display,
                     ttft_str,
                     total_str,
@@ -1771,12 +1640,13 @@ fn print_results_table(report: &BenchmarkReport, suite: BenchmarkSuite) {
                     compile_str,
                     tests_str,
                     tools_str,
+                    subs_str,
                     turns_str,
                     quality_str,
                 );
-            } else if has_tools {
+            } else if has_activity_metrics {
                 println!(
-                    "  {:<22} {:>9} {:>9} {:>7} {:>8} {:>8} {:>6} {:>6}  {}",
+                    "  {:<22} {:>9} {:>9} {:>7} {:>8} {:>8} {:>6} {:>5} {:>6}  {}",
                     model_display,
                     ttft_str,
                     total_str,
@@ -1784,6 +1654,7 @@ fn print_results_table(report: &BenchmarkReport, suite: BenchmarkSuite) {
                     r.input_tokens,
                     cost_str,
                     tools_str,
+                    subs_str,
                     turns_str,
                     quality_str,
                 );
@@ -1810,6 +1681,10 @@ fn print_results_table(report: &BenchmarkReport, suite: BenchmarkSuite) {
                     quality_str,
                 );
             }
+
+            if let Some(summary) = r.delegation_summary() {
+                println!("  {:<22} delegation: {}", "", summary);
+            }
         }
     }
 
@@ -1818,6 +1693,8 @@ fn print_results_table(report: &BenchmarkReport, suite: BenchmarkSuite) {
     println!("-----------------------------------------------------------------------");
 
     let total_cost: f64 = report.results.iter().map(|r| r.cost_usd).sum();
+    let total_subagents: usize = report.results.iter().map(|r| r.subagent_calls_count).sum();
+    let total_subagent_cost: f64 = report.results.iter().map(|r| r.subagent_cost_usd).sum();
     let total_time: f64 = report
         .results
         .iter()
@@ -1881,7 +1758,28 @@ fn print_results_table(report: &BenchmarkReport, suite: BenchmarkSuite) {
         summary.push_str(&format!(", tool efficiency: {:.2}", eff));
     }
 
+    if total_subagents > 0 {
+        summary.push_str(&format!(
+            ", {} subagents, ${:.4} delegated",
+            total_subagents, total_subagent_cost
+        ));
+    }
+
+    if let Some(eff) = report.aggregate_delegation_efficiency {
+        summary.push_str(&format!(", delegation efficiency: {:.2}", eff));
+    }
+
     println!("{}", summary);
+    if total_subagents > 0 {
+        let all_subagent_types: Vec<String> = report
+            .results
+            .iter()
+            .flat_map(|result| result.subagent_types.iter().cloned())
+            .collect();
+        if let Some(mix) = format_subagent_mix(&all_subagent_types) {
+            println!("  Delegation mix: {}", mix);
+        }
+    }
     println!("=======================================================================");
     println!();
 }
@@ -1971,7 +1869,7 @@ mod tests {
     #[test]
     fn test_parse_test_output() {
         let output = "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out";
-        let (passed, failed) = parse_test_output(output);
+        let (passed, failed) = crate::benchmark_support::parse_test_output(output);
         assert_eq!(passed, 3);
         assert_eq!(failed, 0);
     }
@@ -1979,7 +1877,7 @@ mod tests {
     #[test]
     fn test_parse_test_output_with_failures() {
         let output = "test result: FAILED. 2 passed; 1 failed; 0 ignored";
-        let (passed, failed) = parse_test_output(output);
+        let (passed, failed) = crate::benchmark_support::parse_test_output(output);
         assert_eq!(passed, 2);
         assert_eq!(failed, 1);
     }

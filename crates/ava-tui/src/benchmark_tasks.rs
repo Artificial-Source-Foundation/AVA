@@ -162,6 +162,75 @@ pub fn filter_tasks_by_suite(
     }
 }
 
+pub fn filter_tasks_by_name(tasks: Vec<BenchmarkTask>, filter: Option<&str>) -> Vec<BenchmarkTask> {
+    let Some(filter) = filter.map(str::trim).filter(|value| !value.is_empty()) else {
+        return tasks;
+    };
+
+    let needles: Vec<String> = filter
+        .split(',')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_lowercase())
+        .collect();
+
+    if needles.is_empty() {
+        return tasks;
+    }
+
+    tasks
+        .into_iter()
+        .filter(|task| {
+            let task_name = task.name.to_lowercase();
+            needles
+                .iter()
+                .any(|needle| task_name == *needle || task_name.contains(needle))
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod task_filter_tests {
+    use super::*;
+
+    fn task(name: &'static str) -> BenchmarkTask {
+        BenchmarkTask {
+            name,
+            prompt: String::new(),
+            expected_patterns: vec![],
+            category: TaskCategory::Simple,
+            needs_tools: false,
+            test_harness: None,
+            expected_min_tools: None,
+        }
+    }
+
+    #[test]
+    fn filter_tasks_by_name_matches_exact_and_substring_queries() {
+        let tasks = vec![
+            task("rule_guided_typescript"),
+            task("delegated_config_bugfix"),
+            task("cross_file_refactor"),
+        ];
+
+        let filtered = filter_tasks_by_name(tasks, Some("delegated,typescript"));
+        let names: Vec<_> = filtered.into_iter().map(|task| task.name).collect();
+
+        assert_eq!(
+            names,
+            vec!["rule_guided_typescript", "delegated_config_bugfix"]
+        );
+    }
+
+    #[test]
+    fn filter_tasks_by_name_returns_all_tasks_when_filter_is_empty() {
+        let tasks = vec![task("one"), task("two")];
+        let filtered = filter_tasks_by_name(tasks.clone(), Some("  "));
+
+        assert_eq!(filtered.len(), tasks.len());
+    }
+}
+
 /// Test harness for compile-and-test validation.
 #[derive(Debug, Clone)]
 pub struct TestHarness {
@@ -920,6 +989,33 @@ mod tests {
 }
 "#;
 
+/// Rule-following benchmark: TypeScript file guided by `.ava/rules/*.md`.
+const RULE_GUIDED_TYPESCRIPT_SETUP: &str = r#"export type User = {
+    role: string
+}
+
+export function isAdmin(user: User): boolean {
+    return false
+}
+"#;
+
+/// Delegation benchmark: multi-file bug that benefits from a scout/reviewer pass.
+const DELEGATED_CONFIG_SETUP: &str = r#"#[derive(Debug, Clone)]
+pub struct Config {
+    pub retry_limit: usize,
+    pub timeout_ms: u64,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            retry_limit: 3,
+            timeout_ms: 5000,
+        }
+    }
+}
+"#;
+
 /// Returns agent-quality benchmark tasks that test multi-step reasoning,
 /// self-correction, and constraint following. Requires a temp directory path.
 pub fn agent_quality_tasks(temp_dir: &std::path::Path) -> Vec<BenchmarkTask> {
@@ -930,6 +1026,8 @@ pub fn agent_quality_tasks(temp_dir: &std::path::Path) -> Vec<BenchmarkTask> {
     let efficiency_dir = temp_dir.join("tool_efficiency").join("src");
     let no_overengineer_path = temp_dir.join("math.rs");
     let error_recovery_path = temp_dir.join("broken.rs");
+    let ts_rule_path = temp_dir.join("frontend").join("app.ts");
+    let delegation_dir = temp_dir.join("delegated_config_bugfix");
 
     vec![
         // 1. multi_step_debug (MultiStep)
@@ -1054,6 +1152,46 @@ pub fn agent_quality_tasks(temp_dir: &std::path::Path) -> Vec<BenchmarkTask> {
                 language: Language::Rust,
             }),
             expected_min_tools: Some(3),
+        },
+        // 7. rule_guided_typescript (ConstraintFollowing)
+        BenchmarkTask {
+            name: "rule_guided_typescript",
+            prompt: format!(
+                "Read {path}. Implement `isAdmin(user: User): boolean` so it returns true only \
+                 when the role is `admin`. Keep the exported API unchanged and follow the local project rules.",
+                path = ts_rule_path.display(),
+            ),
+            expected_patterns: vec![r"isAdmin"],
+            category: TaskCategory::ConstraintFollowing,
+            needs_tools: true,
+            test_harness: Some(TestHarness {
+                test_code: "",
+                setup_code: Some(RULE_GUIDED_TYPESCRIPT_SETUP),
+                test_count: 1,
+                language: Language::JavaScript,
+            }),
+            expected_min_tools: Some(2),
+        },
+        // 8. delegated_config_bugfix (MultiStep)
+        BenchmarkTask {
+            name: "delegated_config_bugfix",
+            prompt: format!(
+                "In the project at {dir}, first understand how retry settings should flow from \
+                 `Config` into `Client`, then fix the bug so `Client::new()` uses the configured \
+                 `retry_limit` and `timeout_ms`. Verify with `rustc --edition 2021 --test {dir}/tests.rs`. \
+                 This task is intentionally split across several files.",
+                dir = delegation_dir.display(),
+            ),
+            expected_patterns: vec![r"retry_limit", r"timeout_ms"],
+            category: TaskCategory::MultiStep,
+            needs_tools: true,
+            test_harness: Some(TestHarness {
+                test_code: "",
+                setup_code: Some(DELEGATED_CONFIG_SETUP),
+                test_count: 2,
+                language: Language::Rust,
+            }),
+            expected_min_tools: Some(4),
         },
     ]
 }

@@ -127,6 +127,10 @@ pub struct CliArgs {
     #[arg(long)]
     pub language: Option<String>,
 
+    /// Benchmark task filter: comma-separated task names or substrings
+    #[arg(long)]
+    pub task_filter: Option<String>,
+
     /// Run harnessed-pair benchmark (SOTA director + fast worker)
     #[arg(long)]
     pub harness: bool,
@@ -263,6 +267,7 @@ mod tests {
             judges: None,
             suite: "all".to_string(),
             language: None,
+            task_filter: None,
             harness: false,
             director: None,
             worker: None,

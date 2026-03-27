@@ -18,6 +18,8 @@ pub mod benchmark_import;
 #[cfg(feature = "benchmark")]
 pub mod benchmark_reporting;
 #[cfg(feature = "benchmark")]
+pub(crate) mod benchmark_support;
+#[cfg(feature = "benchmark")]
 pub mod benchmark_tasks;
 pub mod config;
 pub mod event;

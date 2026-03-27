@@ -821,7 +821,7 @@ mod tests {
         assert_eq!(estimate_tokens("abcd"), 1);
         // "abcdefgh" is 1-2 tokens depending on BPE merges
         let count = estimate_tokens("abcdefgh");
-        assert!(count >= 1 && count <= 3, "got {count}");
+        assert!((1..=3).contains(&count), "got {count}");
         // Empty string is 0 tokens
         assert_eq!(estimate_tokens(""), 0);
     }

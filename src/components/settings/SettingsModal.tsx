@@ -168,7 +168,7 @@ export const SettingsModal: Component = () => {
         <SettingsModalHeader onClose={closeSettings} />
 
         {/* Body: sidebar + content */}
-        <div class="flex flex-1 min-h-0">
+        <div class="flex flex-1 min-h-0 overflow-hidden">
           <SettingsModalSidebar
             activeTab={activeTab}
             onSelectTab={setActiveTab}
@@ -177,7 +177,10 @@ export const SettingsModal: Component = () => {
             onSearchChange={setSettingsSearch}
           />
 
-          <div class="flex-1 overflow-y-auto">
+          <div
+            class="flex-1 min-w-0 min-h-0 overflow-y-auto"
+            style={{ 'overscroll-behavior': 'contain', 'scrollbar-gutter': 'stable' }}
+          >
             <SettingsModalContent
               activeTab={activeTab}
               settings={settings}

@@ -215,7 +215,13 @@ export function loadSettings(): AppSettings {
   return { ...DEFAULT_SETTINGS }
 }
 
-export function saveSettings(s: AppSettings): void {
+const SETTINGS_PERSIST_DELAY_MS = 180
+
+let pendingSettings: AppSettings | null = null
+let pendingPersistTimer: ReturnType<typeof setTimeout> | undefined
+let persistenceListenersInstalled = false
+
+function persistSettingsNow(s: AppSettings): void {
   const serializable = serializeSettings(s)
   try {
     localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(serializable))
@@ -228,4 +234,44 @@ export function saveSettings(s: AppSettings): void {
   writeSettingsToFS(serializable).catch(() => {})
   // Keep core SettingsManager in sync
   pushSettingsToCore(s)
+}
+
+function flushPendingSettings(): void {
+  if (pendingPersistTimer) {
+    clearTimeout(pendingPersistTimer)
+    pendingPersistTimer = undefined
+  }
+
+  if (!pendingSettings) return
+
+  const next = pendingSettings
+  pendingSettings = null
+  persistSettingsNow(next)
+}
+
+function ensurePersistenceListeners(): void {
+  if (persistenceListenersInstalled || typeof window === 'undefined') return
+
+  persistenceListenersInstalled = true
+
+  const flush = () => flushPendingSettings()
+  window.addEventListener('beforeunload', flush)
+  window.addEventListener('pagehide', flush)
+
+  if (typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') flushPendingSettings()
+    })
+  }
+}
+
+export function saveSettings(s: AppSettings): void {
+  ensurePersistenceListeners()
+  pendingSettings = s
+
+  if (pendingPersistTimer) clearTimeout(pendingPersistTimer)
+  pendingPersistTimer = setTimeout(() => {
+    pendingPersistTimer = undefined
+    flushPendingSettings()
+  }, SETTINGS_PERSIST_DELAY_MS)
 }

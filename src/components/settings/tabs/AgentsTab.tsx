@@ -106,13 +106,13 @@ export const AgentsTab: Component = () => {
       <SettingsCard
         icon={Users}
         title="Agent Presets"
-        description="Configure HQ agent roles, provider/model overrides, and system prompts used by the desktop runtime"
+        description="Configure general agent presets, provider/model overrides, and system prompts used across the desktop runtime"
       >
         <div
-          class="flex -mx-6 -mb-6 rounded-b-[var(--radius-xl)] overflow-hidden"
+          class="flex min-h-0 -mx-6 -mb-6 rounded-b-[var(--radius-xl)] overflow-hidden"
           style={{ height: '520px' }}
         >
-          <div class="w-[40%] flex-shrink-0">
+          <div class="w-[40%] min-h-0 flex-shrink-0">
             <AgentsTabList
               agents={settings().agents}
               selectedId={creatingNew() ? null : selectedId()}
@@ -125,7 +125,7 @@ export const AgentsTab: Component = () => {
               onCreate={handleCreate}
             />
           </div>
-          <div class="flex-1 min-w-0">
+          <div class="flex-1 min-w-0 min-h-0 overflow-hidden">
             <AgentsTabDetail
               agent={selectedAgent()}
               providers={settings().providers}

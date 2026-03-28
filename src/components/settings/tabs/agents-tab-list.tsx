@@ -44,7 +44,7 @@ export const AgentsTabList: Component<AgentsTabListProps> = (props) => {
   const other = () => filtered().filter((a) => !a.tier && !a.isCustom)
 
   return (
-    <div class="flex flex-col h-full border-r border-[var(--border-subtle)]">
+    <div class="flex flex-col h-full min-h-0 border-r border-[var(--border-subtle)]">
       {/* Search + Actions */}
       <div class="p-2 space-y-2 flex-shrink-0">
         <input
@@ -87,7 +87,10 @@ export const AgentsTabList: Component<AgentsTabListProps> = (props) => {
       </div>
 
       {/* Scrollable list */}
-      <div class="flex-1 overflow-y-auto px-1 pb-2">
+      <div
+        class="flex-1 overflow-y-auto px-1 pb-2"
+        style={{ 'overscroll-behavior': 'contain', 'scrollbar-gutter': 'stable' }}
+      >
         <For each={TIER_ORDER}>
           {(tier) => (
             <Show when={byTier(tier).length > 0}>

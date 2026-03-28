@@ -174,7 +174,10 @@ export const SettingsModalSidebar: Component<SettingsModalSidebarProps> = (props
       </div>
 
       {/* Tab groups */}
-      <div class="flex-1 overflow-y-auto px-3 pb-3 space-y-4">
+      <div
+        class="flex-1 overflow-y-auto px-3 pb-3 space-y-4"
+        style={{ 'overscroll-behavior': 'contain', 'scrollbar-gutter': 'stable' }}
+      >
         <For each={namedGroups()}>
           {(group) => (
             <div>

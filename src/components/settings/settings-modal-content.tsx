@@ -36,7 +36,7 @@ interface SettingsModalContentProps {
 export const SettingsModalContent: Component<SettingsModalContentProps> = (props) => {
   return (
     <div
-      class="max-w-full overflow-y-auto"
+      class="max-w-full min-h-full"
       style={{
         'padding-top': '32px',
         'padding-left': '40px',

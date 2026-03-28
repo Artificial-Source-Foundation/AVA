@@ -97,7 +97,10 @@ export const AgentsTabDetail: Component<AgentsTabDetailProps> = (props) => {
   const capCategories = CAPABILITY_CATEGORIES.map((c) => ({ label: c.label, items: c.items }))
 
   return (
-    <div class="h-full overflow-y-auto p-5">
+    <div
+      class="h-full min-h-0 overflow-y-auto p-5"
+      style={{ 'overscroll-behavior': 'contain', 'scrollbar-gutter': 'stable' }}
+    >
       <Show
         when={props.agent}
         fallback={

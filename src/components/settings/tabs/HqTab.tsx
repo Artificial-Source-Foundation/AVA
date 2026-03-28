@@ -135,7 +135,10 @@ const HqAgentEditor: Component<{
       }
     >
       {(agent) => (
-        <div class="flex flex-col gap-4 p-4 h-full overflow-y-auto">
+        <div
+          class="flex h-full min-h-0 flex-col gap-4 overflow-y-auto p-4"
+          style={{ 'overscroll-behavior': 'contain', 'scrollbar-gutter': 'stable' }}
+        >
           <div class="flex items-start justify-between gap-3">
             <div>
               <div class="flex items-center gap-2">
@@ -525,14 +528,16 @@ const HqTab: Component = () => {
         description="A dedicated HQ-only view of the roles that matter during planning and execution. Edit overrides here instead of hunting through generic agent presets."
       >
         <div
-          class="flex -mx-6 -mb-6 rounded-b-[var(--radius-xl)] overflow-hidden"
+          class="flex min-h-0 -mx-6 -mb-6 rounded-b-[var(--radius-xl)] overflow-hidden"
           style={{ height: '520px' }}
         >
           <div
-            class="w-[36%] min-w-[260px] border-r overflow-y-auto"
+            class="w-[36%] min-w-[260px] min-h-0 border-r overflow-y-auto"
             style={{
               'border-color': 'var(--border-subtle)',
               'background-color': 'rgba(255,255,255,0.02)',
+              'overscroll-behavior': 'contain',
+              'scrollbar-gutter': 'stable',
             }}
           >
             <For each={hqAgents()}>
@@ -583,7 +588,7 @@ const HqTab: Component = () => {
               }}
             </For>
           </div>
-          <div class="flex-1 min-w-0">
+          <div class="flex-1 min-w-0 min-h-0 overflow-hidden">
             <HqAgentEditor
               agent={selectedAgent()}
               providers={settings().providers}

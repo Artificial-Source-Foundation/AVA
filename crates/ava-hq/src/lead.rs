@@ -20,7 +20,7 @@ use crate::plan::HqTask;
 use crate::prompts;
 use crate::routing::{domain_to_task_type, topological_sort};
 use crate::worker::{run_worker, Worker};
-use crate::{Budget, Domain, Task};
+use crate::{Budget, Domain, Task, TaskType};
 
 /// Worker name pool from the HQ design spec.
 const WORKER_NAMES: &[&str] = &[
@@ -437,7 +437,11 @@ impl Lead {
                 max_cost_usd: worker_budget.max_cost_usd,
                 loop_detection: true,
                 custom_system_prompt: Some(system_prompt),
-                thinking_level: ava_types::ThinkingLevel::Off,
+                thinking_level: if matches!(task.task_type, TaskType::Chat) {
+                    ava_types::ThinkingLevel::Medium
+                } else {
+                    ava_types::ThinkingLevel::Off
+                },
                 thinking_budget_tokens: None,
                 system_prompt_suffix: None,
                 project_root: None,

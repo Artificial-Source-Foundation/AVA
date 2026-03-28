@@ -31,6 +31,7 @@ pnpm install && pnpm tauri dev             # desktop app
 |------|-------|
 | Architecture + conventions | [CLAUDE.md](../CLAUDE.md) |
 | AI agent instructions | [AGENTS.md](../AGENTS.md) |
+| HQ architecture + UX | [hq/README.md](hq/README.md) |
 | Crate dependency graph | [crate-map.md](crate-map.md) |
 | Plugins + MCP | [plugins.md](plugins.md) |
 | Changelog | [CHANGELOG.md](CHANGELOG.md) |

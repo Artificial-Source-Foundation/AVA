@@ -13,7 +13,7 @@ import { useHq } from '../../../stores/hq'
 import { type LeadConfig, useSettings } from '../../../stores/settings'
 import { aggregateModels } from '../../dialogs/model-browser/model-browser-helpers'
 import { SettingsCard } from '../SettingsCard'
-import { SETTINGS_CARD_GAP } from '../settings-constants'
+import { SETTINGS_CARD_GAP, SETTINGS_INPUT_CLASS } from '../settings-constants'
 
 type HqAgentRole = 'direct' | 'support'
 
@@ -136,7 +136,7 @@ const HqAgentEditor: Component<{
     >
       {(agent) => (
         <div
-          class="flex h-full min-h-0 flex-col gap-4 overflow-y-auto p-4"
+          class="settings-scroll-area flex h-full min-h-0 flex-col gap-4 overflow-y-auto p-4"
           style={{ 'overscroll-behavior': 'contain', 'scrollbar-gutter': 'stable' }}
         >
           <div class="flex items-start justify-between gap-3">
@@ -240,8 +240,7 @@ const HqAgentEditor: Component<{
   )
 }
 
-const INPUT_CLASS =
-  'w-full h-9 px-2.5 rounded-md text-xs outline-none bg-[rgba(255,255,255,0.04)] border border-[var(--border-subtle)] text-[var(--text-primary)]'
+const INPUT_CLASS = `${SETTINGS_INPUT_CLASS} h-9 px-2.5 text-xs`
 
 const Field: Component<{ label: string; children: import('solid-js').JSX.Element }> = (props) => (
   <div class="flex flex-col gap-1.5">
@@ -532,7 +531,7 @@ const HqTab: Component = () => {
           style={{ height: '520px' }}
         >
           <div
-            class="w-[36%] min-w-[260px] min-h-0 border-r overflow-y-auto"
+            class="settings-scroll-area w-[36%] min-w-[260px] min-h-0 border-r overflow-y-auto"
             style={{
               'border-color': 'var(--border-subtle)',
               'background-color': 'rgba(255,255,255,0.02)',

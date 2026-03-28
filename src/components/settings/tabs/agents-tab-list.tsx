@@ -88,7 +88,7 @@ export const AgentsTabList: Component<AgentsTabListProps> = (props) => {
 
       {/* Scrollable list */}
       <div
-        class="flex-1 overflow-y-auto px-1 pb-2"
+        class="settings-scroll-area flex-1 overflow-y-auto px-1 pb-2"
         style={{ 'overscroll-behavior': 'contain', 'scrollbar-gutter': 'stable' }}
       >
         <For each={TIER_ORDER}>

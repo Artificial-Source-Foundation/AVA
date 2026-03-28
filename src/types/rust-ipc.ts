@@ -159,6 +159,28 @@ export interface HqWorkerTokenEvent {
   token: string
 }
 
+export interface HqWorkerThinkingEvent {
+  type: 'hq_worker_thinking'
+  worker_id: string
+  content: string
+}
+
+export interface HqWorkerToolCallEvent {
+  type: 'hq_worker_tool_call'
+  worker_id: string
+  call_id: string
+  name: string
+  args: Record<string, JsonValue>
+}
+
+export interface HqWorkerToolResultEvent {
+  type: 'hq_worker_tool_result'
+  worker_id: string
+  call_id: string
+  content: string
+  is_error: boolean
+}
+
 export interface HqWorkerCompletedEvent {
   type: 'hq_worker_completed'
   worker_id: string
@@ -310,6 +332,9 @@ export type HqEvent =
   | HqWorkerStartedEvent
   | HqWorkerProgressEvent
   | HqWorkerTokenEvent
+  | HqWorkerThinkingEvent
+  | HqWorkerToolCallEvent
+  | HqWorkerToolResultEvent
   | HqWorkerCompletedEvent
   | HqWorkerFailedEvent
   | HqAllCompleteEvent

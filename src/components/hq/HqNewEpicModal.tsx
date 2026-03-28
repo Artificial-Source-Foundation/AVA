@@ -20,17 +20,21 @@ export const HqNewEpicModal: Component<{
         type="button"
         aria-label="Close new epic modal"
         class="absolute inset-0"
-        style={{ 'background-color': 'rgba(0,0,0,0.6)' }}
+        style={{
+          'background-color': 'color-mix(in srgb, var(--background) 78%, black)',
+        }}
         onClick={props.onClose}
       />
       <div
         role="dialog"
         aria-modal="true"
         aria-labelledby="hq-new-epic-title"
-        class="flex flex-col gap-6 w-[520px] p-8 rounded-xl"
+        class="relative flex flex-col gap-6 w-[560px] max-w-[calc(100vw-32px)] p-8 rounded-2xl shadow-2xl"
         style={{
-          'background-color': 'var(--surface)',
-          border: '1px solid var(--border-subtle)',
+          background:
+            'linear-gradient(180deg, color-mix(in srgb, var(--surface) 92%, white) 0%, var(--surface) 100%)',
+          border: '1px solid color-mix(in srgb, var(--border-subtle) 85%, white)',
+          'box-shadow': '0 30px 80px rgba(0, 0, 0, 0.45)',
         }}
       >
         {/* Header */}
@@ -52,7 +56,7 @@ export const HqNewEpicModal: Component<{
         </div>
 
         {/* Description */}
-        <p class="text-xs" style={{ color: 'var(--text-muted)', 'line-height': '1.5' }}>
+        <p class="text-sm" style={{ color: 'var(--text-secondary)', 'line-height': '1.6' }}>
           Describe the feature or initiative. The Director will analyze it, create a plan, decompose
           into issues, and assign agents.
         </p>
@@ -70,7 +74,7 @@ export const HqNewEpicModal: Component<{
             id="hq-epic-title"
             class="w-full h-[100px] px-3 py-2.5 rounded-lg text-xs resize-none outline-none"
             style={{
-              'background-color': 'rgba(255,255,255,0.04)',
+              'background-color': 'color-mix(in srgb, var(--surface) 82%, black)',
               color: 'var(--text-primary)',
               border: '1px solid var(--border-subtle)',
               'line-height': '1.5',
@@ -93,15 +97,15 @@ export const HqNewEpicModal: Component<{
           <div
             class="flex items-center gap-2 w-full h-9 px-3 rounded-lg"
             style={{
-              'background-color': 'rgba(255,255,255,0.04)',
+              'background-color': 'color-mix(in srgb, var(--surface) 82%, black)',
               border: '1px solid var(--border-subtle)',
             }}
           >
-            <Paperclip size={13} class="text-zinc-700" />
+            <Paperclip size={13} style={{ color: 'var(--text-muted)' }} />
             <input
               id="hq-epic-context"
               class="flex-1 bg-transparent text-xs outline-none"
-              style={{ color: 'var(--text-muted)' }}
+              style={{ color: 'var(--text-primary)' }}
               placeholder="Attach files, reference issues..."
               value={description()}
               onInput={(e) => setDescription(e.currentTarget.value)}
@@ -126,9 +130,10 @@ export const HqNewEpicModal: Component<{
             type="button"
             class="flex items-center gap-1.5 h-9 px-5 rounded-lg text-xs font-semibold"
             style={{
-              'background-color': 'var(--accent)',
-              color: 'white',
-              opacity: title().trim() ? '1' : '0.5',
+              'background-color': title().trim() ? 'var(--accent)' : 'var(--surface)',
+              color: title().trim() ? 'white' : 'var(--text-muted)',
+              border: title().trim() ? 'none' : '1px solid var(--border-subtle)',
+              opacity: '1',
             }}
             onClick={handleCreate}
             disabled={!title().trim()}

@@ -80,12 +80,32 @@ pub(crate) async fn run_worker(
                     token,
                 });
             }
+            AgentEvent::Thinking(content) => {
+                let _ = event_tx.send(HqEvent::WorkerThinking {
+                    worker_id: worker.id,
+                    content,
+                });
+            }
+            AgentEvent::ToolCall(call) => {
+                let _ = event_tx.send(HqEvent::WorkerToolCall {
+                    worker_id: worker.id,
+                    call_id: call.id.clone(),
+                    name: call.name.clone(),
+                    args_json: serde_json::to_string(&call.arguments)
+                        .unwrap_or_else(|_| "{}".to_string()),
+                });
+            }
+            AgentEvent::ToolResult(result) => {
+                let _ = event_tx.send(HqEvent::WorkerToolResult {
+                    worker_id: worker.id,
+                    call_id: result.call_id.clone(),
+                    content: result.content.clone(),
+                    is_error: result.is_error,
+                });
+            }
             AgentEvent::Complete(session) => return Ok(session),
             AgentEvent::Error(error) => return Err(AvaError::ToolError(error)),
-            AgentEvent::Thinking(_)
-            | AgentEvent::ToolCall(_)
-            | AgentEvent::ToolResult(_)
-            | AgentEvent::ToolStats(_)
+            AgentEvent::ToolStats(_)
             | AgentEvent::BudgetWarning { .. }
             | AgentEvent::TokenUsage { .. }
             | AgentEvent::SubAgentComplete { .. }

@@ -98,7 +98,7 @@ export const AgentsTabDetail: Component<AgentsTabDetailProps> = (props) => {
 
   return (
     <div
-      class="h-full min-h-0 overflow-y-auto p-5"
+      class="settings-scroll-area h-full min-h-0 overflow-y-auto p-5"
       style={{ 'overscroll-behavior': 'contain', 'scrollbar-gutter': 'stable' }}
     >
       <Show

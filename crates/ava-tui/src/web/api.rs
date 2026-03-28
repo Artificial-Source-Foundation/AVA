@@ -38,6 +38,10 @@ pub(crate) use super::api_config::{
     ingest_frontend_log, list_cli_agents, list_mcp_servers, list_models, list_plugins,
     list_providers, reload_mcp, set_permission_level, switch_model, toggle_permission_level,
 };
+pub(crate) use super::api_hq::{
+    get_activity_feed, get_agent, get_agents, get_dashboard_metrics, get_director_chat,
+    get_hq_settings, list_epics, list_issues, send_director_message, update_hq_settings,
+};
 pub(crate) use super::api_interactive::{
     resolve_approval, resolve_plan, resolve_question, undo_last_edit,
 };
@@ -136,6 +140,84 @@ pub enum WebAgentEvent {
         file_path: Option<String>,
         bytes_received: usize,
     },
+    #[serde(rename = "hq_worker_started")]
+    HqWorkerStarted {
+        worker_id: String,
+        lead: String,
+        task: String,
+    },
+    #[serde(rename = "hq_worker_progress")]
+    HqWorkerProgress {
+        worker_id: String,
+        turn: usize,
+        max_turns: usize,
+    },
+    #[serde(rename = "hq_worker_token")]
+    HqWorkerToken { worker_id: String, token: String },
+    #[serde(rename = "hq_worker_thinking")]
+    HqWorkerThinking { worker_id: String, content: String },
+    #[serde(rename = "hq_worker_tool_call")]
+    HqWorkerToolCall {
+        worker_id: String,
+        call_id: String,
+        name: String,
+        args: Value,
+    },
+    #[serde(rename = "hq_worker_tool_result")]
+    HqWorkerToolResult {
+        worker_id: String,
+        call_id: String,
+        content: String,
+        is_error: bool,
+    },
+    #[serde(rename = "hq_worker_completed")]
+    HqWorkerCompleted {
+        worker_id: String,
+        success: bool,
+        turns: usize,
+    },
+    #[serde(rename = "hq_worker_failed")]
+    HqWorkerFailed { worker_id: String, error: String },
+    #[serde(rename = "hq_all_complete")]
+    HqAllComplete {
+        total_workers: usize,
+        succeeded: usize,
+        failed: usize,
+    },
+    #[serde(rename = "hq_summary")]
+    HqSummary {
+        total_workers: usize,
+        succeeded: usize,
+        failed: usize,
+        total_turns: usize,
+    },
+    #[serde(rename = "hq_phase_started")]
+    HqPhaseStarted {
+        phase_index: usize,
+        phase_count: usize,
+        phase_name: String,
+        role: String,
+    },
+    #[serde(rename = "hq_phase_completed")]
+    HqPhaseCompleted {
+        phase_index: usize,
+        phase_name: String,
+        turns: usize,
+        output_preview: String,
+    },
+    #[serde(rename = "hq_external_worker_started")]
+    HqExternalWorkerStarted {
+        worker_id: String,
+        agent_name: String,
+    },
+    #[serde(rename = "hq_external_worker_completed")]
+    HqExternalWorkerCompleted {
+        worker_id: String,
+        success: bool,
+        cost_usd: Option<f64>,
+    },
+    #[serde(rename = "hq_external_worker_failed")]
+    HqExternalWorkerFailed { worker_id: String, error: String },
 }
 
 /// A single todo item for the frontend.
@@ -170,6 +252,7 @@ pub struct PlanStepFrontend {
 pub fn convert_web_event(event: &WebEvent) -> Option<WebAgentEvent> {
     match event {
         WebEvent::Agent(backend_event) => convert_agent_event(backend_event),
+        WebEvent::Hq(hq_event) => convert_hq_event(hq_event),
         WebEvent::ApprovalRequest {
             id,
             tool_name,
@@ -227,6 +310,140 @@ pub fn convert_web_event(event: &WebEvent) -> Option<WebAgentEvent> {
         WebEvent::PlanStepComplete { step_id } => Some(WebAgentEvent::PlanStepComplete {
             step_id: step_id.clone(),
         }),
+    }
+}
+
+fn convert_hq_event(event: &ava_hq::HqEvent) -> Option<WebAgentEvent> {
+    use ava_hq::HqEvent as HE;
+    match event {
+        HE::WorkerToken { worker_id, token } => Some(WebAgentEvent::HqWorkerToken {
+            worker_id: worker_id.to_string(),
+            token: token.clone(),
+        }),
+        HE::WorkerThinking { worker_id, content } => Some(WebAgentEvent::HqWorkerThinking {
+            worker_id: worker_id.to_string(),
+            content: content.clone(),
+        }),
+        HE::WorkerToolCall {
+            worker_id,
+            call_id,
+            name,
+            args_json,
+        } => Some(WebAgentEvent::HqWorkerToolCall {
+            worker_id: worker_id.to_string(),
+            call_id: call_id.clone(),
+            name: name.clone(),
+            args: serde_json::from_str(args_json).unwrap_or_default(),
+        }),
+        HE::WorkerToolResult {
+            worker_id,
+            call_id,
+            content,
+            is_error,
+        } => Some(WebAgentEvent::HqWorkerToolResult {
+            worker_id: worker_id.to_string(),
+            call_id: call_id.clone(),
+            content: content.clone(),
+            is_error: *is_error,
+        }),
+        HE::WorkerStarted {
+            worker_id,
+            lead,
+            task_description,
+        } => Some(WebAgentEvent::HqWorkerStarted {
+            worker_id: worker_id.to_string(),
+            lead: lead.clone(),
+            task: task_description.clone(),
+        }),
+        HE::WorkerProgress {
+            worker_id,
+            turn,
+            max_turns,
+        } => Some(WebAgentEvent::HqWorkerProgress {
+            worker_id: worker_id.to_string(),
+            turn: *turn,
+            max_turns: *max_turns,
+        }),
+        HE::WorkerCompleted {
+            worker_id,
+            success,
+            turns,
+        } => Some(WebAgentEvent::HqWorkerCompleted {
+            worker_id: worker_id.to_string(),
+            success: *success,
+            turns: *turns,
+        }),
+        HE::WorkerFailed { worker_id, error } => Some(WebAgentEvent::HqWorkerFailed {
+            worker_id: worker_id.to_string(),
+            error: error.clone(),
+        }),
+        HE::AllComplete {
+            total_workers,
+            succeeded,
+            failed,
+        } => Some(WebAgentEvent::HqAllComplete {
+            total_workers: *total_workers,
+            succeeded: *succeeded,
+            failed: *failed,
+        }),
+        HE::Summary {
+            total_workers,
+            succeeded,
+            failed,
+            total_turns,
+        } => Some(WebAgentEvent::HqSummary {
+            total_workers: *total_workers,
+            succeeded: *succeeded,
+            failed: *failed,
+            total_turns: *total_turns,
+        }),
+        HE::PhaseStarted {
+            phase_index,
+            phase_count,
+            phase_name,
+            role,
+        } => Some(WebAgentEvent::HqPhaseStarted {
+            phase_index: *phase_index,
+            phase_count: *phase_count,
+            phase_name: phase_name.clone(),
+            role: role.clone(),
+        }),
+        HE::PhaseCompleted {
+            phase_index,
+            phase_name,
+            turns,
+            output_preview,
+        } => Some(WebAgentEvent::HqPhaseCompleted {
+            phase_index: *phase_index,
+            phase_name: phase_name.clone(),
+            turns: *turns,
+            output_preview: output_preview.clone(),
+        }),
+        HE::ExternalWorkerStarted {
+            worker_id,
+            agent_name,
+            ..
+        } => Some(WebAgentEvent::HqExternalWorkerStarted {
+            worker_id: worker_id.to_string(),
+            agent_name: agent_name.clone(),
+        }),
+        HE::ExternalWorkerCompleted {
+            worker_id,
+            success,
+            cost_usd,
+            ..
+        } => Some(WebAgentEvent::HqExternalWorkerCompleted {
+            worker_id: worker_id.to_string(),
+            success: *success,
+            cost_usd: *cost_usd,
+        }),
+        HE::ExternalWorkerFailed { worker_id, error } => {
+            Some(WebAgentEvent::HqExternalWorkerFailed {
+                worker_id: worker_id.to_string(),
+                error: error.clone(),
+            })
+        }
+        _ => None,
     }
 }
 

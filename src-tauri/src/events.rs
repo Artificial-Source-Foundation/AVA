@@ -81,6 +81,22 @@ pub enum AgentEvent {
     },
     #[serde(rename = "hq_worker_token")]
     HqWorkerToken { worker_id: String, token: String },
+    #[serde(rename = "hq_worker_thinking")]
+    HqWorkerThinking { worker_id: String, content: String },
+    #[serde(rename = "hq_worker_tool_call")]
+    HqWorkerToolCall {
+        worker_id: String,
+        call_id: String,
+        name: String,
+        args: Value,
+    },
+    #[serde(rename = "hq_worker_tool_result")]
+    HqWorkerToolResult {
+        worker_id: String,
+        call_id: String,
+        content: String,
+        is_error: bool,
+    },
     #[serde(rename = "hq_worker_completed")]
     HqWorkerCompleted {
         worker_id: String,
@@ -341,6 +357,32 @@ pub fn from_hq_event(event: &ava_hq::HqEvent) -> Option<AgentEvent> {
         PE::WorkerToken { worker_id, token } => Some(AgentEvent::HqWorkerToken {
             worker_id: worker_id.to_string(),
             token: token.clone(),
+        }),
+        PE::WorkerThinking { worker_id, content } => Some(AgentEvent::HqWorkerThinking {
+            worker_id: worker_id.to_string(),
+            content: content.clone(),
+        }),
+        PE::WorkerToolCall {
+            worker_id,
+            call_id,
+            name,
+            args_json,
+        } => Some(AgentEvent::HqWorkerToolCall {
+            worker_id: worker_id.to_string(),
+            call_id: call_id.clone(),
+            name: name.clone(),
+            args: serde_json::from_str(args_json).unwrap_or(Value::Null),
+        }),
+        PE::WorkerToolResult {
+            worker_id,
+            call_id,
+            content,
+            is_error,
+        } => Some(AgentEvent::HqWorkerToolResult {
+            worker_id: worker_id.to_string(),
+            call_id: call_id.clone(),
+            content: content.clone(),
+            is_error: *is_error,
         }),
         PE::WorkerCompleted {
             worker_id,

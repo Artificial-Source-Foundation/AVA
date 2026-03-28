@@ -34,6 +34,77 @@ interface SettingsModalContentProps {
 }
 
 export const SettingsModalContent: Component<SettingsModalContentProps> = (props) => {
+  const renderTab = (tab: SettingsTab) => {
+    switch (tab) {
+      case 'general':
+        return <GeneralSection />
+      case 'appearance':
+        return <AppearanceTab />
+      case 'behavior':
+        return <BehaviorTab />
+      case 'shortcuts':
+        return (
+          <KeybindingsTab
+            keybindings={props.keybindings()}
+            onEdit={props.onEditKeybinding}
+            onReset={props.onResetKeybinding}
+            onResetAll={props.onResetAllKeybindings}
+          />
+        )
+      case 'providers':
+        return (
+          <ProvidersTab
+            providers={props.settings().providers}
+            onToggle={(id, enabled) => props.onUpdateProvider(id, { enabled })}
+            onSaveApiKey={(id, key) =>
+              props.onUpdateProvider(id, { apiKey: key, status: 'connected', enabled: true })
+            }
+            onClearApiKey={(id) =>
+              props.onUpdateProvider(id, { apiKey: undefined, status: 'disconnected' })
+            }
+            onSetDefaultModel={(providerId, modelId) =>
+              props.onUpdateProvider(providerId, { defaultModel: modelId })
+            }
+            onUpdateModels={(providerId, models) => {
+              props.onUpdateProvider(providerId, {
+                models,
+                defaultModel: models.find((m) => m.isDefault)?.id || models[0]?.id,
+              })
+            }}
+            onTestConnection={props.onTestProvider}
+            onSaveBaseUrl={(id, url) => props.onUpdateProvider(id, { baseUrl: url || undefined })}
+          />
+        )
+      case 'usage':
+        return <UsageTab />
+      case 'permissions-trust':
+        return <PermissionsAndTrustTab />
+      case 'agents':
+        return <AgentsTab />
+      case 'hq':
+        return <HqTab />
+      case 'llm':
+        return <LLMTab />
+      case 'mcp':
+        return (
+          <MCPServersTab
+            servers={props.mcpServers()}
+            onRemove={props.onRemoveMcpServer}
+            onAdd={props.onAddMcpServer}
+            onRefresh={props.onRefreshMcpServers}
+          />
+        )
+      case 'plugins':
+        return <PluginsTab />
+      case 'skills-commands':
+        return <SkillsAndCommandsTab />
+      case 'developer':
+        return <DeveloperTab />
+      case 'about':
+        return <AboutSection />
+    }
+  }
+
   return (
     <div
       class="max-w-full min-h-full"
@@ -44,94 +115,8 @@ export const SettingsModalContent: Component<SettingsModalContentProps> = (props
         'padding-bottom': '32px',
       }}
     >
-      <Show when={props.activeTab() === 'general'}>
-        <GeneralSection />
-      </Show>
-
-      <Show when={props.activeTab() === 'appearance'}>
-        <AppearanceTab />
-      </Show>
-
-      <Show when={props.activeTab() === 'behavior'}>
-        <BehaviorTab />
-      </Show>
-
-      <Show when={props.activeTab() === 'shortcuts'}>
-        <KeybindingsTab
-          keybindings={props.keybindings()}
-          onEdit={props.onEditKeybinding}
-          onReset={props.onResetKeybinding}
-          onResetAll={props.onResetAllKeybindings}
-        />
-      </Show>
-
-      <Show when={props.activeTab() === 'providers'}>
-        <ProvidersTab
-          providers={props.settings().providers}
-          onToggle={(id, enabled) => props.onUpdateProvider(id, { enabled })}
-          onSaveApiKey={(id, key) =>
-            props.onUpdateProvider(id, { apiKey: key, status: 'connected', enabled: true })
-          }
-          onClearApiKey={(id) =>
-            props.onUpdateProvider(id, { apiKey: undefined, status: 'disconnected' })
-          }
-          onSetDefaultModel={(providerId, modelId) =>
-            props.onUpdateProvider(providerId, { defaultModel: modelId })
-          }
-          onUpdateModels={(providerId, models) => {
-            props.onUpdateProvider(providerId, {
-              models,
-              defaultModel: models.find((m) => m.isDefault)?.id || models[0]?.id,
-            })
-          }}
-          onTestConnection={props.onTestProvider}
-          onSaveBaseUrl={(id, url) => props.onUpdateProvider(id, { baseUrl: url || undefined })}
-        />
-      </Show>
-
-      <Show when={props.activeTab() === 'usage'}>
-        <UsageTab />
-      </Show>
-
-      <Show when={props.activeTab() === 'permissions-trust'}>
-        <PermissionsAndTrustTab />
-      </Show>
-
-      <Show when={props.activeTab() === 'agents'}>
-        <AgentsTab />
-      </Show>
-
-      <Show when={props.activeTab() === 'hq'}>
-        <HqTab />
-      </Show>
-
-      <Show when={props.activeTab() === 'llm'}>
-        <LLMTab />
-      </Show>
-
-      <Show when={props.activeTab() === 'mcp'}>
-        <MCPServersTab
-          servers={props.mcpServers()}
-          onRemove={props.onRemoveMcpServer}
-          onAdd={props.onAddMcpServer}
-          onRefresh={props.onRefreshMcpServers}
-        />
-      </Show>
-
-      <Show when={props.activeTab() === 'plugins'}>
-        <PluginsTab />
-      </Show>
-
-      <Show when={props.activeTab() === 'skills-commands'}>
-        <SkillsAndCommandsTab />
-      </Show>
-
-      <Show when={props.activeTab() === 'developer'}>
-        <DeveloperTab />
-      </Show>
-
-      <Show when={props.activeTab() === 'about'}>
-        <AboutSection />
+      <Show when={props.activeTab()} keyed>
+        {(tab) => <div class="settings-tab-panel">{renderTab(tab)}</div>}
       </Show>
     </div>
   )

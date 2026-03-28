@@ -1,4 +1,12 @@
-import { Crown, KanbanSquare, Layers, LayoutDashboard, ListChecks, Network } from 'lucide-solid'
+import {
+  ArrowLeft,
+  Crown,
+  KanbanSquare,
+  Layers,
+  LayoutDashboard,
+  ListChecks,
+  Network,
+} from 'lucide-solid'
 import { type Component, For } from 'solid-js'
 import { useHq } from '../../stores/hq'
 import { useProject } from '../../stores/project'
@@ -20,7 +28,7 @@ const NAV_ITEMS: NavItem[] = [
 ]
 
 export const HqSidebar: Component = () => {
-  const { hqPage, navigateTo, runningAgents } = useHq()
+  const { hqPage, navigateTo, runningAgents, toggleHqMode } = useHq()
   const { currentProject } = useProject()
 
   const projectLabel = () => {
@@ -38,22 +46,30 @@ export const HqSidebar: Component = () => {
       }}
     >
       {/* Header */}
-      <div
-        class="flex items-center gap-2 px-4 py-3 border-b"
-        style={{ 'border-color': 'var(--border-subtle)' }}
-      >
-        <span
-          class="text-xs font-bold tracking-wider px-2 py-0.5 rounded"
-          style={{
-            color: 'var(--accent)',
-            'background-color': 'var(--accent-subtle)',
-          }}
+      <div class="border-b px-3 py-3" style={{ 'border-color': 'var(--border-subtle)' }}>
+        <button
+          type="button"
+          class="mb-3 flex items-center gap-2 text-xs font-medium transition-colors hover:text-[var(--text-primary)]"
+          style={{ color: 'var(--text-secondary)' }}
+          onClick={toggleHqMode}
         >
-          HQ
-        </span>
-        <span class="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
-          {projectLabel()}
-        </span>
+          <ArrowLeft size={14} />
+          Back to Chat
+        </button>
+        <div class="flex items-center gap-2">
+          <span
+            class="text-xs font-bold tracking-wider px-2 py-0.5 rounded"
+            style={{
+              color: 'var(--accent)',
+              'background-color': 'var(--accent-subtle)',
+            }}
+          >
+            HQ
+          </span>
+          <span class="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
+            {projectLabel()}
+          </span>
+        </div>
       </div>
 
       {/* Nav Items */}

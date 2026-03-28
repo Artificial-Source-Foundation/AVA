@@ -238,6 +238,78 @@ button {
 }
 
 /* ========================================
+   SETTINGS UX POLISH
+   ======================================== */
+
+.settings-scroll-area::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.settings-scroll-area::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.settings-scroll-area::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--accent-subtle) 58%, transparent);
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background-clip: padding-box;
+}
+
+.settings-scroll-area::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--accent-border) 72%, transparent);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+.settings-sidebar-button {
+  position: relative;
+  overflow: hidden;
+  transition:
+    transform var(--duration-normal) var(--ease-out),
+    background-color var(--duration-normal) var(--ease-out),
+    color var(--duration-normal) var(--ease-out),
+    box-shadow var(--duration-slow) var(--ease-out);
+}
+
+.settings-sidebar-button::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0;
+  background: linear-gradient(90deg, var(--accent-subtle), transparent 70%);
+  transition: opacity var(--duration-normal) var(--ease-out);
+}
+
+.settings-sidebar-button:hover {
+  transform: translateX(2px);
+}
+
+.settings-sidebar-button:hover::after,
+.settings-sidebar-button:focus-visible::after {
+  opacity: 1;
+}
+
+.settings-tab-panel {
+  animation: settings-panel-in var(--duration-slower) var(--ease-out);
+  transform-origin: top center;
+}
+
+@keyframes settings-panel-in {
+  0% {
+    opacity: 0;
+    transform: translateY(10px) scale(0.992);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* ========================================
    RESIZE HANDLE
    ======================================== */
 
@@ -1560,6 +1632,7 @@ button {
 @media (prefers-reduced-motion: reduce) {
   .onboarding-bg::before,
   .onboarding-logo,
+  .settings-tab-panel,
   .step-enter,
   .stagger-child,
   .floating-particle,

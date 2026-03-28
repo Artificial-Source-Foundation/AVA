@@ -38,6 +38,8 @@ pub struct FileEditRecord {
 pub enum WebEvent {
     /// A regular agent event from the backend loop.
     Agent(ava_agent::agent_loop::AgentEvent),
+    /// An HQ event from the Director/worker pipeline.
+    Hq(ava_hq::HqEvent),
     /// An interactive approval request.
     ApprovalRequest {
         id: String,
@@ -91,6 +93,7 @@ pub struct WebState {
 
 pub struct WebStateInner {
     pub stack: Arc<AgentStack>,
+    pub db: Arc<ava_db::Database>,
     /// Cancellation token for the current agent run.
     pub cancel: RwLock<CancellationToken>,
     /// Whether the agent is currently running.
@@ -121,6 +124,8 @@ pub struct WebStateInner {
 impl WebState {
     /// Initialise the web state with a fresh `AgentStack`.
     pub async fn init(data_dir: PathBuf) -> Result<Self> {
+        let db = ava_db::Database::create_at(data_dir.join("ava.db")).await?;
+        db.run_migrations().await?;
         let config = AgentStackConfig {
             data_dir,
             ..Default::default()
@@ -134,6 +139,7 @@ impl WebState {
         Ok(Self {
             inner: Arc::new(WebStateInner {
                 stack: Arc::new(stack),
+                db: Arc::new(db),
                 cancel: RwLock::new(CancellationToken::new()),
                 running: RwLock::new(false),
                 event_tx,

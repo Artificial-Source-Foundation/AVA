@@ -108,7 +108,7 @@ export const SettingsModalSidebar: Component<SettingsModalSidebarProps> = (props
       <button
         type="button"
         onClick={() => props.onBack()}
-        class="flex items-center gap-2 px-4 py-3 text-[var(--settings-text-input)] text-[var(--gray-7)] hover:text-[var(--gray-9)] transition-colors"
+        class="flex items-center gap-2 px-4 py-3 text-[var(--settings-text-input)] text-[var(--gray-7)] hover:text-[var(--gray-9)] transition-colors duration-[var(--duration-normal)]"
       >
         <ArrowLeft class="w-3.5 h-3.5" />
         Back to Chat
@@ -175,7 +175,7 @@ export const SettingsModalSidebar: Component<SettingsModalSidebarProps> = (props
 
       {/* Tab groups */}
       <div
-        class="flex-1 overflow-y-auto px-3 pb-3 space-y-4"
+        class="settings-scroll-area flex-1 overflow-y-auto px-3 pb-3 space-y-4"
         style={{ 'overscroll-behavior': 'contain', 'scrollbar-gutter': 'stable' }}
       >
         <For each={namedGroups()}>
@@ -201,7 +201,7 @@ export const SettingsModalSidebar: Component<SettingsModalSidebarProps> = (props
                       <button
                         type="button"
                         onClick={() => props.onSelectTab(tab.id)}
-                        class="w-full flex items-center rounded-[10px] transition-colors duration-[var(--duration-fast)]"
+                        class="settings-sidebar-button w-full flex items-center rounded-[10px]"
                         style={{
                           gap: '10px',
                           padding: '10px 14px',
@@ -243,7 +243,7 @@ export const SettingsModalSidebar: Component<SettingsModalSidebarProps> = (props
                 <button
                   type="button"
                   onClick={() => props.onSelectTab(tab.id)}
-                  class="w-full flex items-center rounded-[10px] transition-colors duration-[var(--duration-fast)]"
+                  class="settings-sidebar-button w-full flex items-center rounded-[10px]"
                   style={{
                     gap: '10px',
                     padding: '10px 14px',

@@ -112,6 +112,7 @@ pub enum TaskType {
     Review,
     Research,
     Debug,
+    Chat,
     Simple,
 }
 

@@ -332,13 +332,6 @@ fn to_string_error<E: std::fmt::Display>(error: E) -> String {
     error.to_string()
 }
 
-fn new_issue_number() -> i64 {
-    let bytes = *Uuid::new_v4().as_bytes();
-    let mut lower = [0_u8; 8];
-    lower.copy_from_slice(&bytes[8..]);
-    i64::from_be_bytes(lower).abs()
-}
-
 fn hq_repo(app: &AppState) -> HqRepository {
     HqRepository::new(app.database().pool().clone())
 }
@@ -640,6 +633,15 @@ fn convert_plan(
 }
 
 async fn ensure_director_agent(repo: &HqRepository, stack: &AgentStack) -> Result<(), String> {
+    if repo
+        .get_agent("director")
+        .await
+        .map_err(to_string_error)?
+        .is_some()
+    {
+        return Ok(());
+    }
+
     let now = now_ms();
     let (_, model_name) = stack.current_model().await;
     repo.upsert_agent(&HqAgentRecord {
@@ -667,6 +669,136 @@ async fn ensure_director_agent(repo: &HqRepository, stack: &AgentStack) -> Resul
     })
     .await
     .map_err(to_string_error)
+}
+
+async fn purge_stale_director_chat(repo: &HqRepository) {
+    let _ = repo
+        .delete_chat_messages_by_content(&[
+            "Understood. I am kicking off HQ work now.",
+            "Steering received. I forwarded it to the active HQ run.",
+            "Understood. Web HQ preview stored your note; desktop runtime execution is available in the Tauri app.",
+        ])
+        .await;
+}
+
+fn extract_director_reply(session: &ava_types::Session) -> String {
+    let assistant_messages: Vec<_> = session
+        .messages
+        .iter()
+        .filter(|message| message.role == ava_types::Role::Assistant)
+        .map(|message| message.content.trim())
+        .filter(|content| !content.is_empty())
+        .collect();
+
+    if !assistant_messages.is_empty() {
+        return assistant_messages.join("\n\n");
+    }
+
+    session
+        .messages
+        .iter()
+        .rev()
+        .find(|message| {
+            !matches!(message.role, ava_types::Role::System) && !message.content.trim().is_empty()
+        })
+        .map(|message| message.content.trim().to_string())
+        .unwrap_or_else(|| "HQ finished without a textual reply.".to_string())
+}
+
+fn spawn_simple_hq_run(
+    app_handle: AppHandle,
+    stack: Arc<AgentStack>,
+    cancel: tokio_util::sync::CancellationToken,
+    goal: String,
+    task_type: ava_hq::TaskType,
+    team_config: Option<TeamConfigPayload>,
+    repo: Option<HqRepository>,
+    epic_id: Option<String>,
+) {
+    tokio::spawn(async move {
+        let settings = stack.config.get().await.hq;
+        let director = match build_director(stack.clone(), team_config, &settings).await {
+            Ok(director) => director,
+            Err(error) => {
+                let _ = app_handle.emit(
+                    "agent-event",
+                    crate::events::AgentEvent::Error {
+                        message: format!("HQ setup failed: {error}"),
+                    },
+                );
+                let bridge_ref = app_handle.state::<DesktopBridge>();
+                *bridge_ref.running.write().await = false;
+                return;
+            }
+        };
+
+        let mut director = director;
+        let worker = match director.delegate(ava_hq::Task {
+            description: goal,
+            task_type,
+            files: vec![],
+        }) {
+            Ok(worker) => worker,
+            Err(err) => {
+                let _ = app_handle.emit(
+                    "agent-event",
+                    crate::events::AgentEvent::Error {
+                        message: format!("HQ delegation failed: {err}"),
+                    },
+                );
+                let bridge_ref = app_handle.state::<DesktopBridge>();
+                *bridge_ref.running.write().await = false;
+                return;
+            }
+        };
+
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let app_fwd = app_handle.clone();
+        let forwarder = tokio::spawn(async move {
+            while let Some(event) = rx.recv().await {
+                crate::events::emit_hq_event(&app_fwd, &event);
+            }
+        });
+
+        let result = director.coordinate(vec![worker], cancel, tx).await;
+        let _ = forwarder.await;
+
+        match result {
+            Ok(session) => {
+                if let Some(repo) = repo.as_ref() {
+                    append_chat_message(
+                        repo,
+                        "director",
+                        extract_director_reply(&session),
+                        epic_id.as_deref(),
+                        vec![],
+                    )
+                    .await;
+                }
+            }
+            Err(error) => {
+                if let Some(repo) = repo.as_ref() {
+                    append_chat_message(
+                        repo,
+                        "director",
+                        format!("HQ hit an error while working on that: {error}"),
+                        epic_id.as_deref(),
+                        vec![],
+                    )
+                    .await;
+                }
+                let _ = app_handle.emit(
+                    "agent-event",
+                    crate::events::AgentEvent::Error {
+                        message: format!("HQ coordination failed: {error}"),
+                    },
+                );
+            }
+        }
+
+        let bridge_ref = app_handle.state::<DesktopBridge>();
+        *bridge_ref.running.write().await = false;
+    });
 }
 
 async fn append_activity(
@@ -855,7 +987,7 @@ async fn create_plan_issues(
     let mut created = Vec::new();
     for phase in &plan.phases {
         for task in &phase.tasks {
-            let issue_number = new_issue_number();
+            let issue_number = repo.next_issue_number().await.map_err(to_string_error)?;
             let now = now_ms();
             let issue_record = HqIssueRecord {
                 id: Uuid::new_v4().to_string(),
@@ -1585,69 +1717,16 @@ pub async fn start_hq(
 
     let cancel = bridge.new_cancel_token().await;
     let stack = bridge.stack.clone();
-    let app_handle = app.clone();
-
-    tokio::spawn(async move {
-        let settings = stack.config.get().await.hq;
-        let director =
-            match build_director(stack.clone(), args.team_config.clone(), &settings).await {
-                Ok(director) => director,
-                Err(error) => {
-                    let _ = app_handle.emit(
-                        "agent-event",
-                        crate::events::AgentEvent::Error {
-                            message: format!("HQ setup failed: {error}"),
-                        },
-                    );
-                    let bridge_ref = app_handle.state::<DesktopBridge>();
-                    *bridge_ref.running.write().await = false;
-                    return;
-                }
-            };
-
-        let mut director = director;
-        let worker = match director.delegate(ava_hq::Task {
-            description: args.goal.clone(),
-            task_type: ava_hq::TaskType::Simple,
-            files: vec![],
-        }) {
-            Ok(worker) => worker,
-            Err(err) => {
-                let _ = app_handle.emit(
-                    "agent-event",
-                    crate::events::AgentEvent::Error {
-                        message: format!("HQ delegation failed: {err}"),
-                    },
-                );
-                let bridge_ref = app_handle.state::<DesktopBridge>();
-                *bridge_ref.running.write().await = false;
-                return;
-            }
-        };
-
-        let (tx, mut rx) = mpsc::unbounded_channel();
-        let app_fwd = app_handle.clone();
-        let forwarder = tokio::spawn(async move {
-            while let Some(event) = rx.recv().await {
-                crate::events::emit_hq_event(&app_fwd, &event);
-            }
-        });
-
-        let result = director.coordinate(vec![worker], cancel, tx).await;
-        let _ = forwarder.await;
-
-        if let Err(error) = result {
-            let _ = app_handle.emit(
-                "agent-event",
-                crate::events::AgentEvent::Error {
-                    message: format!("HQ coordination failed: {error}"),
-                },
-            );
-        }
-
-        let bridge_ref = app_handle.state::<DesktopBridge>();
-        *bridge_ref.running.write().await = false;
-    });
+    spawn_simple_hq_run(
+        app,
+        stack,
+        cancel,
+        args.goal,
+        ava_hq::TaskType::Simple,
+        args.team_config,
+        None,
+        None,
+    );
 
     Ok(())
 }
@@ -1841,7 +1920,7 @@ pub async fn create_issue(
     app_state: State<'_, AppState>,
 ) -> Result<HqIssueDto, String> {
     let repo = hq_repo(&app_state);
-    let issue_number = new_issue_number();
+    let issue_number = repo.next_issue_number().await.map_err(to_string_error)?;
     let now = now_ms();
     let record = HqIssueRecord {
         id: Uuid::new_v4().to_string(),
@@ -2118,8 +2197,12 @@ pub async fn reject_plan(
 }
 
 #[tauri::command]
-pub async fn get_agents(app_state: State<'_, AppState>) -> Result<Vec<HqAgentDto>, String> {
+pub async fn get_agents(
+    app_state: State<'_, AppState>,
+    bridge: State<'_, DesktopBridge>,
+) -> Result<Vec<HqAgentDto>, String> {
     let repo = hq_repo(&app_state);
+    ensure_director_agent(&repo, &bridge.stack).await?;
     let records = repo.list_agents().await.map_err(to_string_error)?;
     let mut out = Vec::with_capacity(records.len());
     for record in records {
@@ -2132,8 +2215,10 @@ pub async fn get_agents(app_state: State<'_, AppState>) -> Result<Vec<HqAgentDto
 pub async fn get_agent(
     id: String,
     app_state: State<'_, AppState>,
+    bridge: State<'_, DesktopBridge>,
 ) -> Result<Option<HqAgentDto>, String> {
     let repo = hq_repo(&app_state);
+    ensure_director_agent(&repo, &bridge.stack).await?;
     let Some(record) = repo.get_agent(&id).await.map_err(to_string_error)? else {
         return Ok(None);
     };
@@ -2143,8 +2228,10 @@ pub async fn get_agent(
 #[tauri::command]
 pub async fn get_dashboard_metrics(
     app_state: State<'_, AppState>,
+    bridge: State<'_, DesktopBridge>,
 ) -> Result<HqDashboardMetricsDto, String> {
     let repo = hq_repo(&app_state);
+    ensure_director_agent(&repo, &bridge.stack).await?;
     let agents = repo.list_agents().await.map_err(to_string_error)?;
     let epics = repo.list_epics().await.map_err(to_string_error)?;
     let issues = repo.list_issues(None).await.map_err(to_string_error)?;
@@ -2211,8 +2298,12 @@ pub async fn get_activity_feed(
 #[tauri::command]
 pub async fn get_director_chat(
     app_state: State<'_, AppState>,
+    bridge: State<'_, DesktopBridge>,
 ) -> Result<Vec<HqDirectorMessageDto>, String> {
-    Ok(hq_repo(&app_state)
+    let repo = hq_repo(&app_state);
+    ensure_director_agent(&repo, &bridge.stack).await?;
+    purge_stale_director_chat(&repo).await;
+    Ok(repo
         .list_chat_messages(500)
         .await
         .map_err(to_string_error)?
@@ -2225,6 +2316,7 @@ pub async fn get_director_chat(
 pub async fn send_director_message(
     message: String,
     epic_id: Option<String>,
+    app: AppHandle,
     app_state: State<'_, AppState>,
     bridge: State<'_, DesktopBridge>,
 ) -> Result<(), String> {
@@ -2233,22 +2325,41 @@ pub async fn send_director_message(
         return Err("Message must not be empty.".to_string());
     }
     let repo = hq_repo(&app_state);
+    ensure_director_agent(&repo, &bridge.stack).await?;
     append_chat_message(&repo, "user", message.clone(), epic_id.as_deref(), vec![]).await;
 
-    let running = *bridge.running.read().await;
-    if running {
+    let mut running = bridge.running.write().await;
+    if *running {
         bridge
             .send_message(message.clone(), MessageTier::Steering)
             .await?;
+        drop(running);
         append_chat_message(
             &repo,
             "director",
-            "Steering received. I forwarded it to the active HQ run.".to_string(),
+            "Steering note received for the active HQ run.".to_string(),
             epic_id.as_deref(),
             vec![],
         )
         .await;
+        return Ok(());
+    } else {
+        *running = true;
+        let cancel = bridge.new_cancel_token().await;
+        let stack = bridge.stack.clone();
+        let repo_for_run = repo.clone();
+        let epic_id_for_run = epic_id.clone();
+        drop(running);
+        spawn_simple_hq_run(
+            app,
+            stack,
+            cancel,
+            message,
+            ava_hq::TaskType::Chat,
+            None,
+            Some(repo_for_run),
+            epic_id_for_run,
+        );
+        return Ok(());
     }
-
-    Ok(())
 }

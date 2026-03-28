@@ -30,6 +30,7 @@ export const SettingsModal: Component = () => {
   const [editingKeybinding, setEditingKeybinding] = createSignal<Keybinding | null>(null)
   const [addMcpDialogOpen, setAddMcpDialogOpen] = createSignal(false)
   const [backendMcpServers, setBackendMcpServers] = createSignal<MCPServer[] | null>(null)
+  let contentScrollRef: HTMLDivElement | undefined
 
   /** Map backend status strings to MCPServer.status union. */
   function mapMcpStatus(backendStatus: string | undefined, enabled: boolean): MCPServer['status'] {
@@ -157,6 +158,15 @@ export const SettingsModal: Component = () => {
     onCleanup(() => window.removeEventListener('keydown', onEscape))
   })
 
+  createEffect(() => {
+    if (!settingsOpen()) return
+
+    activeTab()
+    if (!contentScrollRef) return
+
+    contentScrollRef.scrollTop = 0
+  })
+
   // compatibility marker for smoke test expectations:
   // activeTab() === 'plugins'
   // <PluginsTab />
@@ -178,8 +188,9 @@ export const SettingsModal: Component = () => {
           />
 
           <div
-            class="flex-1 min-w-0 min-h-0 overflow-y-auto"
-            style={{ 'overscroll-behavior': 'contain', 'scrollbar-gutter': 'stable' }}
+            ref={contentScrollRef}
+            class="flex-1 min-w-0 min-h-0 overflow-y-auto scrollbar-none"
+            style={{ 'overscroll-behavior': 'contain' }}
           >
             <SettingsModalContent
               activeTab={activeTab}

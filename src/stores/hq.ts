@@ -3,7 +3,9 @@
  */
 
 import { batch, createMemo, createSignal } from 'solid-js'
+import type { ThinkingSegment } from '../hooks/use-rust-agent'
 import { rustBackend } from '../services/rust-bridge'
+import type { ToolCall } from '../types'
 import type {
   HqActivityEvent,
   HqAgent,
@@ -61,11 +63,32 @@ const [plan, setPlan] = createSignal<HqPlan | null>(null)
 const [activity, setActivity] = createSignal<HqActivityEvent[]>([])
 const [metrics, setMetrics] = createSignal<HqDashboardMetrics>(EMPTY_METRICS)
 const [directorMessages, setDirectorMessages] = createSignal<HqDirectorMessage[]>([])
+const [liveDirectorWorkerId, setLiveDirectorWorkerId] = createSignal<string | null>(null)
+const [liveDirectorStartedAt, setLiveDirectorStartedAt] = createSignal<number | null>(null)
+const [liveDirectorContent, setLiveDirectorContent] = createSignal('')
+const [liveDirectorThinking, setLiveDirectorThinking] = createSignal('')
+const [liveDirectorThinkingSegments, setLiveDirectorThinkingSegments] = createSignal<
+  ThinkingSegment[]
+>([])
+const [liveDirectorToolCalls, setLiveDirectorToolCalls] = createSignal<ToolCall[]>([])
+const [liveDirectorStreaming, setLiveDirectorStreaming] = createSignal(false)
 const [hqSettings, setHqSettings] = createSignal<HqSettings>(DEFAULT_SETTINGS)
 const [isLoading, setIsLoading] = createSignal(false)
 const [lastError, setLastError] = createSignal<string | null>(null)
 
 let refreshScheduled = false
+
+function resetLiveDirectorStream(): void {
+  batch(() => {
+    setLiveDirectorWorkerId(null)
+    setLiveDirectorStartedAt(null)
+    setLiveDirectorContent('')
+    setLiveDirectorThinking('')
+    setLiveDirectorThinkingSegments([])
+    setLiveDirectorToolCalls([])
+    setLiveDirectorStreaming(false)
+  })
+}
 
 function toggleHqMode(): void {
   const next = !hqMode()
@@ -180,6 +203,14 @@ async function refreshAll(): Promise<void> {
       setDirectorMessages(nextChat)
       setHqSettings(nextSettings)
       setLastError(null)
+
+      const startedAt = liveDirectorStartedAt()
+      if (
+        startedAt &&
+        nextChat.some((msg) => msg.role === 'director' && msg.timestamp >= startedAt)
+      ) {
+        resetLiveDirectorStream()
+      }
     })
 
     await loadCurrentPlan()
@@ -197,6 +228,14 @@ function scheduleRefresh(delay = 150): void {
     refreshScheduled = false
     void refreshAll()
   }, delay)
+}
+
+function scheduleRefreshBurst(delays: number[]): void {
+  for (const delay of delays) {
+    window.setTimeout(() => {
+      scheduleRefresh(0)
+    }, delay)
+  }
 }
 
 async function loadCurrentPlan(explicitEpicId?: string | null): Promise<void> {
@@ -297,6 +336,7 @@ async function addIssueComment(issueId: string, content: string): Promise<void> 
 async function sendDirectorMessage(message: string): Promise<void> {
   await rustBackend.sendDirectorMessage(message, selectedEpicId())
   scheduleRefresh(50)
+  scheduleRefreshBurst([750, 2000, 5000, 9000])
 }
 
 async function updateSettings(patch: Partial<HqSettings>): Promise<void> {
@@ -307,16 +347,88 @@ async function updateSettings(patch: Partial<HqSettings>): Promise<void> {
 function ingestEvent(event: AgentEvent): void {
   switch (event.type) {
     case 'plan_created':
+      scheduleRefresh(100)
+      break
     case 'hq_worker_started':
+      setLiveDirectorWorkerId(event.worker_id)
+      setLiveDirectorStartedAt(Date.now())
+      setLiveDirectorContent('')
+      setLiveDirectorThinking('')
+      setLiveDirectorThinkingSegments([])
+      setLiveDirectorToolCalls([])
+      setLiveDirectorStreaming(true)
+      scheduleRefresh(100)
+      break
     case 'hq_worker_completed':
     case 'hq_worker_failed':
     case 'hq_all_complete':
     case 'hq_phase_started':
     case 'hq_phase_completed':
       scheduleRefresh(100)
+      if ('worker_id' in event && event.worker_id === liveDirectorWorkerId()) {
+        setLiveDirectorStreaming(false)
+      }
+      if (event.type === 'hq_all_complete') {
+        setLiveDirectorStreaming(false)
+      }
+      break
+    case 'hq_worker_token':
+      if (event.worker_id === liveDirectorWorkerId()) {
+        setLiveDirectorContent((prev) => prev + event.token)
+      }
+      break
+    case 'hq_worker_thinking':
+      if (event.worker_id === liveDirectorWorkerId()) {
+        setLiveDirectorThinking((prev) => prev + event.content)
+        setLiveDirectorThinkingSegments((prev) => {
+          if (prev.length === 0) return [{ thinking: event.content, toolCallIds: [] }]
+          const next = [...prev]
+          const last = next[next.length - 1]!
+          next[next.length - 1] = { ...last, thinking: last.thinking + event.content }
+          return next
+        })
+      }
+      break
+    case 'hq_worker_tool_call':
+      if (event.worker_id === liveDirectorWorkerId()) {
+        const startedAt = Date.now()
+        setLiveDirectorToolCalls((prev) => [
+          ...prev,
+          {
+            id: event.call_id,
+            name: event.name,
+            args: event.args,
+            status: 'running',
+            startedAt,
+          },
+        ])
+        setLiveDirectorThinkingSegments((prev) => {
+          if (prev.length === 0) return [{ thinking: '', toolCallIds: [event.call_id] }]
+          const next = [...prev]
+          const last = next[next.length - 1]!
+          next[next.length - 1] = { ...last, toolCallIds: [...last.toolCallIds, event.call_id] }
+          return next
+        })
+      }
+      break
+    case 'hq_worker_tool_result':
+      if (event.worker_id === liveDirectorWorkerId()) {
+        setLiveDirectorToolCalls((prev) =>
+          prev.map((toolCall) =>
+            toolCall.id === event.call_id
+              ? {
+                  ...toolCall,
+                  status: event.is_error ? 'error' : 'success',
+                  output: event.content,
+                  completedAt: Date.now(),
+                  error: event.is_error ? event.content : undefined,
+                }
+              : toolCall
+          )
+        )
+      }
       break
     case 'hq_worker_progress':
-    case 'hq_worker_token':
     case 'hq_external_worker_started':
     case 'hq_external_worker_completed':
     case 'hq_external_worker_failed':
@@ -377,6 +489,11 @@ export function useHq() {
     activity,
     metrics,
     directorMessages,
+    liveDirectorContent,
+    liveDirectorThinking,
+    liveDirectorThinkingSegments,
+    liveDirectorToolCalls,
+    liveDirectorStreaming,
     hqSettings,
     isLoading,
     lastError,

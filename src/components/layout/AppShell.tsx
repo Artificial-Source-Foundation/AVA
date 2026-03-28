@@ -1,6 +1,7 @@
 import type { LucideProps } from 'lucide-solid'
 import { Brain, ScrollText, Terminal, X } from 'lucide-solid'
 import { type Component, For, type JSX, lazy, Show } from 'solid-js'
+import { useHq } from '../../stores/hq'
 import { useLayout } from '../../stores/layout'
 import { usePlanOverlay } from '../../stores/planOverlayStore'
 import { useSettings } from '../../stores/settings'
@@ -43,6 +44,7 @@ export const AppShell: Component = () => {
     bottomPanelTab,
     switchBottomPanelTab,
   } = useLayout()
+  const { hqMode } = useHq()
   const { settings } = useSettings()
 
   const { settingsOpen } = useLayout()
@@ -56,6 +58,7 @@ export const AppShell: Component = () => {
     bottomPanelHeight,
     setBottomPanelHeight,
   })
+  const showChatSidebar = () => sidebarVisible() && !hqMode()
 
   return (
     <div class="h-screen flex flex-col text-[var(--text-primary)] overflow-hidden">
@@ -69,7 +72,7 @@ export const AppShell: Component = () => {
         <div
           class="flex-shrink-0 overflow-hidden"
           style={{
-            width: sidebarVisible() ? `${sidebarWidth()}px` : '0px',
+            width: showChatSidebar() ? `${sidebarWidth()}px` : '0px',
             transition: 'width 120ms ease',
           }}
         >
@@ -77,7 +80,7 @@ export const AppShell: Component = () => {
         </div>
 
         {/* Sidebar resize handle */}
-        <Show when={sidebarVisible()}>
+        <Show when={showChatSidebar()}>
           {/* biome-ignore lint/a11y/noStaticElementInteractions: resize handle uses mouse-only interaction by design */}
           <div
             class="

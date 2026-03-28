@@ -634,6 +634,7 @@ impl Director {
             TaskType::Testing | TaskType::Review => Domain::QA,
             TaskType::Research => Domain::Research,
             TaskType::Debug => Domain::Debug,
+            TaskType::Chat => Domain::Fullstack,
             TaskType::Simple => Domain::Fullstack,
         }
     }

@@ -60,6 +60,7 @@
 pub mod api;
 mod api_agent;
 mod api_config;
+mod api_hq;
 mod api_interactive;
 mod api_plans;
 mod api_sessions;
@@ -179,6 +180,21 @@ fn build_router(state: WebState) -> Router {
         // Plan persistence
         .route("/api/plans", get(api_plans::list_plans))
         .route("/api/plans/{filename}", get(api_plans::get_plan))
+        // HQ endpoints
+        .route("/api/hq/epics", get(api::list_epics))
+        .route("/api/hq/issues", get(api::list_issues))
+        .route("/api/hq/agents", get(api::get_agents))
+        .route("/api/hq/agents/{id}", get(api::get_agent))
+        .route("/api/hq/activity", get(api::get_activity_feed))
+        .route("/api/hq/metrics", get(api::get_dashboard_metrics))
+        .route(
+            "/api/hq/director-chat",
+            get(api::get_director_chat).post(api::send_director_message),
+        )
+        .route(
+            "/api/hq/settings",
+            get(api::get_hq_settings).post(api::update_hq_settings),
+        )
         // WebSocket
         .route("/ws", get(ws::ws_handler))
         // Frontend log ingestion

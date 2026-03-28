@@ -83,6 +83,18 @@ const COMMAND_TO_ENDPOINT: Record<string, { path: string; method: 'GET' | 'POST'
 
   // Health
   health: { path: '/api/health', method: 'GET' },
+
+  // HQ
+  list_epics: { path: '/api/hq/epics', method: 'GET' },
+  list_issues: { path: '/api/hq/issues', method: 'GET' },
+  get_agents: { path: '/api/hq/agents', method: 'GET' },
+  get_agent: { path: '/api/hq/agents/{id}', method: 'GET' },
+  get_activity_feed: { path: '/api/hq/activity', method: 'GET' },
+  get_dashboard_metrics: { path: '/api/hq/metrics', method: 'GET' },
+  get_director_chat: { path: '/api/hq/director-chat', method: 'GET' },
+  send_director_message: { path: '/api/hq/director-chat', method: 'POST' },
+  get_hq_settings: { path: '/api/hq/settings', method: 'GET' },
+  update_hq_settings: { path: '/api/hq/settings', method: 'POST' },
 }
 
 function unwrapInvokeArgs(args?: Record<string, unknown>): Record<string, unknown> | undefined {

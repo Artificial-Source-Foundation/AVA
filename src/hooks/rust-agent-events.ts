@@ -387,6 +387,9 @@ export function createAgentEventHandler(deps: EventHandlerDeps): (event: AgentEv
       case 'hq_worker_started':
       case 'hq_worker_progress':
       case 'hq_worker_token':
+      case 'hq_worker_thinking':
+      case 'hq_worker_tool_call':
+      case 'hq_worker_tool_result':
       case 'hq_worker_completed':
       case 'hq_worker_failed':
       case 'hq_all_complete':

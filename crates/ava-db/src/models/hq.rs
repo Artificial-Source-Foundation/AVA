@@ -480,4 +480,24 @@ impl HqRepository {
         .fetch_all(&self.pool)
         .await
     }
+
+    pub async fn delete_chat_messages_by_content(
+        &self,
+        contents: &[&str],
+    ) -> Result<u64, sqlx::Error> {
+        if contents.is_empty() {
+            return Ok(0);
+        }
+        let placeholders: Vec<String> = (1..=contents.len()).map(|i| format!("?{i}")).collect();
+        let sql = format!(
+            "DELETE FROM hq_chat_messages WHERE content IN ({})",
+            placeholders.join(", ")
+        );
+        let mut query = sqlx::query(&sql);
+        for content in contents {
+            query = query.bind(*content);
+        }
+        let result = query.execute(&self.pool).await?;
+        Ok(result.rows_affected())
+    }
 }

@@ -22,6 +22,22 @@ pub enum HqEvent {
         worker_id: Uuid,
         token: String,
     },
+    WorkerThinking {
+        worker_id: Uuid,
+        content: String,
+    },
+    WorkerToolCall {
+        worker_id: Uuid,
+        call_id: String,
+        name: String,
+        args_json: String,
+    },
+    WorkerToolResult {
+        worker_id: Uuid,
+        call_id: String,
+        content: String,
+        is_error: bool,
+    },
     WorkerCompleted {
         worker_id: Uuid,
         success: bool,

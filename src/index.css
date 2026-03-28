@@ -1183,7 +1183,7 @@ button {
 /* Composer textarea — no focus ring (card provides the visual boundary) */
 .message-composer-textarea:focus {
   outline: none;
-  border-color: transparent !important;
+  border-color: transparent;
   box-shadow: none;
 }
 

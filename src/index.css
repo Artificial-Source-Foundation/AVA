@@ -65,7 +65,7 @@ input,
   position: relative;
 }
 
-/* Ambient gradient mesh - subtler for premium feel */
+/* Ambient gradient mesh — barely-there color wash */
 #root::before {
   content: "";
   position: fixed;
@@ -73,29 +73,53 @@ input,
   z-index: -1;
   pointer-events: none;
   background:
-    radial-gradient(ellipse at 15% 80%, rgba(139, 92, 246, 0.05) 0%, transparent 50%),
-    radial-gradient(ellipse at 85% 20%, rgba(59, 130, 246, 0.04) 0%, transparent 50%),
+    radial-gradient(
+      ellipse at 15% 80%,
+      color-mix(in srgb, var(--thinking-accent) 6%, transparent) 0%,
+      transparent 50%
+    ),
+    radial-gradient(
+      ellipse at 85% 20%,
+      color-mix(in srgb, var(--accent) 5%, transparent) 0%,
+      transparent 50%
+    ),
     var(--background);
 }
 
 /* Light mode: even subtler gradient */
 [data-mode="light"] #root::before {
   background:
-    radial-gradient(ellipse at 15% 80%, rgba(139, 92, 246, 0.03) 0%, transparent 50%),
-    radial-gradient(ellipse at 85% 20%, rgba(59, 130, 246, 0.02) 0%, transparent 50%),
+    radial-gradient(
+      ellipse at 15% 80%,
+      color-mix(in srgb, var(--thinking-accent) 6%, transparent) 0%,
+      transparent 50%
+    ),
+    radial-gradient(
+      ellipse at 85% 20%,
+      color-mix(in srgb, var(--accent) 5%, transparent) 0%,
+      transparent 50%
+    ),
     var(--background);
 }
 
 /* Midnight: no gradient, pure black */
 [data-mode="midnight"] #root::before {
-  background: #000000;
+  background: var(--background);
 }
 
 /* Charcoal: warm-tinted gradient */
 [data-mode="charcoal"] #root::before {
   background:
-    radial-gradient(ellipse at 15% 80%, rgba(139, 92, 246, 0.04) 0%, transparent 50%),
-    radial-gradient(ellipse at 85% 20%, rgba(120, 90, 60, 0.03) 0%, transparent 50%),
+    radial-gradient(
+      ellipse at 15% 80%,
+      color-mix(in srgb, var(--thinking-accent) 7%, transparent) 0%,
+      transparent 50%
+    ),
+    radial-gradient(
+      ellipse at 85% 20%,
+      color-mix(in srgb, var(--warning) 5%, transparent) 0%,
+      transparent 50%
+    ),
     var(--background);
 }
 
@@ -107,9 +131,9 @@ h4,
 h5,
 h6 {
   margin: 0;
-  font-weight: 600;
+  font-weight: 500;
   line-height: 1.2;
-  letter-spacing: -0.01em;
+  letter-spacing: -0.02em;
   color: var(--text-primary);
 }
 
@@ -134,10 +158,10 @@ pre {
 }
 
 code {
-  padding: 2px 6px;
-  background: var(--code-background);
+  padding: 2px 5px;
+  background: var(--alpha-white-5);
   border-radius: var(--radius-sm);
-  font-size: 0.9em;
+  font-size: 0.88em;
 }
 
 pre {
@@ -163,7 +187,7 @@ button {
 
 /* Focus */
 :focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 1.5px solid var(--accent);
   outline-offset: 2px;
 }
 
@@ -180,10 +204,10 @@ button {
   letter-spacing: 0.02em;
 }
 
-/* Scrollbar (thin, fades in on hover) */
+/* Scrollbar — minimal, unobtrusive */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
 }
 
 ::-webkit-scrollbar-track {
@@ -191,18 +215,18 @@ button {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--alpha-white-8);
+  background: var(--alpha-white-5);
   border-radius: var(--radius-full);
-  transition: background 150ms ease;
+  transition: background var(--duration-normal) ease;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--alpha-white-15);
+  background: var(--alpha-white-10);
 }
 
 * {
   scrollbar-width: thin;
-  scrollbar-color: var(--alpha-white-8) transparent;
+  scrollbar-color: var(--alpha-white-5) transparent;
 }
 
 /* ========================================
@@ -263,39 +287,141 @@ button {
   background-clip: padding-box;
 }
 
-.settings-sidebar-button {
-  position: relative;
-  overflow: hidden;
-  transition:
-    transform var(--duration-normal) var(--ease-out),
-    background-color var(--duration-normal) var(--ease-out),
-    color var(--duration-normal) var(--ease-out),
-    box-shadow var(--duration-slow) var(--ease-out);
+/* Settings slider — Pencil design: thin 4px track, #2C2C2E bg, #0A84FF accent */
+.settings-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  border-radius: 2px;
+  background: #2c2c2e;
+  outline: none;
+  cursor: pointer;
 }
 
-.settings-sidebar-button::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  pointer-events: none;
-  opacity: 0;
-  background: linear-gradient(90deg, var(--accent-subtle), transparent 70%);
-  transition: opacity var(--duration-normal) var(--ease-out);
+.settings-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #f5f5f7;
+  border: none;
+  cursor: pointer;
 }
 
-.settings-sidebar-button:hover {
-  transform: translateX(2px);
+.settings-slider::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #f5f5f7;
+  border: none;
+  cursor: pointer;
 }
 
-.settings-sidebar-button:hover::after,
-.settings-sidebar-button:focus-visible::after {
-  opacity: 1;
+.settings-slider::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 2px;
 }
+
+/* Settings sidebar buttons — Pencil design uses inline styles now */
 
 .settings-tab-panel {
-  animation: settings-panel-in var(--duration-slower) var(--ease-out);
+  animation: settings-panel-in var(--duration-slower) var(--ease-out) both;
   transform-origin: top center;
+}
+
+.settings-divider {
+  width: 100%;
+  height: 1px;
+  background: var(--border-subtle);
+}
+
+.settings-section-title {
+  display: block;
+  margin-bottom: 4px;
+  font-family: var(--font-sans);
+  font-size: var(--text-md);
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.settings-label {
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  line-height: 1.3;
+  color: var(--text-secondary);
+}
+
+.settings-description {
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+  line-height: 1.3;
+  color: var(--text-muted);
+}
+
+.ui-surface-card {
+  background: var(--surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xl);
+}
+
+.ui-surface-card-muted {
+  background: color-mix(in srgb, var(--surface) 84%, transparent);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+}
+
+.ui-surface-accent {
+  background: var(--accent-subtle);
+  border: 1px solid var(--accent-border);
+}
+
+.ui-title {
+  font-family: var(--font-sans);
+  color: var(--text-primary);
+}
+
+.ui-meta {
+  font-family: var(--font-ui-mono);
+  color: var(--text-muted);
+}
+
+.ui-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.1875rem 0.4375rem;
+  border-radius: var(--radius-sm);
+  background: var(--alpha-white-5);
+  color: var(--text-tertiary);
+}
+
+.ui-pill--accent {
+  background: var(--accent-subtle);
+  color: var(--accent);
+}
+
+.ui-pill--success {
+  background: var(--success-subtle);
+  color: var(--success);
+}
+
+.ui-pill--warning {
+  background: var(--warning-subtle);
+  color: var(--warning);
+}
+
+.ui-pill--error {
+  background: var(--error-subtle);
+  color: var(--error);
+}
+
+.dialog-close-button {
+  color: var(--close-button-color);
+}
+
+.dialog-close-button:hover {
+  color: var(--close-button-hover);
 }
 
 @keyframes settings-panel-in {
@@ -358,19 +484,19 @@ button {
    ======================================== */
 
 .press:active {
-  transform: scale(0.97);
+  transform: scale(0.98);
 }
 
-/* Focus ring — precise, no diffuse glow */
+/* Focus ring — single-pixel precision */
 .focus-glow:focus {
   outline: none;
   border-color: var(--input-border-focus);
-  box-shadow: 0 0 0 2px var(--accent-subtle);
+  box-shadow: 0 0 0 1px var(--accent-subtle);
 }
 
 .focus-glow:focus[data-invalid] {
   border-color: var(--error);
-  box-shadow: 0 0 0 2px var(--error-subtle);
+  box-shadow: 0 0 0 1px var(--error-subtle);
 }
 
 /* Subtle pulse animation for badges/indicators */
@@ -402,6 +528,156 @@ button {
     opacity: 1;
     transform: scale(1) translateY(0);
   }
+}
+
+/* ========================================
+   TITLE BAR
+   Pencil design: 32px height, #111114 bg
+   ======================================== */
+
+.titlebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 32px;
+  padding: 0 12px;
+  background: var(--titlebar-background);
+  border-bottom: 1px solid var(--titlebar-border);
+  user-select: none;
+  cursor: default;
+}
+
+/* Window control buttons — outlined variant */
+.titlebar-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 20px;
+  border-radius: 4px;
+  border: none;
+  background: transparent;
+  color: var(--gray-8);
+  cursor: pointer;
+  transition:
+    color 0.15s,
+    background 0.15s;
+  padding: 0;
+}
+
+.titlebar-btn--outlined {
+  border: 1px solid var(--window-control-border);
+}
+
+.titlebar-btn--outlined:hover {
+  color: var(--gray-12);
+  background: var(--window-control-hover);
+}
+
+/* Close button — filled red tint */
+.titlebar-btn--close {
+  background: var(--window-control-close-background);
+  color: var(--error);
+}
+
+.titlebar-btn--close:hover {
+  background: var(--window-control-close-hover);
+  color: var(--error);
+}
+
+/* ========================================
+   MENU BAR ITEMS
+   Pencil design: 12px Geist, weight 400
+   ======================================== */
+
+.menubar-item {
+  font-family: Geist, var(--font-sans);
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--menu-text);
+  padding: 0 8px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition:
+    color 0.15s,
+    background 0.15s;
+}
+
+.menubar-item:hover,
+.menubar-item--active {
+  color: var(--menu-text-active);
+  background: var(--menu-hover);
+}
+
+/* ========================================
+   MENU BAR DROPDOWNS
+   Pencil design: 220px, rounded-10, shadow
+   ======================================== */
+
+.menubar-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 4px;
+  width: 220px;
+  padding: 4px 0;
+  background: var(--dropdown-surface);
+  border: 1px solid var(--dropdown-border);
+  border-radius: var(--dropdown-radius);
+  box-shadow: var(--modal-shadow);
+  z-index: var(--z-popover);
+}
+
+.menubar-dropdown-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  height: 32px;
+  padding: 0 12px;
+  font-family: Geist, var(--font-sans);
+  font-size: 13px;
+  color: var(--text-secondary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    color 0.15s;
+}
+
+.menubar-dropdown-item:hover {
+  background: var(--menu-hover);
+  color: var(--menu-text-active);
+}
+
+.menubar-dropdown-item--disabled {
+  color: var(--gray-8);
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.menubar-dropdown-item--disabled:hover {
+  background: transparent;
+  color: var(--gray-8);
+}
+
+.menubar-dropdown-shortcut {
+  font-family: "Geist Mono", var(--font-mono);
+  font-size: 10px;
+  color: var(--menu-shortcut);
+  margin-left: 16px;
+}
+
+.menubar-dropdown-sep {
+  height: 1px;
+  background: var(--border-subtle);
+  margin: 4px 8px;
 }
 
 /* Smooth touch scrolling for WebKitGTK */
@@ -498,13 +774,13 @@ button {
 /* Glass card container */
 .onboarding-card {
   background: rgba(17, 17, 19, 0.92);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: var(--radius-2xl);
   position: relative;
   overflow: hidden;
   box-shadow:
-    0 12px 32px rgba(0, 0, 0, 0.35),
-    inset 0 1px 0 rgba(255, 255, 255, 0.025);
+    0 16px 48px rgba(0, 0, 0, 0.25),
+    inset 0 1px 0 rgba(255, 255, 255, 0.02);
 }
 
 .onboarding-hero {
@@ -754,10 +1030,16 @@ button {
    Set data-expanded="true/false" on the wrapper to trigger the transition.
    ======================================== */
 
+/* Running tool card — blue accent border glow */
+.tool-card-running {
+  border: 1px solid var(--tool-card-running-border);
+  box-shadow: var(--tool-card-running-shadow);
+}
+
 .tool-card-body-grid {
   display: grid;
   grid-template-rows: 0fr;
-  transition: grid-template-rows 200ms ease-out;
+  transition: grid-template-rows 150ms var(--ease-out);
 }
 
 .tool-card-body-grid[data-expanded="true"] {
@@ -798,31 +1080,9 @@ button {
    Uses background-clip:text trick — pure GPU (no layout thrash).
    ======================================== */
 
-@keyframes tool-shimmer {
-  0% {
-    background-position: -200% center;
-  }
-  100% {
-    background-position: 200% center;
-  }
-}
-
 .tool-summary-shimmer {
-  /* Clip the gradient to the text glyphs */
-  background: linear-gradient(
-    90deg,
-    var(--text-secondary) 20%,
-    var(--text-primary) 40%,
-    var(--accent-hover) 50%,
-    var(--text-primary) 60%,
-    var(--text-secondary) 80%
-  );
-  background-size: 200% auto;
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
-  color: transparent;
-  animation: tool-shimmer 2s linear infinite;
+  color: var(--text-primary);
+  opacity: 0.9;
 }
 
 /* ========================================
@@ -920,17 +1180,11 @@ button {
   box-shadow: 0 0 0 2px var(--accent-subtle);
 }
 
-/* ========================================
-   COMPOSER TEXTAREA FOCUS GLOW
-   Premium feel: soft accent ring on focus matching ChatGPT/Claude.ai
-   ======================================== */
-
+/* Composer textarea — no focus ring (card provides the visual boundary) */
 .message-composer-textarea:focus {
   outline: none;
-  border-color: var(--accent) !important;
-  box-shadow:
-    0 0 0 3px var(--accent-subtle),
-    0 2px 8px rgba(0, 0, 0, 0.2);
+  border-color: transparent !important;
+  box-shadow: none;
 }
 
 /* ========================================
@@ -941,8 +1195,8 @@ button {
 
 .chat-user-bubble {
   box-shadow:
-    var(--shadow-sm),
-    inset 0 1px 0 rgba(255, 255, 255, 0.18);
+    var(--shadow-xs),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -960,19 +1214,19 @@ button {
 
 .settings-input {
   width: 100%;
-  padding: 8px 12px;
+  padding: 10px 14px;
   background: var(--input-background);
   color: var(--text-primary);
   font-size: var(--text-sm);
   border: 1px solid var(--input-border);
   border-radius: var(--radius-md);
-  transition: border-color var(--duration-fast) var(--ease-out);
+  transition: border-color var(--duration-normal) var(--ease-out);
   outline: none;
 }
 
 .settings-input:focus {
   border-color: var(--input-border-focus);
-  box-shadow: 0 0 0 2px var(--accent-subtle);
+  box-shadow: 0 0 0 1px var(--accent-subtle);
 }
 
 .settings-input:disabled {
@@ -1112,6 +1366,101 @@ button {
   }
 }
 
+/* Plan full-screen highlight classes (Pencil design spec) */
+.plan-fullscreen-document .plan-hl-comment {
+  background: rgba(234, 179, 8, 0.19);
+  border-radius: 3px;
+  padding: 2px 4px;
+}
+
+.plan-fullscreen-document .plan-hl-redline {
+  background: rgba(255, 69, 58, 0.13);
+  text-decoration: line-through;
+  color: var(--error);
+}
+
+.plan-fullscreen-document .plan-hl-selected {
+  background: rgba(10, 132, 255, 0.19);
+  outline: 1px solid var(--accent);
+  border-radius: 3px;
+}
+
+/* Plan full-screen document typography */
+.plan-fullscreen-document h1 {
+  font-size: 26px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 24px;
+  line-height: 1.3;
+}
+
+.plan-fullscreen-document h2 {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-top: 32px;
+  margin-bottom: 16px;
+}
+
+.plan-fullscreen-document h3 {
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--text-primary);
+  margin-top: 20px;
+  margin-bottom: 8px;
+}
+
+.plan-fullscreen-document p {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+  margin-bottom: 12px;
+}
+
+.plan-fullscreen-document ul,
+.plan-fullscreen-document ol {
+  padding-left: 20px;
+  margin-bottom: 12px;
+}
+
+.plan-fullscreen-document li {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+}
+
+.plan-fullscreen-document code {
+  font-size: 13px;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  border: 1px solid var(--border-subtle);
+}
+
+.plan-fullscreen-document pre {
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  border: 1px solid var(--border-subtle);
+  padding: 16px;
+  margin-bottom: 16px;
+  overflow-x: auto;
+}
+
+.plan-fullscreen-document pre code {
+  padding: 0;
+  border: none;
+  background: transparent;
+}
+
+.plan-fullscreen-document blockquote {
+  border-left: 3px solid var(--border-accent);
+  padding-left: 12px;
+  margin: 12px 0;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
 /* Plan step expand */
 @keyframes planStepExpand {
   from {
@@ -1149,6 +1498,53 @@ button {
   user-select: text;
 }
 
+.markdown-render-surface {
+  contain: layout paint style;
+}
+
+.chat-scroll-viewport {
+  scroll-behavior: smooth;
+}
+
+.chat-message-shell,
+.chat-tool-shell,
+.chat-user-bubble {
+  contain: content;
+}
+
+.chat-message-shell {
+  width: 100%;
+}
+
+.tool-output-region {
+  contain: layout paint style;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 320px;
+}
+
+.tool-card-surface {
+  background: var(--tool-card-background);
+  border: 1px solid var(--border-subtle);
+}
+
+.tool-card-header {
+  background: var(--tool-card-header);
+}
+
+.thinking-surface {
+  background: var(--tool-card-background);
+  border: 1px solid var(--thinking-border);
+}
+
+.thinking-surface-header {
+  background: var(--thinking-subtle);
+}
+
+.thinking-badge {
+  background: var(--thinking-badge);
+  color: var(--thinking-accent);
+}
+
 /* ========================================
    MARKDOWN CONTENT STYLES
    Styles for rendered markdown inside chat messages.
@@ -1183,7 +1579,7 @@ button {
 
 .message-content p {
   margin: 0.5em 0;
-  line-height: 1.65;
+  line-height: 1.7;
 }
 
 .message-content p:first-child {
@@ -1284,16 +1680,16 @@ button {
   margin: 0.75em 0;
   border-radius: var(--radius-lg);
   overflow: hidden;
-  border: 1px solid var(--border-default);
+  border: 1px solid var(--border-subtle);
 }
 
 .message-content .code-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 6px 12px;
-  background: var(--alpha-white-8);
-  border-bottom: 1px solid var(--border-default);
+  padding: 8px 14px;
+  background: var(--alpha-white-3);
+  border-bottom: 1px solid var(--border-subtle);
 }
 
 .message-content .code-lang {
@@ -1314,13 +1710,55 @@ button {
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
   cursor: pointer;
-  transition: all 150ms;
+  transition:
+    color 150ms,
+    background-color 150ms,
+    border-color 150ms;
 }
 
 .message-content .code-copy-btn:hover {
   color: var(--text-primary);
   background: var(--alpha-white-5);
   border-color: var(--border-subtle);
+}
+
+/* Welcome / empty-state styles */
+
+.welcome-logo-mark {
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, var(--welcome-logo-start) 0%, var(--welcome-logo-end) 100%);
+  flex-shrink: 0;
+}
+
+.welcome-suggestion-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 20px;
+  border-radius: 12px;
+  background: var(--welcome-card-background);
+  border: 1px solid var(--welcome-card-border);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 180ms ease-out,
+    transform 180ms ease-out;
+}
+.welcome-suggestion-card:hover {
+  border-color: var(--welcome-card-border-hover);
+  transform: translateY(-1px);
+}
+
+.welcome-hint {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--gray-5);
+  letter-spacing: 0.01em;
+}
+.welcome-hint kbd {
+  font-family: inherit;
 }
 
 .message-content .code-copy-btn.copied {
@@ -1518,81 +1956,20 @@ button {
    SPLASH SCREEN
    ======================================== */
 
-/* Ambient mesh gradient — reuses onboarding breathe animation */
-.splash-mesh {
-  position: absolute;
-  inset: -12%;
-  background:
-    radial-gradient(ellipse 80% 60% at 20% 80%, rgba(139, 92, 246, 0.08) 0%, transparent 60%),
-    radial-gradient(ellipse 60% 80% at 80% 20%, rgba(59, 130, 246, 0.06) 0%, transparent 60%);
-  background-size: 120% 120%;
-  opacity: 0.74;
-  pointer-events: none;
-}
-
-/* Logo entrance — scale up with subtle overshoot */
+/* Logo entrance — fade in with subtle rise */
 .splash-logo {
   animation: splash-logo-in 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  opacity: 0;
 }
 
 @keyframes splash-logo-in {
   0% {
     opacity: 0;
-    transform: scale(0.7);
-  }
-  60% {
-    opacity: 1;
-    transform: scale(1.04);
+    transform: scale(0.9);
   }
   100% {
     opacity: 1;
     transform: scale(1);
-  }
-}
-
-/* Progress bar shimmer effect */
-.splash-progress-bar {
-  position: relative;
-  overflow: hidden;
-}
-
-.splash-progress-bar::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(
-    90deg,
-    transparent 0%,
-    rgba(255, 255, 255, 0.15) 50%,
-    transparent 100%
-  );
-  animation: splash-shimmer 1.8s ease-in-out infinite;
-}
-
-@keyframes splash-shimmer {
-  0% {
-    transform: translateX(-100%);
-  }
-  100% {
-    transform: translateX(100%);
-  }
-}
-
-/* Loading dots — staggered pulse (kept for backwards compat) */
-.splash-dot {
-  opacity: 0.3;
-  animation: splash-dot-pulse 1.2s ease-in-out infinite;
-}
-
-@keyframes splash-dot-pulse {
-  0%,
-  100% {
-    opacity: 0.3;
-    transform: scale(1);
-  }
-  50% {
-    opacity: 1;
-    transform: scale(1.4);
   }
 }
 
@@ -1637,14 +2014,473 @@ button {
   .stagger-child,
   .floating-particle,
   .feature-card::before,
-  .splash-mesh,
   .splash-logo,
-  .splash-dot,
-  .splash-progress-bar::after,
   .animate-tool-card-in,
   .animate-message-in,
   .typing-dot {
     animation: none;
     transition: none;
   }
+}
+
+/* ========================================
+   INSPECTOR PANEL (Right Panel)
+   ======================================== */
+
+.inspector-panel {
+  background: var(--inspector-background);
+  border-left: 1px solid var(--inspector-border);
+}
+
+.inspector-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 40px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--inspector-border);
+  flex-shrink: 0;
+}
+
+.inspector-header-title {
+  font-family: "Geist", var(--font-ui), system-ui, sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.inspector-content {
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.inspector-section-title {
+  font-family: "Geist", var(--font-ui), system-ui, sans-serif;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.inspector-card {
+  background: var(--surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.inspector-card-running {
+  background: var(--surface);
+  border: 1px solid var(--accent-border);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.inspector-divider {
+  width: 100%;
+  height: 1px;
+  background: var(--border-subtle);
+  flex-shrink: 0;
+}
+
+/* ========================================
+   PROJECT HUB
+   ======================================== */
+
+.ph-root {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  width: 100%;
+  background: var(--background);
+  overflow: hidden;
+}
+
+/* ── Header ─────────────────────────────────────── */
+
+.ph-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 56px;
+  padding: 0 24px;
+  background: var(--surface);
+  flex-shrink: 0;
+}
+
+.ph-header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 100%;
+}
+
+.ph-header-icon {
+  width: 18px;
+  height: 18px;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.ph-header-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.ph-header-count {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--accent-subtle);
+  padding: 3px 8px;
+  border-radius: 8px;
+}
+
+.ph-header-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 100%;
+}
+
+/* ── Search ─────────────────────────────────────── */
+
+.ph-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 220px;
+  height: 32px;
+  padding: 0 10px;
+  background: var(--background-subtle);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+}
+
+.ph-search-icon {
+  width: 13px;
+  height: 13px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.ph-search-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  font-size: 12px;
+  color: var(--text-primary);
+  font-family: inherit;
+}
+
+.ph-search-input::placeholder {
+  color: var(--text-muted);
+}
+
+/* ── Open Project Button ────────────────────────── */
+
+.ph-open-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  background: var(--accent);
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  color: white;
+  transition: background-color 150ms;
+}
+
+.ph-open-btn:hover {
+  background: var(--accent-hover);
+}
+
+.ph-open-btn-icon {
+  width: 13px;
+  height: 13px;
+}
+
+/* ── Divider ────────────────────────────────────── */
+
+.ph-divider {
+  width: 100%;
+  height: 1px;
+  background: var(--border-subtle);
+  flex-shrink: 0;
+}
+
+/* ── Body ───────────────────────────────────────── */
+
+.ph-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* ── Sections ───────────────────────────────────── */
+
+.ph-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ph-section-label {
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--text-muted);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+/* ── Grid ───────────────────────────────────────── */
+
+.ph-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+
+@media (max-width: 900px) {
+  .ph-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 600px) {
+  .ph-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ── Cards ──────────────────────────────────────── */
+
+.ph-card {
+  display: flex;
+  flex-direction: column;
+  border-radius: 12px;
+  background: var(--surface);
+  cursor: pointer;
+  text-align: left;
+  border: none;
+  transition:
+    background-color 150ms,
+    border-color 150ms;
+}
+
+.ph-card--active {
+  padding: 16px;
+  gap: 0;
+  border: 1px solid var(--accent-border);
+}
+
+.ph-card--active:hover {
+  background: var(--surface-raised);
+}
+
+.ph-card--default {
+  padding: 16px;
+  gap: 12px;
+  border: 1px solid var(--border-subtle);
+}
+
+.ph-card--default:hover {
+  background: var(--surface-raised);
+  border-color: var(--border-default);
+}
+
+/* ── Card Top Row ───────────────────────────────── */
+
+.ph-card-top {
+  display: flex;
+  align-items: center;
+}
+
+.ph-card--active .ph-card-top {
+  gap: 16px;
+}
+
+.ph-card--default .ph-card-top {
+  gap: 10px;
+}
+
+/* ── Folder Icon Frame ──────────────────────────── */
+
+.ph-card-folder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.ph-card-folder--active {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  background: var(--accent-subtle);
+}
+
+.ph-card-folder--default {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: rgba(72, 72, 74, 0.125);
+}
+
+.ph-card-folder-icon--active {
+  width: 22px;
+  height: 22px;
+  color: var(--accent);
+}
+
+.ph-card-folder-icon--default {
+  width: 16px;
+  height: 16px;
+  color: var(--text-muted);
+}
+
+/* ── Card Info ──────────────────────────────────── */
+
+.ph-card-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.ph-card--active .ph-card-info {
+  gap: 4px;
+}
+
+.ph-card--default .ph-card-info {
+  gap: 2px;
+}
+
+.ph-card-name {
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ph-card-name--active {
+  font-size: 15px;
+}
+
+.ph-card-name--default {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.ph-card-path {
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ph-card-path--active {
+  font-size: 11px;
+}
+
+.ph-card-path--default {
+  font-size: 10px;
+}
+
+/* ── Card Metadata ──────────────────────────────── */
+
+.ph-card-meta {
+  display: flex;
+  align-items: center;
+  color: var(--text-muted);
+}
+
+.ph-card-meta--active {
+  gap: 12px;
+  margin-top: 8px;
+  font-size: 10px;
+}
+
+.ph-card-meta--default {
+  gap: 8px;
+  font-size: 9px;
+}
+
+.ph-card-meta-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.ph-card-meta-icon {
+  width: 10px;
+  height: 10px;
+}
+
+.ph-card-meta-dot {
+  color: var(--text-muted);
+}
+
+.ph-card-meta-active {
+  color: var(--success);
+}
+
+/* ── Loading State ──────────────────────────────── */
+
+.ph-loading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-muted);
+  padding: 16px 0;
+}
+
+.ph-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--border-default);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+}
+
+/* ── Empty State ────────────────────────────────── */
+
+.ph-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 0;
+  color: var(--text-muted);
+}
+
+.ph-empty-icon {
+  width: 40px;
+  height: 40px;
+  margin-bottom: 12px;
+  opacity: 0.4;
+}
+
+.ph-empty-title {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.ph-empty-sub {
+  font-size: 12px;
+  margin-top: 4px;
+  color: var(--text-muted);
 }

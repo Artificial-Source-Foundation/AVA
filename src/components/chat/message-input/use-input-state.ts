@@ -101,10 +101,10 @@ export function useInputState(): InputState {
   )
   const placeholder = createMemo(() =>
     isProcessing()
-      ? 'Type a message... (Enter = queue, Ctrl+Enter = interrupt)'
+      ? 'Type a message...'
       : agent.isPlanMode()
-        ? 'Plan your approach... (Ctrl+/ for commands)'
-        : 'Ask anything... (Ctrl+/ for commands)'
+        ? 'Plan your approach...'
+        : 'Ask anything...'
   )
 
   // Auto-resize textarea
@@ -128,7 +128,13 @@ export function useInputState(): InputState {
   createEffect(
     on(
       () => sessionStore.currentSession()?.id,
-      () => chat.clearQueue()
+      () => {
+        chat.clearQueue()
+        queueMicrotask(() => {
+          if (!textareaRef || document.activeElement === textareaRef) return
+          textareaRef.focus()
+        })
+      }
     )
   )
 
@@ -354,6 +360,14 @@ export function useInputState(): InputState {
           lastEscapeTime = 0
         }, 2000)
       }
+      return
+    }
+
+    if (!isProcessing() && e.key === 'Escape' && document.activeElement === textareaRef) {
+      e.preventDefault()
+      textareaRef?.blur()
+      mention.setMentionOpen(false)
+      slash.setSlashOpen(false)
       return
     }
 

@@ -39,7 +39,7 @@ export const TeamChatInput: Component<TeamChatInputProps> = (props) => {
 
   return (
     <Show when={member()}>
-      <div class="flex items-center gap-2 px-3 py-2 border-t border-[var(--border-subtle)] bg-[var(--bg-subtle)]">
+      <div class="flex items-center gap-2 border-t border-[var(--border-subtle)] bg-[var(--surface-sunken)] px-3 py-2">
         <input
           type="text"
           value={text()}
@@ -51,7 +51,7 @@ export const TeamChatInput: Component<TeamChatInputProps> = (props) => {
               ? `Steer ${member()!.name.split(' ')[0]}... (Director will relay)`
               : `${member()!.name} is not running`
           }
-          class="flex-1 bg-[var(--bg-raised)] border border-[var(--border-subtle)] rounded-[var(--radius-md)] px-3 py-1.5 text-[13px] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none transition-colors duration-[var(--duration-fast)] focus:border-[var(--accent)]/50 disabled:opacity-50 disabled:cursor-not-allowed"
+          class="flex-1 rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface)] px-3 py-1.5 text-[13px] text-[var(--text-primary)] outline-none transition-colors duration-[var(--duration-fast)] placeholder:text-[var(--text-muted)] focus:border-[var(--accent)]/50 disabled:cursor-not-allowed disabled:opacity-50"
         />
         <button
           type="button"

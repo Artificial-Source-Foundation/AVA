@@ -1,11 +1,12 @@
 /**
  * Step 3: Make it Yours
  *
- * 2x2 grid of theme preset cards + accent color swatch row.
- * Each preset card shows a dot, name, description, and mini color bar.
+ * Dark/Light/System toggle strip, 3x2 grid of theme preset cards (70px height),
+ * accent color swatches (6 circles), navigation.
  */
 
-import { type Component, For } from 'solid-js'
+import { Monitor, Moon, Sun } from 'lucide-solid'
+import { type Component, createSignal, For } from 'solid-js'
 import type { AccentColor } from '../../../stores/settings/settings-types'
 
 // ---------------------------------------------------------------------------
@@ -22,50 +23,78 @@ export interface OnboardingThemePreset {
   darkStyle: 'dark' | 'midnight' | 'charcoal'
   borderRadius: 'sharp' | 'default' | 'rounded' | 'pill'
   barColors: [string, string, string]
+  /** Background color for the preview card */
+  previewBg: string
 }
 
 // NOTE: Theme preset cards intentionally use hardcoded colors since they
 // represent specific theme previews, not the active theme.
 const THEME_PRESETS: OnboardingThemePreset[] = [
   {
-    id: 'soft-zinc',
-    name: 'Soft Zinc',
-    dotColor: '#8B5CF6',
-    description: 'Dark \u00B7 Violet accent \u00B7 Default radius',
+    id: 'default',
+    name: 'Default',
+    dotColor: '#3B82F6',
+    description: '',
+    accentColor: 'blue',
+    darkStyle: 'dark',
+    borderRadius: 'default',
+    barColors: ['#3B82F6', '#27272A', '#18181B'],
+    previewBg: '#0A0A0C',
+  },
+  {
+    id: 'tokyo-night',
+    name: 'Tokyo Night',
+    dotColor: '#7AA2F7',
+    description: '',
+    accentColor: 'blue',
+    darkStyle: 'midnight',
+    borderRadius: 'default',
+    barColors: ['#7AA2F7', '#24283B', '#1A1B26'],
+    previewBg: '#1a1b26',
+  },
+  {
+    id: 'dracula',
+    name: 'Dracula',
+    dotColor: '#BD93F9',
+    description: '',
     accentColor: 'violet',
     darkStyle: 'dark',
     borderRadius: 'default',
-    barColors: ['#8B5CF6', '#27272A', '#18181B'],
+    barColors: ['#BD93F9', '#44475A', '#282A36'],
+    previewBg: '#282a36',
   },
   {
-    id: 'ocean-blue',
-    name: 'Ocean Blue',
-    dotColor: '#3B82F6',
-    description: 'Midnight \u00B7 Blue accent \u00B7 Rounded',
-    accentColor: 'blue',
-    darkStyle: 'midnight',
+    id: 'nord',
+    name: 'Nord',
+    dotColor: '#88C0D0',
+    description: '',
+    accentColor: 'cyan',
+    darkStyle: 'charcoal',
     borderRadius: 'rounded',
-    barColors: ['#3B82F6', '#1E293B', '#0F172A'],
+    barColors: ['#88C0D0', '#3B4252', '#2E3440'],
+    previewBg: '#2e3440',
   },
   {
-    id: 'forest',
-    name: 'Forest',
-    dotColor: '#22C55E',
-    description: 'Charcoal \u00B7 Green accent \u00B7 Pill',
+    id: 'night-owl',
+    name: 'Night Owl',
+    dotColor: '#7FDBCA',
+    description: '',
+    accentColor: 'green',
+    darkStyle: 'midnight',
+    borderRadius: 'default',
+    barColors: ['#7FDBCA', '#1D3B53', '#011628'],
+    previewBg: '#011628',
+  },
+  {
+    id: 'monokai',
+    name: 'Monokai',
+    dotColor: '#A6E22E',
+    description: '',
     accentColor: 'green',
     darkStyle: 'charcoal',
-    borderRadius: 'pill',
-    barColors: ['#22C55E', '#1C1C1F', '#111113'],
-  },
-  {
-    id: 'rose',
-    name: 'Rose',
-    dotColor: '#F43F5E',
-    description: 'Dark \u00B7 Rose accent \u00B7 Sharp',
-    accentColor: 'rose',
-    darkStyle: 'dark',
-    borderRadius: 'sharp',
-    barColors: ['#F43F5E', '#27272A', '#18181B'],
+    borderRadius: 'default',
+    barColors: ['#A6E22E', '#3E3D32', '#272822'],
+    previewBg: '#272822',
   },
 ]
 
@@ -76,13 +105,25 @@ const THEME_PRESETS: OnboardingThemePreset[] = [
 // NOTE: Accent swatches use hardcoded colors since they represent
 // specific color options the user is choosing between.
 const ACCENT_SWATCHES: { id: AccentColor; color: string }[] = [
-  { id: 'violet', color: '#8B5CF6' },
   { id: 'blue', color: '#3B82F6' },
+  { id: 'violet', color: '#8B5CF6' },
   { id: 'green', color: '#22C55E' },
   { id: 'rose', color: '#F43F5E' },
   { id: 'amber', color: '#F59E0B' },
   { id: 'cyan', color: '#06B6D4' },
 ]
+
+// ---------------------------------------------------------------------------
+// Color scheme mode type
+// ---------------------------------------------------------------------------
+
+type ColorSchemeMode = 'dark' | 'light' | 'system'
+
+const COLOR_MODES = [
+  { id: 'dark' as const, label: 'Dark', icon: Moon },
+  { id: 'light' as const, label: 'Light', icon: Sun },
+  { id: 'system' as const, label: 'System', icon: Monitor },
+] as const
 
 // ---------------------------------------------------------------------------
 // Props
@@ -101,93 +142,125 @@ export interface ThemeStepProps {
 // Component
 // ---------------------------------------------------------------------------
 
-export const ThemeStep: Component<ThemeStepProps> = (props) => (
-  <div class="flex flex-col items-center">
-    {/* Header */}
-    <h2 class="text-2xl font-bold text-[var(--text-primary)] tracking-tight mb-2">Make it Yours</h2>
-    <p class="text-sm text-[var(--text-muted)] mb-6">Choose a look that fits your style</p>
+export const ThemeStep: Component<ThemeStepProps> = (props) => {
+  const [colorMode, setColorMode] = createSignal<ColorSchemeMode>('dark')
 
-    {/* Theme Presets label */}
-    <p class="text-xs font-medium text-[var(--text-muted)] uppercase tracking-wider mb-3 self-start max-w-[640px] w-full mx-auto">
-      Theme Presets
-    </p>
+  return (
+    <div class="flex flex-col items-center w-full max-w-[520px]">
+      {/* Header */}
+      <h2 class="text-2xl font-bold text-[var(--text-primary)] tracking-tight mb-2">
+        Make It Yours
+      </h2>
+      <p class="text-sm text-[var(--text-muted)] mb-6">Choose a theme preset</p>
 
-    {/* 2x2 grid */}
-    <div class="w-full max-w-[640px] grid grid-cols-2 gap-3 mb-6">
-      <For each={THEME_PRESETS}>
-        {(preset) => (
-          <button
-            type="button"
-            onClick={() => props.onSelectPreset(preset)}
-            class="bg-[var(--surface-raised)] border rounded-xl p-4 text-left transition-all hover:border-[var(--gray-6)]"
-            classList={{
-              'border-[var(--accent)]': props.selectedPreset === preset.id,
-              'border-[var(--gray-5)]': props.selectedPreset !== preset.id,
-            }}
-          >
-            {/* Dot + name */}
-            <div class="flex items-center gap-2 mb-1.5">
-              <div
-                class="w-3 h-3 rounded-full flex-shrink-0"
-                style={{ background: preset.dotColor }}
-              />
-              <span class="text-sm font-medium text-[var(--text-primary)]">{preset.name}</span>
-            </div>
-
-            {/* Description */}
-            <p class="text-xs text-[var(--text-muted)] mb-3">{preset.description}</p>
-
-            {/* Mini color bar preview */}
-            <div class="flex gap-1 h-2 rounded-full overflow-hidden">
-              <div class="flex-1 rounded-full" style={{ background: preset.barColors[0] }} />
-              <div class="flex-[2] rounded-full" style={{ background: preset.barColors[1] }} />
-              <div class="flex-1 rounded-full" style={{ background: preset.barColors[2] }} />
-            </div>
-          </button>
-        )}
-      </For>
-    </div>
-
-    {/* Accent color swatches */}
-    <p class="text-xs text-[var(--text-muted)] mb-3 self-start max-w-[640px] w-full mx-auto">
-      Or pick an accent color
-    </p>
-    <div class="flex gap-3 mb-10 max-w-[640px] w-full">
-      <For each={ACCENT_SWATCHES}>
-        {(swatch) => (
-          <button
-            type="button"
-            onClick={() => props.onSelectAccent(swatch.id)}
-            class="w-8 h-8 rounded-full transition-all"
-            classList={{
-              'ring-2 ring-white ring-offset-2 ring-offset-[var(--background)]':
-                props.selectedAccent === swatch.id,
-            }}
-            style={{ background: swatch.color }}
-            title={swatch.id}
-          />
-        )}
-      </For>
-    </div>
-
-    {/* Navigation */}
-    <div class="w-full max-w-[640px] flex items-center justify-between">
-      <button
-        type="button"
-        onClick={() => props.onPrev()}
-        class="text-sm text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
+      {/* Dark / Light / System toggle strip */}
+      <div
+        class="w-full grid grid-cols-3 gap-0 mb-6 rounded-lg overflow-hidden"
+        style={{
+          background: 'var(--surface)',
+          border: '1px solid var(--border-subtle)',
+          height: '40px',
+        }}
       >
-        Back
-      </button>
-      <button
-        type="button"
-        onClick={() => props.onNext()}
-        class="px-6 py-2.5 bg-[var(--accent)] hover:bg-[var(--violet-8)] text-white text-sm font-medium rounded-xl transition-colors"
-      >
-        Continue
-      </button>
+        <For each={COLOR_MODES}>
+          {(mode) => {
+            const Icon = mode.icon
+            return (
+              <button
+                type="button"
+                onClick={() => setColorMode(mode.id)}
+                class="flex h-full items-center justify-center gap-2 text-sm font-medium transition-colors"
+                style={{
+                  color: colorMode() === mode.id ? 'var(--text-primary)' : 'var(--text-muted)',
+                  background: colorMode() === mode.id ? 'var(--background)' : 'transparent',
+                  'border-right': mode.id !== 'system' ? '1px solid var(--border-subtle)' : 'none',
+                  ...(colorMode() === mode.id
+                    ? { 'box-shadow': 'inset 0 0 0 1px var(--accent)' }
+                    : {}),
+                }}
+              >
+                <Icon class="w-3.5 h-3.5" />
+                {mode.label}
+              </button>
+            )
+          }}
+        </For>
+      </div>
+
+      {/* 3x2 grid of theme preset cards */}
+      <div class="w-full grid grid-cols-3 gap-2 mb-6">
+        <For each={THEME_PRESETS}>
+          {(preset) => (
+            <button
+              type="button"
+              onClick={() => props.onSelectPreset(preset)}
+              class="overflow-hidden rounded-xl text-left transition-[border-color,transform] duration-[var(--duration-fast)] hover:-translate-y-[1px]"
+              style={{
+                background: preset.previewBg,
+                border:
+                  props.selectedPreset === preset.id
+                    ? '1px solid var(--accent)'
+                    : '1px solid var(--border-subtle)',
+                height: '70px',
+                padding: '10px 12px',
+              }}
+            >
+              {/* Name at top */}
+              <p class="text-xs font-medium text-[var(--text-primary)] mb-auto">{preset.name}</p>
+
+              {/* 3 color dots at bottom */}
+              <div class="flex gap-1.5 mt-6">
+                <div class="w-2.5 h-2.5 rounded-full" style={{ background: preset.barColors[0] }} />
+                <div class="w-2.5 h-2.5 rounded-full" style={{ background: preset.barColors[1] }} />
+                <div class="w-2.5 h-2.5 rounded-full" style={{ background: preset.barColors[2] }} />
+              </div>
+            </button>
+          )}
+        </For>
+      </div>
+
+      {/* ACCENT COLOR label + swatches */}
+      <p class="text-[9px] font-semibold uppercase tracking-[0.1em] text-[var(--text-muted)] mb-3 self-start">
+        Accent Color
+      </p>
+      <div class="flex gap-3 mb-10 w-full justify-center">
+        <For each={ACCENT_SWATCHES}>
+          {(swatch) => (
+            <button
+              type="button"
+              onClick={() => props.onSelectAccent(swatch.id)}
+              class="h-6 w-6 rounded-full transition-[transform,box-shadow] duration-[var(--duration-fast)] hover:scale-105"
+              classList={{
+                'ring-2 ring-white ring-offset-2 ring-offset-[var(--background)]':
+                  props.selectedAccent === swatch.id,
+              }}
+              style={{ background: swatch.color }}
+              title={swatch.id}
+            />
+          )}
+        </For>
+      </div>
+
+      {/* Navigation: Back <- | (dots in parent) | Continue */}
+      <div class="w-full flex items-center justify-between">
+        <button
+          type="button"
+          onClick={() => props.onPrev()}
+          class="text-sm text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors flex items-center gap-1"
+        >
+          <span aria-hidden="true">&larr;</span>
+          Back
+        </button>
+        <button
+          type="button"
+          onClick={() => props.onNext()}
+          class="px-6 py-2 bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white text-sm font-medium rounded-[10px] transition-colors"
+        >
+          Continue
+        </button>
+      </div>
     </div>
-  </div>
-)
+  )
+}
 
 export { THEME_PRESETS as ONBOARDING_THEME_PRESETS }

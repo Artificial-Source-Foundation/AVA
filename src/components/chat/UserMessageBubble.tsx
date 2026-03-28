@@ -60,9 +60,9 @@ export const UserMessageBubble: Component<UserMessageBubbleProps> = (props) => {
         />
       }
     >
-      <div class="relative group" style={{ 'max-width': 'min(85%, 68ch)' }}>
+      <div class="relative group" style={{ 'max-width': '70%' }}>
         <div class="flex flex-col">
-          <div class="chat-user-bubble bg-[var(--chat-user-bg)] text-[var(--chat-user-text)] rounded-[var(--radius-2xl)] rounded-br-[var(--radius-sm)] py-2.5 px-4">
+          <div class="chat-user-bubble rounded-[16px] rounded-br-[4px] border border-[var(--border-subtle)] bg-[var(--chat-user-bg)] px-4 py-3 text-sm leading-relaxed text-[var(--chat-user-text)]">
             <ImagesBlock message={props.message} />
             <Show when={props.message.content}>
               <MarkdownContent
@@ -98,7 +98,7 @@ export const UserMessageBubble: Component<UserMessageBubbleProps> = (props) => {
           {/* Timestamp line */}
           <div class="relative h-[20px] flex justify-end">
             <Show when={!props.isStreaming}>
-              <div class="font-[var(--font-ui-mono)] text-[11px] tracking-wide text-[var(--gray-7)] pt-1 transition-all duration-200 group-hover:-translate-y-3 group-hover:opacity-0 tabular-nums">
+              <div class="font-[var(--font-ui-mono)] text-[11px] tracking-wider text-[var(--text-muted)] pt-1.5 opacity-0 transition-opacity duration-200 group-hover:opacity-100 tabular-nums">
                 {formatTimestamp(props.message)}
               </div>
             </Show>

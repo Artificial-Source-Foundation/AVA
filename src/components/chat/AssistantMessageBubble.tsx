@@ -80,7 +80,7 @@ function parseLeadQuestion(content: string): LeadQuestion | null {
 const LeadQuestionCard: Component<{ question: LeadQuestion }> = (props) => {
   return (
     <div
-      class="w-full rounded-[var(--radius-xl)] bg-[var(--gray-3)] overflow-hidden my-1"
+      class="my-1 w-full overflow-hidden rounded-[var(--radius-xl)] bg-[var(--gray-3)]"
       style={{
         border: `1px solid color-mix(in srgb, ${props.question.color} 25%, transparent)`,
       }}
@@ -249,7 +249,7 @@ export const AssistantMessageBubble: Component<AssistantMessageBubbleProps> = (p
     return (
       <div class="relative h-[20px] flex justify-start">
         <Show when={!props.isStreaming}>
-          <div class="font-[var(--font-ui-mono)] text-[11px] tracking-wide text-[var(--gray-7)] pt-1 transition-all duration-200 group-hover:-translate-y-3 group-hover:opacity-0 tabular-nums">
+          <div class="font-[var(--font-ui-mono)] text-[11px] tracking-wider text-[var(--text-muted)] pt-1.5 opacity-0 transition-opacity duration-200 group-hover:opacity-100 tabular-nums">
             {formatTimestamp(props.message)}
             <Show when={props.message.model}>
               {' '}
@@ -291,7 +291,7 @@ export const AssistantMessageBubble: Component<AssistantMessageBubbleProps> = (p
 
   return (
     <div
-      class="relative group w-[90%] min-w-0"
+      class="relative group w-full min-w-0"
       classList={{
         'pl-3': isDirectorMessage(),
       }}

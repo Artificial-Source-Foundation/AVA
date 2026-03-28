@@ -59,13 +59,40 @@ export function getToolIcon(name: string): IconComponent {
   return TOOL_ICONS[name] || Code2
 }
 
-export function getIconColor(status: ToolCallStatus): string {
+/**
+ * Color-coded by tool type -- matches Pencil design:
+ * search/find/git/read = #0A84FF (blue)
+ * write/create = #34C759 (green)
+ * edit = #0A84FF (blue)
+ * bash = #0A84FF (blue), but #FF453A on error
+ * delete = #FF453A (red)
+ * web = #0A84FF (blue)
+ * task/delegate = #5E5CE6 (purple)
+ */
+export function getToolTypeColor(name: string): string {
+  if (['write_file', 'write', 'create_file', 'create'].includes(name)) return 'var(--success)'
+  if (['delete_file', 'delete'].includes(name)) return 'var(--error)'
+  if (
+    [
+      'task',
+      'delegate_coder',
+      'delegate_reviewer',
+      'delegate_researcher',
+      'delegate_explorer',
+    ].includes(name)
+  )
+    return 'var(--thinking-accent)'
+  // read, edit, bash, glob, grep, git, web -- all blue
+  return 'var(--accent)'
+}
+
+export function getIconColor(status: ToolCallStatus, name?: string): string {
   switch (status) {
     case 'pending':
     case 'running':
-      return 'var(--text-muted)'
+      return name ? getToolTypeColor(name) : 'var(--accent)'
     case 'success':
-      return 'var(--success)'
+      return name ? getToolTypeColor(name) : 'var(--accent)'
     case 'error':
       return 'var(--error)'
   }
@@ -103,7 +130,9 @@ export const ToolIcon: Component<ToolIconProps> = (props) => {
     <div class="tool-status-dot-wrapper">
       <Show
         when={!isRunning()}
-        fallback={<Loader2 class={`${baseClass()} animate-spin text-[var(--accent-text)]`} />}
+        fallback={
+          <Loader2 class={`${baseClass()} animate-spin`} style={{ color: 'var(--accent)' }} />
+        }
       >
         <Show
           when={!isError()}
@@ -112,7 +141,7 @@ export const ToolIcon: Component<ToolIconProps> = (props) => {
           <Dynamic
             component={getToolIcon(props.name)}
             class={baseClass()}
-            style={{ color: getIconColor(props.status) }}
+            style={{ color: getIconColor(props.status, props.name) }}
           />
         </Show>
       </Show>

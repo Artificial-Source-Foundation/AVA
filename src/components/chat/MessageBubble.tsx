@@ -35,7 +35,7 @@ export const MessageBubble: Component<MessageBubbleProps> = (props) => {
 
   return (
     <div
-      class={`flex ${isUser() ? 'justify-end' : 'justify-start'} ${shouldAnimateIn() ? 'animate-message-in' : ''}`}
+      class={`chat-message-shell flex ${isUser() ? 'justify-end' : 'justify-start'} ${shouldAnimateIn() ? 'animate-message-in' : ''}`}
     >
       <Show
         when={!isUser()}

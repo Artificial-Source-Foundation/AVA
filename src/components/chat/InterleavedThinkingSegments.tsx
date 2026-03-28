@@ -202,8 +202,8 @@ export const InterleavedThinkingSegments: Component<{
         open={detailsOpen()}
         onToggle={(e) => setIsOpen((e.currentTarget as HTMLDetailsElement).open)}
         style={{
-          border: '1px solid var(--border-default, rgba(255,255,255,0.08))',
-          background: 'var(--bg-subtle, rgba(255,255,255,0.02))',
+          border: '1px solid var(--border-default)',
+          background: 'var(--surface-sunken)',
         }}
       >
         <summary

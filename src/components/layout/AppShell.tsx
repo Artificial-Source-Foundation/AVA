@@ -72,8 +72,9 @@ export const AppShell: Component = () => {
         <div
           class="flex-shrink-0 overflow-hidden"
           style={{
-            width: showChatSidebar() ? `${sidebarWidth()}px` : '0px',
-            transition: 'width 120ms ease',
+            width: `${sidebarWidth()}px`,
+            'margin-left': showChatSidebar() ? '0px' : `-${sidebarWidth()}px`,
+            transition: 'margin-left 120ms var(--ease-out)',
           }}
         >
           <SidebarPanel />

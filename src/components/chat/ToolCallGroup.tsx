@@ -12,9 +12,9 @@
  *   [check]  Read 3 files                    [4.1s] [v]   ← collapsed
  */
 
-import { ChevronRight } from 'lucide-solid'
+import { ChevronRight, Layers } from 'lucide-solid'
 import { type Component, createEffect, createSignal, For, Show } from 'solid-js'
-import type { ToolCall, ToolCallStatus } from '../../types'
+import type { ToolCall } from '../../types'
 import { ToolCallCard } from './ToolCallCard'
 import { ToolIcon } from './tool-call-icon'
 import {
@@ -70,13 +70,13 @@ const GroupHeader: Component<GroupHeaderProps> = (props) => {
   }
 
   return (
-    <div class="animate-tool-card-in rounded-[var(--radius-md)] border border-[var(--border-subtle)] overflow-hidden">
+    <div class="chat-tool-shell animate-tool-card-in overflow-hidden rounded-[10px] border border-[var(--border-default)] bg-[var(--tool-card-background)]">
       {/* Group header */}
       {/* biome-ignore lint/a11y/useSemanticElements: div+role=button avoids nested button which crashes WebKitGTK */}
       <div
         role="button"
         tabIndex={0}
-        class="flex items-center gap-2.5 px-3 py-2 text-[var(--text-base)] cursor-pointer select-none hover:bg-[var(--alpha-white-3)] transition-colors duration-[var(--duration-fast)]"
+        class="tool-card-header flex h-10 cursor-pointer select-none items-center gap-2.5 px-3.5 transition-colors duration-[var(--duration-fast)] hover:bg-[var(--alpha-white-5)]"
         onClick={() => setExpanded((v) => !v)}
         onKeyDown={(e) => {
           if (e.key === 'Enter' || e.key === ' ') {
@@ -88,36 +88,71 @@ const GroupHeader: Component<GroupHeaderProps> = (props) => {
         <ToolIcon name={props.group.toolName} status={status()} />
 
         <div class="flex flex-col min-w-0 flex-1">
-          <span class="text-[var(--text-secondary)] truncate">{label()}</span>
+          <span
+            class="truncate"
+            style={{
+              'font-family': 'var(--font-ui), Geist, sans-serif',
+              'font-size': '13px',
+              color: 'var(--text-primary)',
+            }}
+          >
+            {label()}
+          </span>
           <Show when={activeSubtitle()}>
-            <span class="text-[var(--text-xs)] text-[var(--text-muted)] truncate mt-0.5">
+            <span
+              class="truncate"
+              style={{
+                'font-size': '11px',
+                color: 'var(--text-muted)',
+                'margin-top': '2px',
+              }}
+            >
               {activeSubtitle()}
             </span>
           </Show>
         </div>
 
         {/* Count badge */}
-        <span class="text-[var(--text-2xs)] font-medium text-[var(--text-muted)] bg-[var(--alpha-white-5)] px-1.5 py-0.5 rounded-[var(--radius-sm)] tabular-nums">
+        <span
+          class="tabular-nums"
+          style={{
+            'font-family': 'var(--font-ui-mono), Geist Mono, monospace',
+            'font-size': '10px',
+            'font-weight': '500',
+            color: 'var(--text-tertiary)',
+            background: 'var(--alpha-white-8)',
+            padding: '2px 6px',
+            'border-radius': '4px',
+          }}
+        >
           {props.group.calls.length}
         </span>
 
         {/* Duration */}
         <Show when={duration()}>
-          <span class="text-[var(--text-xs)] text-[var(--text-muted)] tabular-nums whitespace-nowrap">
+          <span
+            class="tabular-nums whitespace-nowrap"
+            style={{
+              'font-family': 'var(--font-ui-mono), Geist Mono, monospace',
+              'font-size': '11px',
+              color: 'var(--text-muted)',
+            }}
+          >
             {duration()}
           </span>
         </Show>
 
         {/* Chevron */}
         <ChevronRight
-          class="w-4 h-4 flex-shrink-0 text-[var(--text-muted)] transition-transform duration-[var(--duration-fast)]"
+          class="flex-shrink-0 transition-transform duration-[var(--duration-fast)]"
+          style={{ width: '14px', height: '14px', color: 'var(--text-muted)' }}
           classList={{ 'rotate-90': expanded() }}
         />
       </div>
 
       {/* Expanded: individual cards */}
       <Show when={expanded()}>
-        <div class="px-2 pb-2 pt-1 flex flex-col gap-1 border-t border-[var(--border-subtle)]">
+        <div class="flex flex-col gap-1 border-t border-[var(--border-default)] px-2 pb-2 pt-1">
           <For each={props.group.calls}>{(tc) => <ToolCallCard toolCall={tc} />}</For>
         </div>
       </Show>
@@ -163,8 +198,6 @@ export const ContextGroupHeader: Component<ContextGroupHeaderProps> = (props) =>
     }
   })
 
-  const status = (): ToolCallStatus => (anyRunning() ? 'running' : anyError() ? 'error' : 'success')
-
   const label = () => {
     if (anyRunning()) return `Gathering context... (${props.calls.length})`
     return describeContextGroup(props.calls)
@@ -187,18 +220,22 @@ export const ContextGroupHeader: Component<ContextGroupHeaderProps> = (props) =>
 
   return (
     <div
-      class="animate-tool-card-in rounded-[var(--radius-md)] border overflow-hidden"
-      classList={{
-        'border-[var(--error)]/30': anyError(),
-        'border-[var(--accent)]/30': anyRunning(),
-        'border-[var(--border-subtle)]': !anyRunning() && !anyError(),
+      class="chat-tool-shell animate-tool-card-in overflow-hidden rounded-[10px]"
+      style={{
+        background: 'var(--tool-card-background)',
+        border: anyRunning()
+          ? '1px solid var(--tool-card-running-border)'
+          : anyError()
+            ? '1px solid var(--error-border)'
+            : '1px solid var(--border-default)',
       }}
     >
       {/* biome-ignore lint/a11y/useSemanticElements: div+role=button avoids nested button which crashes WebKitGTK */}
       <div
         role="button"
         tabIndex={0}
-        class="flex items-center gap-2.5 px-3 py-2 text-[var(--text-base)] cursor-pointer select-none hover:bg-[var(--alpha-white-3)] transition-colors duration-[var(--duration-fast)]"
+        class="tool-card-header flex cursor-pointer select-none items-center gap-2 px-3.5 transition-colors duration-[var(--duration-fast)] hover:bg-[var(--alpha-white-5)]"
+        style={{ height: '42px' }}
         onClick={() => setExpanded((v) => !v)}
         onKeyDown={(e) => {
           if (e.key === 'Enter' || e.key === ' ') {
@@ -207,38 +244,79 @@ export const ContextGroupHeader: Component<ContextGroupHeaderProps> = (props) =>
           }
         }}
       >
-        <ToolIcon name="read" status={status()} />
+        {/* Layers icon in amber for gathered context */}
+        <Layers
+          class="flex-shrink-0"
+          style={{ width: '16px', height: '16px', color: 'var(--warning)' }}
+        />
 
         <div class="flex flex-col min-w-0 flex-1">
-          <span class="text-[var(--text-secondary)] truncate">{label()}</span>
+          <span
+            class="truncate"
+            style={{
+              'font-family': 'var(--font-ui), Geist, sans-serif',
+              'font-size': '13px',
+              'font-weight': '500',
+              color: 'var(--text-primary)',
+            }}
+          >
+            {label()}
+          </span>
           <Show when={activeSubtitle()}>
-            <span class="text-[var(--text-xs)] text-[var(--text-muted)] truncate mt-0.5">
+            <span
+              class="truncate"
+              style={{
+                'font-size': '11px',
+                color: 'var(--text-muted)',
+                'margin-top': '2px',
+              }}
+            >
               {activeSubtitle()}
             </span>
           </Show>
         </div>
 
         {/* Count badge */}
-        <span class="text-[var(--text-2xs)] font-medium text-[var(--text-muted)] bg-[var(--alpha-white-5)] px-1.5 py-0.5 rounded-[var(--radius-sm)] tabular-nums">
+        <span
+          class="tabular-nums"
+          style={{
+            'font-family': 'var(--font-ui-mono), Geist Mono, monospace',
+            'font-size': '10px',
+            'font-weight': '500',
+            color: 'var(--text-tertiary)',
+            background: 'var(--alpha-white-8)',
+            padding: '2px 6px',
+            'border-radius': '4px',
+          }}
+        >
           {props.calls.length}
         </span>
 
         {/* Duration */}
         <Show when={totalDuration()}>
-          <span class="text-[var(--text-xs)] text-[var(--text-muted)] tabular-nums whitespace-nowrap">
+          <span
+            class="tabular-nums whitespace-nowrap"
+            style={{
+              'font-family': 'var(--font-ui-mono), Geist Mono, monospace',
+              'font-size': '12px',
+              'font-weight': '600',
+              color: 'var(--text-primary)',
+            }}
+          >
             {totalDuration()}
           </span>
         </Show>
 
         <ChevronRight
-          class="w-4 h-4 flex-shrink-0 text-[var(--text-muted)] transition-transform duration-[var(--duration-fast)]"
+          class="flex-shrink-0 transition-transform duration-[var(--duration-fast)]"
+          style={{ width: '14px', height: '14px', color: 'var(--text-muted)' }}
           classList={{ 'rotate-90': expanded() }}
         />
       </div>
 
-      {/* Expanded: individual tool cards */}
+      {/* Expanded: individual tool cards -- indented nested rows */}
       <Show when={expanded()}>
-        <div class="px-2 pb-2 pt-1 flex flex-col gap-1 border-t border-[var(--border-subtle)]">
+        <div class="flex flex-col gap-1 border-t border-[var(--border-subtle)] pb-2 pl-7 pr-2 pt-1">
           <For each={props.calls}>{(tc) => <ToolCallCard toolCall={tc} />}</For>
         </div>
       </Show>
@@ -347,13 +425,13 @@ export const ToolCallGroup: Component<ToolCallGroupProps> = (props) => {
         </div>
       }
     >
-      <div class="my-1 rounded-[var(--radius-md)] border border-[var(--border-subtle)] overflow-hidden">
+      <div class="chat-tool-shell my-1 overflow-hidden rounded-[10px] border border-[var(--border-default)] bg-[var(--tool-card-background)]">
         {/* Unified group header */}
         {/* biome-ignore lint/a11y/useSemanticElements: div+role=button avoids nested button which crashes WebKitGTK */}
         <div
           role="button"
           tabIndex={0}
-          class="flex items-center gap-2.5 px-3 py-2 text-[var(--text-base)] cursor-pointer select-none hover:bg-[var(--alpha-white-3)] transition-colors"
+          class="tool-card-header flex h-10 cursor-pointer select-none items-center gap-2.5 px-3.5 transition-colors hover:bg-[var(--alpha-white-5)]"
           onClick={() => setExpanded((v) => !v)}
           onKeyDown={(e) => {
             if (e.key === 'Enter' || e.key === ' ') {
@@ -368,32 +446,58 @@ export const ToolCallGroup: Component<ToolCallGroupProps> = (props) => {
           />
 
           <div class="flex flex-col min-w-0 flex-1">
-            <span class="text-[var(--text-secondary)] truncate">
+            <span
+              class="truncate"
+              style={{
+                'font-family': 'var(--font-ui), Geist, sans-serif',
+                'font-size': '13px',
+                color: 'var(--text-primary)',
+              }}
+            >
               {anyRunning()
                 ? `Running tools... (${toolSummary(props.toolCalls)})`
                 : `Used ${props.toolCalls.length} tools (${toolSummary(props.toolCalls)})`}
             </span>
           </div>
 
-          <span class="text-[var(--text-2xs)] font-medium text-[var(--text-muted)] bg-[var(--alpha-white-5)] px-1.5 py-0.5 rounded-[var(--radius-sm)] tabular-nums">
+          <span
+            class="tabular-nums"
+            style={{
+              'font-family': 'var(--font-ui-mono), Geist Mono, monospace',
+              'font-size': '10px',
+              'font-weight': '500',
+              color: 'var(--text-tertiary)',
+              background: 'var(--alpha-white-8)',
+              padding: '2px 6px',
+              'border-radius': '4px',
+            }}
+          >
             {props.toolCalls.length}
           </span>
 
           <Show when={totalDuration()}>
-            <span class="text-[var(--text-xs)] text-[var(--text-muted)] tabular-nums whitespace-nowrap">
+            <span
+              class="tabular-nums whitespace-nowrap"
+              style={{
+                'font-family': 'var(--font-ui-mono), Geist Mono, monospace',
+                'font-size': '11px',
+                color: 'var(--text-muted)',
+              }}
+            >
               {totalDuration()}
             </span>
           </Show>
 
           <ChevronRight
-            class="w-4 h-4 flex-shrink-0 text-[var(--text-muted)] transition-transform duration-[var(--duration-fast)]"
+            class="flex-shrink-0 transition-transform duration-[var(--duration-fast)]"
+            style={{ width: '14px', height: '14px', color: 'var(--text-muted)' }}
             classList={{ 'rotate-90': expanded() }}
           />
         </div>
 
         {/* Expanded: show per-type sub-groups */}
         <Show when={expanded()}>
-          <div class="px-2 pb-2 pt-1 flex flex-col gap-1 border-t border-[var(--border-subtle)]">
+          <div class="flex flex-col gap-1 border-t border-[var(--border-default)] px-2 pb-2 pt-1">
             <For each={groups()}>
               {(group) => (
                 <Show

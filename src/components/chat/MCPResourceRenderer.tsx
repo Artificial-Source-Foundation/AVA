@@ -110,8 +110,8 @@ const ResourceChart: Component<{ data: ChartData }> = (props) => {
                 </span>
                 <div class="flex-1 h-5 bg-[var(--alpha-white-3)] rounded-[var(--radius-sm)] overflow-hidden">
                   <div
-                    class="h-full bg-[var(--accent)] rounded-[var(--radius-sm)] transition-all duration-300"
-                    style={{ width: `${pct()}%` }}
+                    class="h-full w-full origin-left bg-[var(--accent)] rounded-[var(--radius-sm)] transition-transform duration-300"
+                    style={{ transform: `scaleX(${pct() / 100})` }}
                   />
                 </div>
                 <span class="text-[11px] text-[var(--text-secondary)] tabular-nums min-w-[40px]">
@@ -158,7 +158,7 @@ interface MCPResourceRendererProps {
 
 export const MCPResourceRenderer: Component<MCPResourceRendererProps> = (props) => {
   return (
-    <div class="bg-[var(--bg-inset,var(--surface-sunken))] border-t border-[var(--border-subtle)] rounded-b-[var(--radius-md)] overflow-hidden">
+    <div class="overflow-hidden rounded-b-[var(--radius-md)] border-t border-[var(--border-default)] bg-[var(--bg-inset,var(--surface-sunken))]">
       <Switch
         fallback={
           <div class="px-3 py-2 text-[11px] text-[var(--text-muted)]">

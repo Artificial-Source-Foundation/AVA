@@ -8,8 +8,8 @@
  * - PermissionBadge — styled pill cycling through permission modes
  */
 
-import { Brain, FileSearch, Play, Shield, ShieldAlert, ShieldOff, Users } from 'lucide-solid'
-import { type Accessor, type Component, Show } from 'solid-js'
+import { Brain, Shield, ShieldAlert, ShieldOff, Users } from 'lucide-solid'
+import type { Accessor, Component } from 'solid-js'
 import type { PermissionMode } from '../../../stores/settings'
 import type { ReasoningEffort } from '../../../stores/settings/settings-types'
 import type { PermissionConfigEntry } from './types'
@@ -77,27 +77,32 @@ export const ReasoningDropdown: Component<ReasoningDropdownProps> = (props) => {
     <button
       type="button"
       onClick={() => props.onCycle()}
-      class={`
-        flex items-center gap-1 px-1.5 py-1
-        text-[var(--text-xs)] font-medium rounded-[var(--radius-md)]
-        transition-all duration-200
-        ${
-          isActive()
-            ? 'text-[var(--accent)] bg-[var(--accent-subtle)]'
-            : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] bg-transparent hover:bg-[var(--surface-raised)]'
-        }
-      `}
+      class="flex items-center rounded-[6px] bg-[var(--alpha-white-5)] transition-colors duration-200 hover:bg-[var(--alpha-white-8)]"
+      style={{
+        gap: '4px',
+        padding: '4px 8px',
+      }}
       title={isActive() ? `Reasoning: ${EFFORT_LABELS[props.effort()]}` : 'Enable reasoning'}
+      aria-label={isActive() ? `Reasoning: ${EFFORT_LABELS[props.effort()]}` : 'Enable reasoning'}
     >
       <Brain
-        class="w-3.5 h-3.5 transition-all duration-200"
+        class="transition-colors duration-200"
         style={{
-          filter: isActive() ? 'drop-shadow(0 0 4px var(--accent))' : 'none',
+          width: '10px',
+          height: '10px',
+          color: isActive() ? 'var(--text-tertiary)' : 'var(--text-muted)',
         }}
       />
-      <Show when={isActive()}>
-        <span>{EFFORT_LABELS[props.effort()]}</span>
-      </Show>
+      <span
+        style={{
+          'font-size': '10px',
+          'font-weight': '500',
+          'font-family': "var(--font-ui-mono, 'Geist Mono', ui-monospace, monospace)",
+          color: isActive() ? 'var(--text-tertiary)' : 'var(--text-muted)',
+        }}
+      >
+        {isActive() ? `Think ${EFFORT_LABELS[props.effort()]}` : 'Think'}
+      </span>
     </button>
   )
 }
@@ -131,7 +136,7 @@ export const DelegationToggle: Component<DelegationToggleProps> = (props) => (
     class={`
       flex items-center gap-1 px-1.5 py-1
       text-[var(--text-xs)] font-medium rounded-[var(--radius-md)]
-      transition-all duration-200
+      transition-colors duration-200
       ${
         props.enabled()
           ? 'text-[var(--accent)] bg-[var(--accent-subtle)]'
@@ -139,6 +144,7 @@ export const DelegationToggle: Component<DelegationToggleProps> = (props) => (
       }
     `}
     title={props.enabled() ? 'Team delegation on' : 'Enable team delegation'}
+    aria-label={props.enabled() ? 'Team delegation on' : 'Enable team delegation'}
   >
     <Users class="w-3.5 h-3.5" />
     <span>{props.enabled() ? 'Team' : 'Solo'}</span>
@@ -156,57 +162,57 @@ export interface PlanActSliderProps {
 }
 
 export const PlanActSlider: Component<PlanActSliderProps> = (props) => (
-  <button
-    type="button"
-    onClick={() => props.togglePlanMode()}
-    disabled={props.isProcessing()}
+  <div
     class="
       relative flex items-center
-      h-[28px] w-[120px] rounded-full
-      bg-[var(--alpha-white-5)]
-      text-[var(--text-xs)] font-medium
-      disabled:opacity-50 disabled:cursor-not-allowed
-      overflow-hidden select-none
-      transition-colors
+      rounded-[6px]
+      bg-[var(--alpha-white-5)] p-[2px]
+      select-none
     "
-    title={props.isPlanMode() ? 'Plan mode — read-only exploration' : 'Act mode — full execution'}
   >
-    {/* Sliding highlight */}
-    <div
-      class="
-        absolute top-[2px] bottom-[2px] w-[56px]
-        rounded-full
-        transition-all duration-300 ease-[cubic-bezier(0.4,0,0.2,1)]
-      "
-      style={{
-        left: props.isPlanMode() ? '2px' : '60px',
-        'background-color': 'var(--accent)',
+    {/* Plan tab */}
+    <button
+      type="button"
+      onClick={() => {
+        if (!props.isPlanMode()) props.togglePlanMode()
       }}
-    />
-    {/* Labels */}
-    <span
-      class="relative z-10 flex-1 text-center transition-colors duration-200"
+      disabled={props.isProcessing()}
+      class="relative z-10 flex items-center justify-center rounded-[4px] transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
       style={{
-        color: props.isPlanMode() ? 'white' : 'var(--text-muted)',
+        padding: '4px 10px',
+        'font-size': '11px',
+        'font-family': "var(--font-sans, 'Geist', system-ui, sans-serif)",
+        color: props.isPlanMode() ? 'var(--text-primary)' : 'var(--text-muted)',
+        'font-weight': props.isPlanMode() ? '500' : undefined,
+        'background-color': props.isPlanMode() ? 'var(--alpha-white-10)' : undefined,
       }}
+      title="Plan mode — read-only exploration"
+      aria-label="Switch to plan mode"
     >
-      <span class="flex items-center justify-center gap-0.5">
-        <FileSearch class="w-3 h-3" />
-        Plan
-      </span>
-    </span>
-    <span
-      class="relative z-10 flex-1 text-center transition-colors duration-200"
-      style={{
-        color: props.isPlanMode() ? 'var(--text-muted)' : 'white',
+      Plan
+    </button>
+    {/* Act tab */}
+    <button
+      type="button"
+      onClick={() => {
+        if (props.isPlanMode()) props.togglePlanMode()
       }}
+      disabled={props.isProcessing()}
+      class="relative z-10 flex items-center justify-center rounded-[4px] transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+      style={{
+        padding: '4px 10px',
+        'font-size': '11px',
+        'font-family': "var(--font-sans, 'Geist', system-ui, sans-serif)",
+        color: props.isPlanMode() ? 'var(--text-muted)' : 'var(--text-primary)',
+        'font-weight': props.isPlanMode() ? undefined : '500',
+        'background-color': props.isPlanMode() ? undefined : 'var(--alpha-white-10)',
+      }}
+      title="Act mode — full execution"
+      aria-label="Switch to act mode"
     >
-      <span class="flex items-center justify-center gap-0.5">
-        <Play class="w-3 h-3" />
-        Act
-      </span>
-    </span>
-  </button>
+      Act
+    </button>
+  </div>
 )
 
 // ---------------------------------------------------------------------------
@@ -228,7 +234,7 @@ export const PermissionBadge: Component<PermissionBadgeProps> = (props) => {
       class="
         flex items-center gap-1 px-2 py-1
         text-[var(--text-xs)] font-medium rounded-[var(--radius-md)]
-        transition-all duration-200
+        transition-[background-color,border-color,color] duration-200
         border
       "
       style={{
@@ -242,6 +248,7 @@ export const PermissionBadge: Component<PermissionBadgeProps> = (props) => {
               : 'color-mix(in srgb, var(--error) 10%, transparent)',
       }}
       title={`Permissions: ${cfg().label} (click to cycle)`}
+      aria-label={`Permissions: ${cfg().label}`}
     >
       {(() => {
         const Icon = cfg().icon

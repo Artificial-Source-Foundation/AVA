@@ -9,7 +9,7 @@
  * - Post-decision approval audit badge (Approved / Auto-approved / Denied)
  */
 
-import { Check, CheckCheck, ChevronRight, X } from 'lucide-solid'
+import { Check, CheckCheck, ChevronRight, Loader2, X } from 'lucide-solid'
 import { type Component, createMemo, createSignal, Match, Show, Switch } from 'solid-js'
 import { useSecondTicker } from '../../hooks/useElapsedTimer'
 import { useSettings } from '../../stores/settings'
@@ -18,6 +18,14 @@ import { SubagentCard } from './SubagentCard'
 import { ToolIcon } from './tool-call-icon'
 import { ToolCallOutput } from './tool-call-output'
 import { formatDuration, formatElapsed, getToolDescription } from './tool-call-utils'
+
+const TOOL_CARD_STYLE = {
+  idleBorder: '1px solid var(--border-subtle)',
+  expandedBackground: 'var(--tool-card-background)',
+  runningBorder: '1px solid var(--tool-card-running-border)',
+  runningShadow: 'var(--tool-card-running-shadow)',
+  errorBorder: '1px solid var(--error-border)',
+} as const
 
 // ============================================================================
 // Approval Audit Badge
@@ -76,20 +84,28 @@ const ToolCallCardContent: Component<ToolCallCardProps> = (props) => {
 
   return (
     <div
-      class="animate-tool-card-in rounded-[var(--radius-md)] border overflow-hidden transition-colors duration-[var(--duration-fast)]"
-      classList={{
-        'border-[var(--error)]/30': props.toolCall.status === 'error',
-        'border-[var(--accent)]/30': isRunning(),
-        'border-[var(--border-default)]': !isRunning() && props.toolCall.status !== 'error',
+      class="chat-tool-shell animate-tool-card-in rounded-[10px] overflow-hidden transition-colors duration-[var(--duration-fast)]"
+      style={{
+        background: expanded() ? TOOL_CARD_STYLE.expandedBackground : 'transparent',
+        border: isRunning()
+          ? TOOL_CARD_STYLE.runningBorder
+          : props.toolCall.status === 'error'
+            ? TOOL_CARD_STYLE.errorBorder
+            : TOOL_CARD_STYLE.idleBorder,
+        ...(isRunning() ? { 'box-shadow': TOOL_CARD_STYLE.runningShadow } : {}),
       }}
     >
-      {/* Single-line header */}
+      {/* Single-line header — 40px height, bottom border when collapsed */}
       {/* biome-ignore lint/a11y/useSemanticElements: div+role=button avoids nested button which crashes WebKitGTK */}
       <div
         role="button"
         tabIndex={0}
         aria-expanded={expanded()}
-        class="flex items-center gap-2.5 px-3 py-2 text-[13px] cursor-pointer select-none hover:bg-[var(--alpha-white-3)] transition-colors duration-[var(--duration-fast)]"
+        class="tool-card-header flex h-10 cursor-pointer select-none items-center gap-2.5 px-3 text-[13px] transition-colors duration-[var(--duration-fast)] hover:bg-[var(--alpha-white-5)]"
+        classList={{
+          'border-b border-[var(--border-subtle)]': !expanded(),
+          'bg-[var(--alpha-white-5)]': expanded(),
+        }}
         onClick={() => {
           if (hasOutput()) setExpanded((v) => !v)
         }}
@@ -100,16 +116,13 @@ const ToolCallCardContent: Component<ToolCallCardProps> = (props) => {
           }
         }}
       >
-        {/* Tool icon */}
+        {/* Tool icon — 16px, color-coded by type */}
         <ToolIcon name={props.toolCall.name} status={props.toolCall.status} />
 
-        {/* Human-readable summary — shimmer while running */}
+        {/* Tool name / summary */}
         <span
-          class="truncate"
-          classList={{
-            'tool-summary-shimmer': isRunning(),
-            'text-[var(--text-secondary)]': !isRunning(),
-          }}
+          class="truncate text-[13px] text-[var(--text-primary)]"
+          style={isRunning() ? { opacity: '0.9' } : undefined}
           title={summary()}
         >
           {summary()}
@@ -122,17 +135,57 @@ const ToolCallCardContent: Component<ToolCallCardProps> = (props) => {
           <ApprovalBadge decision={props.toolCall.approvalDecision!} />
         </Show>
 
-        {/* Live elapsed / completed duration */}
-        <Show when={duration() || (isRunning() && elapsed())}>
-          <span class="text-[11px] text-[var(--text-muted)] tabular-nums whitespace-nowrap">
-            {duration() ?? elapsed()}
+        {/* Status badge for expanded cards */}
+        <Show when={expanded() && !isRunning()}>
+          <span
+            class="text-[10px] font-medium px-1.5 py-0.5 rounded-full"
+            classList={{
+              'text-[var(--success)] bg-[var(--success-subtle)]':
+                props.toolCall.status === 'success',
+              'text-[var(--error)] bg-[var(--error-subtle)]': props.toolCall.status === 'error',
+            }}
+          >
+            {props.toolCall.status === 'error' ? 'Error' : 'Done'}
+          </span>
+        </Show>
+
+        {/* Running indicator */}
+        <Show when={isRunning()}>
+          <Loader2
+            class="animate-spin flex-shrink-0"
+            style={{ width: '14px', height: '14px', color: 'var(--accent)' }}
+          />
+          <span
+            class="tabular-nums whitespace-nowrap"
+            style={{
+              'font-family': 'var(--font-ui-mono), Geist Mono, monospace',
+              'font-size': '11px',
+              color: 'var(--accent)',
+            }}
+          >
+            {elapsed()}
+          </span>
+        </Show>
+
+        {/* Completed duration badge */}
+        <Show when={!isRunning() && duration()}>
+          <span
+            class="tabular-nums whitespace-nowrap"
+            style={{
+              'font-family': 'var(--font-ui-mono), Geist Mono, monospace',
+              'font-size': '11px',
+              color: 'var(--text-muted)',
+            }}
+          >
+            {duration()}
           </span>
         </Show>
 
         {/* Expand chevron */}
         <Show when={hasOutput()}>
           <ChevronRight
-            class="w-4 h-4 flex-shrink-0 text-[var(--text-muted)] transition-transform duration-[var(--duration-fast)]"
+            class="flex-shrink-0 transition-transform duration-[var(--duration-fast)]"
+            style={{ width: '14px', height: '14px', color: 'var(--text-muted)' }}
             classList={{ 'rotate-90': expanded() }}
           />
         </Show>
@@ -140,9 +193,10 @@ const ToolCallCardContent: Component<ToolCallCardProps> = (props) => {
 
       {/* Live streaming output while running */}
       <Show when={hasStreamingOutput()}>
-        <div class="px-3 pb-2 border-t border-[var(--border-subtle)]">
-          <pre class="scroll-fade-mask text-[11px] text-[var(--text-muted)] font-mono whitespace-pre-wrap break-all max-h-32 overflow-y-auto scrollbar-none leading-relaxed mt-1.5">
+        <div class="border-t border-[var(--border-subtle)] px-3 pb-2">
+          <pre class="scroll-fade-mask mt-1.5 max-h-32 overflow-y-auto whitespace-pre-wrap break-all font-[var(--font-ui-mono)] text-[11px] leading-relaxed text-[var(--text-muted)] scrollbar-none">
             {props.toolCall.streamingOutput!.slice(-2000)}
+            <span class="ml-px inline-block h-[14px] w-[6px] animate-pulse align-middle bg-[var(--chat-streaming-indicator)]" />
           </pre>
         </div>
       </Show>

@@ -20,7 +20,7 @@ export const TeamStatusStrip: Component = () => {
 
   return (
     <Show when={isActive()}>
-      <div class="flex items-center gap-2 px-3 py-1.5 border-t border-[var(--border-subtle)] bg-[var(--bg-subtle)]/50">
+      <div class="flex items-center gap-2 border-t border-[var(--border-subtle)] bg-[var(--surface-sunken)] px-3 py-1.5">
         {/* Member dots */}
         <div class="flex items-center gap-1">
           <For each={team.allMembers()}>
@@ -34,7 +34,7 @@ export const TeamStatusStrip: Component = () => {
 
         {/* Summary text */}
         <Show when={workingCount() > 0}>
-          <span class="text-[11px] text-[var(--accent-text)] tabular-nums">
+          <span class="tabular-nums text-[11px] text-[var(--accent)]">
             {workingCount()} working
           </span>
         </Show>
@@ -55,7 +55,7 @@ const MemberDot: Component<{ member: TeamMember; onClick: () => void }> = (props
     <button
       type="button"
       onClick={() => props.onClick()}
-      class="group relative flex items-center justify-center w-6 h-6 rounded-full transition-all duration-[var(--duration-fast)] hover:scale-110 cursor-pointer"
+      class="group relative flex items-center justify-center w-6 h-6 rounded-full transition-[transform,background-color] duration-[var(--duration-fast)] hover:scale-110 cursor-pointer"
       style={{ background: config().colorSubtle }}
       title={`${props.member.name} — ${props.member.task ?? 'idle'}`}
     >
@@ -66,7 +66,7 @@ const MemberDot: Component<{ member: TeamMember; onClick: () => void }> = (props
 
       {/* Status indicator dot */}
       <span
-        class="absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full border border-[var(--bg-subtle)]"
+        class="absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full border border-[var(--surface-sunken)]"
         classList={{
           'bg-[var(--accent)] animate-pulse-subtle': props.member.status === 'working',
           'bg-[var(--success)]': props.member.status === 'done',

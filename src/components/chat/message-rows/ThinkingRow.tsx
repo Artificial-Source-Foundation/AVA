@@ -1,14 +1,18 @@
 /**
  * Thinking Row
  *
- * Collapsed <details> pattern matching Goose's design:
- * - Summary: "Thinking..." while streaming, "Thought for Ns" after completion
- * - Collapsed by default for completed messages
- * - Expanded (open) during live streaming
- * - Muted secondary styling with subtle left border
- * - Thinking content rendered as markdown (bold, italic, code, etc.)
+ * Purple-accented card matching the Pencil "Tool States" design:
+ *
+ * Expanded: rounded-10, fill #0F0F12, border 1px #5E5CE620
+ *   Header: 36px, fill #5E5CE608, brain icon (13px #5E5CE6),
+ *           "Thinking" label (Geist 12px, weight 500, #C8C8CC),
+ *           effort badge pill (rounded-4, fill #5E5CE615, Geist Mono 9px #5E5CE6)
+ *   Body: padding 10px 12px, italic Geist 12px #86868B, line-height 1.5
+ *
+ * Collapsed: single 36px row, brain icon + "Thinking (Ns)" + chevron-right
  */
 
+import { Brain, ChevronRight } from 'lucide-solid'
 import {
   type Component,
   createEffect,
@@ -21,18 +25,21 @@ import {
 import { debugLog } from '../../../lib/debug-log'
 import { renderMarkdown, renderMarkdownStreaming } from '../../../lib/markdown'
 import { useSettings } from '../../../stores/settings'
+import type { ThinkingDisplay } from '../../../stores/settings/settings-types'
 
 interface ThinkingRowProps {
   thinking: string
   isStreaming: boolean
   /** Duration of thinking in seconds (optional) */
   thinkingDuration?: number
+  /** Effort level for the thinking badge (optional) */
+  effortLevel?: 'low' | 'medium' | 'high'
 }
 
 export const ThinkingRow: Component<ThinkingRowProps> = (props) => {
   let contentRef: HTMLDivElement | undefined
   const { settings } = useSettings()
-  const displayMode = (): string => settings().appearance.thinkingDisplay
+  const displayMode = (): ThinkingDisplay => settings().appearance.thinkingDisplay
   const hidden = () => displayMode() === 'hidden'
   const debugState = createMemo(() => ({
     hidden: hidden(),
@@ -45,23 +52,17 @@ export const ThinkingRow: Component<ThinkingRowProps> = (props) => {
     debugLog('thinking', 'render check:', debugState())
   })
 
-  // Track the timestamp when streaming first started (stable — never changes)
-  const [startTime] = createSignal(Date.now())
+  // Track the timestamp when streaming first started (stable -- never changes)
+  const [startTime, setStartTime] = createSignal(Date.now())
   // Track the elapsed time at the moment streaming ends (set once, never updated again)
   const [completedDuration, setCompletedDuration] = createSignal<number | null>(null)
   // Whether we've ever been in streaming state (so we know to show duration on completion)
   const [wasStreaming, setWasStreaming] = createSignal(false)
 
-  createEffect(() => {
-    if (props.isStreaming) {
-      setWasStreaming(true)
-    }
-  })
-
   // Rendered markdown HTML for the thinking content
   const [renderedHtml, setRenderedHtml] = createSignal('')
 
-  // Throttled streaming render — avoids re-render of content on every token
+  // Throttled streaming render -- avoids re-render of content on every token
   let streamRenderTimer: ReturnType<typeof setTimeout> | null = null
   let pendingContent = ''
   let lastRenderedContent = ''
@@ -113,8 +114,7 @@ export const ThinkingRow: Component<ThinkingRowProps> = (props) => {
     )
   )
 
-  // Inject rendered HTML into the container div (separate effect so it doesn't trigger re-renders
-  // of the outer component — only touches the DOM node directly)
+  // Inject rendered HTML into the container div
   createEffect(
     on(renderedHtml, () => {
       if (!contentRef) return
@@ -123,15 +123,14 @@ export const ThinkingRow: Component<ThinkingRowProps> = (props) => {
   )
 
   // Capture the wall-clock duration exactly once when streaming finishes.
-  // Using `on` with defer:false so it fires on first eval too (handles pre-completed thinking).
   createEffect(
     on(
       () => props.isStreaming,
       (streaming) => {
         if (streaming) {
+          setStartTime(Date.now())
           setWasStreaming(true)
         } else if (wasStreaming() && completedDuration() === null) {
-          // Snapshot the elapsed time exactly once when streaming stops
           setCompletedDuration((Date.now() - startTime()) / 1000)
           setWasStreaming(false)
         }
@@ -140,77 +139,167 @@ export const ThinkingRow: Component<ThinkingRowProps> = (props) => {
   )
 
   /**
-   * Stable summary text — only two states:
-   * - "Thinking..." (while streaming, never changes per-token)
-   * - "Thought for Ns" / "Thought" (after completion, computed once from completedDuration)
-   *
-   * The key insight: while streaming, we NEVER read `Date.now()` inside a reactive memo.
-   * That would re-run on every reactive push and cause the <summary> to flicker.
-   * Instead, we only show a static label, and capture elapsed time once on completion.
+   * Stable duration for collapsed label.
    */
-  const summaryText = createMemo(() => {
-    if (props.isStreaming) return 'Thinking...'
-    // Use the prop-provided duration first (for settled messages from metadata)
-    const d = props.thinkingDuration ?? completedDuration() ?? 0
-    if (d > 0.5) return `Thought for ${d.toFixed(1)}s`
-    return 'Thought'
+  const durationSeconds = createMemo(() => {
+    if (props.isStreaming) return 0
+    return props.thinkingDuration ?? completedDuration() ?? 0
   })
 
-  // details element is open (expanded) during streaming, closed when done
-  const isOpen = () => props.isStreaming
+  const durationLabel = createMemo(() => {
+    const d = durationSeconds()
+    if (d > 0.5) return `${Math.round(d)} seconds`
+    return null
+  })
+
+  /** Effort badge label */
+  const effortLabel = createMemo(() => {
+    if (!props.effortLevel) return null
+    return props.effortLevel.charAt(0).toUpperCase() + props.effortLevel.slice(1)
+  })
+
+  // Expanded during streaming, collapsed when done
+  const [isOpen, setIsOpen] = createSignal(false)
+
+  createEffect(
+    on(
+      () => props.isStreaming,
+      (streaming) => {
+        setIsOpen(streaming)
+      }
+    )
+  )
 
   return (
     <Show when={!hidden()}>
-      <details
-        class="mb-2 animate-fade-in"
-        open={isOpen()}
-        style={{
-          'border-left': '2px solid var(--border-default, rgba(255,255,255,0.1))',
-          'padding-left': '10px',
-        }}
-      >
-        {/*
-         * The <summary> must NOT read any signal that changes per-token (e.g. props.thinking
-         * directly, or Date.now()). summaryText() is stable while streaming — it only ever
-         * returns "Thinking..." — so the <summary> DOM node is not touched per-token.
-         */}
-        <summary
-          class={props.isStreaming ? 'thinking-shimmer' : ''}
-          style={{
-            cursor: 'pointer',
-            'font-size': '11px',
-            color: 'var(--text-tertiary, var(--text-muted))',
-            'user-select': 'none',
-            'list-style': 'none',
-            display: 'flex',
-            'align-items': 'center',
-            gap: '4px',
-          }}
+      <div class="animate-fade-in my-1">
+        <Show
+          when={isOpen()}
+          fallback={
+            /* ── Collapsed: single 36px row ── */
+            /* biome-ignore lint/a11y/useSemanticElements: div+role=button avoids nested button which crashes WebKitGTK */
+            <div
+              role="button"
+              tabIndex={0}
+              class="thinking-surface flex h-9 cursor-pointer select-none items-center justify-between rounded-[10px] px-3 transition-colors hover:bg-[var(--thinking-subtle)]"
+              onClick={() => setIsOpen(true)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault()
+                  setIsOpen(true)
+                }
+              }}
+            >
+              <div class="flex items-center gap-1.5">
+                <Brain
+                  class="flex-shrink-0"
+                  style={{ width: '13px', height: '13px', color: 'var(--thinking-accent)' }}
+                />
+                <span
+                  style={{
+                    'font-family': 'var(--font-ui), Geist, sans-serif',
+                    'font-size': '12px',
+                    'font-weight': '500',
+                    color: 'var(--text-tertiary)',
+                  }}
+                >
+                  Thinking{durationLabel() ? ` (${durationLabel()})` : ''}
+                </span>
+              </div>
+              <ChevronRight style={{ width: '14px', height: '14px', color: 'var(--text-muted)' }} />
+            </div>
+          }
         >
-          {summaryText()}
-        </summary>
+          {/* ── Expanded: purple card ── */}
+          <div class="thinking-surface overflow-hidden rounded-[10px]">
+            {/* Header: 36px */}
+            {/* biome-ignore lint/a11y/useSemanticElements: div+role=button avoids nested button which crashes WebKitGTK */}
+            <div
+              role="button"
+              tabIndex={0}
+              class="thinking-surface-header flex h-9 cursor-pointer select-none items-center justify-between px-3"
+              onClick={() => {
+                if (!props.isStreaming) setIsOpen(false)
+              }}
+              onKeyDown={(e) => {
+                if ((e.key === 'Enter' || e.key === ' ') && !props.isStreaming) {
+                  e.preventDefault()
+                  setIsOpen(false)
+                }
+              }}
+            >
+              <div class="flex items-center gap-1.5">
+                <Brain
+                  class="flex-shrink-0"
+                  style={{ width: '13px', height: '13px', color: 'var(--thinking-accent)' }}
+                />
+                <span
+                  style={{
+                    'font-family': 'var(--font-ui), Geist, sans-serif',
+                    'font-size': '12px',
+                    'font-weight': '500',
+                    color: 'var(--text-secondary)',
+                  }}
+                >
+                  Thinking
+                </span>
+              </div>
 
-        <Show when={props.thinking}>
-          {/* biome-ignore lint/a11y/noStaticElementInteractions: prevent details toggle */}
-          {/* biome-ignore lint/a11y/useKeyWithClickEvents: text selection area */}
-          <div
-            class="mt-1 overflow-y-auto scrollbar-thin message-content thinking-content select-text"
-            style={{
-              color: 'var(--text-secondary)',
-              'font-size': '12.5px',
-              opacity: '0.8',
-              'line-height': '1.6',
-              cursor: 'text',
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div ref={contentRef} class="message-content" />
-            <Show when={props.isStreaming}>
-              <span class="streaming-cursor">▍</span>
+              <div class="flex items-center gap-2">
+                {/* Effort badge */}
+                <Show when={effortLabel()}>
+                  <span
+                    class="thinking-badge inline-flex items-center"
+                    style={{
+                      'border-radius': '4px',
+                      padding: '2px 6px',
+                      'font-family': 'var(--font-ui-mono), Geist Mono, monospace',
+                      'font-size': '9px',
+                      'font-weight': '500',
+                    }}
+                  >
+                    {effortLabel()}
+                  </span>
+                </Show>
+
+                {/* Streaming indicator */}
+                <Show when={props.isStreaming}>
+                  <span
+                    class="inline-block w-1.5 h-1.5 rounded-full animate-pulse"
+                    style={{ background: 'var(--thinking-accent)' }}
+                  />
+                </Show>
+              </div>
+            </div>
+
+            {/* Body: thinking content */}
+            <Show when={props.thinking}>
+              {/* biome-ignore lint/a11y/noStaticElementInteractions: prevent details toggle */}
+              {/* biome-ignore lint/a11y/useKeyWithClickEvents: text selection area */}
+              <div
+                class="overflow-y-auto scrollbar-thin select-text"
+                style={{ padding: '10px 12px', 'max-height': '320px' }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div
+                  ref={contentRef}
+                  class="message-content thinking-content"
+                  style={{
+                    color: 'var(--text-tertiary)',
+                    'font-family': 'var(--font-ui), Geist, sans-serif',
+                    'font-size': '12px',
+                    'font-style': 'italic',
+                    'line-height': '1.5',
+                  }}
+                />
+                <Show when={props.isStreaming}>
+                  <span class="streaming-cursor">&#9613;</span>
+                </Show>
+              </div>
             </Show>
           </div>
         </Show>
-      </details>
+      </div>
     </Show>
   )
 }

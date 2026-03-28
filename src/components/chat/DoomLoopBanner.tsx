@@ -15,14 +15,15 @@ interface DoomLoopBannerProps {
 }
 
 export const DoomLoopBanner: Component<DoomLoopBannerProps> = (props) => (
-  <div class="flex items-center gap-3 px-3 py-2 rounded-lg bg-[var(--warning-subtle)] border border-[var(--warning)]/30 text-[var(--warning)] text-[13px]">
+  <div class="flex items-center gap-3 rounded-lg border border-[var(--warning-border)] bg-[var(--warning-subtle)] px-3 py-2 text-[13px] text-[var(--warning)]">
     <AlertTriangle class="w-4 h-4 flex-shrink-0" />
     <span class="flex-1 font-medium">Agent appears stuck in a loop</span>
     <div class="flex items-center gap-1.5">
       <button
         type="button"
         onClick={() => props.onStop()}
-        class="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded-[var(--radius-md)] bg-[var(--error)] text-white hover:brightness-110 transition-colors"
+        class="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded-[var(--radius-md)] bg-[var(--error)] text-white hover:bg-[color-mix(in_srgb,var(--error)_88%,white_12%)] transition-colors"
+        aria-label="Stop the current agent run"
       >
         <Square class="w-3 h-3" />
         Stop
@@ -31,6 +32,7 @@ export const DoomLoopBanner: Component<DoomLoopBannerProps> = (props) => (
         type="button"
         onClick={() => props.onRetry()}
         class="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded-[var(--radius-md)] bg-[var(--surface-raised)] text-[var(--text-primary)] hover:bg-[var(--alpha-white-8)] transition-colors"
+        aria-label="Retry after loop detection"
       >
         <RotateCcw class="w-3 h-3" />
         Retry
@@ -39,6 +41,7 @@ export const DoomLoopBanner: Component<DoomLoopBannerProps> = (props) => (
         type="button"
         onClick={() => props.onSwitchModel()}
         class="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded-[var(--radius-md)] bg-[var(--surface-raised)] text-[var(--text-primary)] hover:bg-[var(--alpha-white-8)] transition-colors"
+        aria-label="Switch model after loop detection"
       >
         <RefreshCw class="w-3 h-3" />
         Switch Model

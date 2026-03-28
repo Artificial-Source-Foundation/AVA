@@ -59,20 +59,27 @@ export const ToolCallRow: Component<ToolCallRowProps> = (props) => {
 
   return (
     <div
-      class="animate-tool-card-in rounded-[var(--radius-md)] border overflow-hidden transition-colors duration-[var(--duration-fast)]"
-      classList={{
-        'border-[var(--error)]/30': props.toolCall.status === 'error',
-        'border-[var(--accent)]/30': isRunning(),
-        'border-[var(--border-subtle)]': !isRunning() && props.toolCall.status !== 'error',
+      class="chat-tool-shell animate-tool-card-in rounded-[10px] overflow-hidden transition-colors duration-[var(--duration-fast)]"
+      style={{
+        background: expanded() ? 'var(--tool-card-background)' : 'transparent',
+        border: isRunning()
+          ? '1px solid var(--tool-card-running-border)'
+          : props.toolCall.status === 'error'
+            ? '1px solid var(--error-border)'
+            : '1px solid var(--border-default)',
       }}
     >
-      {/* Header */}
+      {/* Header — 40px, bottom border when collapsed */}
       {/* biome-ignore lint/a11y/useSemanticElements: div+role=button avoids nested button which crashes WebKitGTK */}
       <div
         role="button"
         tabIndex={0}
         aria-expanded={expanded()}
-        class="flex items-center gap-2.5 px-3 py-2 text-[13px] cursor-pointer select-none hover:bg-[var(--alpha-white-3)] transition-colors duration-[var(--duration-fast)]"
+        class="tool-card-header flex h-10 cursor-pointer select-none items-center gap-2.5 px-3 text-[13px] transition-colors duration-[var(--duration-fast)] hover:bg-[var(--alpha-white-5)]"
+        classList={{
+          'border-b border-[var(--border-subtle)]': !expanded(),
+          'bg-[var(--alpha-white-5)]': expanded(),
+        }}
         onClick={() => {
           if (hasOutput()) setExpanded((v) => !v)
         }}
@@ -84,18 +91,46 @@ export const ToolCallRow: Component<ToolCallRowProps> = (props) => {
         }}
       >
         <ToolIcon name={props.toolCall.name} status={props.toolCall.status} />
-        <span class="text-[var(--text-secondary)] truncate" title={summary()}>
+        <span
+          class="truncate"
+          style={{
+            'font-family': 'var(--font-ui), Geist, sans-serif',
+            'font-size': '13px',
+            color: 'var(--text-primary)',
+          }}
+          title={summary()}
+        >
           {summary()}
         </span>
         <span class="flex-1" />
-        <Show when={duration() || (isRunning() && elapsed())}>
-          <span class="text-[11px] text-[var(--text-muted)] tabular-nums whitespace-nowrap">
-            {duration() ?? elapsed()}
+        <Show when={!isRunning() && duration()}>
+          <span
+            class="tabular-nums whitespace-nowrap"
+            style={{
+              'font-family': 'var(--font-ui-mono), Geist Mono, monospace',
+              'font-size': '11px',
+              color: 'var(--text-muted)',
+            }}
+          >
+            {duration()}
+          </span>
+        </Show>
+        <Show when={isRunning() && elapsed()}>
+          <span
+            class="tabular-nums whitespace-nowrap"
+            style={{
+              'font-family': 'var(--font-ui-mono), Geist Mono, monospace',
+              'font-size': '11px',
+              color: 'var(--accent)',
+            }}
+          >
+            {elapsed()}
           </span>
         </Show>
         <Show when={hasOutput()}>
           <ChevronRight
-            class="w-4 h-4 flex-shrink-0 text-[var(--text-muted)] transition-transform duration-[var(--duration-fast)]"
+            class="flex-shrink-0 transition-transform duration-[var(--duration-fast)]"
+            style={{ width: '14px', height: '14px', color: 'var(--text-muted)' }}
             classList={{ 'rotate-90': expanded() }}
           />
         </Show>
@@ -103,9 +138,10 @@ export const ToolCallRow: Component<ToolCallRowProps> = (props) => {
 
       {/* Live streaming output */}
       <Show when={isRunning() && !!props.toolCall.streamingOutput}>
-        <div class="px-3 pb-2 border-t border-[var(--border-subtle)]">
-          <pre class="text-[11px] text-[var(--text-muted)] font-mono whitespace-pre-wrap break-all max-h-32 overflow-y-auto scrollbar-none leading-relaxed mt-1.5">
+        <div class="border-t border-[var(--border-default)] px-3 pb-2">
+          <pre class="text-[11px] text-[var(--text-muted)] font-[var(--font-ui-mono)] whitespace-pre-wrap break-all max-h-32 overflow-y-auto scrollbar-none leading-relaxed mt-1.5">
             {props.toolCall.streamingOutput!.slice(-2000)}
+            <span class="ml-px inline-block h-[14px] w-[6px] animate-pulse align-middle bg-[var(--chat-streaming-indicator)]" />
           </pre>
         </div>
       </Show>

@@ -5,22 +5,13 @@
  * for OpenAI, Anthropic, GitHub Copilot, and OpenRouter.
  */
 
-import { AlertTriangle, Github, Globe, RefreshCw, Zap } from 'lucide-solid'
+import { AlertTriangle, RefreshCw } from 'lucide-solid'
 import { type Component, createSignal, For, onMount, Show } from 'solid-js'
 import { rustBackend } from '../../../services/rust-bridge'
 import type { CopilotQuota, SubscriptionUsage, UsageWindow } from '../../../types/rust-ipc'
+import { getProviderLogo } from '../../icons/provider-logo-map'
 import { SettingsCard } from '../SettingsCard'
 import { SETTINGS_CARD_GAP } from '../settings-constants'
-
-const PROVIDER_ICONS: Record<string, Component<{ class?: string }>> = {
-  openai: Zap,
-  copilot: Github,
-  openrouter: Globe,
-}
-
-function providerIcon(provider: string): Component<{ class?: string }> {
-  return PROVIDER_ICONS[provider] ?? Zap
-}
 
 function usageBarColor(percent: number): string {
   if (percent >= 85) return '#e5484d'
@@ -153,11 +144,10 @@ const ProviderUsageCard: Component<{ usage: SubscriptionUsage }> = (props) => {
   const u = () => props.usage
   const hasData = () =>
     u().usageWindows.length > 0 || u().credits !== null || u().copilotQuota !== null
-  const icon = () => providerIcon(u().provider)
 
   return (
     <SettingsCard
-      icon={icon()}
+      icon={getProviderLogo(u().provider)}
       title={u().displayName}
       description={u().error && !hasData() ? u().error! : undefined}
     >

@@ -90,9 +90,11 @@ pub struct AgentStack {
     agents_config: AgentsConfig,
     /// Compaction threshold as a percentage (50–95). Stored as integer, converted
     /// to fraction (0.50–0.95) when building `CondenserConfig`.
-    compaction_threshold_pct: u8,
+    compaction_threshold_pct: RwLock<u8>,
     /// When false, automatic context compaction is disabled entirely.
-    auto_compact: bool,
+    auto_compact: RwLock<bool>,
+    /// Optional provider/model override used only for compaction summarization.
+    compaction_model_override: RwLock<Option<(String, String)>>,
     /// When false, skip loading project instruction files into the system prompt.
     include_project_instructions: bool,
     /// Parent session ID for linking sub-agent sessions back to their parent.
@@ -433,8 +435,9 @@ impl AgentStack {
                 permission_inspector,
                 shared_tool_sources,
                 agents_config,
-                compaction_threshold_pct: config.compaction_threshold_pct,
-                auto_compact: config.auto_compact,
+                compaction_threshold_pct: RwLock::new(config.compaction_threshold_pct),
+                auto_compact: RwLock::new(config.auto_compact),
+                compaction_model_override: RwLock::new(None),
                 include_project_instructions: config.include_project_instructions,
                 parent_session_id: RwLock::new(None),
                 plugin_manager,
@@ -827,6 +830,28 @@ impl AgentStack {
     pub async fn set_thinking_level(&self, level: ThinkingLevel) -> Result<()> {
         *self.thinking_level.write().await = level;
         Ok(())
+    }
+
+    pub async fn set_compaction_settings(
+        &self,
+        auto_compact: bool,
+        threshold_pct: u8,
+        model_override: Option<(String, String)>,
+    ) -> Result<()> {
+        let clamped = threshold_pct.clamp(50, 95);
+        *self.auto_compact.write().await = auto_compact;
+        *self.compaction_threshold_pct.write().await = clamped;
+
+        if let Some((provider, model)) = &model_override {
+            self.router.route_required(provider, model).await?;
+        }
+        *self.compaction_model_override.write().await = model_override;
+
+        Ok(())
+    }
+
+    pub async fn current_compaction_model(&self) -> Option<(String, String)> {
+        self.compaction_model_override.read().await.clone()
     }
 
     pub async fn cycle_thinking(&self) -> &'static str {

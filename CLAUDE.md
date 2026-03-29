@@ -55,7 +55,7 @@ AVA uses a **Rust-first architecture**. All agent, CLI, and backend code is Rust
 - **1 agent tool**: `plan` (Plannotator-style inline plan editing via PlanBridge)
 - **Dynamic tools**: MCP servers + TOML custom tools (`~/.ava/tools/`, `.ava/tools/`)
 - **File snapshots**: Shadow git snapshots before file edits, `revert_file` capability for undoing changes
-- **Key capabilities**: Anthropic prompt caching (`cache_control` on system + tools), auto-retry middleware (2x exponential backoff for read-only tools), stream silence timeout (90s configurable per-chunk reset), tiktoken-rs BPE token counting, tool schema pre-validation, persistent audit log (SQLite, opt-out), auto-compaction settings (toggle + threshold slider), JSONL session logging (`~/.ava/log/`, opt-in), rich edit error feedback (similar lines + "did you mean?"), SBPL injection hardening, env scrubbing in bash, rm -rf and find -delete blocking, context overflow auto-compact (12 overflow patterns with auto-retry), conversation repair, symlink escape detection in path guard, shadow git snapshots for file edit backups, incremental message persistence, retry-after header parsing, quota error classification, 100+ security patterns in command classifier, dual compaction visibility
+- **Key capabilities**: Anthropic prompt caching (`cache_control` on system + tools), auto-retry middleware (2x exponential backoff for read-only tools), stream silence timeout (90s configurable per-chunk reset), tiktoken-rs BPE token counting, tool schema pre-validation, persistent audit log (SQLite, opt-out), auto-compaction settings (toggle + threshold slider + compaction model), JSONL session logging (`~/.ava/log/`, opt-in), rich edit error feedback (similar lines + "did you mean?"), SBPL injection hardening, env scrubbing in bash, rm -rf and find -delete blocking, context overflow auto-compact (12 overflow patterns with auto-retry), manual `/compact` summaries with collapsible desktop context cards, conversation repair, symlink escape detection in path guard, shadow git snapshots for file edit backups, incremental message persistence, retry-after header parsing, quota error classification, 100+ security patterns in command classifier, dual compaction visibility
 
 ### Mid-Stream Messaging
 
@@ -80,7 +80,7 @@ AVA/
 |   +-- ava-agent/            # Agent execution loop + reflection
 |   +-- ava-llm/              # LLM providers (21 built-in)
 |   +-- ava-tools/            # Tool trait + registry + 9 default tools (extended available as plugins)
-|   +-- ava-praxis/           # Multi-agent orchestration (Praxis)
+|   +-- ava-praxis/           # Multi-agent orchestration (HQ)
 |   +-- ava-permissions/      # Permission rules + bash command classifier
 |   +-- ava-config/           # Config, credentials, model catalog
 |   +-- ava-context/          # Token tracking + context condensation
@@ -112,7 +112,7 @@ New capabilities should ship as Extended (available as plugins), MCP, or custom 
 |------|------:|-------|
 | Default | 9 | read, write, edit, bash, glob, grep, web_fetch, web_search, git_read |
 | Extended (plugin) | 7 | apply_patch, multiedit, ast_ops, lsp_ops, code_search, lint, test_runner |
-| Agent | 1 | plan (Praxis plan tool with PlanBridge for agent-to-TUI communication) |
+| Agent | 1 | plan (HQ plan tool with PlanBridge for agent-to-TUI communication) |
 
 Extended tools are **not auto-registered**; they must be explicitly loaded via plugin/MCP configuration. Additional helpers (todo_read/write, question, task, codebase_search, memory/session tools) are always available when initialized. Dynamic MCP tools and TOML custom tools load at runtime from `~/.ava/tools/`, `.ava/tools/`, `~/.ava/mcp.json`, `.ava/mcp.json`. File edits create shadow git snapshots enabling `revert_file` capability.
 
@@ -131,7 +131,7 @@ Path-scoped `.ava/rules/*.md` are intended to feel like Claude Code rules: keep 
 
 ## Solo Hidden Delegation
 
-Outside Praxis team mode, the main agent can still delegate quietly through the `task` tool:
+Outside HQ team mode, the main agent can still delegate quietly through the `task` tool:
 
 - Small single-file work keeps the main thread only (no hidden helper swarm).
 - Broader tasks can unlock a bounded helper budget (typically 1-2 hidden subagents, 3 only on explicit delegation requests).
@@ -156,9 +156,9 @@ Trust a project: `ava --trust`. Global config (`~/.ava/`) always loads.
 - Desktop commands: `src-tauri/src/commands/`
 - Configuration: `crates/ava-config/`
 
-## Praxis (Multi-Agent Orchestration) — v2
+## HQ (Multi-Agent Orchestration) — v2
 
-Praxis is AVA's multi-agent system in `crates/ava-praxis/`. Uses a **Director -> Scouts -> Leads -> Workers** hierarchy with LLM-powered planning. 91 tests (74 unit + 11 integration + 6 doc-tests). 23 source files: `lib`, `director`, `lead`, `worker`, `routing`, `plan`, `prompts`, `scout`, `board`, `events`, `workflow`, `acp`, `acp_handler`, `acp_transport`, `artifact`, `artifact_store`, `conflict`, `decomposition`, `mailbox`, `review`, `spec`, `spec_workflow`, `synthesis`. See [docs/codebase/ava-praxis.md](docs/codebase/ava-praxis.md) for full details.
+HQ is AVA's multi-agent system in `crates/ava-praxis/`. Uses a **Director -> Scouts -> Leads -> Workers** hierarchy with LLM-powered planning. 91 tests (74 unit + 11 integration + 6 doc-tests). 23 source files: `lib`, `director`, `lead`, `worker`, `routing`, `plan`, `prompts`, `scout`, `board`, `events`, `workflow`, `acp`, `acp_handler`, `acp_transport`, `artifact`, `artifact_store`, `conflict`, `decomposition`, `mailbox`, `review`, `spec`, `spec_workflow`, `synthesis`. See [docs/codebase/ava-praxis.md](docs/codebase/ava-praxis.md) for full details.
 
 ### Director Intelligence Levels
 
@@ -201,7 +201,7 @@ The Director is **LLM-powered** (not a code-driven router). It analyzes task com
 - Solo/Team switching via Team button. Mode switches preserved in session.
 - Each Lead gets its own git worktree; workers share their lead's worktree.
 - Merge Worker integrates lead worktrees. QA Lead reviews merged result.
-- Artifacts saved to `.ava/praxis/{session-id}/{lead-name}/`.
+- Artifacts saved to `.ava/hq/{session-id}/{lead-name}/`.
 
 ### Error Handling (Tiered)
 

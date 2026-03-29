@@ -139,9 +139,7 @@ export const {
   const [budgetTick, setBudgetTick] = createSignal(0)
   if (typeof window !== 'undefined') {
     installSessionWindowListeners({
-      onCompacted: () => {
-        setCompactionIndex(messages().length)
-      },
+      onCompacted: () => setCompactionIndex(-1),
       onSessionStatus: ({ sessionId, status }) => {
         setBusySessionIds((prev) => {
           const next = new Set(prev)
@@ -165,7 +163,24 @@ export const {
       const s = budget.getStats()
       return { used: s.total, total: s.limit, percentage: s.percentUsed }
     }
-    const estimated = messages().reduce((sum, m) => sum + Math.ceil(m.content.length / 4), 0)
+    const compactedUsage = [...messages()].reverse().find((message) => {
+      const summary = message.metadata?.contextSummary as { tokensAfter?: number } | undefined
+      return typeof summary?.tokensAfter === 'number'
+    })
+    if (compactedUsage) {
+      const tokensAfter =
+        (compactedUsage.metadata?.contextSummary as { tokensAfter?: number } | undefined)
+          ?.tokensAfter ?? 0
+      return {
+        used: tokensAfter,
+        total: DEFAULT_CONTEXT_WINDOW,
+        percentage: Math.min(100, (tokensAfter / DEFAULT_CONTEXT_WINDOW) * 100),
+      }
+    }
+    const estimated = messages().reduce((sum, m) => {
+      if (m.metadata?.agentVisible === false) return sum
+      return sum + Math.ceil(m.content.length / 4)
+    }, 0)
     return {
       used: estimated,
       total: DEFAULT_CONTEXT_WINDOW,

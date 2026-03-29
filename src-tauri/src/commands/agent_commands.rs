@@ -44,6 +44,16 @@ pub struct SubmitGoalArgs {
     /// Thinking/reasoning level: "off", "low", "medium", "high", "xhigh"
     #[serde(default)]
     pub thinking_level: Option<String>,
+    #[serde(default)]
+    pub session_id: Option<String>,
+    #[serde(default)]
+    pub auto_compact: Option<bool>,
+    #[serde(default)]
+    pub compaction_threshold: Option<u8>,
+    #[serde(default)]
+    pub compaction_provider: Option<String>,
+    #[serde(default)]
+    pub compaction_model: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -60,6 +70,7 @@ async fn run_agent_inner(
     goal: &str,
     max_turns: usize,
     history: Vec<ava_types::Message>,
+    session_id: Option<Uuid>,
     app: &AppHandle,
     bridge: &DesktopBridge,
 ) -> Result<SubmitGoalResult, String> {
@@ -94,7 +105,11 @@ async fn run_agent_inner(
             // Also update last_session_id so the next run can load history even
             // if the current run is cancelled/interrupted.
             if let ava_agent::agent_loop::AgentEvent::Checkpoint(ref session) = event {
-                let _ = save_session_checkpoint(checkpoint_sm.clone(), session.clone()).await;
+                if let Err(e) =
+                    save_session_checkpoint(checkpoint_sm.clone(), session.clone()).await
+                {
+                    tracing::error!("Failed to save session checkpoint: {e}");
+                }
                 *checkpoint_last_id.write().await = Some(session.id);
                 continue;
             }
@@ -102,16 +117,24 @@ async fn run_agent_inner(
             if let ava_agent::agent_loop::AgentEvent::ToolCall(ref tc) = event {
                 if tc.name == "edit" || tc.name == "write" {
                     if let Some(path) = tc.arguments.get("file_path").and_then(|v| v.as_str()) {
-                        if let Ok(content) = tokio::fs::read_to_string(path).await {
-                            let mut hist = edit_history.write().await;
-                            if hist.len() >= 100 {
-                                hist.pop_front();
+                        match tokio::fs::read_to_string(path).await {
+                            Ok(content) => {
+                                let mut hist = edit_history.write().await;
+                                if hist.len() >= 100 {
+                                    hist.pop_front();
+                                }
+                                hist.push_back(crate::bridge::FileEditRecord {
+                                    file_path: path.to_string(),
+                                    previous_content: content,
+                                    timestamp: chrono::Utc::now(),
+                                });
                             }
-                            hist.push_back(crate::bridge::FileEditRecord {
-                                file_path: path.to_string(),
-                                previous_content: content,
-                                timestamp: chrono::Utc::now(),
-                            });
+                            Err(e) => {
+                                tracing::warn!(
+                                    "Failed to read file for edit tracking (undo will be unavailable \
+                                     for this edit): path={path}, error={e}"
+                                );
+                            }
                         }
                     }
                 }
@@ -130,7 +153,10 @@ async fn run_agent_inner(
                             priority: item.priority.to_string(),
                         })
                         .collect();
-                    let _ = app_clone.emit("agent-event", AgentEvent::TodoUpdate { todos });
+                    if let Err(e) = app_clone.emit("agent-event", AgentEvent::TodoUpdate { todos })
+                    {
+                        tracing::error!("Failed to emit todo_update event: {e}");
+                    }
                 }
             } else if !matches!(
                 event,
@@ -167,8 +193,11 @@ async fn run_agent_inner(
     let pending_question = bridge.pending_question_reply.clone();
     let pending_plan = bridge.pending_plan_reply.clone();
 
-    // Spawn approval forwarder
+    // Spawn approval forwarder with timeout protection.
+    // If the frontend does not respond within the timeout, auto-deny the approval
+    // so the agent doesn't hang forever.
     let app_approval = app.clone();
+    let approval_timeout = std::time::Duration::from_secs(5 * 60); // 5 minutes
     let approval_forwarder = tokio::spawn(async move {
         while let Some(req) = approval_rx.recv().await {
             let risk_level = format!("{:?}", req.inspection.risk_level).to_lowercase();
@@ -176,37 +205,75 @@ async fn run_agent_inner(
 
             *pending_approval.lock().await = Some(req.reply);
 
-            let _ = app_approval.emit(
+            if let Err(e) = app_approval.emit(
                 "agent-event",
                 AgentEvent::ApprovalRequest {
-                    id,
+                    id: id.clone(),
                     tool_call_id: req.call.id.clone(),
                     tool_name: req.call.name.clone(),
                     args: req.call.arguments.clone(),
-                    risk_level,
+                    risk_level: risk_level.clone(),
                     reason: req.inspection.reason.clone(),
                     warnings: req.inspection.warnings.clone(),
                 },
-            );
+            ) {
+                tracing::error!("Failed to emit approval_request event to frontend: {e}");
+            }
+
+            // Spawn a timeout watchdog: if the frontend hasn't consumed the
+            // pending reply within the timeout, auto-deny so the agent unblocks.
+            let watchdog_pending = pending_approval.clone();
+            let watchdog_timeout = approval_timeout;
+            tokio::spawn(async move {
+                tokio::time::sleep(watchdog_timeout).await;
+                let mut lock = watchdog_pending.lock().await;
+                if let Some(reply) = lock.take() {
+                    tracing::warn!(
+                        "Approval request {id} timed out after {}s — auto-denying to unblock agent",
+                        watchdog_timeout.as_secs()
+                    );
+                    let _ = reply.send(ToolApproval::Rejected(Some(
+                        "Timed out waiting for user approval in desktop UI".to_string(),
+                    )));
+                }
+            });
         }
     });
 
-    // Spawn question forwarder
+    // Spawn question forwarder with timeout protection.
     let app_question = app.clone();
+    let question_timeout = std::time::Duration::from_secs(5 * 60); // 5 minutes
     let question_forwarder = tokio::spawn(async move {
         while let Some(req) = question_rx.recv().await {
             let id = format!("question-{}", uuid::Uuid::new_v4());
 
             *pending_question.lock().await = Some(req.reply);
 
-            let _ = app_question.emit(
+            if let Err(e) = app_question.emit(
                 "agent-event",
                 AgentEvent::QuestionRequest {
-                    id,
+                    id: id.clone(),
                     question: req.question.clone(),
                     options: req.options.clone(),
                 },
-            );
+            ) {
+                tracing::error!("Failed to emit question_request event to frontend: {e}");
+            }
+
+            // Timeout watchdog for question responses
+            let watchdog_pending = pending_question.clone();
+            let watchdog_timeout = question_timeout;
+            tokio::spawn(async move {
+                tokio::time::sleep(watchdog_timeout).await;
+                let mut lock = watchdog_pending.lock().await;
+                if let Some(reply) = lock.take() {
+                    tracing::warn!(
+                        "Question request {id} timed out after {}s — sending empty response to unblock agent",
+                        watchdog_timeout.as_secs()
+                    );
+                    let _ = reply.send(String::new());
+                }
+            });
         }
     });
 
@@ -238,7 +305,7 @@ async fn run_agent_inner(
 
             *pending_plan.lock().await = Some(req.reply);
 
-            let _ = app_plan.emit(
+            if let Err(e) = app_plan.emit(
                 "agent-event",
                 AgentEvent::PlanCreated {
                     plan: PlanPayload {
@@ -247,7 +314,9 @@ async fn run_agent_inner(
                         estimated_turns: req.plan.estimated_turns.unwrap_or(0) as usize,
                     },
                 },
-            );
+            ) {
+                tracing::error!("Failed to emit plan_created event to frontend: {e}");
+            }
         }
     });
 
@@ -279,7 +348,7 @@ async fn run_agent_inner(
             history,
             Some(message_queue),
             vec![], // no images
-            None,   // session_id (desktop uses its own)
+            session_id,
         )
         .await;
 
@@ -362,9 +431,35 @@ pub async fn submit_goal(
         }
     }
 
+    if args.auto_compact.is_some()
+        || args.compaction_threshold.is_some()
+        || args.compaction_provider.is_some()
+        || args.compaction_model.is_some()
+    {
+        let auto_compact = args.auto_compact.unwrap_or(true);
+        let threshold = args.compaction_threshold.unwrap_or(80);
+        let override_model = match (&args.compaction_provider, &args.compaction_model) {
+            (Some(provider), Some(model)) => Some((provider.clone(), model.clone())),
+            _ => None,
+        };
+        bridge
+            .stack
+            .set_compaction_settings(auto_compact, threshold, override_model)
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+
+    let requested_session_id = args
+        .session_id
+        .as_deref()
+        .map(Uuid::parse_str)
+        .transpose()
+        .map_err(|e| format!("invalid session id: {e}"))?;
+
     // Load conversation history from the previous session (if any) so the
     // agent has context from prior turns in this desktop session.
-    let history = if let Some(session_id) = *bridge.last_session_id.read().await {
+    let history_session_id = requested_session_id.or(*bridge.last_session_id.read().await);
+    let history = if let Some(session_id) = history_session_id {
         bridge
             .stack
             .session_manager
@@ -377,7 +472,15 @@ pub async fn submit_goal(
         vec![]
     };
 
-    run_agent_inner(&args.goal, args.max_turns, history, &app, &bridge).await
+    run_agent_inner(
+        &args.goal,
+        args.max_turns,
+        history,
+        requested_session_id,
+        &app,
+        &bridge,
+    )
+    .await
 }
 
 /// Cancel the currently-running agent.
@@ -666,7 +769,7 @@ pub async fn retry_last_message(
     let history = collect_history_before_last_user(&session.messages);
 
     info!(goal = %goal, session_id = %session_id, "retry_last_message");
-    run_agent_inner(&goal, 0, history, &app, &bridge).await
+    run_agent_inner(&goal, 0, history, Some(session_id), &app, &bridge).await
 }
 
 #[derive(Deserialize)]
@@ -708,7 +811,15 @@ pub async fn edit_and_resend(
     let history: Vec<ava_types::Message> = session.messages[..pos].to_vec();
 
     info!(new_content = %args.new_content, message_id = %args.message_id, "edit_and_resend");
-    run_agent_inner(&args.new_content, 0, history, &app, &bridge).await
+    run_agent_inner(
+        &args.new_content,
+        0,
+        history,
+        Some(session_id),
+        &app,
+        &bridge,
+    )
+    .await
 }
 
 /// Regenerate the last assistant response.
@@ -740,7 +851,7 @@ pub async fn regenerate_response(
     let history: Vec<ava_types::Message> = session.messages[..last_user_pos].to_vec();
 
     info!(goal = %goal, session_id = %session_id, "regenerate_response");
-    run_agent_inner(&goal, 0, history, &app, &bridge).await
+    run_agent_inner(&goal, 0, history, Some(session_id), &app, &bridge).await
 }
 
 #[derive(Serialize)]

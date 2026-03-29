@@ -11,6 +11,28 @@ pub struct TodoItemPayload {
 }
 
 #[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CompactMessagePayload {
+    pub role: String,
+    pub content: String,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContextCompactedPayload {
+    pub auto: bool,
+    pub tokens_before: usize,
+    pub tokens_after: usize,
+    pub tokens_saved: usize,
+    pub messages_before: usize,
+    pub messages_after: usize,
+    pub usage_before_percent: f64,
+    pub summary: String,
+    pub context_summary: String,
+    pub active_messages: Vec<CompactMessagePayload>,
+}
+
+#[derive(Clone, Serialize)]
 #[serde(tag = "type")]
 pub enum AgentEvent {
     #[serde(rename = "token")]
@@ -49,6 +71,8 @@ pub enum AgentEvent {
         current_cost_usd: f64,
         max_budget_usd: f64,
     },
+    #[serde(rename = "context_compacted")]
+    ContextCompacted(ContextCompactedPayload),
     #[serde(rename = "approval_request")]
     ApprovalRequest {
         id: String,
@@ -291,7 +315,16 @@ pub fn from_backend_event(event: &ava_agent::agent_loop::AgentEvent) -> Option<A
             message: msg.clone(),
         }),
         BE::Complete(session) => {
-            let session_json = serde_json::to_value(session).unwrap_or_default();
+            let session_json = match serde_json::to_value(session) {
+                Ok(v) => v,
+                Err(e) => {
+                    tracing::error!(
+                        "Failed to serialize session for Complete event: {e}. \
+                         Sending error indicator instead of silently dropping data."
+                    );
+                    serde_json::json!({ "__serialization_error": e.to_string() })
+                }
+            };
             Some(AgentEvent::Complete {
                 session: session_json,
             })
@@ -317,8 +350,45 @@ pub fn from_backend_event(event: &ava_agent::agent_loop::AgentEvent) -> Option<A
             current_cost_usd: *current_cost_usd,
             max_budget_usd: *max_budget_usd,
         }),
-        // ToolStats and SubAgentComplete don't have a direct frontend representation yet.
-        _ => None,
+        BE::ContextCompacted {
+            auto,
+            tokens_before,
+            tokens_after,
+            tokens_saved,
+            messages_before,
+            messages_after,
+            usage_before_percent,
+            summary,
+            context_summary,
+            active_messages,
+        } => Some(AgentEvent::ContextCompacted(ContextCompactedPayload {
+            auto: *auto,
+            tokens_before: *tokens_before,
+            tokens_after: *tokens_after,
+            tokens_saved: *tokens_saved,
+            messages_before: *messages_before,
+            messages_after: *messages_after,
+            usage_before_percent: *usage_before_percent,
+            summary: summary.clone(),
+            context_summary: context_summary.clone(),
+            active_messages: active_messages
+                .iter()
+                .map(|message| CompactMessagePayload {
+                    role: message.role.clone(),
+                    content: message.content.clone(),
+                })
+                .collect(),
+        })),
+        // ToolStats, SubAgentComplete, SnapshotTaken etc. don't have a direct frontend
+        // representation yet. Log at debug level so we can diagnose if important events
+        // are being silently dropped.
+        other => {
+            tracing::debug!(
+                "from_backend_event: no frontend mapping for event type {:?} — dropping",
+                std::mem::discriminant(other)
+            );
+            None
+        }
     }
 }
 
@@ -328,7 +398,9 @@ pub fn emit_backend_event<R: tauri::Runtime>(
     event: &ava_agent::agent_loop::AgentEvent,
 ) {
     if let Some(payload) = from_backend_event(event) {
-        let _ = handle.emit("agent-event", payload);
+        if let Err(e) = handle.emit("agent-event", payload) {
+            tracing::error!("Failed to emit backend agent-event to frontend: {e}");
+        }
     }
 }
 
@@ -371,7 +443,13 @@ pub fn from_hq_event(event: &ava_hq::HqEvent) -> Option<AgentEvent> {
             worker_id: worker_id.to_string(),
             call_id: call_id.clone(),
             name: name.clone(),
-            args: serde_json::from_str(args_json).unwrap_or(Value::Null),
+            args: serde_json::from_str(args_json).unwrap_or_else(|e| {
+                tracing::warn!(
+                    "Failed to parse WorkerToolCall args_json as JSON: {e}. \
+                     Raw value: {args_json:.200}"
+                );
+                Value::Null
+            }),
         }),
         PE::WorkerToolResult {
             worker_id,
@@ -514,14 +592,22 @@ pub fn from_hq_event(event: &ava_hq::HqEvent) -> Option<AgentEvent> {
         }
         // IterationStarted, WorkflowComplete, SpecStatusChanged, SpecWorkflowStarted,
         // SpecWorkflowCompleted, PeerMessageSent, AcpRequestHandled — no direct UI representation yet
-        _ => None,
+        other => {
+            tracing::debug!(
+                "from_hq_event: no frontend mapping for HQ event type {:?} — dropping",
+                std::mem::discriminant(other)
+            );
+            None
+        }
     }
 }
 
 /// Emit a `HqEvent` to all Tauri windows via the app handle.
 pub fn emit_hq_event<R: tauri::Runtime>(handle: &tauri::AppHandle<R>, event: &ava_hq::HqEvent) {
     if let Some(payload) = from_hq_event(event) {
-        let _ = handle.emit("agent-event", payload);
+        if let Err(e) = handle.emit("agent-event", payload) {
+            tracing::error!("Failed to emit HQ agent-event to frontend: {e}");
+        }
     }
 }
 

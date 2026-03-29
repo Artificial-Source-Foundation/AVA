@@ -9,6 +9,7 @@ import type {
   HqIssue,
   HqPlan,
   HqSettings,
+  HqWorkspaceBootstrapResult,
 } from '../types/hq'
 import type {
   AgentStatus,
@@ -361,9 +362,21 @@ export const rustBackend = {
   getDashboardMetrics: (): Promise<HqDashboardMetrics> => invokeCommand('get_dashboard_metrics'),
   getActivityFeed: (): Promise<HqActivityEvent[]> => invokeCommand('get_activity_feed'),
   getDirectorChat: (): Promise<HqDirectorMessage[]> => invokeCommand('get_director_chat'),
-  sendDirectorMessage: (message: string, epicId?: string | null): Promise<void> =>
-    invokeCommand('send_director_message', { message, epicId: epicId ?? null }),
+  sendDirectorMessage: (
+    message: string,
+    epicId?: string | null,
+    teamConfig?: import('../types/rust-ipc').TeamConfigPayload | null
+  ): Promise<void> =>
+    invokeCommand('send_director_message', {
+      message,
+      epicId: epicId ?? null,
+      teamConfig: teamConfig ?? null,
+    }),
   getHqSettings: (): Promise<HqSettings> => invokeCommand('get_hq_settings'),
+  bootstrapHqWorkspace: (args?: {
+    directorModel?: string | null
+    force?: boolean
+  }): Promise<HqWorkspaceBootstrapResult> => invokeCommand('bootstrap_hq_workspace', { args }),
   updateHqSettings: (args: Partial<HqSettings>): Promise<HqSettings> =>
     invokeCommand('update_hq_settings', { args }),
 
@@ -371,12 +384,18 @@ export const rustBackend = {
   compactContext: (
     messages: CompactMessage[],
     focus?: string,
-    contextWindow?: number
+    contextWindow?: number,
+    sessionId?: string,
+    compactionProvider?: string,
+    compactionModel?: string
   ): Promise<CompactContextResult> =>
     invokeCommand('compact_context', {
       messages,
       focus: focus ?? null,
       contextWindow: contextWindow ?? null,
+      sessionId: sessionId ?? null,
+      compactionProvider: compactionProvider ?? null,
+      compactionModel: compactionModel ?? null,
     }),
 
   // Subscription usage

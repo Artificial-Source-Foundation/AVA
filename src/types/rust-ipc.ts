@@ -118,6 +118,20 @@ export interface BudgetWarningEvent {
   maxBudgetUsd: number
 }
 
+export interface ContextCompactedEvent {
+  type: 'context_compacted'
+  auto: boolean
+  tokensBefore: number
+  tokensAfter: number
+  tokensSaved: number
+  messagesBefore: number
+  messagesAfter: number
+  usageBeforePercent: number
+  summary: string
+  contextSummary: string
+  activeMessages: CompactMessageOut[]
+}
+
 export interface ApprovalRequestEvent {
   type: 'approval_request'
   id: string
@@ -358,6 +372,7 @@ export type AgentEvent =
   | ThinkingEvent
   | TokenUsageEvent
   | BudgetWarningEvent
+  | ContextCompactedEvent
   | ApprovalRequestEvent
   | QuestionRequestEvent
   | PlanCreatedEvent
@@ -474,6 +489,12 @@ export interface SubmitGoalArgs {
   maxTurns?: number
   provider?: string
   model?: string
+  thinkingLevel?: string
+  sessionId?: string
+  autoCompact?: boolean
+  compactionThreshold?: number
+  compactionProvider?: string
+  compactionModel?: string
 }
 
 export interface SubmitGoalResult {
@@ -605,6 +626,8 @@ export interface CompactContextResult {
   messagesBefore: number
   messagesAfter: number
   summary: string
+  contextSummary: string
+  usageBeforePercent: number
 }
 
 // HQ multi-agent IPC types

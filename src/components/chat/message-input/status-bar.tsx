@@ -15,7 +15,10 @@ import { useAgent } from '../../../hooks/useAgent'
 import { useElapsedTimer } from '../../../hooks/useElapsedTimer'
 import { formatCost } from '../../../lib/cost'
 import { formatSeconds } from '../../../lib/format-time'
-import { getCoreBudget } from '../../../services/core-bridge'
+import {
+  applyCompactionResult,
+  requestConversationCompaction,
+} from '../../../services/context-compaction'
 import { useDiagnostics } from '../../../stores/diagnostics'
 import { useSession } from '../../../stores/session'
 import { useSettings } from '../../../stores/settings'
@@ -166,29 +169,9 @@ export const StatusBar: Component<StatusBarProps> = (props) => {
               if (isCompacting()) return
               setIsCompacting(true)
               try {
-                const budget = getCoreBudget()
-                if (!budget) return
-                const msgs = messages()
-                if (msgs.length <= 4) return
-                const coreMessages = msgs.map((m) => ({
-                  id: m.id,
-                  role: m.role as 'user' | 'assistant' | 'system',
-                  content: m.content,
-                }))
-                const result = await budget.compact(coreMessages)
-                if (result.tokensSaved === 0) return
-                const keptIds = new Set(result.messages.map((m) => m.id))
-                sessionStore.setMessages(msgs.filter((m) => keptIds.has(m.id)))
-                budget.clear()
-                for (const m of result.messages) budget.addMessage(m.id, m.content)
-                window.dispatchEvent(
-                  new CustomEvent('ava:compacted', {
-                    detail: {
-                      removed: result.originalCount - result.compactedCount,
-                      tokensSaved: result.tokensSaved,
-                    },
-                  })
-                )
+                if (messages().length <= 4) return
+                const result = await requestConversationCompaction()
+                applyCompactionResult(result, 'manual')
               } catch (err) {
                 const msg = err instanceof Error ? err.message : 'Unknown error'
                 notify.error('Compaction failed', msg)

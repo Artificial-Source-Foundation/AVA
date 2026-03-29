@@ -8,6 +8,7 @@
 import type { Component } from 'solid-js'
 import { useAgent } from '../../hooks/useAgent'
 import { useSession } from '../../stores/session'
+import { useSettings } from '../../stores/settings'
 
 /** Format token count as compact string: 12.4k, 200k, 1.2m */
 function fmtTokens(n: number): string {
@@ -18,6 +19,7 @@ function fmtTokens(n: number): string {
 
 export const ChatTitleBar: Component = () => {
   const { currentSession, contextUsage } = useSession()
+  const { settings } = useSettings()
   const agent = useAgent()
 
   const sessionTitle = (): string => {
@@ -32,6 +34,16 @@ export const ChatTitleBar: Component = () => {
     const ctx = contextUsage()
     if (!ctx.total) return ''
     return `${fmtTokens(ctx.used)} / ${fmtTokens(ctx.total)}`
+  }
+
+  const contextPercent = (): number => Math.round(contextUsage().percentage)
+
+  const usageColor = (): string => {
+    const pct = contextUsage().percentage
+    const threshold = settings().generation.compactionThreshold
+    if (pct >= threshold) return 'var(--error)'
+    if (pct >= Math.max(60, threshold - 10)) return 'var(--warning)'
+    return 'var(--success)'
   }
 
   return (
@@ -66,13 +78,34 @@ export const ChatTitleBar: Component = () => {
         </span>
       </div>
 
-      {/* Right: token counter only */}
-      <span
-        class="tabular-nums text-[11px] text-[var(--text-muted)]"
-        style={{ 'font-family': "var(--font-ui-mono, 'Geist Mono', ui-monospace, monospace)" }}
-      >
-        {tokenDisplay()}
-      </span>
+      <div class="flex items-center gap-3">
+        <div class="flex items-center gap-2" title={`${contextPercent()}% of context window used`}>
+          <div class="h-1.5 w-20 overflow-hidden rounded-full bg-[var(--surface-raised)]">
+            <div
+              class="h-full rounded-full transition-[width,background-color] duration-200"
+              style={{
+                width: `${Math.min(100, contextUsage().percentage)}%`,
+                background: usageColor(),
+              }}
+            />
+          </div>
+          <span
+            class="tabular-nums text-[11px]"
+            style={{
+              color: usageColor(),
+              'font-family': "var(--font-ui-mono, 'Geist Mono', ui-monospace, monospace)",
+            }}
+          >
+            {contextPercent()}%
+          </span>
+        </div>
+        <span
+          class="tabular-nums text-[11px] text-[var(--text-muted)]"
+          style={{ 'font-family': "var(--font-ui-mono, 'Geist Mono', ui-monospace, monospace)" }}
+        >
+          {tokenDisplay()}
+        </span>
+      </div>
     </div>
   )
 }

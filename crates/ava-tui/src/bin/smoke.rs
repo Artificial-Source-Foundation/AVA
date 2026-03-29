@@ -66,6 +66,7 @@ async fn main() -> Result<()> {
             | AgentEvent::DiffPreview { .. }
             | AgentEvent::MCPToolsChanged { .. }
             | AgentEvent::Checkpoint(_)
+            | AgentEvent::ContextCompacted { .. }
             | AgentEvent::SnapshotTaken { .. }
             | AgentEvent::PlanStepComplete { .. }
             | AgentEvent::StreamingEditProgress { .. } => {}

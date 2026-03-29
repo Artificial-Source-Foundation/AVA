@@ -451,6 +451,12 @@ impl App {
                 // (DELETE-all + INSERT-all) to avoid data loss on crash.
                 self.state.session.checkpoint_session(&session);
             }
+            ava_agent::AgentEvent::ContextCompacted { summary, .. } => {
+                self.set_status("Context compacted".to_string(), StatusLevel::Info);
+                self.state
+                    .messages
+                    .push(UiMessage::new(MessageKind::System, summary));
+            }
             ava_agent::AgentEvent::SnapshotTaken {
                 commit_hash,
                 message,

@@ -98,8 +98,11 @@ export function getAvailableCommands(): CommandEntry[] {
   return entries.sort((a, b) => a.name.localeCompare(b.name))
 }
 
-/** Register the built-in /later and /queue commands */
+/** Register built-in slash commands exposed in desktop chat */
 export function registerBuiltInCommands(): void {
+  registerCommand('compact', {
+    description: 'Compact conversation context and preserve a summary',
+  })
   registerCommand('later', {
     description: 'Queue a post-complete message for after the agent finishes',
   })

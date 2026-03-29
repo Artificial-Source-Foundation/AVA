@@ -14,6 +14,7 @@ import { debugLog } from '../lib/debug-log'
 import { generateMessageId } from '../lib/ids'
 import { log } from '../lib/logger'
 import { deriveSessionTitle } from '../lib/title-utils'
+import { decodeCompactionModel } from '../services/context-compaction'
 import { getCoreBudget } from '../services/core-bridge'
 import { registerBackendSessionId } from '../services/db-web-fallback'
 import { rustBackend } from '../services/rust-bridge'
@@ -193,11 +194,18 @@ export function createAgentRun(deps: RunDeps) {
         return null
       }
 
+      const compactionModel = decodeCompactionModel(
+        settingsRef.settings().generation.compactionModel
+      )
       const result = await rustAgent.run(goal, {
         model: selectedModelId,
         provider: selectedProviderId,
         thinkingLevel,
         sessionId,
+        autoCompact: settingsRef.settings().generation.autoCompact,
+        compactionThreshold: settingsRef.settings().generation.compactionThreshold,
+        compactionProvider: compactionModel?.provider,
+        compactionModel: compactionModel?.model,
       })
       const errorText = rustAgent.error()
 

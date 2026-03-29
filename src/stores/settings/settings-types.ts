@@ -96,6 +96,7 @@ export interface GenerationSettings {
   customInstructions: string // prepended as system message
   weakModel: string // cheaper model for secondary tasks ('' = use default)
   editorModel: string // cheaper model for file edits by Junior Devs ('' = use primary)
+  compactionModel: string // '' = use current chat model, otherwise provider::model
   thinkingEnabled: boolean // Enable extended thinking / reasoning mode (derived from reasoningEffort)
   reasoningEffort: ReasoningEffort // Reasoning intensity: off, low, medium, high
   autoCompact: boolean // Automatically compact conversation when context reaches threshold

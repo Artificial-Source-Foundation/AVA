@@ -204,6 +204,12 @@ fn default_enable_dynamic_rules() -> bool {
 
 /// Events emitted during streaming agent execution for UI consumption.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CompactedMessagePreview {
+    pub role: String,
+    pub content: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum AgentEvent {
     Token(String),
     /// Thinking/reasoning content from the model (displayed separately in UI).
@@ -227,6 +233,18 @@ pub enum AgentEvent {
         threshold_percent: u8,
         current_cost_usd: f64,
         max_budget_usd: f64,
+    },
+    ContextCompacted {
+        auto: bool,
+        tokens_before: usize,
+        tokens_after: usize,
+        tokens_saved: usize,
+        messages_before: usize,
+        messages_after: usize,
+        usage_before_percent: f64,
+        summary: String,
+        context_summary: String,
+        active_messages: Vec<CompactedMessagePreview>,
     },
     /// A file edit has completed. Contains the unified diff for UI display.
     DiffPreview {
@@ -644,6 +662,45 @@ impl AgentLoop {
                         self.broadcast_event_to_plugins(&err_event).await;
                         return Err(error);
                     }
+                    if let Some(report) = self.context.last_compaction_report().cloned() {
+                        let active_messages = self
+                            .context
+                            .get_agent_visible_messages()
+                            .into_iter()
+                            .map(|message| CompactedMessagePreview {
+                                role: match message.role {
+                                    Role::System => "system".to_string(),
+                                    Role::User => "user".to_string(),
+                                    Role::Assistant => "assistant".to_string(),
+                                    Role::Tool => "tool".to_string(),
+                                },
+                                content: message.content.clone(),
+                            })
+                            .collect();
+                        let usage_before_percent = if self.config.token_limit == 0 {
+                            0.0
+                        } else {
+                            (report.tokens_before as f64 / self.config.token_limit as f64) * 100.0
+                        };
+                        Self::emit(
+                            &event_tx,
+                            AgentEvent::ContextCompacted {
+                                auto: true,
+                                tokens_before: report.tokens_before,
+                                tokens_after: report.tokens_after,
+                                tokens_saved: report.tokens_saved,
+                                messages_before: report.messages_before,
+                                messages_after: report.messages_after,
+                                usage_before_percent,
+                                summary: format!(
+                                    "Context automatically compacted: {} messages -> summary (saved {} tokens).",
+                                    report.messages_before, report.tokens_saved
+                                ),
+                                context_summary: report.summary.unwrap_or_default(),
+                                active_messages,
+                            },
+                        );
+                    }
                     self.reset_dynamic_instruction_activation();
 
                     Self::emit(
@@ -972,8 +1029,53 @@ impl AgentLoop {
                         }
                     }
                     if let Err(error) = self.context.compact_async().await {
-                        Self::emit(&event_tx, AgentEvent::Error(error.to_string()));
-                        return Err(error.into());
+                        warn!(error = %error, "background auto-compaction failed; continuing run");
+                        Self::emit(
+                            &event_tx,
+                            AgentEvent::Progress(format!(
+                                "context compaction skipped after failure: {error}"
+                            )),
+                        );
+                        continue;
+                    }
+                    if let Some(report) = self.context.last_compaction_report().cloned() {
+                        let active_messages = self
+                            .context
+                            .get_agent_visible_messages()
+                            .into_iter()
+                            .map(|message| CompactedMessagePreview {
+                                role: match message.role {
+                                    Role::System => "system".to_string(),
+                                    Role::User => "user".to_string(),
+                                    Role::Assistant => "assistant".to_string(),
+                                    Role::Tool => "tool".to_string(),
+                                },
+                                content: message.content.clone(),
+                            })
+                            .collect();
+                        let usage_before_percent = if self.config.token_limit == 0 {
+                            0.0
+                        } else {
+                            (report.tokens_before as f64 / self.config.token_limit as f64) * 100.0
+                        };
+                        Self::emit(
+                            &event_tx,
+                            AgentEvent::ContextCompacted {
+                                auto: true,
+                                tokens_before: report.tokens_before,
+                                tokens_after: report.tokens_after,
+                                tokens_saved: report.tokens_saved,
+                                messages_before: report.messages_before,
+                                messages_after: report.messages_after,
+                                usage_before_percent,
+                                summary: format!(
+                                    "Context automatically compacted: {} messages -> summary (saved {} tokens).",
+                                    report.messages_before, report.tokens_saved
+                                ),
+                                context_summary: report.summary.unwrap_or_default(),
+                                active_messages,
+                            },
+                        );
                     }
                     self.reset_dynamic_instruction_activation();
                     Self::emit(

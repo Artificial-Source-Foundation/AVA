@@ -9,8 +9,12 @@ interface CoreSettingsDetail {
   category?: string
 }
 
+interface CompactedDetail {
+  source?: 'manual' | 'auto'
+}
+
 interface SessionWindowListenerDeps {
-  onCompacted: () => void
+  onCompacted: (detail: CompactedDetail | undefined) => void
   onSessionStatus: (detail: SessionStatusDetail) => void
   onBudgetUpdated: () => void
   onCoreSettingsChanged: (detail: CoreSettingsDetail | undefined) => void
@@ -24,7 +28,8 @@ export function bindSessionWindowListeners(
   target: Window,
   deps: SessionWindowListenerDeps
 ): () => void {
-  const handleCompacted = (): void => deps.onCompacted()
+  const handleCompacted = (event: Event): void =>
+    deps.onCompacted((event as CustomEvent<CompactedDetail | undefined>).detail)
   const handleSessionStatus = (event: Event): void =>
     deps.onSessionStatus((event as CustomEvent<SessionStatusDetail>).detail)
   const handleBudgetUpdated = (): void => deps.onBudgetUpdated()

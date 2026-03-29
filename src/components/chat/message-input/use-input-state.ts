@@ -1,10 +1,16 @@
 import { type Accessor, createEffect, createMemo, createSignal, on, onCleanup } from 'solid-js'
+import { useNotification } from '../../../contexts/notification'
 import { useAgent } from '../../../hooks/useAgent'
 import { useChat } from '../../../hooks/useChat'
 import { useElapsedTimer } from '../../../hooks/useElapsedTimer'
 import { generateMessageId } from '../../../lib/ids'
 import type { CommandEntry } from '../../../services/command-resolver'
 import { parseSlashCommand } from '../../../services/command-resolver'
+import {
+  applyCompactionResult,
+  parseCompactFocus,
+  requestConversationCompaction,
+} from '../../../services/context-compaction'
 import type { SearchableFile } from '../../../services/file-search'
 import { openInExternalEditor } from '../../../services/ide-integration'
 import { getStash, popStash, pushStash } from '../../../services/prompt-stash'
@@ -70,6 +76,7 @@ export function useInputState(): InputState {
   const attachments = createAttachmentState()
   const chat = useChat()
   const agent = useAgent()
+  const notify = useNotification()
   const sessionStore = useSession()
   const { selectedModel, messages } = sessionStore
   const settingsStore = useSettings()
@@ -185,9 +192,29 @@ export function useInputState(): InputState {
     const hasImages = attachments.pendingImages().length > 0
     if ((!message && !hasPastes && !hasImages) || submitting) return
 
-    // Handle /later and /queue slash commands locally
+    // Handle local slash commands
     const parsed = parseSlashCommand(message)
     if (parsed) {
+      if (parsed.name === 'compact') {
+        if (isProcessing()) {
+          notify.error('Compaction unavailable', 'Wait for the current response to finish')
+          return
+        }
+        try {
+          notify.info('Compacting conversation...', 'Summarizing older context')
+          const result = await requestConversationCompaction(parseCompactFocus(parsed.args))
+          applyCompactionResult(result, 'manual')
+        } catch (err) {
+          notify.error(
+            'Compaction failed',
+            err instanceof Error ? err.message : 'Unknown compaction error'
+          )
+        }
+        setInput('')
+        setHistoryIndex(-1)
+        if (textareaRef) textareaRef.style.height = 'auto'
+        return
+      }
       if (parsed.name === 'later') {
         const laterMsg = parsed.args.trim()
         if (laterMsg) {

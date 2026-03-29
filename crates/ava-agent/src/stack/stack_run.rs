@@ -367,13 +367,23 @@ impl AgentStack {
                 idx.pagerank.clone()
             })
         };
+        let compaction_provider =
+            if let Some((provider_name, model_name)) = self.current_compaction_model().await {
+                self.router
+                    .route_required(&provider_name, &model_name)
+                    .await?
+            } else {
+                provider.clone()
+            };
         let summarizer: Arc<dyn ava_context::Summarizer> =
-            Arc::new(LlmSummarizer(provider.clone()));
-        let compaction_pct = self.compaction_threshold_pct as f32 / 100.0;
+            Arc::new(LlmSummarizer(compaction_provider));
+        let compaction_pct = *self.compaction_threshold_pct.read().await as f32 / 100.0;
         let condenser_config = ava_context::CondenserConfig {
             max_tokens: model_context_window,
             target_tokens: model_context_window * 3 / 4,
             compaction_threshold_pct: compaction_pct,
+            preserve_recent_messages: 4,
+            preserve_recent_turns: 2,
             ..Default::default()
         };
         let condenser = ava_context::create_hybrid_condenser_with_relevance(
@@ -465,6 +475,7 @@ impl AgentStack {
             "run-scoped tool registry prepared"
         );
 
+        let auto_compact = *self.auto_compact.read().await;
         let config = AgentConfig {
             max_turns: turns_limit,
             max_budget_usd: self.max_budget_usd,
@@ -482,7 +493,7 @@ impl AgentStack {
             extended_tools: false,
             plan_mode,
             post_edit_validation: None,
-            auto_compact: self.auto_compact,
+            auto_compact,
             stream_timeout_secs: LLM_STREAM_TIMEOUT_SECS,
             prompt_caching: true,
         };

@@ -8,6 +8,7 @@ import { useTeam } from '../../stores/team'
 import type { Message, ToolCall } from '../../types'
 import type { PlanData } from '../../types/rust-ipc'
 import { TEAM_DOMAINS, type TeamDomain } from '../../types/team'
+import { ContextSummaryCard } from './ContextSummaryCard'
 import { InlinePlanCard } from './InlinePlanCard'
 import {
   InterleavedThinkingSegments,
@@ -168,6 +169,13 @@ interface AssistantMessageBubbleProps {
   onRetry: () => void
 }
 
+interface ContextSummaryMetadata {
+  source: 'manual' | 'auto'
+  summary: string
+  tokensSaved: number
+  usageBeforePercent?: number
+}
+
 export const AssistantMessageBubble: Component<AssistantMessageBubbleProps> = (props) => {
   const team = useTeam()
 
@@ -197,6 +205,12 @@ export const AssistantMessageBubble: Component<AssistantMessageBubbleProps> = (p
     const plan = meta.plan as PlanData
     if (plan.steps && Array.isArray(plan.steps) && plan.summary) return plan
     return null
+  })
+
+  const contextSummary = createMemo((): ContextSummaryMetadata | null => {
+    const summary = props.message.metadata?.contextSummary as ContextSummaryMetadata | undefined
+    if (!summary?.summary) return null
+    return summary
   })
 
   /** Detect if this message is relaying a lead's question */
@@ -342,6 +356,18 @@ export const AssistantMessageBubble: Component<AssistantMessageBubbleProps> = (p
           )}
         </Show>
 
+        <Show when={contextSummary()}>
+          {(summary) => (
+            <ContextSummaryCard
+              summaryLine={props.message.content}
+              summary={summary().summary}
+              source={summary().source}
+              tokensSaved={summary().tokensSaved}
+              usageBeforePercent={summary().usageBeforePercent}
+            />
+          )}
+        </Show>
+
         {/* Lead question relay card */}
         <Show when={leadQuestion()}>{(q) => <LeadQuestionCard question={q()} />}</Show>
 
@@ -357,7 +383,7 @@ export const AssistantMessageBubble: Component<AssistantMessageBubbleProps> = (p
 
         <Show when={!isActiveStreaming()}>
           {/* When content is a lead question, skip normal rendering (card handles it) */}
-          <Show when={!leadQuestion()}>
+          <Show when={!leadQuestion() && !contextSummary()}>
             {/* When interleaved thinking segments handle tools, only render text segments */}
             <Show when={thinkingSegments()}>
               <Show when={props.message.content}>

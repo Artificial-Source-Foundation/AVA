@@ -37,6 +37,10 @@ export interface AgentIpc {
       maxTurns?: number
       thinkingLevel?: string
       sessionId?: string
+      autoCompact?: boolean
+      compactionThreshold?: number
+      compactionProvider?: string
+      compactionModel?: string
     }
   ) => Promise<SubmitGoalResult | null>
   editAndResendRun: (messageId: string, newContent: string) => Promise<SubmitGoalResult | null>
@@ -198,6 +202,10 @@ export function createAgentIpc(deps: IpcDeps): AgentIpc {
       maxTurns?: number
       thinkingLevel?: string
       sessionId?: string
+      autoCompact?: boolean
+      compactionThreshold?: number
+      compactionProvider?: string
+      compactionModel?: string
     }
   ): Promise<SubmitGoalResult | null> => {
     resetState()
@@ -214,6 +222,10 @@ export function createAgentIpc(deps: IpcDeps): AgentIpc {
           model: opts?.model ?? null,
           thinkingLevel: opts?.thinkingLevel ?? null,
           sessionId: opts?.sessionId ?? null,
+          autoCompact: opts?.autoCompact ?? null,
+          compactionThreshold: opts?.compactionThreshold ?? null,
+          compactionProvider: opts?.compactionProvider ?? null,
+          compactionModel: opts?.compactionModel ?? null,
         },
       }
 

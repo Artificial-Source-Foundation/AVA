@@ -24,4 +24,4 @@ pub use strategies::{
 };
 pub use token_tracker::{estimate_tokens, estimate_tokens_for_message, TokenTracker};
 pub use tokenizer::{count_tokens, count_tokens_default, count_tokens_for_model, TokenEncoding};
-pub use types::{CondensationResult, CondenserConfig, ContextChunk};
+pub use types::{CompactionReport, CondensationResult, CondenserConfig, ContextChunk};

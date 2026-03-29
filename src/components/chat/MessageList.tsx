@@ -146,7 +146,9 @@ export const MessageList: Component = () => {
           const msg = () => message()
           const msgIndex = () => data.messageIndexById().get(msg().id) ?? -1
           const modelChange = () => data.modelChangeById().get(msg().id)
-          const showDivider = () => compactionIndex() > 0 && msgIndex() === compactionIndex()
+          const showDivider = () =>
+            !!msg().metadata?.contextSummary ||
+            (compactionIndex() > 0 && msgIndex() === compactionIndex())
 
           return (
             <>
@@ -171,7 +173,8 @@ export const MessageList: Component = () => {
 
           return {
             extraClass:
-              compactionIndex() > 0 && msgIndex() < compactionIndex()
+              msg().metadata?.contextCompacted ||
+              (compactionIndex() > 0 && msgIndex() < compactionIndex())
                 ? 'compaction-pre'
                 : undefined,
             isEditing: editingMessageId() === msg().id,

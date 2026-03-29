@@ -15,6 +15,7 @@ import { createEffect, createSignal, on } from 'solid-js'
 
 import { debugLog } from '../lib/debug-log'
 import { log } from '../lib/logger'
+import { applyCompactionResult } from '../services/context-compaction'
 import { getCoreBudget } from '../services/core-bridge'
 import { useSession } from '../stores/session'
 import { useSettings } from '../stores/settings'
@@ -220,6 +221,30 @@ function createAgentStore() {
               new CustomEvent('ava:core-settings-changed', { detail: { category: 'context' } })
             )
           }
+        }
+        if (event.type === 'context_compacted') {
+          const compact = event as import('../types/rust-ipc').ContextCompactedEvent &
+            Record<string, unknown>
+          applyCompactionResult(
+            {
+              messages:
+                ((compact.activeMessages ??
+                  compact.active_messages) as import('../types/rust-ipc').CompactMessageOut[]) ??
+                [],
+              tokensBefore: Number(compact.tokensBefore ?? compact.tokens_before ?? 0),
+              tokensAfter: Number(compact.tokensAfter ?? compact.tokens_after ?? 0),
+              tokensSaved: Number(compact.tokensSaved ?? compact.tokens_saved ?? 0),
+              messagesBefore: Number(compact.messagesBefore ?? compact.messages_before ?? 0),
+              messagesAfter: Number(compact.messagesAfter ?? compact.messages_after ?? 0),
+              summary: String(compact.summary ?? ''),
+              contextSummary: String(compact.contextSummary ?? compact.context_summary ?? ''),
+              usageBeforePercent: Number(
+                compact.usageBeforePercent ?? compact.usage_before_percent ?? 0
+              ),
+            } as import('../types/rust-ipc').CompactContextResult,
+            'auto',
+            { appendSummaryMessage: false }
+          )
         }
         if (event.type === 'approval_request') {
           log.info('tools', 'Approval requested', {

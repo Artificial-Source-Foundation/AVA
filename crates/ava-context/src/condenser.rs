@@ -69,6 +69,42 @@ impl Condenser {
             self.config.max_tokens,
         ))
     }
+
+    pub fn force_condense(&mut self, messages: &[Message]) -> Result<CondensationResult> {
+        self.tracker.reset();
+        self.tracker.add_messages(messages);
+        let before_tokens = self.tracker.current_tokens;
+        let mut current = messages.to_vec();
+
+        for strategy in &self.strategies {
+            current = strategy.condense(&current, self.config.target_tokens)?;
+            self.tracker.reset();
+            self.tracker.add_messages(&current);
+
+            if self.tracker.current_tokens <= self.config.target_tokens {
+                let compacted = mark_compacted_messages(messages, &current);
+                return Ok(CondensationResult {
+                    messages: current,
+                    estimated_tokens: self.tracker.current_tokens,
+                    strategy: strategy.name().to_string(),
+                    compacted_messages: compacted,
+                });
+            }
+        }
+
+        let compacted = mark_compacted_messages(messages, &current);
+        tracing::info!(
+            before_tokens,
+            after_tokens = self.tracker.current_tokens,
+            "forced condensation completed without reaching target"
+        );
+        Ok(CondensationResult {
+            messages: current,
+            estimated_tokens: self.tracker.current_tokens,
+            strategy: "forced".to_string(),
+            compacted_messages: compacted,
+        })
+    }
 }
 
 /// Hybrid condenser with a 3-stage pipeline:
@@ -186,6 +222,76 @@ impl HybridCondenser {
             self.config.max_tokens,
         ))
     }
+
+    pub async fn force_condense(&mut self, messages: &[Message]) -> Result<CondensationResult> {
+        self.tracker.reset();
+        self.tracker.add_messages(messages);
+        let before_tokens = self.tracker.current_tokens;
+        let mut current = messages.to_vec();
+
+        for strategy in &self.sync_strategies {
+            current = strategy.condense(&current, self.config.target_tokens)?;
+            self.tracker.reset();
+            self.tracker.add_messages(&current);
+
+            if self.tracker.current_tokens <= self.config.target_tokens {
+                let compacted = mark_compacted_messages(messages, &current);
+                return Ok(CondensationResult {
+                    messages: current,
+                    estimated_tokens: self.tracker.current_tokens,
+                    strategy: strategy.name().to_string(),
+                    compacted_messages: compacted,
+                });
+            }
+        }
+
+        for strategy in &self.async_strategies {
+            current = strategy
+                .condense(&current, self.config.target_tokens)
+                .await?;
+            self.tracker.reset();
+            self.tracker.add_messages(&current);
+
+            if self.tracker.current_tokens <= self.config.target_tokens {
+                let compacted = mark_compacted_messages(messages, &current);
+                return Ok(CondensationResult {
+                    messages: current,
+                    estimated_tokens: self.tracker.current_tokens,
+                    strategy: strategy.name().to_string(),
+                    compacted_messages: compacted,
+                });
+            }
+        }
+
+        for strategy in &self.fallback_strategies {
+            current = strategy.condense(&current, self.config.target_tokens)?;
+            self.tracker.reset();
+            self.tracker.add_messages(&current);
+
+            if self.tracker.current_tokens <= self.config.target_tokens {
+                let compacted = mark_compacted_messages(messages, &current);
+                return Ok(CondensationResult {
+                    messages: current,
+                    estimated_tokens: self.tracker.current_tokens,
+                    strategy: strategy.name().to_string(),
+                    compacted_messages: compacted,
+                });
+            }
+        }
+
+        let compacted = mark_compacted_messages(messages, &current);
+        tracing::info!(
+            before_tokens,
+            after_tokens = self.tracker.current_tokens,
+            "forced hybrid condensation completed without reaching target"
+        );
+        Ok(CondensationResult {
+            messages: current,
+            estimated_tokens: self.tracker.current_tokens,
+            strategy: "forced".to_string(),
+            compacted_messages: compacted,
+        })
+    }
 }
 
 /// Identify messages from `original` that are not present in `condensed` (by ID)
@@ -263,6 +369,8 @@ pub fn create_hybrid_condenser_with_relevance(
             summarizer,
             config.summarization_batch_size,
             config.preserve_recent_messages,
+            config.preserve_recent_turns,
+            config.focus.clone(),
         ))]
     } else {
         vec![]
@@ -344,6 +452,7 @@ mod tests {
             summarization_batch_size: 3,
             preserve_recent_messages: 2,
             compaction_threshold_pct: 0.8,
+            ..Default::default()
         };
         let mut condenser = create_hybrid_condenser(config, None);
 

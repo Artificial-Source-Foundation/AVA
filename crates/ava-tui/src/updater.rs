@@ -206,13 +206,15 @@ fn render_changelog(changelog: &str) -> String {
 }
 
 /// Download the update and replace the current binary.
+///
+/// If pre-built binary assets are available on the release, downloads and
+/// replaces the binary in-place. Otherwise falls back to building from
+/// source via `cargo install --git`.
 pub async fn download_and_replace(info: &UpdateInfo) -> color_eyre::Result<()> {
     use std::io::Write;
 
     if info.download_url.is_empty() {
-        return Err(color_eyre::eyre::eyre!(
-            "No download URL for this platform. Download manually from GitHub."
-        ));
+        return install_from_source(info).await;
     }
 
     eprint!("\x1b[2m  Downloading...\x1b[0m");
@@ -279,6 +281,36 @@ pub async fn download_and_replace(info: &UpdateInfo) -> color_eyre::Result<()> {
         "  \x1b[1;32m\u{2022}\x1b[0m Installed to {}",
         current_exe.display()
     );
+    Ok(())
+}
+
+/// Fallback: build and install from source via `cargo install --git`.
+async fn install_from_source(info: &UpdateInfo) -> color_eyre::Result<()> {
+    eprintln!("  \x1b[2mNo pre-built binary for this platform. Building from source...\x1b[0m");
+
+    let tag = format!("v{}", info.latest_version);
+    let status = tokio::process::Command::new("cargo")
+        .args([
+            "install",
+            "--git",
+            "https://github.com/Artificial-Source-Foundation/AVA.git",
+            "--tag",
+            &tag,
+            "--bin",
+            "ava",
+            "--force",
+        ])
+        .status()
+        .await?;
+
+    if !status.success() {
+        return Err(color_eyre::eyre::eyre!(
+            "cargo install failed (exit {}). Install manually:\n  \
+             cargo install --git https://github.com/Artificial-Source-Foundation/AVA.git --tag {tag} --bin ava",
+            status.code().unwrap_or(-1)
+        ));
+    }
+
     Ok(())
 }
 

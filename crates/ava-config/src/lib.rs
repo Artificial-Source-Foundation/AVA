@@ -168,6 +168,12 @@ pub struct FeaturesConfig {
     /// Default: false (agent decides when to review).
     #[serde(default)]
     pub auto_review: bool,
+    /// When true (default), the codebase is indexed in-memory (BM25 + PageRank)
+    /// on first use, enabling the `codebase_search` tool. The index uses ~5-20 MB
+    /// of RAM depending on project size. Disable for low-memory environments or
+    /// projects where grep/glob are sufficient.
+    #[serde(default = "default_true")]
+    pub enable_codebase_index: bool,
 }
 
 fn default_true() -> bool {
@@ -183,6 +189,7 @@ impl Default for FeaturesConfig {
             audit_logging: true,
             session_logging: false,
             auto_review: false,
+            enable_codebase_index: true,
         }
     }
 }

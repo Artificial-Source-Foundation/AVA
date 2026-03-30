@@ -121,9 +121,9 @@ const TeamGroupCard: Component<{
       {/* Progress bar: 3px, domain color fill on var(--gray-3) track */}
       <div class="w-full h-[3px] rounded-sm bg-[var(--gray-3)]">
         <div
-          class="h-full rounded-sm transition-all duration-300"
+          class="h-full w-full origin-left rounded-sm transition-transform duration-300"
           style={{
-            width: `${Math.round(props.group.progress * 100)}%`,
+            transform: `scaleX(${Math.round(props.group.progress * 100) / 100})`,
             background: props.group.lead.status === 'done' ? 'var(--success)' : domainColor(),
           }}
         />

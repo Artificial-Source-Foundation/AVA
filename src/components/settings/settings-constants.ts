@@ -1,5 +1,5 @@
-/** Gap between settings cards in grid layouts */
-export const SETTINGS_CARD_GAP = '12px'
+/** Gap between settings sections in layouts */
+export const SETTINGS_CARD_GAP = '32px'
 
 /** Standard input class for settings forms */
 export const SETTINGS_INPUT_CLASS =

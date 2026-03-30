@@ -8,6 +8,7 @@ import { MessageBubble } from '../MessageBubble'
 export interface MessageRowProps {
   message: Message
   extraClass?: string
+  readOnly?: boolean
   shouldAnimate: boolean
   isEditing: boolean
   isRetrying: boolean
@@ -38,6 +39,7 @@ export const MessageRow: Component<MessageRowProps> = (props) => {
   const [ctxMenu, setCtxMenu] = createSignal<{ x: number; y: number } | null>(null)
 
   const handleContextMenu = (e: MouseEvent): void => {
+    if (props.readOnly) return
     e.preventDefault()
     e.stopPropagation()
     setCtxMenu({ x: e.clientX, y: e.clientY })
@@ -54,6 +56,8 @@ export const MessageRow: Component<MessageRowProps> = (props) => {
         },
       },
     ]
+
+    if (props.readOnly) return items
 
     // Edit — user messages only
     if (props.message.role === 'user') {
@@ -112,12 +116,17 @@ export const MessageRow: Component<MessageRowProps> = (props) => {
         // Virtual scrolling foundation: browser skips layout/paint for off-screen
         // messages. The `auto` keyword in contain-intrinsic-size caches last-known
         // height so returning to a previously rendered row is instant.
+        // Note: content-visibility: auto implies contain: layout style paint which
+        // creates a stacking context; we keep it for perf but add z-index isolation
+        // so message action toolbars remain clickable above the scroll container.
         'content-visibility': 'auto',
         'contain-intrinsic-size': 'auto 120px',
+        position: 'relative',
       }}
     >
       <MessageBubble
         message={props.message}
+        readOnly={props.readOnly}
         shouldAnimate={props.shouldAnimate}
         isEditing={props.isEditing}
         isRetrying={props.isRetrying}

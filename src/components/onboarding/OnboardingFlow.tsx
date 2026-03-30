@@ -100,7 +100,7 @@ export const OnboardingFlow: Component<OnboardingFlowProps> = (props) => {
   const handleComplete = (): void => {
     const preset = activePreset()
     props.onComplete({
-      theme: 'glass',
+      theme: selectedPreset(),
       mode: 'dark',
       accentColor: selectedAccent(),
       darkStyle: preset.darkStyle,

@@ -1,22 +1,23 @@
 /**
  * Usage Tab — Subscription usage tracking for OAuth and credit-based providers.
  *
- * Shows plan tier, usage bars, credits remaining, and reset times
- * for OpenAI, Anthropic, GitHub Copilot, and OpenRouter.
+ * Pencil design: "Subscription Usage" title (22px/600 #F5F5F7),
+ * subtitle (12px #48484A), Refresh button (rounded-8, #ffffff0a border).
+ * Provider cards: #111114, rounded-12, #ffffff08 border, 20px padding.
+ * Plan badge: PRO in #0A84FF on #0A84FF18, rounded-6, 10px/600 uppercase.
+ * Usage bars: 10px height, rounded-5, track #2C2C2E.
+ * Bar colors: green #34C759 (<60%), amber #F5A623 (60-85%), red #e5484d (>85%).
  */
 
 import { AlertTriangle, RefreshCw } from 'lucide-solid'
 import { type Component, createSignal, For, onMount, Show } from 'solid-js'
 import { rustBackend } from '../../../services/rust-bridge'
 import type { CopilotQuota, SubscriptionUsage, UsageWindow } from '../../../types/rust-ipc'
-import { getProviderLogo } from '../../icons/provider-logo-map'
-import { SettingsCard } from '../SettingsCard'
-import { SETTINGS_CARD_GAP } from '../settings-constants'
 
 function usageBarColor(percent: number): string {
   if (percent >= 85) return '#e5484d'
-  if (percent >= 60) return '#f5a623'
-  return '#30a46c'
+  if (percent >= 60) return '#F5A623'
+  return '#34C759'
 }
 
 function formatResetTime(isoOrTimestamp: string | null): string | null {
@@ -41,30 +42,35 @@ function formatResetTime(isoOrTimestamp: string | null): string | null {
 }
 
 const UsageBar: Component<{ window: UsageWindow }> = (props) => {
-  const percent = () => props.window.usedPercent
+  const percent = () => Math.max(0, props.window.usedPercent)
   const reset = () => formatResetTime(props.window.resetsAt)
 
   return (
-    <div class="flex flex-col gap-1">
-      <div class="flex items-center justify-between text-[11px]">
-        <span style={{ color: 'var(--text-secondary)' }}>{props.window.label}</span>
-        <span style={{ color: 'var(--text-muted)' }}>
+    <div class="flex flex-col" style={{ gap: '4px' }}>
+      <div class="flex items-center justify-between">
+        <span style={{ 'font-family': 'Geist, sans-serif', 'font-size': '11px', color: '#C8C8CC' }}>
+          {props.window.label}
+        </span>
+        <span style={{ 'font-family': 'Geist, sans-serif', 'font-size': '11px', color: '#48484A' }}>
           {percent().toFixed(0)}% used
-          <Show when={reset()}>
-            {' '}
-            <span style={{ color: 'var(--text-muted)' }}>· resets in {reset()}</span>
-          </Show>
+          <Show when={reset()}> · resets in {reset()}</Show>
         </span>
       </div>
       <div
-        class="h-2.5 rounded-full overflow-hidden"
-        style={{ 'background-color': 'var(--gray-5)' }}
+        style={{
+          height: '10px',
+          'border-radius': '5px',
+          background: '#2C2C2E',
+          overflow: 'hidden',
+        }}
       >
         <div
-          class="h-full rounded-full transition-all"
           style={{
+            height: '100%',
             width: `${Math.min(100, percent())}%`,
-            'background-color': usageBarColor(percent()),
+            'border-radius': '5px',
+            background: usageBarColor(percent()),
+            transition: 'width 300ms ease',
           }}
         />
       </div>
@@ -74,54 +80,39 @@ const UsageBar: Component<{ window: UsageWindow }> = (props) => {
 
 const CopilotQuotaDisplay: Component<{ quota: CopilotQuota }> = (props) => {
   const q = () => props.quota
-  const reset = () => formatResetTime(q().resetTime)
   const isUnlimited = () => q().limit < 0
-  const usedPercent = () => (isUnlimited() ? 0 : Math.min(100, 100 - q().percentRemaining))
-  const compUnlimited = () => (q().completionsLimit ?? 0) < 0
+  const percent = () => (q().limit > 0 ? ((q().limit - q().remaining) / q().limit) * 100 : 0)
 
   return (
-    <div class="flex flex-col gap-2">
-      {/* Premium interactions quota */}
-      <div class="flex flex-col gap-1">
-        <div class="flex items-center justify-between text-[11px]">
-          <span style={{ color: 'var(--text-secondary)' }}>Premium Requests</span>
-          <span style={{ color: 'var(--text-muted)' }}>
-            <Show when={!isUnlimited()} fallback="Unlimited">
-              {q().remaining} / {q().limit} remaining
-            </Show>
-          </span>
-        </div>
-        <Show when={!isUnlimited()}>
-          <div
-            class="h-2.5 rounded-full overflow-hidden"
-            style={{ 'background-color': 'var(--gray-5)' }}
-          >
-            <div
-              class="h-full rounded-full transition-all"
-              style={{
-                width: `${usedPercent()}%`,
-                'background-color': usageBarColor(usedPercent()),
-              }}
-            />
-          </div>
-        </Show>
+    <div class="flex flex-col" style={{ gap: '4px' }}>
+      <div class="flex items-center justify-between">
+        <span style={{ 'font-family': 'Geist, sans-serif', 'font-size': '11px', color: '#C8C8CC' }}>
+          Premium Requests
+        </span>
+        <span style={{ 'font-family': 'Geist, sans-serif', 'font-size': '11px', color: '#48484A' }}>
+          <Show when={!isUnlimited()} fallback="Unlimited">
+            {q().remaining} / {q().limit} remaining
+          </Show>
+        </span>
       </div>
-
-      {/* Completions quota */}
-      <Show when={q().completionsRemaining != null && q().completionsLimit != null}>
-        <div class="flex items-center justify-between text-[11px]">
-          <span style={{ color: 'var(--text-secondary)' }}>Completions</span>
-          <span style={{ color: 'var(--text-muted)' }}>
-            <Show when={!compUnlimited()} fallback="Unlimited">
-              {q().completionsRemaining} / {q().completionsLimit} remaining
-            </Show>
-          </span>
-        </div>
-      </Show>
-
-      <Show when={reset()}>
-        <div class="text-[11px]" style={{ color: 'var(--text-muted)' }}>
-          Resets in {reset()}
+      <Show when={!isUnlimited()}>
+        <div
+          style={{
+            height: '10px',
+            'border-radius': '5px',
+            background: '#2C2C2E',
+            overflow: 'hidden',
+          }}
+        >
+          <div
+            style={{
+              height: '100%',
+              width: `${Math.min(100, percent())}%`,
+              'border-radius': '5px',
+              background: usageBarColor(percent()),
+              transition: 'width 300ms ease',
+            }}
+          />
         </div>
       </Show>
     </div>
@@ -130,10 +121,18 @@ const CopilotQuotaDisplay: Component<{ quota: CopilotQuota }> = (props) => {
 
 const PlanBadge: Component<{ plan: string }> = (props) => (
   <span
-    class="inline-flex items-center rounded-md px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide"
     style={{
-      'background-color': 'var(--accent-subtle)',
-      color: 'var(--accent)',
+      display: 'inline-flex',
+      'align-items': 'center',
+      'border-radius': '6px',
+      padding: '2px 8px',
+      background: '#0A84FF18',
+      'font-family': 'Geist, sans-serif',
+      'font-size': '10px',
+      'font-weight': '600',
+      'letter-spacing': '1px',
+      color: '#0A84FF',
+      'text-transform': 'uppercase',
     }}
   >
     {props.plan}
@@ -146,56 +145,93 @@ const ProviderUsageCard: Component<{ usage: SubscriptionUsage }> = (props) => {
     u().usageWindows.length > 0 || u().credits !== null || u().copilotQuota !== null
 
   return (
-    <SettingsCard
-      icon={getProviderLogo(u().provider)}
-      title={u().displayName}
-      description={u().error && !hasData() ? u().error! : undefined}
+    <div
+      style={{
+        display: 'flex',
+        'flex-direction': 'column',
+        gap: '16px',
+        background: '#111114',
+        border: '1px solid #ffffff08',
+        'border-radius': '12px',
+        padding: '20px',
+      }}
     >
-      <div class="flex flex-col gap-3">
-        {/* Plan badge */}
+      {/* Provider header with optional plan badge */}
+      <div class="flex items-center" style={{ gap: '10px' }}>
+        <span
+          style={{
+            'font-family': 'Geist, sans-serif',
+            'font-size': '14px',
+            'font-weight': '500',
+            color: '#F5F5F7',
+          }}
+        >
+          {u().displayName}
+        </span>
         <Show when={u().planType}>
-          <div>
-            <PlanBadge plan={u().planType!} />
-          </div>
-        </Show>
-
-        {/* Usage windows (Anthropic, OpenAI, OpenRouter) */}
-        <Show when={u().usageWindows.length > 0}>
-          <div class="flex flex-col gap-2">
-            <For each={u().usageWindows}>{(w) => <UsageBar window={w} />}</For>
-          </div>
-        </Show>
-
-        {/* Copilot-specific quota */}
-        <Show when={u().copilotQuota}>
-          <CopilotQuotaDisplay quota={u().copilotQuota!} />
-        </Show>
-
-        {/* Credits */}
-        <Show when={u().credits}>
-          <div class="flex items-center justify-between text-[12px]">
-            <span style={{ color: 'var(--text-secondary)' }}>Balance</span>
-            <span class="font-mono font-medium" style={{ color: 'var(--text-primary)' }}>
-              {u().credits!.unlimited ? 'Unlimited' : (u().credits!.balance ?? 'N/A')}
-            </span>
-          </div>
-        </Show>
-
-        {/* Error with partial data */}
-        <Show when={u().error && hasData()}>
-          <div
-            class="flex items-center gap-1.5 text-[11px] rounded-md px-2 py-1"
-            style={{
-              color: 'var(--amber-9)',
-              'background-color': 'rgba(255,200,0,0.06)',
-            }}
-          >
-            <AlertTriangle class="w-3 h-3 flex-shrink-0" />
-            <span>{u().error}</span>
-          </div>
+          <PlanBadge plan={u().planType!} />
         </Show>
       </div>
-    </SettingsCard>
+
+      {/* Usage windows (Anthropic, OpenAI, OpenRouter) */}
+      <Show when={u().usageWindows.length > 0}>
+        <div class="flex flex-col" style={{ gap: '4px' }}>
+          <For each={u().usageWindows}>{(w) => <UsageBar window={w} />}</For>
+        </div>
+      </Show>
+
+      {/* Copilot-specific quota */}
+      <Show when={u().copilotQuota}>
+        <CopilotQuotaDisplay quota={u().copilotQuota!} />
+      </Show>
+
+      {/* Credits / Balance */}
+      <Show when={u().credits}>
+        <div class="flex items-center justify-between">
+          <span
+            style={{ 'font-family': 'Geist, sans-serif', 'font-size': '12px', color: '#C8C8CC' }}
+          >
+            Balance
+          </span>
+          <span
+            style={{
+              'font-family': 'Geist Mono, monospace',
+              'font-size': '12px',
+              'font-weight': '500',
+              color: '#F5F5F7',
+            }}
+          >
+            {u().credits!.unlimited ? 'Unlimited' : (u().credits!.balance ?? 'N/A')}
+          </span>
+        </div>
+      </Show>
+
+      {/* Error indicator */}
+      <Show when={u().error && !hasData()}>
+        <span style={{ 'font-family': 'Geist, sans-serif', 'font-size': '12px', color: '#48484A' }}>
+          {u().error}
+        </span>
+      </Show>
+
+      {/* Error with partial data */}
+      <Show when={u().error && hasData()}>
+        <div
+          class="flex items-center gap-1.5"
+          style={{
+            'border-radius': '8px',
+            padding: '6px 10px',
+            background: 'rgba(255,200,0,0.06)',
+          }}
+        >
+          <AlertTriangle class="w-3 h-3 shrink-0" style={{ color: '#F5A623' }} />
+          <span
+            style={{ 'font-family': 'Geist, sans-serif', 'font-size': '11px', color: '#F5A623' }}
+          >
+            {u().error}
+          </span>
+        </div>
+      </Show>
+    </div>
   )
 }
 
@@ -220,36 +256,64 @@ export const UsageTab: Component = () => {
   onMount(() => void fetchUsage())
 
   return (
-    <div class="flex flex-col" style={{ gap: SETTINGS_CARD_GAP }}>
+    <div class="flex flex-col" style={{ gap: '24px' }}>
       {/* Header with refresh */}
       <div class="flex items-center justify-between">
-        <div>
-          <h2 class="text-[15px] font-semibold" style={{ color: 'var(--text-primary)' }}>
+        <div class="flex flex-col" style={{ gap: '4px' }}>
+          <h2
+            style={{
+              'font-family': 'Geist, sans-serif',
+              'font-size': '22px',
+              'font-weight': '600',
+              color: '#F5F5F7',
+              margin: '0',
+            }}
+          >
             Subscription Usage
           </h2>
-          <p class="text-[12px] mt-0.5" style={{ color: 'var(--text-muted)' }}>
+          <p
+            style={{
+              'font-family': 'Geist, sans-serif',
+              'font-size': '12px',
+              color: '#48484A',
+              margin: '0',
+            }}
+          >
             Plan tiers and remaining quota for connected providers.
           </p>
         </div>
         <button
           type="button"
-          class="inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-[12px] font-medium transition-colors"
-          style={{
-            'border-color': 'var(--border-default)',
-            color: 'var(--text-secondary)',
-            'background-color': 'var(--surface)',
-          }}
           onClick={() => void fetchUsage()}
           disabled={loading()}
+          class="flex items-center shrink-0"
+          style={{
+            gap: '6px',
+            'border-radius': '8px',
+            padding: '6px 10px',
+            border: '1px solid #ffffff0a',
+            background: 'transparent',
+            cursor: 'pointer',
+            'font-family': 'Geist, sans-serif',
+            'font-size': '12px',
+            'font-weight': '500',
+            color: '#C8C8CC',
+          }}
         >
-          <RefreshCw class={`w-3.5 h-3.5 ${loading() ? 'animate-spin' : ''}`} />
+          <RefreshCw
+            class={`w-3.5 h-3.5 ${loading() ? 'animate-spin' : ''}`}
+            style={{ color: '#C8C8CC' }}
+          />
           Refresh
         </button>
       </div>
 
       {/* Loading state */}
       <Show when={loading() && !usageData()}>
-        <div class="text-[12px] py-8 text-center" style={{ color: 'var(--text-muted)' }}>
+        <div
+          class="py-8 text-center"
+          style={{ 'font-family': 'Geist, sans-serif', 'font-size': '12px', color: '#48484A' }}
+        >
           Fetching usage data...
         </div>
       </Show>
@@ -262,8 +326,15 @@ export const UsageTab: Component = () => {
       {/* Error state */}
       <Show when={error()}>
         <div
-          class="text-[12px] py-4 text-center rounded-lg"
-          style={{ color: '#e5484d', 'background-color': 'rgba(255,0,0,0.08)' }}
+          class="text-center"
+          style={{
+            'font-family': 'Geist, sans-serif',
+            'font-size': '12px',
+            padding: '16px',
+            'border-radius': '12px',
+            color: '#e5484d',
+            background: 'rgba(255,0,0,0.08)',
+          }}
         >
           Failed to fetch usage data. Check your credentials in Providers settings.
         </div>

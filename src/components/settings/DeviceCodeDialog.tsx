@@ -68,15 +68,18 @@ export const DeviceCodeDialog: Component<DeviceCodeDialogProps> = (props) => {
   })
 
   return (
-    <div class="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center bg-black/50">
+    <div
+      class="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center"
+      style={{ background: 'var(--modal-overlay)' }}
+    >
       <div
-        class="
-          w-[380px] bg-[var(--surface-overlay)]
-          border border-[var(--border-default)]
-          rounded-[var(--radius-xl)]
-          shadow-xl p-6
-          animate-slide-up
-        "
+        class="w-[380px] p-6 animate-slide-up"
+        style={{
+          background: 'var(--modal-surface)',
+          border: '1px solid var(--modal-border)',
+          'border-radius': 'var(--modal-radius-sm)',
+          'box-shadow': 'var(--modal-shadow)',
+        }}
       >
         {/* Header */}
         <div class="flex items-center justify-between mb-4">

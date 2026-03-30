@@ -24,6 +24,11 @@ export interface ThinkingSegment {
 // Module-level shared signal for todos — all useRustAgent instances share this
 // so TodoPanel can read todos set by the agent event handler.
 const [todos, setTodos] = createSignal<TodoItem[]>([])
+
+/** Clear todos when switching sessions so stale items don't bleed across chats. */
+export function clearTodos(): void {
+  setTodos([])
+}
 const MAX_EVENT_HISTORY = 4000
 
 export function useRustAgent() {
@@ -156,6 +161,8 @@ export function useRustAgent() {
     todos,
     run: ipc.run,
     editAndResendRun: ipc.editAndResendRun,
+    retryRun: ipc.retryRun,
+    regenerateRun: ipc.regenerateRun,
     cancel: ipc.cancel,
     clearError,
     endRun: ipc.endRun,

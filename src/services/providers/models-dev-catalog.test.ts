@@ -3,6 +3,7 @@ import {
   _resetCatalogCache,
   getModelFromCatalog,
   getModelsDevModels,
+  isBlockedModelId,
   syncModelsCatalog,
 } from './models-dev-catalog'
 
@@ -69,6 +70,27 @@ const MOCK_CATALOG = {
         tool_call: false,
         modalities: { input: ['text'], output: ['audio'] },
         limit: { context: 4096 },
+      },
+    },
+  },
+  xai: {
+    id: 'xai',
+    name: 'xAI',
+    models: {
+      'grok-4-1-fast-reasoning': {
+        id: 'grok-4-1-fast-reasoning',
+        name: 'Grok 4.1 Fast',
+        tool_call: true,
+        reasoning: true,
+        cost: { input: 0.2, output: 0.5 },
+        limit: { context: 131072 },
+      },
+      'aurora-alpha': {
+        id: 'aurora-alpha',
+        name: 'Aurora Alpha',
+        tool_call: true,
+        status: 'alpha',
+        limit: { context: 65536 },
       },
     },
   },
@@ -228,6 +250,32 @@ describe('models-dev-catalog', () => {
 
     it('returns null for unknown model', () => {
       expect(getModelFromCatalog('nonexistent-model')).toBeNull()
+    })
+  })
+
+  describe('filters alpha/blocked models', () => {
+    beforeEach(async () => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue({
+          ok: true,
+          json: () => Promise.resolve(MOCK_CATALOG),
+        })
+      )
+      await syncModelsCatalog()
+    })
+
+    it('filters out models with alpha status', () => {
+      const models = getModelsDevModels('xai' as 'openai')
+      expect(models.some((m) => m.id === 'aurora-alpha')).toBe(false)
+      expect(models.some((m) => m.id === 'grok-4-1-fast-reasoning')).toBe(true)
+    })
+
+    it('isBlockedModelId catches known-outdated patterns', () => {
+      expect(isBlockedModelId('aurora-alpha')).toBe(true)
+      expect(isBlockedModelId('Aurora-Alpha')).toBe(true)
+      expect(isBlockedModelId('grok-4-1-fast-reasoning')).toBe(false)
+      expect(isBlockedModelId('claude-sonnet-4-6')).toBe(false)
     })
   })
 })

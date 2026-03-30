@@ -9,6 +9,7 @@ import type { Component } from 'solid-js'
 import { useAgent } from '../../hooks/useAgent'
 import { useSession } from '../../stores/session'
 import { useSettings } from '../../stores/settings'
+import { ChatHeaderBar } from './ChatHeaderBar'
 
 /** Format token count as compact string: 12.4k, 200k, 1.2m */
 function fmtTokens(n: number): string {
@@ -47,24 +48,16 @@ export const ChatTitleBar: Component = () => {
   }
 
   return (
-    <div
-      class="
-        flex items-center justify-between
-        h-[52px] min-h-[52px]
-        px-5
-        border-b border-[var(--border-subtle)]
-        select-none
-      "
-    >
-      {/* Left: session title + mode badge */}
-      <div class="flex items-center gap-2.5 min-w-0">
+    <ChatHeaderBar
+      title={
         <span
           class="truncate text-sm font-medium text-[var(--text-primary)]"
           style={{ 'font-family': "var(--font-ui, 'Geist', system-ui, sans-serif)" }}
         >
           {sessionTitle()}
         </span>
-
+      }
+      leftMeta={
         <span
           class="
             shrink-0
@@ -76,36 +69,40 @@ export const ChatTitleBar: Component = () => {
         >
           {modeLabel()}
         </span>
-      </div>
-
-      <div class="flex items-center gap-3">
-        <div class="flex items-center gap-2" title={`${contextPercent()}% of context window used`}>
-          <div class="h-1.5 w-20 overflow-hidden rounded-full bg-[var(--surface-raised)]">
-            <div
-              class="h-full rounded-full transition-[width,background-color] duration-200"
+      }
+      right={
+        <div class="flex items-center gap-3">
+          <div
+            class="flex items-center gap-2"
+            title={`${contextPercent()}% of context window used`}
+          >
+            <div class="h-1.5 w-20 overflow-hidden rounded-full bg-[var(--surface-raised)]">
+              <div
+                class="h-full rounded-full transition-[width,background-color] duration-200"
+                style={{
+                  width: `${Math.min(100, contextUsage().percentage)}%`,
+                  background: usageColor(),
+                }}
+              />
+            </div>
+            <span
+              class="tabular-nums text-[11px]"
               style={{
-                width: `${Math.min(100, contextUsage().percentage)}%`,
-                background: usageColor(),
+                color: usageColor(),
+                'font-family': "var(--font-ui-mono, 'Geist Mono', ui-monospace, monospace)",
               }}
-            />
+            >
+              {contextPercent()}%
+            </span>
           </div>
           <span
-            class="tabular-nums text-[11px]"
-            style={{
-              color: usageColor(),
-              'font-family': "var(--font-ui-mono, 'Geist Mono', ui-monospace, monospace)",
-            }}
+            class="tabular-nums text-[11px] text-[var(--text-muted)]"
+            style={{ 'font-family': "var(--font-ui-mono, 'Geist Mono', ui-monospace, monospace)" }}
           >
-            {contextPercent()}%
+            {tokenDisplay()}
           </span>
         </div>
-        <span
-          class="tabular-nums text-[11px] text-[var(--text-muted)]"
-          style={{ 'font-family': "var(--font-ui-mono, 'Geist Mono', ui-monospace, monospace)" }}
-        >
-          {tokenDisplay()}
-        </span>
-      </div>
-    </div>
+      }
+    />
   )
 }

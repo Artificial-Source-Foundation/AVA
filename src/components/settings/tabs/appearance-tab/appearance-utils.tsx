@@ -13,9 +13,7 @@ export { segmentedBtnClass as segmentedBtn } from '../../../ui/SegmentedControl'
 /** Re-export shared Toggle for convenience */
 export { Toggle } from '../../../ui/Toggle'
 
-/** Small uppercase section header */
+/** Section header matching the standard settings pattern: Geist 14px/500 #F5F5F7 */
 export const SectionHeader: Component<{ title: string }> = (props) => (
-  <h3 class="text-[var(--settings-text-button)] font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-2.5">
-    {props.title}
-  </h3>
+  <span class="settings-section-title">{props.title}</span>
 )

@@ -85,20 +85,20 @@ export const Button: Component<ButtonProps> = (props) => {
     danger: `
       bg-[var(--error)]
       text-white
-      hover:brightness-110
-      active:brightness-90
+      hover:bg-[color-mix(in_srgb,var(--error)_88%,white_12%)]
+      active:bg-[color-mix(in_srgb,var(--error)_82%,black_18%)]
     `,
     success: `
       bg-[var(--success)]
       text-white
-      hover:brightness-110
-      active:brightness-90
+      hover:bg-[color-mix(in_srgb,var(--success)_88%,white_12%)]
+      active:bg-[color-mix(in_srgb,var(--success)_82%,black_18%)]
     `,
     warning: `
       bg-[var(--warning)]
       text-white
-      hover:brightness-110
-      active:brightness-90
+      hover:bg-[color-mix(in_srgb,var(--warning)_90%,white_10%)]
+      active:bg-[color-mix(in_srgb,var(--warning)_82%,black_18%)]
     `,
   }
 

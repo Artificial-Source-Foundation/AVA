@@ -42,7 +42,7 @@ export const SidebarMemory: Component = () => {
     <div class="flex flex-col h-full">
       {/* Header */}
       <div class="flex items-center justify-between px-3 h-10 flex-shrink-0 border-b border-[var(--border-subtle)]">
-        <span class="text-xs font-semibold text-[var(--text-secondary)] uppercase tracking-wider">
+        <span class="text-xs font-medium text-[var(--text-secondary)] uppercase tracking-wider">
           Memory
         </span>
         <span class="text-[var(--text-2xs)] text-[var(--text-muted)]">
@@ -58,11 +58,12 @@ export const SidebarMemory: Component = () => {
             {usage().percentage.toFixed(0)}%
           </span>
         </div>
-        <div class="h-1.5 bg-[var(--surface-sunken)] rounded-full overflow-hidden">
+        <div class="h-1 bg-[var(--alpha-white-5)] rounded-full overflow-hidden">
           <div
-            class="h-full rounded-full transition-[width] duration-300"
+            class="h-full rounded-full transition-transform duration-300 origin-left"
             style={{
-              width: `${Math.min(usage().percentage, 100)}%`,
+              width: '100%',
+              transform: `scaleX(${Math.min(usage().percentage, 100) / 100})`,
               background: usageColor(),
             }}
           />
@@ -83,7 +84,7 @@ export const SidebarMemory: Component = () => {
             </div>
           }
         >
-          <div class="space-y-0.5">
+          <div class="space-y-1">
             <For each={memoryItems()}>
               {(item) => {
                 const config = getItemConfig(item)
@@ -111,7 +112,7 @@ export const SidebarMemory: Component = () => {
                         opacity-0 group-hover:opacity-100
                         flex-shrink-0 p-0.5
                         text-[var(--text-muted)] hover:text-[var(--error)]
-                        transition-all
+                        transition-[background-color,border-color,color,transform]
                       "
                       title="Remove"
                       aria-label="Remove memory item"

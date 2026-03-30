@@ -21,8 +21,7 @@ export const ChatComposer: Component<ChatComposerProps> = (props) => {
         <div
           class="rounded-[14px] border border-[var(--border-default)] bg-[var(--surface)]"
           style={{
-            'box-shadow':
-              '0 -2px 20px 0 color-mix(in srgb, var(--accent) 10%, transparent), 0 4px 24px 0 var(--alpha-black-40), 0 1px 4px 0 var(--alpha-black-20)',
+            'box-shadow': '0 4px 24px 0 var(--alpha-black-40), 0 1px 4px 0 var(--alpha-black-20)',
           }}
         >
           {/* Input row */}

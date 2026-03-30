@@ -50,8 +50,19 @@ export const PluginWizard: Component<PluginWizardProps> = (props) => {
 
   return (
     <Show when={props.open}>
-      <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-        <div class="bg-[var(--surface-overlay)] border border-[var(--border-default)] rounded-[var(--radius-xl)] p-6 max-w-lg w-full shadow-2xl">
+      <div
+        class="fixed inset-0 z-50 flex items-center justify-center"
+        style={{ background: 'var(--modal-overlay)' }}
+      >
+        <div
+          class="p-6 max-w-lg w-full"
+          style={{
+            background: 'var(--modal-surface)',
+            border: '1px solid var(--modal-border)',
+            'border-radius': 'var(--modal-radius-lg)',
+            'box-shadow': 'var(--modal-shadow)',
+          }}
+        >
           {/* Header */}
           <div class="flex items-center justify-between mb-4">
             <div class="flex items-center gap-2">
@@ -66,7 +77,8 @@ export const PluginWizard: Component<PluginWizardProps> = (props) => {
             <button
               type="button"
               onClick={handleClose}
-              class="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
+              class="p-1 rounded-[var(--radius-sm)] hover:bg-[var(--alpha-white-5)] transition-colors"
+              style={{ color: 'var(--close-button-color)' }}
             >
               <X class="w-4 h-4" />
             </button>
@@ -154,7 +166,7 @@ export const PluginWizard: Component<PluginWizardProps> = (props) => {
                   type="button"
                   onClick={() => setStep('preview')}
                   disabled={!pluginName().trim()}
-                  class="px-3 py-1.5 text-xs font-medium bg-[var(--accent)] text-white rounded-[var(--radius-md)] hover:brightness-110 transition-colors disabled:opacity-50 flex items-center gap-1"
+                  class="px-3 py-1.5 text-xs font-medium bg-[var(--accent)] text-white rounded-[var(--radius-md)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-50 flex items-center gap-1"
                 >
                   Preview <ArrowRight class="w-3 h-3" />
                 </button>
@@ -203,7 +215,7 @@ export const PluginWizard: Component<PluginWizardProps> = (props) => {
                 <button
                   type="button"
                   onClick={handleCreate}
-                  class="px-3 py-1.5 text-xs font-medium bg-[var(--success)] text-white rounded-[var(--radius-md)] hover:brightness-110 transition-colors flex items-center gap-1"
+                  class="px-3 py-1.5 text-xs font-medium bg-[var(--success)] text-white rounded-[var(--radius-md)] hover:bg-[color-mix(in_srgb,var(--success)_88%,white_12%)] transition-colors flex items-center gap-1"
                 >
                   <Check class="w-3 h-3" /> Create Plugin
                 </button>
@@ -225,7 +237,7 @@ export const PluginWizard: Component<PluginWizardProps> = (props) => {
               <button
                 type="button"
                 onClick={handleClose}
-                class="px-4 py-1.5 text-xs font-medium bg-[var(--accent)] text-white rounded-[var(--radius-md)] hover:brightness-110 transition-colors"
+                class="px-4 py-1.5 text-xs font-medium bg-[var(--accent)] text-white rounded-[var(--radius-md)] hover:bg-[var(--accent-hover)] transition-colors"
               >
                 Done
               </button>

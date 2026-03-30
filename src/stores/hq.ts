@@ -2,7 +2,7 @@
  * AVA HQ Store — navigation state + live backend-backed HQ data.
  */
 
-import { batch, createMemo, createSignal } from 'solid-js'
+import { batch, createEffect, createMemo, createSignal } from 'solid-js'
 import type { ThinkingSegment } from '../hooks/use-rust-agent'
 import { rustBackend } from '../services/rust-bridge'
 import type { ToolCall } from '../types'
@@ -17,9 +17,10 @@ import type {
   HqPage,
   HqPlan,
   HqSettings,
-  KanbanColumn,
+  HqWorkspaceBootstrapResult,
 } from '../types/hq'
 import type { AgentEvent } from '../types/rust-ipc'
+import { useSettings } from './settings'
 
 const STORAGE_KEY = 'ava-hq-mode'
 const ONBOARDED_KEY = 'ava-hq-onboarded'
@@ -46,9 +47,9 @@ const DEFAULT_SETTINGS: HqSettings = {
 }
 
 const [hqMode, setHqMode] = createSignal(localStorage.getItem(STORAGE_KEY) === 'true')
-const [hqPage, setHqPage] = createSignal<HqPage>('dashboard')
+const [hqPage, setHqPage] = createSignal<HqPage>('director-chat')
 const [breadcrumbs, setBreadcrumbs] = createSignal<HqBreadcrumb[]>([
-  { page: 'dashboard', label: 'Dashboard' },
+  { page: 'director-chat', label: 'Director Chat' },
 ])
 
 const [selectedEpicId, setSelectedEpicId] = createSignal<string | null>(null)
@@ -73,10 +74,25 @@ const [liveDirectorThinkingSegments, setLiveDirectorThinkingSegments] = createSi
 const [liveDirectorToolCalls, setLiveDirectorToolCalls] = createSignal<ToolCall[]>([])
 const [liveDirectorStreaming, setLiveDirectorStreaming] = createSignal(false)
 const [hqSettings, setHqSettings] = createSignal<HqSettings>(DEFAULT_SETTINGS)
+const [lastBootstrapResult, setLastBootstrapResult] =
+  createSignal<HqWorkspaceBootstrapResult | null>(null)
 const [isLoading, setIsLoading] = createSignal(false)
 const [lastError, setLastError] = createSignal<string | null>(null)
 
 let refreshScheduled = false
+
+function preferredEpicId(list: HqEpic[], explicitEpicId?: string | null): string | null {
+  if (explicitEpicId) return explicitEpicId
+
+  const sorted = [...list].sort((a, b) => b.createdAt - a.createdAt)
+  return (
+    selectedEpicId() ??
+    sorted.find((epic) => !!epic.planId)?.id ??
+    sorted.find((epic) => epic.status === 'planning' || epic.status === 'in-progress')?.id ??
+    sorted[0]?.id ??
+    null
+  )
+}
 
 function resetLiveDirectorStream(): void {
   batch(() => {
@@ -105,6 +121,16 @@ function markOnboarded(): void {
   localStorage.setItem(ONBOARDED_KEY, 'true')
 }
 
+async function bootstrapWorkspace(args?: {
+  directorModel?: string | null
+  force?: boolean
+}): Promise<HqWorkspaceBootstrapResult> {
+  const result = await rustBackend.bootstrapHqWorkspace(args)
+  setLastBootstrapResult(result)
+  markOnboarded()
+  return result
+}
+
 function navigateTo(page: HqPage, label?: string): void {
   batch(() => {
     setHqPage(page)
@@ -116,41 +142,14 @@ function navigateTo(page: HqPage, label?: string): void {
   if (page === 'plan-review') void loadCurrentPlan()
 }
 
-function navigateToEpic(id: string): void {
-  batch(() => {
-    setHqPage('epic-detail')
-    setSelectedEpicId(id)
-    const epic = epics().find((e) => e.id === id)
-    setBreadcrumbs([
-      { page: 'epics', label: 'Epics' },
-      { page: 'epic-detail', label: epic?.title ?? 'Epic', id },
-    ])
-  })
-  void loadEpic(id)
-  void loadCurrentPlan(id)
-}
-
-function navigateToIssue(id: string): void {
-  batch(() => {
-    setHqPage('issue-detail')
-    setSelectedIssueId(id)
-    const issue = issues().find((i) => i.id === id)
-    setBreadcrumbs([
-      { page: 'issues', label: 'Issues' },
-      { page: 'issue-detail', label: issue?.identifier ?? 'Issue', id },
-    ])
-  })
-  void loadIssue(id)
-}
-
 function navigateToAgent(id: string): void {
   batch(() => {
-    setHqPage('agent-detail')
+    setHqPage('team')
     setSelectedAgentId(id)
     const agent = agents().find((a) => a.id === id)
     setBreadcrumbs([
-      { page: 'org-chart', label: 'Org Chart' },
-      { page: 'agent-detail', label: agent?.name ?? 'Agent', id },
+      { page: 'team', label: 'Team' },
+      { page: 'team', label: agent?.name ?? 'Agent', id },
     ])
   })
   void loadAgent(id)
@@ -166,7 +165,8 @@ function navigateBack(): void {
       if (parent.id) {
         if (parent.page === 'epic-detail') setSelectedEpicId(parent.id)
         else if (parent.page === 'issue-detail') setSelectedIssueId(parent.id)
-        else if (parent.page === 'agent-detail') setSelectedAgentId(parent.id)
+        else if (parent.page === 'agent-detail' || parent.page === 'team')
+          setSelectedAgentId(parent.id)
       }
     })
   }
@@ -206,6 +206,7 @@ async function refreshAll(): Promise<void> {
 
       const startedAt = liveDirectorStartedAt()
       if (
+        !liveDirectorStreaming() &&
         startedAt &&
         nextChat.some((msg) => msg.role === 'director' && msg.timestamp >= startedAt)
       ) {
@@ -221,12 +222,17 @@ async function refreshAll(): Promise<void> {
   }
 }
 
+function triggerRefresh(): void {
+  void refreshAll()
+}
+
 function scheduleRefresh(delay = 150): void {
   if (refreshScheduled) return
   refreshScheduled = true
+  // eslint-disable-next-line solid/reactivity
   window.setTimeout(() => {
     refreshScheduled = false
-    void refreshAll()
+    triggerRefresh()
   }, delay)
 }
 
@@ -239,39 +245,20 @@ function scheduleRefreshBurst(delays: number[]): void {
 }
 
 async function loadCurrentPlan(explicitEpicId?: string | null): Promise<void> {
-  const epicId =
-    explicitEpicId ?? selectedEpicId() ?? epics().find((epic) => epic.planId)?.id ?? null
+  const epicId = preferredEpicId(epics(), explicitEpicId)
   if (!epicId) {
     setPlan(null)
     return
   }
   try {
-    setPlan(await rustBackend.getPlan(epicId))
+    const nextPlan = await rustBackend.getPlan(epicId)
+    batch(() => {
+      setSelectedEpicId(epicId)
+      setPlan(nextPlan)
+    })
   } catch {
     setPlan(null)
   }
-}
-
-async function loadEpic(id: string): Promise<void> {
-  try {
-    const detail = await rustBackend.getEpic(id)
-    if (!detail) return
-    batch(() => {
-      setEpics((prev) => prev.map((epic) => (epic.id === id ? detail.epic : epic)))
-      setIssues((prev) => {
-        const filtered = prev.filter((issue) => issue.epicId !== id)
-        return [...filtered, ...detail.issues]
-      })
-    })
-  } catch {}
-}
-
-async function loadIssue(id: string): Promise<void> {
-  try {
-    const detail = await rustBackend.getIssue(id)
-    if (!detail) return
-    setIssues((prev) => prev.map((issue) => (issue.id === id ? detail : issue)))
-  } catch {}
 }
 
 async function loadAgent(id: string): Promise<void> {
@@ -288,26 +275,13 @@ async function createEpic(title: string, description: string): Promise<void> {
     setShowNewEpicModal(false)
     setEpics((prev) => [epic, ...prev])
     setSelectedEpicId(epic.id)
-    setHqPage('epic-detail')
+    setHqPage('plan-review')
     setBreadcrumbs([
-      { page: 'epics', label: 'Epics' },
-      { page: 'epic-detail', label: epic.title, id: epic.id },
+      { page: 'plan-review', label: 'Plan Review' },
+      { page: 'plan-review', label: epic.title, id: epic.id },
     ])
   })
-  scheduleRefresh(50)
-}
-
-async function moveIssue(issueId: string, toColumn: KanbanColumn): Promise<void> {
-  const updated = await rustBackend.moveIssue(issueId, toColumn)
-  if (!updated) return
-  setIssues((prev) => prev.map((issue) => (issue.id === issueId ? updated : issue)))
-  scheduleRefresh(50)
-}
-
-async function steerAgent(agentId: string, message: string): Promise<void> {
-  const content = message.trim()
-  if (!content) return
-  await rustBackend.steerLead(agentId, content)
+  scheduleRefreshBurst([100, 1000, 4000, 10000, 22000])
 }
 
 async function approveCurrentPlan(): Promise<void> {
@@ -326,15 +300,23 @@ async function rejectCurrentPlan(feedback: string): Promise<void> {
   scheduleRefresh(50)
 }
 
-async function addIssueComment(issueId: string, content: string): Promise<void> {
-  const updated = await rustBackend.addComment(issueId, content)
-  if (!updated) return
-  setIssues((prev) => prev.map((issue) => (issue.id === issueId ? updated : issue)))
-  scheduleRefresh(50)
-}
-
 async function sendDirectorMessage(message: string): Promise<void> {
-  await rustBackend.sendDirectorMessage(message, selectedEpicId())
+  const { settings } = useSettings()
+  const team = settings().team
+  await rustBackend.sendDirectorMessage(message, selectedEpicId(), {
+    defaultDirectorModel: team.defaultDirectorModel,
+    defaultLeadModel: team.defaultLeadModel,
+    defaultWorkerModel: team.defaultWorkerModel,
+    defaultScoutModel: team.defaultScoutModel,
+    workerNames: team.workerNames,
+    leads: team.leads.map((lead) => ({
+      domain: lead.domain,
+      enabled: lead.enabled,
+      model: lead.model,
+      maxWorkers: lead.maxWorkers,
+      customPrompt: lead.customPrompt,
+    })),
+  })
   scheduleRefresh(50)
   scheduleRefreshBurst([750, 2000, 5000, 9000])
 }
@@ -344,19 +326,31 @@ async function updateSettings(patch: Partial<HqSettings>): Promise<void> {
   setHqSettings(updated)
 }
 
+async function refreshSettings(): Promise<void> {
+  try {
+    setHqSettings(await rustBackend.getHqSettings())
+  } catch (error) {
+    setLastError(error instanceof Error ? error.message : String(error))
+  }
+}
+
 function ingestEvent(event: AgentEvent): void {
   switch (event.type) {
     case 'plan_created':
+      setHqPage('plan-review')
+      setBreadcrumbs([{ page: 'plan-review', label: 'Plan Review' }])
       scheduleRefresh(100)
       break
     case 'hq_worker_started':
-      setLiveDirectorWorkerId(event.worker_id)
-      setLiveDirectorStartedAt(Date.now())
-      setLiveDirectorContent('')
-      setLiveDirectorThinking('')
-      setLiveDirectorThinkingSegments([])
-      setLiveDirectorToolCalls([])
-      setLiveDirectorStreaming(true)
+      batch(() => {
+        setLiveDirectorWorkerId(event.worker_id)
+        setLiveDirectorStartedAt(Date.now())
+        setLiveDirectorContent('')
+        setLiveDirectorThinking('')
+        setLiveDirectorThinkingSegments([])
+        setLiveDirectorToolCalls([])
+        setLiveDirectorStreaming(true)
+      })
       scheduleRefresh(100)
       break
     case 'hq_worker_completed':
@@ -366,10 +360,14 @@ function ingestEvent(event: AgentEvent): void {
     case 'hq_phase_completed':
       scheduleRefresh(100)
       if ('worker_id' in event && event.worker_id === liveDirectorWorkerId()) {
-        setLiveDirectorStreaming(false)
+        batch(() => {
+          setLiveDirectorStreaming(false)
+        })
       }
       if (event.type === 'hq_all_complete') {
-        setLiveDirectorStreaming(false)
+        batch(() => {
+          setLiveDirectorStreaming(false)
+        })
       }
       break
     case 'hq_worker_token':
@@ -429,6 +427,10 @@ function ingestEvent(event: AgentEvent): void {
       }
       break
     case 'hq_worker_progress':
+    case 'hq_summary':
+    case 'hq_spec_created':
+    case 'hq_artifact_created':
+    case 'hq_conflict_detected':
     case 'hq_external_worker_started':
     case 'hq_external_worker_completed':
     case 'hq_external_worker_failed':
@@ -437,16 +439,6 @@ function ingestEvent(event: AgentEvent): void {
   }
 }
 
-const selectedEpic = createMemo(() => {
-  const id = selectedEpicId()
-  return id ? (epics().find((epic) => epic.id === id) ?? null) : null
-})
-
-const selectedIssue = createMemo(() => {
-  const id = selectedIssueId()
-  return id ? (issues().find((issue) => issue.id === id) ?? null) : null
-})
-
 const selectedAgent = createMemo(() => {
   const id = selectedAgentId()
   return id ? (agents().find((agent) => agent.id === id) ?? null) : null
@@ -454,17 +446,19 @@ const selectedAgent = createMemo(() => {
 
 const runningAgents = createMemo(() => agents().filter((agent) => agent.status === 'running'))
 
-const issuesByColumn = createMemo(() => {
-  const all = issues()
-  return {
-    backlog: all.filter((issue) => issue.status === 'backlog'),
-    'in-progress': all.filter((issue) => issue.status === 'in-progress'),
-    review: all.filter((issue) => issue.status === 'review'),
-    done: all.filter((issue) => issue.status === 'done'),
+createEffect(() => {
+  if (hqMode()) {
+    triggerRefresh()
   }
 })
 
-if (hqMode()) void refreshAll()
+createEffect(() => {
+  const page = hqPage()
+  const currentEpics = epics()
+  if (page !== 'plan-review' || currentEpics.length === 0 || plan()) return
+  const epicId = preferredEpicId(currentEpics)
+  if (epicId) void loadCurrentPlan(epicId)
+})
 
 export function useHq() {
   return {
@@ -472,11 +466,10 @@ export function useHq() {
     toggleHqMode,
     isOnboarded,
     markOnboarded,
+    bootstrapWorkspace,
     hqPage,
     breadcrumbs,
     navigateTo,
-    navigateToEpic,
-    navigateToIssue,
     navigateToAgent,
     navigateBack,
     showNewEpicModal,
@@ -489,29 +482,26 @@ export function useHq() {
     activity,
     metrics,
     directorMessages,
+    liveDirectorStartedAt,
     liveDirectorContent,
     liveDirectorThinking,
     liveDirectorThinkingSegments,
     liveDirectorToolCalls,
     liveDirectorStreaming,
     hqSettings,
+    lastBootstrapResult,
     isLoading,
     lastError,
     selectedEpicId,
     selectedIssueId,
     selectedAgentId,
-    selectedEpic,
-    selectedIssue,
     selectedAgent,
     runningAgents,
-    issuesByColumn,
     refreshAll,
+    refreshSettings,
     createEpic,
-    moveIssue,
-    steerAgent,
     approveCurrentPlan,
     rejectCurrentPlan,
-    addIssueComment,
     sendDirectorMessage,
     updateSettings,
     ingestEvent,

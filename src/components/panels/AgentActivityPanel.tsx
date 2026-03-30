@@ -99,7 +99,7 @@ export const AgentActivityPanel: Component<AgentActivityPanelProps> = (props) =>
             <div class="flex items-center gap-4">
               <Show when={agent.isRunning()}>
                 <span class="flex items-center gap-1.5">
-                  <span class="w-2 h-2 rounded-full bg-[var(--accent)] animate-pulse" />
+                  <span class="w-2 h-2 rounded-full bg-[var(--accent)] animate-pulse-subtle" />
                   Turn {agent.currentTurn()}
                 </span>
                 <span class="flex items-center gap-1.5">
@@ -109,7 +109,7 @@ export const AgentActivityPanel: Component<AgentActivityPanelProps> = (props) =>
               </Show>
               <Show when={!agent.isRunning()}>
                 <span class="flex items-center gap-1.5">
-                  <span class="w-2 h-2 rounded-full bg-[var(--accent)] animate-pulse" />
+                  <span class="w-2 h-2 rounded-full bg-[var(--accent)] animate-pulse-subtle" />
                   {agentStats().running} Active
                 </span>
                 <span class="flex items-center gap-1.5">
@@ -150,7 +150,7 @@ export const AgentActivityPanel: Component<AgentActivityPanelProps> = (props) =>
 
 /** Skeleton placeholder shown while agent data is loading */
 export const AgentActivitySkeleton: Component = () => (
-  <div class="flex flex-col h-full animate-pulse">
+  <div class="flex flex-col h-full animate-pulse-subtle">
     <div class="px-4 py-3 border-b border-[var(--border-subtle)]">
       <div class="flex items-center gap-3">
         <div class="w-9 h-9 bg-[var(--surface-raised)] rounded-[var(--radius-lg)]" />

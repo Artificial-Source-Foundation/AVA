@@ -107,20 +107,27 @@ export const QuickModelPicker: Component<QuickModelPickerProps> = (props) => {
   return (
     <Dialog open={props.open} onOpenChange={(open) => !open && props.onClose()}>
       <Dialog.Portal>
-        <Dialog.Overlay class="fixed inset-0 z-[var(--z-modal)] bg-black/40" />
+        <Dialog.Overlay
+          class="fixed inset-0 z-[var(--z-modal)]"
+          style={{ background: 'var(--modal-overlay)' }}
+        />
         <Dialog.Content
           class="
             fixed z-[var(--z-modal)]
             top-[15%] left-1/2 -translate-x-1/2
             w-[min(520px,90vw)]
-            bg-[var(--surface-overlay)] border border-[var(--border-default)]
-            rounded-[var(--radius-xl)] shadow-[var(--shadow-xl)]
             overflow-hidden
           "
+          style={{
+            background: 'var(--modal-surface)',
+            border: '1px solid var(--modal-border)',
+            'border-radius': 'var(--modal-radius-sm)',
+            'box-shadow': 'var(--modal-shadow)',
+          }}
           onKeyDown={handleKeyDown}
         >
           {/* Search */}
-          <div class="px-3 py-2 border-b border-[var(--border-subtle)]">
+          <div class="px-3 py-2" style={{ 'border-bottom': '1px solid var(--modal-border)' }}>
             <input
               ref={inputRef}
               type="text"
@@ -163,9 +170,11 @@ export const QuickModelPicker: Component<QuickModelPickerProps> = (props) => {
                               w-full flex items-center gap-3 px-3 py-1.5 text-left
                               transition-colors
                             "
-                            classList={{
-                              'bg-[var(--accent-subtle)]': flatIdx() === selectedIndex(),
-                              'hover:bg-[var(--alpha-white-5)]': flatIdx() !== selectedIndex(),
+                            style={{
+                              background:
+                                flatIdx() === selectedIndex()
+                                  ? 'var(--dropdown-item-active-bg)'
+                                  : 'transparent',
                             }}
                           >
                             <div class="flex-1 min-w-0">

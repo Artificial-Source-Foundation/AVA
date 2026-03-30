@@ -98,10 +98,24 @@ export const ToolListDialog: Component<ToolListDialogProps> = (props) => {
 
   return (
     <Show when={props.open}>
-      <div class="fixed inset-0 z-50 flex items-center justify-center bg-[var(--background)]/80">
-        <div class="bg-[var(--surface-raised)] border border-[var(--border-default)] rounded-[var(--radius-xl)] max-w-lg w-full shadow-2xl overflow-hidden max-h-[80vh] flex flex-col">
+      <div
+        class="fixed inset-0 z-50 flex items-center justify-center"
+        style={{ background: 'var(--modal-overlay)' }}
+      >
+        <div
+          class="max-w-lg w-full overflow-hidden max-h-[80vh] flex flex-col"
+          style={{
+            background: 'var(--modal-surface)',
+            border: '1px solid var(--modal-border)',
+            'border-radius': 'var(--modal-radius-lg)',
+            'box-shadow': 'var(--modal-shadow)',
+          }}
+        >
           {/* Header */}
-          <div class="flex items-center justify-between px-5 py-4 border-b border-[var(--border-subtle)]">
+          <div
+            class="flex items-center justify-between px-5 py-4"
+            style={{ 'border-bottom': '1px solid var(--modal-border)' }}
+          >
             <div class="flex items-center gap-2.5">
               <div class="p-1.5 rounded-[var(--radius-md)] bg-[var(--accent-subtle)]">
                 <Wrench class="w-4 h-4 text-[var(--accent)]" />
@@ -116,7 +130,8 @@ export const ToolListDialog: Component<ToolListDialogProps> = (props) => {
             <button
               type="button"
               onClick={() => props.onClose()}
-              class="p-1.5 rounded-[var(--radius-md)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-raised)] transition-colors"
+              class="p-1.5 rounded-[var(--radius-md)] hover:bg-[var(--alpha-white-5)] transition-colors"
+              style={{ color: 'var(--close-button-color)' }}
               aria-label="Close"
             >
               <X class="w-4 h-4" />
@@ -124,7 +139,7 @@ export const ToolListDialog: Component<ToolListDialogProps> = (props) => {
           </div>
 
           {/* Search */}
-          <div class="px-5 py-3 border-b border-[var(--border-subtle)]">
+          <div class="px-5 py-3" style={{ 'border-bottom': '1px solid var(--modal-border)' }}>
             <div class="relative">
               <Search class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-muted)]" />
               <input
@@ -222,7 +237,10 @@ export const ToolListDialog: Component<ToolListDialogProps> = (props) => {
           </div>
 
           {/* Footer */}
-          <div class="px-5 py-3 border-t border-[var(--border-subtle)] flex justify-end">
+          <div
+            class="px-5 py-3 flex justify-end"
+            style={{ 'border-top': '1px solid var(--modal-border)' }}
+          >
             <button
               type="button"
               onClick={() => props.onClose()}

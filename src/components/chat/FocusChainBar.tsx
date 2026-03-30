@@ -40,8 +40,8 @@ export const FocusChainBar: Component = () => {
           {/* Progress bar */}
           <div class="w-16 h-1 bg-[var(--surface-raised)] rounded-full overflow-hidden shrink-0">
             <div
-              class="h-full bg-[var(--accent)] rounded-full transition-all duration-300"
-              style={{ width: `${progressPercent()}%` }}
+              class="h-full w-full origin-left bg-[var(--accent)] rounded-full transition-transform duration-300"
+              style={{ transform: `scaleX(${progressPercent() / 100})` }}
             />
           </div>
 

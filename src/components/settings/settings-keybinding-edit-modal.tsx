@@ -27,7 +27,18 @@ export const KeybindingEditModal: Component<KeybindingEditModalProps> = (props) 
       if (e.shiftKey) newKeys.push('shift')
       if (e.altKey) newKeys.push('alt')
 
-      const key = e.key.toLowerCase()
+      let key = e.key.toLowerCase()
+      // When Ctrl/Meta remaps a letter to a control-char name (e.g. Ctrl+M → "Enter"),
+      // recover the real letter from e.code.
+      if (
+        (e.ctrlKey || e.metaKey) &&
+        e.code &&
+        (key === 'enter' || key === 'tab' || key === 'backspace' || key.length > 1) &&
+        !['control', 'shift', 'alt', 'meta'].includes(key)
+      ) {
+        if (e.code.startsWith('Key')) key = e.code.slice(3).toLowerCase()
+        else if (e.code.startsWith('Digit')) key = e.code.slice(5)
+      }
       if (!['control', 'shift', 'alt', 'meta'].includes(key)) {
         newKeys.push(key)
       }
@@ -67,47 +78,118 @@ export const KeybindingEditModal: Component<KeybindingEditModalProps> = (props) 
   return (
     <div
       role="dialog"
-      class="fixed inset-0 bg-black/60 flex items-center justify-center z-[60] p-4"
+      class="fixed inset-0 flex items-center justify-center z-[60] p-4"
+      style={{ background: 'var(--modal-overlay)' }}
       onClick={(e) => e.target === e.currentTarget && props.onClose()}
       onKeyDown={(e) => e.key === 'Escape' && props.onClose()}
     >
-      <div class="bg-[var(--surface-overlay)] border border-[var(--border-default)] rounded-[var(--radius-xl)] w-full max-w-md shadow-xl">
-        <div class="flex items-center justify-between px-5 py-3 border-b border-[var(--border-subtle)]">
-          <h2 class="text-sm font-semibold text-[var(--text-primary)]">Edit Shortcut</h2>
+      <div
+        style={{
+          background: 'var(--modal-surface)',
+          border: '1px solid var(--modal-border)',
+          'border-radius': 'var(--modal-radius-sm)',
+          width: '100%',
+          'max-width': '28rem',
+          'box-shadow': 'var(--modal-shadow)',
+        }}
+      >
+        <div
+          class="flex items-center justify-between"
+          style={{
+            padding: '12px 20px',
+            'border-bottom': '1px solid #ffffff06',
+          }}
+        >
+          <h2
+            style={{
+              'font-family': 'Geist, sans-serif',
+              'font-size': '14px',
+              'font-weight': '600',
+              color: '#F5F5F7',
+            }}
+          >
+            Edit Shortcut
+          </h2>
           <button
             type="button"
             onClick={() => props.onClose()}
-            class="p-1.5 rounded-[var(--radius-md)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--alpha-white-5)] transition-colors"
+            class="transition-colors"
+            style={{
+              padding: '6px',
+              'border-radius': '6px',
+              color: '#48484A',
+              background: 'transparent',
+              border: 'none',
+              cursor: 'pointer',
+            }}
           >
             <X class="w-4 h-4" />
           </button>
         </div>
 
-        <div class="p-5 space-y-4">
+        <div style={{ padding: '20px', display: 'flex', 'flex-direction': 'column', gap: '16px' }}>
           <div>
-            <p class="text-sm font-medium text-[var(--text-primary)]">{props.keybinding.action}</p>
-            <p class="text-xs text-[var(--text-muted)] mt-0.5">{props.keybinding.description}</p>
+            <p
+              style={{
+                'font-family': 'Geist, sans-serif',
+                'font-size': '13px',
+                'font-weight': '500',
+                color: '#F5F5F7',
+              }}
+            >
+              {props.keybinding.action}
+            </p>
+            <p
+              style={{
+                'font-family': 'Geist, sans-serif',
+                'font-size': '12px',
+                color: '#48484A',
+                'margin-top': '2px',
+              }}
+            >
+              {props.keybinding.description}
+            </p>
           </div>
 
           <FieldGroup label="Shortcut">
             <button
               type="button"
               onClick={startRecording}
-              class={`w-full px-4 py-3 text-center text-sm rounded-[var(--radius-lg)] border-2 border-dashed transition-colors duration-[var(--duration-fast)] ${recording() ? 'border-[var(--accent)] bg-[var(--accent-subtle)] text-[var(--accent)] animate-pulse' : 'border-[var(--border-default)] bg-[var(--input-background)] text-[var(--text-primary)] hover:border-[var(--accent-muted)]'}`}
+              class="w-full text-center transition-colors"
+              style={{
+                padding: '12px 16px',
+                'border-radius': '8px',
+                border: `2px dashed ${recording() ? '#0A84FF' : '#ffffff0a'}`,
+                background: recording() ? '#0A84FF10' : '#ffffff06',
+                color: recording() ? '#0A84FF' : '#F5F5F7',
+                'font-size': '13px',
+                cursor: 'pointer',
+              }}
             >
               <Show
                 when={!recording()}
-                fallback={<span class="font-medium">Press your shortcut...</span>}
+                fallback={<span style={{ 'font-weight': '500' }}>Press your shortcut...</span>}
               >
                 <div class="flex items-center justify-center gap-1">
                   <For each={keys()}>
                     {(key, index) => (
                       <>
-                        <kbd class="px-2 py-1 bg-[var(--surface-raised)] border border-[var(--border-default)] rounded-md text-xs font-mono font-medium shadow-[0_1px_0_var(--alpha-black-20)]">
+                        <kbd
+                          style={{
+                            padding: '4px 8px',
+                            background: '#0A0A0C',
+                            border: '1px solid #ffffff08',
+                            'border-radius': '6px',
+                            'font-family': 'Geist Mono, monospace',
+                            'font-size': '12px',
+                            'font-weight': '500',
+                            color: '#F5F5F7',
+                          }}
+                        >
                           {formatKey(key)}
                         </kbd>
                         <Show when={index() < keys().length - 1}>
-                          <span class="text-[var(--text-muted)]">+</span>
+                          <span style={{ color: '#48484A' }}>+</span>
                         </Show>
                       </>
                     )}
@@ -115,17 +197,32 @@ export const KeybindingEditModal: Component<KeybindingEditModalProps> = (props) 
                 </div>
               </Show>
             </button>
-            <p class="text-[var(--settings-text-badge)] text-[var(--text-muted)] mt-1.5">
+            <p style={{ 'font-size': '11px', color: '#48484A', 'margin-top': '6px' }}>
               Click to record a new shortcut
             </p>
           </FieldGroup>
         </div>
 
-        <div class="flex items-center justify-end gap-2 px-5 py-3 border-t border-[var(--border-subtle)]">
+        <div
+          class="flex items-center justify-end"
+          style={{
+            gap: '8px',
+            padding: '12px 20px',
+            'border-top': '1px solid #ffffff06',
+          }}
+        >
           <button
             type="button"
             onClick={() => props.onClose()}
-            class="px-3 py-1.5 text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] rounded-[var(--radius-md)] transition-colors"
+            style={{
+              padding: '6px 14px',
+              'font-size': '13px',
+              color: '#48484A',
+              background: 'transparent',
+              border: 'none',
+              'border-radius': '8px',
+              cursor: 'pointer',
+            }}
           >
             Cancel
           </button>
@@ -133,7 +230,17 @@ export const KeybindingEditModal: Component<KeybindingEditModalProps> = (props) 
             type="button"
             onClick={handleSave}
             disabled={keys().length === 0}
-            class="px-3 py-1.5 text-xs bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white rounded-[var(--radius-md)] font-medium transition-colors disabled:opacity-50"
+            style={{
+              padding: '6px 14px',
+              'font-size': '13px',
+              'font-weight': '500',
+              color: '#FFFFFF',
+              background: '#0A84FF',
+              border: 'none',
+              'border-radius': '8px',
+              cursor: 'pointer',
+              opacity: keys().length === 0 ? '0.5' : '1',
+            }}
           >
             Save
           </button>

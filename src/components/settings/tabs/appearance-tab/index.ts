@@ -11,5 +11,5 @@ export {
   InterfaceScaleSection,
   SidebarOrderSection,
 } from './LayoutSettings'
-export type { ThemePresetsGridProps } from './ThemeSelector'
-export { AccentSection, ColorModeSection, ThemePresetsGrid } from './ThemeSelector'
+export type { ThemeSelectorCompactProps } from './ThemeSelector'
+export { AccentSection, ColorModeSection, ThemeSelectorCompact } from './ThemeSelector'

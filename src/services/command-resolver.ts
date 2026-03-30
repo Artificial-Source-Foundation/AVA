@@ -41,6 +41,13 @@ const BUILT_IN_NAMES = new Set([
   'init',
   'later',
   'queue',
+  'new',
+  'sessions',
+  'copy',
+  'shortcuts',
+  'theme',
+  'permissions',
+  'think',
 ])
 
 export interface ParsedCommand {
@@ -100,6 +107,7 @@ export function getAvailableCommands(): CommandEntry[] {
 
 /** Register built-in slash commands exposed in desktop chat */
 export function registerBuiltInCommands(): void {
+  // ── Local UI commands (handled in frontend) ──
   registerCommand('compact', {
     description: 'Compact conversation context and preserve a summary',
   })
@@ -108,5 +116,73 @@ export function registerBuiltInCommands(): void {
   })
   registerCommand('queue', {
     description: 'Show the current message queue',
+  })
+  registerCommand('clear', {
+    description: 'Clear the current chat',
+  })
+  registerCommand('new', {
+    description: 'Start a new session',
+  })
+  registerCommand('sessions', {
+    description: 'Open the session picker',
+  })
+  registerCommand('model', {
+    description: 'Show or switch the current model',
+  })
+  registerCommand('theme', {
+    description: 'Cycle or switch theme',
+  })
+  registerCommand('permissions', {
+    description: 'Toggle permission level',
+  })
+  registerCommand('think', {
+    description: 'Toggle thinking visibility',
+  })
+  registerCommand('export', {
+    description: 'Export the current conversation',
+  })
+  registerCommand('copy', {
+    description: 'Copy the last assistant response',
+  })
+  registerCommand('help', {
+    description: 'Show available commands and shortcuts',
+  })
+  registerCommand('shortcuts', {
+    description: 'Show keyboard shortcuts',
+  })
+  registerCommand('settings', {
+    description: 'Open settings',
+  })
+
+  // ── Agent-handled commands (sent to Rust backend) ──
+  registerCommand('commit', {
+    description: 'Inspect commit readiness',
+  })
+  registerCommand('connect', {
+    description: 'Add provider credentials',
+  })
+  registerCommand('providers', {
+    description: 'Show provider status',
+  })
+  registerCommand('disconnect', {
+    description: 'Remove provider credentials',
+  })
+  registerCommand('mcp', {
+    description: 'Manage MCP servers',
+  })
+  registerCommand('btw', {
+    description: 'Start a side conversation branch',
+  })
+  registerCommand('hooks', {
+    description: 'Manage lifecycle hooks',
+  })
+  registerCommand('tasks', {
+    description: 'Show background tasks',
+  })
+  registerCommand('init', {
+    description: 'Create project templates',
+  })
+  registerCommand('rewind', {
+    description: 'Browse conversation checkpoint history',
   })
 }

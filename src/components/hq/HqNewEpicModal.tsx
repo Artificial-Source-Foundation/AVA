@@ -23,7 +23,7 @@ export const HqNewEpicModal: Component<{
         style={{
           'background-color': 'color-mix(in srgb, var(--background) 78%, black)',
         }}
-        onClick={props.onClose}
+        onClick={() => props.onClose()}
       />
       <div
         role="dialog"
@@ -49,7 +49,7 @@ export const HqNewEpicModal: Component<{
           <button
             type="button"
             class="flex items-center justify-center w-7 h-7 rounded-md hover:bg-[var(--alpha-white-8)] transition-colors"
-            onClick={props.onClose}
+            onClick={() => props.onClose()}
           >
             <X size={18} class="text-zinc-500" />
           </button>
@@ -122,7 +122,7 @@ export const HqNewEpicModal: Component<{
               color: 'var(--text-secondary)',
               border: '1px solid var(--border-subtle)',
             }}
-            onClick={props.onClose}
+            onClick={() => props.onClose()}
           >
             Cancel
           </button>

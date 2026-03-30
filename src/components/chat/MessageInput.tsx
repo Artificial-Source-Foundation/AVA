@@ -1,16 +1,14 @@
 /**
  * Message Input Component
  *
- * Chat input with Goose-style layout:
- * - Send/cancel buttons inside the textarea
- * - Single unified strip below with model selector, toggles, and context info
- *
- * Sub-components live in ./message-input/ for modularity.
+ * Chat input with Goose-style layout.
+ * Supports an optional adapter so HQ can use this exact component path.
  */
 
-import { type Component, createMemo, Show } from 'solid-js'
+import { type Component, createMemo, type JSX, Show } from 'solid-js'
 import { useLayout } from '../../stores/layout'
 import { DoomLoopBanner } from './DoomLoopBanner'
+import { MessageInputShell } from './MessageInputShell'
 import { FileMentionPopover } from './message-input/file-mention-popover'
 import { InputDialogs } from './message-input/input-dialogs'
 import type { QueuedItem } from './message-input/MessageQueueWidget'
@@ -18,17 +16,20 @@ import { SlashCommandPopover } from './message-input/slash-command-popover'
 import { InputTextArea } from './message-input/text-area'
 import { ToolbarStrip } from './message-input/toolbar-strip'
 import { useInputState } from './message-input/use-input-state'
-import { ShortcutHint } from './ShortcutHint'
 
-// ---------------------------------------------------------------------------
-// Component
-// ---------------------------------------------------------------------------
+export interface MessageInputAdapter {
+  doomBanner?: JSX.Element
+  popovers: JSX.Element
+  textarea: JSX.Element
+  toolbar: JSX.Element
+  dialogs?: JSX.Element
+  shortcutHintSendCount: number
+}
 
-export const MessageInput: Component = () => {
+export const MessageInput: Component<{ adapter?: MessageInputAdapter }> = (props) => {
   const state = useInputState()
   const { openModelBrowser } = useLayout()
 
-  // Map QueuedMessage[] -> QueuedItem[] (add stable id for the widget)
   const queuedItems = createMemo<QueuedItem[]>(() =>
     state.chat.messageQueue().map((msg, i) => ({
       id: `q-${i}-${msg.content.slice(0, 20)}`,
@@ -38,8 +39,8 @@ export const MessageInput: Component = () => {
     }))
   )
 
-  return (
-    <div class="px-7 py-4 border-t border-[var(--gray-5)]">
+  const defaultAdapter = (): MessageInputAdapter => ({
+    doomBanner: (
       <Show when={state.agent.doomLoopDetected()}>
         <DoomLoopBanner
           onStop={() => state.agent.cancel()}
@@ -47,22 +48,25 @@ export const MessageInput: Component = () => {
           onSwitchModel={() => openModelBrowser()}
         />
       </Show>
-      <form onSubmit={state.handleSubmit} class="space-y-1.5">
-        {/* @ mention autocomplete popover */}
-        <div class="relative">
-          <FileMentionPopover
-            open={state.mentionOpen}
-            files={state.mentionFiltered}
-            onSelect={state.handleMentionSelect}
-            selectedIndex={state.mentionIndex}
-          />
-          <SlashCommandPopover
-            open={state.slashOpen}
-            commands={state.slashCommands}
-            onSelect={state.handleSlashSelect}
-            selectedIndex={state.slashIndex}
-          />
-        </div>
+    ),
+    popovers: (
+      <div class="relative">
+        <FileMentionPopover
+          open={state.mentionOpen}
+          files={state.mentionFiltered}
+          onSelect={state.handleMentionSelect}
+          selectedIndex={state.mentionIndex}
+        />
+        <SlashCommandPopover
+          open={state.slashOpen}
+          commands={state.slashCommands}
+          onSelect={state.handleSlashSelect}
+          selectedIndex={state.slashIndex}
+        />
+      </div>
+    ),
+    textarea: (
+      <form onSubmit={state.handleSubmit}>
         <InputTextArea
           input={state.input}
           onInput={state.onTextareaInput}
@@ -99,20 +103,20 @@ export const MessageInput: Component = () => {
           onQueueEdit={(i, content) => state.chat.editInQueue(i, content)}
           onQueueClearAll={() => state.chat.clearQueue()}
         />
-        <ShortcutHint sendCount={state.sendCount()} />
-
-        <ToolbarStrip
-          currentModelDisplay={state.currentModelDisplay}
-          modelSupportsReasoning={state.modelSupportsReasoning}
-          handleCycleReasoning={state.handleCycleReasoning}
-          toggleDelegation={state.toggleDelegation}
-          isProcessing={state.isProcessing}
-          stashSize={state.stashSize}
-          chat={state.chat}
-          agent={state.agent}
-          sessionStore={state.sessionStore}
-        />
       </form>
+    ),
+    toolbar: (
+      <ToolbarStrip
+        currentModelDisplay={state.currentModelDisplay}
+        modelSupportsReasoning={state.modelSupportsReasoning}
+        handleCycleReasoning={state.handleCycleReasoning}
+        toggleDelegation={state.toggleDelegation}
+        isProcessing={state.isProcessing}
+        agent={state.agent}
+        sessionStore={state.sessionStore}
+      />
+    ),
+    dialogs: (
       <InputDialogs
         input={state.input}
         setInput={state.setInput}
@@ -120,6 +124,20 @@ export const MessageInput: Component = () => {
         enabledProviders={state.enabledProviders}
         focusTextarea={state.focusTextarea}
       />
-    </div>
+    ),
+    shortcutHintSendCount: state.sendCount(),
+  })
+
+  const adapter = () => props.adapter ?? defaultAdapter()
+
+  return (
+    <MessageInputShell
+      doomBanner={adapter().doomBanner}
+      popovers={adapter().popovers}
+      textarea={adapter().textarea}
+      toolbar={adapter().toolbar}
+      dialogs={adapter().dialogs}
+      shortcutHintSendCount={adapter().shortcutHintSendCount}
+    />
   )
 }

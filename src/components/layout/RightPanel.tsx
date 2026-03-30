@@ -1,171 +1,211 @@
-import {
-  Bot,
-  CheckSquare,
-  FileDiff,
-  FolderOpen,
-  GitCompareArrows,
-  MoreHorizontal,
-  Route,
-  Users,
-  X,
-} from 'lucide-solid'
-import { createMemo, createSignal, For, Show } from 'solid-js'
+/**
+ * Right Panel — Unified "Inspector" Panel
+ *
+ * A single scrollable panel showing Changes and Todos sections
+ * separated by dividers. Replaces the previous multi-tab layout.
+ *
+ * Design reference: Pencil node OvbCi / yKUuH
+ */
+
+import { Check, FileEdit, FilePlus2, X } from 'lucide-solid'
+import { type Component, createMemo, For, Show } from 'solid-js'
 import { useRustAgent } from '../../hooks/use-rust-agent'
-import { useAgent } from '../../hooks/useAgent'
-import type { RightPanelTab } from '../../stores/layout'
 import { useLayout } from '../../stores/layout'
 import { useSession } from '../../stores/session'
 import { useSettings } from '../../stores/settings'
-import { useTeam } from '../../stores/team'
-import { AgentActivityPanel } from '../panels/AgentActivityPanel'
-import { DiffReviewPanel } from '../panels/DiffReviewPanel'
-import { FileOperationsPanel } from '../panels/FileOperationsPanel'
-import { SessionDiffPanel } from '../panels/SessionDiffPanel'
-import { TeamPanel } from '../panels/TeamPanel'
-import { TodoPanel } from '../panels/TodoPanel'
-import { TrajectoryInspector } from '../panels/TrajectoryInspector'
-import { WorkerDetail } from '../panels/team/WorkerDetail'
+import type { Message, ToolCall } from '../../types'
+import type { TodoItem } from '../../types/rust-ipc'
 import { PanelErrorBoundary } from '../ui/PanelErrorBoundary'
 
-// ---------------------------------------------------------------------------
-// Primary tabs (always visible) + overflow tabs (behind "..." menu)
-// ---------------------------------------------------------------------------
+// ============================================================================
+// Changes helpers
+// ============================================================================
 
-const ALL_PANEL_TABS: { id: RightPanelTab; icon: typeof Bot; label: string; primary: boolean }[] = [
-  { id: 'activity', icon: Bot, label: 'Activity', primary: true },
-  { id: 'changes', icon: FileDiff, label: 'Changes', primary: true },
-  { id: 'todos', icon: CheckSquare, label: 'Todos', primary: true },
-  { id: 'files', icon: FolderOpen, label: 'Files', primary: false },
-  { id: 'review', icon: GitCompareArrows, label: 'Review', primary: false },
-  { id: 'trajectory', icon: Route, label: 'Trajectory', primary: false },
-  { id: 'team', icon: Users, label: 'Team', primary: false },
-]
+const FILE_WRITE_TOOLS = new Set(['write', 'edit', 'apply_patch', 'multiedit'])
 
-interface TabBarProps {
-  currentTab: RightPanelTab
-  onSwitch: (tab: RightPanelTab) => void
-  onClose: () => void
-  todoCount: number
-  changesCount: number
-  showTeam: boolean
+interface FileChange {
+  filePath: string
+  fileName: string
+  isNew: boolean
+  linesAdded: number
+  linesRemoved: number
+  timestamp: number
 }
 
-function TabBar(props: TabBarProps) {
-  const [moreOpen, setMoreOpen] = createSignal(false)
-  let moreRef: HTMLDivElement | undefined
+function resolveFilePath(tc: ToolCall): string | null {
+  if (tc.filePath) return tc.filePath
+  const a = tc.args
+  if (typeof a.path === 'string') return a.path
+  if (typeof a.file_path === 'string') return a.file_path
+  if (typeof a.filename === 'string') return a.filename
+  return null
+}
 
-  const handleClickOutside = (e: MouseEvent) => {
-    if (moreRef && !moreRef.contains(e.target as Node)) setMoreOpen(false)
+function extractFileChanges(messages: Message[]): FileChange[] {
+  const byFile = new Map<string, FileChange>()
+
+  for (const msg of messages) {
+    if (!msg.toolCalls) continue
+    for (const tc of msg.toolCalls) {
+      if (!FILE_WRITE_TOOLS.has(tc.name)) continue
+      if (tc.status !== 'success') continue
+      const fp = resolveFilePath(tc)
+      if (!fp) continue
+
+      const ts = tc.completedAt ?? tc.startedAt
+      const existing = byFile.get(fp)
+
+      // Count lines from diff if available
+      let added = 0
+      let removed = 0
+      let isNew = false
+      if (tc.diff) {
+        const lines = tc.diff.newContent.split('\n')
+        const oldLines = tc.diff.oldContent.split('\n')
+        added = Math.max(0, lines.length - oldLines.length)
+        removed = Math.max(0, oldLines.length - lines.length)
+        isNew = !tc.diff.oldContent
+      } else if (tc.name === 'write') {
+        isNew = true
+        added = typeof tc.args.content === 'string' ? tc.args.content.split('\n').length : 0
+      }
+
+      if (!existing || ts > existing.timestamp) {
+        byFile.set(fp, {
+          filePath: fp,
+          fileName: fp.split('/').pop() || fp,
+          isNew: existing ? existing.isNew : isNew,
+          linesAdded: added || existing?.linesAdded || 0,
+          linesRemoved: removed || existing?.linesRemoved || 0,
+          timestamp: ts,
+        })
+      }
+    }
   }
 
-  const primaryTabs = () => ALL_PANEL_TABS.filter((t) => t.primary)
-  const overflowTabs = () =>
-    ALL_PANEL_TABS.filter((t) => !t.primary && (t.id !== 'team' || props.showTeam))
+  return Array.from(byFile.values()).sort((a, b) => b.timestamp - a.timestamp)
+}
 
-  const isOverflowActive = () => overflowTabs().some((t) => t.id === props.currentTab)
+// ============================================================================
+// Section: Activity (removed — only populated in HQ mode; solo mode shows
+// tool activity inline in message bubbles instead)
+// ============================================================================
+// ============================================================================
+// Section: Changes
+// ============================================================================
 
-  const badge = (tabId: RightPanelTab) => {
-    if (tabId === 'todos' && props.todoCount > 0) return props.todoCount
-    if (tabId === 'changes' && props.changesCount > 0) return props.changesCount
-    return 0
-  }
+const ChangesSection: Component = () => {
+  const { messages } = useSession()
+  const changes = createMemo(() => extractFileChanges(messages()))
 
   return (
-    <div class="flex items-center h-8 flex-shrink-0 border-b border-[var(--border-subtle)]">
-      {/* Primary tabs — icon-only with tooltip, always fit */}
-      <div class="flex items-center flex-1 min-w-0">
-        <For each={primaryTabs()}>
-          {(tab) => {
-            const Icon = tab.icon
-            const count = () => badge(tab.id)
+    <div class="flex flex-col gap-[10px]">
+      <span class="inspector-section-title">Changes</span>
+
+      <Show
+        when={changes().length > 0}
+        fallback={<span class="text-[11px] text-[var(--text-muted)]">No file changes yet</span>}
+      >
+        <For each={changes()}>
+          {(file) => {
+            const FileIcon = file.isNew ? FilePlus2 : FileEdit
+            const iconColor = file.isNew ? 'var(--success)' : 'var(--warning)'
+
             return (
-              <button
-                type="button"
-                onClick={() => props.onSwitch(tab.id)}
-                class="relative flex items-center justify-center w-8 h-8 transition-colors flex-shrink-0"
-                classList={{
-                  'text-[var(--accent)] border-b-2 border-[var(--accent)]':
-                    props.currentTab === tab.id,
-                  'text-[var(--text-muted)] hover:text-[var(--text-secondary)]':
-                    props.currentTab !== tab.id,
-                }}
-                title={tab.label}
-              >
-                <Icon class="w-4 h-4" />
-                <Show when={count() > 0}>
-                  <span class="absolute -top-0.5 -right-0.5 min-w-[14px] h-[14px] px-0.5 flex items-center justify-center rounded-full bg-[var(--accent)] text-white text-[8px] font-bold leading-none">
-                    {count()}
+              <div class="inspector-card flex items-center justify-between rounded-lg">
+                <div class="flex items-center gap-1.5">
+                  <FileIcon class="w-[11px] h-[11px] flex-shrink-0" style={{ color: iconColor }} />
+                  <span class="truncate font-mono text-[11px] text-[var(--text-secondary)]">
+                    {file.fileName}
                   </span>
-                </Show>
-              </button>
+                </div>
+                <div class="flex items-center gap-1 flex-shrink-0">
+                  <Show when={file.linesAdded > 0}>
+                    <span class="font-mono text-[10px] font-medium text-[var(--success)]">
+                      +{file.linesAdded}
+                    </span>
+                  </Show>
+                  <Show when={file.linesRemoved > 0}>
+                    <span class="font-mono text-[10px] font-medium text-[var(--error)]">
+                      -{file.linesRemoved}
+                    </span>
+                  </Show>
+                  <Show when={file.isNew && file.linesAdded === 0}>
+                    <span class="font-mono text-[10px] font-medium text-[var(--success)]">new</span>
+                  </Show>
+                </div>
+              </div>
             )
           }}
         </For>
-
-        {/* More dropdown */}
-        <div ref={moreRef} class="relative h-full flex-shrink-0">
-          <button
-            type="button"
-            onClick={() => {
-              setMoreOpen(!moreOpen())
-              if (!moreOpen()) {
-                document.addEventListener('click', handleClickOutside, { once: true })
-              }
-            }}
-            class="flex items-center justify-center w-8 h-8 transition-colors"
-            classList={{
-              'text-[var(--accent)] border-b-2 border-[var(--accent)]': isOverflowActive(),
-              'text-[var(--text-muted)] hover:text-[var(--text-secondary)]': !isOverflowActive(),
-            }}
-            title="More tabs"
-          >
-            <MoreHorizontal class="w-4 h-4" />
-          </button>
-
-          <Show when={moreOpen()}>
-            <div class="absolute top-full right-0 mt-1 min-w-[140px] py-1 bg-[var(--surface-overlay)] border border-[var(--border-default)] rounded-[var(--radius-md)] shadow-lg z-50">
-              <For each={overflowTabs()}>
-                {(tab) => {
-                  const Icon = tab.icon
-                  return (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        props.onSwitch(tab.id)
-                        setMoreOpen(false)
-                      }}
-                      class="w-full flex items-center gap-2 px-3 py-1.5 text-[var(--text-xs)] transition-colors"
-                      classList={{
-                        'text-[var(--accent)] bg-[var(--alpha-white-5)]':
-                          props.currentTab === tab.id,
-                        'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--alpha-white-5)]':
-                          props.currentTab !== tab.id,
-                      }}
-                    >
-                      <Icon class="w-3.5 h-3.5" />
-                      {tab.label}
-                    </button>
-                  )
-                }}
-              </For>
-            </div>
-          </Show>
-        </div>
-      </div>
-
-      {/* Close button — always visible */}
-      <button
-        type="button"
-        onClick={() => props.onClose()}
-        class="flex items-center justify-center w-8 h-8 flex-shrink-0 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
-        aria-label="Close panel"
-        title="Close panel"
-      >
-        <X class="w-3.5 h-3.5" />
-      </button>
+      </Show>
     </div>
   )
 }
+
+// ============================================================================
+// Section: Todos
+// ============================================================================
+
+const TodosSection: Component = () => {
+  const rustAgent = useRustAgent()
+  const todos = (): TodoItem[] => rustAgent.todos() ?? []
+
+  // Group: in_progress first, then pending, then completed/cancelled
+  const orderedTodos = createMemo(() => {
+    const all = todos()
+    const inProgress = all.filter((t) => t.status === 'in_progress')
+    const pending = all.filter((t) => t.status === 'pending')
+    const done = all.filter((t) => t.status === 'completed')
+    return [...inProgress, ...pending, ...done]
+  })
+
+  return (
+    <div class="flex flex-col gap-[10px]">
+      <span class="inspector-section-title">Todos</span>
+
+      <Show
+        when={orderedTodos().length > 0}
+        fallback={<span class="text-[11px] text-[var(--text-muted)]">No todos yet</span>}
+      >
+        <For each={orderedTodos()}>
+          {(item) => {
+            const isDone = () => item.status === 'completed'
+            return (
+              <div class="flex items-start gap-2 w-full">
+                {/* Checkbox */}
+                <div
+                  class="w-4 h-4 rounded flex items-center justify-center flex-shrink-0 mt-[1px]"
+                  style={{
+                    border: '1.5px solid var(--border-default)',
+                  }}
+                >
+                  <Show when={isDone()}>
+                    <Check class="h-[10px] w-[10px] text-[var(--success)]" />
+                  </Show>
+                </div>
+                {/* Text */}
+                <span
+                  class="text-[12px] leading-[1.4] min-w-0 flex-1"
+                  classList={{
+                    'text-[var(--text-tertiary)]': isDone(),
+                    'text-[var(--text-secondary)]': !isDone(),
+                  }}
+                >
+                  {item.content}
+                </span>
+              </div>
+            )
+          }}
+        </For>
+      </Show>
+    </div>
+  )
+}
+
+// ============================================================================
+// Main Component
+// ============================================================================
 
 interface RightPanelProps {
   startRightResize: (event: MouseEvent) => void
@@ -173,53 +213,11 @@ interface RightPanelProps {
 
 export function RightPanel(props: RightPanelProps) {
   const { settings } = useSettings()
-  const { currentSession, messages } = useSession()
-  const agent = useAgent()
-  const team = useTeam()
-  const rustAgent = useRustAgent()
-  const {
-    rightPanelVisible,
-    rightPanelWidth,
-    rightPanelTab,
-    switchRightPanelTab,
-    setRightPanelVisible,
-  } = useLayout()
-
-  const todoCount = createMemo(() => {
-    const todos = rustAgent.todos()
-    return todos.filter((t) => t.status === 'pending' || t.status === 'in_progress').length
-  })
-
-  /** Count of unique files modified in the current session (via tool calls) */
-  const changesCount = createMemo(() => {
-    const FILE_WRITE_TOOLS = new Set(['write', 'edit', 'apply_patch', 'multiedit'])
-    const seen = new Set<string>()
-    for (const msg of messages()) {
-      if (!msg.toolCalls) continue
-      for (const tc of msg.toolCalls) {
-        if (!FILE_WRITE_TOOLS.has(tc.name)) continue
-        if (tc.status !== 'success') continue
-        const fp =
-          tc.filePath ??
-          (typeof tc.args.path === 'string' ? tc.args.path : null) ??
-          (typeof tc.args.file_path === 'string' ? tc.args.file_path : null)
-        if (fp) seen.add(fp)
-      }
-    }
-    return seen.size
-  })
-
-  /** Stop all working team members */
-  const handleStopAll = (): void => {
-    for (const member of team.allMembers()) {
-      if (member.status === 'working') {
-        agent.stopAgent(member.id)
-      }
-    }
-  }
+  const { rightPanelVisible, rightPanelWidth, setRightPanelVisible } = useLayout()
 
   return (
     <Show when={settings().ui.showAgentActivity && rightPanelVisible()}>
+      {/* Resize handle */}
       {/* biome-ignore lint/a11y/noStaticElementInteractions: resize handle uses mouse-only interaction by design */}
       <div
         class="
@@ -230,61 +228,38 @@ export function RightPanel(props: RightPanelProps) {
         "
         onMouseDown={(event) => props.startRightResize(event)}
       />
+
       <div
-        class="flex-shrink-0 overflow-hidden border-l border-[var(--border-subtle)]"
+        class="inspector-panel flex-shrink-0 overflow-hidden"
         style={{ width: `${rightPanelWidth()}px` }}
       >
-        <div class="flex flex-col h-full bg-[var(--gray-1)]">
-          <TabBar
-            currentTab={rightPanelTab()}
-            onSwitch={switchRightPanelTab}
-            onClose={() => setRightPanelVisible(false)}
-            todoCount={todoCount()}
-            changesCount={changesCount()}
-            showTeam={settings().generation.delegationEnabled || team.hierarchy() !== null}
-          />
+        <div class="flex flex-col h-full">
+          {/* Header — 40px, "Inspector" title + close */}
+          <div class="inspector-header">
+            <span class="inspector-header-title">Inspector</span>
+            <button
+              type="button"
+              onClick={() => setRightPanelVisible(false)}
+              class="flex items-center justify-center text-[var(--text-muted)] transition-colors hover:text-[var(--text-tertiary)]"
+              aria-label="Close panel"
+              title="Close panel"
+            >
+              <X class="w-[14px] h-[14px]" />
+            </button>
+          </div>
 
-          <div class="flex-1 overflow-hidden">
-            <Show when={rightPanelTab() === 'activity'}>
-              <PanelErrorBoundary panelName="Agent Activity">
-                <AgentActivityPanel compact />
-              </PanelErrorBoundary>
-            </Show>
-            <Show when={rightPanelTab() === 'files'}>
-              <PanelErrorBoundary panelName="File Operations">
-                <FileOperationsPanel compact />
-              </PanelErrorBoundary>
-            </Show>
-            <Show when={rightPanelTab() === 'review'}>
-              <PanelErrorBoundary panelName="Diff Review">
-                <DiffReviewPanel />
-              </PanelErrorBoundary>
-            </Show>
-            <Show when={rightPanelTab() === 'trajectory'}>
-              <PanelErrorBoundary panelName="Trajectory Inspector">
-                <TrajectoryInspector sessionId={currentSession()?.id ?? 'unknown'} />
-              </PanelErrorBoundary>
-            </Show>
-            <Show when={rightPanelTab() === 'team'}>
-              <PanelErrorBoundary panelName="Team">
-                <Show
-                  when={!team.selectedMember() || team.selectedMember()?.role === 'team-lead'}
-                  fallback={<WorkerDetail member={team.selectedMember()!} />}
-                >
-                  <TeamPanel onStopAgent={(id) => agent.stopAgent(id)} onStopAll={handleStopAll} />
-                </Show>
-              </PanelErrorBoundary>
-            </Show>
-            <Show when={rightPanelTab() === 'todos'}>
-              <PanelErrorBoundary panelName="Todos">
-                <TodoPanel todos={rustAgent.todos()} />
-              </PanelErrorBoundary>
-            </Show>
-            <Show when={rightPanelTab() === 'changes'}>
-              <PanelErrorBoundary panelName="Session Changes">
-                <SessionDiffPanel />
-              </PanelErrorBoundary>
-            </Show>
+          {/* Scrollable content — all three sections */}
+          <div class="inspector-content flex-1 overflow-y-auto">
+            <PanelErrorBoundary panelName="Inspector">
+              {/* Changes */}
+              <ChangesSection />
+
+              {/* Divider */}
+              <div class="inspector-divider" />
+
+              {/* Todos */}
+              <TodosSection />
+            </PanelErrorBoundary>
           </div>
         </div>
       </div>

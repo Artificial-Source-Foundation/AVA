@@ -85,8 +85,19 @@ export const OllamaModelBrowser: Component<OllamaModelBrowserProps> = (props) =>
 
   return (
     <Show when={props.open}>
-      <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-        <div class="bg-[var(--surface-overlay)] border border-[var(--border-default)] rounded-[var(--radius-xl)] p-5 max-w-lg w-full shadow-2xl space-y-3 max-h-[80vh] flex flex-col">
+      <div
+        class="fixed inset-0 z-50 flex items-center justify-center"
+        style={{ background: 'var(--modal-overlay)' }}
+      >
+        <div
+          class="p-5 max-w-lg w-full space-y-3 max-h-[80vh] flex flex-col"
+          style={{
+            background: 'var(--modal-surface)',
+            border: '1px solid var(--modal-border)',
+            'border-radius': 'var(--modal-radius-lg)',
+            'box-shadow': 'var(--modal-shadow)',
+          }}
+        >
           {/* Header */}
           <div class="flex items-center justify-between">
             <div class="flex items-center gap-2">
@@ -96,7 +107,8 @@ export const OllamaModelBrowser: Component<OllamaModelBrowserProps> = (props) =>
             <button
               type="button"
               onClick={() => props.onClose()}
-              class="p-1 rounded-[var(--radius-sm)] hover:bg-[var(--surface-raised)] text-[var(--text-muted)] transition-colors"
+              class="p-1 rounded-[var(--radius-sm)] hover:bg-[var(--alpha-white-5)] transition-colors"
+              style={{ color: 'var(--close-button-color)' }}
             >
               <X class="w-4 h-4" />
             </button>
@@ -119,7 +131,7 @@ export const OllamaModelBrowser: Component<OllamaModelBrowserProps> = (props) =>
               type="button"
               onClick={() => void handlePull()}
               disabled={pulling() || !pullName().trim()}
-              class="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-[var(--accent)] text-white rounded-[var(--radius-md)] hover:brightness-110 transition-colors disabled:opacity-50"
+              class="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-[var(--accent)] text-white rounded-[var(--radius-md)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-50"
             >
               <Show when={pulling()} fallback={<Download class="w-3 h-3" />}>
                 <Loader2 class="w-3 h-3 animate-spin" />

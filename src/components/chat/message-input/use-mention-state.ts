@@ -5,9 +5,10 @@
  * and selection logic for the MessageInput text area.
  */
 
+import { invoke } from '@tauri-apps/api/core'
 import { type Accessor, createEffect, createMemo, createSignal, on } from 'solid-js'
 import type { SearchableFile } from '../../../services/file-search'
-import { filterFiles, getProjectFiles } from '../../../services/file-search'
+import { filterFiles, getProjectFiles, invalidateFileCache } from '../../../services/file-search'
 import { useProject } from '../../../stores/project'
 
 // ---------------------------------------------------------------------------
@@ -46,12 +47,21 @@ export function useMentionState(): MentionState {
     mentionOpen() ? filterFiles(mentionFiles(), mentionQuery(), 12) : []
   )
 
-  // Preload project files
+  // Preload project files.
+  // We must ensure the Tauri FS scope includes the project directory before
+  // calling readDir, otherwise the plugin-fs call is silently denied.
   createEffect(
     on(
       () => currentProject()?.directory,
       async (dir) => {
         if (!dir) return
+        try {
+          await invoke('allow_project_path', { path: dir })
+          // Invalidate any cached empty result from before the scope was expanded
+          invalidateFileCache(dir)
+        } catch {
+          // Non-Tauri env or scope already set — continue anyway
+        }
         setMentionFiles(await getProjectFiles(dir))
       }
     )

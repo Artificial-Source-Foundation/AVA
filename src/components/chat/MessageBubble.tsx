@@ -7,6 +7,7 @@ import { UserMessageBubble } from './UserMessageBubble'
 
 interface MessageBubbleProps {
   message: Message
+  readOnly?: boolean
   isEditing: boolean
   isRetrying: boolean
   isStreaming: boolean
@@ -42,6 +43,7 @@ export const MessageBubble: Component<MessageBubbleProps> = (props) => {
         fallback={
           <UserMessageBubble
             message={props.message}
+            readOnly={props.readOnly}
             isEditing={props.isEditing}
             isStreaming={props.isStreaming}
             isLastMessage={props.isLastMessage}
@@ -68,6 +70,7 @@ export const MessageBubble: Component<MessageBubbleProps> = (props) => {
         >
           <AssistantMessageBubble
             message={props.message}
+            readOnly={props.readOnly}
             isStreaming={props.isStreaming}
             isLastMessage={props.isLastMessage}
             isRetrying={props.isRetrying}

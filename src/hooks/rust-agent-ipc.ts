@@ -44,6 +44,8 @@ export interface AgentIpc {
     }
   ) => Promise<SubmitGoalResult | null>
   editAndResendRun: (messageId: string, newContent: string) => Promise<SubmitGoalResult | null>
+  retryRun: () => Promise<SubmitGoalResult | null>
+  regenerateRun: () => Promise<SubmitGoalResult | null>
   cancel: () => Promise<void>
   steer: (message: string) => Promise<void>
   followUp: (message: string) => Promise<void>
@@ -326,6 +328,95 @@ export function createAgentIpc(deps: IpcDeps): AgentIpc {
     }
   }
 
+  /**
+   * Retry the last failed message via the backend retry endpoint.
+   * Uses the same streaming infrastructure as run() so events are properly
+   * captured and the caller can settle the response into a placeholder message.
+   */
+  const retryRun = async (): Promise<SubmitGoalResult | null> => {
+    resetState()
+    setIsRunning(true)
+    resetMetrics()
+    log.info('streaming', 'Retry stream started')
+    try {
+      await attachListener()
+
+      if (isTauri()) {
+        const result = await invoke<SubmitGoalResult>('retry_last_message')
+        setLastResult(result)
+        return result
+      }
+
+      // Web mode: HTTP call returns immediately, wait for WebSocket completion
+      const completionPromise = new Promise<SubmitGoalResult | null>((resolve) => {
+        completion.resolve = resolve
+      })
+
+      const submitResult = await invoke<SubmitGoalResult>('retry_last_message')
+
+      const result = await completionPromise
+
+      const finalResult: SubmitGoalResult = result
+        ? { ...result, sessionId: result.sessionId || submitResult.sessionId }
+        : { success: false, turns: 0, sessionId: submitResult.sessionId }
+      setLastResult(finalResult)
+      return finalResult
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      log.error('error', 'IPC invoke failed', { command: 'retry_last_message', error: message })
+      setError(message)
+      setIsRunning(false)
+      completion.resolve = null
+      return null
+    } finally {
+      detachListener()
+    }
+  }
+
+  /**
+   * Regenerate the last assistant response via the backend regenerate endpoint.
+   * Same streaming infrastructure as retryRun().
+   */
+  const regenerateRun = async (): Promise<SubmitGoalResult | null> => {
+    resetState()
+    setIsRunning(true)
+    resetMetrics()
+    log.info('streaming', 'Regenerate stream started')
+    try {
+      await attachListener()
+
+      if (isTauri()) {
+        const result = await invoke<SubmitGoalResult>('regenerate_response')
+        setLastResult(result)
+        return result
+      }
+
+      // Web mode: HTTP call returns immediately, wait for WebSocket completion
+      const completionPromise = new Promise<SubmitGoalResult | null>((resolve) => {
+        completion.resolve = resolve
+      })
+
+      const submitResult = await invoke<SubmitGoalResult>('regenerate_response')
+
+      const result = await completionPromise
+
+      const finalResult: SubmitGoalResult = result
+        ? { ...result, sessionId: result.sessionId || submitResult.sessionId }
+        : { success: false, turns: 0, sessionId: submitResult.sessionId }
+      setLastResult(finalResult)
+      return finalResult
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      log.error('error', 'IPC invoke failed', { command: 'regenerate_response', error: message })
+      setError(message)
+      setIsRunning(false)
+      completion.resolve = null
+      return null
+    } finally {
+      detachListener()
+    }
+  }
+
   const cancel = async (): Promise<void> => {
     log.info('agent', 'Agent cancel requested')
     try {
@@ -422,6 +513,8 @@ export function createAgentIpc(deps: IpcDeps): AgentIpc {
   return {
     run,
     editAndResendRun,
+    retryRun,
+    regenerateRun,
     cancel,
     steer,
     followUp,

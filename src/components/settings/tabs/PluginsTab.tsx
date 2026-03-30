@@ -1,11 +1,11 @@
 /**
- * Plugins Tab
+ * Plugins Tab — Pencil design revamp
  *
- * Thin orchestrator that wires together PluginSearch, PluginCard,
- * PluginInstallDialog, PluginDevMode, and the shared PluginDetailPanel.
+ * Single card with header (icon + title + description + Create Plugin button),
+ * search bar, status line, and plugin rows with Installed/Install badges.
  */
 
-import { Code2, Info, Package } from 'lucide-solid'
+import { Package, Plus, Search } from 'lucide-solid'
 import { type Component, createMemo, createSignal, For, onCleanup, Show } from 'solid-js'
 import { watchPluginDirectory } from '../../../services/extension-loader'
 import { usePlugins } from '../../../stores/plugins'
@@ -14,21 +14,14 @@ import { type PluginPermission, SENSITIVE_PERMISSIONS } from '../../../types/plu
 import { PluginDetailPanel } from '../../plugins'
 import { PluginWizard } from '../../plugins/PluginWizard'
 import { PublishDialog } from '../../plugins/PublishDialog'
-import { SettingsCard } from '../SettingsCard'
 import { SETTINGS_CARD_GAP } from '../settings-constants'
 import {
   type DevModeStatus,
-  FeaturedPluginCard,
   formatSyncTime,
   GitInstallDialog,
   LinkLocalDialog,
   PermissionConfirmDialog,
-  PluginCard,
   PluginDevMode,
-  PluginPermissionBadges,
-  PluginSearch,
-  PluginSourceInfo,
-  PluginToolbar,
 } from './plugins-tab'
 
 export const PluginsTab: Component = () => {
@@ -44,7 +37,7 @@ export const PluginsTab: Component = () => {
   const [showLinkDialog, setShowLinkDialog] = createSignal(false)
   const [showPublish, setShowPublish] = createSignal(false)
   const [showWizard, setShowWizard] = createSignal(false)
-  const [sortBy, setSortBy] = createSignal<PluginSortBy>('popular')
+  const [sortBy] = createSignal<PluginSortBy>('popular')
 
   // Permission confirmation
   const [permConfirmPluginId, setPermConfirmPluginId] = createSignal<string | null>(null)
@@ -146,114 +139,322 @@ export const PluginsTab: Component = () => {
     return plugins.pluginState()[id] ?? { installed: false, enabled: false }
   })
 
-  const showFeatured = createMemo(
-    () =>
-      !plugins.search().trim() && plugins.categoryFilter() === 'all' && !plugins.showInstalledOnly()
-  )
-
-  const emptyStateMessage = createMemo(() => {
-    if (plugins.showInstalledOnly()) return 'No installed plugins match this filter yet.'
-    if (plugins.search().trim()) return `No plugins found for "${plugins.search().trim()}".`
-    if (plugins.categoryFilter() !== 'all') return 'No plugins in this category.'
-    return 'No plugins match your filters.'
-  })
-
   const sortedPlugins = createMemo(() => sortPlugins(plugins.filteredPlugins(), sortBy()))
 
   return (
-    <div class="grid grid-cols-1" style={{ gap: SETTINGS_CARD_GAP }}>
-      {/* Plugins card */}
-      <SettingsCard
-        icon={Package}
-        title="Plugins"
-        description="Extend AVA with community and custom plugins"
+    <div style={{ display: 'flex', 'flex-direction': 'column', gap: SETTINGS_CARD_GAP }}>
+      {/* Page title */}
+      <h1
+        style={{
+          'font-family': 'Geist, sans-serif',
+          'font-size': '22px',
+          'font-weight': '600',
+          color: '#F5F5F7',
+        }}
       >
-        {/* Header toolbar */}
-        <PluginToolbar
-          onShowWizard={() => setShowWizard(true)}
-          onShowPublish={() => setShowPublish(true)}
-          onShowGitDialog={() => setShowGitDialog(true)}
-          onShowLinkDialog={() => setShowLinkDialog(true)}
-        />
+        Plugins
+      </h1>
 
-        {/* Status bar */}
-        <div class="text-[var(--settings-text-description)] text-[var(--text-muted)]">
-          <span>Status: {plugins.catalogStatus()}</span>
-          <span class="mx-1">&bull;</span>
-          <span>Last sync: {formatSyncTime(plugins.lastCatalogSyncAt())}</span>
-        </div>
-
-        <Show when={plugins.catalogError()}>
-          <p class="text-[var(--settings-text-badge)] text-[var(--error)]">
-            {plugins.catalogError()}
-          </p>
-        </Show>
-
-        {/* Search, category filter, sort */}
-        <PluginSearch sortBy={sortBy} onSortChange={setSortBy} />
-
-        {/* Featured section */}
-        <Show when={showFeatured()}>
-          <div class="space-y-1.5">
-            <p class="text-[var(--settings-text-badge)] uppercase tracking-wide text-[var(--text-muted)]">
-              Featured
-            </p>
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
-              <For each={plugins.featuredPlugins()}>
-                {(plugin) => <FeaturedPluginCard plugin={plugin} onSelect={setSelectedPluginId} />}
-              </For>
+      {/* Plugins Card */}
+      <div
+        style={{
+          background: '#111114',
+          border: '1px solid #ffffff08',
+          'border-radius': '12px',
+          padding: '20px',
+          display: 'flex',
+          'flex-direction': 'column',
+          gap: '16px',
+        }}
+      >
+        {/* Card header */}
+        <div
+          style={{
+            display: 'flex',
+            'align-items': 'center',
+            'justify-content': 'space-between',
+          }}
+        >
+          <div style={{ display: 'flex', 'align-items': 'center', gap: '10px' }}>
+            <Package size={16} style={{ color: '#C8C8CC' }} />
+            <div style={{ display: 'flex', 'flex-direction': 'column', gap: '2px' }}>
+              <span
+                style={{
+                  'font-family': 'Geist, sans-serif',
+                  'font-size': '14px',
+                  'font-weight': '500',
+                  color: '#F5F5F7',
+                }}
+              >
+                Plugins
+              </span>
+              <span
+                style={{
+                  'font-family': 'Geist, sans-serif',
+                  'font-size': '12px',
+                  color: '#48484A',
+                }}
+              >
+                Extend AVA with community and custom plugins
+              </span>
             </div>
           </div>
+          <button
+            type="button"
+            onClick={() => setShowWizard(true)}
+            style={{
+              display: 'flex',
+              'align-items': 'center',
+              gap: '6px',
+              padding: '6px 12px',
+              background: '#0A84FF',
+              'border-radius': '8px',
+              border: 'none',
+              cursor: 'pointer',
+            }}
+          >
+            <Plus size={12} style={{ color: '#FFFFFF' }} />
+            <span
+              style={{
+                'font-family': 'Geist, sans-serif',
+                'font-size': '12px',
+                'font-weight': '500',
+                color: '#FFFFFF',
+              }}
+            >
+              Create Plugin
+            </span>
+          </button>
+        </div>
+
+        {/* Search bar */}
+        <div
+          style={{
+            display: 'flex',
+            'align-items': 'center',
+            gap: '8px',
+            padding: '8px 12px',
+            background: '#ffffff08',
+            border: '1px solid #ffffff0a',
+            'border-radius': '8px',
+          }}
+        >
+          <Search size={12} style={{ color: '#48484A', 'flex-shrink': '0' }} />
+          <input
+            type="text"
+            placeholder="Search plugins..."
+            value={plugins.search()}
+            onInput={(e) => plugins.setSearch(e.currentTarget.value)}
+            style={{
+              background: 'transparent',
+              border: 'none',
+              outline: 'none',
+              'font-family': 'Geist, sans-serif',
+              'font-size': '12px',
+              color: '#F5F5F7',
+              width: '100%',
+            }}
+          />
+        </div>
+
+        {/* Status line */}
+        <span
+          style={{
+            'font-family': 'Geist, sans-serif',
+            'font-size': '11px',
+            color: '#48484A',
+          }}
+        >
+          Status: {plugins.catalogStatus()} &middot; Last sync:{' '}
+          {formatSyncTime(plugins.lastCatalogSyncAt())}
+        </span>
+
+        <Show when={plugins.catalogError()}>
+          <span
+            style={{
+              'font-family': 'Geist, sans-serif',
+              'font-size': '11px',
+              color: '#FF453A',
+            }}
+          >
+            {plugins.catalogError()}
+          </span>
         </Show>
 
-        {/* Plugin list */}
-        <div class="space-y-1.5">
-          <Show
-            when={sortedPlugins().length > 0}
-            fallback={
-              <div class="flex flex-col items-center justify-center py-10 text-center">
-                <Package class="w-8 h-8 text-[var(--text-muted)] mb-2" />
-                <p class="text-[var(--settings-text-description)] text-[var(--text-secondary)] mb-1">
-                  No plugins installed
-                </p>
-                <p class="text-[var(--settings-text-description)] text-[var(--text-muted)] max-w-xs mb-3">
-                  Plugins add capabilities to AVA. {emptyStateMessage()}
-                </p>
-                <button
-                  type="button"
-                  onClick={() => setShowWizard(true)}
-                  class="inline-flex items-center gap-1.5 px-3 py-1.5 text-[var(--settings-text-button)] font-medium rounded-[var(--radius-md)] bg-[var(--accent)] text-white hover:brightness-110 transition-colors"
+        {/* Plugin rows */}
+        <Show
+          when={sortedPlugins().length > 0}
+          fallback={
+            <div
+              style={{
+                display: 'flex',
+                'flex-direction': 'column',
+                'align-items': 'center',
+                'justify-content': 'center',
+                padding: '40px 0',
+                'text-align': 'center',
+              }}
+            >
+              <Package size={32} style={{ color: '#48484A', 'margin-bottom': '8px' }} />
+              <span
+                style={{
+                  'font-family': 'Geist, sans-serif',
+                  'font-size': '13px',
+                  color: '#C8C8CC',
+                  'margin-bottom': '4px',
+                }}
+              >
+                No plugins found
+              </span>
+              <span
+                style={{
+                  'font-family': 'Geist, sans-serif',
+                  'font-size': '12px',
+                  color: '#48484A',
+                  'max-width': '280px',
+                  'margin-bottom': '12px',
+                }}
+              >
+                Plugins add capabilities to AVA. Create your first plugin to get started.
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowWizard(true)}
+                style={{
+                  display: 'flex',
+                  'align-items': 'center',
+                  gap: '6px',
+                  padding: '6px 12px',
+                  background: '#0A84FF',
+                  'border-radius': '8px',
+                  border: 'none',
+                  cursor: 'pointer',
+                  'font-family': 'Geist, sans-serif',
+                  'font-size': '12px',
+                  'font-weight': '500',
+                  color: '#FFFFFF',
+                }}
+              >
+                Create your first plugin
+              </button>
+            </div>
+          }
+        >
+          <For each={sortedPlugins()}>
+            {(plugin) => {
+              const state = () => plugins.pluginState()[plugin.id]
+              const isInstalled = () => state()?.installed ?? false
+              return (
+                // biome-ignore lint/a11y/useKeyWithClickEvents: plugin card selection
+                // biome-ignore lint/a11y/useSemanticElements: card-style row
+                <div
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setSelectedPluginId(plugin.id)}
+                  style={{
+                    display: 'flex',
+                    'align-items': 'center',
+                    'justify-content': 'space-between',
+                    padding: '10px 14px',
+                    background: '#ffffff04',
+                    border: `1px solid ${selectedPluginId() === plugin.id ? '#0A84FF40' : '#ffffff0a'}`,
+                    'border-radius': '8px',
+                    cursor: 'pointer',
+                    transition: 'border-color 0.15s',
+                  }}
                 >
-                  Create your first plugin
-                </button>
-              </div>
-            }
-          >
-            <For each={sortedPlugins()}>
-              {(plugin) => (
-                <PluginCard
-                  plugin={plugin}
-                  isSelected={selectedPluginId() === plugin.id}
-                  onSelect={setSelectedPluginId}
-                  onInstall={handleInstallWithPermCheck}
-                />
-              )}
-            </For>
-          </Show>
-        </div>
-      </SettingsCard>
+                  <div style={{ display: 'flex', 'flex-direction': 'column', gap: '2px' }}>
+                    <span
+                      style={{
+                        'font-family': 'Geist, sans-serif',
+                        'font-size': '13px',
+                        'font-weight': '500',
+                        color: '#F5F5F7',
+                      }}
+                    >
+                      {plugin.name}
+                    </span>
+                    <span
+                      style={{
+                        'font-family': 'Geist, sans-serif',
+                        'font-size': '11px',
+                        color: '#48484A',
+                      }}
+                    >
+                      {plugin.description}
+                    </span>
+                  </div>
+                  <Show
+                    when={isInstalled()}
+                    fallback={
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          handleInstallWithPermCheck(plugin.id)
+                        }}
+                        style={{
+                          padding: '4px 10px',
+                          background: '#0A84FF',
+                          'border-radius': '6px',
+                          border: 'none',
+                          cursor: 'pointer',
+                          'font-family': 'Geist, sans-serif',
+                          'font-size': '10px',
+                          'font-weight': '500',
+                          color: '#FFFFFF',
+                        }}
+                      >
+                        Install
+                      </button>
+                    }
+                  >
+                    <span
+                      style={{
+                        padding: '3px 8px',
+                        background: '#34C75920',
+                        'border-radius': '6px',
+                        'font-family': 'Geist, sans-serif',
+                        'font-size': '10px',
+                        'font-weight': '500',
+                        color: '#34C759',
+                      }}
+                    >
+                      Installed
+                    </span>
+                  </Show>
+                </div>
+              )
+            }}
+          </For>
+        </Show>
+      </div>
 
       {/* Plugin Details card */}
       <Show when={selectedPlugin()}>
-        <SettingsCard
-          icon={Info}
-          title="Plugin Details"
-          description="Configuration and info for the selected plugin"
+        <div
+          style={{
+            background: '#111114',
+            border: '1px solid #ffffff08',
+            'border-radius': '12px',
+            padding: '20px',
+            display: 'flex',
+            'flex-direction': 'column',
+            gap: '16px',
+          }}
         >
+          <span
+            style={{
+              'font-family': 'Geist, sans-serif',
+              'font-size': '14px',
+              'font-weight': '500',
+              color: '#F5F5F7',
+            }}
+          >
+            Plugin Details
+          </span>
           <PluginDetailPanel plugin={selectedPlugin()} state={selectedState()} />
-          <PluginPermissionBadges plugin={selectedPlugin} />
-          <PluginSourceInfo plugin={selectedPlugin} state={selectedState} />
-        </SettingsCard>
+        </div>
       </Show>
 
       {/* Developer Mode card */}
@@ -261,11 +462,27 @@ export const PluginsTab: Component = () => {
         {(_) => {
           const pluginId = () => selectedPluginId()!
           return (
-            <SettingsCard
-              icon={Code2}
-              title="Developer Mode"
-              description="Live reload and debug tools for plugin development"
+            <div
+              style={{
+                background: '#111114',
+                border: '1px solid #ffffff08',
+                'border-radius': '12px',
+                padding: '20px',
+                display: 'flex',
+                'flex-direction': 'column',
+                gap: '16px',
+              }}
             >
+              <span
+                style={{
+                  'font-family': 'Geist, sans-serif',
+                  'font-size': '14px',
+                  'font-weight': '500',
+                  color: '#F5F5F7',
+                }}
+              >
+                Developer Mode
+              </span>
               <PluginDevMode
                 pluginId={pluginId}
                 isDevMode={() => devModePlugins()[pluginId()] ?? false}
@@ -273,12 +490,12 @@ export const PluginsTab: Component = () => {
                 logs={() => devModeLogs()[pluginId()] ?? []}
                 onToggle={toggleDevMode}
               />
-            </SettingsCard>
+            </div>
           )
         }}
       </Show>
 
-      {/* Dialogs (outside cards — they're modals) */}
+      {/* Dialogs */}
       <GitInstallDialog open={showGitDialog} onClose={() => setShowGitDialog(false)} />
       <LinkLocalDialog open={showLinkDialog} onClose={() => setShowLinkDialog(false)} />
       <PermissionConfirmDialog

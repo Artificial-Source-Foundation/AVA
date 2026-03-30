@@ -36,12 +36,10 @@ export const ModelBrowserGrid: Component<ModelBrowserGridProps> = (props) => {
     <Show
       when={props.models.length > 0}
       fallback={
-        <div class="py-8 text-center text-xs text-[var(--text-muted)]">
-          No models match your filters
-        </div>
+        <div class="py-12 text-center text-[13px] text-[#48484A]">No models match your filters</div>
       }
     >
-      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
         <For each={props.models}>
           {(model) => (
             <ModelBrowserCard

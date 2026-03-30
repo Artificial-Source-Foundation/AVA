@@ -6,6 +6,7 @@
 
 export type HqPage =
   | 'dashboard'
+  | 'team'
   | 'org-chart'
   | 'director-chat'
   | 'plan-review'
@@ -88,7 +89,21 @@ export interface HqPlan {
   title: string
   status: PlanStatus
   directorDescription: string
+  boardReview?: HqBoardReview
   phases: HqPhase[]
+}
+
+export interface HqBoardReview {
+  consensus: string
+  voteSummary: string
+  opinions: HqBoardOpinion[]
+}
+
+export interface HqBoardOpinion {
+  memberName: string
+  personality: string
+  recommendation: string
+  vote: string
 }
 
 export interface HqPhase {
@@ -108,11 +123,15 @@ export interface HqPlanTask {
   title: string
   domain: string
   complexity: TaskComplexity
+  dependencies: string[]
   assigneeId?: string
   assigneeName?: string
   assigneeModel?: string
   steps: string[]
   fileHints: string[]
+  budgetMaxTokens: number
+  budgetMaxTurns: number
+  budgetMaxCostUsd: number
   expanded: boolean
 }
 
@@ -156,6 +175,7 @@ export type ActivityType =
   | 'delegation'
   | 'completion'
   | 'review'
+  | 'planning'
   | 'error'
   | 'comment'
   | 'status-change'
@@ -208,4 +228,13 @@ export interface HqSettings {
   tonePreference: 'technical' | 'simple' | string
   autoReview: boolean
   showCosts: boolean
+}
+
+export interface HqWorkspaceBootstrapResult {
+  projectRoot: string
+  hqRoot: string
+  projectName: string
+  stackSummary: string[]
+  createdFiles: string[]
+  reusedExisting: boolean
 }

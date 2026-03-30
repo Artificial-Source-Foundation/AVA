@@ -2,18 +2,19 @@
  * Approval Dock Component
  *
  * Inline, non-modal tool approval widget that sits between MessageList
- * and MessageInput in the chat area. Compact by default (one row),
- * expandable for details. Replaces the old full-screen ToolApprovalDialog.
+ * and MessageInput in the chat area. Card-style design with header bar
+ * (amber shield + risk badge), tool name row, command preview card,
+ * and right-aligned action buttons.
  *
  * Three explicit action buttons:
- *   Allow Once   — approve this specific call only        (green outline)
- *   Always Allow — approve this tool for the session     (green filled)
- *   Deny         — reject the call                       (red outline)
+ *   Deny         — ghost button                              (outline)
+ *   Always Allow — ghost button                              (outline)
+ *   Approve      — blue filled                               (primary)
  *
- * Keyboard: Enter = Allow Once, Shift+Enter = Always Allow, Escape = Deny
+ * Keyboard: Enter = Approve, Shift+Enter = Always Allow, Escape = Deny
  */
 
-import { Check, CheckCheck, ChevronDown, ChevronUp, X } from 'lucide-solid'
+import { Shield, Terminal } from 'lucide-solid'
 import { type Component, createEffect, createSignal, onCleanup, Show } from 'solid-js'
 import { Dynamic } from 'solid-js/web'
 import type { ApprovalRequest } from '../../hooks/useAgent'
@@ -55,7 +56,7 @@ export const ApprovalDock: Component<ApprovalDockProps> = (props) => {
   })
 
   // Keyboard shortcuts:
-  //   Enter           → Allow Once
+  //   Enter           → Approve (Allow Once)
   //   Shift+Enter     → Always Allow (skipped for critical risk)
   //   Escape          → Deny
   createEffect(() => {
@@ -87,107 +88,181 @@ export const ApprovalDock: Component<ApprovalDockProps> = (props) => {
         role="dialog"
         aria-label="Tool approval request"
         aria-labelledby="approval-dock-title"
-        class="border-t border-b border-[var(--border-subtle)] bg-[var(--surface-raised)] approval-dock-enter"
-        style={{ animation: 'approvalSlideUp 150ms ease-out' }}
+        class="approval-dock-enter"
+        style={{
+          width: '620px',
+          'max-width': '100%',
+          'border-radius': '12px',
+          background: 'var(--surface)',
+          border: '1px solid var(--border-default)',
+          'box-shadow': '0 12px 24px rgba(0, 0, 0, 0.4)',
+          overflow: 'hidden',
+          'align-self': 'center',
+          animation: 'approvalSlideUp 150ms ease-out',
+        }}
       >
-        {/* Compact row */}
-        <div class="flex items-center gap-2.5 px-4 py-2">
-          {/* Tool icon */}
-          <div
-            class="p-1.5 rounded-[var(--radius-md)] flex-shrink-0"
-            style={{ background: toolConfig()?.bg }}
-          >
-            <Show when={toolConfig()}>
-              <Dynamic
-                component={toolConfig()!.icon}
-                class="w-4 h-4"
-                style={{ color: toolConfig()!.color }}
-              />
-            </Show>
+        {/* Header bar */}
+        <div
+          class="flex items-center justify-between"
+          style={{
+            height: '44px',
+            padding: '0 16px',
+            background: 'var(--background-subtle)',
+          }}
+        >
+          {/* Left: icon + title */}
+          <div class="flex items-center gap-2.5" style={{ height: '100%' }}>
+            <Shield class="w-4 h-4" style={{ color: 'var(--warning)' }} />
+            <span
+              id="approval-dock-title"
+              class="text-[13px] font-semibold"
+              style={{ color: 'var(--text-primary)' }}
+            >
+              Tool Approval Required
+            </span>
           </div>
 
-          {/* Tool description */}
-          <span
-            id="approval-dock-title"
-            class="text-sm font-medium text-[var(--text-primary)] truncate"
-          >
-            {getToolDescription(props.request!.toolName, props.request!.args)}
-          </span>
-
-          {/* Risk badge */}
+          {/* Right: risk badge */}
           <div
-            class="flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[var(--text-2xs)] font-medium flex-shrink-0"
-            style={{ background: risk().bg, color: risk().color }}
+            class="flex items-center gap-1.5 px-2 py-0.5"
+            style={{
+              'border-radius': '8px',
+              background: risk().bg,
+              color: risk().color,
+              'font-size': '11px',
+              'font-weight': '500',
+            }}
           >
             <Dynamic component={risk().icon} class="w-3 h-3" />
-            {risk().label}
+            {risk().label} Risk
           </div>
-
-          {/* Spacer */}
-          <div class="flex-1" />
-
-          {/* Expand/collapse toggle */}
-          <button
-            type="button"
-            onClick={() => setExpanded(!expanded())}
-            class="p-1 rounded-[var(--radius-sm)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--alpha-white-5)] transition-colors"
-            title={expanded() ? 'Collapse details' : 'Expand details'}
-          >
-            <Show when={expanded()} fallback={<ChevronDown class="w-3.5 h-3.5" />}>
-              <ChevronUp class="w-3.5 h-3.5" />
-            </Show>
-          </button>
-
-          {/* ── Three-button action row ── */}
-
-          {/* Deny — red outline */}
-          <button
-            type="button"
-            onClick={() => props.onResolve(false)}
-            class="inline-flex items-center gap-1 rounded-[var(--radius-sm)] border border-[var(--error)] px-2 py-1 text-[var(--text-xs)] font-medium text-[var(--error)] hover:bg-[var(--error)] hover:text-white transition-colors"
-            title="Deny (Esc)"
-          >
-            <X class="w-3 h-3" />
-            Deny
-          </button>
-
-          {/* Allow Once — green outline for normal risk, error colour for critical */}
-          <button
-            type="button"
-            onClick={() => props.onResolve(true, false)}
-            class="inline-flex items-center gap-1 rounded-[var(--radius-sm)] border px-2 py-1 text-[var(--text-xs)] font-medium transition-colors"
-            classList={{
-              'border-[var(--error)] text-[var(--error)] hover:bg-[var(--error)] hover:text-white':
-                riskLevel() === 'critical',
-              'border-[var(--warning)] text-[var(--warning)] hover:bg-[var(--warning)] hover:text-white':
-                riskLevel() === 'high',
-              'border-[var(--success)] text-[var(--success)] hover:bg-[var(--success)] hover:text-white':
-                riskLevel() !== 'critical' && riskLevel() !== 'high',
-            }}
-            title="Allow for this call only (Enter)"
-          >
-            <Check class="w-3 h-3" />
-            Allow Once
-          </button>
-
-          {/* Always Allow — green filled. Hidden for critical risk. */}
-          <Show when={riskLevel() !== 'critical'}>
-            <button
-              type="button"
-              onClick={() => props.onResolve(true, true)}
-              class="inline-flex items-center gap-1 rounded-[var(--radius-sm)] bg-[var(--success)] px-2 py-1 text-[var(--text-xs)] font-medium text-white hover:opacity-90 transition-opacity"
-              title="Always allow this tool for the session (Shift+Enter)"
-            >
-              <CheckCheck class="w-3 h-3" />
-              Always Allow
-            </button>
-          </Show>
         </div>
 
-        {/* Expanded section */}
-        <Show when={expanded()}>
-          <ApprovalExpandedDetails request={props.request!} riskLevel={riskLevel()} />
-        </Show>
+        {/* Body */}
+        <div
+          style={{
+            padding: '16px',
+            display: 'flex',
+            'flex-direction': 'column',
+            gap: '12px',
+          }}
+        >
+          {/* Tool name row */}
+          <div class="flex items-center gap-2">
+            <Show
+              when={toolConfig()}
+              fallback={<Terminal class="w-3.5 h-3.5" style={{ color: 'var(--accent)' }} />}
+            >
+              <Dynamic
+                component={toolConfig()!.icon}
+                class="w-3.5 h-3.5"
+                style={{ color: 'var(--accent)' }}
+              />
+            </Show>
+            <span
+              style={{
+                color: 'var(--text-primary)',
+                'font-family': 'var(--font-mono)',
+                'font-size': '12px',
+                'font-weight': '600',
+              }}
+            >
+              {props.request!.toolName}
+            </span>
+          </div>
+
+          {/* Command preview card */}
+          <div
+            style={{
+              padding: '12px',
+              'border-radius': '6px',
+              background: 'var(--background-subtle)',
+              border: '1px solid var(--border-subtle)',
+            }}
+          >
+            <span
+              style={{
+                color: 'var(--text-secondary)',
+                'font-family': 'var(--font-mono)',
+                'font-size': '11px',
+                'word-break': 'break-all',
+                'white-space': 'pre-wrap',
+              }}
+            >
+              {getToolDescription(props.request!.toolName, props.request!.args)}
+            </span>
+          </div>
+
+          {/* Expanded section */}
+          <Show when={expanded()}>
+            <ApprovalExpandedDetails request={props.request!} riskLevel={riskLevel()} />
+          </Show>
+
+          {/* Action buttons — right-aligned */}
+          <div class="flex items-center justify-end gap-2">
+            {/* Deny — ghost */}
+            <button
+              type="button"
+              onClick={() => props.onResolve(false)}
+              class="inline-flex items-center justify-center transition-colors"
+              style={{
+                padding: '8px 16px',
+                'border-radius': '6px',
+                background: 'rgba(255, 255, 255, 0.024)',
+                border: '1px solid var(--border-default)',
+                color: 'var(--text-secondary)',
+                'font-size': '12px',
+                'font-weight': '500',
+                cursor: 'pointer',
+              }}
+              title="Deny (Esc)"
+            >
+              Deny
+            </button>
+
+            {/* Always Allow — ghost (hidden for critical risk) */}
+            <Show when={riskLevel() !== 'critical'}>
+              <button
+                type="button"
+                onClick={() => props.onResolve(true, true)}
+                class="inline-flex items-center justify-center transition-colors"
+                style={{
+                  padding: '8px 16px',
+                  'border-radius': '6px',
+                  background: 'rgba(255, 255, 255, 0.024)',
+                  border: '1px solid var(--border-default)',
+                  color: 'var(--text-secondary)',
+                  'font-size': '12px',
+                  'font-weight': '500',
+                  cursor: 'pointer',
+                }}
+                title="Always allow this tool for the session (Shift+Enter)"
+              >
+                Always Allow
+              </button>
+            </Show>
+
+            {/* Approve — blue filled */}
+            <button
+              type="button"
+              onClick={() => props.onResolve(true, false)}
+              class="inline-flex items-center justify-center transition-colors"
+              style={{
+                padding: '8px 20px',
+                'border-radius': '6px',
+                background: 'var(--accent)',
+                color: 'white',
+                'font-size': '12px',
+                'font-weight': '600',
+                cursor: 'pointer',
+                border: 'none',
+              }}
+              title="Approve this call (Enter)"
+            >
+              Approve
+            </button>
+          </div>
+        </div>
       </div>
     </Show>
   )

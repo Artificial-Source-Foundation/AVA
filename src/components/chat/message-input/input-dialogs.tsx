@@ -7,7 +7,7 @@
  * - SandboxReviewDialog (sandbox change review)
  */
 
-import { type Accessor, type Component, onMount, untrack } from 'solid-js'
+import { type Accessor, type Component, onMount, Show, untrack } from 'solid-js'
 import type { LLMProviderConfig } from '../../../config/defaults/provider-defaults'
 import { useLayout } from '../../../stores/layout'
 import { useSandbox } from '../../../stores/sandbox'
@@ -67,19 +67,21 @@ export const InputDialogs: Component<InputDialogsProps> = (props) => {
         onSelect={(modelId, providerId) => sessionStore.setSelectedModel(modelId, providerId)}
         enabledProviders={props.enabledProviders}
       />
-      <ExpandedEditor
-        open={expandedEditorOpen()}
-        initialText={props.input()}
-        onApply={(text) => {
-          props.setInput(text)
-          setExpandedEditorOpen(false)
-          queueMicrotask(() => {
-            focusTextarea()
-            autoResize()
-          })
-        }}
-        onClose={() => setExpandedEditorOpen(false)}
-      />
+      <Show when={expandedEditorOpen()}>
+        <ExpandedEditor
+          open={true}
+          initialText={props.input()}
+          onApply={(text) => {
+            props.setInput(text)
+            setExpandedEditorOpen(false)
+            queueMicrotask(() => {
+              focusTextarea()
+              autoResize()
+            })
+          }}
+          onClose={() => setExpandedEditorOpen(false)}
+        />
+      </Show>
       <SandboxReviewDialog
         open={sandbox.reviewDialogOpen()}
         changes={sandbox.pendingChanges()}

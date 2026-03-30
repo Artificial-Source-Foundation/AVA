@@ -7,13 +7,9 @@ interface SettingsModalHeaderProps {
 export const SettingsModalHeader: Component<SettingsModalHeaderProps> = () => {
   return (
     <div
-      class="flex items-center justify-center flex-shrink-0 border-b border-[var(--gray-5)]"
-      style={{ height: '40px', background: 'var(--gray-0)' }}
+      class="flex items-center justify-center flex-shrink-0"
+      style={{ height: '40px', background: '#0A0A0C', 'border-bottom': '1px solid #ffffff06' }}
       data-tauri-drag-region
-    >
-      <span class="text-[var(--settings-text-description)] font-medium text-[var(--text-primary)]">
-        Settings
-      </span>
-    </div>
+    />
   )
 }

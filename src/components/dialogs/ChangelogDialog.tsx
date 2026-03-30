@@ -1,54 +1,127 @@
 /**
  * Changelog Dialog
- * Shows release notes / announcements on first launch after update.
- * Auto-shows when localStorage 'ava-last-seen-version' differs from APP_VERSION.
+ *
+ * 480px card-style modal showing release notes with color-coded tags
+ * (green "New", blue "Improved", red "Fixed") + title + description,
+ * separated by dividers. Auto-shows when localStorage version differs.
  */
 
-import { Megaphone } from 'lucide-solid'
+import { Sparkles, X } from 'lucide-solid'
 import { type Component, For, Show } from 'solid-js'
 
 export const APP_VERSION = '2.2.6'
 
+// ============================================================================
+// Types
+// ============================================================================
+
+type ChangeKind = 'new' | 'improved' | 'fixed'
+
+interface ChangelogItem {
+  kind: ChangeKind
+  title: string
+  description: string
+}
+
 interface ChangelogEntry {
   version: string
-  date: string
-  items: string[]
+  items: ChangelogItem[]
 }
+
+const KIND_CONFIG: Record<ChangeKind, { label: string; color: string; bg: string }> = {
+  new: {
+    label: 'New',
+    color: 'var(--success)',
+    bg: 'rgba(52, 199, 89, 0.125)',
+  },
+  improved: {
+    label: 'Improved',
+    color: 'var(--accent)',
+    bg: 'rgba(10, 132, 255, 0.08)',
+  },
+  fixed: {
+    label: 'Fixed',
+    color: 'var(--error)',
+    bg: 'rgba(255, 69, 58, 0.125)',
+  },
+}
+
+// ============================================================================
+// Changelog Data
+// ============================================================================
 
 const CHANGELOG: ChangelogEntry[] = [
   {
     version: '2.2.6',
-    date: '2026-03-22',
     items: [
-      '21 LLM providers: + Azure OpenAI, AWS Bedrock, xAI, Mistral, Groq, DeepSeek',
-      'Mid-stream messaging: Enter = queue, Ctrl+Enter = interrupt, Alt+Enter = post-complete',
-      'Message queue UI with reorder, edit, and remove',
-      'Shadow git snapshots for file undo/rollback',
-      'Crash recovery: per-turn checkpoints, file backups, interrupted tool cleanup',
-      'Context overflow auto-compact with retry (12 provider patterns)',
-      'Conversation repair before LLM calls',
-      '100+ security patterns: credential theft, reverse shells, crypto mining, exfiltration',
-      'Collapsible agent activity cards with live stats',
-      'Right panel redesign: icon tabs, activity toggle, todos auto-open',
-      'Double-Escape abort, send button context menu',
-      'Incremental message persistence (crash-safe)',
-      'Retry-after header parsing, quota error classification',
+      {
+        kind: 'new',
+        title: 'macOS Luxury Design System',
+        description:
+          'Complete UI overhaul with new color system, typography, and component library inspired by premium macOS applications.',
+      },
+      {
+        kind: 'improved',
+        title: 'Streaming Performance',
+        description:
+          'Removed filter-based hover effects, converted animations to scaleX transforms, and trimmed transition-all hot paths.',
+      },
+      {
+        kind: 'fixed',
+        title: 'Chat Scroll Position',
+        description:
+          'Fixed contain: layout style breaking flex height calculations in the message list.',
+      },
+      {
+        kind: 'new',
+        title: 'Mid-Stream Messaging',
+        description:
+          'Three-tier message queue: Enter = queue, Ctrl+Enter = interrupt, Alt+Enter = post-complete.',
+      },
+      {
+        kind: 'new',
+        title: 'Shadow Git Snapshots',
+        description: 'File undo/rollback via automatic shadow git snapshots before every edit.',
+      },
+      {
+        kind: 'improved',
+        title: 'Context Overflow Auto-Compact',
+        description:
+          'Automatic context compaction with retry for 12 different provider overflow patterns.',
+      },
+      {
+        kind: 'fixed',
+        title: 'Incremental Persistence',
+        description: 'Crash-safe per-turn message persistence with retry-after header parsing.',
+      },
     ],
   },
   {
     version: '2.1.0',
-    date: '2026-03-08',
     items: [
-      '9 default tools: read, write, edit, bash, glob, grep, web_fetch, web_search, git_read',
-      '21 Rust crates powering the full agent, CLI, and desktop backend',
-      'Thinking + tool interleaving for reasoning-capable models',
-      'Multi-agent orchestration via HQ (Director → Leads → Workers)',
-      'MCP protocol support with hot-reload and per-project trust',
-      'Persistent memory, session history, and codebase indexing (BM25 + PageRank)',
-      '29 built-in themes with live preview and custom TOML theme support',
+      {
+        kind: 'new',
+        title: '21 Rust Crates',
+        description:
+          '9 default tools, thinking + tool interleaving, multi-agent orchestration via HQ.',
+      },
+      {
+        kind: 'improved',
+        title: 'MCP Protocol Support',
+        description: 'Hot-reload and per-project trust for MCP servers.',
+      },
+      {
+        kind: 'new',
+        title: '29 Built-in Themes',
+        description: 'Live preview and custom TOML theme support.',
+      },
     ],
   },
 ]
+
+// ============================================================================
+// Component
+// ============================================================================
 
 interface ChangelogDialogProps {
   open: boolean
@@ -57,43 +130,187 @@ interface ChangelogDialogProps {
 
 export const ChangelogDialog: Component<ChangelogDialogProps> = (props) => (
   <Show when={props.open}>
-    <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-      <div class="bg-[var(--surface-overlay)] border border-[var(--border-default)] rounded-[var(--radius-xl)] p-6 max-w-md w-full shadow-2xl space-y-4 max-h-[80vh] overflow-y-auto">
-        <div class="flex items-center gap-2">
-          <Megaphone class="w-4 h-4 text-[var(--accent)]" />
-          <h3 class="text-sm font-semibold text-[var(--text-primary)]">What's New</h3>
-          <span class="ml-auto text-[10px] text-[var(--text-muted)] font-mono">v{APP_VERSION}</span>
-        </div>
-
-        <For each={CHANGELOG}>
-          {(entry) => (
-            <div class="space-y-2">
-              <div class="flex items-baseline gap-2">
-                <span class="text-xs font-medium text-[var(--accent)]">v{entry.version}</span>
-                <span class="text-[10px] text-[var(--text-muted)]">{entry.date}</span>
-              </div>
-              <ul class="space-y-1">
-                <For each={entry.items}>
-                  {(item) => (
-                    <li class="flex gap-2 text-xs text-[var(--text-secondary)]">
-                      <span class="text-[var(--accent)] shrink-0 mt-0.5">-</span>
-                      <span>{item}</span>
-                    </li>
-                  )}
-                </For>
-              </ul>
+    {/* Backdrop */}
+    {/* biome-ignore lint/a11y/useKeyWithClickEvents: backdrop dismiss */}
+    {/* biome-ignore lint/a11y/noStaticElementInteractions: backdrop dismiss */}
+    <div
+      class="fixed inset-0 z-50 flex items-center justify-center"
+      style={{ background: 'rgba(0, 0, 0, 0.6)' }}
+      onClick={(e) => {
+        if (e.target === e.currentTarget) props.onClose()
+      }}
+    >
+      {/* Dialog card */}
+      <div
+        style={{
+          width: '480px',
+          'max-width': 'calc(100% - 32px)',
+          'max-height': '80vh',
+          'border-radius': '12px',
+          background: 'var(--surface)',
+          border: '1px solid var(--border-default)',
+          'box-shadow': '0 12px 24px rgba(0, 0, 0, 0.4)',
+          overflow: 'hidden',
+          display: 'flex',
+          'flex-direction': 'column',
+        }}
+      >
+        {/* Header */}
+        <div
+          class="flex items-center justify-between"
+          style={{
+            height: '48px',
+            padding: '0 16px',
+            background: 'var(--background-subtle)',
+            'flex-shrink': '0',
+          }}
+        >
+          <div class="flex items-center gap-2.5" style={{ height: '100%' }}>
+            <Sparkles class="w-4 h-4" style={{ color: 'var(--accent)' }} />
+            <span class="text-[14px] font-semibold" style={{ color: 'var(--text-primary)' }}>
+              What's New
+            </span>
+            {/* Version badge */}
+            <div
+              style={{
+                padding: '2px 8px',
+                'border-radius': '8px',
+                background: 'rgba(10, 132, 255, 0.08)',
+              }}
+            >
+              <span
+                style={{
+                  color: 'var(--accent)',
+                  'font-family': 'var(--font-mono)',
+                  'font-size': '10px',
+                  'font-weight': '500',
+                }}
+              >
+                v{APP_VERSION}
+              </span>
             </div>
-          )}
-        </For>
-
-        <div class="flex justify-end pt-2">
+          </div>
           <button
             type="button"
             onClick={() => props.onClose()}
-            class="px-3 py-1.5 text-xs font-medium bg-[var(--accent)] text-white rounded-[var(--radius-md)] hover:brightness-110 transition-colors"
+            class="flex items-center justify-center transition-colors"
+            style={{
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              color: 'var(--text-muted)',
+              padding: '4px',
+            }}
           >
-            Got it
+            <X class="w-4 h-4" />
           </button>
+        </div>
+
+        {/* Body — scrollable */}
+        <div
+          style={{
+            padding: '20px',
+            'overflow-y': 'auto',
+            display: 'flex',
+            'flex-direction': 'column',
+            gap: '16px',
+          }}
+        >
+          <For each={CHANGELOG}>
+            {(entry, entryIdx) => (
+              <>
+                {/* Version separator for non-first entries */}
+                <Show when={entryIdx() > 0}>
+                  <div
+                    style={{
+                      height: '1px',
+                      background: 'var(--border-subtle)',
+                      margin: '4px 0',
+                    }}
+                  />
+                  <div
+                    style={{
+                      color: 'var(--text-muted)',
+                      'font-size': '11px',
+                      'font-weight': '500',
+                    }}
+                  >
+                    v{entry.version}
+                  </div>
+                </Show>
+
+                <For each={entry.items}>
+                  {(item, itemIdx) => {
+                    const cfg = KIND_CONFIG[item.kind]
+                    return (
+                      <>
+                        {/* Divider between items (not before first in first entry) */}
+                        <Show when={entryIdx() > 0 || itemIdx() > 0}>
+                          <div
+                            style={{
+                              height: '1px',
+                              background: 'var(--border-subtle)',
+                            }}
+                          />
+                        </Show>
+
+                        <div
+                          style={{
+                            display: 'flex',
+                            'flex-direction': 'column',
+                            gap: '6px',
+                          }}
+                        >
+                          {/* Tag + Title row */}
+                          <div class="flex items-center gap-2">
+                            {/* Color-coded tag */}
+                            <div
+                              style={{
+                                padding: '2px 8px',
+                                'border-radius': '8px',
+                                background: cfg.bg,
+                              }}
+                            >
+                              <span
+                                style={{
+                                  color: cfg.color,
+                                  'font-size': '9px',
+                                  'font-weight': '600',
+                                }}
+                              >
+                                {cfg.label}
+                              </span>
+                            </div>
+                            <span
+                              style={{
+                                color: 'var(--text-primary)',
+                                'font-size': '13px',
+                                'font-weight': '500',
+                              }}
+                            >
+                              {item.title}
+                            </span>
+                          </div>
+
+                          {/* Description */}
+                          <p
+                            style={{
+                              color: 'var(--text-muted)',
+                              'font-size': '12px',
+                              'line-height': '1.5',
+                              margin: '0',
+                            }}
+                          >
+                            {item.description}
+                          </p>
+                        </div>
+                      </>
+                    )
+                  }}
+                </For>
+              </>
+            )}
+          </For>
         </div>
       </div>
     </div>

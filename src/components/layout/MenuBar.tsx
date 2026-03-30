@@ -6,12 +6,14 @@
  * panel toggles, and settings access.
  */
 
+import { getVersion } from '@tauri-apps/api/app'
 import { open } from '@tauri-apps/plugin-dialog'
-import { type Component, createSignal, For, onCleanup, Show } from 'solid-js'
+import { type Component, createSignal, For, onCleanup, onMount, Show } from 'solid-js'
 import { logError } from '../../services/logger'
 import { useLayout } from '../../stores/layout'
 import { useProject } from '../../stores/project'
 import { useSession } from '../../stores/session'
+import { Dialog } from '../ui/Dialog'
 
 type MenuId = 'file' | 'view' | 'help'
 
@@ -30,7 +32,16 @@ export const MenuBar: Component = () => {
   const { openDirectory } = useProject()
 
   const [openMenu, setOpenMenu] = createSignal<MenuId | null>(null)
+  const [aboutOpen, setAboutOpen] = createSignal(false)
+  const [appVersion, setAppVersion] = createSignal('unknown')
   let menuBarRef: HTMLDivElement | undefined
+
+  const handleAbout = () => {
+    void getVersion()
+      .then((v) => setAppVersion(v))
+      .catch(() => setAppVersion('unknown'))
+    setAboutOpen(true)
+  }
 
   const handleOpenProject = async () => {
     let selected: string | string[] | null = null
@@ -90,6 +101,12 @@ export const MenuBar: Component = () => {
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true, bubbles: true }))
   }
 
+  const handleExportChat = () => {
+    document.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'E', ctrlKey: true, shiftKey: true, bubbles: true })
+    )
+  }
+
   const menus: Record<MenuId, MenuItem[]> = {
     file: [
       { label: 'New Session', shortcut: 'Ctrl+N', action: () => createNewSession() },
@@ -97,6 +114,8 @@ export const MenuBar: Component = () => {
       { separator: true, label: '' },
       { label: 'Open Project...', action: handleOpenProject },
       { label: 'Switch Project', action: openProjectHub },
+      { separator: true, label: '' },
+      { label: 'Export Chat...', shortcut: 'Ctrl+Shift+E', action: handleExportChat },
       { separator: true, label: '' },
       { label: 'Close Window', action: handleCloseWindow },
     ],
@@ -111,7 +130,7 @@ export const MenuBar: Component = () => {
       { label: 'Keyboard Shortcuts', action: openSettings },
       { separator: true, label: '' },
       { label: 'Settings', shortcut: 'Ctrl+,', action: openSettings },
-      { label: 'About AVA', disabled: true },
+      { label: 'About AVA', action: handleAbout },
     ],
   }
 
@@ -137,8 +156,10 @@ export const MenuBar: Component = () => {
     }
   }
 
-  document.addEventListener('mousedown', handleMouseDown)
-  document.addEventListener('keydown', handleKeyDown)
+  onMount(() => {
+    document.addEventListener('mousedown', handleMouseDown)
+    document.addEventListener('keydown', handleKeyDown)
+  })
 
   onCleanup(() => {
     document.removeEventListener('mousedown', handleMouseDown)
@@ -152,46 +173,43 @@ export const MenuBar: Component = () => {
   ]
 
   return (
-    <div ref={menuBarRef} data-menubar class="flex items-center gap-0.5 relative">
+    <div ref={menuBarRef} data-menubar class="flex items-center relative">
       <For each={menuLabels}>
         {(menu) => (
           <div class="relative">
             <button
               type="button"
-              class={`text-[var(--text-xs)] font-medium px-2 py-1 rounded-[var(--radius-sm)] transition-colors ${
-                openMenu() === menu.id
-                  ? 'text-[var(--text-primary)] bg-[var(--alpha-white-8)]'
-                  : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--alpha-white-8)]'
-              }`}
+              class="menubar-item"
+              classList={{ 'menubar-item--active': openMenu() === menu.id }}
               onClick={() => toggleMenu(menu.id)}
               onMouseEnter={() => openMenu() && setOpenMenu(menu.id)}
+              aria-haspopup="menu"
+              aria-expanded={openMenu() === menu.id}
+              aria-controls={`menubar-${menu.id}`}
             >
               {menu.label}
             </button>
 
             <Show when={openMenu() === menu.id}>
-              <div class="absolute top-full left-0 mt-1 min-w-[200px] py-1 bg-[var(--surface-overlay)] border border-[var(--border-default)] rounded-[var(--radius-lg)] shadow-lg z-[var(--z-popover)]">
+              <div
+                id={`menubar-${menu.id}`}
+                class="menubar-dropdown animate-dropdown-in"
+                role="menu"
+              >
                 <For each={menus[menu.id]}>
                   {(item) => (
-                    <Show
-                      when={!item.separator}
-                      fallback={<div class="h-px bg-[var(--border-subtle)] mx-2 my-1" />}
-                    >
+                    <Show when={!item.separator} fallback={<div class="menubar-dropdown-sep" />}>
                       <button
                         type="button"
-                        class={`w-full flex items-center justify-between px-3 py-1.5 text-[var(--text-sm)] transition-colors ${
-                          item.disabled
-                            ? 'text-[var(--text-muted)] opacity-40 cursor-not-allowed'
-                            : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--alpha-white-5)]'
-                        }`}
+                        class="menubar-dropdown-item"
+                        classList={{ 'menubar-dropdown-item--disabled': item.disabled }}
                         disabled={item.disabled}
                         onClick={() => handleItemClick(item)}
+                        role="menuitem"
                       >
                         <span>{item.label}</span>
                         <Show when={item.shortcut}>
-                          <span class="text-[var(--text-2xs)] text-[var(--text-muted)] ml-4">
-                            {item.shortcut}
-                          </span>
+                          <span class="menubar-dropdown-shortcut">{item.shortcut}</span>
                         </Show>
                       </button>
                     </Show>
@@ -202,6 +220,38 @@ export const MenuBar: Component = () => {
           </div>
         )}
       </For>
+      <Dialog
+        open={aboutOpen()}
+        onOpenChange={setAboutOpen}
+        title="About AVA"
+        size="sm"
+        showCloseButton
+      >
+        <div class="flex flex-col items-center gap-3 py-4 text-center">
+          <div
+            class="w-12 h-12 rounded-xl bg-[var(--accent)] flex items-center justify-center"
+            style={{ 'box-shadow': '0 0 12px rgba(139, 92, 246, 0.2)' }}
+          >
+            <span class="text-white text-xl font-bold">A</span>
+          </div>
+          <div>
+            <p class="text-base font-semibold text-[var(--text-primary)]">AVA</p>
+            <p class="text-xs text-[var(--text-secondary)] mt-0.5">v{appVersion()}</p>
+          </div>
+          <p class="text-xs text-[var(--text-muted)] max-w-[280px] leading-relaxed">
+            AI-powered coding assistant with multi-agent orchestration, 21 LLM providers, and a full
+            developer toolkit.
+          </p>
+          <a
+            href="https://github.com/ASF-GROUP/AVA"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="text-xs text-[var(--accent)] hover:underline mt-1"
+          >
+            github.com/ASF-GROUP/AVA
+          </a>
+        </div>
+      </Dialog>
     </div>
   )
 }

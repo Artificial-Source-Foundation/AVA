@@ -7,7 +7,7 @@
 | ├─ TUI | `crates/ava-tui/` | Interactive terminal interface (Ratatui + Crossterm) | Rust |
 | ├─ LLM | `crates/ava-llm/` | LLM providers (Anthropic, OpenAI, Gemini, Ollama, OpenRouter) | Rust |
 | ├─ Tools | `crates/ava-tools/` | Tool trait + 6 default tools + 7 extended | Rust |
-| ├─ Praxis | `crates/ava-praxis/` | Multi-agent orchestration | Rust |
+| ├─ HQ | `crates/ava-praxis/` | Multi-agent orchestration | Rust |
 | ├─ Session | `crates/ava-session/` | Session persistence (SQLite + FTS5) | Rust |
 | ├─ Memory | `crates/ava-memory/` | Persistent memory/recall | Rust |
 | ├─ Auth | `crates/ava-auth/` | Credentials + auth flows | Rust |

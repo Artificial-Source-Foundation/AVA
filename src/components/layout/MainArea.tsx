@@ -2,35 +2,83 @@
  * Main Area Component
  *
  * Chat-first layout. When no session is active, shows welcome state.
+ * When viewing a subagent, shows SubagentDetailView instead of ChatView.
  */
 
 import { Sparkles } from 'lucide-solid'
-import { type Component, Show } from 'solid-js'
+import { type Component, createMemo } from 'solid-js'
 import { useHq } from '../../stores/hq'
+import { useLayout } from '../../stores/layout'
+import { usePlanOverlay } from '../../stores/planOverlayStore'
 import { useSession } from '../../stores/session'
+import type { ToolCall } from '../../types'
 import { ChatView } from '../chat/ChatView'
+import { PlanFullScreen } from '../chat/plan-viewer/PlanFullScreen'
+import { SubagentDetailView } from '../chat/SubagentDetailView'
+import { DashboardView } from '../dashboard/DashboardView'
 import { HqShell } from '../hq'
 
 export const MainArea: Component = () => {
-  const { currentSession } = useSession()
+  const { currentSession, messages } = useSession()
   const { hqMode } = useHq()
+  const { dashboardVisible, viewingSubagentId, viewingPlanId, closePlanViewer } = useLayout()
+  const planOverlay = usePlanOverlay()
+
+  /** Find the tool call being viewed by scanning session messages */
+  const viewedToolCall = createMemo((): ToolCall | undefined => {
+    const id = viewingSubagentId()
+    if (!id) return undefined
+    for (const msg of messages()) {
+      if (msg.toolCalls) {
+        const tc = msg.toolCalls.find((tc) => tc.id === id)
+        if (tc) return tc
+      }
+    }
+    return undefined
+  })
+
+  /** Get the plan being viewed in full-screen mode */
+  const viewedPlan = createMemo(() => {
+    if (!viewingPlanId()) return null
+    return planOverlay.activePlan()
+  })
 
   return (
     <div class="flex flex-col h-full w-full min-w-0 bg-[var(--surface)]">
-      <Show
-        when={hqMode()}
-        fallback={
-          <Show when={currentSession()} fallback={<WelcomeState />}>
-            <div class="flex-1 overflow-hidden">
-              <ChatView />
-            </div>
-          </Show>
-        }
-      >
-        <div class="flex-1 overflow-hidden">
+      {hqMode() ? (
+        <div class="flex-1 min-h-0 overflow-hidden">
           <HqShell />
         </div>
-      </Show>
+      ) : viewingPlanId() && viewedPlan() ? (
+        <div class="flex-1 min-h-0 overflow-hidden">
+          <PlanFullScreen
+            plan={viewedPlan()!}
+            onApprove={() => {
+              planOverlay.executePlan('code')
+              closePlanViewer()
+            }}
+            onRevise={() => {
+              planOverlay.refinePlan()
+              closePlanViewer()
+            }}
+            onClose={closePlanViewer}
+          />
+        </div>
+      ) : viewingSubagentId() ? (
+        <div class="flex-1 min-h-0 overflow-hidden">
+          <SubagentDetailView toolCallId={viewingSubagentId()!} toolCall={viewedToolCall()} />
+        </div>
+      ) : dashboardVisible() ? (
+        <div class="flex-1 min-h-0 overflow-hidden">
+          <DashboardView />
+        </div>
+      ) : currentSession() ? (
+        <div class="flex-1 min-h-0 overflow-hidden">
+          <ChatView />
+        </div>
+      ) : (
+        <WelcomeState />
+      )}
     </div>
   )
 }

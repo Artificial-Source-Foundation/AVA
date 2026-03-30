@@ -42,8 +42,19 @@ export const UpdateDialog: Component<UpdateDialogProps> = (props) => {
 
   return (
     <Show when={props.open && props.updateInfo?.available}>
-      <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-        <div class="bg-[var(--surface-overlay)] border border-[var(--border-default)] rounded-[var(--radius-xl)] p-6 max-w-md w-full shadow-2xl space-y-4">
+      <div
+        class="fixed inset-0 z-50 flex items-center justify-center"
+        style={{ background: 'var(--modal-overlay)' }}
+      >
+        <div
+          class="p-6 max-w-md w-full space-y-4"
+          style={{
+            background: 'var(--modal-surface)',
+            border: '1px solid var(--modal-border)',
+            'border-radius': 'var(--modal-radius-sm)',
+            'box-shadow': 'var(--modal-shadow)',
+          }}
+        >
           {/* Header */}
           <div class="flex items-center gap-2">
             <ArrowDownCircle class="w-5 h-5 text-[var(--accent)]" />
@@ -79,8 +90,8 @@ export const UpdateDialog: Component<UpdateDialogProps> = (props) => {
               </div>
               <div class="w-full h-1.5 rounded-full bg-[var(--surface-sunken)] overflow-hidden">
                 <div
-                  class="h-full bg-[var(--accent)] rounded-full transition-all duration-300"
-                  style={{ width: `${progress()}%` }}
+                  class="h-full w-full origin-left bg-[var(--accent)] rounded-full transition-transform duration-300"
+                  style={{ transform: `scaleX(${progress() / 100})` }}
                 />
               </div>
             </div>
@@ -105,7 +116,7 @@ export const UpdateDialog: Component<UpdateDialogProps> = (props) => {
               type="button"
               onClick={handleInstall}
               disabled={installing()}
-              class="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-[var(--accent)] text-white rounded-[var(--radius-md)] hover:brightness-110 transition-colors disabled:opacity-60"
+              class="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-[var(--accent)] text-white rounded-[var(--radius-md)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-60"
             >
               <Show when={installing()} fallback={<RefreshCw class="w-3 h-3" />}>
                 <Loader2 class="w-3 h-3 animate-spin" />

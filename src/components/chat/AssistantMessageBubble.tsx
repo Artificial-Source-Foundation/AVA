@@ -151,6 +151,7 @@ function formatTimestamp(msg: Message): string {
 
 interface AssistantMessageBubbleProps {
   message: Message
+  readOnly?: boolean
   isStreaming: boolean
   isLastMessage: boolean
   isRetrying: boolean
@@ -261,7 +262,7 @@ export const AssistantMessageBubble: Component<AssistantMessageBubbleProps> = (p
 
   const TimestampLine = () => {
     return (
-      <div class="relative h-[20px] flex justify-start">
+      <div class="relative h-[20px] flex justify-start overflow-visible">
         <Show when={!props.isStreaming}>
           <div class="font-[var(--font-ui-mono)] text-[11px] tracking-wider text-[var(--text-muted)] pt-1.5 opacity-0 transition-opacity duration-200 group-hover:opacity-100 tabular-nums">
             {formatTimestamp(props.message)}
@@ -288,6 +289,7 @@ export const AssistantMessageBubble: Component<AssistantMessageBubbleProps> = (p
           <div class="absolute left-0 top-0 pt-1">
             <MessageActions
               message={props.message}
+              readOnly={props.readOnly}
               isLastMessage={props.isLastMessage}
               onEdit={props.onStartEdit}
               onRegenerate={props.onRegenerate}

@@ -15,6 +15,7 @@ import { PermissionsAndTrustTab } from './tabs/PermissionsAndTrustTab'
 import { PluginsTab } from './tabs/PluginsTab'
 import { ProvidersTab } from './tabs/providers/providers-tab'
 import { SkillsAndCommandsTab } from './tabs/SkillsAndCommandsTab'
+import { SkillsSettingsTab } from './tabs/SkillsSettingsTab'
 import { UsageTab } from './tabs/UsageTab'
 
 interface SettingsModalContentProps {
@@ -96,6 +97,8 @@ export const SettingsModalContent: Component<SettingsModalContentProps> = (props
         )
       case 'plugins':
         return <PluginsTab />
+      case 'skills':
+        return <SkillsSettingsTab />
       case 'skills-commands':
         return <SkillsAndCommandsTab />
       case 'developer':

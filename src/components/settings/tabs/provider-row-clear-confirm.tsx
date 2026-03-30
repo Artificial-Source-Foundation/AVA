@@ -34,7 +34,7 @@ export const ProviderRowClearConfirm: Component<ProviderRowClearConfirmProps> = 
         <button
           type="button"
           onClick={() => props.onConfirm()}
-          class="px-2.5 py-1 text-[var(--settings-text-badge)] font-medium text-white bg-[var(--error)] rounded-[var(--radius-md)] hover:brightness-110 transition-colors"
+          class="px-2.5 py-1 text-[var(--settings-text-badge)] font-medium text-white bg-[var(--error)] rounded-[var(--radius-md)] hover:bg-[color-mix(in_srgb,var(--error)_88%,white_12%)] transition-colors"
         >
           Yes, clear
         </button>

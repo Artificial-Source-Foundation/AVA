@@ -219,7 +219,7 @@ export const SkillForm: Component<{
           type="button"
           onClick={handleSave}
           disabled={!name().trim()}
-          class="px-3 py-1 text-[var(--settings-text-button)] rounded-[var(--radius-md)] bg-[var(--accent)] text-white hover:brightness-110 disabled:opacity-40 transition-colors"
+          class="px-3 py-1 text-[var(--settings-text-button)] rounded-[var(--radius-md)] bg-[var(--accent)] text-white hover:bg-[var(--accent-hover)] disabled:opacity-40 transition-colors"
         >
           Save
         </button>

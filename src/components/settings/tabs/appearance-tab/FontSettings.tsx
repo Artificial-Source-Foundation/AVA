@@ -58,7 +58,7 @@ export const FontSizeSection: Component = () => {
     <div>
       <SectionHeader title="Font Size" />
       <div class="flex items-center justify-between py-2">
-        <span class="text-[var(--settings-text-label)] text-[var(--text-secondary)]">Size</span>
+        <span class="settings-label">Size</span>
         <div class="flex gap-1">
           <For each={FONT_SIZE_OPTIONS}>
             {(opt) => (
@@ -73,7 +73,7 @@ export const FontSizeSection: Component = () => {
           </For>
         </div>
       </div>
-      <p class="text-[var(--settings-text-description)] text-[var(--gray-8)]">
+      <p class="settings-description">
         {FONT_SIZE_DESCRIPTIONS[settings().appearance.fontSize ?? 'medium']}
       </p>
     </div>
@@ -92,7 +92,7 @@ export const FontSection: Component = () => {
       <SectionHeader title="Font" />
       {/* Sans / UI font */}
       <div class="flex items-center justify-between py-2">
-        <span class="text-[var(--settings-text-label)] text-[var(--text-secondary)]">UI Font</span>
+        <span class="settings-label">UI Font</span>
         <div class="flex gap-1">
           <For each={SANS_FONT_OPTIONS}>
             {(font) => (
@@ -109,9 +109,7 @@ export const FontSection: Component = () => {
       </div>
       {/* Monospace font */}
       <div class="flex items-center justify-between py-2">
-        <span class="text-[var(--settings-text-label)] text-[var(--text-secondary)]">
-          Monospace
-        </span>
+        <span class="settings-label">Monospace</span>
         <div class="flex gap-1">
           <For each={MONO_FONT_OPTIONS}>
             {(font) => (
@@ -128,18 +126,24 @@ export const FontSection: Component = () => {
       </div>
       {/* Mono font preview */}
       <p
-        class="mt-1 p-2 rounded-[var(--radius-md)] bg-[var(--surface-raised)] border border-[var(--border-subtle)] text-xs text-[var(--text-secondary)]"
-        style={{ 'font-family': 'var(--font-mono)' }}
+        style={{
+          'margin-top': '4px',
+          padding: '8px',
+          'border-radius': '8px',
+          background: 'var(--alpha-white-8)',
+          border: '1px solid var(--border-default)',
+          'font-family': 'var(--font-mono)',
+          'font-size': '12px',
+          color: 'var(--text-secondary)',
+        }}
       >
         {'const hello = "Preview text in mono font";'}
       </p>
       {/* Ligatures */}
       <div class="flex items-center justify-between py-2 mt-1">
         <div>
-          <span class="text-[var(--settings-text-label)] text-[var(--text-secondary)]">
-            Ligatures
-          </span>
-          <p class="text-[var(--settings-text-description)] text-[var(--text-muted)] mt-0.5">
+          <span class="settings-label">Ligatures</span>
+          <p class="settings-description" style={{ 'margin-top': '2px' }}>
             {'Enables => and !== style ligatures (Fira Code, JetBrains Mono)'}
           </p>
         </div>
@@ -150,15 +154,13 @@ export const FontSection: Component = () => {
       </div>
       {/* Chat font size */}
       <div class="flex items-center justify-between py-2 mt-1">
-        <span class="text-[var(--settings-text-label)] text-[var(--text-secondary)]">
-          Chat font size
-        </span>
-        <span class="text-[var(--settings-text-label)] font-mono text-[var(--text-primary)]">
+        <span class="settings-label">Chat font size</span>
+        <span class="font-ui-mono text-[13px] text-[var(--text-primary)]">
           {settings().appearance.chatFontSize}px
         </span>
       </div>
       <div class="flex items-center gap-2 py-1">
-        <span class="text-[var(--settings-text-description)] text-[var(--text-muted)] w-6">11</span>
+        <span class="font-ui-mono w-6 text-[12px] text-[var(--text-muted)]">11</span>
         <input
           type="range"
           min="11"
@@ -168,11 +170,10 @@ export const FontSection: Component = () => {
           onInput={(e) =>
             updateAppearance({ chatFontSize: Number.parseInt(e.currentTarget.value, 10) })
           }
-          class="flex-1 h-1 appearance-none bg-[var(--border-default)] rounded-full cursor-pointer accent-[var(--accent)]"
+          class="flex-1 h-1 appearance-none rounded-full cursor-pointer"
+          style={{ background: 'var(--surface-overlay)', 'accent-color': 'var(--accent)' }}
         />
-        <span class="text-[var(--settings-text-description)] text-[var(--text-muted)] w-6 text-right">
-          20
-        </span>
+        <span class="font-ui-mono w-6 text-right text-[12px] text-[var(--text-muted)]">20</span>
       </div>
     </div>
   )
@@ -205,8 +206,14 @@ export const CodeThemeSection: Component = () => {
       </div>
       {/* Live preview */}
       <pre
-        class="mt-2 p-3 rounded-[var(--radius-md)] border border-[var(--border-subtle)] text-xs leading-relaxed overflow-hidden"
         style={{
+          'margin-top': '8px',
+          padding: '12px',
+          'border-radius': '8px',
+          border: '1px solid var(--border-default)',
+          'font-size': '12px',
+          'line-height': '1.6',
+          overflow: 'hidden',
           background: 'var(--code-background)',
           color: 'var(--code-text)',
           'font-family': 'var(--font-mono)',

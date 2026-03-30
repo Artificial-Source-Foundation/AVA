@@ -3,10 +3,10 @@
  * Duplicate, fork, and branch sessions.
  */
 
+import { isTauri } from '@tauri-apps/api/core'
 import { STORAGE_KEYS } from '../../config/constants'
 import {
   createSession as dbCreateSession,
-  duplicateSessionMessages as dbDuplicateSessionMessages,
   insertMessages as dbInsertMessages,
   getMessages,
 } from '../../services/database'
@@ -24,9 +24,49 @@ import {
   setSessions,
 } from './session-state'
 
+const API_BASE = import.meta.env.VITE_API_URL || ''
+
 // ============================================================================
 // Helpers
 // ============================================================================
+
+/** Web-mode helper: call the backend duplicate endpoint which copies messages server-side. */
+async function duplicateViaApi(
+  sourceSessionId: string,
+  name: string,
+  projectId: string | undefined
+): Promise<void> {
+  const newId = crypto.randomUUID()
+  const res = await fetch(`${API_BASE}/api/sessions/${sourceSessionId}/duplicate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, id: newId }),
+  })
+  if (!res.ok) {
+    console.error('[session] duplicate API failed:', res.status, await res.text())
+    return
+  }
+  const data = (await res.json()) as { id: string; title: string; message_count: number }
+
+  // Build a local Session object matching what dbCreateSession returns
+  const now = Date.now()
+  const newSession: Session = {
+    id: data.id,
+    name: data.title,
+    projectId,
+    parentSessionId: sourceSessionId,
+    createdAt: now,
+    updatedAt: now,
+    status: 'active' as const,
+    metadata: {},
+  }
+
+  await activateClonedSession(
+    newSession,
+    { messageCount: data.message_count, totalTokens: 0, lastPreview: '' },
+    projectId
+  )
+}
 
 /** After cloning a session, update signals and persist the new session as active. */
 async function activateClonedSession(
@@ -66,16 +106,38 @@ export async function duplicateSession(sourceSessionId: string): Promise<void> {
 
   const { currentProject } = useProject()
   const projectId = currentProject()?.id
+  const newName = `${source.name} (copy)`
 
-  const newSession = await dbCreateSession(`${source.name} (copy)`, projectId)
-  await dbDuplicateSessionMessages(sourceSessionId, newSession.id)
+  if (!isTauri()) {
+    // Web mode: use the dedicated backend API to duplicate with messages
+    return duplicateViaApi(sourceSessionId, newName, projectId)
+  }
+
+  const sourceMessages = await getMessages(sourceSessionId)
+  const newSession = await dbCreateSession(newName, projectId)
+
+  if (sourceMessages.length > 0) {
+    await dbInsertMessages(
+      sourceMessages.map((m) => ({
+        ...m,
+        id: crypto.randomUUID(),
+        sessionId: newSession.id,
+      }))
+    )
+  }
+
+  const totalTokens = sourceMessages.reduce((sum, m) => sum + (m.tokensUsed || 0), 0)
+  const lastPreview =
+    sourceMessages.length > 0
+      ? sourceMessages[sourceMessages.length - 1]!.content.slice(0, 100)
+      : source.lastPreview
 
   await activateClonedSession(
     newSession,
     {
-      messageCount: source.messageCount,
-      totalTokens: source.totalTokens,
-      lastPreview: source.lastPreview,
+      messageCount: sourceMessages.length,
+      totalTokens,
+      lastPreview: lastPreview || '',
     },
     projectId
   )
@@ -87,17 +149,38 @@ export async function forkSession(sourceSessionId: string, name?: string): Promi
 
   const { currentProject } = useProject()
   const projectId = currentProject()?.id
-
   const forkName = name || `${source.name} (fork)`
+
+  if (!isTauri()) {
+    // Web mode: use the dedicated backend API to fork with messages
+    return duplicateViaApi(sourceSessionId, forkName, projectId)
+  }
+
+  const sourceMessages = await getMessages(sourceSessionId)
   const newSession = await dbCreateSession(forkName, projectId, sourceSessionId)
-  await dbDuplicateSessionMessages(sourceSessionId, newSession.id)
+
+  if (sourceMessages.length > 0) {
+    await dbInsertMessages(
+      sourceMessages.map((m) => ({
+        ...m,
+        id: crypto.randomUUID(),
+        sessionId: newSession.id,
+      }))
+    )
+  }
+
+  const totalTokens = sourceMessages.reduce((sum, m) => sum + (m.tokensUsed || 0), 0)
+  const lastPreview =
+    sourceMessages.length > 0
+      ? sourceMessages[sourceMessages.length - 1]!.content.slice(0, 100)
+      : source.lastPreview
 
   await activateClonedSession(
     newSession,
     {
-      messageCount: source.messageCount,
-      totalTokens: source.totalTokens,
-      lastPreview: source.lastPreview,
+      messageCount: sourceMessages.length,
+      totalTokens,
+      lastPreview: lastPreview || '',
     },
     projectId
   )

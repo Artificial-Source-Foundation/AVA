@@ -131,11 +131,11 @@ Path-scoped `.ava/rules/*.md` are intended to feel like Claude Code rules: keep 
 
 ## Solo Hidden Delegation
 
-Outside HQ team mode, the main agent can still delegate quietly through the `task` tool:
+Outside HQ team mode, the main agent can still delegate quietly through the `subagent` tool:
 
 - Small single-file work keeps the main thread only (no hidden helper swarm).
 - Broader tasks can unlock a bounded helper budget (typically 1-2 hidden subagents, 3 only on explicit delegation requests).
-- `scout`, `explore`, `plan`, and `review` helpers run in enforced read-only specialist mode; `worker`, `build`, and `task` keep full editing access.
+- `scout`, `explore`, `plan`, and `review` helpers run in enforced read-only specialist mode; `worker`, `build`, and `subagent` keep full editing access.
 
 ## Workspace Trust
 

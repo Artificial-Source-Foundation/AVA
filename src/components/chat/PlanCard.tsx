@@ -5,21 +5,27 @@
  * Shows when the agent proposes a plan (via plan_created event).
  * Users can approve, reject with feedback, edit steps, and add per-step comments.
  *
- * Design:
- * - Header: "PLAN" label + summary
- * - Ordered steps with checkboxes, action badges, file badges, dependency indicators
- * - Per-step comment input (click step to toggle)
- * - Footer: estimated turns + budget + action buttons
+ * Design (Pencil KV8QP):
+ * - 680px card, rounded-lg, bg surface, border border-default
+ * - Header: 48px, bg background-subtle, list-checks icon (blue), "PLAN" badge, codename, estimate + chevron
+ * - Summary paragraph
+ * - Steps list with numbered circles (color-coded by action), action tag badges, file counts, deps
+ * - Expandable step detail with description, files list, comments section
+ * - Footer: step count + estimates left, Reject/Edit/Approve buttons right
  */
 
 import {
   Check,
   ChevronDown,
   ChevronUp,
-  ClipboardList,
-  GripVertical,
-  MessageSquare,
+  Circle,
+  CircleCheck,
+  File,
+  ListChecks,
+  MessageCircle,
   Pencil,
+  Send,
+  X,
 } from 'lucide-solid'
 import { type Component, createEffect, createSignal, For, on, Show } from 'solid-js'
 import type { PlanData, PlanStep, PlanStepAction } from '../../types/rust-ipc'
@@ -36,105 +42,225 @@ export interface PlanCardProps {
   onViewFull?: () => void
 }
 
+interface StepComment {
+  id: string
+  author: 'ava' | 'user'
+  text: string
+  time: string
+}
+
 // ============================================================================
 // Constants
 // ============================================================================
 
-const ACTION_COLORS: Record<PlanStepAction, { bg: string; text: string; label: string }> = {
-  research: { bg: 'rgba(6, 182, 212, 0.12)', text: '#06B6D4', label: 'Research' },
-  implement: { bg: 'rgba(59, 130, 246, 0.12)', text: '#3B82F6', label: 'Implement' },
-  test: { bg: 'rgba(34, 197, 94, 0.12)', text: '#22C55E', label: 'Test' },
-  review: { bg: 'rgba(245, 158, 11, 0.12)', text: '#F59E0B', label: 'Review' },
+const ACTION_COLORS: Record<
+  PlanStepAction,
+  { bg: string; text: string; label: string; numBg: string }
+> = {
+  research: {
+    bg: 'rgba(0, 188, 212, 0.125)',
+    text: '#00BCD4',
+    label: 'research',
+    numBg: 'rgba(0, 188, 212, 0.125)',
+  },
+  implement: {
+    bg: 'rgba(10, 132, 255, 0.125)',
+    text: 'var(--accent)',
+    label: 'implement',
+    numBg: 'rgba(10, 132, 255, 0.125)',
+  },
+  test: {
+    bg: 'rgba(52, 199, 89, 0.125)',
+    text: 'var(--success)',
+    label: 'test',
+    numBg: 'rgba(52, 199, 89, 0.125)',
+  },
+  review: {
+    bg: 'rgba(245, 166, 35, 0.125)',
+    text: 'var(--warning)',
+    label: 'review',
+    numBg: 'rgba(245, 166, 35, 0.125)',
+  },
 }
 
 // ============================================================================
 // Sub-components
 // ============================================================================
 
-const ActionBadge: Component<{ action: PlanStepAction }> = (props) => {
+/** Small action tag badge (e.g. "research", "implement") */
+const ActionTag: Component<{ action: PlanStepAction }> = (props) => {
   const config = () => ACTION_COLORS[props.action]
-
   return (
     <span
-      class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium tracking-wide uppercase flex-shrink-0"
-      style={{ background: config().bg, color: config().text }}
+      class="inline-flex items-center rounded-[6px] text-[9px] font-medium tracking-wide flex-shrink-0"
+      style={{ background: config().bg, color: config().text, padding: '2px 6px' }}
     >
       {config().label}
     </span>
   )
 }
 
-const FilesBadge: Component<{ files: string[] }> = (props) => (
-  <Show when={props.files.length > 0}>
-    <span
-      class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] tracking-wide flex-shrink-0"
-      style={{
-        background: 'var(--alpha-white-5)',
-        color: 'var(--text-muted)',
-        'font-family': 'var(--font-ui-mono)',
-      }}
-    >
-      {props.files.length} file{props.files.length !== 1 ? 's' : ''}
-    </span>
-  </Show>
-)
-
-const DependencyIndicator: Component<{ dependsOn: string[]; allSteps: PlanStep[] }> = (props) => {
-  const depLabels = () =>
-    props.dependsOn
-      .map((depId) => {
-        const idx = props.allSteps.findIndex((s) => s.id === depId)
-        return idx >= 0 ? `#${idx + 1}` : depId
-      })
-      .join(', ')
+/** Numbered circle for a step, color-coded by action and status */
+const StepNumber: Component<{ index: number; step: PlanStep }> = (props) => {
+  const config = () => ACTION_COLORS[props.step.action]
+  const numColor = () => {
+    if (props.step.approved) return 'var(--success)'
+    return config().text
+  }
+  const bgColor = () => {
+    if (props.step.approved) return 'rgba(52, 199, 89, 0.125)'
+    return config().numBg
+  }
 
   return (
-    <Show when={props.dependsOn.length > 0}>
+    <div
+      class="flex items-center justify-center rounded-full flex-shrink-0"
+      style={{
+        width: '22px',
+        height: '22px',
+        background: bgColor(),
+      }}
+    >
       <span
-        class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] flex-shrink-0"
+        class="text-[10px] font-semibold"
         style={{
-          background: 'var(--alpha-white-3)',
-          color: 'var(--text-muted)',
+          color: numColor(),
+          'font-family': 'var(--font-ui-mono)',
         }}
-        title={`Depends on step${props.dependsOn.length > 1 ? 's' : ''} ${depLabels()}`}
       >
-        after {depLabels()}
+        {props.index + 1}
       </span>
-    </Show>
+    </div>
   )
 }
 
-const StepCommentInput: Component<{
-  stepId: string
+/** Status icon on the right side of a step row */
+const StepStatusIcon: Component<{ approved: boolean }> = (props) => (
+  <Show
+    when={props.approved}
+    fallback={<Circle class="w-4 h-4 flex-shrink-0" style={{ color: 'var(--text-muted)' }} />}
+  >
+    <CircleCheck class="w-4 h-4 flex-shrink-0" style={{ color: 'var(--success)' }} />
+  </Show>
+)
+
+/** File row in step detail */
+const FileRow: Component<{ path: string }> = (props) => (
+  <div
+    class="flex items-center gap-2 rounded-[var(--radius-sm)] h-7"
+    style={{
+      background: 'var(--surface-raised)',
+      padding: '0 10px',
+    }}
+  >
+    <File class="w-3 h-3 flex-shrink-0" style={{ color: 'var(--text-muted)' }} />
+    <span
+      class="text-[11px] truncate"
+      style={{
+        color: 'var(--text-secondary)',
+        'font-family': 'var(--font-ui-mono)',
+      }}
+    >
+      {props.path}
+    </span>
+  </div>
+)
+
+/** Single comment bubble in step detail */
+const CommentBubble: Component<{ comment: StepComment }> = (props) => {
+  const isAva = () => props.comment.author === 'ava'
+  return (
+    <div
+      class="flex items-start gap-2.5 rounded-[var(--radius-sm)] w-full"
+      style={{
+        background: 'var(--surface-raised)',
+        padding: '8px 10px',
+      }}
+    >
+      {/* Avatar */}
+      <div
+        class="flex items-center justify-center rounded-full flex-shrink-0"
+        style={{
+          width: '20px',
+          height: '20px',
+          background: isAva()
+            ? 'linear-gradient(180deg, var(--accent) 0%, var(--system-purple) 100%)'
+            : 'var(--gray-6)',
+        }}
+      >
+        <span class="text-[9px] font-bold text-white">{isAva() ? 'A' : 'X'}</span>
+      </div>
+
+      {/* Body */}
+      <div class="flex flex-col gap-0.5 flex-1 min-w-0">
+        <div class="flex items-center gap-1.5">
+          <span class="text-[10px] font-semibold" style={{ color: 'var(--text-primary)' }}>
+            {isAva() ? 'AVA' : 'You'}
+          </span>
+          <span
+            class="text-[9px]"
+            style={{
+              color: 'var(--text-muted)',
+              'font-family': 'var(--font-ui-mono)',
+            }}
+          >
+            {props.comment.time}
+          </span>
+        </div>
+        <p class="text-[11px] m-0 leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
+          {props.comment.text}
+        </p>
+      </div>
+    </div>
+  )
+}
+
+/** Comment input row at bottom of step detail */
+const CommentInput: Component<{
   value: string
-  onInput: (stepId: string, value: string) => void
+  onInput: (value: string) => void
+  onSend: () => void
 }> = (props) => {
-  let inputRef: HTMLTextAreaElement | undefined
+  let inputRef: HTMLInputElement | undefined
 
   createEffect(() => {
     if (inputRef) inputRef.focus()
   })
 
   return (
-    <div class="mt-1.5 ml-7" style={{ animation: 'planStepExpand 120ms ease-out' }}>
-      <textarea
+    <div
+      class="flex items-center gap-2 rounded-[var(--radius-sm)] border border-[var(--border-default)] w-full"
+      style={{
+        height: '36px',
+        background: 'var(--surface-raised)',
+        padding: '0 10px 0 12px',
+      }}
+    >
+      <MessageCircle class="w-3.5 h-3.5 flex-shrink-0" style={{ color: 'var(--text-muted)' }} />
+      <input
         ref={inputRef}
+        type="text"
         value={props.value}
-        onInput={(e) => props.onInput(props.stepId, e.currentTarget.value)}
+        onInput={(e) => props.onInput(e.currentTarget.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && props.value.trim()) {
+            e.preventDefault()
+            props.onSend()
+          }
+        }}
         placeholder="Add a comment on this step..."
-        rows={2}
-        class="
-          w-full resize-none
-          rounded-[var(--radius-md)]
-          border border-[var(--border-subtle)]
-          bg-[var(--surface-sunken)]
-          px-2.5 py-1.5
-          text-[12px] text-[var(--text-primary)]
-          placeholder:text-[var(--text-muted)]
-          focus:outline-none focus:border-[var(--accent)]
-          transition-colors
-        "
+        class="flex-1 min-w-0 bg-transparent border-none outline-none text-[11px] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] placeholder:italic"
       />
+      <button
+        type="button"
+        onClick={() => {
+          if (props.value.trim()) props.onSend()
+        }}
+        class="flex-shrink-0 p-0 bg-transparent border-none cursor-pointer"
+        style={{ color: props.value.trim() ? 'var(--accent)' : 'var(--text-muted)' }}
+      >
+        <Send class="w-3.5 h-3.5" />
+      </button>
     </div>
   )
 }
@@ -146,7 +272,9 @@ const StepCommentInput: Component<{
 export const PlanCard: Component<PlanCardProps> = (props) => {
   const [steps, setSteps] = createSignal<PlanStep[]>([])
   const [stepComments, setStepComments] = createSignal<Record<string, string>>({})
-  const [commentingStepId, setCommentingStepId] = createSignal<string | null>(null)
+  const [commentThreads, setCommentThreads] = createSignal<Record<string, StepComment[]>>({})
+  const [expandedStepId, setExpandedStepId] = createSignal<string | null>(null)
+  const [commentInput, setCommentInput] = createSignal('')
   const [isEditing, setIsEditing] = createSignal(false)
   const [isRejecting, setIsRejecting] = createSignal(false)
   const [rejectFeedback, setRejectFeedback] = createSignal('')
@@ -159,7 +287,9 @@ export const PlanCard: Component<PlanCardProps> = (props) => {
       (plan) => {
         setSteps(plan.steps.map((s) => ({ ...s })))
         setStepComments({})
-        setCommentingStepId(null)
+        setCommentThreads({})
+        setExpandedStepId(null)
+        setCommentInput('')
         setIsEditing(false)
         setIsRejecting(false)
         setRejectFeedback('')
@@ -167,20 +297,38 @@ export const PlanCard: Component<PlanCardProps> = (props) => {
     )
   )
 
-  const toggleStepApproval = (stepId: string): void => {
-    setSteps((prev) => prev.map((s) => (s.id === stepId ? { ...s, approved: !s.approved } : s)))
+  const toggleStepExpansion = (stepId: string): void => {
+    setExpandedStepId((prev) => (prev === stepId ? null : stepId))
+    setCommentInput('')
   }
 
   const updateStepDescription = (stepId: string, description: string): void => {
     setSteps((prev) => prev.map((s) => (s.id === stepId ? { ...s, description } : s)))
   }
 
-  const handleStepComment = (stepId: string, value: string): void => {
-    setStepComments((prev) => ({ ...prev, [stepId]: value }))
-  }
+  const handleSendComment = (stepId: string): void => {
+    const text = commentInput().trim()
+    if (!text) return
 
-  const toggleComment = (stepId: string): void => {
-    setCommentingStepId((prev) => (prev === stepId ? null : stepId))
+    const comment: StepComment = {
+      id: `${stepId}-${Date.now()}`,
+      author: 'user',
+      text,
+      time: 'just now',
+    }
+
+    setCommentThreads((prev) => ({
+      ...prev,
+      [stepId]: [...(prev[stepId] ?? []), comment],
+    }))
+
+    // Also store in flat stepComments for the callbacks
+    setStepComments((prev) => {
+      const existing = prev[stepId] ? `${prev[stepId]}\n${text}` : text
+      return { ...prev, [stepId]: existing }
+    })
+
+    setCommentInput('')
   }
 
   const buildPlanData = (): PlanData => ({
@@ -191,7 +339,6 @@ export const PlanCard: Component<PlanCardProps> = (props) => {
   })
 
   const handleApprove = (): void => {
-    // Mark all steps as approved
     setSteps((prev) => prev.map((s) => ({ ...s, approved: true })))
     props.onApprove(buildPlanData(), stepComments())
   }
@@ -222,172 +369,254 @@ export const PlanCard: Component<PlanCardProps> = (props) => {
     }
   })
 
+  const depLabel = (depId: string): string => {
+    const idx = steps().findIndex((s) => s.id === depId)
+    return idx >= 0 ? `#${idx + 1}` : depId
+  }
+
   return (
     <div
-      class="w-full rounded-[var(--radius-lg)] border border-[var(--border-default)] bg-[var(--surface)] shadow-[var(--shadow-sm)] overflow-hidden"
-      style={{ animation: 'planCardIn 200ms ease-out' }}
+      class="w-full overflow-hidden"
+      style={{
+        'max-width': '680px',
+        'border-radius': 'var(--radius-lg)',
+        border: '1px solid var(--border-default)',
+        background: 'var(--surface)',
+        animation: 'planCardIn 200ms ease-out',
+      }}
     >
-      {/* Header */}
-      <div class="flex items-center gap-2.5 px-4 py-2.5 border-b border-[var(--border-subtle)] bg-[var(--surface-raised)]">
-        <div
-          class="p-1 rounded-[var(--radius-sm)] flex-shrink-0"
-          style={{ background: 'rgba(139, 92, 246, 0.12)' }}
-        >
-          <ClipboardList class="w-4 h-4" style={{ color: '#8B5CF6' }} />
-        </div>
-        <span
-          class="text-[10px] font-semibold tracking-widest uppercase flex-shrink-0"
-          style={{ color: '#8B5CF6' }}
-        >
-          Plan
-        </span>
-        <Show when={props.plan.codename}>
-          <span class="text-[12px] font-semibold flex-shrink-0" style={{ color: '#8B5CF6' }}>
-            {props.plan.codename}
+      {/* ── Header (48px) ────────────────────────────────────────── */}
+      <div
+        class="flex items-center justify-between"
+        style={{
+          height: '48px',
+          padding: '0 16px',
+          background: 'var(--surface-raised)',
+          'border-bottom': '1px solid var(--border-subtle)',
+        }}
+      >
+        {/* Left: icon + PLAN badge + codename */}
+        <div class="flex items-center gap-2.5 min-w-0 h-full">
+          <ListChecks class="w-4 h-4 flex-shrink-0" style={{ color: 'var(--accent)' }} />
+          <span
+            class="inline-flex items-center rounded-lg text-[9px] font-bold tracking-wider uppercase flex-shrink-0"
+            style={{
+              background: 'rgba(10, 132, 255, 0.08)',
+              color: 'var(--accent)',
+              padding: '2px 8px',
+              'letter-spacing': '1px',
+            }}
+          >
+            Plan
           </span>
-          <span class="text-[10px] text-[var(--text-muted)] flex-shrink-0">&mdash;</span>
-        </Show>
-        <span class="text-[13px] font-medium text-[var(--text-primary)] truncate flex-1">
-          {props.plan.summary}
-        </span>
-        <button
-          type="button"
-          onClick={() => setCollapsed(!collapsed())}
-          class="p-1 rounded-[var(--radius-sm)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--alpha-white-5)] transition-colors flex-shrink-0"
-          title={collapsed() ? 'Expand plan' : 'Collapse plan'}
-        >
-          <Show when={collapsed()} fallback={<ChevronUp class="w-3.5 h-3.5" />}>
-            <ChevronDown class="w-3.5 h-3.5" />
+          <Show when={props.plan.codename}>
+            <span
+              class="text-[13px] font-semibold truncate"
+              style={{ color: 'var(--text-primary)' }}
+            >
+              {props.plan.codename}
+            </span>
           </Show>
-        </button>
+        </div>
+
+        {/* Right: estimate + chevron */}
+        <div class="flex items-center gap-1.5 flex-shrink-0 h-full">
+          <span
+            class="text-[10px]"
+            style={{
+              color: 'var(--text-muted)',
+              'font-family': 'var(--font-ui-mono)',
+            }}
+          >
+            ~{props.plan.estimatedTurns} turn{props.plan.estimatedTurns !== 1 ? 's' : ''}
+            <Show when={props.plan.estimatedBudgetUsd != null}>
+              {' '}
+              &middot; ${props.plan.estimatedBudgetUsd!.toFixed(2)}
+            </Show>
+          </span>
+          <button
+            type="button"
+            onClick={() => setCollapsed(!collapsed())}
+            class="p-1 rounded-[var(--radius-sm)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--alpha-white-5)] transition-colors flex-shrink-0"
+            title={collapsed() ? 'Expand plan' : 'Collapse plan'}
+          >
+            <Show when={collapsed()} fallback={<ChevronUp class="w-3.5 h-3.5" />}>
+              <ChevronDown class="w-3.5 h-3.5" />
+            </Show>
+          </button>
+        </div>
       </div>
 
       <Show when={!collapsed()}>
-        {/* Steps */}
-        <div class="px-4 py-3">
-          <ol class="space-y-1.5 list-none m-0 p-0">
-            <For each={steps()}>
-              {(step, index) => (
-                <li class="group/step">
-                  <div class="flex items-start gap-2">
-                    {/* Drag handle (visual only for now) */}
-                    <Show when={isEditing()}>
-                      <div class="pt-0.5 cursor-grab text-[var(--text-muted)] opacity-0 group-hover/step:opacity-100 transition-opacity flex-shrink-0">
-                        <GripVertical class="w-3 h-3" />
-                      </div>
-                    </Show>
-
-                    {/* Checkbox */}
-                    <button
-                      type="button"
-                      onClick={() => toggleStepApproval(step.id)}
-                      class="mt-0.5 w-4 h-4 rounded border-2 flex items-center justify-center flex-shrink-0 transition-colors duration-100"
-                      classList={{
-                        'border-[var(--accent)] bg-[var(--accent)]': step.approved,
-                        'border-[var(--border-default)] hover:border-[var(--accent)]':
-                          !step.approved,
-                      }}
-                      title={step.approved ? 'Mark as pending' : 'Approve step'}
-                    >
-                      <Show when={step.approved}>
-                        <Check class="w-2.5 h-2.5 text-white" />
-                      </Show>
-                    </button>
-
-                    {/* Step number */}
-                    <span
-                      class="text-[11px] font-medium tabular-nums flex-shrink-0 pt-px"
-                      style={{ color: 'var(--text-muted)' }}
-                    >
-                      {index() + 1}.
-                    </span>
-
-                    {/* Step content */}
-                    <div class="flex-1 min-w-0">
-                      <div class="flex items-center gap-1.5 flex-wrap">
-                        <Show
-                          when={isEditing()}
-                          fallback={
-                            <button
-                              type="button"
-                              onClick={() => toggleComment(step.id)}
-                              class="text-[13px] text-[var(--text-primary)] text-left hover:text-[var(--accent)] transition-colors cursor-pointer"
-                              title="Click to add comment"
-                            >
-                              {step.description}
-                            </button>
-                          }
-                        >
-                          <input
-                            type="text"
-                            value={step.description}
-                            onInput={(e) => updateStepDescription(step.id, e.currentTarget.value)}
-                            class="flex-1 min-w-0 text-[13px] text-[var(--text-primary)] bg-[var(--surface-sunken)] border border-[var(--border-subtle)] rounded-[var(--radius-sm)] px-2 py-0.5 focus:outline-none focus:border-[var(--accent)] transition-colors"
-                          />
-                        </Show>
-
-                        <ActionBadge action={step.action} />
-                        <FilesBadge files={step.files} />
-                        <DependencyIndicator dependsOn={step.dependsOn} allSteps={steps()} />
-                      </div>
-
-                      {/* Files list (expanded) */}
-                      <Show when={step.files.length > 0}>
-                        <div class="mt-1 flex flex-wrap gap-1">
-                          <For each={step.files}>
-                            {(file) => (
-                              <span
-                                class="text-[10px] px-1 py-0.5 rounded"
-                                style={{
-                                  background: 'var(--alpha-white-3)',
-                                  color: 'var(--text-muted)',
-                                  'font-family': 'var(--font-ui-mono)',
-                                }}
-                              >
-                                {file}
-                              </span>
-                            )}
-                          </For>
-                        </div>
-                      </Show>
-
-                      {/* Comment indicator */}
-                      <Show when={stepComments()[step.id] && commentingStepId() !== step.id}>
-                        <div class="mt-1 flex items-center gap-1 text-[10px] text-[var(--text-muted)]">
-                          <MessageSquare class="w-3 h-3" />
-                          <span class="truncate">{stepComments()[step.id]}</span>
-                        </div>
-                      </Show>
-                    </div>
-
-                    {/* Comment toggle (when not editing) */}
-                    <Show when={!isEditing()}>
-                      <button
-                        type="button"
-                        onClick={() => toggleComment(step.id)}
-                        class="mt-0.5 p-1 rounded-[var(--radius-sm)] text-[var(--text-muted)] opacity-0 group-hover/step:opacity-100 hover:text-[var(--accent)] hover:bg-[var(--alpha-white-5)] transition-all flex-shrink-0"
-                        title="Add comment"
-                      >
-                        <MessageSquare class="w-3 h-3" />
-                      </button>
-                    </Show>
-                  </div>
-
-                  {/* Comment input */}
-                  <Show when={commentingStepId() === step.id}>
-                    <StepCommentInput
-                      stepId={step.id}
-                      value={stepComments()[step.id] ?? ''}
-                      onInput={handleStepComment}
-                    />
-                  </Show>
-                </li>
-              )}
-            </For>
-          </ol>
+        {/* ── Summary ────────────────────────────────────────────── */}
+        <div style={{ padding: '12px 16px' }}>
+          <p class="m-0 text-[12px] leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
+            {props.plan.summary}
+          </p>
         </div>
 
-        {/* Rejection feedback area */}
+        {/* ── Divider ────────────────────────────────────────────── */}
+        <div style={{ height: '1px', background: 'var(--border-subtle)' }} />
+
+        {/* ── Steps ──────────────────────────────────────────────── */}
+        <div class="flex flex-col" style={{ gap: '4px', padding: '8px' }}>
+          <For each={steps()}>
+            {(step, index) => {
+              const isExpanded = () => expandedStepId() === step.id
+              const isSelected = () => expandedStepId() === step.id
+
+              return (
+                <div
+                  class="overflow-hidden transition-[border-color]"
+                  style={{
+                    'border-radius': 'var(--radius-sm)',
+                    border: isSelected()
+                      ? '1px solid var(--accent-border)'
+                      : '1px solid transparent',
+                    background: isExpanded() ? 'var(--surface)' : undefined,
+                  }}
+                >
+                  {/* Step row */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!isEditing()) toggleStepExpansion(step.id)
+                    }}
+                    class="flex items-center gap-2.5 w-full text-left transition-colors group/step"
+                    style={{
+                      padding: '10px 12px',
+                      background: isExpanded() ? 'var(--surface-raised)' : 'var(--surface-raised)',
+                      'border-radius': isExpanded()
+                        ? 'var(--radius-sm) var(--radius-sm) 0 0'
+                        : 'var(--radius-sm)',
+                      cursor: isEditing() ? 'default' : 'pointer',
+                      border: 'none',
+                    }}
+                  >
+                    <StepNumber index={index()} step={step} />
+
+                    {/* Step body */}
+                    <div class="flex-1 min-w-0 flex flex-col" style={{ gap: '4px' }}>
+                      {/* Title */}
+                      <Show
+                        when={isEditing()}
+                        fallback={
+                          <span
+                            class="text-[12px] font-medium"
+                            style={{ color: 'var(--text-primary)' }}
+                          >
+                            {step.description}
+                          </span>
+                        }
+                      >
+                        <input
+                          type="text"
+                          value={step.description}
+                          onInput={(e) => updateStepDescription(step.id, e.currentTarget.value)}
+                          onClick={(e) => e.stopPropagation()}
+                          class="flex-1 min-w-0 text-[12px] text-[var(--text-primary)] bg-[var(--surface-sunken)] border border-[var(--border-subtle)] rounded-[var(--radius-sm)] px-2 py-0.5 focus:outline-none focus:border-[var(--accent)] transition-colors"
+                        />
+                      </Show>
+
+                      {/* Meta row: action tag + file count + deps */}
+                      <div class="flex items-center" style={{ gap: '8px' }}>
+                        <ActionTag action={step.action} />
+                        <Show when={step.files.length > 0}>
+                          <span
+                            class="text-[9px] flex-shrink-0"
+                            style={{
+                              color: 'var(--text-muted)',
+                              'font-family': 'var(--font-ui-mono)',
+                            }}
+                          >
+                            {step.files.length} file{step.files.length !== 1 ? 's' : ''}
+                          </span>
+                        </Show>
+                        <Show when={step.dependsOn.length > 0}>
+                          <span
+                            class="text-[9px] flex-shrink-0"
+                            style={{
+                              color: 'var(--text-muted)',
+                              'font-family': 'var(--font-ui-mono)',
+                            }}
+                          >
+                            after {step.dependsOn.map(depLabel).join(', ')}
+                          </span>
+                        </Show>
+                      </div>
+                    </div>
+
+                    {/* Right: status icon or chevron */}
+                    <Show
+                      when={isExpanded()}
+                      fallback={<StepStatusIcon approved={step.approved} />}
+                    >
+                      <ChevronUp
+                        class="w-3.5 h-3.5 flex-shrink-0"
+                        style={{ color: 'var(--text-muted)' }}
+                      />
+                    </Show>
+                  </button>
+
+                  {/* ── Expanded Step Detail ──────────────────────── */}
+                  <Show when={isExpanded()}>
+                    <div
+                      class="flex flex-col"
+                      style={{
+                        gap: '12px',
+                        padding: '16px',
+                        animation: 'planStepExpand 120ms ease-out',
+                      }}
+                    >
+                      {/* Full description (if different from title, show it; otherwise skip) */}
+
+                      {/* FILES section */}
+                      <Show when={step.files.length > 0}>
+                        <div class="flex flex-col" style={{ gap: '6px' }}>
+                          <span
+                            class="text-[9px] font-semibold tracking-wider uppercase"
+                            style={{ color: 'var(--text-muted)', 'letter-spacing': '1px' }}
+                          >
+                            Files
+                          </span>
+                          <div class="flex flex-col" style={{ gap: '4px' }}>
+                            <For each={step.files}>{(file) => <FileRow path={file} />}</For>
+                          </div>
+                        </div>
+                      </Show>
+
+                      {/* COMMENTS divider + section */}
+                      <div style={{ height: '1px', background: 'var(--border-subtle)' }} />
+
+                      <div class="flex flex-col" style={{ gap: '8px' }}>
+                        <span
+                          class="text-[9px] font-semibold tracking-wider uppercase"
+                          style={{ color: 'var(--text-muted)', 'letter-spacing': '1px' }}
+                        >
+                          Comments
+                        </span>
+
+                        {/* Existing comments */}
+                        <For each={commentThreads()[step.id] ?? []}>
+                          {(comment) => <CommentBubble comment={comment} />}
+                        </For>
+
+                        {/* Comment input */}
+                        <CommentInput
+                          value={commentInput()}
+                          onInput={setCommentInput}
+                          onSend={() => handleSendComment(step.id)}
+                        />
+                      </div>
+                    </div>
+                  </Show>
+                </div>
+              )
+            }}
+          </For>
+        </div>
+
+        {/* ── Rejection feedback area ────────────────────────────── */}
         <Show when={isRejecting()}>
           <div class="px-4 pb-3" style={{ animation: 'planStepExpand 120ms ease-out' }}>
             <textarea
@@ -420,39 +649,60 @@ export const PlanCard: Component<PlanCardProps> = (props) => {
           </div>
         </Show>
 
-        {/* Footer */}
-        <div class="flex items-center gap-3 px-4 py-2.5 border-t border-[var(--border-subtle)] bg-[var(--surface-raised)]">
-          {/* Estimates */}
-          <div class="flex items-center gap-2 text-[11px] text-[var(--text-muted)] flex-1">
-            <span>
+        {/* ── Footer ─────────────────────────────────────────────── */}
+        <div style={{ height: '1px', background: 'var(--border-subtle)' }} />
+
+        <div class="flex items-center justify-between" style={{ padding: '12px 16px' }}>
+          {/* Left: stats */}
+          <div class="flex items-center" style={{ gap: '8px' }}>
+            <span
+              class="text-[10px]"
+              style={{ color: 'var(--text-muted)', 'font-family': 'var(--font-ui-mono)' }}
+            >
+              {steps().length} step{steps().length !== 1 ? 's' : ''}
+            </span>
+            <span class="text-[10px]" style={{ color: 'var(--text-muted)' }}>
+              &middot;
+            </span>
+            <span
+              class="text-[10px]"
+              style={{ color: 'var(--text-muted)', 'font-family': 'var(--font-ui-mono)' }}
+            >
               ~{props.plan.estimatedTurns} turn{props.plan.estimatedTurns !== 1 ? 's' : ''}
             </span>
             <Show when={props.plan.estimatedBudgetUsd != null}>
-              <span>&middot;</span>
-              <span>~${props.plan.estimatedBudgetUsd!.toFixed(2)}</span>
-            </Show>
-            <Show when={steps().some((s) => s.approved)}>
-              <span>&middot;</span>
-              <span>
-                {steps().filter((s) => s.approved).length}/{steps().length} approved
+              <span class="text-[10px]" style={{ color: 'var(--text-muted)' }}>
+                &middot;
+              </span>
+              <span
+                class="text-[10px]"
+                style={{ color: 'var(--text-muted)', 'font-family': 'var(--font-ui-mono)' }}
+              >
+                ${props.plan.estimatedBudgetUsd!.toFixed(2)} est.
               </span>
             </Show>
           </div>
 
-          {/* View Full Plan link */}
-          <Show when={props.onViewFull}>
-            <button
-              type="button"
-              onClick={() => props.onViewFull?.()}
-              class="text-[11px] font-medium transition-colors hover:underline mr-2"
-              style={{ color: '#8B5CF6' }}
-            >
-              View Full Plan &rarr;
-            </button>
-          </Show>
+          {/* Right: action buttons */}
+          <div class="flex items-center" style={{ gap: '8px' }}>
+            {/* View Full Plan link */}
+            <Show when={props.onViewFull}>
+              <button
+                type="button"
+                onClick={() => props.onViewFull?.()}
+                class="text-[11px] font-medium transition-colors hover:underline"
+                style={{
+                  color: 'var(--accent)',
+                  background: 'transparent',
+                  border: 'none',
+                  cursor: 'pointer',
+                  padding: 0,
+                }}
+              >
+                View Full Plan &rarr;
+              </button>
+            </Show>
 
-          {/* Action buttons */}
-          <div class="flex items-center gap-1.5">
             {/* Reject */}
             <Show
               when={!isRejecting()}
@@ -461,7 +711,8 @@ export const PlanCard: Component<PlanCardProps> = (props) => {
                   type="button"
                   onClick={handleReject}
                   disabled={!rejectFeedback().trim()}
-                  class="text-[11px] font-medium text-[var(--error)] hover:underline disabled:opacity-40 disabled:no-underline transition-opacity px-1"
+                  class="text-[11px] font-medium text-[var(--error)] hover:underline disabled:opacity-40 disabled:no-underline transition-opacity cursor-pointer"
+                  style={{ background: 'transparent', border: 'none', padding: '0 4px' }}
                 >
                   Send Rejection
                 </button>
@@ -470,8 +721,16 @@ export const PlanCard: Component<PlanCardProps> = (props) => {
               <button
                 type="button"
                 onClick={handleReject}
-                class="text-[11px] text-[var(--text-muted)] hover:text-[var(--error)] transition-colors px-1"
+                class="inline-flex items-center justify-center rounded-[var(--radius-sm)] text-[11px] font-medium transition-colors cursor-pointer"
+                style={{
+                  gap: '6px',
+                  padding: '6px 14px',
+                  background: 'rgba(255, 255, 255, 0.024)',
+                  border: '1px solid var(--border-default)',
+                  color: 'var(--text-secondary)',
+                }}
               >
+                <X class="w-3 h-3" style={{ color: 'var(--text-muted)' }} />
                 Reject
               </button>
             </Show>
@@ -480,9 +739,16 @@ export const PlanCard: Component<PlanCardProps> = (props) => {
             <button
               type="button"
               onClick={handleEdit}
-              class="inline-flex items-center gap-1 rounded-[var(--radius-sm)] border border-[var(--border-default)] bg-[var(--surface)] px-2.5 py-1 text-[11px] font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-raised)] transition-colors"
+              class="inline-flex items-center justify-center rounded-[var(--radius-sm)] text-[11px] font-medium transition-colors cursor-pointer"
+              style={{
+                gap: '6px',
+                padding: '6px 14px',
+                background: 'rgba(255, 255, 255, 0.024)',
+                border: '1px solid var(--border-default)',
+                color: 'var(--text-secondary)',
+              }}
             >
-              <Pencil class="w-3 h-3" />
+              <Pencil class="w-3 h-3" style={{ color: 'var(--text-muted)' }} />
               {isEditing() ? 'Save Edits' : 'Edit'}
             </button>
 
@@ -490,8 +756,14 @@ export const PlanCard: Component<PlanCardProps> = (props) => {
             <button
               type="button"
               onClick={handleApprove}
-              class="inline-flex items-center gap-1 rounded-[var(--radius-sm)] px-2.5 py-1 text-[11px] font-medium text-white transition-colors"
-              style={{ background: 'var(--accent)' }}
+              class="inline-flex items-center justify-center rounded-[var(--radius-sm)] text-[11px] font-semibold transition-colors cursor-pointer"
+              style={{
+                gap: '6px',
+                padding: '6px 18px',
+                background: 'var(--accent)',
+                border: 'none',
+                color: '#ffffff',
+              }}
             >
               <Check class="w-3 h-3" />
               Approve

@@ -119,10 +119,24 @@ export const SandboxReviewDialog: Component<SandboxReviewDialogProps> = (props) 
 
   return (
     <Show when={props.open}>
-      <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-        <div class="bg-[var(--surface-overlay)] border border-[var(--border-default)] rounded-[var(--radius-xl)] shadow-2xl w-full max-w-2xl max-h-[80vh] flex flex-col">
+      <div
+        class="fixed inset-0 z-50 flex items-center justify-center"
+        style={{ background: 'var(--modal-overlay)' }}
+      >
+        <div
+          class="w-full max-w-2xl max-h-[80vh] flex flex-col"
+          style={{
+            background: 'var(--modal-surface)',
+            border: '1px solid var(--modal-border)',
+            'border-radius': 'var(--modal-radius-lg)',
+            'box-shadow': 'var(--modal-shadow)',
+          }}
+        >
           {/* Header */}
-          <div class="flex items-center justify-between px-5 py-4 border-b border-[var(--border-subtle)]">
+          <div
+            class="flex items-center justify-between px-5 py-4"
+            style={{ 'border-bottom': '1px solid var(--modal-border)' }}
+          >
             <div class="flex items-center gap-2.5">
               <Shield class="w-4.5 h-4.5 text-[var(--accent)]" />
               <div>
@@ -144,7 +158,8 @@ export const SandboxReviewDialog: Component<SandboxReviewDialogProps> = (props) 
             <button
               type="button"
               onClick={() => props.onClose()}
-              class="p-1 rounded-[var(--radius-sm)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-raised)]"
+              class="p-1 rounded-[var(--radius-sm)] hover:bg-[var(--alpha-white-5)] transition-colors"
+              style={{ color: 'var(--close-button-color)' }}
               aria-label="Close"
             >
               <X class="w-4 h-4" />
@@ -152,7 +167,10 @@ export const SandboxReviewDialog: Component<SandboxReviewDialogProps> = (props) 
           </div>
 
           {/* Selection controls */}
-          <div class="flex items-center justify-between px-5 py-2 border-b border-[var(--border-subtle)] bg-[var(--surface-sunken)]">
+          <div
+            class="flex items-center justify-between px-5 py-2"
+            style={{ 'border-bottom': '1px solid var(--modal-border)' }}
+          >
             <div class="flex items-center gap-3 text-[10px] text-[var(--text-muted)]">
               <button type="button" onClick={selectAll} class="hover:text-[var(--accent)]">
                 Select all
@@ -250,7 +268,10 @@ export const SandboxReviewDialog: Component<SandboxReviewDialogProps> = (props) 
           </div>
 
           {/* Footer */}
-          <div class="flex items-center justify-between px-5 py-3 border-t border-[var(--border-subtle)] bg-[var(--surface-sunken)]">
+          <div
+            class="flex items-center justify-between px-5 py-3"
+            style={{ 'border-top': '1px solid var(--modal-border)' }}
+          >
             <button
               type="button"
               onClick={() => props.onRejectAll()}
@@ -278,7 +299,7 @@ export const SandboxReviewDialog: Component<SandboxReviewDialogProps> = (props) 
                 type="button"
                 onClick={() => void handleApplyAll()}
                 disabled={props.changes.length === 0 || applying()}
-                class="px-3 py-1.5 text-xs font-medium bg-[var(--accent)] text-white rounded-[var(--radius-md)] hover:brightness-110 disabled:opacity-50"
+                class="px-3 py-1.5 text-xs font-medium bg-[var(--accent)] text-white rounded-[var(--radius-md)] hover:bg-[var(--accent-hover)] disabled:opacity-50"
               >
                 {applying() ? 'Applying...' : 'Apply All'}
               </button>

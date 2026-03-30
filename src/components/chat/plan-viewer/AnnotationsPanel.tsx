@@ -64,7 +64,7 @@ export const AnnotationsPanel: Component<{
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') props.onFocus(ann.id)
                 }}
-                class="w-full text-left rounded-lg border p-3 transition-all cursor-pointer"
+                class="w-full cursor-pointer rounded-lg border p-3 transition-[background-color,border-color]"
                 style={{
                   background:
                     props.focusedId === ann.id

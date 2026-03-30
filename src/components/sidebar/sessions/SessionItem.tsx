@@ -135,29 +135,35 @@ export const SessionItem: Component<SessionItemProps> = (props) => {
           if (e.key === 'Enter' || e.key === ' ') props.onSelect()
         }}
         onContextMenu={(e) => props.onContextMenu(e, props.session.id)}
-        class={`
-          relative flex flex-col w-full
-          py-1.5 px-2
-          rounded-[var(--radius-md)]
-          text-left transition-colors cursor-pointer
-          ${props.isActive ? 'bg-[var(--alpha-white-8)]' : 'hover:bg-[var(--alpha-white-5)]'}
-        `}
+        class="relative flex flex-col w-full rounded-[6px] text-left transition-colors cursor-pointer"
+        classList={{
+          'hover:bg-[rgba(255,255,255,0.04)]': !props.isActive,
+        }}
+        style={{
+          padding: '8px 10px',
+          background: props.isActive ? '#ffffff12' : undefined,
+          border: props.isActive ? '1px solid #ffffff0a' : '1px solid transparent',
+        }}
       >
         {/* Line 1: Session title */}
         <div class="flex items-center gap-1.5">
           <Show when={props.isBusy}>
-            <span class="flex-shrink-0 w-1.5 h-1.5 rounded-full bg-[var(--accent)] animate-pulse" />
+            <span class="flex-shrink-0 w-1.5 h-1.5 rounded-full bg-[#0A84FF] animate-pulse-subtle" />
           </Show>
           <span
-            class="flex-1 min-w-0 text-[var(--text-sm)] truncate"
-            style={{ color: 'var(--text-primary)' }}
+            class="flex-1 min-w-0 truncate"
+            style={{
+              'font-size': '13px',
+              'font-weight': props.isActive ? '500' : undefined,
+              color: props.isActive ? '#F5F5F7' : '#86868B',
+            }}
           >
             {formatSessionName(props.session.name)}
           </span>
         </div>
 
-        {/* Line 2: Relative timestamp */}
-        <span class="text-[var(--text-2xs)] mt-0.5" style={{ color: 'var(--text-muted)' }}>
+        {/* Line 2: Relative timestamp (subtitle) */}
+        <span class="mt-0.5 truncate" style={{ 'font-size': '11px', color: '#48484A' }}>
           {formatRelativeTimeVerbose(props.session.updatedAt)}
         </span>
       </div>

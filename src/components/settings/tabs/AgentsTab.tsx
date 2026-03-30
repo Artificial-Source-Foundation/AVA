@@ -1,18 +1,15 @@
 /**
- * Agents Settings Tab — Obsidian-Style Split Panel
+ * Agents Settings Tab — Split Panel Layout
  *
- * Left panel: tier-grouped list with search and toggles.
- * Right panel: inline detail/edit form (replaces the old AgentEditModal).
- * Fully self-contained — manages its own state via useSettings().
+ * Matches the Pencil design: flat agent list on the left (280px),
+ * detail form on the right. No outer card wrapper.
  */
 
-import { Users, Wand2 } from 'lucide-solid'
+import { Wand2 } from 'lucide-solid'
 import { type Component, createSignal } from 'solid-js'
 import type { AgentPreset } from '../../../config/defaults/agent-defaults'
 import { resolveAgentIcon } from '../../../config/defaults/agent-defaults'
 import { useSettings } from '../../../stores/settings'
-import { SettingsCard } from '../SettingsCard'
-import { SETTINGS_CARD_GAP } from '../settings-constants'
 import { AgentsTabDetail } from './agents-tab-detail'
 import { AgentsTabList } from './agents-tab-list'
 
@@ -102,40 +99,37 @@ export const AgentsTab: Component = () => {
   }
 
   return (
-    <div class="grid grid-cols-1" style={{ gap: SETTINGS_CARD_GAP }}>
-      <SettingsCard
-        icon={Users}
-        title="Agent Presets"
-        description="Configure general agent presets, provider/model overrides, and system prompts used across the desktop runtime"
-      >
-        <div
-          class="flex min-h-0 -mx-6 -mb-6 rounded-b-[var(--radius-xl)] overflow-hidden"
-          style={{ height: '520px' }}
-        >
-          <div class="w-[40%] min-h-0 flex-shrink-0">
-            <AgentsTabList
-              agents={settings().agents}
-              selectedId={creatingNew() ? null : selectedId()}
-              onSelect={handleSelect}
-              onToggle={handleToggle}
-              searchQuery={searchQuery()}
-              onSearchChange={setSearchQuery}
-              onImport={handleImport}
-              onExport={handleExport}
-              onCreate={handleCreate}
-            />
-          </div>
-          <div class="flex-1 min-w-0 min-h-0 overflow-hidden">
-            <AgentsTabDetail
-              agent={selectedAgent()}
-              providers={settings().providers}
-              onSave={handleSave}
-              onDelete={handleDelete}
-              isCreating={creatingNew()}
-            />
-          </div>
-        </div>
-      </SettingsCard>
+    <div
+      class="flex min-h-0 overflow-hidden"
+      style={{
+        height: '100%',
+        background: '#0A0A0C',
+      }}
+    >
+      {/* Agent List — 280px fixed width */}
+      <div style={{ width: '280px', 'flex-shrink': '0', height: '100%' }}>
+        <AgentsTabList
+          agents={settings().agents}
+          selectedId={creatingNew() ? null : selectedId()}
+          onSelect={handleSelect}
+          onToggle={handleToggle}
+          searchQuery={searchQuery()}
+          onSearchChange={setSearchQuery}
+          onImport={handleImport}
+          onExport={handleExport}
+          onCreate={handleCreate}
+        />
+      </div>
+      {/* Agent Detail — fills remaining width */}
+      <div class="flex-1 min-w-0 min-h-0 overflow-hidden">
+        <AgentsTabDetail
+          agent={selectedAgent()}
+          providers={settings().providers}
+          onSave={handleSave}
+          onDelete={handleDelete}
+          isCreating={creatingNew()}
+        />
+      </div>
     </div>
   )
 }

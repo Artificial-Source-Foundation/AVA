@@ -11,24 +11,47 @@ interface ModelOption {
 
 const DIRECTOR_MODELS: ModelOption[] = [
   {
-    id: 'opus',
+    id: 'claude-opus-4-6',
     name: 'Claude Opus (Anthropic)',
     description: 'Best reasoning · Recommended for Director',
     recommended: true,
   },
-  { id: 'gpt54', name: 'GPT-5.4 (OpenAI)', description: 'Strong reasoning · Good alternative' },
-  { id: 'gemini', name: 'Gemini Pro (Google)', description: 'Large context · Fast planning' },
+  {
+    id: 'gpt-5.4',
+    name: 'GPT-5.4 (OpenAI)',
+    description: 'Strong reasoning · Good alternative',
+  },
+  {
+    id: 'gemini-2.5-pro',
+    name: 'Gemini Pro (Google)',
+    description: 'Large context · Fast planning',
+  },
 ]
 
 const STEPS = ['Director Model', 'Team Config', 'Review']
 
 export const HqOnboarding: Component<{ onComplete: () => void }> = (props) => {
-  const { markOnboarded } = useHq()
+  const { bootstrapWorkspace, markOnboarded } = useHq()
   const [step, setStep] = createSignal(0)
-  const [selectedModel, setSelectedModel] = createSignal('opus')
+  const [selectedModel, setSelectedModel] = createSignal('claude-opus-4-6')
   const [leadsEnabled, setLeadsEnabled] = createSignal({ cto: true, qa: true })
+  const [isBootstrapping, setIsBootstrapping] = createSignal(false)
+  const [bootstrapError, setBootstrapError] = createSignal<string | null>(null)
 
-  const handleComplete = (): void => {
+  const handleComplete = async (): Promise<void> => {
+    setIsBootstrapping(true)
+    setBootstrapError(null)
+    try {
+      await bootstrapWorkspace({ directorModel: selectedModel() })
+      props.onComplete()
+    } catch (error) {
+      setBootstrapError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setIsBootstrapping(false)
+    }
+  }
+
+  const handleSkip = (): void => {
     markOnboarded()
     props.onComplete()
   }
@@ -92,6 +115,20 @@ export const HqOnboarding: Component<{ onComplete: () => void }> = (props) => {
         </div>
 
         {/* Step Content */}
+        <Show when={bootstrapError()}>
+          {(message) => (
+            <div
+              class="px-3 py-2 rounded-lg text-xs"
+              style={{
+                color: 'var(--danger)',
+                'background-color': 'rgba(239,68,68,0.08)',
+                border: '1px solid rgba(239,68,68,0.18)',
+              }}
+            >
+              HQ setup hit a problem: {message()}
+            </div>
+          )}
+        </Show>
         <Show when={step() === 0}>
           <StepDirectorModel selected={selectedModel()} onSelect={setSelectedModel} />
         </Show>
@@ -113,7 +150,8 @@ export const HqOnboarding: Component<{ onComplete: () => void }> = (props) => {
             type="button"
             class="text-xs"
             style={{ color: 'var(--text-muted)' }}
-            onClick={handleComplete}
+            onClick={handleSkip}
+            disabled={isBootstrapping()}
           >
             Skip for now
           </button>
@@ -124,9 +162,10 @@ export const HqOnboarding: Component<{ onComplete: () => void }> = (props) => {
                 type="button"
                 class="flex items-center gap-1.5 h-9 px-5 rounded-lg text-xs font-semibold"
                 style={{ 'background-color': 'var(--success)', color: 'white' }}
-                onClick={handleComplete}
+                onClick={() => void handleComplete()}
+                disabled={isBootstrapping()}
               >
-                Launch HQ
+                {isBootstrapping() ? 'Setting up HQ...' : 'Launch HQ'}
               </button>
             }
           >
@@ -273,7 +312,7 @@ const ToggleRow: Component<{
       style={{
         'background-color': props.enabled ? 'var(--accent)' : 'var(--border-default)',
       }}
-      onClick={props.onToggle}
+      onClick={() => props.onToggle()}
     >
       <div
         class="absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform"

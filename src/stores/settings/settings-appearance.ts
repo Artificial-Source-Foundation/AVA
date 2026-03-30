@@ -39,18 +39,18 @@ export const RADIUS_SCALES: Record<BorderRadius, Record<string, string>> = {
     '--radius-2xl': '6px',
   },
   default: {
-    '--radius-sm': '3px',
-    '--radius-md': '5px',
-    '--radius-lg': '6px',
-    '--radius-xl': '10px',
-    '--radius-2xl': '14px',
+    '--radius-sm': '4px',
+    '--radius-md': '6px',
+    '--radius-lg': '10px',
+    '--radius-xl': '12px',
+    '--radius-2xl': '16px',
   },
   rounded: {
     '--radius-sm': '6px',
     '--radius-md': '8px',
-    '--radius-lg': '10px',
-    '--radius-xl': '14px',
-    '--radius-2xl': '20px',
+    '--radius-lg': '12px',
+    '--radius-xl': '16px',
+    '--radius-2xl': '22px',
   },
   pill: {
     '--radius-sm': '10px',
@@ -99,19 +99,19 @@ export const DENSITY_SCALES: Record<UIDensity, Record<string, string>> = {
   },
   default: {
     '--density-spacing': '1',
-    '--density-py': '0.375rem',
-    '--density-px': '0.75rem',
-    '--density-gap': '0.5rem',
-    '--density-section-py': '0.75rem',
-    '--density-section-px': '1rem',
+    '--density-py': '0.5rem',
+    '--density-px': '1rem',
+    '--density-gap': '0.625rem',
+    '--density-section-py': '1rem',
+    '--density-section-px': '1.25rem',
   },
   comfortable: {
     '--density-spacing': '1.25',
-    '--density-py': '0.5rem',
-    '--density-px': '1rem',
-    '--density-gap': '0.75rem',
-    '--density-section-py': '1rem',
-    '--density-section-px': '1.25rem',
+    '--density-py': '0.625rem',
+    '--density-px': '1.25rem',
+    '--density-gap': '0.875rem',
+    '--density-section-py': '1.25rem',
+    '--density-section-px': '1.5rem',
   },
 }
 
@@ -210,7 +210,7 @@ export function applyAppearanceToDOM(s: AppSettings): void {
     for (const prop of ACCENT_VAR_NAMES) {
       el.style.removeProperty(prop)
     }
-    if (s.appearance.accentColor === 'violet') {
+    if (s.appearance.accentColor === 'blue') {
       delete el.dataset.accent
     } else {
       el.dataset.accent = s.appearance.accentColor

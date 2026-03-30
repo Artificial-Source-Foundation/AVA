@@ -38,7 +38,7 @@ export const MemberRow: Component<{
       <span
         class={`
           w-1.5 h-1.5 rounded-full flex-shrink-0
-          ${isWorking() ? 'animate-pulse' : ''}
+          ${isWorking() ? 'animate-pulse-subtle' : ''}
         `}
         style={{
           background: isWorking()

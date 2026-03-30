@@ -1,31 +1,22 @@
 /**
  * Project Hub Landing Page
  *
- * Full-screen landing page with time-based greeting, quick actions,
- * and recent projects grid. Replaces the old project hub with a
- * polished, design-spec-aligned layout.
+ * Full-screen view with header (search + open project button),
+ * current project card, and recent projects grid.
+ * Matches the Pencil design spec (KVAdT).
  */
 
-import { Folder, Settings } from 'lucide-solid'
-import { type Component, For, Show } from 'solid-js'
+import { FolderOpen, Plus, Search } from 'lucide-solid'
+import { type Component, createSignal, For, Show } from 'solid-js'
 import { logError } from '../../services/logger'
 import { useLayout } from '../../stores/layout'
 import { useProject } from '../../stores/project'
 import { useSession } from '../../stores/session'
 import type { ProjectId } from '../../types'
 import { ProjectCard } from './ProjectCard'
-import { QuickActions } from './QuickActions'
-
-/** Return a time-based greeting based on the current hour. */
-function getGreeting(): string {
-  const hour = new Date().getHours()
-  if (hour < 12) return 'Good morning'
-  if (hour < 18) return 'Good afternoon'
-  return 'Good evening'
-}
 
 export const ProjectHub: Component = () => {
-  const { closeProjectHub, openSettings } = useLayout()
+  const { closeProjectHub } = useLayout()
   const {
     currentProject,
     recentProjects,
@@ -34,11 +25,15 @@ export const ProjectHub: Component = () => {
     switchProject,
     isLoadingProjects,
   } = useProject()
-  const { createNewSession, loadSessionsForCurrentProject, restoreForCurrentProject } = useSession()
+  const { loadSessionsForCurrentProject, restoreForCurrentProject } = useSession()
 
-  /** Deduplicated ordered list: favorites first, then recent. */
+  const [searchQuery, setSearchQuery] = createSignal('')
+
+  /** Deduplicated ordered list: favorites first, then recent, excluding current project. */
   const orderedProjects = () => {
+    const current = currentProject()
     const seen = new Set<string>()
+    if (current) seen.add(current.id)
     const combined = [...favoriteProjects(), ...recentProjects()]
     return combined.filter((project) => {
       if (seen.has(project.id)) return false
@@ -47,16 +42,22 @@ export const ProjectHub: Component = () => {
     })
   }
 
-  // ── Handlers ───────────────────────────────────────────────────
-
-  const handleNewSession = async (): Promise<void> => {
-    try {
-      await createNewSession()
-      closeProjectHub()
-    } catch (error) {
-      logError('ProjectHub', 'Failed to create new session', error)
-    }
+  /** Filtered recent projects based on search query. */
+  const filteredProjects = () => {
+    const q = searchQuery().toLowerCase().trim()
+    if (!q) return orderedProjects()
+    return orderedProjects().filter(
+      (p) => p.name.toLowerCase().includes(q) || p.directory.toLowerCase().includes(q)
+    )
   }
+
+  /** Total project count (current + recent). */
+  const projectCount = () => {
+    const count = orderedProjects().length
+    return currentProject() ? count + 1 : count
+  }
+
+  // ── Handlers ───────────────────────────────────────────────────
 
   const handleOpenProject = async (): Promise<void> => {
     let selected: string | string[] | null = null
@@ -86,17 +87,6 @@ export const ProjectHub: Component = () => {
     }
   }
 
-  const handleResumeLast = async (): Promise<void> => {
-    if (!currentProject()) return
-    try {
-      await loadSessionsForCurrentProject()
-      await restoreForCurrentProject()
-      closeProjectHub()
-    } catch (error) {
-      logError('ProjectHub', 'Failed to resume last session', error)
-    }
-  }
-
   const handleProjectClick = async (projectId: ProjectId): Promise<void> => {
     try {
       await switchProject(projectId)
@@ -115,97 +105,106 @@ export const ProjectHub: Component = () => {
     }
   }
 
-  const handleSettingsClick = (): void => {
-    openSettings()
+  const handleCurrentProjectClick = async (): Promise<void> => {
+    const current = currentProject()
+    if (!current) return
+    try {
+      await loadSessionsForCurrentProject()
+      await restoreForCurrentProject()
+      closeProjectHub()
+    } catch (error) {
+      logError('ProjectHub', 'Failed to resume current project', error)
+    }
   }
 
   // ── Render ─────────────────────────────────────────────────────
 
   return (
-    <div class="h-screen w-full flex flex-col bg-[var(--background)] overflow-hidden">
-      {/* ── Top Bar (56px) ──────────────────────────────────── */}
-      <div class="flex items-center justify-between h-14 px-5 flex-shrink-0 border-b border-[var(--gray-5)]">
-        {/* Left: logo + app name */}
-        <div class="flex items-center gap-3">
-          <div class="w-8 h-8 rounded-lg bg-[var(--violet-2)] flex items-center justify-center">
-            <span class="text-[14px] font-bold text-[var(--accent)]">A</span>
-          </div>
-          <span class="text-[16px] font-bold text-white tracking-tight">AVA</span>
+    <div class="ph-root">
+      {/* ── Header (56px) ──────────────────────────────────── */}
+      <div class="ph-header">
+        <div class="ph-header-left">
+          <FolderOpen class="ph-header-icon" />
+          <span class="ph-header-title">Projects</span>
+          <Show when={projectCount() > 0}>
+            <span class="ph-header-count">{projectCount()}</span>
+          </Show>
         </div>
 
-        {/* Right: settings gear */}
-        <button
-          type="button"
-          onClick={handleSettingsClick}
-          class="p-2 rounded-lg text-[var(--text-tertiary)] hover:text-[var(--gray-9)] hover:bg-[var(--surface-raised)] transition-colors"
-          title="Settings"
-          aria-label="Settings"
-        >
-          <Settings class="w-5 h-5" />
-        </button>
+        <div class="ph-header-right">
+          <div class="ph-search">
+            <Search class="ph-search-icon" />
+            <input
+              type="text"
+              class="ph-search-input"
+              placeholder="Search projects..."
+              value={searchQuery()}
+              onInput={(e) => setSearchQuery(e.currentTarget.value)}
+            />
+          </div>
+
+          <button type="button" class="ph-open-btn" onClick={handleOpenProject}>
+            <Plus class="ph-open-btn-icon" />
+            <span>Open Project</span>
+          </button>
+        </div>
       </div>
 
-      {/* ── Body ────────────────────────────────────────────── */}
-      <div class="flex-1 overflow-y-auto px-20 pt-10">
-        {/* Welcome Section */}
-        <div class="mb-8">
-          <h1 class="text-2xl font-bold text-white">{getGreeting()}</h1>
-          <p class="mt-1.5 text-sm text-[var(--text-muted)]">
-            Pick up where you left off, or start something new
-          </p>
-        </div>
+      {/* ── Divider ────────────────────────────────────────── */}
+      <div class="ph-divider" />
 
-        {/* Quick Actions */}
-        <div class="mb-10">
-          <QuickActions
-            onNewSession={handleNewSession}
-            onOpenProject={handleOpenProject}
-            onResumeLast={handleResumeLast}
-            hasLastSession={currentProject() !== null}
-          />
-        </div>
+      {/* ── Body ───────────────────────────────────────────── */}
+      <div class="ph-body">
+        {/* Loading state */}
+        <Show when={isLoadingProjects()}>
+          <div class="ph-loading">
+            <div class="ph-spinner" />
+            <span>Loading projects...</span>
+          </div>
+        </Show>
 
-        {/* Recent Projects */}
-        <div>
-          <h2
-            class="text-[10px] font-semibold text-[var(--gray-6)] uppercase mb-4"
-            style={{ 'letter-spacing': '0.8px' }}
-          >
-            Recent Projects
-          </h2>
+        <Show when={!isLoadingProjects()}>
+          {/* ── Current Project ─────────────────────────────── */}
+          <Show when={currentProject()}>
+            {(project) => (
+              <div class="ph-section">
+                <span class="ph-section-label">CURRENT PROJECT</span>
+                <ProjectCard
+                  project={project()}
+                  variant="active"
+                  onClick={handleCurrentProjectClick}
+                />
+              </div>
+            )}
+          </Show>
 
-          {/* Loading state */}
-          <Show when={isLoadingProjects()}>
-            <div class="flex items-center gap-2 text-sm text-[var(--text-muted)] py-4">
-              <div class="w-4 h-4 border-2 border-[var(--gray-5)] border-t-[var(--accent)] rounded-full animate-spin" />
-              <span>Loading projects…</span>
+          {/* ── Recent Projects ─────────────────────────────── */}
+          <Show when={filteredProjects().length > 0}>
+            <div class="ph-section">
+              <span class="ph-section-label">RECENT PROJECTS</span>
+              <div class="ph-grid">
+                <For each={filteredProjects()}>
+                  {(project) => (
+                    <ProjectCard
+                      project={project}
+                      variant="default"
+                      onClick={() => handleProjectClick(project.id as ProjectId)}
+                    />
+                  )}
+                </For>
+              </div>
             </div>
           </Show>
 
-          {/* Empty state */}
-          <Show when={!isLoadingProjects() && orderedProjects().length === 0}>
-            <div class="flex flex-col items-center justify-center py-10 text-[var(--text-muted)]">
-              <Folder class="w-10 h-10 mb-3 opacity-40" />
-              <p class="text-sm font-medium">No recent projects</p>
-              <p class="text-xs mt-1 text-[var(--text-muted)]">Open a folder to get started</p>
+          {/* Empty state (no projects at all) */}
+          <Show when={!currentProject() && orderedProjects().length === 0}>
+            <div class="ph-empty">
+              <FolderOpen class="ph-empty-icon" />
+              <p class="ph-empty-title">No projects yet</p>
+              <p class="ph-empty-sub">Open a folder to get started</p>
             </div>
           </Show>
-
-          {/* Project cards */}
-          <Show when={!isLoadingProjects() && orderedProjects().length > 0}>
-            <div class="flex flex-wrap gap-4">
-              <For each={orderedProjects()}>
-                {(project) => (
-                  <ProjectCard
-                    project={project}
-                    isActive={currentProject()?.id === project.id}
-                    onClick={() => handleProjectClick(project.id as ProjectId)}
-                  />
-                )}
-              </For>
-            </div>
-          </Show>
-        </div>
+        </Show>
       </div>
     </div>
   )

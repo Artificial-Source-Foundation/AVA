@@ -6,6 +6,7 @@
 
 import { batch, createMemo } from 'solid-js'
 import { DEFAULTS, STORAGE_KEYS } from '../../config/constants'
+import { clearTodos } from '../../hooks/use-rust-agent'
 import { log } from '../../lib/logger'
 import { notifySessionOpened } from '../../services/core-bridge'
 import {
@@ -23,6 +24,7 @@ import {
   getTerminalExecutions,
 } from '../../services/database'
 import { logDebug, logError, logInfo, logWarn } from '../../services/logger'
+import { rustAgent } from '../../services/rust-bridge'
 import type { Session, SessionWithStats } from '../../types'
 import { useProject } from '../project'
 import { getLastSessionForProject, setLastSessionForProject } from '../session-persistence'
@@ -76,6 +78,7 @@ function resetSessionArtifacts(): void {
     setTerminalExecutions([])
     setMemoryItems([])
     setCheckpoints([])
+    clearTodos()
   })
 }
 
@@ -147,6 +150,10 @@ export async function restoreForCurrentProject(): Promise<void> {
 }
 
 export async function createNewSession(name?: string): Promise<Session> {
+  // Fire-and-forget cancel so a running agent from the previous session
+  // doesn't block the new session with a 409 conflict.
+  rustAgent.cancel().catch(() => {})
+
   const { currentProject } = useProject()
   const project = currentProject()
   const projectId = project?.id
@@ -178,6 +185,10 @@ export async function switchSession(id: string): Promise<void> {
     logWarn('session', 'Session not found', { id })
     return
   }
+
+  // Fire-and-forget cancel so a running agent from the previous session
+  // doesn't block the new session with a 409 conflict.
+  rustAgent.cancel().catch(() => {})
 
   const requestToken = sessionSwitchGate.begin()
   setEditingMessageId(null)

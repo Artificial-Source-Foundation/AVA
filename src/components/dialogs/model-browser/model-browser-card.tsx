@@ -2,6 +2,7 @@
  * Model Browser Card
  *
  * Individual model card with provider icon, name, context window, price, and capability badges.
+ * macOS-inspired dark design with category-colored capability pills.
  */
 
 import { type Component, For, Show } from 'solid-js'
@@ -17,79 +18,78 @@ interface ModelBrowserCardProps {
   onSelect: () => void
 }
 
-const capabilityColors: Record<string, string> = {
-  reasoning: 'text-[var(--warning)] bg-[var(--warning)]/10',
-  thinking: 'text-[var(--accent)] bg-[var(--accent)]/10',
-  tools: 'text-[var(--info)] bg-[var(--info)]/10',
-  vision: 'text-[var(--success)] bg-[var(--success)]/10',
-  free: 'text-[var(--text-muted)] bg-[var(--alpha-white-5)]',
+/** Category-specific colors for capability badges */
+const capabilityStyles: Record<string, { text: string; bg: string }> = {
+  tools: { text: '#0A84FF', bg: 'rgba(10, 132, 255, 0.12)' },
+  vision: { text: '#5E5CE6', bg: 'rgba(94, 92, 230, 0.12)' },
+  reasoning: { text: '#F5A623', bg: 'rgba(245, 166, 35, 0.12)' },
+  thinking: { text: '#34C759', bg: 'rgba(52, 199, 89, 0.12)' },
+  free: { text: '#48484A', bg: 'rgba(255, 255, 255, 0.04)' },
 }
 
 export const ModelBrowserCard: Component<ModelBrowserCardProps> = (props) => (
   <button
     type="button"
     onClick={() => props.onSelect()}
-    class={`
-      w-full text-left p-3 rounded-[var(--radius-lg)]
-      border transition-colors duration-150
-      hover:bg-[var(--alpha-white-5)]
-      ${
-        props.isSelected
-          ? 'border-[var(--accent)] bg-[var(--accent)]/5'
-          : 'border-[var(--border-subtle)] bg-[var(--surface-raised)]'
-      }
-    `}
+    class="w-full text-left p-3.5 rounded-[10px] transition-all duration-150 group cursor-pointer"
+    classList={{
+      'bg-[#0F0F12] border border-[rgba(10,132,255,0.3)] shadow-[0_0_0_1px_rgba(10,132,255,0.1)]':
+        props.isSelected,
+      'bg-[#0F0F12] border border-[rgba(255,255,255,0.05)] hover:border-[rgba(255,255,255,0.1)]':
+        !props.isSelected,
+    }}
     style={{ contain: 'content' }}
   >
     {/* Header: icon + name */}
-    <div class="flex items-start gap-2.5 mb-2">
+    <div class="flex items-start gap-2.5 mb-2.5">
       <Show when={props.provider}>
         {(p) => (
-          <div
-            class="w-7 h-7 rounded-[var(--radius-md)] flex items-center justify-center flex-shrink-0"
-            style={{ background: 'var(--alpha-white-5)' }}
-          >
-            <Dynamic component={p().icon} class="w-3.5 h-3.5 text-[var(--text-secondary)]" />
+          <div class="w-7 h-7 rounded-[6px] flex items-center justify-center flex-shrink-0 bg-[rgba(255,255,255,0.04)] border border-[rgba(255,255,255,0.06)]">
+            <Dynamic component={p().icon} class="w-3.5 h-3.5 text-[#C8C8CC]" />
           </div>
         )}
       </Show>
       <div class="min-w-0 flex-1">
         <div class="flex items-center gap-1.5">
-          <span class="text-xs font-medium text-[var(--text-primary)] truncate">
+          <span class="text-[13px] font-medium text-[#F5F5F7] truncate leading-tight">
             {props.model.name}
           </span>
           <Show when={props.isSelected}>
             <span class="w-1.5 h-1.5 rounded-full bg-[var(--accent)] flex-shrink-0" />
           </Show>
         </div>
-        <p class="text-[10px] text-[var(--text-muted)] truncate">{props.model.providerName}</p>
+        <p class="text-[11px] text-[#48484A] truncate mt-0.5">{props.model.providerName}</p>
       </div>
     </div>
 
-    {/* Meta row */}
-    <div class="flex items-center gap-2 text-[10px] text-[var(--text-muted)] mb-2">
+    {/* Stats row: context + pricing in mono */}
+    <div class="flex items-center gap-2 text-[10px] text-[#48484A] mb-2.5 font-[var(--font-mono)]">
       <span>{formatContextWindow(props.model.contextWindow)} ctx</span>
       <Show when={props.model.pricing}>
         {(pricing) => (
           <>
-            <span class="text-[var(--border-default)]">·</span>
+            <span class="text-[rgba(255,255,255,0.1)]">&middot;</span>
             <span>{formatPricing(pricing())}</span>
           </>
         )}
       </Show>
     </div>
 
-    {/* Capability badges */}
+    {/* Capability badges — tiny pills with category colors */}
     <Show when={props.model.capabilities.length > 0}>
       <div class="flex flex-wrap gap-1">
         <For each={props.model.capabilities}>
-          {(cap) => (
-            <span
-              class={`px-1.5 py-0.5 text-[9px] font-medium rounded-full capitalize ${capabilityColors[cap] ?? 'text-[var(--text-muted)] bg-[var(--alpha-white-5)]'}`}
-            >
-              {cap}
-            </span>
-          )}
+          {(cap) => {
+            const style = capabilityStyles[cap] ?? { text: '#48484A', bg: 'rgba(255,255,255,0.04)' }
+            return (
+              <span
+                class="px-1.5 py-[1px] text-[9px] font-medium rounded-full capitalize font-[var(--font-mono)]"
+                style={{ color: style.text, background: style.bg }}
+              >
+                {cap}
+              </span>
+            )
+          }}
         </For>
       </div>
     </Show>

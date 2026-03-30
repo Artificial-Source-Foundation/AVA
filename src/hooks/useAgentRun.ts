@@ -23,6 +23,9 @@ import type { ToolActivity } from './agent'
 import type { QueuedMessage } from './chat/types'
 import type { StreamingOffsets } from './useAgentStreaming'
 
+/** Small promise-based delay for async coordination. */
+const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
+
 // ── Deps: signals and stores the run function needs ─────────────────
 
 export interface RunDeps {
@@ -77,6 +80,10 @@ export function createAgentRun(deps: RunDeps) {
       setMessageQueue((prev) => [...prev, { content: goal }])
       return null
     }
+
+    // Track whether the run completed successfully (not cancelled / errored).
+    // The queue should only auto-submit after successful completions.
+    let ranSuccessfully = false
 
     batch(() => {
       setCurrentThought('')
@@ -331,6 +338,7 @@ export function createAgentRun(deps: RunDeps) {
         log.info('agent', 'Backend session ID registered', { backendSessionId })
       }
 
+      ranSuccessfully = true
       return result
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
@@ -348,12 +356,26 @@ export function createAgentRun(deps: RunDeps) {
         setStreamingStartedAt(null)
         setLiveMessageId(null)
       })
-      // Process queue
-      const queue = messageQueue()
-      if (queue.length > 0) {
-        const next = queue[0]!
-        setMessageQueue((prev) => prev.slice(1))
-        void run(next.content)
+      // Auto-submit queued messages only after successful runs.
+      // Don't drain on cancel/error — the user should decide what to do.
+      if (ranSuccessfully) {
+        const queue = messageQueue()
+        if (queue.length > 0) {
+          const next = queue[0]!
+          setMessageQueue((prev) => prev.slice(1))
+          log.info('agent', 'Auto-submitting queued message', {
+            content: next.content.slice(0, 80),
+            remaining: queue.length - 1,
+          })
+          // In web mode, the backend clears its `running` flag asynchronously
+          // after sending the `complete` WebSocket event.  A small delay prevents
+          // a 409 "Agent is already running" race when we immediately re-submit.
+          if (!isTauri()) {
+            void delay(150).then(() => run(next.content))
+          } else {
+            void run(next.content)
+          }
+        }
       }
     }
   }

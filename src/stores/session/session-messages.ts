@@ -315,8 +315,18 @@ export async function createCheckpoint(description: string): Promise<string | nu
     createdAt: Date.now(),
   })
 
-  // Lazy import to avoid circular — setCheckpoints is from session-state
-  const { setCheckpoints } = await import('./session-state')
+  // Lazy import to avoid circular — setCheckpoints/setMemoryItems are from session-state
+  const { setCheckpoints, setMemoryItems } = await import('./session-state')
+  const memItem = {
+    id,
+    sessionId: sess.id,
+    type: 'checkpoint' as const,
+    title: description,
+    preview: JSON.stringify(snapshot),
+    tokens: 0,
+    createdAt: Date.now(),
+  }
+  setMemoryItems((prev) => [...prev, memItem])
   setCheckpoints((prev) => [
     ...prev,
     { id, timestamp: Date.now(), description, messageCount: messages().length },

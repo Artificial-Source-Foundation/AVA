@@ -14,6 +14,7 @@
 
 import { ArrowUp, ChevronDown, Clock, MessageSquare, Square, Zap } from 'lucide-solid'
 import { type Accessor, type Component, createSignal, onCleanup, Show } from 'solid-js'
+import { formatSeconds } from '../../../lib/format-time'
 
 // ---------------------------------------------------------------------------
 // Props
@@ -99,7 +100,7 @@ export const SubmitButton: Component<SubmitButtonProps> = (props) => {
       <Show when={props.isStreaming()}>
         <span class="flex items-center gap-1.5 text-[var(--text-xs)] text-[var(--text-tertiary)] tabular-nums">
           <span class="h-2 w-2 rounded-full bg-[var(--chat-streaming-indicator)] animate-pulse-subtle" />
-          {props.elapsedSeconds()}s
+          {formatSeconds(props.elapsedSeconds())}
         </span>
       </Show>
 

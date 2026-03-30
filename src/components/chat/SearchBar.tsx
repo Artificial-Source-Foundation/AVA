@@ -5,7 +5,7 @@
  * Searches message content with match count and prev/next navigation.
  */
 
-import { ChevronDown, ChevronUp, X } from 'lucide-solid'
+import { ChevronDown, ChevronUp, Search, X } from 'lucide-solid'
 import {
   type Component,
   createEffect,
@@ -14,6 +14,7 @@ import {
   on,
   onCleanup,
   onMount,
+  untrack,
 } from 'solid-js'
 import type { Message } from '../../types'
 
@@ -37,29 +38,36 @@ export const SearchBar: Component<SearchBarProps> = (props) => {
   })
 
   const matchCount = () => matches().length
-  const currentMatch = () => (matchCount() > 0 ? matches()[currentIndex()] : null)
 
-  // Notify parent of highlight changes
+  // Reset index when matches change, then notify parent.
+  // We track `matches` only; `currentIndex` is written but untracked to
+  // avoid the read-write cycle that triggers SolidJS infinite-loop detection.
   createEffect(
-    on([matches, currentIndex] as const, () => {
-      const ids = new Set(matches().map((m) => m.id))
-      const current = currentMatch()
-      props.onHighlightChange(ids, current?.id ?? null)
-    })
-  )
-
-  // Navigate to current match
-  createEffect(
-    on(currentMatch, (match) => {
-      if (match) props.onNavigate(match.id)
-    })
-  )
-
-  // Reset index when matches change
-  createEffect(
-    on(matches, () => {
+    on(matches, (ms) => {
       setCurrentIndex(0)
+      const ids = new Set(ms.map((m) => m.id))
+      const first = ms.length > 0 ? ms[0] : null
+      props.onHighlightChange(ids, first?.id ?? null)
+      if (first) props.onNavigate(first.id)
     })
+  )
+
+  // Navigate + notify when the user steps through matches (prev/next).
+  // Tracks `currentIndex` only; reads `matches` untracked to avoid cycles.
+  createEffect(
+    on(
+      currentIndex,
+      (idx) => {
+        const ms = untrack(matches)
+        if (ms.length === 0) return
+        const match = ms[idx]
+        if (!match) return
+        const ids = new Set(ms.map((m) => m.id))
+        props.onHighlightChange(ids, match.id)
+        props.onNavigate(match.id)
+      },
+      { defer: true }
+    )
   )
 
   const goNext = () => {
@@ -96,7 +104,26 @@ export const SearchBar: Component<SearchBarProps> = (props) => {
   })
 
   return (
-    <div class="flex items-center gap-2 px-3 py-1.5 bg-[var(--surface-raised)] border-b border-[var(--border-default)]">
+    <div
+      class="flex items-center"
+      style={{
+        width: '380px',
+        height: '40px',
+        gap: '8px',
+        padding: '0 10px 0 12px',
+        background: 'var(--surface)',
+        border: '1px solid var(--border-default)',
+        'border-radius': 'var(--radius-md)',
+        'box-shadow': '0 4px 16px rgba(0, 0, 0, 0.19)',
+      }}
+    >
+      {/* Search icon */}
+      <Search
+        class="shrink-0"
+        style={{ width: '14px', height: '14px', color: 'var(--text-muted)' }}
+      />
+
+      {/* Input */}
       <input
         ref={inputRef}
         type="text"
@@ -106,55 +133,77 @@ export const SearchBar: Component<SearchBarProps> = (props) => {
         placeholder="Search messages..."
         class="
           flex-1 min-w-0
-          bg-[var(--surface-sunken)] border border-[var(--border-default)]
-          rounded-[var(--radius-sm)] px-2 py-1
-          text-xs text-[var(--text-primary)]
+          bg-transparent
+          text-[var(--text-primary)]
           placeholder:text-[var(--text-muted)]
-          focus:outline-none focus:border-[var(--accent)]
-          transition-colors
+          focus:outline-none
         "
+        style={{
+          'font-family': 'var(--font-sans)',
+          'font-size': '13px',
+        }}
       />
 
-      {/* Match count */}
-      <span class="text-[10px] text-[var(--text-muted)] tabular-nums whitespace-nowrap">
+      {/* Match count — mono */}
+      <span
+        class="shrink-0 tabular-nums whitespace-nowrap"
+        style={{
+          'font-family': 'var(--font-mono)',
+          'font-size': '11px',
+          color: 'var(--text-muted)',
+        }}
+      >
         {query().trim()
           ? matchCount() > 0
-            ? `${currentIndex() + 1} of ${matchCount()}`
-            : 'No results'
+            ? `${currentIndex() + 1} / ${matchCount()}`
+            : '0 / 0'
           : ''}
       </span>
 
-      {/* Navigation */}
+      {/* Divider */}
+      <div
+        class="shrink-0"
+        style={{
+          width: '1px',
+          height: '20px',
+          background: 'var(--border-default)',
+        }}
+      />
+
+      {/* Navigation — chevron-up, chevron-down */}
       <button
         type="button"
         onClick={goPrev}
         disabled={matchCount() === 0}
-        class="p-0.5 rounded text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--alpha-white-5)] transition-colors disabled:opacity-30"
+        class="shrink-0 flex items-center justify-center rounded transition-colors hover:text-[var(--text-primary)] disabled:opacity-30"
+        style={{ color: 'var(--text-muted)', padding: '2px' }}
         title="Previous match (Shift+Enter)"
         aria-label="Previous match"
       >
-        <ChevronUp class="w-3.5 h-3.5" />
+        <ChevronUp style={{ width: '16px', height: '16px' }} />
       </button>
       <button
         type="button"
         onClick={goNext}
         disabled={matchCount() === 0}
-        class="p-0.5 rounded text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--alpha-white-5)] transition-colors disabled:opacity-30"
+        class="shrink-0 flex items-center justify-center rounded transition-colors hover:text-[var(--text-primary)] disabled:opacity-30"
+        style={{ color: 'var(--text-muted)', padding: '2px' }}
         title="Next match (Enter)"
         aria-label="Next match"
       >
-        <ChevronDown class="w-3.5 h-3.5" />
+        <ChevronDown style={{ width: '16px', height: '16px' }} />
       </button>
 
-      {/* Close */}
+      {/* Close — x */}
       <button
         type="button"
         onClick={() => props.onClose()}
-        class="p-0.5 rounded text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--alpha-white-5)] transition-colors"
+        class="shrink-0 flex items-center justify-center rounded transition-colors hover:text-[var(--text-primary)]"
+        style={{ color: 'var(--text-muted)', padding: '2px' }}
         title="Close search (Escape)"
         aria-label="Close search"
       >
-        <X class="w-3.5 h-3.5" />
+        <X style={{ width: '14px', height: '14px' }} />
       </button>
     </div>
   )

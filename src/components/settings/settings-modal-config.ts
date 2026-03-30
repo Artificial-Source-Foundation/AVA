@@ -14,6 +14,7 @@ import {
   type Settings,
   ShieldCheck,
   Sliders,
+  Sparkles,
   Zap,
 } from 'lucide-solid'
 
@@ -27,6 +28,7 @@ export type SettingsTab =
   | 'permissions-trust'
   | 'mcp'
   | 'plugins'
+  | 'skills'
   | 'skills-commands'
   | 'llm'
   | 'hq'
@@ -48,7 +50,7 @@ export interface TabGroup {
 
 export const tabGroups: TabGroup[] = [
   {
-    label: 'Desktop',
+    label: 'APP',
     tabs: [
       {
         id: 'general',
@@ -98,6 +100,23 @@ export const tabGroups: TabGroup[] = [
         keywords: ['agent', 'preset', 'capability', 'assistant', 'automation'],
       },
       {
+        id: 'skills',
+        label: 'Skills',
+        icon: Sparkles,
+        keywords: [
+          'skill',
+          'domain',
+          'prompt',
+          'glob',
+          'pattern',
+          'microagent',
+          'activation',
+          'instructions',
+          'context',
+          'file',
+        ],
+      },
+      {
         id: 'llm',
         label: 'Generation',
         icon: Cpu,
@@ -141,7 +160,7 @@ export const tabGroups: TabGroup[] = [
     ],
   },
   {
-    label: 'Extensions',
+    label: 'TOOLS',
     tabs: [
       {
         id: 'mcp',
@@ -157,15 +176,9 @@ export const tabGroups: TabGroup[] = [
       },
       {
         id: 'skills-commands',
-        label: 'Skills & Commands',
+        label: 'Rules & Commands',
         icon: Brain,
         keywords: [
-          'skill',
-          'domain',
-          'prompt',
-          'glob',
-          'pattern',
-          'microagent',
           'rule',
           'coding-rule',
           'always',
@@ -175,12 +188,13 @@ export const tabGroups: TabGroup[] = [
           'slash',
           'custom',
           'toml',
+          'prompt',
         ],
       },
     ],
   },
   {
-    label: 'Security',
+    label: 'SECURITY',
     tabs: [
       {
         id: 'permissions-trust',
@@ -204,7 +218,7 @@ export const tabGroups: TabGroup[] = [
     ],
   },
   {
-    label: '',
+    label: 'OTHER',
     tabs: [
       {
         id: 'developer',
@@ -348,6 +362,38 @@ export const settingsSearchIndex: SettingsSearchEntry[] = [
   { label: 'Desktop notifications', tab: 'behavior', tabLabel: 'Behavior' },
   { label: 'Sound on completion', tab: 'behavior', tabLabel: 'Behavior' },
   { label: 'Notification volume', tab: 'behavior', tabLabel: 'Behavior' },
+
+  // Skills
+  {
+    label: 'Skills',
+    description: 'Context-aware instruction modules',
+    tab: 'skills',
+    tabLabel: 'Skills',
+  },
+  {
+    label: 'Built-in skills',
+    description: 'Language-specific prompt modules',
+    tab: 'skills',
+    tabLabel: 'Skills',
+  },
+  {
+    label: 'Custom skills',
+    description: 'User-defined instruction modules',
+    tab: 'skills',
+    tabLabel: 'Skills',
+  },
+  {
+    label: 'Skill file globs',
+    description: 'File patterns that activate skills',
+    tab: 'skills',
+    tabLabel: 'Skills',
+  },
+  {
+    label: 'Skill sources',
+    description: 'Directories where skills are loaded from',
+    tab: 'skills',
+    tabLabel: 'Skills',
+  },
 
   // Generation (LLM)
   { label: 'Max tokens', tab: 'llm', tabLabel: 'Generation' },

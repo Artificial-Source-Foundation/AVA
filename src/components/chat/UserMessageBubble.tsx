@@ -6,6 +6,7 @@ import { MessageActions } from './MessageActions'
 
 interface UserMessageBubbleProps {
   message: Message
+  readOnly?: boolean
   isEditing: boolean
   isStreaming: boolean
   isLastMessage: boolean
@@ -96,7 +97,7 @@ export const UserMessageBubble: Component<UserMessageBubbleProps> = (props) => {
             )}
           </Show>
           {/* Timestamp line */}
-          <div class="relative h-[20px] flex justify-end">
+          <div class="relative h-[20px] flex justify-end overflow-visible">
             <Show when={!props.isStreaming}>
               <div class="font-[var(--font-ui-mono)] text-[11px] tracking-wider text-[var(--text-muted)] pt-1.5 opacity-0 transition-opacity duration-200 group-hover:opacity-100 tabular-nums">
                 {formatTimestamp(props.message)}
@@ -106,6 +107,7 @@ export const UserMessageBubble: Component<UserMessageBubbleProps> = (props) => {
               <div class="absolute left-0 top-0 pt-1">
                 <MessageActions
                   message={props.message}
+                  readOnly={props.readOnly}
                   isLastMessage={props.isLastMessage}
                   onEdit={props.onStartEdit}
                   onRegenerate={props.onRegenerate}

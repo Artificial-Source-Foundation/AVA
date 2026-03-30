@@ -54,6 +54,7 @@ const COMMAND_TO_ENDPOINT: Record<string, { path: string; method: 'GET' | 'POST'
 
   // Providers
   list_providers: { path: '/api/providers', method: 'GET' },
+  get_subscription_usage: { path: '/api/usage', method: 'GET' },
   discover_cli_agents: { path: '/api/cli-agents', method: 'GET' },
 
   // Config
@@ -85,6 +86,10 @@ const COMMAND_TO_ENDPOINT: Record<string, { path: string; method: 'GET' | 'POST'
   health: { path: '/api/health', method: 'GET' },
 
   // HQ
+  create_epic: { path: '/api/hq/epics', method: 'POST' },
+  get_plan: { path: '/api/hq/plans/{epic_id}', method: 'GET' },
+  approve_plan: { path: '/api/hq/plans/{plan_id}/approve', method: 'POST' },
+  reject_plan: { path: '/api/hq/plans/{plan_id}/reject', method: 'POST' },
   list_epics: { path: '/api/hq/epics', method: 'GET' },
   list_issues: { path: '/api/hq/issues', method: 'GET' },
   get_agents: { path: '/api/hq/agents', method: 'GET' },
@@ -95,6 +100,7 @@ const COMMAND_TO_ENDPOINT: Record<string, { path: string; method: 'GET' | 'POST'
   send_director_message: { path: '/api/hq/director-chat', method: 'POST' },
   get_hq_settings: { path: '/api/hq/settings', method: 'GET' },
   update_hq_settings: { path: '/api/hq/settings', method: 'POST' },
+  bootstrap_hq_workspace: { path: '/api/hq/bootstrap', method: 'POST' },
 }
 
 function unwrapInvokeArgs(args?: Record<string, unknown>): Record<string, unknown> | undefined {
@@ -105,12 +111,22 @@ function unwrapInvokeArgs(args?: Record<string, unknown>): Record<string, unknow
   return args
 }
 
+function toSnakeCaseValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(toSnakeCaseValue)
+  if (value && typeof value === 'object') return toSnakeCaseRecord(value as Record<string, unknown>)
+  return value
+}
+
 function toSnakeCaseRecord(payload: Record<string, unknown>): Record<string, unknown> {
   const normalized: Record<string, unknown> = {}
   for (const [key, value] of Object.entries(payload)) {
-    normalized[key.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`)] = value
+    normalized[key.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`)] = toSnakeCaseValue(value)
   }
   return normalized
+}
+
+function snakeToCamelCase(key: string): string {
+  return key.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase())
 }
 
 /**
@@ -127,9 +143,10 @@ export async function apiInvoke<T>(cmd: string, args?: Record<string, unknown>):
   // Substitute path parameters like {id} from args
   if (payload) {
     path = path.replace(/\{(\w+)\}/g, (_, key) => {
-      const val = payload[key]
+      const val = payload[key] ?? payload[snakeToCamelCase(key)]
       if (val !== undefined && val !== null) {
         pathParamKeys.add(key)
+        pathParamKeys.add(snakeToCamelCase(key))
         return encodeURIComponent(String(val))
       }
       return `{${key}}`
@@ -139,14 +156,18 @@ export async function apiInvoke<T>(cmd: string, args?: Record<string, unknown>):
   const url = `${API_BASE}${path}`
   const headers: Record<string, string> = {}
   let body: string | undefined
+  const normalizedPayload = payload ? toSnakeCaseRecord(payload) : undefined
 
-  if (method === 'POST' && payload) {
+  if (method === 'POST' && normalizedPayload) {
     headers['Content-Type'] = 'application/json'
-    body = JSON.stringify(toSnakeCaseRecord(payload))
+    const filteredEntries = Object.entries(normalizedPayload).filter(
+      ([key]) => !pathParamKeys.has(key)
+    )
+    body = JSON.stringify(Object.fromEntries(filteredEntries))
   } else if (method === 'GET' && payload) {
     // For GET requests with args, append as query parameters
     const params = new URLSearchParams()
-    for (const [key, value] of Object.entries(toSnakeCaseRecord(payload))) {
+    for (const [key, value] of Object.entries(normalizedPayload ?? {})) {
       if (pathParamKeys.has(key)) continue
       if (value !== null && value !== undefined) {
         params.set(key, String(value))

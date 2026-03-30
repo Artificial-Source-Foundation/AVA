@@ -36,23 +36,21 @@ export const AgentCard: Component<AgentCardProps> = (props) => {
         p-3
         rounded-[var(--radius-lg)]
         border
-        transition-all duration-[var(--duration-fast)]
+        transition-[background-color,border-color,color,transform] duration-[var(--duration-fast)]
         ${
           expanded()
             ? 'border-[var(--accent)] bg-[var(--accent-subtle)]'
             : 'border-[var(--border-subtle)] hover:border-[var(--border-default)] hover:bg-[var(--surface-raised)]'
         }
       `}
+      style={{ '--agent-accent': config().color } as { '--agent-accent': string }}
     >
       <div class="flex items-start gap-3">
         {/* Agent Icon */}
-        <div
-          class="p-2 rounded-[var(--radius-md)] flex-shrink-0"
-          style={{ background: config().bg }}
-        >
+        <div class="flex-shrink-0 mt-0.5">
           {(() => {
             const AgentIcon = agentTypeIcons[props.agent.type] || FileText
-            return <AgentIcon class="w-4 h-4" style={{ color: config().color }} />
+            return <AgentIcon class="w-4 h-4 text-[var(--agent-accent)]" />
           })()}
         </div>
 
@@ -68,14 +66,11 @@ export const AgentCard: Component<AgentCardProps> = (props) => {
                 return (
                   <StatusIcon
                     class={`w-3.5 h-3.5 ${displayStatus() === 'running' ? 'animate-spin' : ''}`}
-                    style={{ color: config().color }}
+                    style={{ color: 'var(--agent-accent)' }}
                   />
                 )
               })()}
-              <span
-                class="font-[var(--font-ui-mono)] text-[10px] tracking-wide capitalize"
-                style={{ color: config().color }}
-              >
+              <span class="font-[var(--font-ui-mono)] text-[11px] tracking-wide capitalize text-[var(--agent-accent)]">
                 {displayStatus()}
               </span>
             </div>
@@ -88,17 +83,17 @@ export const AgentCard: Component<AgentCardProps> = (props) => {
           {/* Progress bar for running agents */}
           <Show when={displayStatus() === 'running'}>
             <div class="mt-2">
-              <div class="h-1 bg-[var(--surface-sunken)] rounded-[var(--radius-sm)] overflow-hidden">
+              <div class="h-1 bg-[var(--alpha-white-5)] rounded-[var(--radius-sm)] overflow-hidden">
                 <div
-                  class="h-full bg-[var(--accent)] rounded-[var(--radius-sm)] transition-[width] duration-300"
-                  style={{ width: `${progress()}%` }}
+                  class="h-full bg-[var(--accent)] rounded-[var(--radius-sm)] transition-transform duration-300 origin-left"
+                  style={{ width: '100%', transform: `scaleX(${progress() / 100})` }}
                 />
               </div>
               <div class="flex justify-between mt-1">
-                <span class="font-[var(--font-ui-mono)] text-[10px] tabular-nums text-[var(--text-muted)]">
+                <span class="font-[var(--font-ui-mono)] text-[11px] tabular-nums text-[var(--text-muted)]">
                   {progress()}%
                 </span>
-                <span class="font-[var(--font-ui-mono)] text-[10px] tabular-nums text-[var(--text-muted)]">
+                <span class="font-[var(--font-ui-mono)] text-[11px] tabular-nums text-[var(--text-muted)]">
                   {formatDuration(getAgentDuration(props.agent))}
                 </span>
               </div>
@@ -109,7 +104,7 @@ export const AgentCard: Component<AgentCardProps> = (props) => {
           <Show when={expanded()}>
             <div class="mt-3 pt-3 border-t border-[var(--border-subtle)] space-y-2">
               {/* Model info */}
-              <div class="flex items-center gap-1.5 font-[var(--font-ui-mono)] text-[10px] tracking-wide text-[var(--text-muted)]">
+              <div class="flex items-center gap-1.5 font-[var(--font-ui-mono)] text-[11px] tracking-wide text-[var(--text-muted)]">
                 <Bot class="w-3 h-3" />
                 <span>Model: {props.agent.model}</span>
               </div>
@@ -152,7 +147,7 @@ export const AgentCard: Component<AgentCardProps> = (props) => {
 
               {/* Completion info */}
               <Show when={props.agent.completedAt}>
-                <div class="flex items-center gap-1.5 font-[var(--font-ui-mono)] text-[10px] tracking-wide text-[var(--text-muted)]">
+                <div class="flex items-center gap-1.5 font-[var(--font-ui-mono)] text-[11px] tracking-wide text-[var(--text-muted)]">
                   <Zap class="w-3 h-3" />
                   <span>Completed in {formatDuration(getAgentDuration(props.agent))}</span>
                 </div>

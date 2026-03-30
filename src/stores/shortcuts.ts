@@ -58,13 +58,57 @@ function normalizeKey(key: string): string {
   return lower
 }
 
+/**
+ * Derive the logical key from a KeyboardEvent.
+ *
+ * When Ctrl is held, the browser may report control-character names for
+ * certain keys (e.g. Ctrl+M → e.key = "Enter", Ctrl+J → e.key = "Linefeed",
+ * Ctrl+I → e.key = "Tab").  In those cases we fall back to `e.code`
+ * (e.g. "KeyM") to recover the actual letter the user pressed.
+ */
+function deriveKey(e: KeyboardEvent): string {
+  const key = normalizeKey(e.key)
+
+  // When a modifier remaps the key to a control-character name, recover
+  // the real letter from e.code (e.g. "KeyM" → "m", "Digit1" → "1").
+  if (
+    (e.ctrlKey || e.metaKey) &&
+    e.code &&
+    // Only remap when the reported key no longer matches what we'd expect
+    // from a plain letter/digit/symbol press.
+    (key === 'enter' || key === 'tab' || key === 'backspace' || key.length > 1)
+  ) {
+    const code = e.code
+    if (code.startsWith('Key')) return code.slice(3).toLowerCase()
+    if (code.startsWith('Digit')) return code.slice(5)
+    // Punctuation keys: e.code is the name (e.g. "Comma", "Period", "Slash")
+    // Map them to the actual character via a single synthetic keypress lookup.
+    const punctMap: Record<string, string> = {
+      Comma: ',',
+      Period: '.',
+      Slash: '/',
+      Backslash: '\\',
+      BracketLeft: '[',
+      BracketRight: ']',
+      Semicolon: ';',
+      Quote: "'",
+      Backquote: '`',
+      Minus: '-',
+      Equal: '=',
+    }
+    if (punctMap[code]) return punctMap[code]
+  }
+
+  return key
+}
+
 function matchesShortcut(e: KeyboardEvent, keys: string[]): boolean {
   const pressed = new Set<string>()
   if (e.ctrlKey || e.metaKey) pressed.add('ctrl')
   if (e.shiftKey) pressed.add('shift')
   if (e.altKey) pressed.add('alt')
 
-  const actual = normalizeKey(e.key)
+  const actual = deriveKey(e)
   if (actual !== 'ctrl' && actual !== 'shift' && actual !== 'alt') {
     pressed.add(actual)
   }
@@ -135,6 +179,18 @@ const INPUT_ALLOWED_IDS = new Set([
   'stash-prompt',
   'restore-prompt',
   'save-checkpoint',
+  'export-chat',
+  'copy-last-response',
+  'toggle-sidebar',
+  'toggle-bottom-panel',
+  'new-session',
+  'session-switcher',
+  'quick-model-picker',
+  'model-browser',
+  'toggle-settings',
+  'toggle-terminal',
+  'voice-toggle',
+  'cycle-thinking',
 ])
 
 function setupShortcutListener(): () => void {
@@ -156,9 +212,11 @@ function setupShortcutListener(): () => void {
     }
   }
 
-  document.addEventListener('keydown', handler)
+  // Use capture phase so we intercept shortcuts before the browser can
+  // consume them (e.g. Ctrl+, opens browser settings in Chrome/Edge).
+  document.addEventListener('keydown', handler, true)
   // eslint-disable-next-line solid/reactivity -- cleanup only captures the concrete DOM listener
-  return () => document.removeEventListener('keydown', handler)
+  return () => document.removeEventListener('keydown', handler, true)
 }
 
 // ============================================================================

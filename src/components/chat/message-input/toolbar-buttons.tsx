@@ -70,17 +70,32 @@ export interface ReasoningDropdownProps {
   available: Accessor<boolean>
 }
 
+/** Intensity config for each reasoning effort level. */
+const INACTIVE_STYLE = { bg: 'var(--alpha-white-5)', text: 'var(--text-muted)', weight: '500' }
+const EFFORT_INTENSITY: Record<string, { bg: string; text: string; weight: string }> = {
+  off: INACTIVE_STYLE,
+  none: INACTIVE_STYLE,
+  minimal: { bg: 'rgba(255,255,255,0.08)', text: 'rgba(255,255,255,0.55)', weight: '500' },
+  low: { bg: 'rgba(255,255,255,0.12)', text: 'rgba(255,255,255,0.7)', weight: '500' },
+  medium: { bg: 'rgba(255,255,255,0.22)', text: 'rgba(255,255,255,0.85)', weight: '600' },
+  high: { bg: 'rgba(255,255,255,0.38)', text: 'rgba(255,255,255,0.95)', weight: '700' },
+  xhigh: { bg: 'rgba(255,255,255,0.55)', text: '#000', weight: '700' },
+  max: { bg: 'rgba(255,255,255,0.55)', text: '#000', weight: '700' },
+}
+
 export const ReasoningDropdown: Component<ReasoningDropdownProps> = (props) => {
-  const isActive = () => props.effort() !== 'off'
+  const isActive = () => props.effort() !== 'off' && props.effort() !== 'none'
+  const intensity = () => EFFORT_INTENSITY[props.effort()] ?? INACTIVE_STYLE
 
   return (
     <button
       type="button"
       onClick={() => props.onCycle()}
-      class="flex items-center rounded-[6px] bg-[var(--alpha-white-5)] transition-colors duration-200 hover:bg-[var(--alpha-white-8)]"
+      class="flex items-center rounded-[6px] transition-all duration-200"
       style={{
         gap: '4px',
         padding: '4px 8px',
+        background: intensity().bg,
       }}
       title={isActive() ? `Reasoning: ${EFFORT_LABELS[props.effort()]}` : 'Enable reasoning'}
       aria-label={isActive() ? `Reasoning: ${EFFORT_LABELS[props.effort()]}` : 'Enable reasoning'}
@@ -90,15 +105,15 @@ export const ReasoningDropdown: Component<ReasoningDropdownProps> = (props) => {
         style={{
           width: '10px',
           height: '10px',
-          color: isActive() ? 'var(--text-tertiary)' : 'var(--text-muted)',
+          color: intensity().text,
         }}
       />
       <span
         style={{
           'font-size': '10px',
-          'font-weight': '500',
+          'font-weight': intensity().weight,
           'font-family': "var(--font-ui-mono, 'Geist Mono', ui-monospace, monospace)",
-          color: isActive() ? 'var(--text-tertiary)' : 'var(--text-muted)',
+          color: intensity().text,
         }}
       >
         {isActive() ? `Think ${EFFORT_LABELS[props.effort()]}` : 'Think'}

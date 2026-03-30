@@ -1,19 +1,20 @@
 /**
- * Sidebar Panel — Windsurf/Cascade style
+ * Sidebar Panel -- Pencil Design
  *
  * Clean, minimal sidebar with:
- *   - Top icon bar: new chat, new window actions (left) + search, settings (right)
- *   - Project-grouped session list with folder icon and indentation
- *   - "Show N more sessions" accent-colored link (max 5 visible by default)
- *   - Archived section (collapsible)
- *   - Bottom icon bar pinned to bottom: settings, help, info
+ *   1. Action Bar (44px): AVA logo mark + dashboard/search/settings icon buttons
+ *   2. New Chat button: Full-width blue-tinted row
+ *   3. Project Switcher: Folder + project name + git branch badge + chevrons
+ *   4. Thread List: Clean list, no section headers
+ *   5. HQ Card: Purple-tinted bottom card
  */
 
 import {
+  Archive,
+  ArchiveRestore,
+  ArrowRight,
   Building2,
-  ChevronDown,
-  ChevronRight,
-  FolderOpen,
+  LayoutDashboard,
   MessageSquare,
   Plus,
   Search,
@@ -23,12 +24,13 @@ import { type Component, createMemo, createSignal, For, Show } from 'solid-js'
 import { useHq } from '../../stores/hq'
 import { useLayout } from '../../stores/layout'
 import { useSession } from '../../stores/session'
-import { ArchivedSection } from '../sidebar/sessions/ArchivedSection'
+import { ProjectDropdown } from '../sidebar/sessions/ProjectDropdown'
 import { SessionItem } from '../sidebar/sessions/SessionItem'
 import {
   buildSessionContextMenuItems,
   type ContextMenuState,
 } from '../sidebar/sessions/session-context-menu'
+import { ConfirmDialog } from '../ui/ConfirmDialog'
 import { ContextMenu } from '../ui/ContextMenu'
 import { PanelErrorBoundary } from '../ui/PanelErrorBoundary'
 
@@ -50,18 +52,28 @@ export const SidebarPanel: Component = () => {
     loadArchivedSessions,
     isSessionBusy,
   } = useSession()
-  const { closeProjectHub, setRightPanelVisible, switchRightPanelTab, openSettings } = useLayout()
+  const {
+    closeProjectHub,
+    setRightPanelVisible,
+    switchRightPanelTab,
+    openSettings,
+    dashboardVisible,
+    toggleDashboard,
+    closeDashboard,
+  } = useLayout()
   const { hqMode, toggleHqMode } = useHq()
   const [contextMenu, setContextMenu] = createSignal<ContextMenuState | null>(null)
   const [renameRequest, setRenameRequest] = createSignal<{ id: string; seq: number } | null>(null)
   const [showSearch, setShowSearch] = createSignal(false)
   const [search, setSearch] = createSignal('')
-  const [projectExpanded, setProjectExpanded] = createSignal(true)
   const [showAll, setShowAll] = createSignal(false)
+  const [showArchived, setShowArchived] = createSignal(false)
+  const [deleteConfirmId, setDeleteConfirmId] = createSignal<string | null>(null)
 
   const handleNewChat = async (): Promise<void> => {
     await createNewSession()
     closeProjectHub()
+    closeDashboard()
   }
 
   const filteredSessions = createMemo(() => {
@@ -102,7 +114,7 @@ export const SidebarPanel: Component = () => {
       duplicateSession: (id) => runActionSafely(() => duplicateSession(id)),
       forkSession: (id, name) => runActionSafely(() => forkSession(id, name)),
       archiveSession: (id) => runActionSafely(() => archiveSession(id)),
-      deleteSession: (id) => runActionSafely(() => deleteSessionPermanently(id)),
+      deleteSession: (id) => setDeleteConfirmId(id),
       viewTrajectory: (id) => {
         runActionSafely(() => switchSession(id))
         setRightPanelVisible(true)
@@ -120,65 +132,103 @@ export const SidebarPanel: Component = () => {
     <aside
       class="flex flex-col h-full w-full overflow-hidden"
       style={{
-        background: 'var(--sidebar-background)',
-        'border-right': '1px solid var(--sidebar-border)',
+        background: 'var(--surface)',
+        'border-right': '1px solid var(--border-default)',
+        'padding-top': '8px',
+        'padding-bottom': '0',
+        gap: '4px',
       }}
     >
-      {/* Top icon bar */}
-      <div class="flex items-center justify-between px-3 py-2 flex-shrink-0">
-        <div class="flex items-center gap-0.5">
-          <button
-            type="button"
-            onClick={() => void handleNewChat()}
-            class="flex items-center justify-center w-7 h-7 rounded-[var(--radius-md)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--alpha-white-8)] transition-colors"
-            title="New chat (Ctrl+N)"
-            aria-label="New chat"
-          >
-            <Plus class="w-4 h-4" />
-          </button>
-          <button
-            type="button"
-            onClick={toggleHqMode}
-            class={`flex items-center justify-center w-7 h-7 rounded-[var(--radius-md)] transition-colors ${
-              hqMode()
-                ? 'text-[var(--accent)] bg-[var(--accent-subtle)]'
-                : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--alpha-white-8)]'
-            }`}
-            title={hqMode() ? 'Switch to Chat' : 'Open HQ'}
-            aria-label="Toggle HQ mode"
-          >
-            <Building2 class="w-4 h-4" />
-          </button>
+      {/* 1. Action Bar — 44px */}
+      <div class="flex items-center justify-between px-3 flex-shrink-0" style={{ height: '44px' }}>
+        {/* AVA logo mark */}
+        <div
+          class="flex items-center justify-center flex-shrink-0"
+          style={{
+            width: '26px',
+            height: '26px',
+            'border-radius': '7px',
+            background: 'linear-gradient(180deg, var(--accent), var(--system-purple))',
+          }}
+        >
+          <span class="leading-none text-[12px] font-extrabold text-[var(--text-on-accent)]">
+            A
+          </span>
         </div>
-        <div class="flex items-center gap-0.5">
+
+        {/* Right icon buttons */}
+        <div class="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={toggleDashboard}
+            class="flex items-center justify-center rounded-[var(--radius-md)] transition-colors"
+            classList={{
+              'text-[var(--accent)] bg-[var(--accent-subtle)]': dashboardVisible(),
+              'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--alpha-white-8)]':
+                !dashboardVisible(),
+            }}
+            style={{ width: '30px', height: '30px' }}
+            title="Dashboard"
+            aria-label="Dashboard"
+          >
+            <LayoutDashboard class="w-3.5 h-3.5" />
+          </button>
           <button
             type="button"
             onClick={toggleSearch}
-            class={`flex items-center justify-center w-7 h-7 rounded-[var(--radius-md)] transition-colors ${
-              showSearch()
-                ? 'text-[var(--accent)] bg-[var(--alpha-white-8)]'
-                : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--alpha-white-8)]'
-            }`}
+            class="flex items-center justify-center rounded-[var(--radius-md)] transition-colors"
+            classList={{
+              'text-[var(--accent)] bg-[var(--accent-subtle)]': showSearch(),
+              'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--alpha-white-8)]':
+                !showSearch(),
+            }}
+            style={{ width: '30px', height: '30px' }}
             title="Search sessions"
             aria-label="Search sessions"
           >
-            <Search class="w-4 h-4" />
+            <Search class="w-3.5 h-3.5" />
           </button>
           <button
             type="button"
             onClick={openSettings}
-            class="flex items-center justify-center w-7 h-7 rounded-[var(--radius-md)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--alpha-white-8)] transition-colors"
+            class="flex items-center justify-center rounded-[var(--radius-md)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--alpha-white-8)] transition-colors"
+            style={{ width: '30px', height: '30px' }}
             title="Settings (Ctrl+,)"
             aria-label="Settings"
           >
-            <Settings class="w-4 h-4" />
+            <Settings class="w-3.5 h-3.5" />
           </button>
         </div>
       </div>
 
+      {/* 2. New Chat button */}
+      <div class="px-2 flex-shrink-0">
+        <button
+          type="button"
+          onClick={() => void handleNewChat()}
+          class="flex w-full items-center gap-2 px-3 transition-colors hover:bg-[var(--accent-border)]"
+          style={{
+            height: '36px',
+            'border-radius': '8px',
+            background: 'var(--accent-subtle)',
+            border: '1px solid var(--accent-border)',
+          }}
+          title="New chat (Ctrl+N)"
+          aria-label="New chat"
+        >
+          <Plus class="h-[15px] w-[15px] text-[var(--accent)]" />
+          <span class="text-[13px] font-medium text-[var(--accent)]">New Chat</span>
+        </button>
+      </div>
+
+      {/* 3. Project Switcher */}
+      <div class="px-2 flex-shrink-0">
+        <ProjectDropdown />
+      </div>
+
       {/* Inline search (toggled by search icon) */}
       <Show when={showSearch()}>
-        <div class="px-3 pb-2 flex-shrink-0">
+        <div class="px-2 pb-1 flex-shrink-0">
           <input
             type="text"
             placeholder="Search sessions..."
@@ -188,9 +238,10 @@ export const SidebarPanel: Component = () => {
               if (e.key === 'Escape') toggleSearch()
             }}
             autofocus
+            aria-label="Search sessions"
             class="
               w-full px-2.5 py-1.5
-              text-[var(--text-sm)] text-[var(--text-primary)]
+              text-[13px] text-[var(--text-primary)]
               bg-[var(--gray-3)]
               border-none
               rounded-[var(--radius-md)]
@@ -202,119 +253,172 @@ export const SidebarPanel: Component = () => {
         </div>
       </Show>
 
-      {/* Session list */}
+      {/* 4. Thread List — clean, no section headers */}
       <PanelErrorBoundary panelName="Sessions">
-        <div class="flex-1 overflow-y-auto px-2 scrollbar-none">
-          {/* Project group */}
-          <div class="mb-3">
-            {/* Project header */}
+        <div class="flex-1 overflow-y-auto px-1.5 scrollbar-none">
+          <div class="space-y-px">
+            <For each={visibleSessions()}>
+              {(session) => (
+                <SessionItem
+                  session={session}
+                  isActive={currentSession()?.id === session.id}
+                  isBusy={isSessionBusy(session.id)}
+                  onSelect={() => {
+                    switchSession(session.id)
+                    closeDashboard()
+                  }}
+                  onRename={(id, name) => renameSession(id, name)}
+                  onDelete={(id) => deleteSessionPermanently(id)}
+                  onContextMenu={handleContextMenu}
+                  renameRequestId={renameRequest()?.id}
+                  renameRequestSeq={renameRequest()?.seq}
+                  onRenameRequestHandled={() => {
+                    setRenameRequest(null)
+                  }}
+                />
+              )}
+            </For>
+          </div>
+
+          <Show when={hiddenCount() > 0}>
             <button
               type="button"
-              onClick={() => setProjectExpanded(!projectExpanded())}
-              class="flex items-center gap-1.5 px-2 py-1.5 w-full text-left rounded-[var(--radius-md)] hover:bg-[var(--alpha-white-5)] transition-colors"
+              onClick={() => setShowAll(true)}
+              class="text-[12px] px-2 py-1 mt-1 rounded-[var(--radius-sm)] hover:bg-[var(--alpha-white-5)] transition-colors"
+              style={{ color: 'var(--accent)' }}
             >
-              <Show
-                when={projectExpanded()}
-                fallback={
-                  <ChevronRight
-                    class="w-3 h-3 flex-shrink-0"
-                    style={{ color: 'var(--text-muted)' }}
-                  />
-                }
-              >
-                <ChevronDown class="w-3 h-3 flex-shrink-0" style={{ color: 'var(--text-muted)' }} />
-              </Show>
-              <FolderOpen
-                class="w-3.5 h-3.5 flex-shrink-0"
-                style={{ color: 'var(--text-secondary)' }}
-              />
-              <span
-                class="text-[var(--text-sm)] font-medium truncate"
-                style={{ color: 'var(--text-primary)' }}
-              >
-                Estela
-              </span>
-              <Show when={filteredSessions().length > 0}>
-                <span
-                  class="text-[var(--text-2xs)] ml-auto flex-shrink-0"
-                  style={{ color: 'var(--text-muted)' }}
-                >
-                  {filteredSessions().length}
-                </span>
-              </Show>
+              Show {hiddenCount()} more
             </button>
+          </Show>
 
-            {/* Sessions under this project */}
-            <Show when={projectExpanded()}>
-              <div class="pl-4 mt-0.5">
-                <div class="space-y-px">
-                  <For each={visibleSessions()}>
-                    {(session) => (
-                      <SessionItem
-                        session={session}
-                        isActive={currentSession()?.id === session.id}
-                        isBusy={isSessionBusy(session.id)}
-                        onSelect={() => switchSession(session.id)}
-                        onRename={(id, name) => renameSession(id, name)}
-                        onDelete={(id) => deleteSessionPermanently(id)}
-                        onContextMenu={handleContextMenu}
-                        renameRequestId={renameRequest()?.id}
-                        renameRequestSeq={renameRequest()?.seq}
-                        onRenameRequestHandled={() => {
-                          setRenameRequest(null)
-                        }}
-                      />
-                    )}
-                  </For>
-                </div>
-
-                <Show when={hiddenCount() > 0}>
-                  <button
-                    type="button"
-                    onClick={() => setShowAll(true)}
-                    class="text-[var(--text-xs)] px-2 py-1 mt-0.5 rounded-[var(--radius-sm)] hover:bg-[var(--alpha-white-5)] transition-colors"
-                    style={{ color: 'var(--accent)' }}
-                  >
-                    Show {hiddenCount()} more sessions
-                  </button>
-                </Show>
-
-                <Show when={showAll() && filteredSessions().length > MAX_VISIBLE_SESSIONS}>
-                  <button
-                    type="button"
-                    onClick={() => setShowAll(false)}
-                    class="text-[var(--text-xs)] px-2 py-1 mt-0.5 rounded-[var(--radius-sm)] hover:bg-[var(--alpha-white-5)] transition-colors"
-                    style={{ color: 'var(--text-muted)' }}
-                  >
-                    Show fewer
-                  </button>
-                </Show>
-              </div>
-            </Show>
-          </div>
+          <Show when={showAll() && filteredSessions().length > MAX_VISIBLE_SESSIONS}>
+            <button
+              type="button"
+              onClick={() => setShowAll(false)}
+              class="text-[12px] px-2 py-1 mt-1 rounded-[var(--radius-sm)] hover:bg-[var(--alpha-white-5)] transition-colors"
+              style={{ color: 'var(--text-muted)' }}
+            >
+              Show fewer
+            </button>
+          </Show>
 
           <Show when={filteredSessions().length === 0}>
             <div class="text-center py-6 px-4" style={{ color: 'var(--text-muted)' }}>
               <MessageSquare class="w-4 h-4 mx-auto mb-1.5 opacity-40" />
-              <p class="text-[var(--text-xs)]">
-                {search() ? 'No matching sessions' : 'No chats yet'}
-              </p>
+              <p class="text-[12px]">{search() ? 'No matching sessions' : 'No chats yet'}</p>
               <Show when={!search()}>
-                <p class="text-[var(--text-2xs)] mt-0.5 opacity-60">Press Ctrl+N to start</p>
+                <p class="text-[11px] mt-0.5 opacity-60">Press Ctrl+N to start</p>
+              </Show>
+            </div>
+          </Show>
+
+          {/* Archived sessions -- inline toggle */}
+          <Show when={!search()}>
+            <div class="mt-2 mb-1 px-1">
+              <button
+                type="button"
+                onClick={() => {
+                  const next = !showArchived()
+                  setShowArchived(next)
+                  if (next) void loadArchivedSessions()
+                }}
+                class="inline-flex items-center gap-1 hover:opacity-80 transition-opacity"
+                style={{
+                  'font-size': '11px',
+                  'font-family': "var(--font-ui-mono, 'Geist Mono', ui-monospace, monospace)",
+                  color: 'var(--text-muted)',
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  padding: '2px 4px',
+                }}
+                title={showArchived() ? 'Hide archived sessions' : 'Show archived sessions'}
+              >
+                {showArchived()
+                  ? 'hide archived'
+                  : `${archivedSessions().length || ''} archived`.trim()}
+              </button>
+            </div>
+          </Show>
+
+          {/* Archived sessions list (inline) */}
+          <Show when={showArchived()}>
+            <div class="space-y-px pb-2">
+              <For each={archivedSessions()}>
+                {(session) => (
+                  <div
+                    class="group flex items-center gap-2 px-2 py-1.5 rounded-[var(--radius-md)] transition-colors hover:bg-[var(--alpha-white-5)]"
+                    style={{ opacity: '0.6' }}
+                  >
+                    <Archive class="w-3 h-3 flex-shrink-0" style={{ color: 'var(--text-muted)' }} />
+                    <span
+                      class="flex-1 truncate"
+                      style={{ 'font-size': '12px', color: 'var(--text-muted)' }}
+                    >
+                      {session.name}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => runActionSafely(() => unarchiveSession(session.id))}
+                      class="p-0.5 rounded-[var(--radius-sm)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--alpha-white-8)] opacity-0 group-hover:opacity-100 transition-opacity"
+                      title="Unarchive"
+                      aria-label="Unarchive session"
+                    >
+                      <ArchiveRestore class="w-3 h-3" />
+                    </button>
+                  </div>
+                )}
+              </For>
+              <Show when={archivedSessions().length === 0}>
+                <p class="px-2 py-1 text-center text-[11px] text-[var(--text-muted)]">
+                  No archived sessions
+                </p>
               </Show>
             </div>
           </Show>
         </div>
       </PanelErrorBoundary>
 
-      {/* Archived Sessions Section */}
-      <ArchivedSection
-        archivedSessions={archivedSessions}
-        loadArchived={loadArchivedSessions}
-        unarchive={(id) => runActionSafely(() => unarchiveSession(id))}
-      />
-
-      {/* Bottom spacer — keeps layout clean */}
+      {/* 5. HQ Card — bottom, pinned */}
+      <div class="flex-shrink-0">
+        <button
+          type="button"
+          onClick={toggleHqMode}
+          class="flex w-full items-center justify-between transition-colors hover:bg-[var(--alpha-white-8)]"
+          style={{
+            padding: '10px 14px',
+            background: hqMode()
+              ? 'color-mix(in srgb, var(--system-purple) 12%, transparent)'
+              : 'color-mix(in srgb, var(--system-purple) 8%, transparent)',
+            'border-top': '1px solid color-mix(in srgb, var(--system-purple) 20%, transparent)',
+          }}
+          title={hqMode() ? 'Switch to Chat' : 'Open HQ'}
+          aria-label="Toggle HQ mode"
+        >
+          <div class="flex items-center gap-2 min-w-0 text-left">
+            <Building2 class="w-4 h-4 flex-shrink-0" style={{ color: 'var(--system-purple)' }} />
+            <div class="flex flex-col min-w-0" style={{ gap: '1px' }}>
+              <span class="leading-tight text-[13px] font-semibold text-[var(--text-primary)]">
+                HQ
+              </span>
+              <span
+                class="leading-tight truncate"
+                style={{
+                  'font-size': '10px',
+                  color: 'var(--system-purple)',
+                  'font-family': "var(--font-ui-mono, 'Geist Mono', ui-monospace, monospace)",
+                }}
+              >
+                2 agents active
+              </span>
+            </div>
+          </div>
+          <ArrowRight
+            class="flex-shrink-0"
+            style={{ width: '14px', height: '14px', color: 'var(--system-purple)' }}
+          />
+        </button>
+      </div>
 
       {/* Context Menu */}
       <Show when={contextMenu()}>
@@ -325,6 +429,25 @@ export const SidebarPanel: Component = () => {
           onClose={() => setContextMenu(null)}
         />
       </Show>
+
+      {/* Delete Confirmation Dialog */}
+      <ConfirmDialog
+        open={deleteConfirmId() !== null}
+        onOpenChange={(open) => {
+          if (!open) setDeleteConfirmId(null)
+        }}
+        title="Delete session?"
+        message="This session and all its messages will be permanently deleted. This cannot be undone."
+        confirmText="Delete"
+        variant="danger"
+        onConfirm={() => {
+          const id = deleteConfirmId()
+          if (id) {
+            runActionSafely(() => deleteSessionPermanently(id))
+          }
+          setDeleteConfirmId(null)
+        }}
+      />
     </aside>
   )
 }

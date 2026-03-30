@@ -61,7 +61,10 @@ pub use agent_commands::{
     get_message_queue, post_complete_agent, regenerate_response, resolve_approval, resolve_plan,
     resolve_question, retry_last_message, steer_agent, submit_goal, undo_last_edit,
 };
-pub use config_commands::{get_config, sync_hq_agent_overrides};
+pub use config_commands::{
+    get_config, get_feature_flags, sync_hq_agent_overrides, update_feature_flags,
+    update_llm_config,
+};
 pub use context_commands::compact_context;
 pub use hq_commands::{
     add_comment, approve_plan, bootstrap_hq_workspace, cancel_hq, create_epic, create_issue,

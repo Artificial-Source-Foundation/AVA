@@ -141,11 +141,11 @@ export function syncAllApiKeys(current: AppSettings): void {
  *
  * Syncs:
  * - permissionMode → desktop approval middleware + Rust set_permission_level
+ * - LLM config (provider, model, temperature, maxTokens) → config.yaml
+ * - Feature flags (git, lsp, mcp, audit, session logging, etc.) → config.yaml
  *
- * Additional settings (reasoningEffort → thinkingLevel, maxTurns, temperature) are
- * passed per-run via SubmitGoalArgs in submit_goal. There are no standalone AgentStack
- * IPC commands for them yet; they are persisted to localStorage/FS and read by the
- * frontend when constructing each submit_goal call.
+ * Additional settings (reasoningEffort → thinkingLevel, maxTurns) are
+ * passed per-run via SubmitGoalArgs in submit_goal.
  */
 export function pushSettingsToCore(s: AppSettings): void {
   // Sync permission mode to the desktop approval middleware (+ Rust backend)
@@ -161,6 +161,139 @@ export function pushSettingsToCore(s: AppSettings): void {
   invoke('sync_hq_agent_overrides', { overrides: buildHqAgentOverrides(s) }).catch((err) => {
     logWarn('settings', 'HQ agent override sync failed', err)
   })
+
+  // Sync shared LLM config to config.yaml (fire-and-forget)
+  syncLlmConfigToYaml(s)
+
+  // Sync shared feature flags to config.yaml (fire-and-forget)
+  syncFeatureFlagsToYaml(s)
+}
+
+/**
+ * Resolve the active provider ID and model from the Desktop settings.
+ * The active provider is the first enabled provider with an API key.
+ * The model is that provider's defaultModel.
+ */
+function resolveActiveProviderModel(s: AppSettings): { provider?: string; model?: string } {
+  const active = s.providers.find((p) => p.enabled && p.apiKey)
+  if (!active) return {}
+  return {
+    provider: active.id,
+    model: active.defaultModel || undefined,
+  }
+}
+
+/**
+ * Sync LLM settings (provider, model, temperature, maxTokens) to config.yaml.
+ * Fire-and-forget — never blocks the UI.
+ */
+function syncLlmConfigToYaml(s: AppSettings): void {
+  const { provider, model } = resolveActiveProviderModel(s)
+  invoke('update_llm_config', {
+    provider: provider ?? null,
+    model: model ?? null,
+    temperature: s.generation.temperature,
+    maxTokens: s.generation.maxTokens,
+  }).catch((err) => {
+    logWarn('settings', 'LLM config sync to config.yaml failed', err)
+  })
+}
+
+/**
+ * Sync feature flags to config.yaml.
+ * Fire-and-forget — never blocks the UI.
+ */
+function syncFeatureFlagsToYaml(s: AppSettings): void {
+  invoke('update_feature_flags', {
+    enableGit: s.git.enabled,
+    enableLsp: null,
+    enableMcp: s.mcpServers.length > 0,
+    auditLogging: null,
+    sessionLogging: null,
+    autoReview: null,
+    enableCodebaseIndex: null,
+  }).catch((err) => {
+    logWarn('settings', 'Feature flags sync to config.yaml failed', err)
+  })
+}
+
+// ============================================================================
+// Config.yaml Hydration — load shared settings from Rust on startup
+// ============================================================================
+
+/** Shape of the `llm` section returned by `get_config` */
+interface CoreLlmConfig {
+  provider?: string
+  model?: string
+  temperature?: number
+  max_tokens?: number
+}
+
+/** Shape of the `features` section returned by `get_feature_flags` */
+interface CoreFeatureFlags {
+  enable_git?: boolean
+  enable_mcp?: boolean
+}
+
+/**
+ * Load shared settings from config.yaml via Tauri IPC and merge into Desktop settings.
+ *
+ * Called once at startup. Only overwrites fields that differ from defaults so
+ * user's localStorage settings take precedence for Desktop-only knobs.
+ *
+ * Returns a partial patch — the caller is responsible for merging it into the
+ * signal and persisting.
+ */
+export async function loadSharedSettingsFromCore(): Promise<Partial<AppSettings> | null> {
+  try {
+    const [configResult, flagsResult] = await Promise.allSettled([
+      invoke<Record<string, unknown>>('get_config'),
+      invoke<CoreFeatureFlags>('get_feature_flags'),
+    ])
+
+    const patch: Partial<AppSettings> = {}
+    let changed = false
+
+    // --- LLM provider/model from config.yaml ---
+    if (configResult.status === 'fulfilled' && configResult.value) {
+      const llm = (configResult.value as Record<string, unknown>).llm as CoreLlmConfig | undefined
+      if (llm) {
+        if (llm.temperature != null) {
+          patch.generation = { temperature: llm.temperature } as AppSettings['generation']
+          changed = true
+        }
+        if (llm.max_tokens != null) {
+          patch.generation = {
+            ...patch.generation,
+            maxTokens: llm.max_tokens,
+          } as AppSettings['generation']
+          changed = true
+        }
+        // provider/model are informational — log them so Desktop can show
+        // the same model the TUI last used, but only if they're non-empty
+        if (llm.provider && llm.model) {
+          logInfo('settings', 'Core config.yaml LLM', {
+            provider: llm.provider,
+            model: llm.model,
+          })
+        }
+      }
+    }
+
+    // --- Feature flags from config.yaml ---
+    if (flagsResult.status === 'fulfilled' && flagsResult.value) {
+      const flags = flagsResult.value
+      if (flags.enable_git != null) {
+        patch.git = { enabled: flags.enable_git } as AppSettings['git']
+        changed = true
+      }
+    }
+
+    return changed ? patch : null
+  } catch (err) {
+    logWarn('settings', 'Failed to load shared settings from config.yaml', err)
+    return null
+  }
 }
 
 // ============================================================================

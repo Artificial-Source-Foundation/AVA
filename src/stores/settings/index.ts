@@ -35,6 +35,7 @@ import {
 import {
   detectEnvApiKeys as detectEnvApiKeysImpl,
   type EnvKeyDetectionResult,
+  loadSharedSettingsFromCore as loadSharedFromCoreImpl,
   pushSettingsToCore as pushSettingsToCoreImpl,
   saveSettings,
   syncAllApiKeys as syncAllApiKeysImpl,
@@ -145,6 +146,25 @@ export async function hydrateSettingsFromFS(): Promise<void> {
   await hydrateFromFS(settings(), (merged) => {
     setSettingsRaw(merged)
     applyAppearance()
+  })
+
+  // After FS hydration, also pull shared settings from config.yaml so the
+  // Desktop reflects the same provider/model/features the TUI last used.
+  const patch = await loadSharedFromCoreImpl()
+  if (!patch) return
+
+  setSettingsRaw((prev) => {
+    const next = { ...prev }
+    // Deep-merge generation sub-object so we don't clobber other generation fields
+    if (patch.generation) {
+      next.generation = { ...prev.generation, ...patch.generation }
+    }
+    // Deep-merge git sub-object
+    if (patch.git) {
+      next.git = { ...prev.git, ...patch.git }
+    }
+    saveSettings(next)
+    return next
   })
 }
 

@@ -2,7 +2,21 @@
 
 All notable changes to AVA are documented in this file.
 
-## [Unreleased]
+## [3.0.0] — 2026-03-30
+
+AVA v3 — the complete rewrite. Pure Rust backend, 21 crates, 21 LLM providers,
+9 default tools (all stress-tested at 0% error rate), HQ multi-agent orchestration,
+macOS-luxury SolidJS desktop, and a web serve mode with 65+ REST endpoints.
+
+**Highlights:**
+- **Pure Rust architecture** — 40K LOC, 1,962+ tests, 0 failures
+- **21 LLM providers** — Anthropic, OpenAI, Gemini, Copilot, DeepSeek, Inception, and 15 more
+- **9 default tools** — read, write, edit, bash, glob, grep, web_fetch, web_search, git_read — all verified via CLI smoke tests
+- **HQ multi-agent** — Director → Scouts → Leads → Workers with LLM-powered planning and Board of Directors
+- **Desktop app** — SolidJS + Tauri with 15 settings tabs, 25 slash commands, 19+ keyboard shortcuts
+- **Web mode** — `ava serve` with 65+ REST API endpoints, WebSocket streaming, full session/HQ CRUD
+- **3-tier mid-stream messaging** — Steer (Enter), Follow-up (Alt+Enter), Post-complete (Ctrl+Alt+Enter)
+- **E2E tested** — 182 Playwright UI tests, 65 API endpoint tests, 25 CLI slash command tests, 0 tool errors across all models
 
 ### Added
 - HQ desktop backend now has real SQLite-backed orchestration state: epics, issues, comments, plans, agents, activity feed, director chat, and HQ settings all load through new Tauri commands instead of frontend mock data.

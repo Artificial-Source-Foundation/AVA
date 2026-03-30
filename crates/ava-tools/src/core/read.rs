@@ -130,6 +130,7 @@ impl Tool for ReadTool {
             .collect();
 
         let cap = limit
+            .and_then(|l| if l == 0 { None } else { Some(l) })
             .map(|l| usize::try_from(l).unwrap_or(usize::MAX))
             .unwrap_or(MAX_LINES_DEFAULT);
         let truncated = lines.len() > cap;

@@ -671,7 +671,7 @@ impl SessionManager {
         for sql in MIGRATION_SQL {
             if let Err(error) = conn.execute_batch(sql) {
                 if should_ignore_migration_error(&error) {
-                    tracing::debug!(migration = %sql, error = %error, "ignoring already-applied session migration");
+                    tracing::trace!(migration = %sql, error = %error, "ignoring already-applied session migration");
                     continue;
                 }
 

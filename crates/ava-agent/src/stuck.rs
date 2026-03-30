@@ -133,6 +133,9 @@ pub struct StuckDetector {
     llm_judge_concern: u8,
     /// Prevent repeated judge calls — fire at most once.
     llm_judge_fired: bool,
+    /// Cooldown counter after an InjectMessage: skip this many checks to avoid
+    /// cascading nudge → acknowledgment → nudge loops.
+    inject_cooldown: usize,
 }
 
 impl StuckDetector {
@@ -153,6 +156,7 @@ impl StuckDetector {
             thresholds,
             llm_judge_concern: 0,
             llm_judge_fired: false,
+            inject_cooldown: 0,
         }
     }
 
@@ -210,6 +214,13 @@ impl StuckDetector {
         }
 
         self.turn_count += 1;
+
+        // After an InjectMessage, skip checks for a few turns so the model
+        // can recover without cascading nudge → acknowledgment → nudge loops.
+        if self.inject_cooldown > 0 {
+            self.inject_cooldown -= 1;
+            return StuckAction::Continue;
+        }
 
         // Update cost estimate
         let turn_cost = if let Some(usage) = usage {
@@ -370,6 +381,25 @@ impl StuckDetector {
         }
 
         StuckAction::Continue
+    }
+
+    /// Wrapper around `check` that sets a cooldown after any `InjectMessage`
+    /// to prevent cascading nudge → acknowledgment → nudge loops.
+    pub fn check_with_cooldown(
+        &mut self,
+        response_text: &str,
+        tool_calls: &[ToolCall],
+        tool_results: &[ToolResult],
+        usage: Option<&TokenUsage>,
+        config: &AgentConfig,
+        llm: &dyn LLMProvider,
+    ) -> StuckAction {
+        let action = self.check(response_text, tool_calls, tool_results, usage, config, llm);
+        if matches!(action, StuckAction::InjectMessage(_)) {
+            // Skip the next 3 checks so the model can recover without re-triggering
+            self.inject_cooldown = 3;
+        }
+        action
     }
 }
 

@@ -21,7 +21,7 @@ pub struct TaskRoutingIntent {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SubagentDelegationPolicy {
-    pub enable_task_tool: bool,
+    pub enable_subagent_tool: bool,
     pub max_subagents: usize,
     pub reason: String,
 }
@@ -343,7 +343,7 @@ fn classify_delegation(
 ) -> SubagentDelegationPolicy {
     if signals.explicit_delegate {
         return SubagentDelegationPolicy {
-            enable_task_tool: true,
+            enable_subagent_tool: true,
             max_subagents: 3,
             reason: EXPLICIT_DELEGATION_REASON.to_string(),
         };
@@ -351,7 +351,7 @@ fn classify_delegation(
 
     if *tool_visibility != ToolVisibilityProfile::Full {
         return SubagentDelegationPolicy {
-            enable_task_tool: false,
+            enable_subagent_tool: false,
             max_subagents: 0,
             reason: "tool access is limited for this task, so hidden delegation stays off"
                 .to_string(),
@@ -364,7 +364,7 @@ fn classify_delegation(
         && signals.file_reference_count <= 1
     {
         return SubagentDelegationPolicy {
-            enable_task_tool: false,
+            enable_subagent_tool: false,
             max_subagents: 0,
             reason: "request looks like a small in-thread edit".to_string(),
         };
@@ -376,7 +376,7 @@ fn classify_delegation(
         || signals.file_reference_count >= 3
     {
         return SubagentDelegationPolicy {
-            enable_task_tool: true,
+            enable_subagent_tool: true,
             max_subagents: 2,
             reason: "task looks broad enough to justify one scout or reviewer".to_string(),
         };
@@ -384,14 +384,14 @@ fn classify_delegation(
 
     if signals.trimmed.len() > 320 || signals.line_count > 4 {
         return SubagentDelegationPolicy {
-            enable_task_tool: true,
+            enable_subagent_tool: true,
             max_subagents: 1,
             reason: "task is moderately multi-step, so one focused helper may help".to_string(),
         };
     }
 
     SubagentDelegationPolicy {
-        enable_task_tool: false,
+        enable_subagent_tool: false,
         max_subagents: 0,
         reason: "request is simple enough to keep in the main thread".to_string(),
     }
@@ -511,7 +511,7 @@ mod tests {
             false,
         );
 
-        assert!(!policy.enable_task_tool);
+        assert!(!policy.enable_subagent_tool);
         assert_eq!(policy.max_subagents, 0);
     }
 
@@ -524,7 +524,7 @@ mod tests {
             false,
         );
 
-        assert!(policy.enable_task_tool);
+        assert!(policy.enable_subagent_tool);
         assert_eq!(policy.max_subagents, 2);
     }
 
@@ -537,7 +537,7 @@ mod tests {
             false,
         );
 
-        assert!(policy.enable_task_tool);
+        assert!(policy.enable_subagent_tool);
         assert_eq!(policy.max_subagents, 3);
     }
 }

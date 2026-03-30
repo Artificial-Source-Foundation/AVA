@@ -79,7 +79,7 @@ tower-http = { version = "0.6", features = ["cors", "fs"], optional = true }
 [features]
 default = []
 benchmark = []
-web = ["dep:axum", "dep:tower-http"]
+web = ["dep:axum", "dep:tower-http", "dep:async-trait"]
 voice = ["dep:cpal", "dep:hound", "dep:async-trait"]
 local-whisper = ["voice", "dep:whisper-rs"]
 

@@ -673,23 +673,6 @@ impl App {
             match result {
                 Ok(run) => {
                     self.finish_run(run);
-                    // Auto-review: run a code review after successful runs if enabled.
-                    // Default is true; disable with `features.auto_review: false` in config.yaml.
-                    let auto_review = self
-                        .data_dir
-                        .join("config.yaml")
-                        .exists()
-                        .then(|| {
-                            std::fs::read_to_string(self.data_dir.join("config.yaml"))
-                                .ok()
-                                .and_then(|s| serde_yaml::from_str::<ava_config::Config>(&s).ok())
-                                .map(|c| c.features.auto_review)
-                        })
-                        .flatten()
-                        .unwrap_or(true);
-                    if auto_review {
-                        self.spawn_review_pass(app_tx.clone());
-                    }
                 }
                 Err(err) => {
                     self.is_streaming.store(false, Ordering::Relaxed);

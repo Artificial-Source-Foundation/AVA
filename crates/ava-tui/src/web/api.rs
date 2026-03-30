@@ -23,6 +23,7 @@ pub(crate) use super::api_agent::{
     agent_status,
     cancel_agent,
     clear_message_queue,
+    compact_context,
     // Retry / edit-resend / regenerate
     edit_and_resend,
     follow_up_agent,
@@ -35,21 +36,23 @@ pub(crate) use super::api_agent::{
 };
 pub(crate) use super::api_config::{
     disable_mcp_server, enable_mcp_server, get_config, get_current_model, get_permission_level,
-    ingest_frontend_log, list_cli_agents, list_mcp_servers, list_models, list_plugins,
-    list_providers, reload_mcp, set_permission_level, switch_model, toggle_permission_level,
+    get_subscription_usage, ingest_frontend_log, list_cli_agents, list_mcp_servers, list_models,
+    list_plugins, list_providers, reload_mcp, set_permission_level, switch_model,
+    toggle_permission_level,
 };
 pub(crate) use super::api_hq::{
-    get_activity_feed, get_agent, get_agents, get_dashboard_metrics, get_director_chat,
-    get_hq_settings, list_epics, list_issues, send_director_message, update_hq_settings,
+    approve_plan, bootstrap_hq_workspace, create_epic, get_activity_feed, get_agent, get_agents,
+    get_dashboard_metrics, get_director_chat, get_hq_settings, get_plan, list_epics, list_issues,
+    reject_plan, send_director_message, update_hq_settings,
 };
 pub(crate) use super::api_interactive::{
     resolve_approval, resolve_plan, resolve_question, undo_last_edit,
 };
 pub(crate) use super::api_sessions::{
-    add_message, create_session, delete_session, delete_session_body, get_session,
-    get_session_messages, list_session_agents, list_session_checkpoints, list_session_files,
-    list_session_memory, list_session_terminal, list_sessions, load_session_body, rename_session,
-    rename_session_body, search_sessions, update_message,
+    add_message, create_session, delete_session, delete_session_body, duplicate_session,
+    get_session, get_session_messages, list_session_agents, list_session_checkpoints,
+    list_session_files, list_session_memory, list_session_terminal, list_sessions,
+    load_session_body, rename_session, rename_session_body, search_sessions, update_message,
 };
 
 // ============================================================================

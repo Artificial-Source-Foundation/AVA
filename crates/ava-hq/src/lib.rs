@@ -20,6 +20,7 @@ pub mod director;
 pub mod events;
 pub mod lead;
 pub mod mailbox;
+pub mod memory;
 pub mod plan;
 pub mod prompts;
 pub mod review;
@@ -44,6 +45,7 @@ pub use events::HqEvent;
 pub use external_worker::ExternalWorker;
 pub use lead::Lead;
 pub use mailbox::{Mailbox, PeerMessage, PeerMessageKind};
+pub use memory::{bootstrap_hq_memory, HqMemoryBootstrapOptions, HqMemoryBootstrapResult};
 pub use plan::{ExecutionGroup, HqPlan, HqTask, PlannerConfig, TaskComplexity};
 pub use prompts::{
     director_system_prompt, lead_system_prompt, lead_system_prompt_for_domain,

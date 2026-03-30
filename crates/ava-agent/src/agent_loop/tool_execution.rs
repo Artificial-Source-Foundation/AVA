@@ -642,6 +642,39 @@ impl AgentLoop {
         }
     }
 
+    /// Add tool results to context and session, marked as internal (not user-visible).
+    ///
+    /// Used by stuck-detector and repetition-detector nudge paths so that the
+    /// raw tool output does not appear as regular messages on session reload.
+    pub(super) fn add_tool_results_internal(
+        &mut self,
+        tool_calls: &[ToolCall],
+        results: &[ToolResult],
+        session: &mut Session,
+    ) {
+        let mut ri = 0;
+        for tool_call in tool_calls {
+            if tool_call.name == "attempt_completion" {
+                continue;
+            }
+            let mut tool_message = if let Some(result) = results.get(ri) {
+                ri += 1;
+                Message::new(Role::Tool, result.content.clone())
+                    .with_tool_call_id(&tool_call.id)
+                    .with_tool_results(vec![result.clone()])
+            } else {
+                Message::new(
+                    Role::Tool,
+                    format!("Error: tool '{}' did not produce a result", tool_call.name),
+                )
+                .with_tool_call_id(&tool_call.id)
+            };
+            tool_message.user_visible = false;
+            self.context.add_message(tool_message.clone());
+            session.add_message(tool_message);
+        }
+    }
+
     /// Execute tool calls with steering support and event emission.
     ///
     /// Returns (tool_results, steering_triggered, repetition_warning).

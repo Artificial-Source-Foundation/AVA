@@ -197,7 +197,7 @@ pub(super) async fn run_single_agent(cli: CliArgs, goal: &str) -> Result<()> {
             .await
     });
 
-    let mut files_edited = false;
+    let mut _files_edited = false;
     if json_mode {
         while let Some(event) = rx.recv().await {
             let json = match &event {
@@ -270,7 +270,7 @@ pub(super) async fn run_single_agent(cli: CliArgs, goal: &str) -> Result<()> {
                     additions,
                     deletions,
                 } => {
-                    files_edited = true;
+                    _files_edited = true;
                     serde_json::json!({"type": "diff_preview", "file": file.display().to_string(), "diff": diff_text, "additions": additions, "deletions": deletions})
                 }
                 AgentEvent::MCPToolsChanged {
@@ -364,7 +364,7 @@ pub(super) async fn run_single_agent(cli: CliArgs, goal: &str) -> Result<()> {
                         println!();
                         in_text = false;
                     }
-                    files_edited = true;
+                    _files_edited = true;
                     eprintln!(
                         "[diff: {} +{} -{}]",
                         file.display(),
@@ -441,20 +441,12 @@ pub(super) async fn run_single_agent(cli: CliArgs, goal: &str) -> Result<()> {
         );
     }
 
-    // Auto-review: when the agent edited files, review and auto-fix issues.
-    // Triggered automatically when files were edited (if config allows), or explicitly with --review.
-    let config_auto_review = dirs::home_dir()
-        .map(|h| h.join(".ava/config.yaml"))
-        .filter(|p| p.exists())
-        .and_then(|p| std::fs::read_to_string(p).ok())
-        .and_then(|s| serde_yaml::from_str::<ava_config::Config>(&s).ok())
-        .map(|c| c.features.auto_review)
-        .unwrap_or(true);
-    let should_review = result.success && (cli.review || (files_edited && config_auto_review));
-    if should_review {
+    // Explicit review: only run when user passes --review (e.g. CI pipelines).
+    // Normal code review is handled by the agent itself via `subagent(agent_type: "review")`
+    // when it decides a review is warranted — no automatic post-completion review.
+    if result.success && cli.review {
         let review_findings = run_post_completion_review(&cli).await;
         if let Some(findings) = review_findings {
-            // Re-run the agent to fix the review findings
             eprintln!("\n[review] Auto-fixing issues...");
             let fix_goal = format!(
                 "A code review found the following issues in your recent changes. Fix them:\n\n{}",

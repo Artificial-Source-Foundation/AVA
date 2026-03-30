@@ -83,7 +83,8 @@ pub struct CliArgs {
     #[arg(long)]
     pub image: Vec<String>,
 
-    /// Run a code review pass after the agent completes (catches bugs in generated code)
+    /// Force a code review pass after the agent completes (for CI pipelines).
+    /// Without this flag, the agent decides when to self-review via subagent.
     #[arg(long)]
     pub review: bool,
 
@@ -303,6 +304,11 @@ pub enum Command {
         #[command(subcommand)]
         action: PluginCommand,
     },
+    /// HQ setup and headless utilities
+    Hq {
+        #[command(subcommand)]
+        action: HqCommand,
+    },
     /// Check for and install updates
     Update,
     /// Check for and install updates (alias)
@@ -316,6 +322,19 @@ pub enum Command {
         /// Host/IP to bind to
         #[arg(long, default_value = "0.0.0.0")]
         host: String,
+    },
+}
+
+#[derive(Debug, Clone, Subcommand)]
+pub enum HqCommand {
+    /// Initialize `.ava/HQ/` memory for the current project
+    Init {
+        /// Preferred Director model to record in HQ memory
+        #[arg(long)]
+        director_model: Option<String>,
+        /// Overwrite existing HQ memory files
+        #[arg(long)]
+        force: bool,
     },
 }
 

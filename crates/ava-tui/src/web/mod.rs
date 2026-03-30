@@ -23,6 +23,7 @@
 //! | POST   | `/api/agent/post-complete`        | Queue a post-complete message (Tier 3)    |
 //! | GET    | `/api/agent/queue`                | Get message queue state                   |
 //! | POST   | `/api/agent/queue/clear`          | Clear the message queue                   |
+//! | POST   | `/api/context/compact`            | Compact conversation context               |
 //! | GET    | `/api/sessions`                   | List recent sessions                      |
 //! | POST   | `/api/sessions/create`            | Create a new session                      |
 //! | POST   | `/api/sessions/search`            | Search sessions by message content        |
@@ -112,6 +113,8 @@ fn build_router(state: WebState) -> Router {
         .route("/api/agent/post-complete", post(api::post_complete_agent))
         .route("/api/agent/queue", get(api::get_message_queue))
         .route("/api/agent/queue/clear", post(api::clear_message_queue))
+        // Context compaction
+        .route("/api/context/compact", post(api::compact_context))
         // Session CRUD endpoints
         .route("/api/sessions", get(api::list_sessions))
         .route("/api/sessions/create", post(api::create_session))
@@ -121,6 +124,7 @@ fn build_router(state: WebState) -> Router {
             get(api::get_session).delete(api::delete_session),
         )
         .route("/api/sessions/{id}/rename", post(api::rename_session))
+        .route("/api/sessions/{id}/duplicate", post(api::duplicate_session))
         // Message endpoints
         .route(
             "/api/sessions/{id}/messages",
@@ -165,6 +169,7 @@ fn build_router(state: WebState) -> Router {
         .route("/api/models/current", get(api::get_current_model))
         .route("/api/models/switch", post(api::switch_model))
         .route("/api/providers", get(api::list_providers))
+        .route("/api/usage", get(api::get_subscription_usage))
         .route("/api/cli-agents", get(api::list_cli_agents))
         // Config
         .route("/api/config", get(api::get_config))
@@ -181,8 +186,11 @@ fn build_router(state: WebState) -> Router {
         .route("/api/plans", get(api_plans::list_plans))
         .route("/api/plans/{filename}", get(api_plans::get_plan))
         // HQ endpoints
-        .route("/api/hq/epics", get(api::list_epics))
+        .route("/api/hq/epics", get(api::list_epics).post(api::create_epic))
         .route("/api/hq/issues", get(api::list_issues))
+        .route("/api/hq/plans/{epic_id}", get(api::get_plan))
+        .route("/api/hq/plans/{plan_id}/approve", post(api::approve_plan))
+        .route("/api/hq/plans/{plan_id}/reject", post(api::reject_plan))
         .route("/api/hq/agents", get(api::get_agents))
         .route("/api/hq/agents/{id}", get(api::get_agent))
         .route("/api/hq/activity", get(api::get_activity_feed))
@@ -195,6 +203,7 @@ fn build_router(state: WebState) -> Router {
             "/api/hq/settings",
             get(api::get_hq_settings).post(api::update_hq_settings),
         )
+        .route("/api/hq/bootstrap", post(api::bootstrap_hq_workspace))
         // WebSocket
         .route("/ws", get(ws::ws_handler))
         // Frontend log ingestion

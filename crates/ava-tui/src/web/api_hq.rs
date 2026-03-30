@@ -1,17 +1,24 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 
+use ava_config::{HqAgentOverride, HqConfig};
 use ava_db::models::{
-    HqActivityRecord, HqAgentRecord, HqChatMessageRecord, HqEpicRecord, HqIssueRecord,
+    HqActivityRecord, HqAgentRecord, HqChatMessageRecord, HqEpicRecord, HqIssueRecord, HqPlanRecord,
 };
 use ava_db::HqRepository;
-use ava_hq::{Budget, Director, DirectorConfig, Task, TaskType};
+use ava_hq::{
+    bootstrap_hq_memory, Budget, Director, DirectorConfig, Domain, HqMemoryBootstrapOptions, Task,
+    TaskType,
+};
+use ava_llm::provider::LLMProvider;
 use ava_platform::StandardPlatform;
 use ava_types::MessageTier;
 use axum::extract::{Path, State};
 use axum::Json;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, Value};
+use tokio::sync::mpsc;
 use uuid::Uuid;
 
 use super::state::WebState;
@@ -132,11 +139,91 @@ pub struct HqSettingsDto {
     pub show_costs: bool,
 }
 
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HqPlanTaskDto {
+    pub id: String,
+    pub title: String,
+    pub domain: String,
+    pub complexity: String,
+    pub dependencies: Vec<String>,
+    pub assignee_id: Option<String>,
+    pub assignee_name: Option<String>,
+    pub assignee_model: Option<String>,
+    pub steps: Vec<String>,
+    pub file_hints: Vec<String>,
+    pub budget_max_tokens: usize,
+    pub budget_max_turns: usize,
+    pub budget_max_cost_usd: f64,
+    pub expanded: bool,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HqPhaseDto {
+    pub id: String,
+    pub number: i64,
+    pub name: String,
+    pub description: String,
+    pub execution: String,
+    pub depends_on: Vec<String>,
+    pub tasks: Vec<HqPlanTaskDto>,
+    pub review_enabled: bool,
+    pub review_assignee: Option<String>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HqPlanDto {
+    pub id: String,
+    pub epic_id: String,
+    pub title: String,
+    pub status: String,
+    pub director_description: String,
+    pub board_review: Option<Value>,
+    pub phases: Vec<HqPhaseDto>,
+}
+
+#[derive(Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct LeadConfigPayload {
+    pub domain: String,
+    pub enabled: bool,
+    #[serde(default)]
+    pub model: String,
+    #[serde(default = "default_max_workers")]
+    pub max_workers: usize,
+    #[serde(default)]
+    pub custom_prompt: String,
+}
+
+fn default_max_workers() -> usize {
+    3
+}
+
+#[derive(Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct TeamConfigPayload {
+    #[serde(default)]
+    pub default_director_model: String,
+    #[serde(default)]
+    pub default_lead_model: String,
+    #[serde(default)]
+    pub default_worker_model: String,
+    #[serde(default)]
+    pub default_scout_model: String,
+    #[serde(default)]
+    pub worker_names: Vec<String>,
+    #[serde(default)]
+    pub leads: Vec<LeadConfigPayload>,
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct SendDirectorMessageRequest {
     pub message: String,
     pub epic_id: Option<String>,
+    pub team_config: Option<TeamConfigPayload>,
 }
 
 #[derive(Deserialize)]
@@ -146,6 +233,29 @@ pub struct UpdateHqSettingsRequest {
     pub tone_preference: Option<String>,
     pub auto_review: Option<bool>,
     pub show_costs: Option<bool>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct BootstrapHqWorkspaceRequest {
+    pub director_model: Option<String>,
+    #[serde(default)]
+    pub force: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct CreateEpicRequest {
+    pub title: String,
+    #[serde(default)]
+    pub description: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct RejectPlanRequest {
+    #[serde(default)]
+    pub feedback: String,
 }
 
 fn repo(state: &WebState) -> HqRepository {
@@ -162,6 +272,186 @@ fn now_ms() -> i64 {
 fn parse_json_vec<T: serde::de::DeserializeOwned>(raw: Option<&str>) -> Vec<T> {
     raw.and_then(|value| serde_json::from_str(value).ok())
         .unwrap_or_default()
+}
+
+fn complexity_label(complexity: &ava_hq::TaskComplexity) -> &'static str {
+    match complexity {
+        ava_hq::TaskComplexity::Simple => "simple",
+        ava_hq::TaskComplexity::Medium => "medium",
+        ava_hq::TaskComplexity::Complex => "complex",
+    }
+}
+
+fn phase_execution_label(task_count: usize) -> &'static str {
+    if task_count > 1 {
+        "parallel"
+    } else {
+        "sequential"
+    }
+}
+
+fn domain_assignee(domain: &Domain) -> (&'static str, &'static str) {
+    match domain {
+        Domain::Frontend => ("frontend-lead", "Luna"),
+        Domain::Backend => ("backend-lead", "Pedro"),
+        Domain::QA => ("qa-lead", "Kai"),
+        Domain::Research => ("research-lead", "Scout Lead"),
+        Domain::Debug => ("debug-lead", "Sofia"),
+        Domain::Fullstack => ("fullstack-lead", "Sofia"),
+        Domain::DevOps => ("devops-lead", "Rio"),
+    }
+}
+
+fn convert_plan(epic_id: &str, plan_id: &str, status: &str, plan: &ava_hq::HqPlan) -> HqPlanDto {
+    let mut task_lookup = HashMap::new();
+    for task in &plan.tasks {
+        task_lookup.insert(task.id.clone(), task.clone());
+    }
+
+    let phases = plan
+        .execution_groups
+        .iter()
+        .enumerate()
+        .map(|(index, group)| {
+            let tasks: Vec<HqPlanTaskDto> = group
+                .task_ids
+                .iter()
+                .filter_map(|task_id| task_lookup.get(task_id))
+                .map(|task| {
+                    let (assignee_id, assignee_name) = domain_assignee(&task.domain);
+                    HqPlanTaskDto {
+                        id: task.id.clone(),
+                        title: task.description.clone(),
+                        domain: format!("{:?}", task.domain).to_ascii_lowercase(),
+                        complexity: complexity_label(&task.complexity).to_string(),
+                        dependencies: task.dependencies.clone(),
+                        assignee_id: Some(assignee_id.to_string()),
+                        assignee_name: Some(assignee_name.to_string()),
+                        assignee_model: None,
+                        steps: vec![task.description.clone()],
+                        file_hints: task.files_hint.clone(),
+                        budget_max_tokens: task.budget.max_tokens,
+                        budget_max_turns: task.budget.max_turns,
+                        budget_max_cost_usd: task.budget.max_cost_usd,
+                        expanded: matches!(task.complexity, ava_hq::TaskComplexity::Complex),
+                    }
+                })
+                .collect();
+
+            HqPhaseDto {
+                id: format!("phase-{}", index + 1),
+                number: (index + 1) as i64,
+                name: group.label.clone(),
+                description: format!("Execute {} planned task(s).", tasks.len()),
+                execution: phase_execution_label(tasks.len()).to_string(),
+                depends_on: if index == 0 {
+                    vec![]
+                } else {
+                    vec![format!("phase-{index}")]
+                },
+                tasks,
+                review_enabled: true,
+                review_assignee: Some("QA Lead".to_string()),
+            }
+        })
+        .collect();
+
+    HqPlanDto {
+        id: plan_id.to_string(),
+        epic_id: epic_id.to_string(),
+        title: plan.goal.clone(),
+        status: status.to_string(),
+        director_description: format!(
+            "Director prepared a phased plan with {} phase(s) and {} task(s).",
+            plan.execution_groups.len(),
+            plan.tasks.len()
+        ),
+        board_review: None,
+        phases,
+    }
+}
+
+async fn create_plan_issues(
+    repo: &HqRepository,
+    epic_id: &str,
+    plan: &HqPlanDto,
+) -> Result<(), String> {
+    for phase in &plan.phases {
+        for task in &phase.tasks {
+            let issue_number = repo
+                .next_issue_number()
+                .await
+                .map_err(|error| error.to_string())?;
+            repo.create_issue(&HqIssueRecord {
+                id: Uuid::new_v4().to_string(),
+                issue_number,
+                identifier: format!("HQ-{issue_number}"),
+                title: task.title.clone(),
+                description: task.steps.join("\n"),
+                status: "backlog".to_string(),
+                priority: match task.complexity.as_str() {
+                    "complex" => "high".to_string(),
+                    "medium" => "medium".to_string(),
+                    _ => "low".to_string(),
+                },
+                assignee_id: task.assignee_id.clone(),
+                assignee_name: task.assignee_name.clone(),
+                epic_id: epic_id.to_string(),
+                phase_label: Some(phase.name.clone()),
+                agent_turn: None,
+                agent_max_turns: None,
+                agent_live_action: None,
+                is_live: 0,
+                files_changed_json: Some("[]".to_string()),
+                created_at: now_ms(),
+                updated_at: now_ms(),
+            })
+            .await
+            .map_err(|error| error.to_string())?;
+        }
+    }
+    Ok(())
+}
+
+fn should_consult_board(plan: &ava_hq::HqPlan) -> bool {
+    plan.tasks.len() >= 4
+        || plan
+            .tasks
+            .iter()
+            .any(|task| task.complexity == ava_hq::TaskComplexity::Complex)
+}
+
+fn fallback_hq_plan(goal: &str) -> ava_hq::HqPlan {
+    ava_hq::HqPlan {
+        goal: goal.to_string(),
+        tasks: vec![ava_hq::HqTask {
+            id: "t1".to_string(),
+            description: goal.lines().next().unwrap_or(goal).trim().to_string(),
+            domain: Domain::Fullstack,
+            complexity: ava_hq::TaskComplexity::Medium,
+            dependencies: vec![],
+            budget: Budget::interactive(20, 2.0),
+            files_hint: vec![],
+        }],
+        execution_groups: vec![ava_hq::ExecutionGroup {
+            task_ids: vec!["t1".to_string()],
+            label: "Phase 1: Implementation".to_string(),
+        }],
+        total_budget: Budget::interactive(20, 2.0),
+    }
+}
+
+fn board_review_value(result: &ava_hq::BoardResult) -> Value {
+    json!({
+        "consensus": result.consensus,
+        "voteSummary": result.vote_summary,
+        "opinions": result.opinions.iter().map(|opinion| json!({
+            "memberName": opinion.member_name,
+            "personality": opinion.personality.to_string(),
+            "recommendation": opinion.recommendation,
+            "vote": opinion.vote.to_string(),
+        })).collect::<Vec<_>>()
+    })
 }
 
 async fn ensure_director_agent(state: &WebState, repo: &HqRepository) -> Result<(), String> {
@@ -237,7 +527,64 @@ fn extract_director_reply(session: &ava_types::Session) -> String {
         .unwrap_or_else(|| "HQ finished without a textual reply.".to_string())
 }
 
-async fn build_director(state: &WebState) -> Result<Director, String> {
+fn parse_domain(s: &str) -> Option<Domain> {
+    match s.to_lowercase().as_str() {
+        "frontend" => Some(Domain::Frontend),
+        "backend" => Some(Domain::Backend),
+        "qa" => Some(Domain::QA),
+        "research" => Some(Domain::Research),
+        "debug" => Some(Domain::Debug),
+        "fullstack" => Some(Domain::Fullstack),
+        "devops" => Some(Domain::DevOps),
+        _ => None,
+    }
+}
+
+fn hq_override<'a>(settings: &'a HqConfig, id: &str) -> Option<&'a HqAgentOverride> {
+    settings
+        .agent_overrides
+        .iter()
+        .find(|override_item| override_item.id == id)
+}
+
+async fn resolve_model_spec(state: &WebState, model_spec: &str) -> Option<Arc<dyn LLMProvider>> {
+    if model_spec.is_empty() {
+        return None;
+    }
+
+    let (provider_name, model_name) = if let Some(idx) = model_spec.find('/') {
+        let prov = &model_spec[..idx];
+        let mdl = &model_spec[idx + 1..];
+        (prov.to_string(), mdl.to_string())
+    } else {
+        let (cur_prov, _) = state.inner.stack.current_model().await;
+        (cur_prov, model_spec.to_string())
+    };
+
+    state
+        .inner
+        .stack
+        .router
+        .route_required(&provider_name, &model_name)
+        .await
+        .ok()
+}
+
+async fn provider_from_override(
+    state: &WebState,
+    override_item: Option<&HqAgentOverride>,
+) -> Option<Arc<dyn LLMProvider>> {
+    let model_spec = override_item
+        .map(|item| item.model_spec.trim())
+        .unwrap_or("");
+    resolve_model_spec(state, model_spec).await
+}
+
+async fn build_director(
+    state: &WebState,
+    settings: &HqConfig,
+    team_config: Option<TeamConfigPayload>,
+) -> Result<Director, String> {
     let (provider_name, model_name) = state.inner.stack.current_model().await;
     let default_provider = state
         .inner
@@ -247,17 +594,121 @@ async fn build_director(state: &WebState) -> Result<Director, String> {
         .await
         .map_err(|error| error.to_string())?;
 
+    let mut domain_providers = HashMap::new();
+    let mut enabled_leads = Vec::new();
+    let mut lead_prompts = HashMap::new();
+    let mut worker_names = Vec::new();
+
+    let commander_override = hq_override(settings, "commander").filter(|item| item.enabled);
+    let coder_override = hq_override(settings, "coder").filter(|item| item.enabled);
+    let researcher_override = hq_override(settings, "researcher")
+        .or_else(|| hq_override(settings, "explorer"))
+        .filter(|item| item.enabled);
+
+    if let Some(ref team) = team_config {
+        worker_names = team.worker_names.clone();
+        for lead_cfg in &team.leads {
+            if !lead_cfg.enabled {
+                continue;
+            }
+            if let Some(domain) = parse_domain(&lead_cfg.domain) {
+                let override_id = format!("{}-lead", lead_cfg.domain.to_lowercase());
+                let lead_override = hq_override(settings, &override_id);
+                if matches!(lead_override, Some(override_item) if !override_item.enabled) {
+                    continue;
+                }
+                enabled_leads.push(domain.clone());
+                let model_spec = if let Some(override_item) = lead_override {
+                    override_item.model_spec.as_str()
+                } else if lead_cfg.model.is_empty() {
+                    &team.default_lead_model
+                } else {
+                    &lead_cfg.model
+                };
+                if let Some(provider) = resolve_model_spec(state, model_spec).await {
+                    domain_providers.insert(domain.clone(), provider);
+                }
+                if let Some(override_item) = lead_override {
+                    if !override_item.system_prompt.trim().is_empty() {
+                        lead_prompts.insert(domain.clone(), override_item.system_prompt.clone());
+                        continue;
+                    }
+                }
+                if !lead_cfg.custom_prompt.is_empty() {
+                    lead_prompts.insert(domain, lead_cfg.custom_prompt.clone());
+                }
+            }
+        }
+    } else {
+        for (override_id, domain) in [
+            ("frontend-lead", Domain::Frontend),
+            ("backend-lead", Domain::Backend),
+            ("qa-lead", Domain::QA),
+            ("research-lead", Domain::Research),
+            ("debug-lead", Domain::Debug),
+            ("fullstack-lead", Domain::Fullstack),
+            ("devops-lead", Domain::DevOps),
+        ] {
+            let lead_override = hq_override(settings, override_id);
+            if matches!(lead_override, Some(override_item) if !override_item.enabled) {
+                continue;
+            }
+            enabled_leads.push(domain.clone());
+            if let Some(provider) = provider_from_override(state, lead_override).await {
+                domain_providers.insert(domain.clone(), provider);
+            }
+            if let Some(override_item) = lead_override {
+                if !override_item.system_prompt.trim().is_empty() {
+                    lead_prompts.insert(domain, override_item.system_prompt.clone());
+                }
+            }
+        }
+    }
+
+    let director_provider =
+        if let Some(provider) = provider_from_override(state, commander_override).await {
+            provider
+        } else if !settings.director_model.is_empty() {
+            resolve_model_spec(state, &settings.director_model)
+                .await
+                .unwrap_or_else(|| default_provider.clone())
+        } else if let Some(ref team) = team_config {
+            resolve_model_spec(state, &team.default_director_model)
+                .await
+                .unwrap_or_else(|| default_provider.clone())
+        } else {
+            default_provider.clone()
+        };
+
+    let scout_provider =
+        if let Some(provider) = provider_from_override(state, researcher_override).await {
+            Some(provider)
+        } else if let Some(ref team) = team_config {
+            resolve_model_spec(state, &team.default_scout_model).await
+        } else {
+            None
+        };
+
+    let worker_provider =
+        if let Some(provider) = provider_from_override(state, coder_override).await {
+            Some(provider)
+        } else if let Some(ref team) = team_config {
+            resolve_model_spec(state, &team.default_worker_model).await
+        } else {
+            None
+        };
+
     Ok(Director::new(DirectorConfig {
         budget: Budget::interactive(40, 5.0),
-        default_provider,
-        domain_providers: HashMap::new(),
+        default_provider: director_provider,
+        domain_providers,
         platform: Some(Arc::new(StandardPlatform)),
-        scout_provider: None,
+        scout_provider,
         board_providers: Vec::new(),
-        worker_names: Vec::new(),
-        enabled_leads: Vec::new(),
-        lead_prompts: HashMap::new(),
-        worker_provider: None,
+        worker_names,
+        enabled_leads,
+        lead_prompts,
+        worker_provider,
     }))
 }
 
@@ -267,10 +718,12 @@ fn spawn_simple_hq_run_web(
     goal: String,
     epic_id: Option<String>,
     task_type: TaskType,
+    team_config: Option<TeamConfigPayload>,
 ) {
     tokio::spawn(async move {
         let cancel = state.new_cancel_token().await;
-        let director = match build_director(&state).await {
+        let settings = state.inner.stack.config.get().await.hq;
+        let director = match build_director(&state, &settings, team_config).await {
             Ok(director) => director,
             Err(error) => {
                 let _ = repo
@@ -426,6 +879,109 @@ fn map_issue(record: HqIssueRecord) -> HqIssueDto {
     }
 }
 
+async fn plan_epic_background_web(
+    state: WebState,
+    repo: HqRepository,
+    epic_id: String,
+    title: String,
+    description: String,
+    team_config: Option<TeamConfigPayload>,
+) {
+    let settings = state.inner.stack.config.get().await.hq;
+    let goal = if description.trim().is_empty() {
+        title.clone()
+    } else {
+        format!("{title}\n\nAdditional context:\n{description}")
+    };
+
+    let result = async {
+        let director = build_director(&state, &settings, team_config.clone()).await?;
+        let raw_plan = match tokio::time::timeout(Duration::from_secs(20), director.plan(&goal, None)).await {
+            Ok(Ok(plan)) => plan,
+            Ok(Err(_)) | Err(_) => fallback_hq_plan(&goal),
+        };
+        let board_review = if should_consult_board(&raw_plan) {
+            let (tx, rx) = mpsc::unbounded_channel();
+            drop(rx);
+            director
+                .consult_board(&goal, &[], tx)
+                .await
+                .map_err(|error| error.to_string())?
+                .as_ref()
+                .map(board_review_value)
+        } else {
+            None
+        };
+        let plan_id = repo
+            .get_epic(&epic_id)
+            .await
+            .map_err(|error| error.to_string())?
+            .and_then(|epic| epic.plan_id)
+            .unwrap_or_else(|| Uuid::new_v4().to_string());
+        let mut plan = convert_plan(&epic_id, &plan_id, "awaiting-approval", &raw_plan);
+        plan.board_review = board_review;
+
+        repo.save_plan(&HqPlanRecord {
+            id: plan.id.clone(),
+            epic_id: epic_id.clone(),
+            title: plan.title.clone(),
+            status: plan.status.clone(),
+            director_description: plan.director_description.clone(),
+            plan_json: serde_json::to_string(&plan).map_err(|error| error.to_string())?,
+            created_at: now_ms(),
+            updated_at: now_ms(),
+        })
+        .await
+        .map_err(|error| error.to_string())?;
+
+        repo.delete_issues_by_epic(&epic_id)
+            .await
+            .map_err(|error| error.to_string())?;
+        create_plan_issues(&repo, &epic_id, &plan).await?;
+
+        if let Some(mut epic) = repo.get_epic(&epic_id).await.map_err(|error| error.to_string())? {
+            epic.plan_id = Some(plan_id.clone());
+            epic.status = "planning".to_string();
+            epic.progress = 15;
+            epic.updated_at = now_ms();
+            repo.update_epic(&epic)
+                .await
+                .map_err(|error| error.to_string())?;
+        }
+
+        repo.add_chat_message(&HqChatMessageRecord {
+            id: Uuid::new_v4().to_string(),
+            role: "director".to_string(),
+            content: format!(
+                "Plan ready: {} phase(s), {} task(s). Review it in the Plan screen before execution.",
+                plan.phases.len(),
+                raw_plan.tasks.len()
+            ),
+            delegations_json: None,
+            epic_id: Some(epic_id.clone()),
+            timestamp: now_ms(),
+        })
+        .await
+        .map_err(|error| error.to_string())?;
+        Ok::<(), String>(())
+    }
+    .await;
+
+    *state.inner.running.write().await = false;
+    if let Err(error) = result {
+        let _ = repo
+            .create_activity(&HqActivityRecord {
+                id: Uuid::new_v4().to_string(),
+                event_type: "error".to_string(),
+                agent_name: Some("Director".to_string()),
+                message: format!("Planning failed for epic '{title}': {error}"),
+                color: "#FF453A".to_string(),
+                timestamp: now_ms(),
+            })
+            .await;
+    }
+}
+
 pub async fn list_epics(State(state): State<WebState>) -> Result<Json<Vec<HqEpicDto>>, String> {
     let repo = repo(&state);
     let epics = repo.list_epics().await.map_err(|error| error.to_string())?;
@@ -446,6 +1002,148 @@ pub async fn list_epics(State(state): State<WebState>) -> Result<Json<Vec<HqEpic
             })
             .collect(),
     ))
+}
+
+pub async fn create_epic(
+    State(state): State<WebState>,
+    Json(payload): Json<CreateEpicRequest>,
+) -> Result<Json<HqEpicDto>, String> {
+    let title = payload.title.trim().to_string();
+    if title.is_empty() {
+        return Err("Epic title must not be empty.".to_string());
+    }
+
+    let repo = repo(&state);
+    ensure_director_agent(&state, &repo).await?;
+    {
+        let mut running = state.inner.running.write().await;
+        if *running {
+            return Err(
+                "HQ is already running. Wait for the current action to finish or cancel it."
+                    .to_string(),
+            );
+        }
+        *running = true;
+    }
+
+    let now = now_ms();
+    let epic = HqEpicRecord {
+        id: Uuid::new_v4().to_string(),
+        title: title.clone(),
+        description: payload.description.clone(),
+        status: "planning".to_string(),
+        progress: 5,
+        plan_id: None,
+        created_at: now,
+        updated_at: now,
+    };
+    repo.create_epic(&epic)
+        .await
+        .map_err(|error| error.to_string())?;
+
+    tokio::spawn(plan_epic_background_web(
+        state.clone(),
+        repo.clone(),
+        epic.id.clone(),
+        title,
+        payload.description,
+        None,
+    ));
+
+    Ok(Json(HqEpicDto {
+        id: epic.id,
+        title: epic.title,
+        description: epic.description,
+        status: epic.status,
+        progress: epic.progress as usize,
+        issue_ids: vec![],
+        plan_id: epic.plan_id,
+        created_at: epic.created_at,
+    }))
+}
+
+pub async fn get_plan(
+    Path(epic_id): Path<String>,
+    State(state): State<WebState>,
+) -> Result<Json<Option<HqPlanDto>>, String> {
+    let repo = repo(&state);
+    let Some(record) = repo
+        .get_plan_by_epic(&epic_id)
+        .await
+        .map_err(|error| error.to_string())?
+    else {
+        return Ok(Json(None));
+    };
+    Ok(Json(Some(
+        serde_json::from_str(&record.plan_json).map_err(|error| error.to_string())?,
+    )))
+}
+
+pub async fn approve_plan(
+    Path(plan_id): Path<String>,
+    State(state): State<WebState>,
+) -> Result<Json<Option<HqPlanDto>>, String> {
+    let repo = repo(&state);
+    let Some(record) = repo
+        .get_plan(&plan_id)
+        .await
+        .map_err(|error| error.to_string())?
+    else {
+        return Ok(Json(None));
+    };
+    repo.update_plan_status(&plan_id, "executing", now_ms())
+        .await
+        .map_err(|error| error.to_string())?;
+    let mut parsed: HqPlanDto =
+        serde_json::from_str(&record.plan_json).map_err(|error| error.to_string())?;
+    parsed.status = "executing".to_string();
+    Ok(Json(Some(parsed)))
+}
+
+pub async fn reject_plan(
+    Path(plan_id): Path<String>,
+    State(state): State<WebState>,
+    Json(payload): Json<RejectPlanRequest>,
+) -> Result<Json<Option<HqPlanDto>>, String> {
+    let repo = repo(&state);
+    let Some(record) = repo
+        .get_plan(&plan_id)
+        .await
+        .map_err(|error| error.to_string())?
+    else {
+        return Ok(Json(None));
+    };
+    repo.update_plan_status(&plan_id, "rejected", now_ms())
+        .await
+        .map_err(|error| error.to_string())?;
+    if let Some(epic) = repo
+        .get_epic(&record.epic_id)
+        .await
+        .map_err(|error| error.to_string())?
+    {
+        let mut running = state.inner.running.write().await;
+        *running = true;
+        drop(running);
+        tokio::spawn(plan_epic_background_web(
+            state.clone(),
+            repo.clone(),
+            record.epic_id.clone(),
+            epic.title,
+            if payload.feedback.trim().is_empty() {
+                epic.description
+            } else {
+                format!(
+                    "{}\n\nRevision feedback:\n{}",
+                    epic.description, payload.feedback
+                )
+            },
+            None,
+        ));
+    }
+    let mut parsed: HqPlanDto =
+        serde_json::from_str(&record.plan_json).map_err(|error| error.to_string())?;
+    parsed.status = "rejected".to_string();
+    Ok(Json(Some(parsed)))
 }
 
 pub async fn list_issues(State(state): State<WebState>) -> Result<Json<Vec<HqIssueDto>>, String> {
@@ -622,6 +1320,7 @@ pub async fn send_director_message(
             message,
             epic_id,
             TaskType::Chat,
+            payload.team_config,
         );
         return Ok(Json(()));
     }
@@ -635,6 +1334,22 @@ pub async fn get_hq_settings(State(state): State<WebState>) -> Result<Json<HqSet
         auto_review: settings.auto_review,
         show_costs: settings.show_costs,
     }))
+}
+
+pub async fn bootstrap_hq_workspace(
+    Json(request): Json<BootstrapHqWorkspaceRequest>,
+) -> Result<Json<ava_hq::HqMemoryBootstrapResult>, String> {
+    let project_root = std::env::current_dir().map_err(|error| error.to_string())?;
+    let result = bootstrap_hq_memory(
+        &project_root,
+        &HqMemoryBootstrapOptions {
+            director_model: request.director_model,
+            force: request.force,
+        },
+    )
+    .await
+    .map_err(|error| error.to_string())?;
+    Ok(Json(result))
 }
 
 pub async fn update_hq_settings(

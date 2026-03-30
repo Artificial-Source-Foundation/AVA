@@ -327,7 +327,7 @@ impl AgentStack {
             }
         }
 
-        if delegation_policy.enable_task_tool {
+        if delegation_policy.enable_subagent_tool {
             let delegation_section = format!(
                 "\n\n## Hidden Delegation\n\
                  - Keep small, single-file work in the main thread.\n\
@@ -426,7 +426,7 @@ impl AgentStack {
                 Some(Arc::clone(&self.plugin_manager)),
             );
 
-            if delegation_policy.enable_task_tool {
+            if delegation_policy.enable_subagent_tool {
                 let spawner: Arc<dyn TaskSpawner> = Arc::new(AgentTaskSpawner {
                     provider: provider.clone(),
                     platform: self.platform.clone(),
@@ -823,7 +823,7 @@ struct AgentTaskSpawner {
 #[async_trait]
 impl TaskSpawner for AgentTaskSpawner {
     async fn spawn(&self, prompt: &str) -> Result<TaskResult> {
-        self.spawn_named("task", prompt).await
+        self.spawn_named("subagent", prompt).await
     }
 
     async fn spawn_named(&self, agent_type: &str, prompt: &str) -> Result<TaskResult> {
@@ -1053,6 +1053,110 @@ impl TaskSpawner for AgentTaskSpawner {
             session_id,
             messages,
         })
+    }
+
+    async fn spawn_background(&self, agent_type: &str, prompt: &str) -> Result<String> {
+        // Validate budget/depth upfront before spawning the background task.
+        if self.depth >= MAX_AGENT_DEPTH {
+            return Err(AvaError::ToolError(format!(
+                "Maximum sub-agent depth reached ({MAX_AGENT_DEPTH}). Cannot spawn deeper."
+            )));
+        }
+
+        if self.max_spawns == 0 {
+            return Err(AvaError::ToolError(
+                "Sub-agent delegation is disabled for this task.".to_string(),
+            ));
+        }
+
+        let resolved = self.agents_config.get_agent(agent_type);
+        if !resolved.enabled {
+            return Err(AvaError::ToolError(format!(
+                "Sub-agent '{agent_type}' is disabled in agents.toml"
+            )));
+        }
+
+        if self
+            .spawn_count
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |current| {
+                (current < self.max_spawns).then_some(current + 1)
+            })
+            .is_err()
+        {
+            return Err(AvaError::ToolError(format!(
+                "Sub-agent budget exhausted (max {}).",
+                self.max_spawns
+            )));
+        }
+
+        // Generate a session ID upfront so we can return it immediately.
+        let session_id = uuid::Uuid::new_v4().to_string();
+        let session_id_clone = session_id.clone();
+
+        // Clone everything needed for the background task.
+        let provider = self.provider.clone();
+        let platform = self.platform.clone();
+        let model_name = self.model_name.clone();
+        let max_turns = self.max_turns;
+        let agents_config = self.agents_config.clone();
+        let router = self.router.clone();
+        let event_tx = self.event_tx.clone();
+        let session_manager = self.session_manager.clone();
+        let parent_session_id = self.parent_session_id.clone();
+        let agent_type = agent_type.to_string();
+        let prompt = prompt.to_string();
+
+        tokio::spawn(async move {
+            info!(
+                agent_type = %agent_type,
+                session_id = %session_id_clone,
+                "background sub-agent started"
+            );
+
+            // Build a temporary inline spawner to reuse spawn_named logic.
+            let spawner = AgentTaskSpawner {
+                provider,
+                platform,
+                model_name,
+                max_turns,
+                agents_config,
+                router,
+                event_tx: event_tx.clone(),
+                session_manager,
+                parent_session_id,
+                depth: 0,      // background agents are top-level from their perspective
+                max_spawns: 0, // background agents cannot spawn further sub-agents
+                spawn_count: Arc::new(AtomicUsize::new(0)),
+            };
+
+            match spawner.spawn_named(&agent_type, &prompt).await {
+                Ok(result) => {
+                    info!(
+                        agent_type = %agent_type,
+                        session_id = %session_id_clone,
+                        result_len = result.text.len(),
+                        "background sub-agent completed successfully"
+                    );
+                    // The SubAgentComplete event is already emitted by spawn_named.
+                }
+                Err(e) => {
+                    warn!(
+                        agent_type = %agent_type,
+                        session_id = %session_id_clone,
+                        error = %e,
+                        "background sub-agent failed"
+                    );
+                    // Emit an error event so the TUI knows the background agent failed.
+                    if let Some(ref tx) = event_tx {
+                        let _ = tx.send(AgentEvent::Error(format!(
+                            "Background sub-agent [{agent_type}] failed: {e}"
+                        )));
+                    }
+                }
+            }
+        });
+
+        Ok(session_id)
     }
 }
 
@@ -1299,10 +1403,10 @@ fn adapt_delegation_policy_with_feedback(
         .any(|needle| lower.contains(needle))
     };
 
-    if score < 0.45 && policy.enable_task_tool {
+    if score < 0.45 && policy.enable_subagent_tool {
         let next_max = policy.max_subagents.saturating_sub(1);
         return crate::routing::SubagentDelegationPolicy {
-            enable_task_tool: next_max > 0,
+            enable_subagent_tool: next_max > 0,
             max_subagents: next_max,
             reason: format!(
                 "{} (adaptive fallback: recent delegation quality {:.2} was weak)",
@@ -1311,10 +1415,10 @@ fn adapt_delegation_policy_with_feedback(
         };
     }
 
-    if score > 0.85 && policy.enable_task_tool && is_broad_goal {
+    if score > 0.85 && policy.enable_subagent_tool && is_broad_goal {
         let next_max = (policy.max_subagents + 1).min(3);
         return crate::routing::SubagentDelegationPolicy {
-            enable_task_tool: true,
+            enable_subagent_tool: true,
             max_subagents: next_max,
             reason: format!(
                 "{} (adaptive boost: recent delegation quality {:.2} was strong)",
@@ -1382,7 +1486,7 @@ mod tests {
     #[test]
     fn adaptive_feedback_reduces_subagents_after_weak_history() {
         let policy = crate::routing::SubagentDelegationPolicy {
-            enable_task_tool: true,
+            enable_subagent_tool: true,
             max_subagents: 2,
             reason: "task looks broad enough to justify one scout or reviewer".to_string(),
         };
@@ -1414,7 +1518,7 @@ mod tests {
     #[test]
     fn adaptive_feedback_boosts_subagents_after_strong_history() {
         let policy = crate::routing::SubagentDelegationPolicy {
-            enable_task_tool: true,
+            enable_subagent_tool: true,
             max_subagents: 1,
             reason: "task looks broad enough to justify one scout or reviewer".to_string(),
         };

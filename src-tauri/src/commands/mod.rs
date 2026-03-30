@@ -64,10 +64,11 @@ pub use agent_commands::{
 pub use config_commands::{get_config, sync_hq_agent_overrides};
 pub use context_commands::compact_context;
 pub use hq_commands::{
-    add_comment, approve_plan, cancel_hq, create_epic, create_issue, get_activity_feed, get_agent,
-    get_agents, get_dashboard_metrics, get_director_chat, get_epic, get_hq_settings, get_hq_status,
-    get_issue, get_plan, list_epics, list_issues, move_issue, reject_plan, send_director_message,
-    start_hq, steer_lead, update_epic, update_hq_settings, update_issue,
+    add_comment, approve_plan, bootstrap_hq_workspace, cancel_hq, create_epic, create_issue,
+    get_activity_feed, get_agent, get_agents, get_dashboard_metrics, get_director_chat, get_epic,
+    get_hq_settings, get_hq_status, get_issue, get_plan, list_epics, list_issues, move_issue,
+    reject_plan, send_director_message, start_hq, steer_lead, update_epic, update_hq_settings,
+    update_issue,
 };
 pub use mcp_commands::{list_mcp_servers, reload_mcp_servers};
 pub use model_commands::{get_current_model, list_models, switch_model};

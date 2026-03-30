@@ -220,6 +220,14 @@ impl HqRepository {
         }
     }
 
+    pub async fn delete_issues_by_epic(&self, epic_id: &str) -> Result<u64, sqlx::Error> {
+        let result = sqlx::query("DELETE FROM hq_issues WHERE epic_id = ?1")
+            .bind(epic_id)
+            .execute(&self.pool)
+            .await?;
+        Ok(result.rows_affected())
+    }
+
     pub async fn get_issue(&self, id: &str) -> Result<Option<HqIssueRecord>, sqlx::Error> {
         sqlx::query_as::<_, HqIssueRecord>(
             "SELECT id, issue_number, identifier, title, description, status, priority, assignee_id, assignee_name, epic_id, phase_label, agent_turn, agent_max_turns, agent_live_action, is_live, files_changed_json, created_at, updated_at FROM hq_issues WHERE id = ?1",
@@ -298,6 +306,19 @@ impl HqRepository {
         .bind(issue_id)
         .fetch_all(&self.pool)
         .await
+    }
+
+    pub async fn reassign_comments(
+        &self,
+        from_issue_id: &str,
+        to_issue_id: &str,
+    ) -> Result<u64, sqlx::Error> {
+        let result = sqlx::query("UPDATE hq_comments SET issue_id = ?1 WHERE issue_id = ?2")
+            .bind(to_issue_id)
+            .bind(from_issue_id)
+            .execute(&self.pool)
+            .await?;
+        Ok(result.rows_affected())
     }
 
     pub async fn save_plan(&self, record: &HqPlanRecord) -> Result<(), sqlx::Error> {

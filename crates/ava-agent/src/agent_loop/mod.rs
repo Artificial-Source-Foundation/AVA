@@ -79,6 +79,10 @@ pub struct AgentLoop {
     activated_context_paths: std::sync::Mutex<HashSet<std::path::PathBuf>>,
     /// Tracks `.ava/rules/*.md` files already injected during this session.
     activated_rule_paths: std::sync::Mutex<HashSet<std::path::PathBuf>>,
+    /// When true, suppress `AgentEvent::Token` emissions for the current turn.
+    /// Set after a stuck-detector `InjectMessage` so the model's acknowledgment
+    /// of the nudge doesn't leak into the visible assistant response.
+    suppress_next_tokens: bool,
     /// When false, skip on-demand project rule injection entirely.
     enable_dynamic_rules: bool,
     /// Cached active tool definitions for this loop configuration.
@@ -338,6 +342,7 @@ impl AgentLoop {
             project_root,
             activated_context_paths: std::sync::Mutex::new(HashSet::new()),
             activated_rule_paths: std::sync::Mutex::new(HashSet::new()),
+            suppress_next_tokens: false,
             enable_dynamic_rules,
             cached_tool_defs: std::sync::Mutex::new(None),
             cached_hooked_tool_defs: std::sync::Mutex::new(None),
@@ -801,13 +806,15 @@ impl AgentLoop {
 
             // --- Repetition detection ---
             if let Some(ref warning) = repetition_warning {
-                let assistant_message = Message::new(Role::Assistant, response_text.clone())
+                let mut assistant_message = Message::new(Role::Assistant, response_text.clone())
                     .with_tool_calls(tool_calls.clone());
+                assistant_message.user_visible = false;
                 self.context.add_message(assistant_message.clone());
                 session.add_message(assistant_message);
-                self.add_tool_results(&tool_calls, &tool_results, &mut session);
+                self.add_tool_results_internal(&tool_calls, &tool_results, &mut session);
                 Self::emit(&event_tx, AgentEvent::Progress(warning.clone()));
-                let nudge = Message::new(Role::User, warning.clone());
+                let mut nudge = Message::new(Role::User, warning.clone());
+                nudge.user_visible = false;
                 self.context.add_message(nudge.clone());
                 session.add_message(nudge);
                 continue;
@@ -820,7 +827,7 @@ impl AgentLoop {
                 tool_results = tool_results.len(),
                 "running stuck detection"
             );
-            match detector.check(
+            match detector.check_with_cooldown(
                 &response_text,
                 &tool_calls,
                 &tool_results,
@@ -830,15 +837,22 @@ impl AgentLoop {
             ) {
                 StuckAction::Continue => {}
                 StuckAction::InjectMessage(msg) => {
-                    let assistant_message = Message::new(Role::Assistant, response_text.clone())
-                        .with_tool_calls(tool_calls.clone());
+                    let mut assistant_message =
+                        Message::new(Role::Assistant, response_text.clone())
+                            .with_tool_calls(tool_calls.clone());
+                    assistant_message.user_visible = false;
                     self.context.add_message(assistant_message.clone());
                     session.add_message(assistant_message);
-                    self.add_tool_results(&tool_calls, &tool_results, &mut session);
+                    self.add_tool_results_internal(&tool_calls, &tool_results, &mut session);
                     Self::emit(&event_tx, AgentEvent::Progress(msg.clone()));
-                    let nudge = Message::new(Role::User, msg);
+                    let mut nudge = Message::new(Role::User, msg);
+                    nudge.user_visible = false;
                     self.context.add_message(nudge.clone());
                     session.add_message(nudge);
+                    // Suppress token output for the next turn so the model's
+                    // acknowledgment of the nudge doesn't leak into the visible
+                    // assistant response bubble.
+                    self.suppress_next_tokens = true;
                     continue;
                 }
                 StuckAction::Stop(reason) => {
@@ -901,6 +915,10 @@ impl AgentLoop {
                 }
             }
 
+            // Response passed stuck detection — this is a productive turn.
+            // Reset token suppression so output streams normally again.
+            self.suppress_next_tokens = false;
+
             // --- Empty response handling ---
             if response_text.trim().is_empty() && tool_calls.is_empty() {
                 let msg = format!(
@@ -915,8 +933,13 @@ impl AgentLoop {
                 break;
             }
 
-            let assistant_message = Message::new(Role::Assistant, response_text.clone())
+            let mut assistant_message = Message::new(Role::Assistant, response_text.clone())
                 .with_tool_calls(tool_calls.clone());
+            // When suppress_next_tokens is active, this is the model's internal
+            // acknowledgment of a stuck-detector nudge — hide it from the UI.
+            if self.suppress_next_tokens {
+                assistant_message.user_visible = false;
+            }
             self.context.add_message(assistant_message.clone());
             session.add_message(assistant_message);
 
@@ -928,10 +951,11 @@ impl AgentLoop {
                 // nudge the agent to retry instead of silently completing.
                 if last_turn_all_failed && turn < self.effective_max_turns() {
                     last_turn_all_failed = false; // fire once to avoid infinite nudge loop
-                    let nudge = Message::new(
+                    let mut nudge = Message::new(
                         Role::User,
                         "Your previous tool calls all failed. Review the errors above and try a different approach to complete the task.".to_string(),
                     );
+                    nudge.user_visible = false;
                     self.context.add_message(nudge.clone());
                     session.add_message(nudge);
                     Self::emit(

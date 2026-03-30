@@ -270,13 +270,15 @@ pub fn build_system_prompt(
     prompt.push_str("- Avoid filler, time estimates, and unnecessary verbosity.\n\n");
 
     if tool_visibility_profile != crate::routing::ToolVisibilityProfile::AnswerOnly
-        && tools.iter().any(|tool| tool.name == "task")
+        && tools.iter().any(|tool| tool.name == "subagent")
     {
         prompt.push_str("### Delegation\n");
         prompt.push_str("- Keep small, single-file work in the main thread.\n");
-        prompt.push_str("- Use `task` only for self-contained chunks whose result can be summarized back clearly.\n");
-        prompt.push_str("- Prefer `scout` or `explore` for read-only reconnaissance, `plan` for design-only breakdowns, `review` for a final pass, and `worker` or `task` for isolated implementation.\n");
-        prompt.push_str("- Avoid chaining sub-agents for every step; delegate only when it saves context or speeds up exploration.\n\n");
+        prompt.push_str("- Use `subagent` only for self-contained chunks whose result can be summarized back clearly.\n");
+        prompt.push_str("- Prefer `scout` or `explore` for read-only reconnaissance, `plan` for design-only breakdowns, `review` for a final pass, and `worker` or `subagent` for isolated implementation.\n");
+        prompt.push_str("- Use `background: true` when the sub-agent's work is independent and you can continue without its result. Use foreground (default) when you need the result before proceeding.\n");
+        prompt.push_str("- Avoid chaining sub-agents for every step; delegate only when it saves context or speeds up exploration.\n");
+        prompt.push_str("- After making significant multi-file edits or complex refactors, spawn a `review` subagent to catch bugs, security issues, and regressions. Skip review for trivial single-file fixes, config changes, or documentation edits.\n\n");
     }
 
     if native_tools && tool_visibility_profile != crate::routing::ToolVisibilityProfile::AnswerOnly
@@ -478,10 +480,10 @@ mod tests {
     }
 
     #[test]
-    fn prompt_adds_delegation_guidance_when_task_tool_is_available() {
+    fn prompt_adds_delegation_guidance_when_subagent_tool_is_available() {
         let mut tools = mock_tools();
         tools.push(Tool {
-            name: "task".to_string(),
+            name: "subagent".to_string(),
             description: "Spawn a sub-agent".to_string(),
             parameters: json!({}),
         });

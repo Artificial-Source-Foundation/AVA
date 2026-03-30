@@ -459,7 +459,9 @@ impl AgentLoop {
                     first_text_ms = Some(provider_request_start.elapsed().as_millis() as u64);
                 }
                 full_text.push_str(text);
-                Self::emit(event_tx, AgentEvent::Token(text.to_string()));
+                if !self.suppress_next_tokens {
+                    Self::emit(event_tx, AgentEvent::Token(text.to_string()));
+                }
             }
             // Emit thinking
             if let Some(ref thinking) = chunk.thinking {

@@ -143,41 +143,63 @@ async fn fetch_codex_usage(credentials: &CredentialStore) -> SubscriptionUsage {
         .map(String::from);
 
     let mut windows = vec![];
+
+    // Global rate limits (5 hour + weekly)
     if let Some(rl) = data.get("rate_limit") {
         if let Some(primary) = rl.get("primary_window") {
-            if let Some(w) = parse_codex_window(primary, "Primary") {
+            let label = primary
+                .get("label")
+                .and_then(|v| v.as_str())
+                .unwrap_or("5 hour usage limit");
+            if let Some(w) = parse_codex_window(primary, label) {
                 windows.push(w);
             }
         }
         if let Some(secondary) = rl.get("secondary_window") {
-            if let Some(w) = parse_codex_window(secondary, "Secondary") {
-                windows.push(w);
-            }
-        }
-    }
-    if let Some(cr) = data.get("code_review_rate_limit") {
-        if let Some(primary) = cr.get("primary_window") {
-            if let Some(w) = parse_codex_window(primary, "Code Review") {
+            let label = secondary
+                .get("label")
+                .and_then(|v| v.as_str())
+                .unwrap_or("Weekly usage limit");
+            if let Some(w) = parse_codex_window(secondary, label) {
                 windows.push(w);
             }
         }
     }
 
-    let credits = data.get("credits").and_then(|c| {
-        Some(CreditsInfo {
-            has_credits: c.get("has_credits")?.as_bool()?,
-            unlimited: c
-                .get("unlimited")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false),
-            balance: c.get("balance").and_then(|v| v.as_str()).map(String::from),
-        })
-    });
+    // Per-model rate limits (e.g. GPT-5.3-Codex-Spark 5 hour / weekly)
+    if let Some(models) = data
+        .get("per_model_rate_limits")
+        .and_then(|v| v.as_object())
+    {
+        for (model_name, model_rl) in models {
+            if let Some(primary) = model_rl.get("primary_window") {
+                let label = primary
+                    .get("label")
+                    .and_then(|v| v.as_str())
+                    .map(String::from)
+                    .unwrap_or_else(|| format!("{model_name} 5 hour usage limit"));
+                if let Some(w) = parse_codex_window(primary, &label) {
+                    windows.push(w);
+                }
+            }
+            if let Some(secondary) = model_rl.get("secondary_window") {
+                let label = secondary
+                    .get("label")
+                    .and_then(|v| v.as_str())
+                    .map(String::from)
+                    .unwrap_or_else(|| format!("{model_name} Weekly usage limit"));
+                if let Some(w) = parse_codex_window(secondary, &label) {
+                    windows.push(w);
+                }
+            }
+        }
+    }
+
+    // Intentionally skip code_review_rate_limit and credits — not relevant for coding agents
 
     SubscriptionUsage {
         plan_type,
         usage_windows: windows,
-        credits,
         ..base
     }
 }

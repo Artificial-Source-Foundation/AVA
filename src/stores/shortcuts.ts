@@ -183,7 +183,7 @@ const INPUT_ALLOWED_IDS = new Set([
   'copy-last-response',
   'toggle-sidebar',
   'toggle-bottom-panel',
-  'new-session',
+  'new-chat',
   'session-switcher',
   'quick-model-picker',
   'model-browser',

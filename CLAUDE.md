@@ -37,6 +37,28 @@ TAURI_SIGNING_PRIVATE_KEY=$(cat ~/.tauri/ava.key) npm run tauri build
 
 AVA uses a **Rust-first architecture**. All agent, CLI, and backend code is Rust.
 
+### Two Products, One Backend
+
+AVA ships as **two products** sharing one Rust agent runtime:
+
+| | **TUI / CLI / Headless** | **Desktop / Web** |
+|---|---|---|
+| Binary | `ava` (pure Rust) | `ava` Tauri app / `ava serve` |
+| UI | Ratatui + Crossterm | SolidJS + TypeScript |
+| Config | `~/.ava/config.yaml` | localStorage + `config.yaml` via Tauri IPC |
+| Themes | `~/.ava/themes/*.toml` (29 built-in) | CSS variables, accent presets |
+| Keybindings | `~/.ava/keybindings.json` | `src/stores/shortcut-defaults.ts` |
+| Settings count | ~70 fields + 15 keybind actions | ~100+ fields across 16 tabs |
+
+**Configuration strategy (OpenCode-inspired):**
+- **Shared config** (`config.yaml`): providers, models, features, permissions, HQ, voice, MCP, instructions — applies to both products
+- **TUI-only config**: keybindings.json, themes/*.toml, TUI display prefs
+- **Desktop-only config**: appearance (fonts, accent, density, border radius, dark style), notification sounds, sidebar order
+
+Both products read `~/.ava/credentials.json` for provider API keys and `.ava/state.json` for per-project model history.
+
+### Components
+
 - **CLI/TUI**: Pure Rust binary (`crates/ava-tui/`) -- Ratatui + Crossterm + Tokio
 - **Web mode**: `ava serve` -- HTTP API + WebSocket server (axum), serves SolidJS frontend
 - **Agent runtime**: Rust (`crates/ava-agent/`, `ava-llm/`, `ava-tools/`, `ava-praxis/`)
@@ -48,7 +70,7 @@ AVA uses a **Rust-first architecture**. All agent, CLI, and backend code is Rust
 
 ### Codebase Stats
 
-- **21 Rust crates**, ~40K LOC, 1,895+ tests (0 failures)
+- **21 Rust crates**, ~40K LOC, 1,962+ tests (0 failures)
 - **21 LLM providers**: Anthropic (with prompt caching), OpenAI, ChatGPT (OAuth), Gemini, Ollama, OpenRouter, Copilot, Inception, Alibaba, Alibaba CN, ZAI, ZhipuAI, Kimi, MiniMax, MiniMax CN, Azure OpenAI, AWS Bedrock, xAI, Mistral, Groq, DeepSeek, Mock
 - **9 default tools**: `read`, `write`, `edit` (15 strategies incl. ellipsis handling, 3-way merge + diff-match-patch), `bash`, `glob`, `grep`, `web_fetch`, `web_search`, `git_read`
 - **Extended tools** (not auto-registered): `apply_patch`, `multiedit`, `ast_ops`, `lsp_ops`, `code_search`, `lint`, `test_runner` — available as plugins

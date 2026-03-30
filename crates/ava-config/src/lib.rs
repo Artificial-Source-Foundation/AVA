@@ -158,10 +158,10 @@ pub struct FeaturesConfig {
     /// Set to false to keep audit entries in memory only (lost on app close).
     #[serde(default = "default_true")]
     pub audit_logging: bool,
-    /// When true, write structured JSONL logs per session to `~/.ava/log/{session-id}.jsonl`.
+    /// When true (default), write structured JSONL logs per session to `~/.ava/log/{session-id}.jsonl`.
     /// Each line records turn number, role, tool calls, token usage, and duration.
-    /// Default: false (opt-in).
-    #[serde(default)]
+    /// Log files older than 7 days are automatically deleted on startup.
+    #[serde(default = "default_true")]
     pub session_logging: bool,
     /// When true and `--review` is passed, run a forced code review after the agent edits files.
     /// Normal review is handled by the agent itself via `subagent(agent_type: "review")`.
@@ -187,7 +187,7 @@ impl Default for FeaturesConfig {
             enable_lsp: true,
             enable_mcp: true,
             audit_logging: true,
-            session_logging: false,
+            session_logging: true,
             auto_review: false,
             enable_codebase_index: true,
         }

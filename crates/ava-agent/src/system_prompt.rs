@@ -221,6 +221,12 @@ pub fn build_system_prompt(
                 "- Read files before modifying them. Never guess at code you haven't seen.\n",
             );
             prompt.push_str(
+                "- Do not re-read files you have already read or just edited in this conversation. The edit tool returns a diff confirming the change — trust it. Only re-read a file if another tool or process may have modified it since you last saw it.\n",
+            );
+            prompt.push_str(
+                "- When editing multiple sections of the same file, batch them into as few edit calls as possible rather than making many small edits with re-reads between them.\n",
+            );
+            prompt.push_str(
                 "- Follow instruction priority: system and tool rules first, then repo guidance, then the user's request.\n",
             );
             prompt.push_str("- Prefer native tools (read, edit, glob, grep) over bash equivalents — they are faster, sandboxed, and produce structured output.\n");
@@ -424,7 +430,7 @@ mod tests {
         );
         // Should be well under 2000 tokens (~8000 chars) for 2 tools
         assert!(
-            prompt.len() < 4000,
+            prompt.len() < 4500,
             "prompt too long: {} chars",
             prompt.len()
         );

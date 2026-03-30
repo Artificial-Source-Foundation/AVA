@@ -50,8 +50,14 @@ impl UiMessage {
         }
     }
 
-    /// Width of the bar prefix (LEFT_BAR + BAR_PAD) in columns.
-    const BAR_PREFIX_WIDTH: u16 = 3; // "▎" (1) + "  " (2)
+    /// Width of the bar prefix (LEFT_BAR + BAR_PAD) in display columns.
+    ///
+    /// `safe_char_width('▎')` returns 2 (non-ASCII chars are conservatively
+    /// treated as 2 columns) plus `"  "` (2 columns) = 4 total.  This MUST
+    /// match the value returned by `display_width(LEFT_BAR) + display_width(BAR_PAD)`
+    /// so that `wrap_line_spans` reserves the correct amount of space and lines
+    /// are not truncated mid-word by the downstream `clamp_line_width` safety net.
+    const BAR_PREFIX_WIDTH: u16 = 4; // "▎" (2, conservative) + "  " (2)
 
     /// Prepend a colored left bar + padding to each line, then manually
     /// wrap so that every visual row carries its own bar prefix.

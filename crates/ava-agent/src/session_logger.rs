@@ -46,16 +46,59 @@ impl SessionLogger {
     ///
     /// Creates the `~/.ava/log/` directory if it does not exist. Returns `None`
     /// if the home directory cannot be determined.
+    ///
+    /// On creation, runs log rotation: any `.jsonl` files in the log directory
+    /// older than 7 days are deleted automatically.
     pub fn new(session_id: &str) -> Option<Self> {
         let log_dir = dirs::home_dir()?.join(".ava").join("log");
         if let Err(e) = std::fs::create_dir_all(&log_dir) {
             warn!("Failed to create session log directory: {e}");
             return None;
         }
+
+        // Log rotation: remove .jsonl files older than 7 days.
+        Self::rotate_old_logs(&log_dir);
+
         let filename = format!("{session_id}.jsonl");
         let log_path = log_dir.join(filename);
         debug!(path = %log_path.display(), "session logger initialized");
         Some(Self { log_path })
+    }
+
+    /// Delete `.jsonl` files in `log_dir` whose last modification time is more
+    /// than 7 days ago. Errors on individual files are logged but do not abort
+    /// the cleanup pass.
+    fn rotate_old_logs(log_dir: &std::path::Path) {
+        use std::time::SystemTime;
+
+        let cutoff = Duration::from_secs(7 * 24 * 60 * 60);
+        let now = SystemTime::now();
+
+        let entries = match std::fs::read_dir(log_dir) {
+            Ok(entries) => entries,
+            Err(e) => {
+                warn!("Failed to read log directory for rotation: {e}");
+                return;
+            }
+        };
+
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
+                continue;
+            }
+            let Ok(modified) = entry.metadata().and_then(|m| m.modified()) else {
+                continue;
+            };
+            if let Ok(age) = now.duration_since(modified) {
+                if age > cutoff {
+                    debug!(path = %path.display(), "rotating old session log");
+                    if let Err(e) = std::fs::remove_file(&path) {
+                        warn!("Failed to remove old session log {}: {e}", path.display());
+                    }
+                }
+            }
+        }
     }
 
     /// Append a single turn entry to the JSONL file.
@@ -196,5 +239,31 @@ mod tests {
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         let content = std::fs::read_to_string(&log_path).unwrap();
         assert_eq!(content.lines().count(), 2);
+    }
+
+    #[test]
+    fn rotate_old_logs_removes_stale_files() {
+        use filetime::FileTime;
+
+        let dir = tempfile::tempdir().unwrap();
+        let old_file = dir.path().join("old-session.jsonl");
+        let new_file = dir.path().join("new-session.jsonl");
+        let non_jsonl = dir.path().join("keep-me.txt");
+
+        std::fs::write(&old_file, "old").unwrap();
+        std::fs::write(&new_file, "new").unwrap();
+        std::fs::write(&non_jsonl, "keep").unwrap();
+
+        // Set old_file mtime to 10 days ago
+        let ten_days_ago =
+            std::time::SystemTime::now() - std::time::Duration::from_secs(10 * 24 * 60 * 60);
+        let ft = FileTime::from_system_time(ten_days_ago);
+        filetime::set_file_mtime(&old_file, ft).unwrap();
+
+        SessionLogger::rotate_old_logs(dir.path());
+
+        assert!(!old_file.exists(), "old .jsonl should be deleted");
+        assert!(new_file.exists(), "recent .jsonl should be kept");
+        assert!(non_jsonl.exists(), "non-.jsonl file should be kept");
     }
 }

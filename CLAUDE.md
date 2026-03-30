@@ -1,4 +1,4 @@
-<!-- Last verified: 2026-03-22 (v2.2.6 doc update). Run 'just check' to revalidate. -->
+<!-- Last verified: 2026-03-26 (v2.2.6 doc update). Run 'just check' to revalidate. -->
 
 # AVA Architecture & Conventions (v3)
 
@@ -61,7 +61,7 @@ Both products read `~/.ava/credentials.json` for provider API keys and `.ava/sta
 
 - **CLI/TUI**: Pure Rust binary (`crates/ava-tui/`) -- Ratatui + Crossterm + Tokio
 - **Web mode**: `ava serve` -- HTTP API + WebSocket server (axum), serves SolidJS frontend
-- **Agent runtime**: Rust (`crates/ava-agent/`, `ava-llm/`, `ava-tools/`, `ava-praxis/`)
+- **Agent runtime**: Rust (`crates/ava-agent/`, `ava-llm/`, `ava-tools/`, `ava-hq/`)
 - **Desktop frontend**: SolidJS + TypeScript (`src/`) -- calls Rust directly via Tauri IPC
   - Key components: `TitleBar`, `AppShell`, `ActivityBar`, `MainArea`, `SidebarPanel`, `RightPanel`
   - Chat components: `ApprovalDock`, `QuestionDock`, `ToolListDialog`
@@ -71,7 +71,7 @@ Both products read `~/.ava/credentials.json` for provider API keys and `.ava/sta
 ### Codebase Stats
 
 - **21 Rust crates**, ~40K LOC, 1,962+ tests (0 failures)
-- **21 LLM providers**: Anthropic (with prompt caching), OpenAI, ChatGPT (OAuth), Gemini, Ollama, OpenRouter, Copilot, Inception, Alibaba, Alibaba CN, ZAI, ZhipuAI, Kimi, MiniMax, MiniMax CN, Azure OpenAI, AWS Bedrock, xAI, Mistral, Groq, DeepSeek, Mock
+- **22 LLM providers**: Anthropic (with prompt caching), OpenAI, ChatGPT (OAuth), Gemini, Ollama, OpenRouter, Copilot, Inception, Alibaba, Alibaba CN, ZAI, ZhipuAI, Kimi, MiniMax, MiniMax CN, Azure OpenAI, AWS Bedrock, xAI, Mistral, Groq, DeepSeek, Mock
 - **9 default tools**: `read`, `write`, `edit` (15 strategies incl. ellipsis handling, 3-way merge + diff-match-patch), `bash`, `glob`, `grep`, `web_fetch`, `web_search`, `git_read`
 - **Extended tools** (not auto-registered): `apply_patch`, `multiedit`, `ast_ops`, `lsp_ops`, `code_search`, `lint`, `test_runner` — available as plugins
 - **1 agent tool**: `plan` (Plannotator-style inline plan editing via PlanBridge)
@@ -100,9 +100,9 @@ AVA/
 +-- crates/                   # 21 Rust crates (agent stack + TUI + services)
 |   +-- ava-tui/              # CLI/TUI binary (Ratatui) -- THE primary interface
 |   +-- ava-agent/            # Agent execution loop + reflection
-|   +-- ava-llm/              # LLM providers (21 built-in)
+|   +-- ava-llm/              # LLM providers (22 built-in)
 |   +-- ava-tools/            # Tool trait + registry + 9 default tools (extended available as plugins)
-|   +-- ava-praxis/           # Multi-agent orchestration (HQ)
+|   +-- ava-hq/               # Multi-agent orchestration (HQ)
 |   +-- ava-permissions/      # Permission rules + bash command classifier
 |   +-- ava-config/           # Config, credentials, model catalog
 |   +-- ava-context/          # Token tracking + context condensation
@@ -173,14 +173,14 @@ Trust a project: `ava --trust`. Global config (`~/.ava/`) always loads.
 
 - New tools: `crates/ava-tools/src/core/` (implement `Tool` trait)
 - New providers: `crates/ava-llm/src/providers/`
-- New agent features: `crates/ava-agent/` or `crates/ava-praxis/`
+- New agent features: `crates/ava-agent/` or `crates/ava-hq/`
 - TUI features: `crates/ava-tui/`
 - Desktop commands: `src-tauri/src/commands/`
 - Configuration: `crates/ava-config/`
 
 ## HQ (Multi-Agent Orchestration) — v2
 
-HQ is AVA's multi-agent system in `crates/ava-praxis/`. Uses a **Director -> Scouts -> Leads -> Workers** hierarchy with LLM-powered planning. 91 tests (74 unit + 11 integration + 6 doc-tests). 23 source files: `lib`, `director`, `lead`, `worker`, `routing`, `plan`, `prompts`, `scout`, `board`, `events`, `workflow`, `acp`, `acp_handler`, `acp_transport`, `artifact`, `artifact_store`, `conflict`, `decomposition`, `mailbox`, `review`, `spec`, `spec_workflow`, `synthesis`. See [docs/codebase/ava-praxis.md](docs/codebase/ava-praxis.md) for full details.
+HQ is AVA's multi-agent system in `crates/ava-hq/`. Uses a **Director -> Scouts -> Leads -> Workers** hierarchy with LLM-powered planning. See `docs/crate-map.md` for the current crate dependency map and HQ placement in the workspace.
 
 ### Director Intelligence Levels
 
@@ -392,7 +392,7 @@ START=$(date +%s%N) && opencode run "goal" --model openai/gpt-5.4 --format json 
 
 When you complete a significant feature, bug fix, or refactor:
 
-1. **Update `docs/CHANGELOG.md`** — add entry under current version
+1. **Update `CHANGELOG.md`** — add entry under current version
 2. **Update `docs/backlog.md`** — mark completed items, add new ones
 3. **Update this file (`CLAUDE.md`)** if architecture, crate count, tool count, or conventions changed
 4. **Update `docs/crate-map.md`** if crates were added/removed
@@ -426,7 +426,7 @@ Users get auto-update prompts via `tauri-plugin-updater` checking GitHub Release
 1. `CLAUDE.md` (this file) -- architecture, conventions, commands
 2. `AGENTS.md` -- AI agent instructions for working on AVA
 3. `docs/README.md` -- documentation entry point
-4. `docs/CHANGELOG.md` -- version history
+4. `CHANGELOG.md` -- version history
 5. `docs/backlog.md` -- open backlog items
 6. `docs/crate-map.md` -- Rust crate dependency graph
 7. `docs/plugins.md` -- TOML custom tools and MCP server guide

@@ -46,12 +46,3 @@ export {
   getSessionsWithStats,
   updateSession,
 } from './db-sessions'
-// Stats
-export {
-  type DailyUsageEntry,
-  getDailyUsage,
-  getModelBreakdown,
-  getProjectUsageStats,
-  type ModelBreakdownEntry,
-  type ProjectUsageStats,
-} from './db-stats'

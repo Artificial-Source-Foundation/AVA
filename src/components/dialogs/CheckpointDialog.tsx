@@ -95,10 +95,21 @@ export const CheckpointDialog: Component<CheckpointDialogProps> = (props) => {
 
   return (
     <Show when={props.open}>
-      <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-        <div class="bg-[var(--surface-raised)] border border-[var(--border-default)] rounded-[var(--radius-xl)] max-w-md w-full shadow-2xl overflow-hidden">
+      <div
+        class="fixed inset-0 z-50 flex items-center justify-center"
+        style={{ background: 'var(--modal-overlay)' }}
+      >
+        <div
+          class="max-w-md w-full overflow-hidden"
+          style={{
+            background: 'var(--modal-surface)',
+            border: '1px solid var(--modal-border)',
+            'border-radius': 'var(--modal-radius-lg)',
+            'box-shadow': 'var(--modal-shadow)',
+          }}
+        >
           {/* Tab bar */}
-          <div class="flex border-b border-[var(--border-subtle)]">
+          <div class="flex" style={{ 'border-bottom': '1px solid var(--modal-border)' }}>
             <button
               type="button"
               onClick={() => setTab('save')}
@@ -147,7 +158,7 @@ export const CheckpointDialog: Component<CheckpointDialogProps> = (props) => {
                 <div class="flex gap-2 justify-end">
                   <button
                     type="button"
-                    onClick={props.onClose}
+                    onClick={() => props.onClose()}
                     class="px-3 py-1.5 text-xs text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors"
                   >
                     Cancel
@@ -156,7 +167,7 @@ export const CheckpointDialog: Component<CheckpointDialogProps> = (props) => {
                     type="button"
                     onClick={handleSave}
                     disabled={!name().trim()}
-                    class="px-3 py-1.5 text-xs font-medium bg-[var(--accent)] text-white rounded-[var(--radius-md)] hover:brightness-110 transition-colors disabled:opacity-50"
+                    class="px-3 py-1.5 text-xs font-medium bg-[var(--accent)] text-white rounded-[var(--radius-md)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-50"
                   >
                     Save
                   </button>
@@ -263,7 +274,7 @@ export const CheckpointDialog: Component<CheckpointDialogProps> = (props) => {
                   <div class="flex gap-2 justify-end pt-1">
                     <button
                       type="button"
-                      onClick={props.onClose}
+                      onClick={() => props.onClose()}
                       class="px-3 py-1.5 text-xs text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors"
                     >
                       Cancel
@@ -272,7 +283,7 @@ export const CheckpointDialog: Component<CheckpointDialogProps> = (props) => {
                       type="button"
                       onClick={() => void handleRestore()}
                       disabled={!selectedId() || restoring()}
-                      class="px-3 py-1.5 text-xs font-medium bg-[var(--accent)] text-white rounded-[var(--radius-md)] hover:brightness-110 transition-colors disabled:opacity-50 flex items-center gap-1.5"
+                      class="px-3 py-1.5 text-xs font-medium bg-[var(--accent)] text-white rounded-[var(--radius-md)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-50 flex items-center gap-1.5"
                     >
                       <RotateCcw class="w-3 h-3" />
                       {restoring() ? 'Restoring...' : 'Restore'}

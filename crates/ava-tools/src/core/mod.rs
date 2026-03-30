@@ -10,6 +10,7 @@ pub mod grep;
 pub mod hashline;
 pub mod output_fallback;
 pub mod path_guard;
+pub mod path_suggest;
 pub mod plan;
 pub mod question;
 pub mod read;
@@ -38,6 +39,18 @@ pub fn shell_single_quote(value: &str) -> String {
     // Close the single-quote, emit a backslash-escaped literal quote, reopen.
     // e.g. "a'b" -> "'a'\\''b'"
     format!("'{}'", value.replace('\'', "'\\''"))
+}
+
+pub(crate) fn fnv1a_64(bytes: &[u8]) -> u64 {
+    const OFFSET_BASIS: u64 = 0xcbf29ce484222325;
+    const PRIME: u64 = 0x100000001b3;
+
+    let mut hash = OFFSET_BASIS;
+    for byte in bytes {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(PRIME);
+    }
+    hash
 }
 
 use std::sync::Arc;
@@ -150,4 +163,12 @@ pub fn register_claude_code_tool(
 
 pub fn register_custom_tools(registry: &mut ToolRegistry, dirs: &[std::path::PathBuf]) {
     custom_tool::register_custom_tools(registry, dirs);
+}
+
+pub fn register_custom_tools_with_plugins(
+    registry: &mut ToolRegistry,
+    dirs: &[std::path::PathBuf],
+    plugin_manager: Option<Arc<tokio::sync::Mutex<PluginManager>>>,
+) {
+    custom_tool::register_custom_tools_with_plugins(registry, dirs, plugin_manager);
 }

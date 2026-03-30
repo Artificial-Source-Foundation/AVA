@@ -1,18 +1,16 @@
 /**
  * SegmentedControl Component
  *
- * A segmented button group for mutually exclusive options.
- * Rounded container with accent-filled active segment.
+ * Pencil macOS-inspired segmented button group.
+ * rounded-8, fill #111114, border #ffffff0a, active segment #0A84FF.
  */
 
 import { type Component, For } from 'solid-js'
 
 /** Segmented button class builder (active/inactive states) */
 export function segmentedBtnClass(active: boolean): string {
-  return `px-4 py-2 text-[13px] rounded-[var(--radius-md)] transition-colors ${
-    active
-      ? 'bg-[var(--accent)] text-white'
-      : 'bg-[var(--surface-raised)] text-[var(--text-secondary)] hover:bg-[var(--alpha-white-8)]'
+  return `px-4 py-2 text-[13px] rounded-[6px] transition-colors ${
+    active ? 'bg-[#0A84FF] text-white font-medium' : 'text-[#48484A] hover:text-[#C8C8CC]'
   }`
 }
 
@@ -35,14 +33,14 @@ export interface SegmentedControlProps {
 export const SegmentedControl: Component<SegmentedControlProps> = (props) => {
   return (
     <div
-      class={`
-        inline-flex items-center
-        rounded-[var(--radius-lg)]
-        bg-[var(--surface-raised)]
-        p-1
-        gap-[2px]
-        ${props.class ?? ''}
-      `}
+      class={`inline-flex items-center ${props.class ?? ''}`}
+      style={{
+        'border-radius': '8px',
+        background: '#111114',
+        border: '1px solid #ffffff0a',
+        padding: '3px',
+        gap: '2px',
+      }}
     >
       <For each={props.options}>
         {(option) => {
@@ -52,18 +50,19 @@ export const SegmentedControl: Component<SegmentedControlProps> = (props) => {
               type="button"
               data-active={isActive() ? '' : undefined}
               onClick={() => props.onChange(option.id)}
-              class={`
-                px-5 py-2.5
-                text-[13px] font-medium
-                rounded-[calc(var(--radius-lg)-2px)]
-                transition-all duration-[var(--duration-fast)] ease-[var(--ease-out)]
-                select-none cursor-pointer
-                ${
-                  isActive()
-                    ? 'bg-[var(--accent)] text-white shadow-sm'
-                    : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--alpha-white-5)]'
-                }
-              `}
+              class="flex items-center justify-center select-none cursor-pointer"
+              style={{
+                'border-radius': '6px',
+                height: '28px',
+                padding: '0 20px',
+                background: isActive() ? '#0A84FF' : 'transparent',
+                color: isActive() ? '#FFFFFF' : '#48484A',
+                'font-family': 'Geist, sans-serif',
+                'font-size': '13px',
+                'font-weight': isActive() ? '500' : '400',
+                border: 'none',
+                transition: 'background 150ms, color 150ms',
+              }}
             >
               {option.label}
             </button>

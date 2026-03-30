@@ -1,0 +1,17 @@
+# Default owner for everything
+* @xndr-n
+
+# Rust crates
+/crates/ @xndr-n
+/src-tauri/ @xndr-n
+
+# Desktop frontend
+/src/ @xndr-n
+
+# CI/CD
+/.github/ @xndr-n
+
+# Docs
+/docs/ @xndr-n
+/CLAUDE.md @xndr-n
+/AGENTS.md @xndr-n

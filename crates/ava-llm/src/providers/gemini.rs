@@ -173,7 +173,8 @@ impl LLMProvider for GeminiProvider {
             .json(&self.build_request_body(messages));
 
         let response = self.send_request(request).await?;
-        let response = common::validate_status(response, "Gemini").await?;
+        let response =
+            common::validate_status_for_model(response, "Gemini", Some(&self.model)).await?;
         let payload: Value = response
             .json()
             .await
@@ -194,17 +195,17 @@ impl LLMProvider for GeminiProvider {
             .json(&self.build_request_body(messages));
 
         let response = self.send_request(request).await?;
-        let response = common::validate_status(response, "Gemini").await?;
+        let response =
+            common::validate_status_for_model(response, "Gemini", Some(&self.model)).await?;
         let mut sse_parser = common::SseParser::new();
+        let mut utf8 = common::Utf8Accumulator::new();
         let stream = response.bytes_stream().flat_map(move |chunk| {
-            let chunks = chunk
-                .ok()
-                .and_then(|bytes| String::from_utf8(bytes.to_vec()).ok())
+            let chunks = common::decode_stream_chunk(&mut utf8, chunk, "Gemini")
                 .map(|text| {
                     sse_parser
                         .feed(&text)
                         .into_iter()
-                        .filter_map(|line| serde_json::from_str::<Value>(&line).ok())
+                        .filter_map(|line| common::parse_json_stream_payload(&line, "Gemini"))
                         .filter_map(|payload| common::parse_gemini_stream_chunk(&payload))
                         .collect::<Vec<_>>()
                 })
@@ -264,14 +265,19 @@ impl LLMProvider for GeminiProvider {
             .json(&body);
 
         let response = self.send_request(request).await?;
-        let response = common::validate_status(response, "Gemini").await?;
+        let response =
+            common::validate_status_for_model(response, "Gemini", Some(&self.model)).await?;
         let payload: Value = response
             .json()
             .await
             .map_err(|error| AvaError::SerializationError(error.to_string()))?;
 
-        let content = common::parse_gemini_completion_payload(&payload).unwrap_or_default();
         let tool_calls = common::parse_gemini_tool_calls(&payload);
+        let content = common::completion_text_or_tool_calls(
+            common::parse_gemini_completion_payload(&payload),
+            "Gemini",
+            tool_calls.len(),
+        )?;
         let usage = common::parse_gemini_usage(&payload);
 
         Ok(LLMResponse {
@@ -296,17 +302,17 @@ impl LLMProvider for GeminiProvider {
             .json(&body);
 
         let response = self.send_request(request).await?;
-        let response = common::validate_status(response, "Gemini").await?;
+        let response =
+            common::validate_status_for_model(response, "Gemini", Some(&self.model)).await?;
         let mut sse_parser = common::SseParser::new();
+        let mut utf8 = common::Utf8Accumulator::new();
         let stream = response.bytes_stream().flat_map(move |chunk| {
-            let chunks = chunk
-                .ok()
-                .and_then(|bytes| String::from_utf8(bytes.to_vec()).ok())
+            let chunks = common::decode_stream_chunk(&mut utf8, chunk, "Gemini")
                 .map(|text| {
                     sse_parser
                         .feed(&text)
                         .into_iter()
-                        .filter_map(|line| serde_json::from_str::<Value>(&line).ok())
+                        .filter_map(|line| common::parse_json_stream_payload(&line, "Gemini"))
                         .filter_map(|payload| common::parse_gemini_stream_chunk(&payload))
                         .collect::<Vec<_>>()
                 })
@@ -397,14 +403,19 @@ impl LLMProvider for GeminiProvider {
             .json(&body);
 
         let response = self.send_request(request).await?;
-        let response = common::validate_status(response, "Gemini").await?;
+        let response =
+            common::validate_status_for_model(response, "Gemini", Some(&self.model)).await?;
         let payload: Value = response
             .json()
             .await
             .map_err(|error| AvaError::SerializationError(error.to_string()))?;
 
-        let content = common::parse_gemini_completion_payload(&payload).unwrap_or_default();
         let tool_calls = common::parse_gemini_tool_calls(&payload);
+        let content = common::completion_text_or_tool_calls(
+            common::parse_gemini_completion_payload(&payload),
+            "Gemini",
+            tool_calls.len(),
+        )?;
         let usage = common::parse_gemini_usage(&payload);
         let thinking_content = self.parse_thinking(&payload);
 
@@ -448,17 +459,17 @@ impl LLMProvider for GeminiProvider {
             .json(&self.build_request_body_with_thinking_config(messages, tools, thinking));
 
         let response = self.send_request(request).await?;
-        let response = common::validate_status(response, "Gemini").await?;
+        let response =
+            common::validate_status_for_model(response, "Gemini", Some(&self.model)).await?;
         let mut sse_parser = common::SseParser::new();
+        let mut utf8 = common::Utf8Accumulator::new();
         let stream = response.bytes_stream().flat_map(move |chunk| {
-            let chunks = chunk
-                .ok()
-                .and_then(|bytes| String::from_utf8(bytes.to_vec()).ok())
+            let chunks = common::decode_stream_chunk(&mut utf8, chunk, "Gemini")
                 .map(|text| {
                     sse_parser
                         .feed(&text)
                         .into_iter()
-                        .filter_map(|line| serde_json::from_str::<Value>(&line).ok())
+                        .filter_map(|line| common::parse_json_stream_payload(&line, "Gemini"))
                         .filter_map(|payload| common::parse_gemini_stream_chunk(&payload))
                         .collect::<Vec<_>>()
                 })

@@ -1,18 +1,19 @@
 /**
  * Provider Card
  *
- * Visual card showing provider icon, name, status, description, and toggle.
- * Click to expand for configuration.
+ * Pencil macOS-inspired card: rounded-12, fill #111114, border #ffffff08.
+ * Icon 28x28 rounded-7 with provider color bg, status dot + label, toggle.
  */
 
-import { ChevronRight, Puzzle } from 'lucide-solid'
+import { Puzzle } from 'lucide-solid'
 import { type Component, Show } from 'solid-js'
 import { Dynamic } from 'solid-js/web'
 import type { LLMProviderConfig } from '../../../../config/defaults/provider-defaults'
 import { defaultProviders } from '../../../../config/defaults/provider-defaults'
+import { getProviderLogo } from '../../../icons/provider-logo-map'
+import { Toggle } from '../../../ui/Toggle'
 import { checkStoredOAuth } from '../providers-tab-helpers'
 import { ProviderCardExpanded } from './provider-card-expanded'
-import { ProviderCardStatus } from './provider-card-status'
 
 interface ProviderCardProps {
   provider: LLMProviderConfig
@@ -29,6 +30,22 @@ interface ProviderCardProps {
 
 const BUILTIN_IDS = new Set(defaultProviders.map((p) => p.id))
 
+/** Provider brand colors for icon backgrounds */
+const PROVIDER_COLORS: Record<string, { bg: string; text: string }> = {
+  anthropic: { bg: '#F5762315', text: '#F57623' },
+  openai: { bg: '#74AA9C15', text: '#74AA9C' },
+  google: { bg: '#4285F415', text: '#4285F4' },
+  gemini: { bg: '#4285F415', text: '#4285F4' },
+  openrouter: { bg: '#6366F115', text: '#6366F1' },
+  ollama: { bg: '#ffffff10', text: '#C8C8CC' },
+  copilot: { bg: '#ffffff10', text: '#C8C8CC' },
+  inception: { bg: '#FF6B3515', text: '#FF6B35' },
+  xai: { bg: '#ffffff10', text: '#C8C8CC' },
+  mistral: { bg: '#FF752015', text: '#FF7520' },
+  groq: { bg: '#F5508015', text: '#F55080' },
+  deepseek: { bg: '#0A84FF15', text: '#0A84FF' },
+}
+
 export const ProviderCard: Component<ProviderCardProps> = (props) => {
   const isPlugin = () => !BUILTIN_IDS.has(props.provider.id)
   const isConnected = () =>
@@ -38,99 +55,135 @@ export const ProviderCard: Component<ProviderCardProps> = (props) => {
   const effectiveStatus = (): 'connected' | 'disconnected' | 'error' =>
     props.provider.status === 'error' ? 'error' : isConnected() ? 'connected' : 'disconnected'
 
+  const colors = () => PROVIDER_COLORS[props.provider.id] ?? { bg: '#ffffff10', text: '#C8C8CC' }
+
   return (
     <div
-      class={`
-        rounded-[var(--radius-lg)] border transition-all duration-150
-        ${
-          props.isExpanded
-            ? 'border-[var(--accent)] bg-[var(--surface-raised)]'
-            : 'border-[var(--border-subtle)] bg-[var(--surface-raised)] hover:border-[var(--border-default)]'
-        }
-      `}
+      style={{
+        'border-radius': '12px',
+        background: '#111114',
+        border: `1px solid ${props.isExpanded ? '#0A84FF40' : '#ffffff08'}`,
+        display: 'flex',
+        'flex-direction': 'column',
+        gap: '12px',
+        padding: '16px',
+        transition: 'border-color 150ms',
+        contain: 'layout style paint',
+      }}
     >
-      {/* Collapsed header */}
-      <div class="flex items-center gap-3 p-3">
+      {/* Card header */}
+      <div class="flex items-center justify-between" style={{ width: '100%' }}>
         <button
           type="button"
-          onClick={props.onExpand}
-          class="flex items-center gap-3 flex-1 min-w-0 text-left"
+          onClick={() => props.onExpand()}
+          class="flex items-center flex-1 min-w-0 text-left"
+          style={{
+            gap: '10px',
+            background: 'transparent',
+            border: 'none',
+            cursor: 'pointer',
+            padding: '0',
+          }}
         >
-          {/* Icon */}
+          {/* Provider icon */}
           <div
-            class="w-8 h-8 rounded-[var(--radius-md)] flex items-center justify-center flex-shrink-0"
-            style={{ background: 'var(--alpha-white-5)' }}
+            class="flex items-center justify-center flex-shrink-0"
+            style={{
+              width: '28px',
+              height: '28px',
+              'border-radius': '7px',
+              background: colors().bg,
+            }}
           >
-            <Show when={!isPlugin()} fallback={<Puzzle class="w-4 h-4 text-[var(--accent)]" />}>
-              <Dynamic
-                component={props.provider.icon}
-                class="w-4 h-4 text-[var(--text-secondary)]"
-              />
+            <Show
+              when={!isPlugin()}
+              fallback={<Puzzle style={{ width: '14px', height: '14px', color: '#0A84FF' }} />}
+            >
+              <Dynamic component={getProviderLogo(props.provider.id)} class="w-4 h-4" />
             </Show>
           </div>
 
-          {/* Name + description */}
+          {/* Name + model */}
           <div class="min-w-0 flex-1">
-            <div class="flex items-center gap-1.5">
-              <ProviderCardStatus status={effectiveStatus()} />
-              <span class="text-xs font-medium text-[var(--text-primary)] truncate">
-                {props.provider.name}
-              </span>
-              <Show when={isPlugin()}>
-                <span class="px-1.5 py-0.5 text-[var(--settings-text-caption)] font-semibold uppercase tracking-wider text-[var(--accent)] bg-[var(--accent)]/10 rounded-full">
-                  Plugin
-                </span>
-              </Show>
-            </div>
-            <p class="text-[var(--settings-text-badge)] text-[var(--text-muted)] mt-0.5">
-              {props.provider.description}
-            </p>
+            <span
+              style={{
+                'font-family': 'Geist, sans-serif',
+                'font-size': '13px',
+                'font-weight': '500',
+                color: '#F5F5F7',
+                display: 'block',
+              }}
+            >
+              {props.provider.name}
+            </span>
+            <span
+              style={{
+                'font-family': 'Geist Mono, monospace',
+                'font-size': '11px',
+                color: '#48484A',
+                display: 'block',
+                'margin-top': '1px',
+              }}
+            >
+              {props.provider.defaultModel || 'Not configured'}
+            </span>
           </div>
         </button>
 
-        {/* Toggle + chevron */}
-        <div class="flex items-center gap-2 flex-shrink-0">
-          <button
-            type="button"
-            onClick={() => props.onToggle?.(!props.provider.enabled)}
-            class={`w-9 h-5 rounded-full transition-colors flex items-center ${
-              props.provider.enabled ? 'bg-[var(--accent)]' : 'bg-[var(--border-default)]'
-            }`}
-            aria-label={`Toggle ${props.provider.name}`}
-          >
-            <span
-              class={`w-4 h-4 rounded-full bg-white shadow-sm transition-transform duration-150 ${
-                props.provider.enabled ? 'translate-x-[18px]' : 'translate-x-[2px]'
-              }`}
-            />
-          </button>
-          <ChevronRight
-            class={`w-3.5 h-3.5 text-[var(--text-muted)] transition-transform duration-150 ${
-              props.isExpanded ? 'rotate-90' : ''
-            }`}
+        {/* Status */}
+        <div class="flex items-center" style={{ gap: '6px' }}>
+          <div
+            style={{
+              width: '6px',
+              height: '6px',
+              'border-radius': '50%',
+              background:
+                effectiveStatus() === 'connected'
+                  ? '#34C759'
+                  : effectiveStatus() === 'error'
+                    ? '#FF453A'
+                    : '#48484A',
+            }}
           />
+          <span
+            style={{
+              'font-family': 'Geist, sans-serif',
+              'font-size': '11px',
+              color:
+                effectiveStatus() === 'connected'
+                  ? '#34C759'
+                  : effectiveStatus() === 'error'
+                    ? '#FF453A'
+                    : '#48484A',
+            }}
+          >
+            {effectiveStatus() === 'connected'
+              ? 'Connected'
+              : effectiveStatus() === 'error'
+                ? 'Error'
+                : 'Disconnected'}
+          </span>
         </div>
       </div>
 
-      {/* Expanded configuration — smooth height transition */}
-      <div
-        class="overflow-hidden transition-all duration-200 ease-out"
-        style={{
-          'max-height': props.isExpanded ? '600px' : '0px',
-          opacity: props.isExpanded ? '1' : '0',
-        }}
-      >
-        <Show when={props.isExpanded}>
-          <ProviderCardExpanded
-            provider={props.provider}
-            onSaveApiKey={props.onSaveApiKey}
-            onClearApiKey={props.onClearApiKey}
-            onSetDefaultModel={props.onSetDefaultModel}
-            onTestConnection={props.onTestConnection}
-            onUpdateModels={props.onUpdateModels}
-            onSaveBaseUrl={props.onSaveBaseUrl}
-          />
-        </Show>
+      {/* Toggle */}
+      <Toggle checked={props.provider.enabled} onChange={(v) => props.onToggle?.(v)} />
+
+      {/* Expanded configuration */}
+      <div class="tool-card-body-grid" data-expanded={props.isExpanded ? 'true' : 'false'}>
+        <div class="tool-card-body-inner">
+          <Show when={props.isExpanded}>
+            <ProviderCardExpanded
+              provider={props.provider}
+              onSaveApiKey={props.onSaveApiKey}
+              onClearApiKey={props.onClearApiKey}
+              onSetDefaultModel={props.onSetDefaultModel}
+              onTestConnection={props.onTestConnection}
+              onUpdateModels={props.onUpdateModels}
+              onSaveBaseUrl={props.onSaveBaseUrl}
+            />
+          </Show>
+        </div>
       </div>
     </div>
   )

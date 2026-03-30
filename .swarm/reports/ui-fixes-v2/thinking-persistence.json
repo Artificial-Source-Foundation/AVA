@@ -1,9 +1,0 @@
-{
-  "status": "fixed",
-  "files_modified": [
-    "src/components/chat/message-rows/ThinkingRow.tsx",
-    "src/services/db-messages.ts"
-  ],
-  "summary": "BUG 1 (ThinkingRow): Replaced the emoji-button toggle pattern with a native <details>/<summary> element matching Goose's design. Summary text is 'Thinking...' while streaming and 'Thought for Ns' after completion. The details element uses open={isOpen()} so it is expanded during streaming and collapsed by default for completed messages. Removed the '● Thought' / '💭' emoji label. Applied muted text color (--text-tertiary) and a subtle left border (--border-subtle) for secondary styling. BUG 2 (tool call persistence): In db-messages.ts both saveMessage() and insertMessages() now merge msg.toolCalls into the metadata blob before JSON serialization. The read path (mapDbMessages) already extracted toolCalls from metadata?.toolCalls — the write path was the gap. This ensures tool calls survive session restore.",
-  "tsc_pass": true
-}

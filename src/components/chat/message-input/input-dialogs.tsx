@@ -7,7 +7,7 @@
  * - SandboxReviewDialog (sandbox change review)
  */
 
-import type { Accessor, Component } from 'solid-js'
+import { type Accessor, type Component, onMount, Show, untrack } from 'solid-js'
 import type { LLMProviderConfig } from '../../../config/defaults/provider-defaults'
 import { useLayout } from '../../../stores/layout'
 import { useSandbox } from '../../../stores/sandbox'
@@ -37,6 +37,23 @@ export const InputDialogs: Component<InputDialogsProps> = (props) => {
   const { modelBrowserOpen, closeModelBrowser, expandedEditorOpen, setExpandedEditorOpen } =
     useLayout()
   const sandbox = useSandbox()
+  let focusTextarea = () => {}
+  let autoResize = () => {}
+
+  onMount(() => {
+    focusTextarea = untrack(() => props.focusTextarea)
+    autoResize = untrack(() => props.autoResize)
+  })
+
+  const handleApplySelected = (paths: string[]): Promise<void> =>
+    sandbox.applySelectedChanges(paths).then(() => {
+      if (untrack(() => sandbox.pendingCount()) === 0) sandbox.closeReview()
+    })
+
+  const handleApplyAll = (): Promise<void> =>
+    sandbox.applyAllChanges().then(() => {
+      sandbox.closeReview()
+    })
 
   return (
     <>
@@ -50,30 +67,26 @@ export const InputDialogs: Component<InputDialogsProps> = (props) => {
         onSelect={(modelId, providerId) => sessionStore.setSelectedModel(modelId, providerId)}
         enabledProviders={props.enabledProviders}
       />
-      <ExpandedEditor
-        open={expandedEditorOpen()}
-        initialText={props.input()}
-        onApply={(text) => {
-          props.setInput(text)
-          setExpandedEditorOpen(false)
-          queueMicrotask(() => {
-            props.focusTextarea()
-            props.autoResize()
-          })
-        }}
-        onClose={() => setExpandedEditorOpen(false)}
-      />
+      <Show when={expandedEditorOpen()}>
+        <ExpandedEditor
+          open={true}
+          initialText={props.input()}
+          onApply={(text) => {
+            props.setInput(text)
+            setExpandedEditorOpen(false)
+            queueMicrotask(() => {
+              focusTextarea()
+              autoResize()
+            })
+          }}
+          onClose={() => setExpandedEditorOpen(false)}
+        />
+      </Show>
       <SandboxReviewDialog
         open={sandbox.reviewDialogOpen()}
         changes={sandbox.pendingChanges()}
-        onApplySelected={async (paths) => {
-          await sandbox.applySelectedChanges(paths)
-          if (sandbox.pendingCount() === 0) sandbox.closeReview()
-        }}
-        onApplyAll={async () => {
-          await sandbox.applyAllChanges()
-          sandbox.closeReview()
-        }}
+        onApplySelected={handleApplySelected}
+        onApplyAll={handleApplyAll}
         onRejectAll={() => {
           sandbox.rejectAllChanges()
           sandbox.closeReview()

@@ -5,11 +5,14 @@
  * Shows each item with status indicators:
  *   - pending: empty circle
  *   - in_progress: yellow filled circle
- *   - completed: green check with strikethrough
+ *   - completed: green check-circle (italic + muted text)
  *   - cancelled: grey X with dimmed text
+ *
+ * Design: rounded-12 card, #111114 bg, #0F0F12 header, blue square-check icon,
+ * blue "done/total" badge, checklist rows with 32px height and 10px gap.
  */
 
-import { CheckCircle2, Circle, CircleDashed, XCircle } from 'lucide-solid'
+import { CheckCircle2, CheckSquare, Circle, Plus, XCircle } from 'lucide-solid'
 import { type Component, createMemo, For, Show } from 'solid-js'
 import { useRustAgent } from '../../hooks/use-rust-agent'
 import type { TodoItem, TodoStatus } from '../../types/rust-ipc'
@@ -24,46 +27,42 @@ const TodoRow: Component<TodoRowProps> = (props) => {
   const isCompleted = (): boolean => props.item.status === 'completed'
   const isCancelled = (): boolean => props.item.status === 'cancelled'
   const isInProgress = (): boolean => props.item.status === 'in_progress'
-  const isHigh = (): boolean => props.item.priority === 'high'
 
   const iconEl = (): TodoStatus => props.item.status
 
   return (
     <div
-      class="flex items-start gap-2.5 py-2 px-3 rounded-[var(--radius-md)] hover:bg-[var(--alpha-white-3)] transition-colors"
+      class="flex items-center gap-2.5 h-8 px-2.5 rounded-[6px] transition-colors"
       classList={{
-        'opacity-50': isCancelled(),
+        'opacity-40': isCancelled(),
       }}
     >
       {/* Status icon */}
-      <div class="mt-0.5 flex-shrink-0">
+      <div class="flex-shrink-0">
         <Show when={iconEl() === 'completed'}>
-          <CheckCircle2 class="w-4 h-4 text-[var(--success)]" />
+          <CheckCircle2 class="w-3.5 h-3.5 text-[var(--system-green)]" />
         </Show>
         <Show when={iconEl() === 'in_progress'}>
-          <Circle class="w-4 h-4 text-[var(--warning)] fill-[var(--warning)]" />
+          <Circle class="w-3.5 h-3.5 text-[var(--warning)] fill-[var(--warning)]" />
         </Show>
         <Show when={iconEl() === 'pending'}>
-          <CircleDashed class="w-4 h-4 text-[var(--text-muted)]" />
+          <Circle class="w-3.5 h-3.5 text-[var(--text-muted)]" />
         </Show>
         <Show when={iconEl() === 'cancelled'}>
-          <XCircle class="w-4 h-4 text-[var(--text-tertiary)]" />
+          <XCircle class="w-3.5 h-3.5 text-[var(--text-muted)]" />
         </Show>
       </div>
 
       {/* Content */}
       <span
-        class="text-xs leading-relaxed min-w-0 flex-1"
+        class="text-[11px] leading-none min-w-0 flex-1 truncate"
         classList={{
-          'text-[var(--text-muted)] line-through': isCompleted(),
-          'text-[var(--text-tertiary)] line-through': isCancelled(),
+          'text-[var(--text-muted)] italic': isCompleted(),
+          'text-[var(--text-muted)] italic line-through': isCancelled(),
           'text-[var(--text-primary)] font-medium': isInProgress(),
-          'text-[var(--text-secondary)]': !isCompleted() && !isCancelled() && !isInProgress(),
+          'text-[var(--text-primary)]': !isCompleted() && !isCancelled() && !isInProgress(),
         }}
       >
-        <Show when={isHigh() && !isCompleted() && !isCancelled()}>
-          <span class="text-[var(--error)] font-bold mr-1">!</span>
-        </Show>
         {props.item.content}
       </span>
     </div>
@@ -77,13 +76,8 @@ interface TodoPanelProps {
 }
 
 export const TodoPanel: Component<TodoPanelProps> = (props) => {
-  // Use passed todos if available, otherwise fall back to own useRustAgent
-  const rustAgent = props.todos ? null : useRustAgent()
-  const todos = (): TodoItem[] => props.todos ?? rustAgent?.todos() ?? []
-
-  const incompleteCount = createMemo(
-    () => todos().filter((t) => t.status === 'pending' || t.status === 'in_progress').length
-  )
+  const rustAgent = useRustAgent()
+  const todos = (): TodoItem[] => props.todos ?? rustAgent.todos() ?? []
 
   const completedCount = createMemo(() => todos().filter((t) => t.status === 'completed').length)
 
@@ -97,72 +91,47 @@ export const TodoPanel: Component<TodoPanelProps> = (props) => {
   })
 
   return (
-    <div class="flex flex-col h-full">
+    <div class="flex flex-col h-full overflow-hidden rounded-[10px] bg-[var(--surface)] border border-[var(--border-subtle)]">
       {/* Header */}
-      <div class="flex items-center justify-between density-section-px density-section-py border-b border-[var(--border-subtle)]">
+      <div class="flex items-center justify-between h-10 px-3 bg-[var(--background-subtle)] shrink-0">
         <div class="flex items-center gap-2">
-          <div class="p-2 bg-[var(--success-subtle)] rounded-[var(--radius-lg)]">
-            <CheckCircle2 class="w-4 h-4 text-[var(--success)]" />
-          </div>
-          <div>
-            <h2 class="text-sm font-semibold text-[var(--text-primary)]">Todos</h2>
-            <Show
-              when={todos().length > 0}
-              fallback={<p class="text-xs text-[var(--text-muted)]">No active tasks</p>}
-            >
-              <p class="text-xs text-[var(--text-muted)]">
-                {incompleteCount()} remaining
-                <Show when={completedCount() > 0}> &middot; {completedCount()} done</Show>
-              </p>
-            </Show>
-          </div>
+          <CheckSquare class="w-3.5 h-3.5 text-[var(--accent)]" />
+          <span class="text-xs font-medium text-[var(--text-secondary)]">Todos</span>
+          <Show when={todos().length > 0}>
+            <span class="inline-flex items-center px-1.5 py-0.5 text-[10px] font-medium rounded-md bg-[var(--accent)]/15 text-[var(--accent)]">
+              {completedCount()}/{todos().length}
+            </span>
+          </Show>
+        </div>
+        <div class="flex items-center gap-1">
+          <button
+            type="button"
+            class="p-1 rounded-[6px] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
+            title="Add todo"
+          >
+            <Plus class="w-[13px] h-[13px]" />
+          </button>
         </div>
       </div>
 
-      {/* Progress bar — only shown when there are todos */}
-      <Show when={todos().length > 0}>
-        <div class="px-3 py-2 border-b border-[var(--border-subtle)]">
-          <div class="h-1.5 bg-[var(--surface-sunken)] rounded-full overflow-hidden">
-            <div
-              class="h-full bg-[var(--success)] rounded-full transition-[width] duration-300"
-              style={{
-                width: `${todos().length > 0 ? Math.round((completedCount() / todos().length) * 100) : 0}%`,
-              }}
-            />
-          </div>
-        </div>
-      </Show>
-
       {/* Todo list */}
-      <div class="flex-1 overflow-y-auto">
+      <div class="flex-1 overflow-y-auto p-2.5">
         <Show
           when={todos().length > 0}
           fallback={
-            <div class="flex flex-col items-center justify-center h-full text-center p-6">
-              <div class="p-4 bg-[var(--surface-raised)] rounded-full mb-4">
-                <CheckCircle2 class="w-8 h-8 text-[var(--text-muted)]" />
-              </div>
-              <h3 class="text-sm font-medium text-[var(--text-secondary)] mb-1">No todos yet</h3>
-              <p class="text-xs text-[var(--text-muted)]">
-                The agent will track tasks here when it uses the todo_write tool
+            <div class="flex flex-col items-center justify-center h-full text-center">
+              <CheckSquare class="w-6 h-6 text-[var(--text-muted)] mb-2" />
+              <p class="text-[11px] text-[var(--text-muted)]">
+                Tasks will appear here when the agent uses todo_write
               </p>
             </div>
           }
         >
-          <div class="p-2 space-y-0.5">
+          <div class="space-y-1">
             <For each={orderedTodos()}>{(item) => <TodoRow item={item} />}</For>
           </div>
         </Show>
       </div>
-
-      {/* Footer — only when there are todos */}
-      <Show when={todos().length > 0}>
-        <div class="density-section-px density-section-py border-t border-[var(--border-subtle)] bg-[var(--surface-sunken)]">
-          <p class="text-xs text-[var(--text-muted)]">
-            {todos().length} task{todos().length !== 1 ? 's' : ''} total
-          </p>
-        </div>
-      </Show>
     </div>
   )
 }

@@ -1,6 +1,0 @@
-{
-  "status": "fixed",
-  "files_modified": ["src/components/chat/message-input/status-bar.tsx"],
-  "summary": "The token counter was showing ~25K on a restored session before any new messages were sent. Root cause: tokenDisplay() and percentage() both used sessionTokenStats().total (the sum of persisted msg.tokensUsed across all historical messages in the session) as the primary value, only falling back to contextUsage().used. The fix changes both functions to use only contextUsage().used — which is backed by the ContextBudget and starts at 0, only getting updated by live token_usage events (bgt.setUsed) or when the user sends a message (budget.addMessage). This means the counter shows 0 on a fresh/restored chat and updates correctly after the first API call returns real usage data. The session cost display (sessionTokenStats().totalCost) is unchanged.",
-  "tsc_pass": true
-}

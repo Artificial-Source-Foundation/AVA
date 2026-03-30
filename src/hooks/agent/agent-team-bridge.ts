@@ -17,7 +17,7 @@ const TAG = 'team-bridge'
  * Create a bridge that maps agent events into team store mutations.
  * Returns the bridgeToTeam function, stopAgent, and sendMessage helpers.
  *
- * @param isTeamMode - Reactive getter that returns true only when team/praxis mode is active.
+ * @param isTeamMode - Reactive getter that returns true only when team/hq mode is active.
  *   When false, events are silently ignored (no team members created in solo mode).
  */
 export function createTeamBridge(
@@ -38,7 +38,7 @@ export function createTeamBridge(
   const accumulatedThought: Record<string, string> = {}
 
   function bridgeToTeam(event: AgentEvent): void {
-    // Only process events when team/praxis mode is active
+    // Only process events when team/hq mode is active
     if (!isTeamMode()) return
 
     switch (event.type) {
@@ -94,7 +94,7 @@ export function createTeamBridge(
         const domain = teamStore.inferDomain(event.task)
         const workerLabel = event.workerName.charAt(0).toUpperCase() + event.workerName.slice(1)
 
-        // Map Praxis tier to team role
+        // Map HQ tier to team role
         const role =
           event.tier === 'lead'
             ? 'senior-lead'

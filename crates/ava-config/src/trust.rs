@@ -147,8 +147,9 @@ mod tests {
         let content = std::fs::read_to_string(&trust_path).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
         let arr = parsed.get("trusted").unwrap().as_array().unwrap();
+        let canonical_str = canonical.to_string_lossy();
         assert!(arr
             .iter()
-            .any(|p| p.as_str() == Some(&canonical.to_string_lossy().to_string())));
+            .any(|p| p.as_str() == Some(canonical_str.as_ref())));
     }
 }

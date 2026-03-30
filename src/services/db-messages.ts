@@ -17,7 +17,7 @@ export async function saveMessage(message: Omit<Message, 'id' | 'createdAt'>): P
 
   // Merge toolCalls into metadata so they survive session restore
   const metadataToSave = {
-    ...(message.metadata || {}),
+    ...message.metadata,
     ...(message.toolCalls && message.toolCalls.length > 0 ? { toolCalls: message.toolCalls } : {}),
   }
 
@@ -65,8 +65,8 @@ export async function duplicateSessionMessages(
 ): Promise<void> {
   const database = await initDatabase()
   await database.execute(
-    `INSERT INTO messages (id, session_id, role, content, agent_id, created_at, tokens_used, metadata)
-     SELECT hex(randomblob(16)), ?, role, content, agent_id, created_at, tokens_used, metadata
+    `INSERT INTO messages (id, session_id, role, content, agent_id, created_at, tokens_used, metadata, cost_usd, model)
+     SELECT hex(randomblob(16)), ?, role, content, agent_id, created_at, tokens_used, metadata, cost_usd, model
      FROM messages WHERE session_id = ? ORDER BY created_at ASC`,
     [targetSessionId, sourceSessionId]
   )
@@ -117,7 +117,7 @@ export async function updateMessage(
       ? (JSON.parse(rows[0].metadata) as Record<string, unknown>)
       : {}
 
-    const merged: Record<string, unknown> = { ...existing, ...(updates.metadata ?? {}) }
+    const merged: Record<string, unknown> = { ...existing, ...updates.metadata }
     if (updates.toolCalls && updates.toolCalls.length > 0) {
       merged.toolCalls = updates.toolCalls
     }
@@ -175,7 +175,7 @@ export async function insertMessages(msgs: Message[]): Promise<void> {
   for (const msg of msgs) {
     // Merge toolCalls into metadata so they survive session restore
     const metadataToSave = {
-      ...(msg.metadata || {}),
+      ...msg.metadata,
       ...(msg.toolCalls && msg.toolCalls.length > 0 ? { toolCalls: msg.toolCalls } : {}),
     }
     await database.execute(
@@ -204,9 +204,14 @@ export async function insertMessages(msgs: Message[]): Promise<void> {
 /** Map database rows to Message objects */
 function mapDbMessages(rows: Array<Record<string, unknown>>): Message[] {
   return rows.map((row) => {
-    const metadata = row.metadata
-      ? (JSON.parse(row.metadata as string) as Record<string, unknown>)
-      : undefined
+    let metadata: Record<string, unknown> | undefined
+    if (typeof row.metadata === 'string' && row.metadata.trim()) {
+      try {
+        metadata = JSON.parse(row.metadata) as Record<string, unknown>
+      } catch {
+        metadata = undefined
+      }
+    }
     return {
       id: row.id as string,
       sessionId: row.session_id as string,

@@ -10,7 +10,7 @@ use ava_llm::router::ProviderFactory;
 use ava_types::{AvaError, Result};
 
 use crate::adapters::claude_sdk::ClaudeSdkAdapter;
-use crate::adapters::config::{AgentConfig, AgentProtocol};
+use crate::adapters::config::{builtin_agent, AgentConfig, AgentProtocol};
 use crate::adapters::legacy_cli::LegacyCliAdapter;
 use crate::provider::AcpAgentProvider;
 
@@ -39,15 +39,12 @@ impl AcpProviderFactory {
     pub fn available_agents(&self) -> Vec<&str> {
         self.configs.keys().map(|s| s.as_str()).collect()
     }
-}
 
-impl ProviderFactory for AcpProviderFactory {
-    fn handles(&self, provider_name: &str) -> bool {
-        provider_name == "acp" || provider_name == "cli"
-    }
-
-    fn create(&self, _provider_name: &str, model: &str) -> Result<Box<dyn LLMProvider>> {
-        let config = self.configs.get(model).ok_or_else(|| {
+    pub fn transport_for_agent(
+        &self,
+        agent_name: &str,
+    ) -> Result<Box<dyn crate::transport::AgentTransport>> {
+        let config = self.configs.get(agent_name).ok_or_else(|| {
             let available = self
                 .configs
                 .keys()
@@ -55,21 +52,64 @@ impl ProviderFactory for AcpProviderFactory {
                 .collect::<Vec<_>>()
                 .join(", ");
             AvaError::ConfigError(format!(
-                "Unknown ACP agent '{model}'. Available: {available}"
+                "Unknown ACP agent '{agent_name}'. Available: {available}"
             ))
         })?;
 
-        let transport: Box<dyn crate::transport::AgentTransport> = match config.protocol {
-            AgentProtocol::SdkV1 => Box::new(ClaudeSdkAdapter::new(config.clone())),
-            AgentProtocol::LegacyStreamJson | AgentProtocol::PlainText => {
-                Box::new(LegacyCliAdapter::new(config.clone()))
-            }
-        };
+        Ok(build_transport(config.clone()))
+    }
+}
+
+pub fn transport_for_builtin_agent(
+    agent_name: &str,
+) -> Result<Box<dyn crate::transport::AgentTransport>> {
+    let config = builtin_agent(agent_name).ok_or_else(|| {
+        AvaError::ConfigError(format!("Unknown built-in ACP agent '{agent_name}'"))
+    })?;
+    Ok(build_transport(config))
+}
+
+fn build_transport(config: AgentConfig) -> Box<dyn crate::transport::AgentTransport> {
+    match config.protocol {
+        AgentProtocol::SdkV1 => Box::new(ClaudeSdkAdapter::new(config)),
+        AgentProtocol::CodexJsonl
+        | AgentProtocol::OpenCodeJsonl
+        | AgentProtocol::GeminiCliJsonl
+        | AgentProtocol::PlainText => Box::new(LegacyCliAdapter::new(config)),
+    }
+}
+
+impl ProviderFactory for AcpProviderFactory {
+    fn handles(&self, provider_name: &str) -> bool {
+        provider_name == "acp" || provider_name == "cli" || provider_name.starts_with("cli:")
+    }
+
+    fn create(&self, provider_name: &str, model: &str) -> Result<Box<dyn LLMProvider>> {
+        let (agent_name, upstream_model) =
+            if let Some(agent_name) = provider_name.strip_prefix("cli:") {
+                (agent_name, Some(model.to_string()))
+            } else {
+                (model, None)
+            };
+
+        let config = self.configs.get(agent_name).ok_or_else(|| {
+            let available = self
+                .configs
+                .keys()
+                .map(|s| s.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+            AvaError::ConfigError(format!(
+                "Unknown ACP agent '{agent_name}'. Available: {available}"
+            ))
+        })?;
+
+        let transport: Box<dyn crate::transport::AgentTransport> = build_transport(config.clone());
 
         Ok(Box::new(AcpAgentProvider::new(
             transport,
             config.name.clone(),
-            None,
+            upstream_model,
             self.yolo,
         )))
     }
@@ -84,6 +124,7 @@ mod tests {
         let factory = AcpProviderFactory::with_builtins(false);
         assert!(factory.handles("acp"));
         assert!(factory.handles("cli"));
+        assert!(factory.handles("cli:claude-code"));
         assert!(!factory.handles("openai"));
     }
 
@@ -108,5 +149,12 @@ mod tests {
         assert!(agents.contains(&"claude-code"));
         assert!(agents.contains(&"codex"));
         assert!(agents.contains(&"aider"));
+    }
+
+    #[test]
+    fn factory_creates_cli_prefixed_provider() {
+        let factory = AcpProviderFactory::with_builtins(false);
+        let provider = factory.create("cli:claude-code", "sonnet").unwrap();
+        assert_eq!(provider.model_name(), "sonnet");
     }
 }

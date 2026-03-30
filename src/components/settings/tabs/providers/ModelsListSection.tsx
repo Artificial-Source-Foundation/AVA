@@ -26,7 +26,7 @@ export const ModelsListSection: Component<ModelsListSectionProps> = (props) => {
         </span>
         <button
           type="button"
-          onClick={props.onRefresh}
+          onClick={() => props.onRefresh()}
           disabled={props.isLoading}
           class="flex items-center gap-1 text-[var(--settings-text-badge)] text-[var(--text-muted)] hover:text-[var(--accent)] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           title="Refresh models from API"

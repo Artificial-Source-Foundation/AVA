@@ -73,6 +73,7 @@ export const EditForm: Component<EditFormProps> = (props) => {
           autoResize(e.currentTarget)
         }}
         onKeyDown={handleKeyDown}
+        aria-label="Edit message"
         class="
           w-full p-3
           bg-[var(--input-background)]
@@ -81,7 +82,7 @@ export const EditForm: Component<EditFormProps> = (props) => {
           rounded-[var(--radius-md)]
           text-sm resize-none
           min-h-[200px] max-h-[min(60vh,600px)]
-          transition-all duration-[var(--duration-fast)]
+          transition-[border-color,box-shadow] duration-[var(--duration-fast)]
           focus:outline-none focus:border-[var(--input-border-focus)] focus:ring-2 focus:ring-[var(--accent-subtle)]
           disabled:opacity-50
           overflow-y-auto
@@ -105,6 +106,7 @@ export const EditForm: Component<EditFormProps> = (props) => {
               disabled:opacity-50
               flex items-center gap-1.5
             "
+            aria-label="Cancel message edit"
           >
             <X class="w-3.5 h-3.5" />
             Cancel
@@ -118,10 +120,11 @@ export const EditForm: Component<EditFormProps> = (props) => {
               bg-[var(--accent)] hover:bg-[var(--accent-hover)]
               text-white text-sm font-medium
               rounded-[var(--radius-md)]
-              transition-all duration-[var(--duration-fast)]
+              transition-[background-color,transform] duration-[var(--duration-fast)]
               disabled:opacity-50 disabled:cursor-not-allowed
               flex items-center gap-1.5
             "
+            aria-label="Save edited message and resend"
           >
             <Show
               when={isSaving()}

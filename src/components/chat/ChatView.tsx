@@ -4,9 +4,13 @@
  * Main chat container with session loading.
  * Premium layout with seamless message flow.
  * Includes tool approval dialog for agent mode.
+ *
+ * When a ChatModeOverrides config is provided (e.g. HQ Director mode),
+ * the same UI path renders with alternative data sources and actions.
  */
 
 import { type Component, createEffect, createMemo, on, onCleanup, Show } from 'solid-js'
+import { type ChatModeOverrides, ChatModeProvider } from '../../contexts/chat-mode'
 import { useNotification } from '../../contexts/notification'
 import { useAgent } from '../../hooks/useAgent'
 import { useChat } from '../../hooks/useChat'
@@ -22,6 +26,8 @@ import { useProject } from '../../stores/project'
 import { useSettings } from '../../stores/settings'
 import { useTeam } from '../../stores/team'
 import { ApprovalDock } from './ApprovalDock'
+import { ChatTitleBar } from './ChatTitleBar'
+import { ChatViewShell } from './ChatViewShell'
 import { MessageInput } from './MessageInput'
 import { MessageList } from './MessageList'
 import { PlanDock } from './PlanDock'
@@ -29,14 +35,17 @@ import { QuestionDock } from './QuestionDock'
 import { TeamChatView } from './TeamChatView'
 import { TeamStatusStrip } from './TeamStatusStrip'
 
-export const ChatView: Component = () => {
+export const ChatView: Component<{ config?: ChatModeOverrides }> = (props) => {
   const { settings, addAutoApprovedTool } = useSettings()
   const { currentProject } = useProject()
   const agent = useAgent()
   const chat = useChat()
   const team = useTeam()
 
+  const isOverrideMode = () => !!props.config
+
   // File watcher — start/stop based on settings + project directory
+  // Skipped in override modes (e.g. HQ Director) since they don't own a project session.
   const handleAIComment = (comment: AIComment) => {
     logInfo('chat', 'AI comment received', {
       filePath: comment.filePath,
@@ -50,12 +59,12 @@ export const ChatView: Component = () => {
 
   createEffect(
     on(
-      () => [settings().behavior.fileWatcher, currentProject()?.directory] as const,
-      ([enabled, dir]) => {
-        if (enabled && dir && dir !== '~') {
+      () =>
+        [settings().behavior.fileWatcher, currentProject()?.directory, isOverrideMode()] as const,
+      ([enabled, dir, overrideMode]) => {
+        void stopFileWatcher()
+        if (!overrideMode && enabled && dir && dir !== '~') {
           void startFileWatcher(dir, handleAIComment)
-        } else {
-          void stopFileWatcher()
         }
       }
     )
@@ -65,24 +74,23 @@ export const ChatView: Component = () => {
     void stopFileWatcher()
   })
 
-  // Clipboard watcher — notify when code is detected in clipboard
+  // Clipboard watcher — skipped in override mode
   const { info } = useNotification()
   let clipboardWatcherInstance: ClipboardWatcher | undefined
 
   createEffect(
     on(
-      () => settings().behavior.clipboardWatcher,
-      (enabled) => {
-        if (enabled) {
+      () => [settings().behavior.clipboardWatcher, isOverrideMode()] as const,
+      ([enabled, overrideMode]) => {
+        clipboardWatcherInstance?.stop()
+        clipboardWatcherInstance = undefined
+        if (!overrideMode && enabled) {
           clipboardWatcherInstance = createClipboardWatcher((text) => {
             if (looksLikeCode(text)) {
               info('Clipboard code detected', 'Add to context?')
             }
           })
           clipboardWatcherInstance.start()
-        } else {
-          clipboardWatcherInstance?.stop()
-          clipboardWatcherInstance = undefined
         }
       }
     )
@@ -120,7 +128,6 @@ export const ChatView: Component = () => {
         alwaysAllow: !!alwaysAllow,
       })
     }
-    // Resolve whichever approval is active
     if (chat.pendingApproval()) {
       chat.resolveApproval(approved)
     } else {
@@ -128,35 +135,44 @@ export const ChatView: Component = () => {
     }
   }
 
+  const cfg = () => props.config
+
+  const shell = () => (
+    <ChatViewShell
+      header={cfg()?.header ?? <ChatTitleBar />}
+      messages={<MessageList />}
+      docks={
+        cfg()?.hideDocks ? undefined : (
+          <>
+            <PlanDock />
+            <ApprovalDock request={activeApproval()} onResolve={handleApprovalResolve} />
+            <QuestionDock request={agent.pendingQuestion()} onResolve={handleQuestionResolve} />
+          </>
+        )
+      }
+      status={cfg() ? undefined : <TeamStatusStrip />}
+      input={<MessageInput />}
+    />
+  )
+
   return (
     <Show
-      when={!team.selectedMemberId()}
+      when={cfg()}
       fallback={
-        <TeamChatView
-          onStopAgent={(id) => agent.stopAgent(id)}
-          onSendMessage={(id, msg) => agent.sendTeamMessage(id, msg)}
-        />
+        <Show
+          when={!team.selectedMemberId()}
+          fallback={
+            <TeamChatView
+              onStopAgent={(id) => agent.stopAgent(id)}
+              onSendMessage={(id, msg) => agent.sendTeamMessage(id, msg)}
+            />
+          }
+        >
+          {shell()}
+        </Show>
       }
     >
-      <div class="flex flex-col h-full min-h-0 bg-[var(--background)]">
-        {/* Messages area */}
-        <MessageList />
-
-        {/* Inline plan approval dock */}
-        <PlanDock />
-
-        {/* Inline tool approval dock */}
-        <ApprovalDock request={activeApproval()} onResolve={handleApprovalResolve} />
-
-        {/* Inline agent question dock */}
-        <QuestionDock request={agent.pendingQuestion()} onResolve={handleQuestionResolve} />
-
-        {/* Team status strip (visible when team is active) */}
-        <TeamStatusStrip />
-
-        {/* Input area */}
-        <MessageInput />
-      </div>
+      {(config) => <ChatModeProvider value={config()}>{shell()}</ChatModeProvider>}
     </Show>
   )
 }

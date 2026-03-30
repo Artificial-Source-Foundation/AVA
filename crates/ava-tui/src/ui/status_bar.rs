@@ -1,5 +1,5 @@
 use crate::app::{AppState, ModalType, ViewMode};
-use crate::state::agent::{AgentActivity, AgentMode};
+use crate::state::agent::AgentActivity;
 use crate::state::messages::spinner_frame;
 use crate::state::voice::VoicePhase;
 use crate::widgets::safe_render::{clamp_line, to_static_line};
@@ -321,7 +321,7 @@ pub fn render_context_bar(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
         ));
     } else if matches!(
         state.view_mode,
-        ViewMode::SubAgent { .. } | ViewMode::BackgroundTask { .. } | ViewMode::PraxisTask { .. }
+        ViewMode::SubAgent { .. } | ViewMode::BackgroundTask { .. }
     ) {
         // Sub-agent or background task view hints
         let hints: &[(&str, &str)] = &[("Esc", "back to main"), ("PgUp/PgDn", "scroll")];
@@ -394,20 +394,6 @@ pub fn render_context_bar(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
             "thinking".to_string()
         };
         right_spans.push(Span::styled(badge, Style::default().fg(state.theme.accent)));
-    }
-
-    // Praxis worker count when in Praxis mode with active tasks
-    if state.agent_mode == AgentMode::Praxis && !state.praxis.tasks.is_empty() {
-        let worker_count: usize = state.praxis.tasks.iter().map(|t| t.workers.len()).sum();
-        if worker_count > 0 {
-            right_spans.push(Span::raw(ITEM_GAP));
-            right_spans.push(Span::styled(
-                format!("[{worker_count} workers]"),
-                Style::default()
-                    .fg(state.theme.accent)
-                    .add_modifier(Modifier::BOLD),
-            ));
-        }
     }
 
     // Fill gap between left and right

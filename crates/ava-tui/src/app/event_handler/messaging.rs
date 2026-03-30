@@ -93,7 +93,7 @@ impl App {
         }
     }
 
-    /// Cancel ALL running agents: background tasks, sub-agents, and praxis tasks (UX-34).
+    /// Cancel ALL running agents: background tasks and sub-agents (UX-34).
     pub(crate) fn cancel_all_agents(&mut self) {
         // Cancel background tasks
         let bg_cancelled = {
@@ -117,23 +117,6 @@ impl App {
                 sa.is_running = false;
                 sa.elapsed = Some(sa.started_at.elapsed());
                 sa.current_tool = None;
-            }
-        }
-
-        // Cancel running praxis tasks
-        for task in &mut self.state.praxis.tasks {
-            if task.status == crate::state::praxis::PraxisTaskStatus::Running
-                || task.status == crate::state::praxis::PraxisTaskStatus::Pending
-            {
-                if let Some(cancel) = task.cancel.take() {
-                    cancel.cancel();
-                }
-                task.status = crate::state::praxis::PraxisTaskStatus::Failed;
-                task.completed_at = Some(std::time::Instant::now());
-                task.messages.push(UiMessage::new(
-                    MessageKind::System,
-                    "Praxis task interrupted by user.",
-                ));
             }
         }
     }

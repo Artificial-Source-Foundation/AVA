@@ -3,7 +3,7 @@ use ava_types::{Message, Role, ToolResult};
 use crate::condenser::{create_condenser, Condenser, HybridCondenser};
 use crate::pruner::prune_old_tool_outputs;
 use crate::token_tracker::TokenTracker;
-use crate::types::CondenserConfig;
+use crate::types::{CompactionReport, CondenserConfig};
 use crate::Result;
 
 enum CondenserKind {
@@ -22,6 +22,8 @@ pub struct ContextManager {
     /// Messages that have been compacted (hidden from agent, visible to user).
     /// Accumulated across compaction rounds so the UI can display the full history.
     compacted_messages: Vec<Message>,
+    /// Latest compaction report for UI notifications / metrics.
+    last_compaction_report: Option<CompactionReport>,
     /// When true, conversation repair should run before the next LLM request.
     needs_repair: bool,
 }
@@ -36,6 +38,7 @@ impl ContextManager {
             condenser: CondenserKind::Sync(create_condenser(token_limit)),
             last_summary: None,
             compacted_messages: Vec::new(),
+            last_compaction_report: None,
             needs_repair: false,
         }
     }
@@ -50,6 +53,7 @@ impl ContextManager {
             condenser: CondenserKind::Hybrid(condenser),
             last_summary: None,
             compacted_messages: Vec::new(),
+            last_compaction_report: None,
             needs_repair: false,
         }
     }
@@ -137,13 +141,25 @@ impl ContextManager {
     /// Synchronous compaction — only works when using a sync Condenser.
     /// For hybrid condensers, use `compact_async()`.
     pub fn compact(&mut self) -> Result<()> {
+        let before_tokens = self.token_count();
+        let before_messages = self.messages.len();
         match &mut self.condenser {
             CondenserKind::Sync(condenser) => {
                 let condensed = condenser.condense(&self.messages)?;
+                let strategy = condensed.strategy.clone();
                 self.compacted_messages.extend(condensed.compacted_messages);
                 self.messages = condensed.messages;
                 self.tracker.reset();
                 self.tracker.add_messages(&self.messages);
+                self.last_compaction_report = Some(CompactionReport {
+                    tokens_before: before_tokens,
+                    tokens_after: self.token_count(),
+                    tokens_saved: before_tokens.saturating_sub(self.token_count()),
+                    messages_before: before_messages,
+                    messages_after: self.messages.len(),
+                    strategy,
+                    summary: self.last_summary.clone(),
+                });
                 self.needs_repair = true;
                 Ok(())
             }
@@ -161,6 +177,15 @@ impl ContextManager {
                 self.messages = condensed;
                 self.tracker.reset();
                 self.tracker.add_messages(&self.messages);
+                self.last_compaction_report = Some(CompactionReport {
+                    tokens_before: before_tokens,
+                    tokens_after: self.token_count(),
+                    tokens_saved: before_tokens.saturating_sub(self.token_count()),
+                    messages_before: before_messages,
+                    messages_after: self.messages.len(),
+                    strategy: "sliding_window".to_string(),
+                    summary: self.last_summary.clone(),
+                });
                 self.needs_repair = true;
                 Ok(())
             }
@@ -170,40 +195,68 @@ impl ContextManager {
     /// Async compaction — uses the hybrid condenser pipeline.
     /// Stores the compaction summary for iterative use in subsequent compactions.
     pub async fn compact_async(&mut self) -> Result<()> {
+        let before_tokens = self.token_count();
+        let before_messages = self.messages.len();
         // Feed previous summary into the hybrid condenser's summarization strategy
         if let CondenserKind::Hybrid(condenser) = &mut self.condenser {
             condenser.set_previous_summary(self.last_summary.clone());
         }
 
-        match &mut self.condenser {
+        let strategy = match &mut self.condenser {
             CondenserKind::Sync(condenser) => {
                 let condensed = condenser.condense(&self.messages)?;
+                let strategy = condensed.strategy.clone();
                 self.compacted_messages.extend(condensed.compacted_messages);
                 self.messages = condensed.messages;
+                strategy
             }
             CondenserKind::Hybrid(condenser) => {
                 let condensed = condenser.condense(&self.messages).await?;
+                let strategy = condensed.strategy.clone();
                 self.compacted_messages.extend(condensed.compacted_messages);
                 self.messages = condensed.messages;
+                strategy
             }
-        }
+        };
 
         // Extract the latest summary from system messages (the compaction summary
         // is inserted as a system message containing "[Summary" or "[Updated summary")
         self.last_summary = self
             .messages
             .iter()
+            .rev()
             .filter(|m| m.role == Role::System)
             .find(|m| {
                 m.content.starts_with("[Summary of")
                     || m.content.starts_with("[Updated summary")
+                    || m.content.starts_with("## Conversation Summary")
                     || m.content.contains("Files read:")
                     || m.content.contains("Files modified:")
             })
             .map(|m| m.content.clone());
 
+        tracing::debug!(
+            messages = self.messages.len(),
+            compacted = self.compacted_messages.len(),
+            has_summary = self.last_summary.is_some(),
+            summary_chars = self
+                .last_summary
+                .as_ref()
+                .map_or(0, |summary| summary.len()),
+            "context compaction state updated"
+        );
+
         self.tracker.reset();
         self.tracker.add_messages(&self.messages);
+        self.last_compaction_report = Some(CompactionReport {
+            tokens_before: before_tokens,
+            tokens_after: self.token_count(),
+            tokens_saved: before_tokens.saturating_sub(self.token_count()),
+            messages_before: before_messages,
+            messages_after: self.messages.len(),
+            strategy,
+            summary: self.last_summary.clone(),
+        });
         self.needs_repair = true;
         Ok(())
     }
@@ -211,6 +264,10 @@ impl ContextManager {
     /// Get the last compaction summary (for external inspection or persistence).
     pub fn last_summary(&self) -> Option<&str> {
         self.last_summary.as_deref()
+    }
+
+    pub fn last_compaction_report(&self) -> Option<&CompactionReport> {
+        self.last_compaction_report.as_ref()
     }
 
     pub fn get_system_message(&self) -> Option<&Message> {

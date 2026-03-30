@@ -73,30 +73,41 @@ export const WorkflowDialog: Component<WorkflowDialogProps> = (props) => {
   return (
     <Dialog open={props.open} onOpenChange={(open) => !open && props.onClose()}>
       <Dialog.Portal>
-        <Dialog.Overlay class="fixed inset-0 z-50 bg-black/60 data-[expanded]:animate-in data-[expanded]:fade-in-0 data-[closed]:animate-out data-[closed]:fade-out-0" />
+        <Dialog.Overlay
+          class="fixed inset-0 z-50 data-[expanded]:animate-in data-[expanded]:fade-in-0 data-[closed]:animate-out data-[closed]:fade-out-0"
+          style={{ background: 'var(--modal-overlay)' }}
+        />
         <Dialog.Content
           class="
             fixed left-1/2 top-1/2 z-50
             -translate-x-1/2 -translate-y-1/2
             w-full max-w-md
-            bg-[var(--surface-overlay)]
-            border border-[var(--border-default)]
-            rounded-[var(--radius-xl)]
-            shadow-2xl
             data-[expanded]:animate-in data-[expanded]:fade-in-0 data-[expanded]:zoom-in-95
             data-[closed]:animate-out data-[closed]:fade-out-0 data-[closed]:zoom-out-95
             duration-200
           "
+          style={{
+            background: 'var(--modal-surface)',
+            border: '1px solid var(--modal-border)',
+            'border-radius': 'var(--modal-radius-lg)',
+            'box-shadow': 'var(--modal-shadow)',
+          }}
         >
           {/* Header */}
-          <div class="flex items-center justify-between px-4 py-3 border-b border-[var(--border-subtle)]">
+          <div
+            class="flex items-center justify-between px-4 py-3"
+            style={{ 'border-bottom': '1px solid var(--modal-border)' }}
+          >
             <div class="flex items-center gap-2">
               <BookmarkPlus class="w-4 h-4 text-[var(--accent)]" />
               <Dialog.Title class="text-sm font-semibold text-[var(--text-primary)]">
                 Save as Workflow
               </Dialog.Title>
             </div>
-            <Dialog.CloseButton class="p-1 rounded-[var(--radius-md)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-raised)] transition-colors">
+            <Dialog.CloseButton
+              class="p-1 rounded-[var(--radius-md)] hover:bg-[var(--alpha-white-5)] transition-colors"
+              style={{ color: 'var(--close-button-color)' }}
+            >
               <X class="w-4 h-4" />
             </Dialog.CloseButton>
           </div>
@@ -165,10 +176,13 @@ export const WorkflowDialog: Component<WorkflowDialogProps> = (props) => {
           </div>
 
           {/* Footer */}
-          <div class="flex justify-end gap-2 px-4 py-3 border-t border-[var(--border-subtle)]">
+          <div
+            class="flex justify-end gap-2 px-4 py-3"
+            style={{ 'border-top': '1px solid var(--modal-border)' }}
+          >
             <button
               type="button"
-              onClick={props.onClose}
+              onClick={() => props.onClose()}
               class="px-3 py-1.5 text-xs font-medium rounded-[var(--radius-md)] text-[var(--text-secondary)] hover:bg-[var(--surface-raised)] transition-colors"
             >
               Cancel

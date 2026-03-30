@@ -31,27 +31,30 @@ export const OperationCard: Component<OperationCardProps> = (props) => {
   return (
     <button
       type="button"
-      onClick={props.onToggle}
+      onClick={() => props.onToggle()}
       class={`
         w-full text-left
         p-3
         rounded-[var(--radius-lg)]
         border
-        transition-all duration-[var(--duration-fast)]
+        transition-[background-color,border-color,color,transform] duration-[var(--duration-fast)]
         ${
           props.isSelected
             ? 'border-[var(--accent)] bg-[var(--accent-subtle)]'
             : 'border-[var(--border-subtle)] hover:border-[var(--border-default)] hover:bg-[var(--surface-raised)]'
         }
       `}
+      style={
+        {
+          '--operation-accent': config().color,
+          '--operation-accent-bg': config().bg,
+        } as { '--operation-accent': string; '--operation-accent-bg': string }
+      }
     >
       <div class="flex items-start gap-3">
         {/* Operation Icon */}
-        <div
-          class="p-2 rounded-[var(--radius-md)] flex-shrink-0"
-          style={{ background: config().bg }}
-        >
-          <Dynamic component={OperationIcon()} class="w-4 h-4" style={{ color: config().color }} />
+        <div class="p-2 rounded-[var(--radius-md)] flex-shrink-0 bg-[var(--operation-accent-bg)]">
+          <Dynamic component={OperationIcon()} class="w-4 h-4 text-[var(--operation-accent)]" />
         </div>
 
         {/* Operation Info */}
@@ -60,10 +63,7 @@ export const OperationCard: Component<OperationCardProps> = (props) => {
             <span class="text-sm font-medium text-[var(--text-primary)] truncate">
               {getFileName(props.operation.filePath)}
             </span>
-            <span
-              class="flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-medium rounded-full flex-shrink-0"
-              style={{ background: config().bg, color: config().color }}
-            >
+            <span class="flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-medium rounded-full flex-shrink-0 bg-[var(--operation-accent-bg)] text-[var(--operation-accent)]">
               {config().label}
             </span>
           </div>

@@ -1,4 +1,4 @@
-import { type Component, createSignal, Index, Match, Show, Switch } from 'solid-js'
+import { type Component, createEffect, createSignal, Index, Match, Show, Switch } from 'solid-js'
 import type { ThinkingSegment } from '../../hooks/use-rust-agent'
 import { useSettings } from '../../stores/settings'
 import type { ToolCall } from '../../types'
@@ -103,7 +103,13 @@ export const InterleavedThinkingSegments: Component<{
   const { settings } = useSettings()
   const activityMode = () => settings().appearance.activityDisplay ?? 'collapsed'
 
-  const [isOpen, setIsOpen] = createSignal(props.isStreaming ?? false)
+  const [isOpen, setIsOpen] = createSignal(false)
+
+  createEffect(() => {
+    if (props.isStreaming) {
+      setIsOpen(true)
+    }
+  })
 
   // Live counts
   const totalTools = () => props.segments.reduce((sum, seg) => sum + seg.toolCallIds.length, 0)
@@ -162,9 +168,6 @@ export const InterleavedThinkingSegments: Component<{
     return isOpen()
   }
 
-  // Hidden mode — render nothing
-  if (activityMode() === 'hidden') return null
-
   const inner = (
     <Index each={props.segments}>
       {(segment, idx) => {
@@ -193,48 +196,50 @@ export const InterleavedThinkingSegments: Component<{
   )
 
   return (
-    <details
-      class="mb-1 rounded-lg animate-fade-in"
-      open={detailsOpen()}
-      onToggle={(e) => setIsOpen((e.currentTarget as HTMLDetailsElement).open)}
-      style={{
-        border: '1px solid var(--border-default, rgba(255,255,255,0.08))',
-        background: 'var(--bg-subtle, rgba(255,255,255,0.02))',
-      }}
-    >
-      <summary
+    <Show when={activityMode() !== 'hidden'}>
+      <details
+        class="mb-1 rounded-lg animate-fade-in"
+        open={detailsOpen()}
+        onToggle={(e) => setIsOpen((e.currentTarget as HTMLDetailsElement).open)}
         style={{
-          cursor: 'pointer',
-          'font-size': '12px',
-          color: 'var(--text-secondary, var(--text-muted))',
-          'user-select': 'none',
-          'list-style': 'none',
-          padding: '8px 12px',
-          display: 'flex',
-          'align-items': 'center',
-          gap: '6px',
+          border: '1px solid var(--border-default)',
+          background: 'var(--surface-sunken)',
         }}
       >
-        <Show
-          when={props.isStreaming}
-          fallback={
-            <span
-              style={{ 'font-size': '10px', opacity: '0.5', transition: 'transform 150ms' }}
-              class={detailsOpen() ? 'rotate-90' : ''}
-            >
-              ▶
-            </span>
-          }
+        <summary
+          style={{
+            cursor: 'pointer',
+            'font-size': '12px',
+            color: 'var(--text-secondary, var(--text-muted))',
+            'user-select': 'none',
+            'list-style': 'none',
+            padding: '8px 12px',
+            display: 'flex',
+            'align-items': 'center',
+            gap: '6px',
+          }}
         >
-          <span class="w-3.5 h-3.5 border-2 border-[var(--accent)] border-t-transparent rounded-full animate-spin flex-shrink-0" />
-        </Show>
-        <span style={{ flex: '1' }}>{summaryLabel()}</span>
-        <Show when={!detailsOpen()}>
-          <span style={{ 'font-size': '11px', opacity: '0.35' }}>click to expand</span>
-        </Show>
-      </summary>
-      <div class="flex flex-col gap-1.5 px-3 pb-3">{inner}</div>
-    </details>
+          <Show
+            when={props.isStreaming}
+            fallback={
+              <span
+                style={{ 'font-size': '10px', opacity: '0.5', transition: 'transform 150ms' }}
+                class={detailsOpen() ? 'rotate-90' : ''}
+              >
+                ▶
+              </span>
+            }
+          >
+            <span class="w-3.5 h-3.5 border-2 border-[var(--accent)] border-t-transparent rounded-full animate-spin flex-shrink-0" />
+          </Show>
+          <span style={{ flex: '1' }}>{summaryLabel()}</span>
+          <Show when={!detailsOpen()}>
+            <span style={{ 'font-size': '11px', opacity: '0.35' }}>click to expand</span>
+          </Show>
+        </summary>
+        <div class="flex flex-col gap-1.5 px-3 pb-3">{inner}</div>
+      </details>
+    </Show>
   )
 }
 

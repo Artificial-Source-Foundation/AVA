@@ -163,10 +163,10 @@ pub struct FeaturesConfig {
     /// Default: false (opt-in).
     #[serde(default)]
     pub session_logging: bool,
-    /// When true, automatically run a code review after the agent edits files.
-    /// If the review finds critical/warning issues, re-run the agent to fix them.
-    /// Default: true.
-    #[serde(default = "default_true")]
+    /// When true and `--review` is passed, run a forced code review after the agent edits files.
+    /// Normal review is handled by the agent itself via `subagent(agent_type: "review")`.
+    /// Default: false (agent decides when to review).
+    #[serde(default)]
     pub auto_review: bool,
 }
 
@@ -182,7 +182,7 @@ impl Default for FeaturesConfig {
             enable_mcp: true,
             audit_logging: true,
             session_logging: false,
-            auto_review: true,
+            auto_review: false,
         }
     }
 }
@@ -288,6 +288,57 @@ pub struct PermissionsConfig {
     pub path_rules: Vec<PathRule>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HqAgentOverride {
+    pub id: String,
+    #[serde(default = "default_hq_agent_enabled")]
+    pub enabled: bool,
+    #[serde(default)]
+    pub model_spec: String,
+    #[serde(default)]
+    pub system_prompt: String,
+}
+
+const fn default_hq_agent_enabled() -> bool {
+    true
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HqConfig {
+    #[serde(default)]
+    pub director_model: String,
+    #[serde(default = "default_hq_tone_preference")]
+    pub tone_preference: String,
+    #[serde(default = "default_hq_auto_review")]
+    pub auto_review: bool,
+    #[serde(default)]
+    pub show_costs: bool,
+    #[serde(default)]
+    pub agent_overrides: Vec<HqAgentOverride>,
+}
+
+fn default_hq_tone_preference() -> String {
+    "technical".to_string()
+}
+
+const fn default_hq_auto_review() -> bool {
+    true
+}
+
+impl Default for HqConfig {
+    fn default() -> Self {
+        Self {
+            director_model: String::new(),
+            tone_preference: default_hq_tone_preference(),
+            auto_review: default_hq_auto_review(),
+            show_costs: false,
+            agent_overrides: vec![],
+        }
+    }
+}
+
 /// Main configuration struct
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Config {
@@ -331,6 +382,8 @@ pub struct Config {
     /// ```
     #[serde(default)]
     pub permissions: PermissionsConfig,
+    #[serde(default)]
+    pub hq: HqConfig,
 }
 
 /// Per-project ephemeral state (stored in `.ava/state.json` in the project root).
@@ -615,6 +668,7 @@ mod tests {
                 oauth_expires_at: None,
                 oauth_account_id: None,
                 litellm_compatible: None,
+                loop_prone: None,
             },
         );
         credentials.save(&credentials_path).await.unwrap();
@@ -656,6 +710,7 @@ mod tests {
                         oauth_expires_at: None,
                         oauth_account_id: None,
                         litellm_compatible: None,
+                        loop_prone: None,
                     },
                 );
             })

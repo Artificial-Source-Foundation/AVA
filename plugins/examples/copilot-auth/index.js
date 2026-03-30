@@ -93,7 +93,7 @@ function httpsRequest(url, options = {}) {
       headers: {
         Accept: 'application/json',
         'User-Agent': 'AVA-CopilotAuth-Plugin/0.1.0',
-        ...(options.headers || {}),
+        ...options.headers,
       },
     }
 

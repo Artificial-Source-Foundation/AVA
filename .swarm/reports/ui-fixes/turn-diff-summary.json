@@ -1,9 +1,0 @@
-{
-  "status": "fixed",
-  "files_modified": [
-    "src/components/chat/TurnDiffSummary.tsx",
-    "src/components/chat/MessageBubble.tsx"
-  ],
-  "summary": "Created TurnDiffSummary component that aggregates file modifications from tool calls within an assistant message and displays a collapsible 'Modified N files' summary with a 5-block proportional +/- bar chart and an expandable per-file list with +N/-N line counts. Integrated into MessageBubble.tsx after message content, before the timestamp line, only for completed (non-streaming) assistant messages with tool calls. The bar chart algorithm is adapted from OpenCode's diff-changes.tsx with proportional block allocation. FILE_MODIFY_TOOLS set covers write/create/edit/apply_patch/multiedit/delete variants. File deduplication keeps last modification per path.",
-  "tsc_pass": true
-}

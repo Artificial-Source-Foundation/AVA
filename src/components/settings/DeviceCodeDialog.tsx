@@ -35,30 +35,32 @@ export const DeviceCodeDialog: Component<DeviceCodeDialogProps> = (props) => {
     openUrl(props.deviceCode.verificationUri)
   }
 
+  const startPolling = async (): Promise<void> => {
+    try {
+      const tokens = await pollDeviceCodeAuth(
+        props.provider,
+        props.deviceCode.deviceCode,
+        props.deviceCode.interval,
+        abortController.signal
+      )
+      if (tokens) {
+        storeOAuthCredentials(props.provider, tokens)
+        setStatus('success')
+        setTimeout(() => props.onSuccess(tokens.accessToken), 1000)
+      } else {
+        setStatus('error')
+        setErrorMsg('Authorization expired or was denied')
+      }
+    } catch (err) {
+      if (!abortController.signal.aborted) {
+        setStatus('error')
+        setErrorMsg(err instanceof Error ? err.message : 'Authorization failed')
+      }
+    }
+  }
+
   onMount(() => {
-    // Start polling for authorization
-    pollDeviceCodeAuth(
-      props.provider,
-      props.deviceCode.deviceCode,
-      props.deviceCode.interval,
-      abortController.signal
-    )
-      .then((tokens) => {
-        if (tokens) {
-          storeOAuthCredentials(props.provider, tokens)
-          setStatus('success')
-          setTimeout(() => props.onSuccess(tokens.accessToken), 1000)
-        } else {
-          setStatus('error')
-          setErrorMsg('Authorization expired or was denied')
-        }
-      })
-      .catch((err) => {
-        if (!abortController.signal.aborted) {
-          setStatus('error')
-          setErrorMsg(err instanceof Error ? err.message : 'Authorization failed')
-        }
-      })
+    void startPolling()
   })
 
   onCleanup(() => {
@@ -66,15 +68,18 @@ export const DeviceCodeDialog: Component<DeviceCodeDialogProps> = (props) => {
   })
 
   return (
-    <div class="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center bg-black/50">
+    <div
+      class="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center"
+      style={{ background: 'var(--modal-overlay)' }}
+    >
       <div
-        class="
-          w-[380px] bg-[var(--surface-overlay)]
-          border border-[var(--border-default)]
-          rounded-[var(--radius-xl)]
-          shadow-xl p-6
-          animate-slide-up
-        "
+        class="w-[380px] p-6 animate-slide-up"
+        style={{
+          background: 'var(--modal-surface)',
+          border: '1px solid var(--modal-border)',
+          'border-radius': 'var(--modal-radius-sm)',
+          'box-shadow': 'var(--modal-shadow)',
+        }}
       >
         {/* Header */}
         <div class="flex items-center justify-between mb-4">
@@ -83,7 +88,7 @@ export const DeviceCodeDialog: Component<DeviceCodeDialogProps> = (props) => {
           </h3>
           <button
             type="button"
-            onClick={props.onClose}
+            onClick={() => props.onClose()}
             class="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)] rounded-[var(--radius-md)] transition-colors"
           >
             <X class="w-4 h-4" />

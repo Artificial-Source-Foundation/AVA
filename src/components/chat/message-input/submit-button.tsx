@@ -14,6 +14,7 @@
 
 import { ArrowUp, ChevronDown, Clock, MessageSquare, Square, Zap } from 'lucide-solid'
 import { type Accessor, type Component, createSignal, onCleanup, Show } from 'solid-js'
+import { formatSeconds } from '../../../lib/format-time'
 
 // ---------------------------------------------------------------------------
 // Props
@@ -71,15 +72,10 @@ export const SubmitButton: Component<SubmitButtonProps> = (props) => {
   }
 
   return (
-    <div class="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-2">
+    <div class="absolute right-0 top-1/2 -translate-y-1/2 flex items-center gap-2">
       {/* Double-Escape hint */}
       <Show when={props.escapeHint?.()}>
-        <span
-          class="
-            text-[var(--text-xs)] text-[var(--warning)] font-medium
-            animate-pulse whitespace-nowrap
-          "
-        >
+        <span class="text-[var(--text-xs)] text-[var(--warning)] font-medium whitespace-nowrap">
           Press Esc again to cancel
         </span>
       </Show>
@@ -91,7 +87,7 @@ export const SubmitButton: Component<SubmitButtonProps> = (props) => {
             flex items-center justify-center
             min-w-[20px] h-[20px] px-1.5
             text-[var(--text-2xs)] font-semibold tabular-nums
-            bg-[var(--accent)] text-white
+            bg-[var(--accent)] text-[var(--text-on-accent)]
             rounded-full
           "
           title={`${props.queuedCount!()} queued message(s)`}
@@ -103,8 +99,8 @@ export const SubmitButton: Component<SubmitButtonProps> = (props) => {
       {/* Streaming elapsed time */}
       <Show when={props.isStreaming()}>
         <span class="flex items-center gap-1.5 text-[var(--text-xs)] text-[var(--text-tertiary)] tabular-nums">
-          <span class="w-2 h-2 bg-[var(--accent)] rounded-full animate-pulse" />
-          {props.elapsedSeconds()}s
+          <span class="h-2 w-2 rounded-full bg-[var(--chat-streaming-indicator)] animate-pulse-subtle" />
+          {formatSeconds(props.elapsedSeconds())}
         </span>
       </Show>
 
@@ -112,15 +108,16 @@ export const SubmitButton: Component<SubmitButtonProps> = (props) => {
       <Show when={props.isProcessing()}>
         <button
           type="button"
-          onClick={props.onCancel}
+          onClick={() => props.onCancel()}
           class="
             flex items-center justify-center
             w-8 h-8
             bg-[var(--error)]/90 hover:bg-[var(--error)]
-            text-white rounded-lg
-            transition-all active:scale-95
+            text-[var(--text-on-accent)] rounded-[10px]
+            transition-[background-color,transform] active:scale-95
           "
           title="Cancel (Esc Esc)"
+          aria-label="Cancel agent run"
         >
           <Square class="w-3.5 h-3.5" />
         </button>
@@ -134,16 +131,17 @@ export const SubmitButton: Component<SubmitButtonProps> = (props) => {
             disabled={!props.inputHasText()}
             class={`
               flex items-center justify-center
-              w-8 h-8 rounded-lg
-              transition-all active:scale-95
+              w-8 h-8 rounded-[10px]
+              transition-[background-color,box-shadow,transform] active:scale-95
               ${
                 props.inputHasText()
-                  ? 'bg-[var(--accent)] hover:brightness-110 text-white shadow-sm shadow-[var(--accent)]/25'
+                  ? 'bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-[var(--text-on-accent)]'
                   : 'bg-[var(--gray-4)] text-[var(--gray-7)] cursor-not-allowed'
               }
               ${props.isProcessing() && props.inputHasText() ? 'rounded-r-none' : ''}
             `}
             title={props.isProcessing() ? 'Queue for next turn (Enter)' : 'Send message (Enter)'}
+            aria-label={props.isProcessing() ? 'Queue message for next turn' : 'Send message'}
             onContextMenu={(e) => openMenu(e)}
           >
             <ArrowUp class="w-4 h-4" stroke-width={2.5} />
@@ -156,8 +154,9 @@ export const SubmitButton: Component<SubmitButtonProps> = (props) => {
               onClick={(e) => {
                 e.preventDefault()
                 e.stopPropagation()
-                setMenuOpen(!menuOpen())
-                if (menuOpen()) {
+                const nextOpen = !menuOpen()
+                setMenuOpen(nextOpen)
+                if (nextOpen) {
                   requestAnimationFrame(() => {
                     document.addEventListener('click', handleDocClick, { once: true })
                   })
@@ -165,11 +164,12 @@ export const SubmitButton: Component<SubmitButtonProps> = (props) => {
               }}
               class="
                 flex items-center justify-center
-                w-5 h-8 rounded-r-lg border-l border-white/20
-                bg-[var(--accent)] hover:brightness-110 text-white
-                transition-all active:scale-95
+                w-5 h-8 rounded-r-[10px] border-l border-white/20
+                bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-[var(--text-on-accent)]
+                transition-[background-color,transform] active:scale-95
               "
               title="Choose message tier"
+              aria-label="Choose message tier"
             >
               <ChevronDown class="w-3 h-3" />
             </button>
@@ -182,10 +182,11 @@ export const SubmitButton: Component<SubmitButtonProps> = (props) => {
             class="
               absolute right-0 bottom-full mb-2
               w-64 py-1
-              bg-[var(--surface-raised)] border border-[var(--gray-5)]
+              bg-[var(--surface-raised)] border border-[var(--border-default)]
               rounded-lg shadow-lg shadow-black/20
               z-50
             "
+            role="menu"
           >
             <button
               type="button"
@@ -194,6 +195,7 @@ export const SubmitButton: Component<SubmitButtonProps> = (props) => {
                 w-full flex items-center gap-3 px-3 py-2
                 hover:bg-[var(--gray-3)] transition-colors text-left
               "
+              role="menuitem"
             >
               <MessageSquare class="w-4 h-4 text-[var(--accent)] shrink-0" />
               <div class="flex-1 min-w-0">
@@ -216,6 +218,7 @@ export const SubmitButton: Component<SubmitButtonProps> = (props) => {
                 w-full flex items-center gap-3 px-3 py-2
                 hover:bg-[var(--gray-3)] transition-colors text-left
               "
+              role="menuitem"
             >
               <Zap class="w-4 h-4 text-[var(--warning)] shrink-0" />
               <div class="flex-1 min-w-0">
@@ -236,6 +239,7 @@ export const SubmitButton: Component<SubmitButtonProps> = (props) => {
                 w-full flex items-center gap-3 px-3 py-2
                 hover:bg-[var(--gray-3)] transition-colors text-left
               "
+              role="menuitem"
             >
               <Clock class="w-4 h-4 text-[var(--violet-4,var(--accent))] shrink-0" />
               <div class="flex-1 min-w-0">

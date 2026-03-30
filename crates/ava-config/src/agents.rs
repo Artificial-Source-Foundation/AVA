@@ -305,7 +305,7 @@ pub fn default_agents() -> HashMap<String, AgentOverride> {
         },
     );
 
-    // Praxis multi-agent role templates.
+    // HQ multi-agent role templates.
     // No default model values — users override via agents.toml:
     //   [agents.director]
     //   model = "anthropic/claude-opus-4"
@@ -341,7 +341,7 @@ pub fn default_agents() -> HashMap<String, AgentOverride> {
         "worker".into(),
         AgentOverride {
             prompt: Some(
-                "You are a Praxis worker. Execute the assigned coding task \
+                "You are an HQ worker. Execute the assigned coding task \
                  efficiently using available tools. Focus on correctness and completeness."
                     .into(),
             ),

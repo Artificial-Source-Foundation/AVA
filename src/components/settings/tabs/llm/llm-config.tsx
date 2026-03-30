@@ -2,6 +2,7 @@
  * LLM Tab — configuration data and shared helpers
  *
  * Model pair presets, dropdown options, and reusable form components.
+ * Updated to match Pencil design tokens.
  */
 
 import type { Component } from 'solid-js'
@@ -58,11 +59,21 @@ export const EDITOR_PAIRS: Record<string, string> = {
 }
 
 // ============================================================================
-// Shared helper components
+// Shared helper components — Pencil design tokens
 // ============================================================================
 
 export const SectionHeader: Component<{ title: string }> = (props) => (
-  <h3 class="text-[var(--settings-text-badge)] font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-2">
+  <h3
+    style={{
+      'font-family': 'Geist, sans-serif',
+      'font-size': '10px',
+      'font-weight': '600',
+      color: '#48484A',
+      'text-transform': 'uppercase',
+      'letter-spacing': '0.05em',
+      'margin-bottom': '8px',
+    }}
+  >
     {props.title}
   </h3>
 )
@@ -78,11 +89,18 @@ export const SliderRow: Component<{
 }> = (props) => {
   const display = () => (props.format ? props.format(props.value) : String(props.value))
   return (
-    <div class="flex items-center justify-between py-1.5 gap-3">
-      <span class="text-[var(--settings-text-label)] text-[var(--text-secondary)] flex-shrink-0">
+    <div class="flex items-center justify-between" style={{ padding: '0', gap: '12px' }}>
+      <span
+        style={{
+          'font-family': 'Geist, sans-serif',
+          'font-size': '13px',
+          color: '#C8C8CC',
+          'flex-shrink': '0',
+        }}
+      >
         {props.label}
       </span>
-      <div class="flex items-center gap-2 flex-1 justify-end">
+      <div class="flex items-center" style={{ gap: '8px' }}>
         <input
           type="range"
           min={props.min}
@@ -90,9 +108,18 @@ export const SliderRow: Component<{
           step={props.step}
           value={props.value}
           onInput={(e) => props.onChange(Number(e.currentTarget.value))}
-          class="w-28 accent-[var(--accent)]"
+          class="settings-slider"
+          style={{ width: '140px' }}
         />
-        <span class="text-[var(--settings-text-button)] font-mono text-[var(--text-muted)] w-14 text-right">
+        <span
+          style={{
+            'font-family': 'Geist Mono, monospace',
+            'font-size': '12px',
+            color: '#48484A',
+            'min-width': '48px',
+            'text-align': 'right',
+          }}
+        >
           {display()}
         </span>
       </div>

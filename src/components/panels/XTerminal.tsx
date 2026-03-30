@@ -101,8 +101,12 @@ export const XTerminal: Component = () => {
 
     // Pass through app shortcuts
     terminal.attachCustomKeyEventHandler((event) => {
-      if ((event.ctrlKey || event.metaKey) && APP_SHORTCUT_KEYS.has(event.key.toLowerCase())) {
-        return false // Let the app handle it
+      if (event.ctrlKey || event.metaKey) {
+        let key = event.key.toLowerCase()
+        // Ctrl remaps some letters to control-char names (Ctrl+M → "Enter", etc.)
+        // Recover the real letter from event.code.
+        if (event.code?.startsWith('Key')) key = event.code.slice(3).toLowerCase()
+        if (APP_SHORTCUT_KEYS.has(key)) return false // Let the app handle it
       }
       return true // Terminal handles it
     })

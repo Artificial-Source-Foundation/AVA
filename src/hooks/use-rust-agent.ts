@@ -2,6 +2,7 @@ import { isTauri } from '@tauri-apps/api/core'
 import { batch, createSignal, onCleanup } from 'solid-js'
 import type { ToolCall } from '../types'
 import type { AgentEvent, PlanData, SubmitGoalResult, TodoItem } from '../types/rust-ipc'
+import { createBoundedEventHistory } from './event-history'
 import {
   type CompletionResolver,
   createAgentEventHandler,
@@ -24,6 +25,12 @@ export interface ThinkingSegment {
 // so TodoPanel can read todos set by the agent event handler.
 const [todos, setTodos] = createSignal<TodoItem[]>([])
 
+/** Clear todos when switching sessions so stale items don't bleed across chats. */
+export function clearTodos(): void {
+  setTodos([])
+}
+const MAX_EVENT_HISTORY = 4000
+
 export function useRustAgent() {
   const [isRunning, setIsRunning] = createSignal(false)
   const [streamingContent, setStreamingContent] = createSignal('')
@@ -32,7 +39,7 @@ export function useRustAgent() {
   const [error, setError] = createSignal<string | null>(null)
   const [lastResult, setLastResult] = createSignal<SubmitGoalResult | null>(null)
   const [tokenUsage, setTokenUsage] = createSignal({ input: 0, output: 0, cost: 0 })
-  const [events, setEvents] = createSignal<AgentEvent[]>([])
+  const eventHistory = createBoundedEventHistory<AgentEvent>(MAX_EVENT_HISTORY)
   const [progressMessage, setProgressMessage] = createSignal<string | null>(null)
   const [budgetWarning, setBudgetWarning] = createSignal<{
     thresholdPercent: number
@@ -57,7 +64,7 @@ export function useRustAgent() {
   const handleAgentEvent = createAgentEventHandler({
     metrics,
     completion,
-    setEvents,
+    appendEvent: eventHistory.append,
     setStreamingContent,
     setThinkingContent,
     setActiveToolCalls,
@@ -74,7 +81,7 @@ export function useRustAgent() {
 
   const resetState = (): void => {
     batch(() => {
-      setEvents([])
+      eventHistory.clear()
       setStreamingContent('')
       setThinkingContent('')
       setActiveToolCalls([])
@@ -110,12 +117,24 @@ export function useRustAgent() {
    * Tag the most-recently-started tool call for `toolName` with an approval decision.
    * Called by `useAgent.resolveApproval` right after the user acts on the ApprovalDock.
    */
-  const markToolApproval = (toolName: string, decision: 'once' | 'always' | 'denied'): void => {
+  const markToolApproval = (
+    toolName: string,
+    decision: 'once' | 'always' | 'denied',
+    toolCallId?: string
+  ): void => {
     setActiveToolCalls((prev) => {
-      // Find the last tool call with this name (most recent pending/running/completed)
-      const idx = [...prev].reverse().findIndex((tc) => tc.name === toolName)
-      if (idx === -1) return prev
-      const realIdx = prev.length - 1 - idx
+      let realIdx = -1
+      if (toolCallId) {
+        realIdx = prev.findIndex((tc) => tc.id === toolCallId)
+      } else {
+        for (let i = prev.length - 1; i >= 0; i -= 1) {
+          if (prev[i]?.name === toolName) {
+            realIdx = i
+            break
+          }
+        }
+      }
+      if (realIdx === -1) return prev
       const updated = [...prev]
       updated[realIdx] = { ...prev[realIdx]!, approvalDecision: decision }
       return updated
@@ -135,13 +154,15 @@ export function useRustAgent() {
     error,
     lastResult,
     tokenUsage,
-    events,
+    events: eventHistory.events,
     progressMessage,
     budgetWarning,
     pendingPlan,
     todos,
     run: ipc.run,
     editAndResendRun: ipc.editAndResendRun,
+    retryRun: ipc.retryRun,
+    regenerateRun: ipc.regenerateRun,
     cancel: ipc.cancel,
     clearError,
     endRun: ipc.endRun,

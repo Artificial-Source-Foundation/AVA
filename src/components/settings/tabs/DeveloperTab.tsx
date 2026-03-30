@@ -1,12 +1,12 @@
 /**
- * Developer Settings Tab
+ * Developer Settings Tab — Pencil design revamp
  *
- * Toggle dev mode to capture and display console output inline.
- * Useful for debugging OAuth, provider connections, and agent issues
- * without needing browser devtools (which aren't available in Tauri).
+ * Two cards:
+ * 1. Developer Mode — toggle + log level dropdown
+ * 2. Console Output — colored log lines with Copy All / Clear buttons
  */
 
-import { Code2, Copy, FileText, Terminal, Trash2 } from 'lucide-solid'
+import { ChevronDown, Code, Terminal } from 'lucide-solid'
 import {
   type Component,
   createEffect,
@@ -18,52 +18,30 @@ import {
   Show,
 } from 'solid-js'
 import { setDebugDevMode } from '../../../lib/debug-log'
-import { getFrontendLogFilePath, readFrontendLogFile } from '../../../lib/logger'
 import { clearDevLogs, getDevLogs } from '../../../services/dev-console'
 import { useSettings } from '../../../stores/settings'
-import { SettingsCard } from '../SettingsCard'
 import { SETTINGS_CARD_GAP } from '../settings-constants'
-import { extractSource, formatTime, levelColor, levelLabel, Toggle } from './developer/dev-helpers'
+import { formatTime, levelLabel } from './developer/dev-helpers'
+
+/** Log level colors matching the Pencil design */
+const PENCIL_LEVEL_COLORS: Record<string, string> = {
+  log: '#C8C8CC',
+  info: '#0A84FF',
+  warn: '#F5A623',
+  error: '#FF453A',
+}
 
 export const DeveloperTab: Component = () => {
   const { settings, updateSettings } = useSettings()
   const logs = getDevLogs()
   const [copied, setCopied] = createSignal(false)
-  const [levelFilter, setLevelFilter] = createSignal<'all' | 'log' | 'info' | 'warn' | 'error'>(
-    'all'
-  )
-  const [sourceFilter, setSourceFilter] = createSignal('all')
-  const [textFilter, setTextFilter] = createSignal('')
   const [stickToBottom, setStickToBottom] = createSignal(true)
-  const [fileLogContent, setFileLogContent] = createSignal('')
-  const [fileLogLoading, setFileLogLoading] = createSignal(false)
-  const [fileLogCopied, setFileLogCopied] = createSignal(false)
+  const [showLevelDropdown, setShowLevelDropdown] = createSignal(false)
   let scrollRef: HTMLDivElement | undefined
 
-  const availableSources = createMemo(() => {
-    const unique = new Set<string>()
-    for (const entry of logs()) {
-      unique.add(extractSource(entry.message))
-    }
-    return ['all', ...Array.from(unique).sort()]
-  })
+  const filteredLogs = createMemo(() => logs())
 
-  const filteredLogs = createMemo(() => {
-    const query = textFilter().trim().toLowerCase()
-    const level = levelFilter()
-    const source = sourceFilter()
-    return logs().filter((entry) => {
-      if (level !== 'all' && entry.level !== level) return false
-      if (source !== 'all' && extractSource(entry.message) !== source) return false
-      if (!query) return true
-      return entry.message.toLowerCase().includes(query)
-    })
-  })
-
-  // Console capture is always active (installed in App.tsx).
-  // devMode toggle only controls visibility of this tab.
-
-  // Auto-scroll to bottom when new entries arrive
+  // Auto-scroll
   createEffect(
     on(
       () => filteredLogs().length,
@@ -81,9 +59,8 @@ export const DeveloperTab: Component = () => {
     scrollRaf = requestAnimationFrame(() => {
       scrollRaf = undefined
       if (!scrollRef) return
-      const distanceFromBottom =
-        scrollRef.scrollHeight - scrollRef.scrollTop - scrollRef.clientHeight
-      setStickToBottom(distanceFromBottom < 16)
+      const dist = scrollRef.scrollHeight - scrollRef.scrollTop - scrollRef.clientHeight
+      setStickToBottom(dist < 16)
     })
   }
   onCleanup(() => {
@@ -99,7 +76,6 @@ export const DeveloperTab: Component = () => {
       setCopied(true)
       setTimeout(() => setCopied(false), 1500)
     } catch {
-      // Fallback: select-all in a textarea
       const ta = document.createElement('textarea')
       ta.value = text
       document.body.appendChild(ta)
@@ -111,252 +87,417 @@ export const DeveloperTab: Component = () => {
     }
   }
 
+  const logLevelOptions = ['debug', 'info', 'warn', 'error'] as const
+  const logLevelDisplayMap: Record<string, string> = {
+    debug: 'DEBUG',
+    info: 'INFO',
+    warn: 'WARN',
+    error: 'ERROR',
+  }
+
+  // Close dropdown on outside click
+  const handleOutsideClick = (_e: MouseEvent) => {
+    if (showLevelDropdown()) setShowLevelDropdown(false)
+  }
+
   return (
-    <div class="grid grid-cols-1" style={{ gap: SETTINGS_CARD_GAP }}>
-      {/* Developer Mode */}
-      <SettingsCard
-        icon={Code2}
-        title="Developer Mode"
-        description="Toggle developer console and configure log verbosity."
+    // biome-ignore lint/a11y/useKeyWithClickEvents: dismiss dropdown on outside click
+    // biome-ignore lint/a11y/noStaticElementInteractions: container dismisses dropdown
+    <div
+      style={{ display: 'flex', 'flex-direction': 'column', gap: SETTINGS_CARD_GAP }}
+      onClick={handleOutsideClick}
+    >
+      {/* Page title */}
+      <h1
+        style={{
+          'font-family': 'Geist, sans-serif',
+          'font-size': '22px',
+          'font-weight': '600',
+          color: '#F5F5F7',
+        }}
       >
-        <div class="flex items-center justify-between py-1.5">
-          <div>
-            <span class="text-xs text-[var(--text-secondary)]">Enable developer console</span>
-            <p class="text-[var(--settings-text-badge)] text-[var(--text-muted)]">
-              Console capture is always active. This toggle controls Developer tab visibility.
-            </p>
-          </div>
-          <Toggle
-            checked={settings().devMode ?? false}
-            onChange={(v) => {
-              updateSettings({ devMode: v })
-              setDebugDevMode(v)
-            }}
-          />
-        </div>
-        <div class="flex items-center justify-between py-1.5">
-          <div>
-            <span class="text-xs text-[var(--text-secondary)]">Log level</span>
-            <p class="text-[var(--settings-text-badge)] text-[var(--text-muted)]">
-              DEBUG shows middleware + verbose internals. INFO is the default.
-            </p>
-          </div>
-          <select
-            value={settings().logLevel}
-            onChange={(e) =>
-              updateSettings({
-                logLevel: e.currentTarget.value as 'debug' | 'info' | 'warn' | 'error',
-              })
-            }
-            class="px-2 py-1 text-[var(--settings-text-badge)] bg-[var(--surface-raised)] border border-[var(--border-subtle)] rounded-[var(--radius-md)] text-[var(--text-secondary)]"
-          >
-            <option value="debug">DEBUG</option>
-            <option value="info">INFO</option>
-            <option value="warn">WARN</option>
-            <option value="error">ERROR</option>
-          </select>
-        </div>
-      </SettingsCard>
+        Developer
+      </h1>
 
-      {/* Console viewer */}
-      <Show when={settings().devMode}>
-        <SettingsCard
-          icon={Terminal}
-          title="Console Output"
-          description="Live console log viewer with filtering."
+      {/* ===== Dev Mode Card ===== */}
+      <div
+        style={{
+          background: '#111114',
+          border: '1px solid #ffffff08',
+          'border-radius': '12px',
+          padding: '20px',
+          display: 'flex',
+          'flex-direction': 'column',
+          gap: '16px',
+        }}
+      >
+        {/* Card header */}
+        <div style={{ display: 'flex', 'align-items': 'center', gap: '10px' }}>
+          <Code size={16} style={{ color: '#C8C8CC' }} />
+          <div style={{ display: 'flex', 'flex-direction': 'column', gap: '2px' }}>
+            <span
+              style={{
+                'font-family': 'Geist, sans-serif',
+                'font-size': '14px',
+                'font-weight': '500',
+                color: '#F5F5F7',
+              }}
+            >
+              Developer Mode
+            </span>
+            <span
+              style={{
+                'font-family': 'Geist, sans-serif',
+                'font-size': '12px',
+                color: '#48484A',
+              }}
+            >
+              Toggle developer console and configure log verbosity
+            </span>
+          </div>
+        </div>
+
+        {/* Enable developer console row */}
+        <div
+          style={{
+            display: 'flex',
+            'align-items': 'center',
+            'justify-content': 'space-between',
+          }}
         >
-          <div class="flex items-center justify-between mb-2">
-            <div class="flex items-center gap-2">
-              <span class="text-[var(--settings-text-badge)] text-[var(--text-muted)]">
-                {filteredLogs().length}
-                <Show when={filteredLogs().length !== logs().length}> / {logs().length}</Show>{' '}
-                entries
-              </span>
-            </div>
-            <div class="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={handleCopy}
-                class="flex items-center gap-1 px-2 py-1 text-[var(--settings-text-badge)] text-[var(--text-muted)] hover:text-[var(--accent)] bg-[var(--surface-raised)] border border-[var(--border-subtle)] rounded-[var(--radius-md)] transition-colors"
-              >
-                <Copy class="w-3 h-3" />
-                {copied() ? 'Copied!' : 'Copy All'}
-              </button>
-              <button
-                type="button"
-                onClick={() => clearDevLogs()}
-                class="flex items-center gap-1 px-2 py-1 text-[var(--settings-text-badge)] text-[var(--text-muted)] hover:text-[var(--error)] bg-[var(--surface-raised)] border border-[var(--border-subtle)] rounded-[var(--radius-md)] transition-colors"
-              >
-                <Trash2 class="w-3 h-3" />
-                Clear
-              </button>
-            </div>
-          </div>
-
-          <div class="flex items-center gap-2 mb-2">
-            <select
-              value={levelFilter()}
-              onChange={(e) =>
-                setLevelFilter(e.currentTarget.value as 'all' | 'log' | 'info' | 'warn' | 'error')
-              }
-              class="px-2 py-1 text-[var(--settings-text-badge)] bg-[var(--surface-raised)] border border-[var(--border-subtle)] rounded-[var(--radius-md)] text-[var(--text-secondary)]"
+          <div style={{ display: 'flex', 'flex-direction': 'column', gap: '2px' }}>
+            <span
+              style={{
+                'font-family': 'Geist, sans-serif',
+                'font-size': '13px',
+                color: '#C8C8CC',
+              }}
             >
-              <option value="all">All levels</option>
-              <option value="log">LOG</option>
-              <option value="info">INF</option>
-              <option value="warn">WRN</option>
-              <option value="error">ERR</option>
-            </select>
-            <select
-              value={sourceFilter()}
-              onChange={(e) => setSourceFilter(e.currentTarget.value)}
-              class="px-2 py-1 text-[var(--settings-text-badge)] bg-[var(--surface-raised)] border border-[var(--border-subtle)] rounded-[var(--radius-md)] text-[var(--text-secondary)]"
+              Enable developer console
+            </span>
+            <span
+              style={{
+                'font-family': 'Geist, sans-serif',
+                'font-size': '12px',
+                color: '#48484A',
+              }}
             >
-              <For each={availableSources()}>
-                {(source) => <option value={source}>{source}</option>}
-              </For>
-            </select>
-            <input
-              type="text"
-              value={textFilter()}
-              onInput={(e) => setTextFilter(e.currentTarget.value)}
-              placeholder="Filter text..."
-              class="flex-1 px-2 py-1 text-[var(--settings-text-badge)] bg-[var(--surface-raised)] border border-[var(--border-subtle)] rounded-[var(--radius-md)] text-[var(--text-secondary)] placeholder:text-[var(--text-muted)] outline-none"
-            />
-            <Show when={!stickToBottom()}>
-              <button
-                type="button"
-                onClick={() => {
-                  if (!scrollRef) return
-                  scrollRef.scrollTop = scrollRef.scrollHeight
-                  setStickToBottom(true)
-                }}
-                class="px-2 py-1 text-[var(--settings-text-badge)] text-[var(--accent)] bg-[var(--surface-raised)] border border-[var(--border-subtle)] rounded-[var(--radius-md)]"
-              >
-                Jump to latest
-              </button>
-            </Show>
+              Controls Developer tab visibility in settings
+            </span>
           </div>
-
-          <div
-            ref={scrollRef}
-            onScroll={handleLogScroll}
-            class="bg-[var(--gray-1)] border border-[var(--border-subtle)] rounded-[var(--radius-md)] overflow-auto font-mono text-[var(--settings-text-button)] leading-[1.6]"
-            style={{ height: '320px' }}
+          <button
+            type="button"
+            onClick={() => {
+              const next = !(settings().devMode ?? false)
+              updateSettings({ devMode: next })
+              setDebugDevMode(next)
+            }}
+            style={{
+              width: '44px',
+              height: '24px',
+              'border-radius': '12px',
+              background: settings().devMode ? '#0A84FF' : '#2C2C2E',
+              border: 'none',
+              cursor: 'pointer',
+              position: 'relative',
+              'flex-shrink': '0',
+              transition: 'background 0.15s',
+            }}
+            aria-label="Toggle developer console"
           >
-            <Show
-              when={filteredLogs().length > 0}
-              fallback={
-                <p class="text-[var(--text-muted)] text-center py-8 text-[var(--settings-text-button)]">
-                  No logs match current filters.
-                </p>
-              }
+            <span
+              style={{
+                position: 'absolute',
+                width: '20px',
+                height: '20px',
+                'border-radius': '50%',
+                background: '#FFFFFF',
+                top: '2px',
+                left: settings().devMode ? '22px' : '2px',
+                transition: 'left 0.15s',
+              }}
+            />
+          </button>
+        </div>
+
+        {/* Log level row */}
+        <div
+          style={{
+            display: 'flex',
+            'align-items': 'center',
+            'justify-content': 'space-between',
+          }}
+        >
+          <div style={{ display: 'flex', 'flex-direction': 'column', gap: '2px' }}>
+            <span
+              style={{
+                'font-family': 'Geist, sans-serif',
+                'font-size': '13px',
+                color: '#C8C8CC',
+              }}
             >
-              <div class="p-2">
-                <For each={filteredLogs()}>
-                  {(entry) => (
-                    <div class="flex gap-2 py-0.5 hover:bg-[var(--alpha-white-3)]">
-                      <span class="text-[var(--text-muted)] flex-shrink-0 select-none">
-                        {formatTime(entry.timestamp)}
-                      </span>
-                      <span
-                        class="flex-shrink-0 font-semibold select-none"
-                        style={{ color: levelColor[entry.level], width: '28px' }}
-                      >
-                        {levelLabel[entry.level]}
-                      </span>
-                      <span
-                        class="flex-1 break-all whitespace-pre-wrap"
-                        style={{
-                          color:
-                            entry.level === 'error'
-                              ? 'var(--error)'
-                              : entry.level === 'warn'
-                                ? '#e5a00d'
-                                : 'var(--text-secondary)',
-                        }}
-                      >
-                        {entry.message}
-                      </span>
-                    </div>
+              Log level
+            </span>
+            <span
+              style={{
+                'font-family': 'Geist, sans-serif',
+                'font-size': '12px',
+                color: '#48484A',
+              }}
+            >
+              DEBUG shows middleware + verbose internals
+            </span>
+          </div>
+          {/* Dropdown styled per Pencil design */}
+          <div style={{ position: 'relative' }}>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation()
+                setShowLevelDropdown(!showLevelDropdown())
+              }}
+              style={{
+                display: 'flex',
+                'align-items': 'center',
+                gap: '6px',
+                padding: '6px 12px',
+                background: '#ffffff08',
+                border: '1px solid #ffffff0a',
+                'border-radius': '8px',
+                cursor: 'pointer',
+              }}
+            >
+              <span
+                style={{
+                  'font-family': 'Geist Mono, monospace',
+                  'font-size': '11px',
+                  color: '#F5F5F7',
+                }}
+              >
+                {logLevelDisplayMap[settings().logLevel] ?? 'INFO'}
+              </span>
+              <ChevronDown size={12} style={{ color: '#48484A' }} />
+            </button>
+            <Show when={showLevelDropdown()}>
+              <div
+                style={{
+                  position: 'absolute',
+                  top: '100%',
+                  right: '0',
+                  'margin-top': '4px',
+                  background: '#1C1C1E',
+                  border: '1px solid #ffffff0a',
+                  'border-radius': '8px',
+                  overflow: 'hidden',
+                  'z-index': '10',
+                  'min-width': '100px',
+                }}
+              >
+                <For each={logLevelOptions}>
+                  {(level) => (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        updateSettings({ logLevel: level })
+                        setShowLevelDropdown(false)
+                      }}
+                      style={{
+                        display: 'block',
+                        width: '100%',
+                        padding: '6px 12px',
+                        background: settings().logLevel === level ? '#ffffff08' : 'transparent',
+                        border: 'none',
+                        cursor: 'pointer',
+                        'text-align': 'left',
+                        'font-family': 'Geist Mono, monospace',
+                        'font-size': '11px',
+                        color: settings().logLevel === level ? '#0A84FF' : '#C8C8CC',
+                      }}
+                    >
+                      {logLevelDisplayMap[level]}
+                    </button>
                   )}
                 </For>
               </div>
             </Show>
           </div>
+        </div>
+      </div>
 
-          <p class="text-[var(--settings-text-badge)] text-[var(--text-muted)] mt-2">
-            Tip: Copy all logs and paste them when reporting issues.
-          </p>
-        </SettingsCard>
-      </Show>
-
-      {/* File Log Viewer */}
+      {/* ===== Console Output Card ===== */}
       <Show when={settings().devMode}>
-        <SettingsCard
-          icon={FileText}
-          title="File Logs"
-          description="Persistent file-based logs that survive across sessions."
+        <div
+          style={{
+            background: '#111114',
+            border: '1px solid #ffffff08',
+            'border-radius': '12px',
+            padding: '20px',
+            display: 'flex',
+            'flex-direction': 'column',
+            gap: '12px',
+          }}
         >
-          <div class="flex items-center justify-between mb-2">
-            <div class="flex items-center gap-2">
-              <Show when={getFrontendLogFilePath()}>
-                <span class="text-[var(--settings-text-badge)] text-[var(--text-muted)] font-mono truncate max-w-[200px]">
-                  {getFrontendLogFilePath()}
-                </span>
-              </Show>
+          {/* Card header with buttons */}
+          <div
+            style={{
+              display: 'flex',
+              'align-items': 'center',
+              'justify-content': 'space-between',
+            }}
+          >
+            <div style={{ display: 'flex', 'align-items': 'center', gap: '10px' }}>
+              <Terminal size={16} style={{ color: '#C8C8CC' }} />
+              <span
+                style={{
+                  'font-family': 'Geist, sans-serif',
+                  'font-size': '14px',
+                  'font-weight': '500',
+                  color: '#F5F5F7',
+                }}
+              >
+                Console Output
+              </span>
             </div>
-            <div class="flex items-center gap-2">
+            <div style={{ display: 'flex', 'align-items': 'center', gap: '8px' }}>
               <button
                 type="button"
-                onClick={async () => {
-                  setFileLogLoading(true)
-                  try {
-                    const content = await readFrontendLogFile(200)
-                    setFileLogContent(content)
-                  } finally {
-                    setFileLogLoading(false)
-                  }
+                onClick={(e) => {
+                  e.stopPropagation()
+                  void handleCopy()
                 }}
-                class="flex items-center gap-1 px-2 py-1 text-[var(--settings-text-badge)] text-[var(--text-muted)] hover:text-[var(--accent)] bg-[var(--surface-raised)] border border-[var(--border-subtle)] rounded-[var(--radius-md)] transition-colors"
+                style={{
+                  padding: '4px 8px',
+                  background: 'transparent',
+                  border: '1px solid #ffffff0a',
+                  'border-radius': '6px',
+                  cursor: 'pointer',
+                  'font-family': 'Geist, sans-serif',
+                  'font-size': '11px',
+                  color: '#48484A',
+                }}
               >
-                {fileLogLoading() ? 'Loading...' : 'View Logs'}
+                {copied() ? 'Copied!' : 'Copy All'}
               </button>
-              <Show when={fileLogContent()}>
-                <button
-                  type="button"
-                  onClick={async () => {
-                    try {
-                      await navigator.clipboard.writeText(fileLogContent())
-                      setFileLogCopied(true)
-                      setTimeout(() => setFileLogCopied(false), 1500)
-                    } catch {
-                      // ignore
-                    }
-                  }}
-                  class="flex items-center gap-1 px-2 py-1 text-[var(--settings-text-badge)] text-[var(--text-muted)] hover:text-[var(--accent)] bg-[var(--surface-raised)] border border-[var(--border-subtle)] rounded-[var(--radius-md)] transition-colors"
-                >
-                  <Copy class="w-3 h-3" />
-                  {fileLogCopied() ? 'Copied!' : 'Copy'}
-                </button>
-              </Show>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  clearDevLogs()
+                }}
+                style={{
+                  padding: '4px 8px',
+                  background: 'transparent',
+                  border: '1px solid #ffffff0a',
+                  'border-radius': '6px',
+                  cursor: 'pointer',
+                  'font-family': 'Geist, sans-serif',
+                  'font-size': '11px',
+                  color: '#48484A',
+                }}
+              >
+                Clear
+              </button>
             </div>
           </div>
 
-          <Show when={fileLogContent()}>
-            <div
-              class="bg-[var(--gray-1)] border border-[var(--border-subtle)] rounded-[var(--radius-md)] overflow-auto font-mono text-[var(--settings-text-button)] leading-[1.6] whitespace-pre-wrap p-2"
-              style={{ height: '280px' }}
+          {/* Log viewer */}
+          <div
+            ref={scrollRef}
+            onScroll={handleLogScroll}
+            style={{
+              background: '#0A0A0C',
+              border: '1px solid #ffffff0a',
+              'border-radius': '8px',
+              height: '200px',
+              overflow: 'auto',
+              padding: '8px',
+              display: 'flex',
+              'flex-direction': 'column',
+              gap: '2px',
+            }}
+          >
+            <Show
+              when={filteredLogs().length > 0}
+              fallback={
+                <div
+                  style={{
+                    display: 'flex',
+                    'align-items': 'center',
+                    'justify-content': 'center',
+                    height: '100%',
+                    'font-family': 'Geist Mono, monospace',
+                    'font-size': '11px',
+                    color: '#48484A',
+                  }}
+                >
+                  No log entries yet.
+                </div>
+              }
             >
-              {fileLogContent()}
-            </div>
-          </Show>
+              <For each={filteredLogs()}>
+                {(entry) => {
+                  const color = () => PENCIL_LEVEL_COLORS[entry.level] ?? '#C8C8CC'
+                  return (
+                    <div
+                      style={{
+                        display: 'flex',
+                        'align-items': 'center',
+                        gap: '8px',
+                      }}
+                    >
+                      <span
+                        style={{
+                          'font-family': 'Geist Mono, monospace',
+                          'font-size': '10px',
+                          color: '#48484A',
+                          'flex-shrink': '0',
+                        }}
+                      >
+                        {formatTime(entry.timestamp).slice(0, 8)}
+                      </span>
+                      <span
+                        style={{
+                          'font-family': 'Geist Mono, monospace',
+                          'font-size': '10px',
+                          'font-weight': '600',
+                          color: color(),
+                          'flex-shrink': '0',
+                          width: '24px',
+                        }}
+                      >
+                        {levelLabel[entry.level]}
+                      </span>
+                      <span
+                        style={{
+                          'font-family': 'Geist Mono, monospace',
+                          'font-size': '10px',
+                          color:
+                            entry.level === 'error' || entry.level === 'warn' ? color() : '#C8C8CC',
+                          'word-break': 'break-all',
+                          'white-space': 'pre-wrap',
+                        }}
+                      >
+                        {entry.message}
+                      </span>
+                    </div>
+                  )
+                }}
+              </For>
+            </Show>
+          </div>
 
-          <p class="text-[var(--settings-text-badge)] text-[var(--text-muted)] mt-2">
-            File logs persist across sessions. Debug-level entries only written when Developer Mode
-            is on.
-          </p>
-        </SettingsCard>
+          {/* Tip */}
+          <span
+            style={{
+              'font-family': 'Geist, sans-serif',
+              'font-size': '11px',
+              color: '#48484A',
+            }}
+          >
+            Tip: Copy all logs and paste them when reporting issues.
+          </span>
+        </div>
       </Show>
     </div>
   )

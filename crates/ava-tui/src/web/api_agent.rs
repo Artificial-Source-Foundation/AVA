@@ -587,36 +587,48 @@ pub struct EditAndResendRequest {
 }
 
 /// Edit a specific user message and re-run the agent from that point.
+///
+/// The frontend generates its own message IDs (client-side UUIDs stored in
+/// IndexedDB) which may not match the backend's session IDs in SQLite.
+/// When the target message cannot be found by ID, we fall back to using
+/// all existing session history as context and treat `new_content` as a
+/// fresh goal. This ensures edit-resend works in web mode where frontend
+/// and backend message IDs diverge.
 pub(crate) async fn edit_and_resend(
     State(state): State<WebState>,
     Json(req): Json<EditAndResendRequest>,
 ) -> Result<Json<SubmitGoalResponse>, (StatusCode, Json<ErrorResponse>)> {
-    let session_id = state
-        .inner
-        .last_session_id
-        .read()
-        .await
-        .ok_or_else(|| error_response(StatusCode::CONFLICT, "No previous session to edit"))?;
+    let session_id = state.inner.last_session_id.read().await;
 
-    let session = state
-        .inner
-        .stack
-        .session_manager
-        .get(session_id)
-        .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?
-        .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "Session not found"))?;
+    // Try to load the session and find the target message for precise history
+    // truncation. If anything fails (no session, message not found), fall back
+    // to using whatever history exists.
+    let history: Vec<ava_types::Message> = if let Some(sid) = session_id.as_ref() {
+        let session = state.inner.stack.session_manager.get(*sid).ok().flatten();
 
-    let target_id = uuid::Uuid::parse_str(&req.message_id).map_err(|e| {
-        error_response(StatusCode::BAD_REQUEST, &format!("Invalid message_id: {e}"))
-    })?;
+        if let Some(session) = session {
+            // Try to find the exact message to truncate history at that point
+            let target_id = uuid::Uuid::parse_str(&req.message_id).ok();
+            let pos = target_id.and_then(|tid| session.messages.iter().position(|m| m.id == tid));
 
-    let pos = session
-        .messages
-        .iter()
-        .position(|m| m.id == target_id)
-        .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "Message not found in session"))?;
-
-    let history: Vec<ava_types::Message> = session.messages[..pos].to_vec();
+            if let Some(pos) = pos {
+                // Found the message — use history before it
+                session.messages[..pos].to_vec()
+            } else {
+                // Message ID not found (frontend/backend ID mismatch).
+                // Use all history up to (but not including) the last user message
+                // so we don't duplicate the message the user just edited.
+                collect_history_before_last_user(&session.messages)
+            }
+        } else {
+            vec![]
+        }
+    } else {
+        vec![]
+    };
+    // Drop the read guard before calling run_agent_from_history which takes
+    // its own locks on the state.
+    drop(session_id);
 
     info!(new_content = %req.new_content, message_id = %req.message_id, "Web: edit_and_resend");
     run_agent_from_history(&state, req.new_content, history).await
@@ -764,6 +776,304 @@ pub enum ClearTarget {
     Steering,
     FollowUp,
     PostComplete,
+}
+
+// ============================================================================
+// Context Compaction
+// ============================================================================
+
+#[derive(Deserialize)]
+pub struct CompactContextRequest {
+    #[serde(default)]
+    pub messages: Vec<CompactMessageIn>,
+    #[serde(default)]
+    pub focus: Option<String>,
+    #[serde(default)]
+    pub context_window: Option<usize>,
+    #[serde(default)]
+    pub session_id: Option<String>,
+    #[serde(default)]
+    pub compaction_provider: Option<String>,
+    #[serde(default)]
+    pub compaction_model: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct CompactMessageIn {
+    pub role: String,
+    pub content: String,
+}
+
+#[derive(Serialize, Clone)]
+pub struct CompactMessageOut {
+    pub role: String,
+    pub content: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CompactContextResponse {
+    pub messages: Vec<CompactMessageOut>,
+    pub tokens_before: usize,
+    pub tokens_after: usize,
+    pub tokens_saved: usize,
+    pub messages_before: usize,
+    pub messages_after: usize,
+    pub summary: String,
+    pub context_summary: String,
+    pub usage_before_percent: f64,
+}
+
+/// Web-mode summarizer that delegates to an LLM provider.
+struct WebSummarizer(std::sync::Arc<dyn ava_llm::provider::LLMProvider>);
+
+#[async_trait::async_trait]
+impl ava_context::strategies::Summarizer for WebSummarizer {
+    async fn summarize(&self, text: &str) -> std::result::Result<String, String> {
+        let messages = vec![ava_types::Message::new(
+            ava_types::Role::User,
+            text.to_string(),
+        )];
+        self.0.generate(&messages).await.map_err(|e| e.to_string())
+    }
+}
+
+fn parse_role(role: &str) -> ava_types::Role {
+    match role {
+        "user" => ava_types::Role::User,
+        "assistant" => ava_types::Role::Assistant,
+        "tool" => ava_types::Role::Tool,
+        _ => ava_types::Role::System,
+    }
+}
+
+fn role_to_str(role: &ava_types::Role) -> &'static str {
+    match role {
+        ava_types::Role::User => "user",
+        ava_types::Role::Assistant => "assistant",
+        ava_types::Role::Tool => "tool",
+        ava_types::Role::System => "system",
+    }
+}
+
+fn to_compact_messages(messages: &[ava_types::Message]) -> Vec<CompactMessageOut> {
+    messages
+        .iter()
+        .map(|m| CompactMessageOut {
+            role: role_to_str(&m.role).to_string(),
+            content: m.content.clone(),
+        })
+        .collect()
+}
+
+fn extract_context_summary(messages: &[ava_types::Message]) -> Option<String> {
+    messages
+        .iter()
+        .rev()
+        .find(|m| {
+            m.role == ava_types::Role::System && m.content.starts_with("## Conversation Summary")
+        })
+        .map(|m| m.content.clone())
+}
+
+fn is_compaction_summary(message: &ava_types::Message) -> bool {
+    message.role == ava_types::Role::System
+        && message.content.starts_with("## Conversation Summary")
+}
+
+/// Compact the conversation context, mirroring the Tauri `compact_context` command.
+///
+/// Accepts messages from the frontend (or loads them from the session DB) and
+/// runs hybrid compaction (tool truncation + sliding window + optional LLM
+/// summarization). The compacted messages are persisted back to the session.
+pub(crate) async fn compact_context(
+    State(state): State<WebState>,
+    Json(req): Json<CompactContextRequest>,
+) -> Result<Json<CompactContextResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let session_uuid = req
+        .session_id
+        .as_deref()
+        .map(uuid::Uuid::parse_str)
+        .transpose()
+        .map_err(|e| error_response(StatusCode::BAD_REQUEST, &format!("invalid session id: {e}")))?
+        .or(*state.inner.last_session_id.read().await);
+
+    let existing_session =
+        session_uuid.and_then(|id| state.inner.stack.session_manager.get(id).ok().flatten());
+
+    let source_messages = existing_session
+        .as_ref()
+        .map(|s| s.messages.clone())
+        .filter(|msgs| !msgs.is_empty())
+        .unwrap_or_else(|| {
+            req.messages
+                .iter()
+                .map(|m| ava_types::Message::new(parse_role(&m.role), &m.content))
+                .collect()
+        });
+
+    if source_messages.is_empty() {
+        return Ok(Json(CompactContextResponse {
+            messages: Vec::new(),
+            tokens_before: 0,
+            tokens_after: 0,
+            tokens_saved: 0,
+            messages_before: 0,
+            messages_after: 0,
+            summary: "Nothing to compact -- conversation is empty.".to_string(),
+            context_summary: String::new(),
+            usage_before_percent: 0.0,
+        }));
+    }
+
+    let context_window = req.context_window.unwrap_or(128_000);
+    let tokens_before: usize = source_messages
+        .iter()
+        .map(ava_context::estimate_tokens_for_message)
+        .sum();
+    let usage_before_percent = if context_window == 0 {
+        0.0
+    } else {
+        (tokens_before as f64 / context_window as f64) * 100.0
+    };
+
+    // Resolve the LLM provider for summarization
+    let provider = if let (Some(ref prov), Some(ref model)) =
+        (&req.compaction_provider, &req.compaction_model)
+    {
+        state
+            .inner
+            .stack
+            .router
+            .route_required(prov, model)
+            .await
+            .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?
+    } else {
+        let (prov, model) = state.inner.stack.current_model().await;
+        state
+            .inner
+            .stack
+            .router
+            .route_required(&prov, &model)
+            .await
+            .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?
+    };
+
+    let summarizer: std::sync::Arc<dyn ava_context::strategies::Summarizer> =
+        std::sync::Arc::new(WebSummarizer(provider));
+    let config = ava_context::CondenserConfig {
+        max_tokens: context_window,
+        target_tokens: context_window * 3 / 4,
+        preserve_recent_messages: 4,
+        preserve_recent_turns: 2,
+        focus: req.focus.clone(),
+        ..Default::default()
+    };
+    let mut condenser = ava_context::create_hybrid_condenser(config, Some(summarizer));
+
+    let condensed = condenser
+        .force_condense(&source_messages)
+        .await
+        .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
+
+    let tokens_after = condensed.estimated_tokens;
+    let messages_after = condensed.messages.len();
+    let context_summary = extract_context_summary(&condensed.messages).unwrap_or_default();
+
+    // If compaction didn't reduce anything, return as-is
+    if messages_after >= source_messages.len() && tokens_after >= tokens_before {
+        return Ok(Json(CompactContextResponse {
+            messages: to_compact_messages(&source_messages),
+            tokens_before,
+            tokens_after: tokens_before,
+            tokens_saved: 0,
+            messages_before: source_messages.len(),
+            messages_after: source_messages.len(),
+            summary: format!(
+                "Conversation is already compact. {} tokens across {} messages.",
+                tokens_before,
+                source_messages.len()
+            ),
+            context_summary: String::new(),
+            usage_before_percent,
+        }));
+    }
+
+    // Persist the compacted session
+    if let Some(session_uuid) = session_uuid {
+        let mut active_messages = condensed.messages.clone();
+        if let Some(summary_index) = active_messages.iter().position(is_compaction_summary) {
+            let next_timestamp = active_messages
+                .iter()
+                .skip(summary_index + 1)
+                .find(|m| !is_compaction_summary(m))
+                .map(|m| m.timestamp);
+            let previous_timestamp = condensed
+                .compacted_messages
+                .last()
+                .map(|m| m.timestamp)
+                .or_else(|| {
+                    active_messages[..summary_index]
+                        .iter()
+                        .rev()
+                        .find(|m| !is_compaction_summary(m))
+                        .map(|m| m.timestamp)
+                });
+
+            if let Some(summary) = active_messages.get_mut(summary_index) {
+                if let Some(ts) = next_timestamp {
+                    summary.timestamp = ts - chrono::Duration::milliseconds(1);
+                } else if let Some(ts) = previous_timestamp {
+                    summary.timestamp = ts + chrono::Duration::milliseconds(1);
+                }
+            }
+        }
+
+        let mut persisted_messages = condensed.compacted_messages.clone();
+        persisted_messages.extend(active_messages);
+        persisted_messages.sort_by_key(|m| m.timestamp);
+
+        let session = {
+            let mut s = existing_session
+                .clone()
+                .unwrap_or_else(|| ava_types::Session::new().with_id(session_uuid));
+            s.messages = persisted_messages;
+            s.updated_at = chrono::Utc::now();
+            s
+        };
+        state
+            .inner
+            .stack
+            .session_manager
+            .save(&session)
+            .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
+        *state.inner.last_session_id.write().await = Some(session_uuid);
+    }
+
+    let saved = tokens_before.saturating_sub(tokens_after);
+    let condensed_count = source_messages.len().saturating_sub(messages_after);
+    let summary = match req.focus.as_deref().filter(|f| !f.trim().is_empty()) {
+        Some(focus) => format!(
+            "Conversation compacted (focus: {focus}): {} messages -> summary (saved {saved} tokens, condensed {condensed_count} messages).",
+            source_messages.len()
+        ),
+        None => format!(
+            "Conversation compacted: {} messages -> summary (saved {saved} tokens, condensed {condensed_count} messages).",
+            source_messages.len()
+        ),
+    };
+
+    Ok(Json(CompactContextResponse {
+        messages: to_compact_messages(&condensed.messages),
+        tokens_before,
+        tokens_after,
+        tokens_saved: saved,
+        messages_before: source_messages.len(),
+        messages_after,
+        summary,
+        context_summary,
+        usage_before_percent,
+    }))
 }
 
 /// Clear the message queue.

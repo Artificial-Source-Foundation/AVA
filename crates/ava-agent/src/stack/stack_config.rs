@@ -28,6 +28,8 @@ pub struct AgentStackConfig {
     pub include_project_instructions: bool,
     /// When false, skip eager background codebase indexing at startup.
     pub eager_codebase_indexing: bool,
+    /// When false, skip probing the system for installed external CLI agents.
+    pub discover_cli_agents: bool,
 }
 
 #[derive(Debug)]
@@ -52,6 +54,7 @@ impl Default for AgentStackConfig {
             auto_compact: true,
             include_project_instructions: true,
             eager_codebase_indexing: true,
+            discover_cli_agents: true,
         }
     }
 }

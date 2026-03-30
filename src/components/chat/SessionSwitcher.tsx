@@ -89,20 +89,27 @@ export const SessionSwitcher: Component<{ open: boolean; onClose: () => void }> 
   return (
     <Dialog open={props.open} onOpenChange={(open) => !open && props.onClose()}>
       <Dialog.Portal>
-        <Dialog.Overlay class="fixed inset-0 z-[var(--z-modal)] bg-black/40" />
+        <Dialog.Overlay
+          class="fixed inset-0 z-[var(--z-modal)]"
+          style={{ background: 'var(--modal-overlay)' }}
+        />
         <Dialog.Content
           class="
             fixed z-[var(--z-modal)]
             top-[20%] left-1/2 -translate-x-1/2
             w-[min(480px,90vw)]
-            bg-[var(--surface-overlay)] border border-[var(--border-default)]
-            rounded-[var(--radius-xl)] shadow-[var(--shadow-xl)]
             overflow-hidden
           "
+          style={{
+            background: 'var(--modal-surface)',
+            border: '1px solid var(--modal-border)',
+            'border-radius': 'var(--modal-radius-sm)',
+            'box-shadow': 'var(--modal-shadow)',
+          }}
           onKeyDown={handleKeyDown}
         >
           {/* Search input */}
-          <div class="px-3 py-2 border-b border-[var(--border-subtle)]">
+          <div class="px-3 py-2" style={{ 'border-bottom': '1px solid var(--modal-border)' }}>
             <input
               ref={inputRef}
               type="text"
@@ -154,9 +161,11 @@ export const SessionSwitcher: Component<{ open: boolean; onClose: () => void }> 
                         w-full flex items-center gap-3 px-3 py-2 text-left
                         transition-colors
                       "
-                      classList={{
-                        'bg-[var(--accent-subtle)]': index() === selectedIndex(),
-                        'hover:bg-[var(--alpha-white-5)]': index() !== selectedIndex(),
+                      style={{
+                        background:
+                          index() === selectedIndex()
+                            ? 'var(--dropdown-item-active-bg)'
+                            : 'transparent',
                       }}
                     >
                       <MessageSquare

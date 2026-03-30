@@ -81,14 +81,6 @@ vi.mock('./MessageList', () => ({
   MessageList: () => null,
 }))
 
-vi.mock('./GitControlStrip', () => ({
-  GitControlStrip: () => null,
-}))
-
-vi.mock('./MessageQueueBar', () => ({
-  MessageQueueBar: () => null,
-}))
-
 vi.mock('./TeamChatView', () => ({
   TeamChatView: () => null,
 }))

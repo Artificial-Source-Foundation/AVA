@@ -4,8 +4,9 @@
  * Branching operations (duplicate/fork/branch) are in session-branching.ts.
  */
 
-import { createMemo } from 'solid-js'
+import { batch, createMemo } from 'solid-js'
 import { DEFAULTS, STORAGE_KEYS } from '../../config/constants'
+import { clearTodos } from '../../hooks/use-rust-agent'
 import { log } from '../../lib/logger'
 import { notifySessionOpened } from '../../services/core-bridge'
 import {
@@ -23,9 +24,11 @@ import {
   getTerminalExecutions,
 } from '../../services/database'
 import { logDebug, logError, logInfo, logWarn } from '../../services/logger'
+import { rustAgent } from '../../services/rust-bridge'
 import type { Session, SessionWithStats } from '../../types'
 import { useProject } from '../project'
 import { getLastSessionForProject, setLastSessionForProject } from '../session-persistence'
+import { createLatestRequestGate } from './request-gate'
 import {
   archivedSessions,
   currentSession,
@@ -64,19 +67,61 @@ export const getSessionTree = createMemo(() => {
   return { roots, childMap }
 })
 
+const sessionListGate = createLatestRequestGate()
+const sessionSwitchGate = createLatestRequestGate()
+
+function resetSessionArtifacts(): void {
+  batch(() => {
+    setMessages([])
+    setAgents([])
+    setFileOperations([])
+    setTerminalExecutions([])
+    setMemoryItems([])
+    setCheckpoints([])
+    clearTodos()
+  })
+}
+
+function hydrateSessionArtifacts(result: {
+  messages: Awaited<ReturnType<typeof getMessages>>
+  agents: Awaited<ReturnType<typeof getAgents>>
+  fileOps: Awaited<ReturnType<typeof getFileOperations>>
+  terminalExecutions: Awaited<ReturnType<typeof getTerminalExecutions>>
+  memoryItems: Awaited<ReturnType<typeof getMemoryItems>>
+  checkpoints: Awaited<ReturnType<typeof getCheckpoints>>
+}): void {
+  batch(() => {
+    setMessages(result.messages)
+    setAgents(result.agents)
+    setFileOperations(result.fileOps)
+    setTerminalExecutions(result.terminalExecutions)
+    setMemoryItems(result.memoryItems)
+    setCheckpoints(result.checkpoints)
+  })
+}
+
 export async function loadSessionsForCurrentProject(): Promise<void> {
   const { currentProject } = useProject()
   const projectId = currentProject()?.id
+  const requestToken = sessionListGate.begin()
   setIsLoadingSessions(true)
   try {
     const dbSessions = await getSessionsWithStats(projectId)
+    if (!sessionListGate.isCurrent(requestToken) || currentProject()?.id !== projectId) {
+      return
+    }
     setSessions(dbSessions)
     logDebug('session', 'Loaded sessions', { count: dbSessions.length })
   } catch (err) {
+    if (!sessionListGate.isCurrent(requestToken) || currentProject()?.id !== projectId) {
+      return
+    }
     logError('Session', 'Failed to load sessions', err)
     setSessions([])
   } finally {
-    setIsLoadingSessions(false)
+    if (sessionListGate.isCurrent(requestToken)) {
+      setIsLoadingSessions(false)
+    }
   }
 }
 
@@ -105,6 +150,10 @@ export async function restoreForCurrentProject(): Promise<void> {
 }
 
 export async function createNewSession(name?: string): Promise<Session> {
+  // Fire-and-forget cancel so a running agent from the previous session
+  // doesn't block the new session with a 409 conflict.
+  rustAgent.cancel().catch(() => {})
+
   const { currentProject } = useProject()
   const project = currentProject()
   const projectId = project?.id
@@ -113,8 +162,7 @@ export async function createNewSession(name?: string): Promise<Session> {
 
   setSessions((prev) => [sessionWithStats, ...prev])
   setCurrentSession(session)
-  setMessages([])
-  setAgents([])
+  resetSessionArtifacts()
   log.info('session', 'Session created', { id: session.id, name: session.name })
   logInfo('session', 'Session created', {
     id: session.id,
@@ -138,18 +186,42 @@ export async function switchSession(id: string): Promise<void> {
     return
   }
 
+  // Fire-and-forget cancel so a running agent from the previous session
+  // doesn't block the new session with a 409 conflict.
+  rustAgent.cancel().catch(() => {})
+
+  const requestToken = sessionSwitchGate.begin()
   setEditingMessageId(null)
   setRetryingMessageId(null)
   setCurrentSession(session)
+  resetSessionArtifacts()
 
   // Switch to per-session log file
   import('../../lib/logger').then((m) => m.setSessionLogFile(id)).catch(() => {})
 
   setIsLoadingMessages(true)
   try {
-    const dbMessages = await getMessages(id)
+    const [dbMessages, dbAgents, dbFileOps, dbTerminalExecs, dbMemItems, dbCheckpoints] =
+      await Promise.all([
+        getMessages(id),
+        getAgents(id),
+        getFileOperations(id),
+        getTerminalExecutions(id),
+        getMemoryItems(id),
+        getCheckpoints(id),
+      ])
+    if (!sessionSwitchGate.isCurrent(requestToken) || currentSession()?.id !== id) {
+      return
+    }
     log.debug('session', `switchSession: loaded ${dbMessages.length} messages from DB for ${id}`)
-    setMessages(dbMessages)
+    hydrateSessionArtifacts({
+      messages: dbMessages,
+      agents: dbAgents,
+      fileOps: dbFileOps,
+      terminalExecutions: dbTerminalExecs,
+      memoryItems: dbMemItems,
+      checkpoints: dbCheckpoints,
+    })
     log.info('session', 'Session loaded', { id, messageCount: dbMessages.length })
     logInfo('session', 'Session switched', {
       from: fromSessionId ?? 'none',
@@ -157,32 +229,15 @@ export async function switchSession(id: string): Promise<void> {
       messageCount: dbMessages.length,
     })
   } catch (err) {
+    if (!sessionSwitchGate.isCurrent(requestToken) || currentSession()?.id !== id) {
+      return
+    }
     logError('Session', 'Failed to load messages', err)
-    setMessages([])
+    resetSessionArtifacts()
   } finally {
-    setIsLoadingMessages(false)
-  }
-
-  try {
-    const [dbAgents, dbFileOps, dbTerminalExecs, dbMemItems, dbCheckpoints] = await Promise.all([
-      getAgents(id),
-      getFileOperations(id),
-      getTerminalExecutions(id),
-      getMemoryItems(id),
-      getCheckpoints(id),
-    ])
-    setAgents(dbAgents)
-    setFileOperations(dbFileOps)
-    setTerminalExecutions(dbTerminalExecs)
-    setMemoryItems(dbMemItems)
-    setCheckpoints(dbCheckpoints)
-  } catch (err) {
-    logError('Session', 'Failed to load session data', err)
-    setAgents([])
-    setFileOperations([])
-    setTerminalExecutions([])
-    setMemoryItems([])
-    setCheckpoints([])
+    if (sessionSwitchGate.isCurrent(requestToken) && currentSession()?.id === id) {
+      setIsLoadingMessages(false)
+    }
   }
 
   const { currentProject: getProject } = useProject()
@@ -199,13 +254,38 @@ async function switchAfterRemoval(projectId: string | undefined): Promise<void> 
   if (remaining.length > 0) {
     const mostRecent = remaining[0]
     setCurrentSession(mostRecent)
+    resetSessionArtifacts()
     setIsLoadingMessages(true)
     try {
-      setMessages(await getMessages(mostRecent.id))
+      const [dbMessages, dbAgents, dbFileOps, dbTerminalExecs, dbMemItems, dbCheckpoints] =
+        await Promise.all([
+          getMessages(mostRecent.id),
+          getAgents(mostRecent.id),
+          getFileOperations(mostRecent.id),
+          getTerminalExecutions(mostRecent.id),
+          getMemoryItems(mostRecent.id),
+          getCheckpoints(mostRecent.id),
+        ])
+      if (currentSession()?.id !== mostRecent.id) {
+        return
+      }
+      hydrateSessionArtifacts({
+        messages: dbMessages,
+        agents: dbAgents,
+        fileOps: dbFileOps,
+        terminalExecutions: dbTerminalExecs,
+        memoryItems: dbMemItems,
+        checkpoints: dbCheckpoints,
+      })
     } catch {
-      setMessages([])
+      if (currentSession()?.id !== mostRecent.id) {
+        return
+      }
+      resetSessionArtifacts()
     } finally {
-      setIsLoadingMessages(false)
+      if (currentSession()?.id === mostRecent.id) {
+        setIsLoadingMessages(false)
+      }
     }
     localStorage.setItem(STORAGE_KEYS.LAST_SESSION, mostRecent.id)
     setLastSessionForProject(projectId, mostRecent.id)
@@ -214,7 +294,7 @@ async function switchAfterRemoval(projectId: string | undefined): Promise<void> 
     const s: SessionWithStats = { ...newSession, messageCount: 0, totalTokens: 0 }
     setSessions([s])
     setCurrentSession(newSession)
-    setMessages([])
+    resetSessionArtifacts()
     localStorage.setItem(STORAGE_KEYS.LAST_SESSION, newSession.id)
     setLastSessionForProject(projectId, newSession.id)
   }

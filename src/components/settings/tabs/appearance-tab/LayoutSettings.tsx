@@ -45,15 +45,13 @@ export const InterfaceScaleSection: Component = () => {
     <div>
       <SectionHeader title="Scale" />
       <div class="flex items-center justify-between py-2">
-        <span class="text-[var(--settings-text-label)] text-[var(--text-secondary)]">Scale</span>
-        <span class="text-[var(--settings-text-label)] font-mono text-[var(--text-primary)]">
+        <span class="settings-label">Scale</span>
+        <span class="font-ui-mono text-[13px] text-[var(--text-primary)]">
           {Math.round(settings().appearance.uiScale * 100)}%
         </span>
       </div>
       <div class="flex items-center gap-2 py-1">
-        <span class="text-[var(--settings-text-description)] text-[var(--text-muted)] w-8">
-          85%
-        </span>
+        <span class="font-ui-mono w-8 text-[12px] text-[var(--text-muted)]">85%</span>
         <input
           type="range"
           min="0"
@@ -71,26 +69,34 @@ export const InterfaceScaleSection: Component = () => {
             const idx = Number.parseInt(e.currentTarget.value, 10)
             updateAppearance({ uiScale: SCALE_STEPS[idx] })
           }}
-          class="flex-1 h-1 appearance-none bg-[var(--border-default)] rounded-full cursor-pointer accent-[var(--accent)]"
+          class="flex-1 h-1 appearance-none rounded-full cursor-pointer"
+          style={{ background: 'var(--surface-overlay)', 'accent-color': 'var(--accent)' }}
         />
-        <span class="text-[var(--settings-text-description)] text-[var(--text-muted)] w-8 text-right">
-          120%
-        </span>
+        <span class="font-ui-mono w-8 text-right text-[12px] text-[var(--text-muted)]">120%</span>
       </div>
-      <div class="flex gap-1 mt-1.5">
+      <div class="flex gap-1" style={{ 'margin-top': '6px' }}>
         <For each={SCALE_STEPS}>
           {(step) => (
             <button
               type="button"
               onClick={() => updateAppearance({ uiScale: step })}
-              class={`
-                px-2 py-1 text-[var(--settings-text-input)] rounded-[var(--radius-sm)] transition-colors
-                ${
+              style={{
+                padding: '4px 8px',
+                'font-family': 'Geist Mono, monospace',
+                'font-size': '11px',
+                'border-radius': '6px',
+                border: 'none',
+                cursor: 'pointer',
+                transition: 'background 150ms, color 150ms',
+                background:
                   Math.abs(settings().appearance.uiScale - step) < 0.01
-                    ? 'bg-[var(--accent)] text-white'
-                    : 'bg-[var(--surface-raised)] text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--alpha-white-8)]'
-                }
-              `}
+                    ? 'var(--accent)'
+                    : 'var(--alpha-white-8)',
+                color:
+                  Math.abs(settings().appearance.uiScale - step) < 0.01
+                    ? 'var(--text-on-accent)'
+                    : 'var(--text-muted)',
+              }}
             >
               {Math.round(step * 100)}
             </button>
@@ -111,7 +117,7 @@ export const BorderRadiusSection: Component = () => {
   return (
     <>
       <div class="flex items-center justify-between py-2">
-        <span class="text-[var(--settings-text-label)] text-[var(--text-secondary)]">Corners</span>
+        <span class="settings-label">Corners</span>
         <div class="flex gap-1">
           <For each={RADIUS_OPTIONS}>
             {(opt) => (
@@ -128,11 +134,43 @@ export const BorderRadiusSection: Component = () => {
           </For>
         </div>
       </div>
-      <div class="flex gap-2 mt-2">
-        <div class="w-8 h-8 bg-[var(--accent-subtle)] border border-[var(--accent-border)] rounded-[var(--radius-sm)]" />
-        <div class="w-8 h-8 bg-[var(--accent-subtle)] border border-[var(--accent-border)] rounded-[var(--radius-md)]" />
-        <div class="w-8 h-8 bg-[var(--accent-subtle)] border border-[var(--accent-border)] rounded-[var(--radius-lg)]" />
-        <div class="w-8 h-8 bg-[var(--accent-subtle)] border border-[var(--accent-border)] rounded-[var(--radius-xl)]" />
+      <div class="flex gap-2" style={{ 'margin-top': '8px' }}>
+        <div
+          style={{
+            width: '32px',
+            height: '32px',
+            background: 'var(--accent-subtle)',
+            border: '1px solid var(--accent-border)',
+            'border-radius': '4px',
+          }}
+        />
+        <div
+          style={{
+            width: '32px',
+            height: '32px',
+            background: 'var(--accent-subtle)',
+            border: '1px solid var(--accent-border)',
+            'border-radius': '8px',
+          }}
+        />
+        <div
+          style={{
+            width: '32px',
+            height: '32px',
+            background: 'var(--accent-subtle)',
+            border: '1px solid var(--accent-border)',
+            'border-radius': '12px',
+          }}
+        />
+        <div
+          style={{
+            width: '32px',
+            height: '32px',
+            background: 'var(--accent-subtle)',
+            border: '1px solid var(--accent-border)',
+            'border-radius': '16px',
+          }}
+        />
       </div>
     </>
   )
@@ -147,7 +185,7 @@ export const DensitySection: Component = () => {
 
   return (
     <div class="flex items-center justify-between py-2">
-      <span class="text-[var(--settings-text-label)] text-[var(--text-secondary)]">Spacing</span>
+      <span class="settings-label">Spacing</span>
       <div class="flex gap-1">
         <For each={DENSITY_OPTIONS}>
           {(opt) => (
@@ -190,31 +228,52 @@ export const SidebarOrderSection: Component = () => {
   return (
     <div>
       <SectionHeader title="Sidebar Order" />
-      <div class="space-y-1">
+      <div style={{ display: 'flex', 'flex-direction': 'column', gap: '4px' }}>
         <For each={order()}>
           {(id, index) => (
-            <div class="flex items-center justify-between py-1 px-2 rounded-[var(--radius-md)] bg-[var(--surface-raised)]">
-              <span class="text-[var(--settings-text-label)] text-[var(--text-secondary)]">
-                {SIDEBAR_LABELS[id] ?? id}
-              </span>
-              <div class="flex gap-0.5">
+            <div
+              class="flex items-center justify-between"
+              style={{
+                padding: '6px 8px',
+                'border-radius': '8px',
+                background: 'var(--alpha-white-8)',
+              }}
+            >
+              <span class="settings-label">{SIDEBAR_LABELS[id] ?? id}</span>
+              <div class="flex" style={{ gap: '2px' }}>
                 <button
                   type="button"
                   onClick={() => moveItem(index(), -1)}
                   disabled={index() === 0}
-                  class="p-0.5 rounded-[var(--radius-sm)] text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--alpha-white-5)] disabled:opacity-30 disabled:pointer-events-none transition-colors"
+                  style={{
+                    padding: '2px',
+                    'border-radius': '4px',
+                    background: 'transparent',
+                    border: 'none',
+                    cursor: 'pointer',
+                    color: 'var(--text-muted)',
+                    opacity: index() === 0 ? '0.3' : '1',
+                  }}
                   title="Move up"
                 >
-                  <ChevronUp class="w-3.5 h-3.5" />
+                  <ChevronUp style={{ width: '14px', height: '14px' }} />
                 </button>
                 <button
                   type="button"
                   onClick={() => moveItem(index(), 1)}
                   disabled={index() === order().length - 1}
-                  class="p-0.5 rounded-[var(--radius-sm)] text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--alpha-white-5)] disabled:opacity-30 disabled:pointer-events-none transition-colors"
+                  style={{
+                    padding: '2px',
+                    'border-radius': '4px',
+                    background: 'transparent',
+                    border: 'none',
+                    cursor: 'pointer',
+                    color: 'var(--text-muted)',
+                    opacity: index() === order().length - 1 ? '0.3' : '1',
+                  }}
                   title="Move down"
                 >
-                  <ChevronDown class="w-3.5 h-3.5" />
+                  <ChevronDown style={{ width: '14px', height: '14px' }} />
                 </button>
               </div>
             </div>
@@ -236,14 +295,10 @@ export const AccessibilitySection: Component = () => {
     <div>
       <SectionHeader title="Accessibility" />
       {/* High contrast */}
-      <div class="flex items-center justify-between py-2">
-        <div>
-          <span class="text-[var(--settings-text-label)] text-[var(--text-secondary)]">
-            High contrast
-          </span>
-          <p class="text-[var(--settings-text-description)] text-[var(--text-muted)] mt-0.5">
-            Stronger text and borders
-          </p>
+      <div class="flex items-center justify-between" style={{ width: '100%' }}>
+        <div class="flex flex-col gap-0.5">
+          <span class="settings-label">High contrast</span>
+          <span class="settings-description">Stronger text and borders</span>
         </div>
         <Toggle
           checked={settings().appearance.highContrast}
@@ -251,14 +306,10 @@ export const AccessibilitySection: Component = () => {
         />
       </div>
       {/* Reduce motion */}
-      <div class="flex items-center justify-between py-2">
-        <div>
-          <span class="text-[var(--settings-text-label)] text-[var(--text-secondary)]">
-            Reduce motion
-          </span>
-          <p class="text-[var(--settings-text-description)] text-[var(--text-muted)] mt-0.5">
-            Disables all animations and transitions
-          </p>
+      <div class="flex items-center justify-between" style={{ width: '100%' }}>
+        <div class="flex flex-col gap-0.5">
+          <span class="settings-label">Reduce motion</span>
+          <span class="settings-description">Disables all animations and transitions</span>
         </div>
         <Toggle
           checked={settings().appearance.reduceMotion}

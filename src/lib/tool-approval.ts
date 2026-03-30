@@ -12,6 +12,7 @@ import { createSignal } from 'solid-js'
 /** Approval request for dangerous operations */
 export interface ApprovalRequest {
   id: string
+  toolCallId?: string
   type: 'file' | 'command' | 'browser' | 'mcp'
   toolName: string
   args: Record<string, unknown>

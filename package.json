@@ -1,6 +1,6 @@
 {
   "name": "ava",
-  "version": "2.0.0",
+  "version": "3.0.0",
   "description": "Multi-Agent AI Coding Assistant - Tauri desktop app with ACP support",
   "type": "module",
   "packageManager": "pnpm@10.29.2",
@@ -76,7 +76,6 @@
     "eslint": "^9.39.2",
     "eslint-plugin-oxlint": "^1.42.0",
     "eslint-plugin-solid": "^0.14.5",
-    "get-port": "^7.2.0",
     "jsdom": "^27.4.0",
     "knip": "^5.82.1",
     "lefthook": "^2.0.16",

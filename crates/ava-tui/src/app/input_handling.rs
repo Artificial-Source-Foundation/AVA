@@ -26,9 +26,7 @@ impl App {
         if key.code == KeyCode::Esc
             && matches!(
                 self.state.view_mode,
-                ViewMode::SubAgent { .. }
-                    | ViewMode::BackgroundTask { .. }
-                    | ViewMode::PraxisTask { .. }
+                ViewMode::SubAgent { .. } | ViewMode::BackgroundTask { .. }
             )
         {
             self.state.view_mode = ViewMode::Main;
@@ -68,23 +66,6 @@ impl App {
             match action {
                 Action::Quit => return true,
                 Action::Cancel => {
-                    if let ViewMode::PraxisTask { task_id, .. } = self.state.view_mode {
-                        if let Some(task) = self.state.praxis.task_mut(task_id) {
-                            if let Some(cancel) = task.cancel.take() {
-                                cancel.cancel();
-                                task.status = crate::state::praxis::PraxisTaskStatus::Failed;
-                                task.messages.push(UiMessage::new(
-                                    MessageKind::System,
-                                    "Praxis task cancelled by user.",
-                                ));
-                                self.set_status(
-                                    format!("Praxis task #{task_id} cancelled"),
-                                    StatusLevel::Warn,
-                                );
-                                return false;
-                            }
-                        }
-                    }
                     if self.state.agent.is_running {
                         // UX-33: Mark in-progress tool calls as cancelled
                         self.mark_interrupted_messages();
@@ -99,7 +80,7 @@ impl App {
                         self.state.agent.abort();
                         self.state.input.queue_display.clear_steering();
 
-                        // UX-34: Cancel ALL running agents — background + sub-agents + praxis
+                        // UX-34: Cancel ALL running agents — background + sub-agents
                         self.cancel_all_agents();
 
                         self.is_streaming

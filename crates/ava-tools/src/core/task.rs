@@ -18,7 +18,7 @@ pub struct TaskResult {
     pub messages: Vec<Message>,
 }
 
-/// Trait for spawning sub-agent runs from the task tool.
+/// Trait for spawning sub-agent runs from the subagent tool.
 ///
 /// Defined here (in ava-tools) to avoid circular dependencies —
 /// the concrete implementation lives in ava-agent where it has
@@ -38,13 +38,28 @@ pub trait TaskSpawner: Send + Sync {
         let _ = agent_type;
         self.spawn(prompt).await
     }
+
+    /// Spawn a sub-agent in the background. Returns immediately; the sub-agent
+    /// runs on its own and emits a `SubAgentComplete` event when done.
+    /// Returns the session ID of the background sub-agent for tracking.
+    async fn spawn_background(&self, agent_type: &str, prompt: &str) -> ava_types::Result<String> {
+        // Default: just run inline and return session ID (concrete impl overrides this).
+        let result = self.spawn_named(agent_type, prompt).await?;
+        Ok(result.session_id)
+    }
 }
 
 /// Tool that spawns a sub-agent to work on a task autonomously.
 ///
 /// The sub-agent gets a subset of tools (read, write, edit, bash, glob, grep,
-/// apply_patch) but NOT task, todo_write, todo_read, or question — preventing
+/// apply_patch) but NOT subagent, todo_write, todo_read, or question — preventing
 /// infinite recursion and user-facing interactions from child agents.
+///
+/// Supports two modes:
+/// - **Foreground** (default): blocks the main agent until the sub-agent completes
+///   and returns its result inline.
+/// - **Background** (`background: true`): spawns the sub-agent in parallel and
+///   returns immediately. The main agent keeps working and gets notified when done.
 pub struct TaskTool {
     spawner: Arc<dyn TaskSpawner>,
 }
@@ -58,18 +73,24 @@ impl TaskTool {
 #[async_trait]
 impl Tool for TaskTool {
     fn name(&self) -> &str {
-        "task"
+        "subagent"
     }
 
     fn description(&self) -> &str {
         "Spawn a sub-agent to work on a task autonomously. The sub-agent has its own \
-         conversation context and access to core tools (read, write, edit, bash, glob, \
-         grep, apply_patch). Use this when a task can be cleanly delegated — for example, \
-         writing a module, running a test suite, or researching a codebase question. \
-         The sub-agent cannot ask the user questions or spawn further sub-agents. \
-         Optionally specify an agent type (e.g. 'build', 'review', 'explore', 'plan') \
-         to use a specialized sub-agent with its own model, prompt, and turn limits \
-         configured in agents.toml."
+          conversation context and access to core tools (read, write, edit, bash, glob, \
+          grep, apply_patch). Use this when a chunk of work is easier to delegate than to \
+          keep in the main thread — for example, codebase reconnaissance, a focused \
+          implementation slice, or a final review pass. Avoid using it for tiny single-file \
+          edits. The sub-agent cannot ask the user questions or spawn further sub-agents.\n\n\
+          By default, the sub-agent runs in the foreground: the main agent waits for it to \
+          finish and receives the result. Set `background: true` to run the sub-agent in \
+          parallel — the main agent keeps working and gets notified when the background \
+          agent completes. Use foreground when you need the result before continuing; use \
+          background when the work is independent.\n\n\
+          Optionally specify an agent type (for example `scout`, `explore`, `plan`, `review`, \
+          `worker`, or `build`) to use a specialist with its own model, prompt, and turn limits \
+          configured in agents.toml."
     }
 
     fn parameters(&self) -> Value {
@@ -83,7 +104,11 @@ impl Tool for TaskTool {
                 },
                 "agent": {
                     "type": "string",
-                    "description": "Optional agent type to use (e.g. 'build', 'review', 'explore', 'plan'). Each agent type can have its own model, system prompt, and turn limits configured in agents.toml. Defaults to 'task'."
+                    "description": "Optional agent type to use (e.g. 'scout', 'explore', 'plan', 'review', 'worker', or 'build'). Each agent type can have its own model, system prompt, and turn limits configured in agents.toml. Defaults to 'subagent'."
+                },
+                "background": {
+                    "type": "boolean",
+                    "description": "Set to true to run this sub-agent in the background. The main agent continues working and gets notified when the background agent completes. Use this when the sub-agent's work is independent and you don't need the result immediately. Defaults to false (foreground, blocking)."
                 }
             }
         })
@@ -94,22 +119,48 @@ impl Tool for TaskTool {
             AvaError::ValidationError("missing required field: prompt".to_string())
         })?;
 
-        tracing::debug!(tool = "task", "executing task tool");
-
         if prompt.trim().is_empty() {
             return Err(AvaError::ValidationError(
                 "prompt cannot be empty".to_string(),
             ));
         }
 
-        let agent_type = args.get("agent").and_then(Value::as_str).unwrap_or("task");
+        let agent_type = args
+            .get("agent")
+            .and_then(Value::as_str)
+            .unwrap_or("subagent");
+        let background = args
+            .get("background")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
 
-        let task_result = self.spawner.spawn_named(agent_type, prompt).await?;
-
-        Ok(ToolResult {
-            call_id: String::new(),
-            content: task_result.text,
-            is_error: false,
-        })
+        if background {
+            tracing::debug!(
+                tool = "subagent",
+                mode = "background",
+                "spawning background sub-agent"
+            );
+            let session_id = self.spawner.spawn_background(agent_type, prompt).await?;
+            Ok(ToolResult {
+                call_id: String::new(),
+                content: format!(
+                    "Background sub-agent launched (session: {session_id}). \
+                     You will be notified when it completes. Continue with other work."
+                ),
+                is_error: false,
+            })
+        } else {
+            tracing::debug!(
+                tool = "subagent",
+                mode = "foreground",
+                "spawning foreground sub-agent"
+            );
+            let task_result = self.spawner.spawn_named(agent_type, prompt).await?;
+            Ok(ToolResult {
+                call_id: String::new(),
+                content: task_result.text,
+                is_error: false,
+            })
+        }
     }
 }

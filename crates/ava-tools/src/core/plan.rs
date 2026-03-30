@@ -399,17 +399,30 @@ impl Tool for PlanTool {
 
         let (reply_tx, reply_rx) = oneshot::channel();
 
-        self.bridge
+        // Try to send the plan to the UI (TUI or desktop). If there's no receiver
+        // (e.g. web serve mode or headless), fall back to returning the plan as text.
+        if self
+            .bridge
             .tx
             .send(PlanRequest {
-                plan,
+                plan: plan.clone(),
                 reply: reply_tx,
             })
-            .map_err(|_| {
-                AvaError::ToolError(
-                    "Failed to send plan to UI — the TUI may not be running".to_string(),
-                )
-            })?;
+            .is_err()
+        {
+            tracing::debug!("no plan UI receiver — returning plan as text (web/headless mode)");
+            let mut content =
+                String::from("Plan created (no interactive UI available — auto-approved).\n\n");
+            content.push_str(&format_plan_as_markdown(&plan));
+            if let Some(path) = saved_path.as_deref() {
+                content.push_str(&format!("\nSaved to: {path}\n"));
+            }
+            return Ok(ToolResult {
+                call_id: String::new(),
+                content,
+                is_error: false,
+            });
+        }
 
         // Wait for the user's decision with a 10-minute timeout (plans need review time)
         let decision = tokio::time::timeout(std::time::Duration::from_secs(600), reply_rx)

@@ -35,14 +35,24 @@ export interface MessageScrollAPI {
 export function useMessageScroll(opts: UseMessageScrollOptions): MessageScrollAPI {
   let containerRef: HTMLDivElement | undefined
   let scrollRaf: number | undefined
+  let resizeRaf: number | undefined
   let resizeObserver: ResizeObserver | undefined
   let userScrolledUp = false
-  // True while the pointer is hovering over a nested [data-scrollable] region.
-  // Scroll events that occur during this time come from scrolling inside tool
-  // output / diff viewers — they must not disable main-chat auto-scroll.
+  let lastBackfillHiddenCount = -1
   let pointerOverNestedScrollable = false
 
   const [shouldAutoScroll, setShouldAutoScroll] = createSignal(true)
+
+  const prefersReducedMotion = (): boolean =>
+    typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+
+  const scrollToEdge = (behavior: ScrollBehavior): void => {
+    if (!containerRef) return
+    containerRef.scrollTo({
+      top: containerRef.scrollHeight,
+      behavior: prefersReducedMotion() ? 'auto' : behavior,
+    })
+  }
 
   // Reset when streaming starts
   createEffect(
@@ -60,46 +70,32 @@ export function useMessageScroll(opts: UseMessageScrollOptions): MessageScrollAP
       if (!containerRef || !opts.autoScrollEnabled()) return
       if (userScrolledUp) return
       if (!shouldAutoScroll()) return
-      // Direct assignment (bypasses smooth scroll CSS)
-      containerRef.scrollTop = containerRef.scrollHeight
+      // Coalesce rapid resize events (streaming) into a single rAF
+      if (resizeRaf !== undefined) return
+      resizeRaf = requestAnimationFrame(() => {
+        resizeRaf = undefined
+        if (!containerRef) return
+        scrollToEdge(opts.isStreaming() ? 'auto' : 'smooth')
+      })
     })
     // Observe the scrollable content (first child) — its resize = content growth
     const content = containerRef.firstElementChild
     if (content) resizeObserver.observe(content)
-    // Also observe the container itself (viewport resize)
-    resizeObserver.observe(containerRef)
   }
 
-  const handlePointerEnterNested = (): void => {
-    pointerOverNestedScrollable = true
+  const getNestedScrollable = (target: EventTarget | null): HTMLElement | null => {
+    if (!(target instanceof Element)) return null
+    return target.closest('[data-scrollable]')
   }
 
-  const handlePointerLeaveNested = (): void => {
-    pointerOverNestedScrollable = false
+  const handlePointerOver = (event: PointerEvent): void => {
+    pointerOverNestedScrollable = getNestedScrollable(event.target) !== null
   }
 
-  /** Attach pointer-enter/leave tracking to all [data-scrollable] descendants. */
-  const observeNestedScrollables = (): void => {
-    if (!containerRef) return
-    const nested = containerRef.querySelectorAll('[data-scrollable]')
-    nested.forEach((el) => {
-      el.addEventListener('pointerenter', handlePointerEnterNested)
-      el.addEventListener('pointerleave', handlePointerLeaveNested)
-    })
+  const handlePointerOut = (event: PointerEvent): void => {
+    const nextScrollable = getNestedScrollable(event.relatedTarget)
+    pointerOverNestedScrollable = nextScrollable !== null
   }
-
-  /** Re-run whenever new [data-scrollable] nodes may have been added. */
-  const nestedScrollObserver = new MutationObserver(() => {
-    if (!containerRef) return
-    const nested = containerRef.querySelectorAll('[data-scrollable]')
-    nested.forEach((el) => {
-      // Add listeners idempotently by removing first
-      el.removeEventListener('pointerenter', handlePointerEnterNested)
-      el.removeEventListener('pointerleave', handlePointerLeaveNested)
-      el.addEventListener('pointerenter', handlePointerEnterNested)
-      el.addEventListener('pointerleave', handlePointerLeaveNested)
-    })
-  })
 
   const handleScroll = (_event: Event): void => {
     if (!containerRef) return
@@ -131,7 +127,11 @@ export function useMessageScroll(opts: UseMessageScrollOptions): MessageScrollAP
       }
 
       // Scroll-up backfill: load older messages when near top
-      if (scrollTop < 200 && opts.hiddenMessageCount() > 0) {
+      const hiddenCount = opts.hiddenMessageCount()
+      if (scrollTop >= 200) {
+        lastBackfillHiddenCount = -1
+      } else if (hiddenCount > 0 && hiddenCount !== lastBackfillHiddenCount) {
+        lastBackfillHiddenCount = hiddenCount
         opts.onLoadOlder()
       }
     })
@@ -140,35 +140,35 @@ export function useMessageScroll(opts: UseMessageScrollOptions): MessageScrollAP
   const setup = (): void => {
     onMount(() => {
       if (containerRef) {
-        containerRef.scrollTop = containerRef.scrollHeight
+        scrollToEdge('auto')
         // Passive listener — critical for smooth scrolling in WebKitGTK.
         containerRef.addEventListener('scroll', handleScroll, { passive: true })
+        containerRef.addEventListener('pointerover', handlePointerOver, { passive: true })
+        containerRef.addEventListener('pointerout', handlePointerOut, { passive: true })
         setupResizeObserver()
-        // Track pointer position relative to nested scrollable regions so
-        // we can ignore scroll events that originate from within them.
-        observeNestedScrollables()
-        nestedScrollObserver.observe(containerRef, { childList: true, subtree: true })
       }
     })
 
     onCleanup(() => {
       if (scrollRaf !== undefined) cancelAnimationFrame(scrollRaf)
+      if (resizeRaf !== undefined) cancelAnimationFrame(resizeRaf)
       containerRef?.removeEventListener('scroll', handleScroll)
+      containerRef?.removeEventListener('pointerover', handlePointerOver)
+      containerRef?.removeEventListener('pointerout', handlePointerOut)
       resizeObserver?.disconnect()
-      nestedScrollObserver.disconnect()
     })
   }
 
   const scrollToBottom = (): void => {
     if (containerRef) {
-      containerRef.scrollTop = containerRef.scrollHeight
+      scrollToEdge('smooth')
       setShouldAutoScroll(true)
     }
   }
 
   const scrollToMessage = (messageId: string): void => {
     if (!containerRef) return
-    const el = containerRef.querySelector(`[data-message-id="${messageId}"]`)
+    const el = containerRef.querySelector(`[data-message-id="${CSS.escape(messageId)}"]`)
     if (el) {
       el.scrollIntoView({ behavior: 'smooth', block: 'center' })
     }

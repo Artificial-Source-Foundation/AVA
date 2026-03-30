@@ -29,7 +29,8 @@ use ava_tools::core::file_backup::FileBackupSession;
 use ava_tools::core::plan::PlanBridge;
 use ava_tools::core::question::QuestionBridge;
 use ava_tools::core::{
-    register_custom_tools, register_plan_tool, register_question_tool, register_todo_tools,
+    register_custom_tools_with_plugins, register_plan_tool, register_question_tool,
+    register_todo_tools,
 };
 use ava_tools::permission_middleware::{convert_tool_source, ApprovalBridge, SharedToolSources};
 use ava_tools::registry::{ToolRegistry, ToolSource};
@@ -39,8 +40,7 @@ use tokio::time::{timeout, Duration};
 use tracing::{error, info, instrument, warn};
 
 use stack_tools::{
-    build_tool_registry, build_tool_registry_with_plugins, init_mcp_with_disabled,
-    resolve_workspace_roots, MCPRuntime,
+    build_tool_registry_with_plugins, init_mcp_with_disabled, resolve_workspace_roots, MCPRuntime,
 };
 
 const CONFIG_HOOK_TIMEOUT_MS: u64 = 150;
@@ -90,9 +90,11 @@ pub struct AgentStack {
     agents_config: AgentsConfig,
     /// Compaction threshold as a percentage (50–95). Stored as integer, converted
     /// to fraction (0.50–0.95) when building `CondenserConfig`.
-    compaction_threshold_pct: u8,
+    compaction_threshold_pct: RwLock<u8>,
     /// When false, automatic context compaction is disabled entirely.
-    auto_compact: bool,
+    auto_compact: RwLock<bool>,
+    /// Optional provider/model override used only for compaction summarization.
+    compaction_model_override: RwLock<Option<(String, String)>>,
     /// When false, skip loading project instruction files into the system prompt.
     include_project_instructions: bool,
     /// Parent session ID for linking sub-agent sessions back to their parent.
@@ -270,8 +272,12 @@ impl AgentStack {
         let router = Arc::new(router);
 
         // Register ACP provider factory for external agents (claude-code, codex, etc.).
-        // No startup discovery — agents are spawned on-demand when requested.
-        let cli_agents = Vec::new();
+        // Discover installed CLI agents on PATH for the model selector.
+        let cli_agents = if config.discover_cli_agents {
+            ava_acp::discover_cli_agents().await
+        } else {
+            Vec::new()
+        };
         {
             let acp_factory = ava_acp::AcpProviderFactory::with_builtins(config.yolo);
             router.register_factory_async(Arc::new(acp_factory)).await;
@@ -372,7 +378,11 @@ impl AgentStack {
         register_todo_tools(&mut registry, todo_state.clone());
         register_question_tool(&mut registry, question_bridge.clone());
         register_plan_tool(&mut registry, plan_bridge.clone(), plan_state.clone());
-        register_custom_tools(&mut registry, &custom_tool_dirs);
+        register_custom_tools_with_plugins(
+            &mut registry,
+            &custom_tool_dirs,
+            Some(Arc::clone(&plugin_manager)),
+        );
 
         // MCP init is deferred to the first run() call via ensure_mcp_initialized().
         // This avoids blocking startup on potentially-slow server connections while
@@ -425,8 +435,9 @@ impl AgentStack {
                 permission_inspector,
                 shared_tool_sources,
                 agents_config,
-                compaction_threshold_pct: config.compaction_threshold_pct,
-                auto_compact: config.auto_compact,
+                compaction_threshold_pct: RwLock::new(config.compaction_threshold_pct),
+                auto_compact: RwLock::new(config.auto_compact),
+                compaction_model_override: RwLock::new(None),
                 include_project_instructions: config.include_project_instructions,
                 parent_session_id: RwLock::new(None),
                 plugin_manager,
@@ -679,7 +690,11 @@ impl AgentStack {
     pub async fn reload_custom_tools(&self) -> usize {
         let mut registry = self.tools.write().await;
         registry.remove_by_source(|src| matches!(src, ToolSource::Custom { .. }));
-        register_custom_tools(&mut registry, &self.custom_tool_dirs);
+        register_custom_tools_with_plugins(
+            &mut registry,
+            &self.custom_tool_dirs,
+            Some(Arc::clone(&self.plugin_manager)),
+        );
         registry
             .list_tools_with_source()
             .iter()
@@ -688,11 +703,12 @@ impl AgentStack {
     }
 
     pub async fn reload_tools(&self) -> Result<usize> {
-        let (mut registry, reload_sources, _backup_session) = build_tool_registry(
+        let (mut registry, reload_sources, _backup_session) = build_tool_registry_with_plugins(
             self.platform.clone(),
             Arc::clone(&self.permission_inspector),
             Arc::clone(&self.permission_context),
             self.approval_bridge.clone(),
+            Some(Arc::clone(&self.plugin_manager)),
         );
         register_todo_tools(&mut registry, self.todo_state.clone());
         register_question_tool(&mut registry, self.question_bridge.clone());
@@ -701,7 +717,11 @@ impl AgentStack {
             self.plan_bridge.clone(),
             self.plan_state.clone(),
         );
-        register_custom_tools(&mut registry, &self.custom_tool_dirs);
+        register_custom_tools_with_plugins(
+            &mut registry,
+            &self.custom_tool_dirs,
+            Some(Arc::clone(&self.plugin_manager)),
+        );
         let disabled = self.disabled_mcp_servers.read().await.clone();
         let runtime = init_mcp_with_disabled(
             &self.mcp_global_config,
@@ -810,6 +830,28 @@ impl AgentStack {
     pub async fn set_thinking_level(&self, level: ThinkingLevel) -> Result<()> {
         *self.thinking_level.write().await = level;
         Ok(())
+    }
+
+    pub async fn set_compaction_settings(
+        &self,
+        auto_compact: bool,
+        threshold_pct: u8,
+        model_override: Option<(String, String)>,
+    ) -> Result<()> {
+        let clamped = threshold_pct.clamp(50, 95);
+        *self.auto_compact.write().await = auto_compact;
+        *self.compaction_threshold_pct.write().await = clamped;
+
+        if let Some((provider, model)) = &model_override {
+            self.router.route_required(provider, model).await?;
+        }
+        *self.compaction_model_override.write().await = model_override;
+
+        Ok(())
+    }
+
+    pub async fn current_compaction_model(&self) -> Option<(String, String)> {
+        self.compaction_model_override.read().await.clone()
     }
 
     pub async fn cycle_thinking(&self) -> &'static str {
@@ -1003,6 +1045,20 @@ mod tests {
         let (provider, model) = parse_model_spec("ollama/llama3.3");
         assert_eq!(provider, "ollama");
         assert_eq!(model, "llama3.3");
+    }
+
+    #[test]
+    fn parse_model_spec_azure_provider() {
+        let (provider, model) = parse_model_spec("azure/gpt-4o");
+        assert_eq!(provider, "azure");
+        assert_eq!(model, "gpt-4o");
+    }
+
+    #[test]
+    fn parse_model_spec_bedrock_provider() {
+        let (provider, model) = parse_model_spec("bedrock/anthropic.claude-sonnet-4-v1:0");
+        assert_eq!(provider, "bedrock");
+        assert_eq!(model, "anthropic.claude-sonnet-4-v1:0");
     }
 
     #[test]

@@ -8,7 +8,9 @@
 import type { LLMProviderConfig } from '../provider-defaults'
 import { alibaba } from './alibaba'
 import { anthropic } from './anthropic'
-import { cliAgents } from './cli-agents'
+// CLI agents (Gemini CLI, Claude Code, etc.) are only available as HQ/delegation
+// worker targets, not as user-selectable providers in the settings UI.
+// Discovery happens at startup via AgentStack for HQ routing.
 import { cohere } from './cohere'
 import { copilot } from './copilot'
 import { deepseek } from './deepseek'
@@ -39,5 +41,4 @@ export const defaultProviders: LLMProviderConfig[] = [
   kimi,
   glm,
   ollama,
-  cliAgents,
 ]

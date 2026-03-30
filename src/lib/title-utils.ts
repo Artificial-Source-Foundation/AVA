@@ -46,8 +46,8 @@ export function deriveSessionTitle(message: string): string | null {
     const breakPoint = title.lastIndexOf(' ', MAX_TITLE_LENGTH - 3)
     title =
       breakPoint > MAX_TITLE_LENGTH * 0.4
-        ? title.slice(0, breakPoint) + '...'
-        : title.slice(0, MAX_TITLE_LENGTH - 3) + '...'
+        ? `${title.slice(0, breakPoint)}...`
+        : `${title.slice(0, MAX_TITLE_LENGTH - 3)}...`
   }
 
   return title || null

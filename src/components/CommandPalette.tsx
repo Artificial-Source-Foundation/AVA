@@ -132,6 +132,11 @@ export const CommandPalette: Component<CommandPaletteProps> = (props) => {
     }
   }
 
+  // Parse shortcut string into individual key badges
+  const shortcutKeys = (shortcut: string): string[] => {
+    return shortcut.split('+').map((k) => k.trim())
+  }
+
   return (
     <Dialog open={open()} onOpenChange={handleOpenChange}>
       <Dialog.Portal>
@@ -139,10 +144,10 @@ export const CommandPalette: Component<CommandPaletteProps> = (props) => {
         <Dialog.Overlay
           class="
             fixed inset-0 z-50
-            bg-black/60
             data-[expanded]:animate-in data-[expanded]:fade-in-0
             data-[closed]:animate-out data-[closed]:fade-out-0
           "
+          style={{ background: 'var(--modal-overlay)' }}
         />
 
         {/* Content */}
@@ -150,26 +155,35 @@ export const CommandPalette: Component<CommandPaletteProps> = (props) => {
           class="
             fixed left-1/2 top-[20%] z-50
             -translate-x-1/2
-            w-full max-w-lg
-            bg-[var(--surface-overlay)]
-            border border-[var(--border-default)]
-            rounded-[var(--radius-xl)]
-            shadow-2xl
             overflow-hidden
             data-[expanded]:animate-in data-[expanded]:fade-in-0 data-[expanded]:zoom-in-95
             data-[closed]:animate-out data-[closed]:fade-out-0 data-[closed]:zoom-out-95
             duration-200
           "
+          style={{
+            width: '640px',
+            background: 'var(--modal-surface)',
+            border: '1px solid var(--border-subtle)',
+            'border-radius': 'var(--modal-radius-sm)',
+            'box-shadow': 'var(--modal-shadow)',
+          }}
           onKeyDown={handleKeyDown}
         >
-          {/* Search Input */}
-          <div class="flex items-center gap-3 px-4 py-3 border-b border-[var(--border-subtle)]">
-            <Search class="w-5 h-5 text-[var(--text-muted)]" />
+          {/* Search Row — 48px */}
+          <div
+            class="flex items-center gap-2.5"
+            style={{
+              height: '48px',
+              padding: '0 16px',
+              background: 'var(--surface)',
+            }}
+          >
+            <Search class="w-4 h-4 shrink-0 text-[var(--text-muted)]" />
             <input
               // biome-ignore lint/suspicious/noAssignInExpressions: SolidJS ref callback pattern
               ref={(el) => (inputRef = el)}
               type="text"
-              placeholder="Search commands..."
+              placeholder="Type a command or search..."
               value={query()}
               onInput={(e) => setQuery(e.currentTarget.value)}
               class="
@@ -178,108 +192,153 @@ export const CommandPalette: Component<CommandPaletteProps> = (props) => {
                 text-[var(--text-primary)]
                 placeholder:text-[var(--text-muted)]
                 outline-none
-                text-sm
               "
+              style={{
+                'font-family': 'var(--font-sans)',
+                'font-size': '14px',
+              }}
             />
-            <kbd class="px-2 py-0.5 text-xs bg-[var(--surface-sunken)] rounded-[var(--radius-md)] text-[var(--text-muted)]">
-              ESC
+            <kbd
+              class="flex items-center shrink-0"
+              style={{
+                padding: '3px 8px',
+                background: 'var(--alpha-white-8)',
+                border: '1px solid var(--border-default)',
+                'border-radius': '4px',
+                'font-family': 'var(--font-mono)',
+                'font-size': '10px',
+                color: 'var(--text-muted)',
+              }}
+            >
+              Esc
             </kbd>
           </div>
 
+          {/* Divider */}
+          <div style={{ height: '1px', background: 'var(--border-default)' }} />
+
           {/* Results */}
-          <div class="max-h-80 overflow-y-auto">
+          <div class="overflow-y-auto" style={{ 'max-height': '320px' }}>
             <Show
               when={flatCommands().length > 0}
               fallback={
-                <div class="py-8 text-center text-sm text-[var(--text-muted)]">
+                <div
+                  class="flex items-center justify-center text-[var(--text-muted)]"
+                  style={{ padding: '32px 0', 'font-size': '13px' }}
+                >
                   No commands found
                 </div>
               }
             >
               <For each={Object.entries(groupedCommands())}>
-                {([category, commands]) => (
-                  <div>
-                    {/* Category Header */}
-                    <div class="px-4 py-2 text-xs font-medium text-[var(--text-muted)] bg-[var(--surface-sunken)]">
-                      {category}
-                    </div>
+                {([category, commands], groupIdx) => (
+                  <>
+                    {/* Divider between sections (not before first) */}
+                    <Show when={groupIdx() > 0}>
+                      <div style={{ height: '1px', background: 'var(--border-default)' }} />
+                    </Show>
 
-                    {/* Commands */}
-                    <For each={commands}>
-                      {(cmd) => {
-                        const globalIndex = () => flatCommands().findIndex((c) => c.id === cmd.id)
-                        const isSelected = () => selectedIndex() === globalIndex()
+                    {/* Section */}
+                    <div style={{ padding: '8px 8px 4px 8px' }}>
+                      {/* Section label — 9px uppercase */}
+                      <div
+                        style={{
+                          'font-family': 'var(--font-sans)',
+                          'font-size': '9px',
+                          'font-weight': '600',
+                          'letter-spacing': '1px',
+                          'text-transform': 'uppercase',
+                          color: 'var(--text-muted)',
+                          padding: '0 10px 4px',
+                        }}
+                      >
+                        {category}
+                      </div>
 
-                        return (
-                          <button
-                            type="button"
-                            onClick={() => executeCommand(cmd)}
-                            onMouseEnter={() => setSelectedIndex(globalIndex())}
-                            class={`
-                              w-full text-left
-                              flex items-center gap-3
-                              px-4 py-2.5
-                              transition-colors duration-[var(--duration-fast)]
-                              ${
-                                isSelected()
-                                  ? 'bg-[var(--accent-subtle)] text-[var(--accent)]'
-                                  : 'hover:bg-[var(--surface-raised)]'
-                              }
-                            `}
-                          >
-                            {/* Icon */}
-                            <div
-                              class={`
-                                p-1.5 rounded-[var(--radius-md)]
-                                ${isSelected() ? 'bg-[var(--accent)]/10' : 'bg-[var(--surface-sunken)]'}
-                              `}
-                            >
-                              <Show when={cmd.icon} fallback={<Command class="w-4 h-4" />}>
-                                <Dynamic component={cmd.icon!} class="w-4 h-4" />
-                              </Show>
-                            </div>
+                      {/* Rows */}
+                      <div class="flex flex-col" style={{ gap: '2px' }}>
+                        <For each={commands}>
+                          {(cmd) => {
+                            const globalIndex = () =>
+                              flatCommands().findIndex((c) => c.id === cmd.id)
+                            const isSelected = () => selectedIndex() === globalIndex()
 
-                            {/* Label & Description */}
-                            <div class="flex-1 min-w-0">
-                              <div class="text-sm font-medium text-[var(--text-primary)]">
-                                {cmd.label}
-                              </div>
-                              <Show when={cmd.description}>
-                                <div class="text-xs text-[var(--text-muted)] truncate">
-                                  {cmd.description}
+                            return (
+                              <button
+                                type="button"
+                                onClick={() => executeCommand(cmd)}
+                                onMouseEnter={() => setSelectedIndex(globalIndex())}
+                                class="w-full text-left flex items-center transition-colors"
+                                style={{
+                                  height: '36px',
+                                  padding: '0 10px',
+                                  gap: '10px',
+                                  'border-radius': 'var(--radius-sm)',
+                                  background: isSelected() ? 'var(--accent)' : 'transparent',
+                                  color: isSelected() ? '#ffffff' : 'inherit',
+                                  'justify-content': cmd.shortcut ? 'space-between' : 'flex-start',
+                                }}
+                              >
+                                {/* Left: Icon + Label */}
+                                <div class="flex items-center" style={{ gap: '10px' }}>
+                                  {/* Icon — no bg wrapper, 14px */}
+                                  <span
+                                    class="shrink-0 flex items-center"
+                                    style={{
+                                      color: isSelected() ? '#ffffff' : 'var(--text-muted)',
+                                    }}
+                                  >
+                                    <Show
+                                      when={cmd.icon}
+                                      fallback={<Command class="w-3.5 h-3.5" />}
+                                    >
+                                      <Dynamic component={cmd.icon!} class="w-3.5 h-3.5" />
+                                    </Show>
+                                  </span>
+
+                                  {/* Label — 13px */}
+                                  <span
+                                    style={{
+                                      'font-family': 'var(--font-sans)',
+                                      'font-size': '13px',
+                                      color: isSelected() ? '#ffffff' : 'var(--text-secondary)',
+                                    }}
+                                  >
+                                    {cmd.label}
+                                  </span>
                                 </div>
-                              </Show>
-                            </div>
 
-                            {/* Shortcut */}
-                            <Show when={cmd.shortcut}>
-                              <kbd class="px-2 py-0.5 text-xs bg-[var(--surface-sunken)] rounded-[var(--radius-md)] text-[var(--text-muted)]">
-                                {cmd.shortcut}
-                              </kbd>
-                            </Show>
-                          </button>
-                        )
-                      }}
-                    </For>
-                  </div>
+                                {/* Right: Keyboard shortcut badges */}
+                                <Show when={cmd.shortcut}>
+                                  <div class="flex items-center" style={{ gap: '4px' }}>
+                                    <For each={shortcutKeys(cmd.shortcut!)}>
+                                      {(key) => (
+                                        <kbd
+                                          style={{
+                                            padding: '2px 6px',
+                                            background: 'var(--alpha-white-8)',
+                                            'border-radius': '4px',
+                                            'font-family': 'var(--font-mono)',
+                                            'font-size': '10px',
+                                            color: 'var(--text-muted)',
+                                          }}
+                                        >
+                                          {key}
+                                        </kbd>
+                                      )}
+                                    </For>
+                                  </div>
+                                </Show>
+                              </button>
+                            )
+                          }}
+                        </For>
+                      </div>
+                    </div>
+                  </>
                 )}
               </For>
             </Show>
-          </div>
-
-          {/* Footer */}
-          <div class="flex items-center justify-between px-4 py-2 border-t border-[var(--border-subtle)] bg-[var(--surface-sunken)]">
-            <div class="flex items-center gap-4 text-xs text-[var(--text-muted)]">
-              <span class="flex items-center gap-1">
-                <kbd class="px-1.5 py-0.5 bg-[var(--surface-raised)] rounded">↑↓</kbd>
-                navigate
-              </span>
-              <span class="flex items-center gap-1">
-                <kbd class="px-1.5 py-0.5 bg-[var(--surface-raised)] rounded">↵</kbd>
-                select
-              </span>
-            </div>
-            <span class="text-xs text-[var(--text-muted)]">{flatCommands().length} commands</span>
           </div>
         </Dialog.Content>
       </Dialog.Portal>

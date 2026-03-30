@@ -78,6 +78,21 @@ bench *ARGS:
 bench-cli-shootout *ARGS:
     node scripts/benchmarks/cli-shootout.mjs {{ ARGS }}
 
+# Quick smoke test (headless, fast)
+smoke:
+    cargo run --bin ava -- "Reply with SMOKE_OK" --headless --provider openai --model gpt-5.4 --max-turns 2 --auto-approve
+
+# Install AVA locally
+install:
+    cargo install --path crates/ava-tui --bin ava
+
+# Full CI-equivalent check (everything CI runs)
+ci: check
+    cargo nextest run --workspace -j 4
+    RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
+    pnpm typecheck
+    pnpm lint
+
 # Clean build artifacts
 clean:
     cargo clean

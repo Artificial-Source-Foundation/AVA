@@ -9,7 +9,8 @@
  */
 
 import { Loader2 } from 'lucide-solid'
-import { type Component, createEffect, createSignal, onCleanup, Show } from 'solid-js'
+import { type Component, createMemo, Show } from 'solid-js'
+import { useSecondTicker } from '../../hooks/useElapsedTimer'
 import type { ToolCall } from '../../types'
 import { formatElapsed, summarizeAction } from './tool-call-utils'
 
@@ -19,8 +20,6 @@ interface ToolPreviewProps {
 }
 
 export const ToolPreview: Component<ToolPreviewProps> = (props) => {
-  const [elapsed, setElapsed] = createSignal('')
-
   const activeCall = (): ToolCall | undefined => {
     if (!props.toolCalls?.length) return undefined
     for (let i = props.toolCalls.length - 1; i >= 0; i--) {
@@ -35,23 +34,12 @@ export const ToolPreview: Component<ToolPreviewProps> = (props) => {
     if (!call) return ''
     return summarizeAction(call.name, call.args)
   }
-
-  createEffect(() => {
-    if (!props.isStreaming) {
-      setElapsed('')
-      return
-    }
+  const nowTick = useSecondTicker(() => props.isStreaming && !!activeCall())
+  const elapsed = createMemo(() => {
     const call = activeCall()
-    if (!call) {
-      setElapsed('')
-      return
-    }
-    setElapsed(formatElapsed(call.startedAt))
-    const timer = setInterval(() => {
-      const running = activeCall()
-      setElapsed(running ? formatElapsed(running.startedAt) : '')
-    }, 1000)
-    onCleanup(() => clearInterval(timer))
+    if (!props.isStreaming || !call) return ''
+    nowTick()
+    return formatElapsed(call.startedAt)
   })
 
   return (

@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [master]
+    branches: [master, develop]
   pull_request:
-    branches: [master]
+    branches: [master, develop]
 
 env:
   CARGO_INCREMENTAL: 0
@@ -69,7 +69,7 @@ jobs:
       - name: Cache cargo registry & build
         uses: Swatinem/rust-cache@v2
         with:
-          save-if: ${{ github.ref == 'refs/heads/master' }}
+          save-if: ${{ github.ref == 'refs/heads/master' || github.ref == 'refs/heads/develop' }}
 
       - name: Check formatting
         run: cargo fmt --all --check
@@ -118,7 +118,7 @@ jobs:
   # ---------------------------------------------------------------------------
   build:
     name: Build (${{ matrix.platform }})
-    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/develop')
     needs: [frontend, rust]
     strategy:
       fail-fast: false

@@ -65,7 +65,7 @@ export const InputTextArea: Component<InputTextAreaProps> = (props) => (
   // biome-ignore lint/a11y/noStaticElementInteractions: drop zone for images and files
   <div
     class="relative"
-    onDrop={props.onDrop}
+    onDrop={(e) => props.onDrop(e)}
     onDragOver={(e: DragEvent) => {
       e.preventDefault()
       props.setIsDragging(true)
@@ -106,26 +106,28 @@ export const InputTextArea: Component<InputTextAreaProps> = (props) => (
         ref={props.textareaRef}
         value={props.input()}
         onInput={(e) => props.onInput(e.currentTarget.value)}
-        onKeyDown={props.onKeyDown}
-        onPaste={props.onPaste}
+        onKeyDown={(e) => props.onKeyDown(e)}
+        onPaste={(e) => props.onPaste(e)}
         placeholder={props.placeholder()}
         disabled={props.disabled()}
         rows={1}
+        aria-label="Message composer"
         class="
           message-composer-textarea
-          w-full px-[18px] py-3.5 pr-[110px]
-          bg-[var(--gray-2)] text-[var(--text-primary)]
-          placeholder-[var(--gray-7)]
-          border border-[var(--gray-5)] rounded-[var(--radius-2xl)]
-          resize-none transition-colors
-          focus:outline-none focus:border-[var(--accent)]
+          w-full px-0 py-0 pr-[100px]
+          bg-transparent text-[var(--text-primary)]
+          placeholder:text-[var(--text-muted)]
+          border-none
+          resize-none
+          focus:outline-none
           disabled:opacity-50
         "
         style={{
-          'min-height': '44px',
+          'min-height': '24px',
           'max-height': '200px',
-          'font-size': 'var(--chat-font-size)',
-          transition: 'height 100ms ease, border-color 150ms ease',
+          'font-size': '14px',
+          'line-height': '1.5',
+          transition: 'height 100ms var(--ease-out)',
         }}
       />
 

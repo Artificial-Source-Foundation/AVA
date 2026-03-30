@@ -10,6 +10,8 @@ use tracing::{info, warn};
 
 /// Default timeout for connecting to a single MCP server (including stdio spawn + initialize).
 const MCP_CONNECT_TIMEOUT_SECS: u64 = 30;
+/// Default timeout for an already-connected MCP server request.
+const MCP_REQUEST_TIMEOUT_SECS: u64 = 45;
 
 use crate::client::{
     MCPClient, MCPPrompt, MCPPromptResult, MCPResource, MCPResourceContent, MCPTool,
@@ -148,7 +150,14 @@ impl ExtensionManager {
             AvaError::ToolError(format!("MCP server '{server_name}' is not connected"))
         })?;
 
-        let result = client.lock().await.call_tool(name, arguments).await?;
+        let result = Self::call_tool_with_timeout(
+            client,
+            &server_name,
+            name,
+            arguments,
+            Duration::from_secs(MCP_REQUEST_TIMEOUT_SECS),
+        )
+        .await?;
 
         // Parse the MCP result into a ToolResult
         let content = extract_text_content(&result);
@@ -164,6 +173,24 @@ impl ExtensionManager {
         })
     }
 
+    async fn call_tool_with_timeout(
+        client: &Arc<Mutex<MCPClient>>,
+        server_name: &str,
+        tool_name: &str,
+        arguments: Value,
+        timeout_duration: Duration,
+    ) -> Result<Value> {
+        let mut client = client.lock().await;
+        tokio::time::timeout(timeout_duration, client.call_tool(tool_name, arguments))
+            .await
+            .map_err(|_| {
+                AvaError::ToolError(format!(
+                    "MCP server '{server_name}' timed out after {} while calling tool '{tool_name}'",
+                    format_timeout(timeout_duration)
+                ))
+            })?
+    }
+
     /// Re-fetch the tool list from a single server and update the registry.
     ///
     /// Called when the server sends a `notifications/tools/list_changed` notification.
@@ -176,7 +203,17 @@ impl ExtensionManager {
             ))
         })?;
 
-        let new_tools = client.lock().await.list_tools().await?;
+        let mut client = client.lock().await;
+        let new_tools = tokio::time::timeout(
+            Duration::from_secs(MCP_REQUEST_TIMEOUT_SECS),
+            client.list_tools(),
+        )
+        .await
+        .map_err(|_| {
+            AvaError::ToolError(format!(
+                "MCP server '{server_name}' timed out after {MCP_REQUEST_TIMEOUT_SECS}s while reloading tools"
+            ))
+        })??;
 
         // Remove all existing tools registered for this server.
         self.tools.retain(|(srv, _)| srv != server_name);
@@ -202,7 +239,17 @@ impl ExtensionManager {
         let client = self.clients.get(server_name).ok_or_else(|| {
             AvaError::ToolError(format!("MCP server '{server_name}' is not connected"))
         })?;
-        client.lock().await.list_resources().await
+        let mut client = client.lock().await;
+        tokio::time::timeout(
+            Duration::from_secs(MCP_REQUEST_TIMEOUT_SECS),
+            client.list_resources(),
+        )
+        .await
+        .map_err(|_| {
+            AvaError::ToolError(format!(
+                "MCP server '{server_name}' timed out after {MCP_REQUEST_TIMEOUT_SECS}s while listing resources"
+            ))
+        })?
     }
 
     /// Read the content of a resource by URI from a specific MCP server.
@@ -214,7 +261,17 @@ impl ExtensionManager {
         let client = self.clients.get(server_name).ok_or_else(|| {
             AvaError::ToolError(format!("MCP server '{server_name}' is not connected"))
         })?;
-        client.lock().await.read_resource(uri).await
+        let mut client = client.lock().await;
+        tokio::time::timeout(
+            Duration::from_secs(MCP_REQUEST_TIMEOUT_SECS),
+            client.read_resource(uri),
+        )
+        .await
+        .map_err(|_| {
+            AvaError::ToolError(format!(
+                "MCP server '{server_name}' timed out after {MCP_REQUEST_TIMEOUT_SECS}s while reading resource '{uri}'"
+            ))
+        })?
     }
 
     /// List all prompt templates available on a specific MCP server.
@@ -222,7 +279,17 @@ impl ExtensionManager {
         let client = self.clients.get(server_name).ok_or_else(|| {
             AvaError::ToolError(format!("MCP server '{server_name}' is not connected"))
         })?;
-        client.lock().await.list_prompts().await
+        let mut client = client.lock().await;
+        tokio::time::timeout(
+            Duration::from_secs(MCP_REQUEST_TIMEOUT_SECS),
+            client.list_prompts(),
+        )
+        .await
+        .map_err(|_| {
+            AvaError::ToolError(format!(
+                "MCP server '{server_name}' timed out after {MCP_REQUEST_TIMEOUT_SECS}s while listing prompts"
+            ))
+        })?
     }
 
     /// Retrieve and render a prompt template from a specific MCP server.
@@ -237,13 +304,24 @@ impl ExtensionManager {
         let client = self.clients.get(server_name).ok_or_else(|| {
             AvaError::ToolError(format!("MCP server '{server_name}' is not connected"))
         })?;
-        client.lock().await.get_prompt(prompt_name, arguments).await
+        let mut client = client.lock().await;
+        tokio::time::timeout(
+            Duration::from_secs(MCP_REQUEST_TIMEOUT_SECS),
+            client.get_prompt(prompt_name, arguments),
+        )
+        .await
+        .map_err(|_| {
+            AvaError::ToolError(format!(
+                "MCP server '{server_name}' timed out after {MCP_REQUEST_TIMEOUT_SECS}s while rendering prompt '{prompt_name}'"
+            ))
+        })?
     }
 
     /// Disconnect all servers.
     pub async fn shutdown(&mut self) -> Result<()> {
         for (name, client) in self.clients.drain() {
-            if let Err(e) = client.lock().await.disconnect().await {
+            let mut client = client.lock().await;
+            if let Err(e) = client.disconnect().await {
                 warn!(server = %name, error = %e, "Error disconnecting MCP server");
             }
         }
@@ -259,6 +337,14 @@ impl ExtensionManager {
     /// Number of discovered tools.
     pub fn tool_count(&self) -> usize {
         self.tools.len()
+    }
+}
+
+fn format_timeout(duration: Duration) -> String {
+    if duration.as_millis() < 1000 {
+        format!("{}ms", duration.as_millis())
+    } else {
+        format!("{}s", duration.as_secs())
     }
 }
 
@@ -405,9 +491,8 @@ mod tests {
 
         // tools/call (loop to handle multiple calls)
         loop {
-            let req = match transport.receive().await {
-                Ok(r) => r,
-                Err(_) => break,
+            let Ok(req) = transport.receive().await else {
+                break;
             };
 
             let resp = JsonRpcMessage {
@@ -481,6 +566,77 @@ mod tests {
         assert_eq!(manager.server_count(), 0);
 
         // Server task should end when transport closes
+        let _ = server_handle.await;
+    }
+
+    #[tokio::test]
+    async fn call_tool_times_out_for_unresponsive_server() {
+        let (client_transport, mut server_transport) = InMemoryTransport::pair();
+
+        let server_handle = tokio::spawn(async move {
+            let req = server_transport.receive().await.unwrap();
+            let resp = JsonRpcMessage {
+                jsonrpc: "2.0".to_string(),
+                id: req.id.clone(),
+                method: None,
+                params: None,
+                result: Some(json!({
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": { "tools": {} },
+                    "serverInfo": { "name": "mock", "version": "1.0" }
+                })),
+                error: None,
+            };
+            server_transport.send(&resp).await.unwrap();
+
+            let _ = server_transport.receive().await.unwrap();
+
+            let req = server_transport.receive().await.unwrap();
+            let resp = JsonRpcMessage {
+                jsonrpc: "2.0".to_string(),
+                id: req.id.clone(),
+                method: None,
+                params: None,
+                result: Some(json!({
+                    "tools": [{
+                        "name": "slow_tool",
+                        "description": "Slow tool",
+                        "inputSchema": {"type": "object"}
+                    }]
+                })),
+                error: None,
+            };
+            server_transport.send(&resp).await.unwrap();
+
+            let _ = server_transport.receive().await.unwrap();
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        });
+
+        let mut client = MCPClient::new(Box::new(client_transport), "mock-server");
+        client.initialize().await.unwrap();
+        let mcp_tools = client.list_tools().await.unwrap();
+
+        let mut manager = ExtensionManager::new();
+        for tool in &mcp_tools {
+            manager
+                .tools
+                .push(("mock-server".to_string(), tool.clone()));
+        }
+        manager
+            .clients
+            .insert("mock-server".to_string(), Arc::new(Mutex::new(client)));
+
+        let err = ExtensionManager::call_tool_with_timeout(
+            manager.clients.get("mock-server").unwrap(),
+            "mock-server",
+            "slow_tool",
+            json!({}),
+            Duration::from_millis(20),
+        )
+        .await
+        .unwrap_err();
+
+        assert!(err.to_string().contains("timed out"));
         let _ = server_handle.await;
     }
 

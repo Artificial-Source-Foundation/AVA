@@ -219,6 +219,12 @@ pub fn parse_responses_api_stream_chunk(payload: &Value) -> Option<StreamChunk> 
                         .or_else(|| item.get("function").and_then(|f| f.get("name")))
                         .and_then(Value::as_str)?
                         .to_string();
+                    let arguments_delta = item
+                        .get("arguments")
+                        .or_else(|| item.get("function").and_then(|f| f.get("arguments")))
+                        .and_then(Value::as_str)
+                        .filter(|arguments| !arguments.is_empty())
+                        .map(String::from);
 
                     // The Responses API puts the output array position in the top-level
                     // `output_index` of the event (same as delta events and output_item.added),
@@ -242,7 +248,7 @@ pub fn parse_responses_api_stream_chunk(payload: &Value) -> Option<StreamChunk> 
                                 call_id
                             }),
                             name: Some(name),
-                            arguments_delta: None,
+                            arguments_delta,
                         }),
                         ..Default::default()
                     })
@@ -625,9 +631,7 @@ mod tests {
         let tc = chunk.tool_call.unwrap();
         assert_eq!(tc.id.as_deref(), Some("call_abc"));
         assert_eq!(tc.name.as_deref(), Some("read"));
-        // arguments_delta is None -- arguments were already streamed via delta events.
-        // Emitting them again here would duplicate them in the accumulator.
-        assert_eq!(tc.arguments_delta, None);
+        assert_eq!(tc.arguments_delta.as_deref(), Some("{\"path\":\"/tmp\"}"));
     }
 
     #[test]

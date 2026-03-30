@@ -66,8 +66,10 @@ mod tests {
 
     #[test]
     fn test_recording_duration() {
-        let mut state = VoiceState::default();
-        state.recording_start = Some(Instant::now());
+        let state = VoiceState {
+            recording_start: Some(Instant::now()),
+            ..VoiceState::default()
+        };
         // Should be very small but > 0
         std::thread::sleep(std::time::Duration::from_millis(10));
         assert!(state.recording_duration() > 0.0);

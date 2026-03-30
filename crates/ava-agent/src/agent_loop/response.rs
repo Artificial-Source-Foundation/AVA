@@ -52,11 +52,67 @@ pub(super) fn accumulate_tool_call(
         acc.name.clone_from(name);
     }
     if let Some(ref args) = tc.arguments_delta {
-        acc.arguments_json.push_str(args);
+        merge_tool_arguments(&mut acc.arguments_json, args);
     }
 }
 
+fn merge_tool_arguments(existing: &mut String, incoming: &str) {
+    if incoming.is_empty() {
+        return;
+    }
+
+    if existing.is_empty() {
+        existing.push_str(incoming);
+        return;
+    }
+
+    if existing == incoming {
+        return;
+    }
+
+    let parsed_existing = serde_json::from_str::<Value>(existing).ok();
+    let parsed_incoming = serde_json::from_str::<Value>(incoming).ok();
+
+    if let Some(incoming_value) = parsed_incoming {
+        if parsed_existing.as_ref() == Some(&incoming_value) {
+            return;
+        }
+
+        existing.clear();
+        existing.push_str(incoming);
+        return;
+    }
+
+    if parsed_existing.is_some() {
+        if existing.trim() == "{}" {
+            existing.clear();
+            existing.push_str(incoming);
+            return;
+        }
+
+        // Some providers flush a syntactically complete JSON object before
+        // streaming one last `,<field>:...}` fragment. Re-open the object so
+        // the trailing delta can be stitched back in instead of being dropped.
+        if incoming.trim_start().starts_with(',') && existing.trim_end().ends_with('}') {
+            while existing.ends_with(char::is_whitespace) {
+                existing.pop();
+            }
+            if existing.ends_with('}') {
+                existing.pop();
+            }
+        }
+
+        existing.push_str(incoming);
+        return;
+    }
+
+    existing.push_str(incoming);
+}
+
 pub(super) fn finalize_tool_calls(accumulators: Vec<ToolCallAccumulator>) -> Vec<ToolCall> {
+    let mut accumulators = accumulators;
+    accumulators.sort_by_key(|acc| acc.index);
+
     accumulators
         .into_iter()
         // Skip accumulators with no name — these are incomplete fragments from
@@ -65,8 +121,19 @@ pub(super) fn finalize_tool_calls(accumulators: Vec<ToolCallAccumulator>) -> Vec
         // name back to the Responses API triggers a 400 "empty_string" error.
         .filter(|acc| !acc.name.is_empty())
         .map(|acc| {
-            let arguments =
-                serde_json::from_str(&acc.arguments_json).unwrap_or(serde_json::json!({}));
+            let arguments = match serde_json::from_str(&acc.arguments_json) {
+                Ok(arguments) => arguments,
+                Err(error) => {
+                    warn!(
+                        tool_index = acc.index,
+                        tool_name = %acc.name,
+                        error = %error,
+                        payload_len = acc.arguments_json.len(),
+                        "failed to parse streamed tool arguments; falling back to empty object"
+                    );
+                    serde_json::json!({})
+                }
+            };
             ToolCall {
                 id: if acc.id.is_empty() {
                     Uuid::new_v4().to_string()
@@ -82,15 +149,37 @@ pub(super) fn finalize_tool_calls(accumulators: Vec<ToolCallAccumulator>) -> Vec
 
 pub(super) fn parse_tool_calls(content: &str) -> Result<Vec<ToolCall>> {
     let Ok(value) = serde_json::from_str::<Value>(content) else {
+        if looks_like_tool_response(content) {
+            return Err(AvaError::SerializationError(format!(
+                "malformed tool response envelope: {}",
+                truncate_tool_response_preview(content)
+            )));
+        }
         return Ok(Vec::new());
     };
 
     let calls = if let Some(raw_calls) = value.get("tool_calls") {
-        serde_json::from_value::<Vec<ToolCallEnvelope>>(raw_calls.clone())
-            .map_err(|error| AvaError::SerializationError(error.to_string()))?
+        match serde_json::from_value::<Vec<ToolCallEnvelope>>(raw_calls.clone()) {
+            Ok(calls) => calls,
+            Err(error) => {
+                warn!(
+                    error = %error,
+                    "tool response had invalid tool_calls schema, treating it as plain text"
+                );
+                Vec::new()
+            }
+        }
     } else if let Some(raw_call) = value.get("tool_call") {
-        vec![serde_json::from_value::<ToolCallEnvelope>(raw_call.clone())
-            .map_err(|error| AvaError::SerializationError(error.to_string()))?]
+        match serde_json::from_value::<ToolCallEnvelope>(raw_call.clone()) {
+            Ok(call) => vec![call],
+            Err(error) => {
+                warn!(
+                    error = %error,
+                    "tool response had invalid tool_call schema, treating it as plain text"
+                );
+                Vec::new()
+            }
+        }
     } else {
         Vec::new()
     };
@@ -103,6 +192,34 @@ pub(super) fn parse_tool_calls(content: &str) -> Result<Vec<ToolCall>> {
             arguments: call.arguments,
         })
         .collect())
+}
+
+fn looks_like_tool_response(content: &str) -> bool {
+    let trimmed = content.trim();
+    (trimmed.starts_with('{') || trimmed.starts_with('['))
+        && (trimmed.contains("\"tool_calls\"") || trimmed.contains("\"tool_call\""))
+}
+
+fn truncate_tool_response_preview(content: &str) -> String {
+    let trimmed = content.trim();
+    if trimmed.chars().count() <= 160 {
+        trimmed.to_string()
+    } else {
+        let preview: String = trimmed.chars().take(160).collect();
+        format!("{preview}...")
+    }
+}
+
+pub(super) fn request_dedup_hash(messages: &[Message]) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    // This is intentionally lightweight: we only need a short-lived guard
+    // against immediate duplicate turns, not a globally collision-resistant key.
+    messages.len().hash(&mut hasher);
+    if let Some(last) = messages.last() {
+        std::mem::discriminant(&last.role).hash(&mut hasher);
+        last.content.hash(&mut hasher);
+    }
+    hasher.finish()
 }
 
 /// Tools allowed in Plan mode. The LLM only sees these — write/edit are hidden.
@@ -200,11 +317,8 @@ impl AgentLoop {
             return base;
         };
 
-        if !pm
-            .lock()
-            .await
-            .has_hook_subscribers(ava_plugin::HookEvent::ToolDefinition)
-        {
+        let mut pm = pm.lock().await;
+        if !pm.has_hook_subscribers(ava_plugin::HookEvent::ToolDefinition) {
             let mut cache = self
                 .cached_hooked_tool_defs
                 .lock()
@@ -225,7 +339,7 @@ impl AgentLoop {
             })
             .collect();
 
-        let modified = pm.lock().await.apply_tool_definition_hook(tool_json).await;
+        let modified = pm.apply_tool_definition_hook(tool_json).await;
 
         // Deserialise back to Tool structs.
         let tools: Vec<_> = modified
@@ -264,21 +378,16 @@ impl AgentLoop {
     ) -> Result<(String, Vec<ToolCall>, Option<TokenUsage>)> {
         // Dedup guard: skip if identical request within 2s
         // Only send agent-visible messages to the LLM (compacted messages excluded).
-        let messages: Vec<Message> = self
+        let mut messages: Vec<Message> = self
             .context
             .get_messages()
             .iter()
             .filter(|m| m.agent_visible)
             .cloned()
             .collect();
+        super::completion::ensure_tool_call_consistency(&mut messages);
         let messages = messages.as_slice();
-        let hash = {
-            let mut hasher = DefaultHasher::new();
-            if let Some(last) = messages.last() {
-                last.content.hash(&mut hasher);
-            }
-            hasher.finish()
-        };
+        let hash = request_dedup_hash(messages);
         if let (Some(prev_hash), Some(prev_time)) = (self.last_request_hash, self.last_request_time)
         {
             if hash == prev_hash && prev_time.elapsed().as_secs() < 2 {
@@ -332,9 +441,6 @@ impl AgentLoop {
                 self.last_request_hash = Some(hash);
                 self.last_request_time = Some(Instant::now());
             }
-        } else {
-            self.last_request_hash = Some(hash);
-            self.last_request_time = Some(Instant::now());
         }
 
         result
@@ -350,21 +456,16 @@ impl AgentLoop {
 
         // Dedup guard
         // Only send agent-visible messages to the LLM (compacted messages excluded).
-        let messages: Vec<Message> = self
+        let mut messages: Vec<Message> = self
             .context
             .get_messages()
             .iter()
             .filter(|m| m.agent_visible)
             .cloned()
             .collect();
+        super::completion::ensure_tool_call_consistency(&mut messages);
         let messages = messages.as_slice();
-        let hash = {
-            let mut hasher = DefaultHasher::new();
-            if let Some(last) = messages.last() {
-                last.content.hash(&mut hasher);
-            }
-            hasher.finish()
-        };
+        let hash = request_dedup_hash(messages);
         if let (Some(prev_hash), Some(prev_time)) = (self.last_request_hash, self.last_request_time)
         {
             if hash == prev_hash && prev_time.elapsed().as_secs() < 2 {
@@ -432,11 +533,256 @@ impl AgentLoop {
                 self.last_request_hash = Some(hash);
                 self.last_request_time = Some(Instant::now());
             }
-        } else {
-            self.last_request_hash = Some(hash);
-            self.last_request_time = Some(Instant::now());
         }
 
         result
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::pin::Pin;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    use async_trait::async_trait;
+    use ava_context::ContextManager;
+    use ava_tools::registry::ToolRegistry;
+    use ava_types::Role;
+    use futures::Stream;
+
+    use super::*;
+
+    struct CountingProvider {
+        calls: Arc<AtomicUsize>,
+        fail: bool,
+    }
+
+    #[async_trait]
+    impl crate::llm_trait::LLMProvider for CountingProvider {
+        async fn generate(&self, _messages: &[Message]) -> Result<String> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            if self.fail {
+                Err(AvaError::TimeoutError("transient failure".to_string()))
+            } else {
+                Ok("ok".to_string())
+            }
+        }
+
+        async fn generate_stream(
+            &self,
+            _messages: &[Message],
+        ) -> Result<Pin<Box<dyn Stream<Item = ava_types::StreamChunk> + Send>>> {
+            unreachable!("streaming is not used in these tests")
+        }
+
+        fn estimate_tokens(&self, input: &str) -> usize {
+            input.len()
+        }
+
+        fn estimate_cost(&self, _input_tokens: usize, _output_tokens: usize) -> f64 {
+            0.0
+        }
+
+        fn model_name(&self) -> &str {
+            "counting-provider"
+        }
+    }
+
+    fn test_config() -> super::super::AgentConfig {
+        super::super::AgentConfig {
+            max_turns: 1,
+            max_budget_usd: 0.0,
+            token_limit: 4_096,
+            provider: String::new(),
+            model: "mock-model".to_string(),
+            max_cost_usd: 1.0,
+            loop_detection: true,
+            custom_system_prompt: None,
+            thinking_level: ThinkingLevel::Off,
+            thinking_budget_tokens: None,
+            system_prompt_suffix: None,
+            project_root: None,
+            enable_dynamic_rules: false,
+            extended_tools: false,
+            plan_mode: false,
+            auto_compact: true,
+            post_edit_validation: None,
+            stream_timeout_secs: 90,
+            prompt_caching: true,
+        }
+    }
+
+    #[test]
+    fn finalize_tool_calls_sorts_by_stream_index() {
+        let tool_calls = finalize_tool_calls(vec![
+            ToolCallAccumulator {
+                index: 2,
+                id: "call-3".to_string(),
+                name: "third".to_string(),
+                arguments_json: r#"{"path":"/tmp/three"}"#.to_string(),
+            },
+            ToolCallAccumulator {
+                index: 0,
+                id: "call-1".to_string(),
+                name: "first".to_string(),
+                arguments_json: r#"{"path":"/tmp/one"}"#.to_string(),
+            },
+            ToolCallAccumulator {
+                index: 1,
+                id: "call-2".to_string(),
+                name: "second".to_string(),
+                arguments_json: r#"{"path":"/tmp/two"}"#.to_string(),
+            },
+        ]);
+
+        let ordered_names: Vec<&str> = tool_calls.iter().map(|call| call.name.as_str()).collect();
+        assert_eq!(ordered_names, vec!["first", "second", "third"]);
+    }
+
+    #[test]
+    fn accumulate_tool_call_prefers_complete_arguments_from_done_event() {
+        let mut accumulators = Vec::new();
+
+        accumulate_tool_call(
+            &mut accumulators,
+            &StreamToolCall {
+                index: 0,
+                id: Some("call-1".to_string()),
+                name: Some("glob".to_string()),
+                arguments_delta: None,
+            },
+        );
+        accumulate_tool_call(
+            &mut accumulators,
+            &StreamToolCall {
+                index: 0,
+                id: Some("call-1".to_string()),
+                name: Some("glob".to_string()),
+                arguments_delta: Some("{\"pattern\":\"**/*.md\"}".to_string()),
+            },
+        );
+
+        let tool_calls = finalize_tool_calls(accumulators);
+        assert_eq!(tool_calls.len(), 1);
+        assert_eq!(
+            tool_calls[0].arguments,
+            serde_json::json!({"pattern": "**/*.md"})
+        );
+    }
+
+    #[test]
+    fn accumulate_tool_call_ignores_duplicate_complete_arguments() {
+        let mut accumulators = Vec::new();
+
+        accumulate_tool_call(
+            &mut accumulators,
+            &StreamToolCall {
+                index: 0,
+                id: Some("call-1".to_string()),
+                name: Some("glob".to_string()),
+                arguments_delta: Some("{\"pattern\":\"**/*.md\"}".to_string()),
+            },
+        );
+        accumulate_tool_call(
+            &mut accumulators,
+            &StreamToolCall {
+                index: 0,
+                id: Some("call-1".to_string()),
+                name: Some("glob".to_string()),
+                arguments_delta: Some("{\"pattern\":\"**/*.md\"}".to_string()),
+            },
+        );
+
+        let tool_calls = finalize_tool_calls(accumulators);
+        assert_eq!(tool_calls.len(), 1);
+        assert_eq!(
+            tool_calls[0].arguments,
+            serde_json::json!({"pattern": "**/*.md"})
+        );
+    }
+
+    #[test]
+    fn parse_tool_calls_accepts_plain_text_responses() {
+        let calls = parse_tool_calls("I checked the file and it looks good.").unwrap();
+        assert!(calls.is_empty());
+    }
+
+    #[test]
+    fn merge_tool_arguments_keeps_appending_after_valid_partial_json() {
+        let mut existing = r#"{"pattern":"*.rs"}"#.to_string();
+        merge_tool_arguments(&mut existing, r#","path":"src"}"#);
+        assert_eq!(existing, r#"{"pattern":"*.rs","path":"src"}"#);
+    }
+
+    #[test]
+    fn parse_tool_calls_rejects_malformed_tool_envelope() {
+        let error = parse_tool_calls("{\"tool_calls\":[")
+            .expect_err("malformed tool envelope should error");
+        assert!(error
+            .to_string()
+            .contains("malformed tool response envelope"));
+    }
+
+    #[test]
+    fn parse_tool_calls_treats_schema_mismatches_as_plain_text() {
+        let calls = parse_tool_calls("{\"tool_calls\":\"not-an-array\"}").unwrap();
+        assert!(calls.is_empty());
+    }
+
+    #[tokio::test]
+    async fn generate_response_does_not_cache_failed_requests() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let provider = CountingProvider {
+            calls: calls.clone(),
+            fail: true,
+        };
+        let mut agent = AgentLoop::new(
+            Box::new(provider),
+            ToolRegistry::new(),
+            ContextManager::new(4_096),
+            test_config(),
+        );
+        agent
+            .context
+            .add_message(Message::new(Role::User, "same request"));
+
+        assert!(agent.generate_response().await.is_err());
+        assert!(agent.generate_response().await.is_err());
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        assert!(agent.last_request_hash.is_none());
+        assert!(agent.last_request_time.is_none());
+    }
+
+    #[tokio::test]
+    async fn generate_response_hash_changes_when_message_count_changes() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let provider = CountingProvider {
+            calls: calls.clone(),
+            fail: false,
+        };
+        let mut agent = AgentLoop::new(
+            Box::new(provider),
+            ToolRegistry::new(),
+            ContextManager::new(4_096),
+            test_config(),
+        );
+        agent.context.replace_messages(vec![
+            Message::new(Role::System, "system"),
+            Message::new(Role::User, "same request"),
+        ]);
+
+        let first = agent.generate_response().await.unwrap();
+        assert_eq!(first.0, "ok");
+
+        agent.context.replace_messages(vec![
+            Message::new(Role::System, "system"),
+            Message::new(Role::Assistant, "intermediate"),
+            Message::new(Role::User, "same request"),
+        ]);
+
+        let second = agent.generate_response().await.unwrap();
+        assert_eq!(second.0, "ok");
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
     }
 }

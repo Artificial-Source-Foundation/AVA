@@ -51,12 +51,11 @@ export const Toggle: Component<ToggleProps> = (props) => {
         class={`
           relative inline-flex shrink-0
           items-center
-          rounded-full
           w-[44px] h-[24px]
-          bg-[var(--gray-5)]
+          rounded-full
           transition-colors duration-[var(--duration-fast)] ease-[var(--ease-out)]
           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--background)]
-          data-[checked]:bg-[var(--accent)]
+          bg-[var(--surface-overlay)] data-[checked]:bg-[var(--accent)]
           data-[disabled]:cursor-not-allowed
         `}
       >
@@ -65,13 +64,13 @@ export const Toggle: Component<ToggleProps> = (props) => {
             pointer-events-none
             block
             rounded-full
-            bg-white
             shadow-sm
             ring-0
             w-[20px] h-[20px]
             transition-transform duration-[var(--duration-normal)] ease-[var(--ease-spring)]
             translate-x-[2px]
             data-[checked]:translate-x-[22px]
+            bg-[var(--text-tertiary)] data-[checked]:bg-[var(--text-on-accent)]
           `}
         />
       </Switch.Control>

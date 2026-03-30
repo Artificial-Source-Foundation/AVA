@@ -8,14 +8,17 @@
  * ≤5 items visible at once. Font: 11px.
  */
 
-import { Activity, AlertCircle, AlertTriangle, Archive, Loader2, MessageSquare } from 'lucide-solid'
+import { AlertCircle, AlertTriangle, Archive, Loader2, MessageSquare } from 'lucide-solid'
 import { type Accessor, type Component, createMemo, createSignal, Show } from 'solid-js'
 import { useNotification } from '../../../contexts/notification'
 import { useAgent } from '../../../hooks/useAgent'
 import { useElapsedTimer } from '../../../hooks/useElapsedTimer'
 import { formatCost } from '../../../lib/cost'
 import { formatSeconds } from '../../../lib/format-time'
-import { getCoreBudget } from '../../../services/core-bridge'
+import {
+  applyCompactionResult,
+  requestConversationCompaction,
+} from '../../../services/context-compaction'
 import { useDiagnostics } from '../../../stores/diagnostics'
 import { useSession } from '../../../stores/session'
 import { useSettings } from '../../../stores/settings'
@@ -24,8 +27,6 @@ import { summarizeAction } from '../tool-call-utils'
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-const fmt = (n: number): string => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n))
 
 // ---------------------------------------------------------------------------
 // Props
@@ -43,7 +44,7 @@ export interface StatusBarProps {
 
 export const StatusBar: Component<StatusBarProps> = (props) => {
   const sessionStore = useSession()
-  const { settings, updateSettings } = useSettings()
+  const { settings } = useSettings()
   const { diagnostics, hasDiagnostics } = useDiagnostics()
   const agent = useAgent()
   const notify = useNotification()
@@ -67,24 +68,13 @@ export const StatusBar: Component<StatusBarProps> = (props) => {
     return null
   })
 
-  const showTokens = (): boolean => settings().ui.showTokenCount
-  const toggleTokens = (): void => {
-    updateSettings({ ui: { ...settings().ui, showTokenCount: !showTokens() } })
-  }
-
-  const tokenDisplay = (): string => {
-    const budgetUsed = contextUsage().used
-    if (budgetUsed > 0) return fmt(budgetUsed)
-    return '0'
-  }
-
   const percentage = (): number => contextUsage().percentage
 
   const barColor = (): string => {
     const pct = percentage()
     if (pct >= 90) return 'var(--error)'
     if (pct >= 70) return 'var(--warning)'
-    return 'var(--success, #22c55e)'
+    return 'var(--success)'
   }
 
   const contextTooltip = (): string => {
@@ -146,65 +136,29 @@ export const StatusBar: Component<StatusBarProps> = (props) => {
           title={contextTooltip()}
         >
           <div
-            class="h-full rounded-full transition-all duration-500"
+            class="h-full w-full origin-left rounded-full transition-transform duration-500"
             style={{
-              width: `${Math.min(100, percentage())}%`,
+              transform: `scaleX(${Math.min(100, percentage()) / 100})`,
               'background-color': barColor(),
             }}
           />
         </div>
       </Show>
 
-      {/* ── IDLE STATE: token count · cost · context % · [compact] · [diagnostics] ── */}
+      {/* ── IDLE STATE: minimal — just stash if present ── */}
       <Show when={!isRunning()}>
-        {/* 1. Token count (togglable) */}
-        <button
-          type="button"
-          onClick={toggleTokens}
-          class="inline-flex items-center gap-1 hover:text-[var(--text-secondary)] transition-colors"
-          title={showTokens() ? 'Hide token details' : 'Show token details'}
-        >
-          <Activity class="w-3 h-3" />
-          <span class="tabular-nums">{tokenDisplay()}</span>
-        </button>
-
-        {/* 2. Session cost */}
+        {/* Session cost (subtle, only when non-zero) */}
         <Show when={sessionTokenStats().totalCost > 0}>
-          <span class="text-[var(--text-muted)]">&middot;</span>
           <span
-            class="tabular-nums text-[var(--success)]"
+            class="tabular-nums font-[var(--font-ui-mono)] text-[var(--text-muted)]"
+            style={{ 'font-size': '10px' }}
             title={`Session total: ${formatCost(sessionTokenStats().totalCost)}`}
           >
             {formatCost(sessionTokenStats().totalCost)}
           </span>
         </Show>
 
-        {/* 3. Context bar + % (always visible when showTokens) */}
-        <Show when={showTokens()}>
-          <span class="text-[var(--text-muted)]">&middot;</span>
-          <div
-            class="w-16 h-1.5 bg-[var(--surface-raised)] rounded-full overflow-hidden cursor-default"
-            title={contextTooltip()}
-          >
-            <div
-              class="h-full rounded-full transition-all duration-500"
-              style={{
-                width: `${Math.min(100, percentage())}%`,
-                'background-color': barColor(),
-              }}
-            />
-          </div>
-          <span
-            class="tabular-nums cursor-default"
-            title={contextTooltip()}
-            classList={{
-              'text-[var(--error)]': percentage() >= 90,
-              'text-[var(--warning)]': percentage() >= 70 && percentage() < 90,
-            }}
-          >
-            {percentage().toFixed(0)}%
-          </span>
-        </Show>
+        {/* Context bar removed — shown in title bar instead */}
 
         {/* 4. Compact button (pill style, shown at threshold) */}
         <Show when={percentage() >= settings().generation.compactionThreshold}>
@@ -215,29 +169,9 @@ export const StatusBar: Component<StatusBarProps> = (props) => {
               if (isCompacting()) return
               setIsCompacting(true)
               try {
-                const budget = getCoreBudget()
-                if (!budget) return
-                const msgs = messages()
-                if (msgs.length <= 4) return
-                const coreMessages = msgs.map((m) => ({
-                  id: m.id,
-                  role: m.role as 'user' | 'assistant' | 'system',
-                  content: m.content,
-                }))
-                const result = await budget.compact(coreMessages)
-                if (result.tokensSaved === 0) return
-                const keptIds = new Set(result.messages.map((m) => m.id))
-                sessionStore.setMessages(msgs.filter((m) => keptIds.has(m.id)))
-                budget.clear()
-                for (const m of result.messages) budget.addMessage(m.id, m.content)
-                window.dispatchEvent(
-                  new CustomEvent('ava:compacted', {
-                    detail: {
-                      removed: result.originalCount - result.compactedCount,
-                      tokensSaved: result.tokensSaved,
-                    },
-                  })
-                )
+                if (messages().length <= 4) return
+                const result = await requestConversationCompaction()
+                applyCompactionResult(result, 'manual')
               } catch (err) {
                 const msg = err instanceof Error ? err.message : 'Unknown error'
                 notify.error('Compaction failed', msg)

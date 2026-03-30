@@ -71,22 +71,6 @@ pub struct CliArgs {
     #[arg(long, default_value = "off")]
     pub thinking: String,
 
-    /// Use multi-agent Director mode (Praxis) instead of single AgentStack
-    #[arg(long, alias = "praxis")]
-    pub multi_agent: bool,
-
-    /// Run scouts and create a plan but don't execute (multi-agent mode only)
-    #[arg(long)]
-    pub plan_only: bool,
-
-    /// Consult the Board of Directors (multi-model consensus) before planning
-    #[arg(long)]
-    pub board: bool,
-
-    /// Run a workflow pipeline (plan-code-review, code-review, plan-code)
-    #[arg(long)]
-    pub workflow: Option<String>,
-
     /// Disable automatic update checks on startup
     #[arg(long)]
     pub no_update_check: bool,
@@ -99,7 +83,8 @@ pub struct CliArgs {
     #[arg(long)]
     pub image: Vec<String>,
 
-    /// Run a code review pass after the agent completes (catches bugs in generated code)
+    /// Force a code review pass after the agent completes (for CI pipelines).
+    /// Without this flag, the agent decides when to self-review via subagent.
     #[arg(long)]
     pub review: bool,
 
@@ -126,6 +111,10 @@ pub struct CliArgs {
     /// Benchmark language filter: rust, python, js, go (comma-separated, default: all)
     #[arg(long)]
     pub language: Option<String>,
+
+    /// Benchmark task filter: comma-separated task names or substrings
+    #[arg(long)]
+    pub task_filter: Option<String>,
 
     /// Run harnessed-pair benchmark (SOTA director + fast worker)
     #[arg(long)]
@@ -177,10 +166,6 @@ impl CliArgs {
             || self.resume
             || self.session.is_some()
             || self.command.is_some()
-            || self.multi_agent
-            || self.plan_only
-            || self.board
-            || self.workflow.is_some()
             || self.watch
             || self.voice
             || self.benchmark
@@ -249,10 +234,6 @@ mod tests {
             watch_path: Vec::new(),
             trust: false,
             thinking: "off".to_string(),
-            multi_agent: false,
-            plan_only: false,
-            board: false,
-            workflow: None,
             no_update_check: false,
             acp_server: false,
             image: Vec::new(),
@@ -263,6 +244,7 @@ mod tests {
             judges: None,
             suite: "all".to_string(),
             language: None,
+            task_filter: None,
             harness: false,
             director: None,
             worker: None,
@@ -322,6 +304,11 @@ pub enum Command {
         #[command(subcommand)]
         action: PluginCommand,
     },
+    /// HQ setup and headless utilities
+    Hq {
+        #[command(subcommand)]
+        action: HqCommand,
+    },
     /// Check for and install updates
     Update,
     /// Check for and install updates (alias)
@@ -335,6 +322,19 @@ pub enum Command {
         /// Host/IP to bind to
         #[arg(long, default_value = "0.0.0.0")]
         host: String,
+    },
+}
+
+#[derive(Debug, Clone, Subcommand)]
+pub enum HqCommand {
+    /// Initialize `.ava/HQ/` memory for the current project
+    Init {
+        /// Preferred Director model to record in HQ memory
+        #[arg(long)]
+        director_model: Option<String>,
+        /// Overwrite existing HQ memory files
+        #[arg(long)]
+        force: bool,
     },
 }
 
@@ -447,12 +447,12 @@ pub enum FailOnSeverity {
 }
 
 impl FailOnSeverity {
-    pub fn to_severity(self) -> ava_praxis::Severity {
+    pub fn to_severity(self) -> ava_hq::Severity {
         match self {
-            Self::Critical => ava_praxis::Severity::Critical,
-            Self::Warning => ava_praxis::Severity::Warning,
-            Self::Suggestion => ava_praxis::Severity::Suggestion,
-            Self::Any => ava_praxis::Severity::Nitpick,
+            Self::Critical => ava_hq::Severity::Critical,
+            Self::Warning => ava_hq::Severity::Warning,
+            Self::Suggestion => ava_hq::Severity::Suggestion,
+            Self::Any => ava_hq::Severity::Nitpick,
         }
     }
 }

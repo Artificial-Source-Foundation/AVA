@@ -2,6 +2,7 @@ import type { Setter } from 'solid-js'
 import { batch } from 'solid-js'
 import { debugLog } from '../lib/debug-log'
 import { log } from '../lib/logger'
+import { useHq } from '../stores/hq'
 import { useLayout } from '../stores/layout'
 import { usePlanOverlay } from '../stores/planOverlayStore'
 import type { ToolCall } from '../types'
@@ -15,6 +16,8 @@ import type {
   SubmitGoalResult,
   TodoItem,
   TodoUpdateEvent,
+  ToolCallEvent,
+  ToolResultEvent,
 } from '../types/rust-ipc'
 import type { ThinkingSegment } from './use-rust-agent'
 
@@ -35,7 +38,7 @@ export interface CompletionResolver {
 interface EventHandlerDeps {
   metrics: StreamingMetrics
   completion: CompletionResolver
-  setEvents: Setter<AgentEvent[]>
+  appendEvent: (event: AgentEvent) => void
   setStreamingContent: Setter<string>
   setThinkingContent: Setter<string>
   setActiveToolCalls: Setter<ToolCall[]>
@@ -62,7 +65,7 @@ export function createAgentEventHandler(deps: EventHandlerDeps): (event: AgentEv
   const {
     metrics,
     completion,
-    setEvents,
+    appendEvent,
     setStreamingContent,
     setThinkingContent,
     setActiveToolCalls,
@@ -78,27 +81,33 @@ export function createAgentEventHandler(deps: EventHandlerDeps): (event: AgentEv
   } = deps
 
   return (event: AgentEvent): void => {
-    setEvents((prev) => [...prev, event])
+    const timedEvent = {
+      ...event,
+      timestamp: (event as { timestamp?: number }).timestamp ?? Date.now(),
+    } as unknown as AgentEvent
+    appendEvent(timedEvent)
 
     debugLog(
       'event',
-      event.type,
-      event.type === 'token' ? `(${(event.content as string)?.length ?? 0} chars)` : event
+      timedEvent.type,
+      timedEvent.type === 'token'
+        ? `(${(timedEvent.content as string)?.length ?? 0} chars)`
+        : timedEvent
     )
 
-    switch (event.type) {
+    switch (timedEvent.type) {
       case 'token':
         metrics.chunkCount++
-        metrics.totalTextLen += (event.content as string)?.length ?? 0
+        metrics.totalTextLen += (timedEvent.content as string)?.length ?? 0
         if (!metrics.firstTokenLogged && metrics.runStartTime > 0) {
           log.info('perf', 'First token latency', { ttftMs: Date.now() - metrics.runStartTime })
           metrics.firstTokenLogged = true
         }
-        setStreamingContent((prev) => prev + event.content)
+        setStreamingContent((prev) => prev + timedEvent.content)
         break
       case 'thinking':
-        debugLog('thinking', 'received:', (event.content as string)?.length ?? 0, 'chars')
-        setThinkingContent((prev) => prev + event.content)
+        debugLog('thinking', 'received:', (timedEvent.content as string)?.length ?? 0, 'chars')
+        setThinkingContent((prev) => prev + timedEvent.content)
         // Track for interleaved segments: accumulate into current block or start new one
         setThinkingSegments((prev) => {
           const last = prev[prev.length - 1]
@@ -106,39 +115,47 @@ export function createAgentEventHandler(deps: EventHandlerDeps): (event: AgentEv
             // Still accumulating into the same thinking block (no tools have been called yet for this block)
             return [
               ...prev.slice(0, -1),
-              { thinking: last.thinking + (event.content as string), toolCallIds: [] },
+              { thinking: last.thinking + (timedEvent.content as string), toolCallIds: [] },
             ]
           }
           // New thinking block (after tool calls or at start)
-          return [...prev, { thinking: event.content as string, toolCallIds: [] }]
+          return [...prev, { thinking: timedEvent.content as string, toolCallIds: [] }]
         })
         break
       case 'tool_call': {
-        log.info('tools', 'Tool call started', { tool: event.name })
+        const toolCallEvent = timedEvent as ToolCallEvent
+        log.info('tools', 'Tool call started', { tool: timedEvent.name })
         debugLog(
           'tools',
           'tool_call:',
-          (event as { name?: string }).name,
-          (event as { args?: unknown }).args
+          (timedEvent as { name?: string }).name,
+          toolCallEvent.args ?? toolCallEvent.arguments
         )
-        metrics.pendingToolNames.push(event.name as string)
-        const newToolId = `${event.name}-${Date.now()}`
+        metrics.pendingToolNames.push(timedEvent.name as string)
+        const newToolId =
+          toolCallEvent.id ?? `${timedEvent.name}-${Date.now()}-${metrics.pendingToolNames.length}`
         // Extract file path from args for file-modifying tools
-        const args = event.args as Record<string, unknown>
+        const args = (toolCallEvent.args ?? toolCallEvent.arguments ?? {}) as Record<
+          string,
+          unknown
+        >
         const filePath = (args.file_path ?? args.filePath ?? args.path ?? args.output_path) as
           | string
           | undefined
-        setActiveToolCalls((prev) => [
-          ...prev,
-          {
-            id: newToolId,
-            name: event.name,
-            args: event.args,
-            status: 'running' as const,
-            startedAt: Date.now(),
-            filePath,
-          },
-        ])
+        setActiveToolCalls((prev) => {
+          if (prev.some((tc) => tc.id === newToolId)) return prev
+          return [
+            ...prev,
+            {
+              id: newToolId,
+              name: timedEvent.name,
+              args,
+              status: 'running' as const,
+              startedAt: Date.now(),
+              filePath,
+            },
+          ]
+        })
         // Associate this tool call with the current thinking segment
         setThinkingSegments((prev) => {
           if (prev.length === 0) {
@@ -154,15 +171,17 @@ export function createAgentEventHandler(deps: EventHandlerDeps): (event: AgentEv
         break
       }
       case 'tool_result': {
+        const toolResultEvent = timedEvent as ToolResultEvent
+        const callId = toolResultEvent.call_id ?? toolResultEvent.callId ?? null
         debugLog(
           'tools',
           'tool_result:',
-          event.is_error ? 'ERROR' : 'OK',
-          (event.content as string)?.slice(0, 120)
+          timedEvent.is_error ? 'ERROR' : 'OK',
+          (timedEvent.content as string)?.slice(0, 120)
         )
         // Parse todos from tool_result content if it looks like a todo_write output.
-        if (!event.is_error) {
-          const content = (event.content as string) ?? ''
+        if (!timedEvent.is_error) {
+          const content = (timedEvent.content as string) ?? ''
           if (content.startsWith('Updated todo list')) {
             try {
               const jsonStart = content.indexOf('[')
@@ -185,8 +204,9 @@ export function createAgentEventHandler(deps: EventHandlerDeps): (event: AgentEv
           }
         }
         setActiveToolCalls((prev) => {
-          // Use indexOf (first running) — results arrive in the same order as tool_call events
-          const firstIdx = prev.findIndex((tc) => tc.status === 'running')
+          const firstIdx = callId
+            ? prev.findIndex((tc) => tc.id === callId)
+            : prev.findIndex((tc) => tc.status === 'running')
           if (firstIdx < 0) return prev
 
           const first = prev[firstIdx]
@@ -194,14 +214,14 @@ export function createAgentEventHandler(deps: EventHandlerDeps): (event: AgentEv
           const durationMs = completedAt - first.startedAt
           log.info('tools', 'Tool call completed', {
             tool: first.name,
-            success: !event.is_error,
+            success: !timedEvent.is_error,
             durationMs,
           })
           log.debug('perf', 'Tool execution time', { tool: first.name, durationMs })
 
           // Build diff data for file-modifying tools from their args
           let diff: { oldContent: string; newContent: string } | undefined = first.diff
-          if (!event.is_error) {
+          if (!timedEvent.is_error) {
             const toolArgs = first.args as Record<string, unknown>
             if (
               first.name === 'edit' ||
@@ -235,8 +255,8 @@ export function createAgentEventHandler(deps: EventHandlerDeps): (event: AgentEv
           const updated = [...prev]
           updated[firstIdx] = {
             ...first,
-            status: event.is_error ? 'error' : 'success',
-            output: event.content,
+            status: timedEvent.is_error ? 'error' : 'success',
+            output: toolResultEvent.content,
             completedAt,
             diff,
           }
@@ -245,11 +265,11 @@ export function createAgentEventHandler(deps: EventHandlerDeps): (event: AgentEv
         break
       }
       case 'progress':
-        log.debug('agent', 'Progress', { message: event.message })
-        setProgressMessage(event.message)
+        log.debug('agent', 'Progress', { message: timedEvent.message })
+        setProgressMessage(timedEvent.message)
         break
       case 'budget_warning': {
-        const bw = event as BudgetWarningEvent
+        const bw = timedEvent as BudgetWarningEvent
         log.warn('agent', 'Budget warning', {
           threshold: bw.thresholdPercent,
           current: bw.currentCostUsd,
@@ -264,7 +284,7 @@ export function createAgentEventHandler(deps: EventHandlerDeps): (event: AgentEv
       }
       case 'token_usage': {
         // Rust serializes as snake_case (input_tokens), TS types say camelCase
-        const tu = event as unknown as Record<string, number>
+        const tu = timedEvent as unknown as Record<string, number>
         const input = tu.input_tokens ?? tu.inputTokens ?? 0
         const output = tu.output_tokens ?? tu.outputTokens ?? 0
         const cost = tu.cost_usd ?? tu.costUsd ?? 0
@@ -302,7 +322,7 @@ export function createAgentEventHandler(deps: EventHandlerDeps): (event: AgentEv
         })
         // Resolve the web-mode completion promise so run() can finalize
         if (completion.resolve) {
-          const completeEvent = event as CompleteEvent
+          const completeEvent = timedEvent as CompleteEvent
           completion.resolve({
             success: true,
             turns: 0,
@@ -312,14 +332,14 @@ export function createAgentEventHandler(deps: EventHandlerDeps): (event: AgentEv
         }
         break
       case 'error':
-        log.error('agent', 'Agent event error', { message: event.message })
+        log.error('agent', 'Agent event error', { message: timedEvent.message })
         log.error('streaming', 'Stream error', {
-          message: event.message,
+          message: timedEvent.message,
           chunks: metrics.chunkCount,
           elapsedMs: Date.now() - metrics.runStartTime,
         })
         batch(() => {
-          setError(event.message)
+          setError(timedEvent.message)
           setIsRunning(false)
         })
         // Resolve the web-mode completion promise on error too
@@ -330,21 +350,21 @@ export function createAgentEventHandler(deps: EventHandlerDeps): (event: AgentEv
         break
 
       case 'plan_created': {
-        debugLog('plan', 'plan_created event', (event as PlanCreatedEvent).plan?.summary)
-        const planEvent = event as PlanCreatedEvent
+        debugLog('plan', 'plan_created event', (timedEvent as PlanCreatedEvent).plan?.summary)
+        const planEvent = timedEvent as PlanCreatedEvent
         setPendingPlan(planEvent.plan)
         break
       }
 
       case 'plan_step_complete': {
-        const stepEvent = event as PlanStepCompleteEvent
+        const stepEvent = timedEvent as PlanStepCompleteEvent
         debugLog('plan', 'plan_step_complete event', stepEvent.step_id)
         usePlanOverlay().markStepComplete(stepEvent.step_id)
         break
       }
 
       case 'todo_update': {
-        const todoEvent = event as TodoUpdateEvent
+        const todoEvent = timedEvent as TodoUpdateEvent
         log.info('todo', 'todo_update received', {
           count: todoEvent.todos?.length ?? 0,
           raw: JSON.stringify(todoEvent).slice(0, 200),
@@ -363,24 +383,31 @@ export function createAgentEventHandler(deps: EventHandlerDeps): (event: AgentEv
         break
       }
 
-      // Praxis events — pass through to events signal for team bridge consumption
-      case 'praxis_worker_started':
-      case 'praxis_worker_progress':
-      case 'praxis_worker_token':
-      case 'praxis_worker_completed':
-      case 'praxis_worker_failed':
-      case 'praxis_all_complete':
-      case 'praxis_summary':
-      case 'praxis_phase_started':
-      case 'praxis_phase_completed':
-      case 'praxis_spec_created':
-      case 'praxis_artifact_created':
-      case 'praxis_conflict_detected':
-        debugLog('team', event.type, (event as { worker_id?: string }).worker_id ?? '')
+      // HQ events — pass through to events signal for team bridge consumption
+      case 'hq_worker_started':
+      case 'hq_worker_progress':
+      case 'hq_worker_token':
+      case 'hq_worker_thinking':
+      case 'hq_worker_tool_call':
+      case 'hq_worker_tool_result':
+      case 'hq_worker_completed':
+      case 'hq_worker_failed':
+      case 'hq_all_complete':
+      case 'hq_summary':
+      case 'hq_phase_started':
+      case 'hq_phase_completed':
+      case 'hq_spec_created':
+      case 'hq_artifact_created':
+      case 'hq_conflict_detected':
+      case 'hq_external_worker_started':
+      case 'hq_external_worker_completed':
+      case 'hq_external_worker_failed':
+        debugLog('team', timedEvent.type, (timedEvent as { worker_id?: string }).worker_id ?? '')
+        useHq().ingestEvent(timedEvent)
         // These are already added to events() signal above — the team bridge
         // in useAgent picks them up via the createEffect on rustAgent.events.
-        // Additional state updates for Praxis completion:
-        if (event.type === 'praxis_all_complete') {
+        // Additional state updates for HQ completion:
+        if (timedEvent.type === 'hq_all_complete') {
           setIsRunning(false)
           if (completion.resolve) {
             completion.resolve({ success: true, turns: 0, sessionId: '' })

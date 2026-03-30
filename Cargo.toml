@@ -15,7 +15,7 @@ members = [
     "crates/ava-sandbox",
     "crates/ava-llm",
     "crates/ava-acp",
-    "crates/ava-praxis",
+    "crates/ava-hq",
     "crates/ava-auth",
     "crates/ava-mcp",
     "crates/ava-session",
@@ -26,7 +26,7 @@ exclude = ["src-tauri"]
 resolver = "2"
 
 [workspace.package]
-version = "2.2.7"
+version = "3.0.0"
 edition = "2021"
 rust-version = "1.75"
 authors = ["ASF Group"]

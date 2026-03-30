@@ -93,10 +93,24 @@ export const AddMCPServerDialog: Component<AddMCPServerDialogProps> = (props) =>
 
   return (
     <Show when={props.open}>
-      <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-        <div class="bg-[var(--surface-overlay)] border border-[var(--border-default)] rounded-[var(--radius-xl)] w-full max-w-lg shadow-2xl overflow-hidden">
+      <div
+        class="fixed inset-0 z-50 flex items-center justify-center"
+        style={{ background: 'var(--modal-overlay)' }}
+      >
+        <div
+          class="w-full max-w-lg overflow-hidden"
+          style={{
+            background: 'var(--modal-surface)',
+            border: '1px solid var(--modal-border)',
+            'border-radius': 'var(--modal-radius-lg)',
+            'box-shadow': 'var(--modal-shadow)',
+          }}
+        >
           {/* Header */}
-          <div class="flex items-center gap-2 px-4 py-3 border-b border-[var(--border-subtle)]">
+          <div
+            class="flex items-center gap-2 px-4 py-3"
+            style={{ 'border-bottom': '1px solid var(--modal-border)' }}
+          >
             <Server class="w-4 h-4 text-[var(--accent)]" />
             <h3 class="text-sm font-semibold text-[var(--text-primary)] flex-1">Add MCP Server</h3>
             <button
@@ -112,7 +126,7 @@ export const AddMCPServerDialog: Component<AddMCPServerDialogProps> = (props) =>
           </div>
 
           {/* Tabs */}
-          <div class="flex border-b border-[var(--border-subtle)]">
+          <div class="flex" style={{ 'border-bottom': '1px solid var(--modal-border)' }}>
             <button
               type="button"
               onClick={() => setTab('presets')}
@@ -193,7 +207,10 @@ export const AddMCPServerDialog: Component<AddMCPServerDialogProps> = (props) =>
 
           {/* Footer */}
           <Show when={tab() === 'manual'}>
-            <div class="flex justify-end gap-2 px-4 py-3 border-t border-[var(--border-subtle)]">
+            <div
+              class="flex justify-end gap-2 px-4 py-3"
+              style={{ 'border-top': '1px solid var(--modal-border)' }}
+            >
               <button
                 type="button"
                 onClick={() => {
@@ -208,7 +225,7 @@ export const AddMCPServerDialog: Component<AddMCPServerDialogProps> = (props) =>
                 type="button"
                 onClick={handleSave}
                 disabled={!canSave()}
-                class="px-3 py-1.5 text-xs font-medium bg-[var(--accent)] text-white rounded-[var(--radius-md)] hover:brightness-110 transition-colors disabled:opacity-50 flex items-center gap-1"
+                class="px-3 py-1.5 text-xs font-medium bg-[var(--accent)] text-white rounded-[var(--radius-md)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-50 flex items-center gap-1"
               >
                 <Plus class="w-3 h-3" />
                 Add Server

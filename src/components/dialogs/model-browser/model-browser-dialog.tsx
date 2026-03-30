@@ -11,7 +11,12 @@ import { Dialog } from '../../ui/Dialog'
 import { ModelBrowserFilters } from './model-browser-filters'
 import { ModelBrowserGrid } from './model-browser-grid'
 import { ModelBrowserHeader } from './model-browser-header'
-import { aggregateModels, filterModels, sortModels } from './model-browser-helpers'
+import {
+  aggregateModels,
+  filterModels,
+  findSelectedModel,
+  sortModels,
+} from './model-browser-helpers'
 import type {
   FilterState,
   ModelBrowserDialogProps,
@@ -35,12 +40,7 @@ export const ModelBrowserDialog: Component<ModelBrowserDialogProps> = (props) =>
   })
 
   const selectedBrowsable = createMemo(() => {
-    const provId = props.selectedProvider?.()
-    return (
-      allModels().find(
-        (m) => m.id === props.selectedModel() && (!provId || m.providerId === provId)
-      ) ?? allModels().find((m) => m.id === props.selectedModel())
-    )
+    return findSelectedModel(allModels(), props.selectedModel(), props.selectedProvider?.() ?? null)
   })
 
   const selectedProvider = createMemo(() =>
@@ -66,7 +66,13 @@ export const ModelBrowserDialog: Component<ModelBrowserDialogProps> = (props) =>
   }
 
   return (
-    <Dialog open={props.open()} onOpenChange={props.onOpenChange} title="Model Browser" size="2xl">
+    <Dialog
+      open={props.open()}
+      onOpenChange={props.onOpenChange}
+      title="Model Browser"
+      size="2xl"
+      class="!max-w-[900px] !max-h-[700px]"
+    >
       <ModelBrowserHeader
         selectedModel={selectedBrowsable()}
         provider={selectedProvider()}

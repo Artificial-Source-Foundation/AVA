@@ -18,7 +18,7 @@ fn backgrounded_run_events_stay_out_of_foreground() {
     app.background_current_agent(app_tx.clone());
 
     // Messages preserved after backgrounding (user msg + system notification)
-    assert!(app.state.messages.messages.len() >= 1);
+    assert!(!app.state.messages.messages.is_empty());
     assert_eq!(app.foreground_run_id, None);
     assert_eq!(app.background_run_routes.get(&42), Some(&1));
 
@@ -42,7 +42,7 @@ fn backgrounded_run_events_stay_out_of_foreground() {
     // Foreground messages preserved (user msg + system notification) — background events don't leak in
     let fg_count = app.state.messages.messages.len();
     assert!(
-        fg_count >= 1 && fg_count <= 2,
+        (1..=2).contains(&fg_count),
         "foreground should have original messages only, got {fg_count}"
     );
     let bg = app.state.background.lock().unwrap();
@@ -111,4 +111,4 @@ fn model_switch_result_updates_state_and_closes_modal() {
 
 // /bg command removed — tests removed
 
-// /praxis command removed — Praxis accessible only via Tab cycling
+// HQ multi-agent support removed from TUI

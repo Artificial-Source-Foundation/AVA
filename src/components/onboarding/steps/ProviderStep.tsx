@@ -1,11 +1,13 @@
 /**
  * Step 2: Connect a Provider
  *
- * Shows 5 provider cards with auth options (OAuth / API Key / Configure).
- * Each card has a colored logo square and provider description.
+ * POPULAR label + 4-column grid of square cards (90px height).
+ * Connected state: green circle-check + accent border + green text.
+ * MORE label + second row with Copilot, OpenRouter, Ollama, "16 more".
+ * Nav: Back <- | dots | Skip + Continue button.
  */
 
-import { Eye, EyeOff, Server } from 'lucide-solid'
+import { CheckCircle, Eye, EyeOff, MoreHorizontal, Server } from 'lucide-solid'
 import { type Component, createSignal, For, Show } from 'solid-js'
 import {
   isOAuthSupported,
@@ -14,7 +16,14 @@ import {
   storeOAuthCredentials,
 } from '../../../services/auth/oauth'
 import type { LLMProvider } from '../../../types/llm'
-import { AnthropicLogo, GoogleLogo, OpenAILogo, OpenRouterLogo } from '../../icons/provider-logos'
+import {
+  AnthropicLogo,
+  CopilotLogo,
+  GoogleLogo,
+  OllamaLogo,
+  OpenAILogo,
+  OpenRouterLogo,
+} from '../../icons/provider-logos'
 
 // ---------------------------------------------------------------------------
 // Data
@@ -23,27 +32,26 @@ import { AnthropicLogo, GoogleLogo, OpenAILogo, OpenRouterLogo } from '../../ico
 interface ProviderDef {
   id: string
   name: string
-  description: string
+  authText: string
   color: string
   logo: Component<{ class?: string }> | null
-  /** null = icon-only (Ollama uses a Lucide icon) */
   useLucideIcon?: boolean
   authOptions: Array<{ label: string; type: 'oauth' | 'apikey' | 'configure' }>
 }
 
-const PROVIDERS: ProviderDef[] = [
+const POPULAR_PROVIDERS: ProviderDef[] = [
   {
     id: 'anthropic',
     name: 'Anthropic',
-    description: 'Claude 4, Sonnet, Haiku',
-    color: '#D97706',
+    authText: 'API Key',
+    color: '#D4A274',
     logo: AnthropicLogo,
     authOptions: [{ label: 'API Key', type: 'apikey' }],
   },
   {
     id: 'openai',
     name: 'OpenAI',
-    description: 'GPT-4.1, o3, o4-mini',
+    authText: 'OAuth \u00B7 API Key',
     color: '#10A37F',
     logo: OpenAILogo,
     authOptions: [
@@ -52,28 +60,46 @@ const PROVIDERS: ProviderDef[] = [
     ],
   },
   {
+    id: 'chatgpt',
+    name: 'ChatGPT',
+    authText: 'OAuth \u00B7 Pro/Plus sub',
+    color: '#10A37F',
+    logo: OpenAILogo,
+    authOptions: [{ label: 'OAuth', type: 'oauth' }],
+  },
+  {
     id: 'google',
-    name: 'Google',
-    description: 'Gemini 2.5 Pro, Flash',
+    name: 'Gemini',
+    authText: 'API Key',
     color: '#4285F4',
     logo: GoogleLogo,
     authOptions: [{ label: 'API Key', type: 'apikey' }],
   },
+]
+
+const MORE_PROVIDERS: ProviderDef[] = [
+  {
+    id: 'copilot',
+    name: 'Copilot',
+    authText: 'OAuth \u00B7 GitHub sub',
+    color: '#1F2328',
+    logo: CopilotLogo,
+    authOptions: [{ label: 'OAuth', type: 'oauth' }],
+  },
   {
     id: 'openrouter',
     name: 'OpenRouter',
-    description: '100+ models, one API key',
-    color: '#6366F1',
+    authText: 'API Key \u00B7 Credits',
+    color: '#FF6200',
     logo: OpenRouterLogo,
     authOptions: [{ label: 'API Key', type: 'apikey' }],
   },
   {
     id: 'ollama',
     name: 'Ollama',
-    description: 'Local models, no API key',
+    authText: 'Local \u00B7 Free',
     color: '#0F172A',
-    logo: null,
-    useLucideIcon: true,
+    logo: OllamaLogo,
     authOptions: [{ label: 'Configure', type: 'configure' }],
   },
 ]
@@ -89,6 +115,70 @@ export interface ProviderStepProps {
   providerKeys: Record<string, string>
   onSetProviderKey: (providerId: string, key: string) => void
 }
+
+// ---------------------------------------------------------------------------
+// ProviderCard sub-component
+// ---------------------------------------------------------------------------
+
+const ProviderCard: Component<{
+  provider: ProviderDef
+  isConnected: boolean
+  isExpanded: boolean
+  showKey: boolean
+  apiKeyValue: string
+  oauthLoading: boolean
+  onToggleExpand: () => void
+  onToggleShowKey: () => void
+  onSetKey: (key: string) => void
+  onAuth: (provider: ProviderDef, type: string) => void
+}> = (cardProps) => (
+  <button
+    type="button"
+    onClick={() => {
+      const firstAuth = cardProps.provider.authOptions[0]
+      if (firstAuth) {
+        cardProps.onAuth(cardProps.provider, firstAuth.type)
+      }
+    }}
+    class="flex flex-col items-start p-3 rounded-xl transition-all text-left"
+    style={{
+      background: 'var(--surface)',
+      border: cardProps.isConnected ? '1px solid var(--accent)' : '1px solid var(--border-subtle)',
+      height: '90px',
+    }}
+  >
+    {/* Top row: logo + optional check */}
+    <div class="flex items-start justify-between w-full mb-auto">
+      <div
+        class="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0"
+        style={{ background: cardProps.provider.color }}
+      >
+        <Show when={cardProps.provider.logo} fallback={<Server class="w-3.5 h-3.5 text-white" />}>
+          {(() => {
+            const Logo = cardProps.provider.logo!
+            return <Logo class="w-3.5 h-3.5 text-white" />
+          })()}
+        </Show>
+      </div>
+      <Show when={cardProps.isConnected}>
+        <CheckCircle class="w-4 h-4" style={{ color: '#22C55E' }} />
+      </Show>
+    </div>
+
+    {/* Name */}
+    <p class="text-xs font-medium text-[var(--text-primary)] mt-1">{cardProps.provider.name}</p>
+
+    {/* Auth text */}
+    <p
+      class="text-[10px] mt-0.5"
+      style={{
+        color: cardProps.isConnected ? '#22C55E' : 'var(--text-muted)',
+      }}
+    >
+      {cardProps.isConnected ? `API Key \u00B7 Connected` : cardProps.provider.authText}
+    </p>
+  </button>
+)
 
 // ---------------------------------------------------------------------------
 // Component
@@ -113,7 +203,6 @@ export const ProviderStep: Component<ProviderStepProps> = (props) => {
       setOauthLoading(provider.id)
       try {
         const result = await startOAuthFlow(provider.id as LLMProvider)
-        // PKCE flow returns OAuthTokens directly; device code returns DeviceCodeResponse
         if ('accessToken' in result) {
           await storeOAuthCredentials(provider.id as LLMProvider, result as OAuthTokens)
         }
@@ -126,119 +215,146 @@ export const ProviderStep: Component<ProviderStepProps> = (props) => {
     }
   }
 
+  const isConnected = (id: string): boolean => Boolean(props.providerKeys[id])
+
   return (
-    <div class="flex flex-col items-center">
+    <div class="flex flex-col items-center w-full max-w-[520px]">
       {/* Header */}
       <h2 class="text-2xl font-bold text-[var(--text-primary)] tracking-tight mb-2">
         Connect a Provider
       </h2>
-      <p class="text-sm text-[var(--text-muted)] mb-8">Add an LLM provider to start chatting</p>
+      <p class="text-sm text-[var(--text-muted)] mb-8">Sign in or add an API key</p>
 
-      {/* Provider cards */}
-      <div class="w-full max-w-[560px] flex flex-col gap-3 mb-8">
-        <For each={PROVIDERS}>
+      {/* POPULAR label */}
+      <p class="text-[9px] font-semibold uppercase tracking-[0.1em] text-[var(--text-muted)] mb-3 self-start">
+        Popular
+      </p>
+
+      {/* 4-column grid */}
+      <div class="w-full grid grid-cols-4 gap-2 mb-5">
+        <For each={POPULAR_PROVIDERS}>
           {(provider) => (
-            <div class="bg-[var(--surface-raised)] border border-[var(--gray-5)] rounded-xl p-4 transition-colors">
-              <div class="flex items-center gap-3">
-                {/* Logo square */}
-                <div
-                  class="w-10 h-10 rounded-[10px] flex items-center justify-center flex-shrink-0"
-                  style={{ background: provider.color }}
-                >
-                  <Show
-                    when={!provider.useLucideIcon && provider.logo}
-                    fallback={<Server class="w-5 h-5 text-white" />}
-                  >
-                    {(() => {
-                      const Logo = provider.logo!
-                      return <Logo class="w-5 h-5 text-white" />
-                    })()}
-                  </Show>
-                </div>
+            <ProviderCard
+              provider={provider}
+              isConnected={isConnected(provider.id)}
+              isExpanded={expandedProvider() === provider.id}
+              showKey={showKey()[provider.id] ?? false}
+              apiKeyValue={props.providerKeys[provider.id] ?? ''}
+              oauthLoading={oauthLoading() === provider.id}
+              onToggleExpand={() =>
+                setExpandedProvider((prev) => (prev === provider.id ? null : provider.id))
+              }
+              onToggleShowKey={() => toggleShowKey(provider.id)}
+              onSetKey={(key) => props.onSetProviderKey(provider.id, key)}
+              onAuth={handleAuth}
+            />
+          )}
+        </For>
+      </div>
 
-                {/* Name + description */}
-                <div class="flex-1 min-w-0">
-                  <p class="text-sm font-medium text-[var(--text-primary)]">{provider.name}</p>
-                  <p class="text-xs text-[var(--text-muted)]">{provider.description}</p>
-                </div>
-
-                {/* Auth buttons */}
-                <div class="flex items-center gap-2 flex-shrink-0">
-                  <For each={provider.authOptions}>
-                    {(opt) => (
-                      <button
-                        type="button"
-                        onClick={() => handleAuth(provider, opt.type)}
-                        disabled={opt.type === 'configure' || oauthLoading() === provider.id}
-                        title={opt.type === 'configure' ? 'Coming soon' : undefined}
-                        class="px-3 py-1.5 text-xs font-medium rounded-lg transition-colors"
-                        classList={{
-                          'bg-[var(--accent)] text-white hover:bg-[var(--accent-hover)]':
-                            opt.type === 'oauth' && oauthLoading() !== provider.id,
-                          'bg-[var(--accent)] text-white opacity-60 cursor-wait':
-                            opt.type === 'oauth' && oauthLoading() === provider.id,
-                          'bg-[var(--gray-5)] text-[var(--text-primary)] hover:bg-[var(--gray-6)]':
-                            opt.type === 'apikey',
-                          'bg-[var(--gray-5)] text-[var(--text-primary)] opacity-40 cursor-not-allowed':
-                            opt.type === 'configure',
-                        }}
-                      >
-                        {oauthLoading() === provider.id ? 'Connecting...' : opt.label}
-                      </button>
-                    )}
-                  </For>
-                </div>
-              </div>
-
-              {/* Expanded API key input */}
-              <Show when={expandedProvider() === provider.id}>
-                <div class="mt-3 pt-3 border-t border-[var(--gray-5)]">
+      {/* Expanded API key input (below grid) */}
+      <Show when={expandedProvider()}>
+        {(expandedId) => {
+          const provider = (): ProviderDef | undefined =>
+            [...POPULAR_PROVIDERS, ...MORE_PROVIDERS].find((p) => p.id === expandedId())
+          return (
+            <Show when={provider()}>
+              {(p) => (
+                <div class="w-full mb-5">
                   <div class="relative">
                     <input
-                      type={showKey()[provider.id] ? 'text' : 'password'}
-                      value={props.providerKeys[provider.id] ?? ''}
-                      onInput={(e) => props.onSetProviderKey(provider.id, e.currentTarget.value)}
-                      placeholder={`Enter ${provider.name} API key...`}
-                      class="w-full px-3 py-2 pr-10 bg-[var(--background)] text-[var(--text-primary)] placeholder-[var(--text-tertiary)] border border-[var(--gray-5)] rounded-lg text-sm outline-none focus:border-[var(--accent)] transition-colors"
+                      type={showKey()[p().id] ? 'text' : 'password'}
+                      value={props.providerKeys[p().id] ?? ''}
+                      onInput={(e) => props.onSetProviderKey(p().id, e.currentTarget.value)}
+                      placeholder={`Enter ${p().name} API key...`}
+                      class="w-full px-3 py-2 pr-10 bg-[var(--surface)] text-[var(--text-primary)] placeholder-[var(--text-muted)] rounded-lg text-sm outline-none transition-colors"
+                      style={{ border: '1px solid var(--border-subtle)' }}
+                      onFocus={(e) => {
+                        e.currentTarget.style.borderColor = 'var(--accent)'
+                      }}
+                      onBlur={(e) => {
+                        e.currentTarget.style.borderColor = 'var(--border-subtle)'
+                      }}
                     />
                     <button
                       type="button"
-                      onClick={() => toggleShowKey(provider.id)}
-                      class="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)] hover:text-[var(--text-primary)] transition-colors"
+                      onClick={() => toggleShowKey(p().id)}
+                      class="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
                     >
-                      <Show when={showKey()[provider.id]} fallback={<Eye class="w-4 h-4" />}>
+                      <Show when={showKey()[p().id]} fallback={<Eye class="w-4 h-4" />}>
                         <EyeOff class="w-4 h-4" />
                       </Show>
                     </button>
                   </div>
                 </div>
-              </Show>
-            </div>
+              )}
+            </Show>
+          )
+        }}
+      </Show>
+
+      {/* MORE label */}
+      <p class="text-[9px] font-semibold uppercase tracking-[0.1em] text-[var(--text-muted)] mb-3 self-start">
+        More
+      </p>
+
+      {/* Second row: 4 columns (3 providers + "16 more") */}
+      <div class="w-full grid grid-cols-4 gap-2 mb-10">
+        <For each={MORE_PROVIDERS}>
+          {(provider) => (
+            <ProviderCard
+              provider={provider}
+              isConnected={isConnected(provider.id)}
+              isExpanded={expandedProvider() === provider.id}
+              showKey={showKey()[provider.id] ?? false}
+              apiKeyValue={props.providerKeys[provider.id] ?? ''}
+              oauthLoading={oauthLoading() === provider.id}
+              onToggleExpand={() =>
+                setExpandedProvider((prev) => (prev === provider.id ? null : provider.id))
+              }
+              onToggleShowKey={() => toggleShowKey(provider.id)}
+              onSetKey={(key) => props.onSetProviderKey(provider.id, key)}
+              onAuth={handleAuth}
+            />
           )}
         </For>
+
+        {/* "16 more" card */}
+        <div
+          class="flex flex-col items-center justify-center rounded-xl"
+          style={{
+            background: 'var(--surface)',
+            border: '1px solid var(--border-subtle)',
+            height: '90px',
+          }}
+        >
+          <MoreHorizontal class="w-5 h-5 text-[var(--text-muted)] mb-1" />
+          <span class="text-[10px] text-[var(--text-muted)]">16 more</span>
+        </div>
       </div>
 
-      {/* Navigation */}
-      <div class="w-full max-w-[560px] flex items-center justify-between">
+      {/* Navigation: Back <- | (dots in parent) | Skip + Continue */}
+      <div class="w-full flex items-center justify-between">
         <button
           type="button"
-          onClick={props.onPrev}
-          class="text-sm text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
+          onClick={() => props.onPrev()}
+          class="text-sm text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors flex items-center gap-1"
         >
+          <span aria-hidden="true">&larr;</span>
           Back
         </button>
         <div class="flex items-center gap-4">
           <button
             type="button"
-            onClick={props.onSkip}
-            class="text-sm text-[var(--text-tertiary)] hover:text-[var(--text-muted)] transition-colors"
+            onClick={() => props.onSkip()}
+            class="text-sm text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
           >
-            Skip for now
+            Skip
           </button>
           <button
             type="button"
-            onClick={props.onNext}
-            class="px-6 py-2.5 bg-[var(--accent)] hover:bg-[var(--violet-8)] text-white text-sm font-medium rounded-xl transition-colors"
+            onClick={() => props.onNext()}
+            class="px-6 py-2 bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white text-sm font-medium rounded-[10px] transition-colors"
           >
             Continue
           </button>

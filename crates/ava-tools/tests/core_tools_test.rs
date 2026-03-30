@@ -1,5 +1,4 @@
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::Arc;
 
 use ava_platform::StandardPlatform;
@@ -63,6 +62,12 @@ async fn read_tool_applies_offset_and_limit() {
 #[tokio::test]
 async fn read_tool_errors_on_missing_file() {
     let dir = tempdir_in(workspace_for_tests()).expect("tempdir");
+    tokio::fs::write(
+        dir.path().join("definitely-missing-ava-tools-file.toml"),
+        "x",
+    )
+    .await
+    .expect("seed sibling file");
     let tool = ReadTool::new(Arc::new(StandardPlatform), hashline::new_cache());
     let missing_path = dir.path().join("definitely-missing-ava-tools-file.txt");
 
@@ -77,6 +82,13 @@ async fn read_tool_errors_on_missing_file() {
         error.to_string().to_ascii_lowercase().contains("not found"),
         "expected 'not found' in error message, got: {error}"
     );
+    assert!(
+        error.to_string().contains("Did you mean"),
+        "expected suggestion in error message, got: {error}"
+    );
+    assert!(error
+        .to_string()
+        .contains("definitely-missing-ava-tools-file.toml"));
 }
 
 #[tokio::test]
@@ -183,12 +195,39 @@ async fn edit_tool_errors_when_no_match_found() {
         .execute(json!({
             "path": path.to_string_lossy().to_string(),
             "old_text": "not-here",
-            "new_text": "replacement"
+            "new_text": "world"
         }))
         .await
         .expect_err("no match should error");
 
     assert!(error.to_string().contains("matching"));
+    assert!(error.to_string().contains("Best similarity score achieved"));
+    assert!(error.to_string().contains("line 1"));
+    assert!(error
+        .to_string()
+        .contains("Replacement text already exists in the file"));
+}
+
+#[tokio::test]
+async fn edit_tool_suggests_similar_file_names_when_path_is_missing() {
+    let dir = tempdir_in(workspace_for_tests()).expect("tempdir");
+    tokio::fs::write(dir.path().join("config.toml"), "mode = 'dev'\n")
+        .await
+        .expect("seed sibling file");
+
+    let tool = EditTool::new(Arc::new(StandardPlatform), hashline::new_cache());
+    let missing_path = dir.path().join("config.tom");
+    let error = tool
+        .execute(json!({
+            "path": missing_path.to_string_lossy().to_string(),
+            "old_text": "mode",
+            "new_text": "profile"
+        }))
+        .await
+        .expect_err("missing path should error");
+
+    assert!(error.to_string().contains("Did you mean"));
+    assert!(error.to_string().contains("config.toml"));
 }
 
 #[tokio::test]
@@ -271,6 +310,34 @@ async fn glob_tool_returns_empty_result() {
 }
 
 #[tokio::test]
+async fn glob_tool_sorts_results_lexicographically() {
+    let dir = tempdir_in(workspace_for_tests()).expect("tempdir");
+    tokio::fs::write(dir.path().join("z.rs"), "z")
+        .await
+        .expect("write");
+    tokio::fs::write(dir.path().join("a.rs"), "a")
+        .await
+        .expect("write");
+
+    let tool = GlobTool::new();
+    let result = tool
+        .execute(json!({
+            "pattern": "*.rs",
+            "path": dir.path().to_string_lossy().to_string()
+        }))
+        .await
+        .expect("glob executes");
+
+    let a_index = result.content.find("a.rs").expect("a.rs present");
+    let z_index = result.content.find("z.rs").expect("z.rs present");
+    assert!(
+        a_index < z_index,
+        "expected lexicographic order: {}",
+        result.content
+    );
+}
+
+#[tokio::test]
 async fn grep_tool_matches_regex_and_include_filter() {
     let dir = tempdir_in(workspace_for_tests()).expect("tempdir");
     tokio::fs::write(dir.path().join("main.rs"), "let status = \"ok\";\n")
@@ -311,6 +378,65 @@ async fn grep_tool_returns_empty_result() {
         .expect("grep executes");
 
     assert!(result.content.trim().is_empty());
+}
+
+#[tokio::test]
+async fn grep_tool_returns_results_in_stable_path_order() {
+    let dir = tempdir_in(workspace_for_tests()).expect("tempdir");
+    tokio::fs::write(dir.path().join("b.rs"), "let status = 2;\n")
+        .await
+        .expect("write");
+    tokio::fs::write(dir.path().join("a.rs"), "let status = 1;\n")
+        .await
+        .expect("write");
+
+    let tool = GrepTool::new();
+    let result = tool
+        .execute(json!({
+            "pattern": "status",
+            "path": dir.path().to_string_lossy().to_string(),
+            "include": "*.rs"
+        }))
+        .await
+        .expect("grep executes");
+
+    let a_index = result.content.find("a.rs:1:").expect("a.rs match present");
+    let b_index = result.content.find("b.rs:1:").expect("b.rs match present");
+    assert!(
+        a_index < b_index,
+        "expected sorted grep output: {}",
+        result.content
+    );
+}
+
+#[tokio::test]
+async fn grep_tool_caps_output_at_max_matches() {
+    let dir = tempdir_in(workspace_for_tests()).expect("tempdir");
+    let content: String = (0..600).map(|i| format!("status line {i}\n")).collect();
+    tokio::fs::write(dir.path().join("many.rs"), content)
+        .await
+        .expect("write");
+
+    let tool = GrepTool::new();
+    let result = tool
+        .execute(json!({
+            "pattern": "status",
+            "path": dir.path().to_string_lossy().to_string(),
+            "include": "*.rs"
+        }))
+        .await
+        .expect("grep executes");
+
+    let match_lines = result
+        .content
+        .lines()
+        .filter(|line| line.contains("many.rs:"))
+        .count();
+    assert!(
+        match_lines <= 500,
+        "expected at most 500 matches, got {match_lines}"
+    );
+    assert!(result.content.contains("Results truncated"));
 }
 
 // --- Tool Registry Tests ---
@@ -468,21 +594,6 @@ fn missing_tool_returns_tool_not_found_error() {
 #[test]
 fn tests_reference_tempfile_paths_as_expected() {
     assert!(Path::new(".").exists());
-}
-
-fn run_git(repo: &Path, args: &[&str]) {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(repo)
-        .args(args)
-        .output()
-        .expect("git command should run");
-    assert!(
-        output.status.success(),
-        "git {:?} failed: {}",
-        args,
-        String::from_utf8_lossy(&output.stderr)
-    );
 }
 
 // --- Hashline Tests (integration) ---

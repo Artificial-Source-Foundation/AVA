@@ -42,7 +42,7 @@ body:
         - Agent / LLM
         - Tools
         - Plugins / MCP
-        - Multi-agent (Praxis)
+        - Multi-agent (HQ)
         - Config / Setup
         - CLI flags
         - Other

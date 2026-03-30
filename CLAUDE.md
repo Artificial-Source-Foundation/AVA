@@ -29,6 +29,10 @@ npx tsc --noEmit
 
 Release verification: `just check && npm run tauri build`
 
+# Desktop release (signed build + publish)
+TAURI_SIGNING_PRIVATE_KEY=$(cat ~/.tauri/ava.key) npm run tauri build
+# Then: gh release create v{VERSION} ... (see docs/releasing.md)
+
 ## Architecture
 
 AVA uses a **Rust-first architecture**. All agent, CLI, and backend code is Rust.
@@ -51,7 +55,7 @@ AVA uses a **Rust-first architecture**. All agent, CLI, and backend code is Rust
 - **1 agent tool**: `plan` (Plannotator-style inline plan editing via PlanBridge)
 - **Dynamic tools**: MCP servers + TOML custom tools (`~/.ava/tools/`, `.ava/tools/`)
 - **File snapshots**: Shadow git snapshots before file edits, `revert_file` capability for undoing changes
-- **Key capabilities**: Anthropic prompt caching (`cache_control` on system + tools), auto-retry middleware (2x exponential backoff for read-only tools), stream silence timeout (90s configurable per-chunk reset), tiktoken-rs BPE token counting, tool schema pre-validation, persistent audit log (SQLite, opt-out), auto-compaction settings (toggle + threshold slider), JSONL session logging (`~/.ava/log/`, opt-in), rich edit error feedback (similar lines + "did you mean?"), SBPL injection hardening, env scrubbing in bash, rm -rf and find -delete blocking, context overflow auto-compact (12 overflow patterns with auto-retry), conversation repair, symlink escape detection in path guard, shadow git snapshots for file edit backups, incremental message persistence, retry-after header parsing, quota error classification, 100+ security patterns in command classifier, dual compaction visibility
+- **Key capabilities**: Anthropic prompt caching (`cache_control` on system + tools), auto-retry middleware (2x exponential backoff for read-only tools), stream silence timeout (90s configurable per-chunk reset), tiktoken-rs BPE token counting, tool schema pre-validation, persistent audit log (SQLite, opt-out), auto-compaction settings (toggle + threshold slider + compaction model), JSONL session logging (`~/.ava/log/`, opt-in), rich edit error feedback (similar lines + "did you mean?"), SBPL injection hardening, env scrubbing in bash, rm -rf and find -delete blocking, context overflow auto-compact (12 overflow patterns with auto-retry), manual `/compact` summaries with collapsible desktop context cards, conversation repair, symlink escape detection in path guard, shadow git snapshots for file edit backups, incremental message persistence, retry-after header parsing, quota error classification, 100+ security patterns in command classifier, dual compaction visibility
 
 ### Mid-Stream Messaging
 
@@ -76,7 +80,7 @@ AVA/
 |   +-- ava-agent/            # Agent execution loop + reflection
 |   +-- ava-llm/              # LLM providers (21 built-in)
 |   +-- ava-tools/            # Tool trait + registry + 9 default tools (extended available as plugins)
-|   +-- ava-praxis/           # Multi-agent orchestration (Praxis)
+|   +-- ava-praxis/           # Multi-agent orchestration (HQ)
 |   +-- ava-permissions/      # Permission rules + bash command classifier
 |   +-- ava-config/           # Config, credentials, model catalog
 |   +-- ava-context/          # Token tracking + context condensation
@@ -88,7 +92,7 @@ AVA/
 |   +-- ava-auth/             # OAuth + credential flows
 |   +-- ava-platform/         # File system + shell abstractions
 |   +-- ava-sandbox/          # Command sandboxing (bwrap/sandbox-exec)
-|   +-- ava-cli-providers/    # External CLI agent integration
+|   +-- ava-acp/              # Agent Client Protocol (external agent integration)
 |   +-- ava-extensions/       # Extension system (hooks, native/WASM)
 |   +-- ava-db/               # SQLite connection pool
 |   +-- ava-types/            # Shared types
@@ -102,11 +106,13 @@ AVA/
 
 New capabilities should ship as Extended (available as plugins), MCP, or custom tools. The default set is now 9.
 
+`ava-acp` is the external-agent bridge: Claude Code uses the Agent SDK stream format, while Codex and OpenCode are normalized from their JSONL event streams with resume-aware stale-session retry, typed external-session metadata, and structured block preservation so hidden subagents and HQ workers can switch runtimes without custom glue at each call site.
+
 | Tier | Count | Tools |
 |------|------:|-------|
 | Default | 9 | read, write, edit, bash, glob, grep, web_fetch, web_search, git_read |
 | Extended (plugin) | 7 | apply_patch, multiedit, ast_ops, lsp_ops, code_search, lint, test_runner |
-| Agent | 1 | plan (Praxis plan tool with PlanBridge for agent-to-TUI communication) |
+| Agent | 1 | plan (HQ plan tool with PlanBridge for agent-to-TUI communication) |
 
 Extended tools are **not auto-registered**; they must be explicitly loaded via plugin/MCP configuration. Additional helpers (todo_read/write, question, task, codebase_search, memory/session tools) are always available when initialized. Dynamic MCP tools and TOML custom tools load at runtime from `~/.ava/tools/`, `.ava/tools/`, `~/.ava/mcp.json`, `.ava/mcp.json`. File edits create shadow git snapshots enabling `revert_file` capability.
 
@@ -117,9 +123,19 @@ Auto-discovered and injected into the agent's system prompt (`crates/ava-agent/s
 1. `~/.ava/AGENTS.md` -- global rules
 2. Ancestor walk: `AGENTS.md`/`CLAUDE.md` from outermost ancestor to `.git` boundary
 3. Project root: `AGENTS.md`, `CLAUDE.md`, `.cursorrules`, `.github/copilot-instructions.md`
-4. `.ava/AGENTS.md`, `.ava/rules/*.md` -- project-local rules (alphabetical)
+4. `.ava/AGENTS.md` eagerly; `.ava/rules/*.md` lazily on direct file touches (activate once per session, reset after compaction)
 5. `config.yaml` `instructions:` paths/globs
 6. Skill files from `.claude/skills/`, `.agents/skills/`, `.ava/skills/`
+
+Path-scoped `.ava/rules/*.md` are intended to feel like Claude Code rules: keep them small, file-focused, and loaded only when AVA actually reads or edits matching files.
+
+## Solo Hidden Delegation
+
+Outside HQ team mode, the main agent can still delegate quietly through the `subagent` tool:
+
+- Small single-file work keeps the main thread only (no hidden helper swarm).
+- Broader tasks can unlock a bounded helper budget (typically 1-2 hidden subagents, 3 only on explicit delegation requests).
+- `scout`, `explore`, `plan`, and `review` helpers run in enforced read-only specialist mode; `worker`, `build`, and `subagent` keep full editing access.
 
 ## Workspace Trust
 
@@ -140,9 +156,9 @@ Trust a project: `ava --trust`. Global config (`~/.ava/`) always loads.
 - Desktop commands: `src-tauri/src/commands/`
 - Configuration: `crates/ava-config/`
 
-## Praxis (Multi-Agent Orchestration) — v2
+## HQ (Multi-Agent Orchestration) — v2
 
-Praxis is AVA's multi-agent system in `crates/ava-praxis/`. Uses a **Director -> Scouts -> Leads -> Workers** hierarchy with LLM-powered planning. 91 tests (74 unit + 11 integration + 6 doc-tests). 23 source files: `lib`, `director`, `lead`, `worker`, `routing`, `plan`, `prompts`, `scout`, `board`, `events`, `workflow`, `acp`, `acp_handler`, `acp_transport`, `artifact`, `artifact_store`, `conflict`, `decomposition`, `mailbox`, `review`, `spec`, `spec_workflow`, `synthesis`. See [docs/codebase/ava-praxis.md](docs/codebase/ava-praxis.md) for full details.
+HQ is AVA's multi-agent system in `crates/ava-praxis/`. Uses a **Director -> Scouts -> Leads -> Workers** hierarchy with LLM-powered planning. 91 tests (74 unit + 11 integration + 6 doc-tests). 23 source files: `lib`, `director`, `lead`, `worker`, `routing`, `plan`, `prompts`, `scout`, `board`, `events`, `workflow`, `acp`, `acp_handler`, `acp_transport`, `artifact`, `artifact_store`, `conflict`, `decomposition`, `mailbox`, `review`, `spec`, `spec_workflow`, `synthesis`. See [docs/codebase/ava-praxis.md](docs/codebase/ava-praxis.md) for full details.
 
 ### Director Intelligence Levels
 
@@ -185,7 +201,7 @@ The Director is **LLM-powered** (not a code-driven router). It analyzes task com
 - Solo/Team switching via Team button. Mode switches preserved in session.
 - Each Lead gets its own git worktree; workers share their lead's worktree.
 - Merge Worker integrates lead worktrees. QA Lead reviews merged result.
-- Artifacts saved to `.ava/praxis/{session-id}/{lead-name}/`.
+- Artifacts saved to `.ava/hq/{session-id}/{lead-name}/`.
 
 ### Error Handling (Tiered)
 
@@ -195,7 +211,7 @@ The Director is **LLM-powered** (not a code-driven router). It analyzes task com
 4. Worker budget exhausted → Lead asks Director → Director asks user
 5. Catastrophic → Director asks user
 
-> **Note:** Praxis Tauri bridge is fully wired — `start_praxis`, `get_praxis_status`, `cancel_praxis`, `steer_lead` commands registered and `emit_praxis_event` forwards all PraxisEvent variants to the desktop frontend via `agent-event` IPC. Frontend event handlers in `rust-agent-events.ts` and `useAgent.ts` map Praxis events to the team store.
+> **Note:** HQ desktop wiring now extends past raw event forwarding: Tauri commands persist HQ epics/issues/comments/plans/agents/activity/director-chat state in SQLite, the frontend HQ store loads that live data instead of mock fixtures, and HQ settings are stored in `ava-config` under `config.hq`.
 
 ## Middleware Priority
 
@@ -331,6 +347,9 @@ cargo run --bin ava -- "goal" --headless --provider openai --model gpt-5.4 --aut
 
 # Verbose logging (stderr): -v info, -vv debug, -vvv trace
 cargo run --bin ava -- -v "goal" --headless --provider openai --model gpt-5.4
+
+# Focused benchmark slice (single task)
+cargo run --bin ava --features benchmark -- --benchmark --provider openai --model gpt-5.4 --suite frontier --language rust --task-filter delegated_config_bugfix --max-turns 8
 ```
 
 ## Benchmarking Against OpenCode
@@ -351,26 +370,44 @@ START=$(date +%s%N) && opencode run "goal" --model openai/gpt-5.4 --format json 
 
 When you complete a significant feature, bug fix, or refactor:
 
-1. **Update `docs/development/CHANGELOG.md`** — add entry under current version
-2. **Update `docs/development/backlog.md`** — mark completed items, add new ones
+1. **Update `docs/CHANGELOG.md`** — add entry under current version
+2. **Update `docs/backlog.md`** — mark completed items, add new ones
 3. **Update this file (`CLAUDE.md`)** if architecture, crate count, tool count, or conventions changed
-4. **Update `docs/architecture/crate-map.md`** if crates were added/removed
+4. **Update `docs/crate-map.md`** if crates were added/removed
 5. **Run `just check`** (or `cargo test --workspace && cargo clippy --workspace`) before committing
 
 Do NOT let docs drift from code. Every PR-worthy change should include doc updates.
+
+## Desktop Releases & Auto-Update
+
+Signing key: `~/.tauri/ava.key` (private), pubkey in `src-tauri/tauri.conf.json`.
+Full guide: `docs/releasing.md`.
+
+```bash
+# Build signed release
+TAURI_SIGNING_PRIVATE_KEY=$(cat ~/.tauri/ava.key) npm run tauri build
+
+# Publish (uploads bundles + updater manifest)
+VERSION=$(grep '"version"' src-tauri/tauri.conf.json | head -1 | grep -oP '[\d.]+')
+git tag -a "v${VERSION}" -m "Release v${VERSION}" && git push origin "v${VERSION}"
+gh release create "v${VERSION}" --title "AVA v${VERSION}" --generate-notes \
+  src-tauri/target/release/bundle/deb/*.deb \
+  src-tauri/target/release/bundle/appimage/*.AppImage.tar.gz \
+  src-tauri/target/release/bundle/appimage/*.AppImage.tar.gz.sig
+find src-tauri/target/release/bundle -name "latest.json" -exec gh release upload "v${VERSION}" {} \;
+```
+
+Users get auto-update prompts via `tauri-plugin-updater` checking GitHub Releases.
 
 ## Documentation
 
 1. `CLAUDE.md` (this file) -- architecture, conventions, commands
 2. `AGENTS.md` -- AI agent instructions for working on AVA
-3. `docs/README.md` -- documentation entry point with crate map
-4. `docs/codebase/` -- **complete codebase reference for all 21 crates, frontend, and plugins**
-5. `docs/plugins.md` -- TOML custom tools and MCP server guide
-6. `docs/architecture/crate-map.md` -- detailed crate dependency map
-7. `docs/architecture/plugin-system.md` -- power plugin system design
-8. `docs/development/CHANGELOG.md` -- version history
-9. `docs/development/roadmap.md` -- roadmap and sprint history
-10. `docs/development/backlog.md` -- open backlog items
-11. `docs/ideas/` -- archived feature designs (not implemented)
-
-**Quick links:** [Codebase docs](docs/codebase/README.md) • [Add a tool](docs/codebase/ava-tools.md) • [Add a provider](docs/codebase/ava-llm.md) • [Tauri commands](docs/codebase/tauri-commands.md) • [Plugins](docs/codebase/plugins.md)
+3. `docs/README.md` -- documentation entry point
+4. `docs/CHANGELOG.md` -- version history
+5. `docs/backlog.md` -- open backlog items
+6. `docs/crate-map.md` -- Rust crate dependency graph
+7. `docs/plugins.md` -- TOML custom tools and MCP server guide
+8. `docs/releasing.md` -- desktop release & auto-update guide
+9. `docs/troubleshooting/` -- platform-specific fixes
+10. `docs/reference-code/` -- competitor source code (12 repos)

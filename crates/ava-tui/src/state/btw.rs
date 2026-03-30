@@ -13,5 +13,5 @@ pub struct BtwState {
     /// Saved messages from before the branch started.
     pub checkpoint_messages: Vec<UiMessage>,
     /// Saved scroll offset from before the branch started.
-    pub checkpoint_scroll: u16,
+    pub checkpoint_scroll: usize,
 }

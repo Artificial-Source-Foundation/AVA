@@ -13,8 +13,6 @@
 //! Design inspired by OpenCode's snapshot system. The shadow repo is a bare-ish
 //! repo that uses `GIT_WORK_TREE` to point at the real project directory.
 
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -70,7 +68,12 @@ impl SnapshotManager {
 
         let home = dirs::home_dir().ok_or("could not determine home directory")?;
         let project_hash = hash_project_root(&canonical);
-        let snapshot_dir = home.join(".ava").join("snapshots").join(&project_hash);
+        let mut snapshot_dir = home.join(".ava").join("snapshots").join(&project_hash);
+        let legacy_hash = legacy_hash_project_root(&canonical);
+        let legacy_snapshot_dir = home.join(".ava").join("snapshots").join(&legacy_hash);
+        if !snapshot_dir.exists() && legacy_snapshot_dir.exists() {
+            snapshot_dir = legacy_snapshot_dir;
+        }
 
         Ok(Self {
             snapshot_dir,
@@ -105,7 +108,8 @@ impl SnapshotManager {
         }
 
         // Verify the project root is itself a git repo (we only snapshot git projects)
-        let check = Command::new("git")
+        let check = self
+            .git_command()
             .arg("-C")
             .arg(&self.project_root)
             .args(["rev-parse", "--is-inside-work-tree"])
@@ -127,7 +131,8 @@ impl SnapshotManager {
         if !git_dir_check.exists() {
             // Initialize a bare git repo so snapshot_dir IS the GIT_DIR.
             // We use GIT_WORK_TREE env var at runtime to point at the project.
-            let output = Command::new("git")
+            let output = self
+                .git_command()
                 .arg("init")
                 .arg("--bare")
                 .arg("--initial-branch=snapshots")
@@ -208,7 +213,8 @@ impl SnapshotManager {
         let full_message = format!("[{timestamp}] {message}");
 
         // Use environment variables to avoid needing user.name/email config
-        let commit_output = Command::new("git")
+        let commit_output = self
+            .git_command()
             .env("GIT_DIR", &self.snapshot_dir)
             .env("GIT_WORK_TREE", &self.project_root)
             .env("GIT_AUTHOR_NAME", "ava-snapshot")
@@ -247,9 +253,11 @@ impl SnapshotManager {
             return Err("snapshot manager not initialized".to_string());
         }
 
+        let to = validate_snapshot_hash(to)?;
+
         let parent_ref = format!("{to}~1");
         let args = match from {
-            Some(from_hash) => vec!["diff", from_hash, to],
+            Some(from_hash) => vec!["diff", validate_snapshot_hash(from_hash)?, to],
             None => vec!["diff", &parent_ref, to],
         };
 
@@ -274,6 +282,7 @@ impl SnapshotManager {
         if !self.initialized {
             return Err("snapshot manager not initialized".to_string());
         }
+        let snapshot_hash = validate_snapshot_hash(snapshot_hash)?;
 
         // First, find which files differ between current state and the target
         let current_head = self.current_head().await.ok();
@@ -507,13 +516,23 @@ impl SnapshotManager {
 
     /// Run a git command in the shadow repo context.
     async fn run_git(&self, args: &[&str]) -> Result<std::process::Output, String> {
-        Command::new("git")
+        self.git_command()
             .env("GIT_DIR", &self.snapshot_dir)
             .env("GIT_WORK_TREE", &self.project_root)
             .args(args)
             .output()
             .await
             .map_err(|e| format!("failed to execute git: {e}"))
+    }
+
+    fn git_command(&self) -> Command {
+        let mut command = Command::new("git");
+        command
+            .env_clear()
+            .envs(super::bash::filtered_env())
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .env("GIT_PAGER", "cat");
+        command
     }
 
     /// Get the snapshot directory path (for diagnostics).
@@ -529,9 +548,27 @@ impl SnapshotManager {
 
 /// Produce a stable, filesystem-safe hash of a project root path.
 fn hash_project_root(path: &Path) -> String {
-    let mut hasher = DefaultHasher::new();
+    format!(
+        "{:016x}",
+        super::fnv1a_64(path.to_string_lossy().as_bytes())
+    )
+}
+
+fn legacy_hash_project_root(path: &Path) -> String {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    use std::hash::{Hash, Hasher};
     path.to_string_lossy().hash(&mut hasher);
     format!("{:016x}", hasher.finish())
+}
+
+fn validate_snapshot_hash(snapshot_hash: &str) -> Result<&str, String> {
+    if (4..=64).contains(&snapshot_hash.len())
+        && snapshot_hash.chars().all(|ch| ch.is_ascii_hexdigit())
+    {
+        Ok(snapshot_hash)
+    } else {
+        Err(format!("invalid snapshot hash: {snapshot_hash}"))
+    }
 }
 
 #[cfg(test)]
@@ -605,6 +642,13 @@ mod tests {
         assert_ne!(h1, h2);
     }
 
+    #[test]
+    fn snapshot_hash_validation_rejects_invalid_refs() {
+        assert!(validate_snapshot_hash("deadbeef").is_ok());
+        assert!(validate_snapshot_hash("--cached").is_err());
+        assert!(validate_snapshot_hash("dead beef").is_err());
+    }
+
     #[tokio::test]
     async fn init_creates_shadow_repo() {
         let repo = setup_test_repo().await;
@@ -669,7 +713,7 @@ mod tests {
         assert_eq!(content, "modified content");
 
         // Restore to first snapshot
-        let changed = manager.restore(&hash1).await.unwrap();
+        let _changed = manager.restore(&hash1).await.unwrap();
         let content = tokio::fs::read_to_string(&file).await.unwrap();
         assert_eq!(content, "original content");
     }

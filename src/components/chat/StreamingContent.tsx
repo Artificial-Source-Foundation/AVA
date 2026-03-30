@@ -45,8 +45,8 @@ export const StreamingContent: Component<StreamingContentProps> = (props) => {
             class="mb-1 rounded-lg"
             open={true}
             style={{
-              border: '1px solid var(--border-default, rgba(255,255,255,0.08))',
-              background: 'var(--bg-subtle, rgba(255,255,255,0.02))',
+              border: '1px solid var(--border-default)',
+              background: 'var(--surface-sunken)',
             }}
           >
             <summary

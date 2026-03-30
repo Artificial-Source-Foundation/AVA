@@ -7,9 +7,7 @@ use chrono::Utc;
 use rusqlite::{params, Connection, OptionalExtension};
 use uuid::Uuid;
 
-use crate::helpers::{
-    db_error, parse_datetime, parse_uuid, role_to_str, str_to_role, to_conversion_error,
-};
+use crate::helpers::{db_error, parse_uuid, role_to_str};
 use crate::{BranchLeaf, ConversationTree, SessionManager, TreeNode};
 
 impl SessionManager {
@@ -149,8 +147,8 @@ impl SessionManager {
         let tx = conn.transaction().map_err(db_error)?;
 
         tx.execute(
-            "INSERT INTO messages (id, session_id, role, content, timestamp, tool_calls, tool_results, tool_call_id, images, parent_id)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            "INSERT INTO messages (id, session_id, role, content, timestamp, tool_calls, tool_results, tool_call_id, images, parent_id, agent_visible, user_visible, original_content, structured_content, metadata)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
             params![
                 msg.id.to_string(),
                 session_id.to_string(),
@@ -162,6 +160,11 @@ impl SessionManager {
                 Option::<String>::None,
                 "[]",
                 msg.parent_id.map(|id| id.to_string()),
+                1,
+                1,
+                Option::<String>::None,
+                "[]",
+                "{}",
             ],
         )
         .map_err(db_error)?;
@@ -258,66 +261,16 @@ impl SessionManager {
     ) -> Result<HashMap<Uuid, Message>> {
         let mut stmt = conn
             .prepare(
-                "SELECT id, role, content, timestamp, tool_calls, tool_results, tool_call_id, images, parent_id
+                "SELECT id, role, content, timestamp, tool_calls, tool_results, tool_call_id, images, parent_id, agent_visible, user_visible, original_content, structured_content, metadata
                  FROM messages WHERE session_id = ?1",
             )
             .map_err(db_error)?;
 
         let messages = stmt
-            .query_map(params![session_id.to_string()], |row| {
-                let tool_calls =
-                    serde_json::from_str::<Vec<ava_types::ToolCall>>(&row.get::<_, String>(4)?)
-                        .map_err(|error| {
-                            rusqlite::Error::FromSqlConversionFailure(
-                                4,
-                                rusqlite::types::Type::Text,
-                                Box::new(error),
-                            )
-                        })?;
-                let tool_results =
-                    serde_json::from_str::<Vec<ava_types::ToolResult>>(&row.get::<_, String>(5)?)
-                        .map_err(|error| {
-                        rusqlite::Error::FromSqlConversionFailure(
-                            5,
-                            rusqlite::types::Type::Text,
-                            Box::new(error),
-                        )
-                    })?;
-                let tool_call_id: Option<String> = row.get(6)?;
-                let images_json: String = row
-                    .get::<_, Option<String>>(7)?
-                    .unwrap_or_else(|| "[]".to_string());
-                let images = serde_json::from_str::<Vec<ava_types::ImageContent>>(&images_json)
-                    .map_err(|error| {
-                        rusqlite::Error::FromSqlConversionFailure(
-                            7,
-                            rusqlite::types::Type::Text,
-                            Box::new(error),
-                        )
-                    })?;
-                let parent_id_str: Option<String> = row.get(8)?;
-                let parent_id = parent_id_str
-                    .as_deref()
-                    .map(parse_uuid)
-                    .transpose()
-                    .map_err(to_conversion_error)?;
-
-                Ok(Message {
-                    id: parse_uuid(&row.get::<_, String>(0)?).map_err(to_conversion_error)?,
-                    role: str_to_role(&row.get::<_, String>(1)?).map_err(to_conversion_error)?,
-                    content: row.get(2)?,
-                    timestamp: parse_datetime(&row.get::<_, String>(3)?)
-                        .map_err(to_conversion_error)?,
-                    tool_calls,
-                    tool_results,
-                    tool_call_id,
-                    images,
-                    parent_id,
-                    agent_visible: true,
-                    user_visible: true,
-                    original_content: None,
-                })
-            })
+            .query_map(
+                params![session_id.to_string()],
+                crate::manager::row_to_message,
+            )
             .map_err(db_error)?
             .collect::<std::result::Result<Vec<_>, _>>()
             .map_err(db_error)?;

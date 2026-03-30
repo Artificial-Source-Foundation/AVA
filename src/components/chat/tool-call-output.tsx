@@ -50,7 +50,7 @@ const ERROR_ICONS: Record<ToolErrorCategory, Component<{ class?: string }>> = {
 // ============================================================================
 
 const PRE_CLASS =
-  'text-[11px] font-[var(--font-ui-mono)] text-[var(--text-secondary)] whitespace-pre-wrap break-words leading-relaxed'
+  'text-[11px] font-[var(--font-ui-mono)] text-[var(--gray-8)] whitespace-pre-wrap break-words leading-[1.6]'
 
 const HighlightedPre: Component<{ output: string; html: string; hasLang: boolean }> = (props) => {
   let ref: HTMLPreElement | undefined
@@ -137,110 +137,119 @@ export const ToolCallOutput: Component<ToolCallOutputProps> = (props) => {
     setTimeout(() => setCopied(false), 2000)
   }
 
-  // Render structured output as JSON tree if applicable
-  if (structuredData() !== null) {
-    return (
-      <div class="border-t border-[var(--border-subtle)]">
-        <StructuredOutputView data={structuredData()!} />
-      </div>
-    )
-  }
-
   return (
-    <div class="bg-[var(--bg-inset,var(--surface-sunken))] border-t border-[var(--border-subtle)]">
-      {/* Error display */}
-      <Show when={hasError()}>
-        <div class="px-3 py-2.5">
-          <div class="flex items-start gap-2">
-            <Dynamic
-              component={ERROR_ICONS[errorCategory()]}
-              class="w-4 h-4 flex-shrink-0 mt-0.5 text-[var(--error)]"
-            />
-            <div class="flex-1 min-w-0">
-              <span class="text-[11px] font-medium text-[var(--error)] uppercase tracking-wider">
-                {getErrorLabel(errorCategory())}
-              </span>
-              <pre class="mt-1 text-[11px] font-[var(--font-ui-mono)] text-[var(--error)] whitespace-pre-wrap break-words leading-relaxed opacity-90">
-                {props.toolCall.error}
-              </pre>
+    <Show
+      when={structuredData() === null}
+      fallback={
+        <div class="border-t border-[var(--border-default)]">
+          <StructuredOutputView data={structuredData()!} />
+        </div>
+      }
+    >
+      <div class="border-t border-[var(--border-default)]">
+        {/* Error display */}
+        <Show when={hasError()}>
+          <div class="bg-[var(--error-subtle)] px-3 py-2.5">
+            <div class="flex items-start gap-2">
+              <Dynamic
+                component={ERROR_ICONS[errorCategory()]}
+                class="mt-0.5 h-4 w-4 flex-shrink-0 text-[var(--error)]"
+              />
+              <div class="flex-1 min-w-0">
+                <span class="text-[10px] font-semibold uppercase tracking-wider text-[var(--error)]">
+                  {getErrorLabel(errorCategory())}
+                </span>
+                <pre class="mt-1 whitespace-pre-wrap break-words font-[var(--font-ui-mono)] text-[11px] leading-[1.6] text-[var(--error)] opacity-90">
+                  {props.toolCall.error}
+                </pre>
+              </div>
+              <button
+                type="button"
+                onClick={copyContent}
+                class="flex-shrink-0 p-1 rounded text-[var(--gray-6)] hover:text-[var(--gray-8)] hover:bg-[var(--alpha-white-5)] transition-colors"
+                title="Copy error"
+                aria-label="Copy tool error"
+              >
+                <Show when={copied()} fallback={<Copy class="w-3.5 h-3.5" />}>
+                  <Check class="h-3.5 w-3.5 text-[var(--success)]" />
+                </Show>
+              </button>
             </div>
+          </div>
+        </Show>
+
+        {/* Diff view for edit/write tools — side-by-side */}
+        <Show when={hasDiff() && !hasError()}>
+          <div
+            class="scroll-fade-mask tool-output-region max-h-[400px] overflow-auto"
+            data-scrollable
+          >
+            <DiffViewer
+              oldContent={props.toolCall.diff!.oldContent}
+              newContent={props.toolCall.diff!.newContent}
+              filename={props.toolCall.filePath}
+              mode="split"
+              showLineNumbers={true}
+              class="border-0 rounded-none"
+            />
+          </div>
+        </Show>
+
+        {/* MCP UI resource rendering (table, chart, form, image, markdown) */}
+        <Show when={hasUIResource() && !hasError()}>
+          <MCPResourceRenderer resource={props.toolCall.uiResource!} />
+        </Show>
+
+        {/* Regular output with syntax highlighting */}
+        <Show when={hasOutput() && !hasError() && !hasDiff() && !hasUIResource()}>
+          <div
+            class="scroll-fade-mask tool-output-region relative max-h-[320px] overflow-auto group/output"
+            data-scrollable
+          >
+            {/* Copy button (top-right) */}
             <button
               type="button"
               onClick={copyContent}
-              class="flex-shrink-0 p-1 rounded text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--alpha-white-5)] transition-colors"
-              title="Copy error"
+              class="absolute top-1.5 right-1.5 z-10 p-1 rounded text-[var(--gray-6)] hover:text-[var(--gray-8)] hover:bg-[var(--alpha-white-8)] transition-colors opacity-0 group-hover/output:opacity-100"
+              title="Copy output"
+              aria-label="Copy tool output"
             >
               <Show when={copied()} fallback={<Copy class="w-3.5 h-3.5" />}>
-                <Check class="w-3.5 h-3.5 text-[var(--success)]" />
+                <Check class="h-3.5 w-3.5 text-[var(--success)]" />
               </Show>
             </button>
-          </div>
-        </div>
-      </Show>
 
-      {/* Diff view for edit/write tools */}
-      <Show when={hasDiff() && !hasError()}>
-        <div class="scroll-fade-mask max-h-[320px] overflow-auto" data-scrollable>
-          <DiffViewer
-            oldContent={props.toolCall.diff!.oldContent}
-            newContent={props.toolCall.diff!.newContent}
-            filename={props.toolCall.filePath}
-            mode="unified"
-            showLineNumbers={false}
-            class="border-0 rounded-none"
-          />
-        </div>
-      </Show>
+            <div class="px-3 py-2 bg-[var(--gray-0)]">
+              <HighlightedPre
+                output={displayOutput()}
+                html={highlightedOutput()}
+                hasLang={!!lang()}
+              />
+            </div>
 
-      {/* MCP UI resource rendering (table, chart, form, image, markdown) */}
-      <Show when={hasUIResource() && !hasError()}>
-        <MCPResourceRenderer resource={props.toolCall.uiResource!} />
-      </Show>
-
-      {/* Regular output with syntax highlighting */}
-      <Show when={hasOutput() && !hasError() && !hasDiff() && !hasUIResource()}>
-        <div class="scroll-fade-mask relative max-h-[320px] overflow-auto" data-scrollable>
-          {/* Copy button (top-right) */}
-          <button
-            type="button"
-            onClick={copyContent}
-            class="absolute top-1.5 right-1.5 z-10 p-1 rounded text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--alpha-white-8)] transition-colors opacity-0 group-hover/output:opacity-100"
-            title="Copy output"
-          >
-            <Show when={copied()} fallback={<Copy class="w-3.5 h-3.5" />}>
-              <Check class="w-3.5 h-3.5 text-[var(--success)]" />
-            </Show>
-          </button>
-
-          <div class="group/output px-3 py-2">
-            <HighlightedPre
-              output={displayOutput()}
-              html={highlightedOutput()}
-              hasLang={!!lang()}
-            />
-          </div>
-
-          {/* Expand/collapse for long output */}
-          <Show when={isLong()}>
-            <button
-              type="button"
-              onClick={() => setExpanded((v) => !v)}
-              class="w-full px-3 py-1.5 text-[10px] text-[var(--accent)] bg-[var(--alpha-white-3)] border-t border-[var(--border-subtle)] text-center hover:bg-[var(--alpha-white-5)] transition-colors flex items-center justify-center gap-1"
-            >
-              <Show
-                when={expanded()}
-                fallback={
-                  <>
-                    <ChevronDown class="w-3 h-3" /> Show all ({totalLineCount()} lines)
-                  </>
-                }
+            {/* Expand/collapse for long output */}
+            <Show when={isLong()}>
+              <button
+                type="button"
+                onClick={() => setExpanded((v) => !v)}
+                class="flex w-full items-center justify-center gap-1 border-t border-[var(--border-default)] bg-[var(--alpha-white-3)] px-3 py-1.5 text-center font-[var(--font-ui-mono)] text-[10px] text-[var(--accent)] transition-colors hover:bg-[var(--alpha-white-5)]"
+                aria-label={expanded() ? 'Collapse tool output' : 'Expand tool output'}
               >
-                <ChevronUp class="w-3 h-3" /> Show less
-              </Show>
-            </button>
-          </Show>
-        </div>
-      </Show>
-    </div>
+                <Show
+                  when={expanded()}
+                  fallback={
+                    <>
+                      <ChevronDown class="w-3 h-3" /> Show all ({totalLineCount()} lines)
+                    </>
+                  }
+                >
+                  <ChevronUp class="w-3 h-3" /> Show less
+                </Show>
+              </button>
+            </Show>
+          </div>
+        </Show>
+      </div>
+    </Show>
   )
 }

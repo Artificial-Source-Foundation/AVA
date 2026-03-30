@@ -408,3 +408,14 @@ pub(crate) async fn ingest_frontend_log(Json(req): Json<FrontendLogRequest>) -> 
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     }
 }
+
+// ============================================================================
+// Subscription Usage
+// ============================================================================
+
+/// Fetch subscription usage from all configured providers.
+pub(crate) async fn get_subscription_usage(State(state): State<WebState>) -> impl IntoResponse {
+    let credentials = state.inner.stack.router.credentials_snapshot().await;
+    let usage = ava_llm::usage::fetch_all_subscription_usage(&credentials).await;
+    Json(usage)
+}

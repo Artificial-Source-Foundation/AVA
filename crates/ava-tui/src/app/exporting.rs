@@ -151,6 +151,24 @@ impl App {
                 }
                 MessageKind::SubAgent => {
                     out.push_str("## Sub-Agent\n");
+                    if let Some(sub) = &msg.sub_agent {
+                        let mut meta = Vec::new();
+                        if let Some(provider) = &sub.provider {
+                            meta.push(format!("provider: {provider}"));
+                        }
+                        if sub.resumed {
+                            meta.push("resumed".to_string());
+                        }
+                        if let Some(cost) = sub.cost_usd {
+                            meta.push(format!("cost: ${cost:.4}"));
+                        }
+                        if let (Some(input), Some(output)) = (sub.input_tokens, sub.output_tokens) {
+                            meta.push(format!("tokens: {input}/{output}"));
+                        }
+                        if !meta.is_empty() {
+                            out.push_str(&format!("*{}*\n\n", meta.join(" | ")));
+                        }
+                    }
                     out.push_str(&msg.content);
                     out.push_str("\n\n---\n\n");
                 }
@@ -198,6 +216,18 @@ impl App {
 
                 if let Some(ref model_name) = msg.model_name {
                     obj["model"] = serde_json::json!(model_name);
+                }
+
+                if let Some(sub) = &msg.sub_agent {
+                    obj["sub_agent"] = serde_json::json!({
+                        "description": sub.description,
+                        "provider": sub.provider,
+                        "resumed": sub.resumed,
+                        "cost_usd": sub.cost_usd,
+                        "input_tokens": sub.input_tokens,
+                        "output_tokens": sub.output_tokens,
+                        "session_id": sub.session_id,
+                    });
                 }
 
                 obj

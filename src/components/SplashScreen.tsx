@@ -1,50 +1,21 @@
 /**
  * Splash screen shown during app initialization.
- * Displays AVA logo (rounded with purple accent), app name, tagline,
- * slim progress bar, status text, and version at bottom.
- * Fades out when `visible` becomes false, then unmounts.
+ * Minimal design: black background, centered logo mark with blue glow,
+ * barely-visible "ava" text near the bottom.
  */
 
-import { createMemo, createSignal, Show } from 'solid-js'
-
-/** Known init steps in approximate order — used to estimate progress */
-const INIT_STEPS = [
-  'Starting logger',
-  'Initializing platform',
-  'Loading settings',
-  'Checking backend',
-  'Loading models',
-  'Loading providers',
-  'Initializing core',
-  'Loading database',
-  'Loading projects',
-  'Loading plugins',
-  'Restoring',
-  'Ready',
-] as const
-
-function estimateProgress(status: string | undefined): number {
-  if (!status) return 0
-  const lower = status.toLowerCase()
-  for (let i = INIT_STEPS.length - 1; i >= 0; i--) {
-    if (lower.includes(INIT_STEPS[i].toLowerCase())) {
-      // Map to 5%–95% range so it never looks "done" until we fade out
-      return Math.round(5 + ((i + 1) / INIT_STEPS.length) * 90)
-    }
-  }
-  return 5
-}
+import { createSignal, Show } from 'solid-js'
 
 interface SplashScreenProps {
   /** When false, triggers the fade-out animation then unmounts */
   visible: boolean
-  /** Current initialization step, e.g. "Loading database..." */
+  /** Current initialization step (kept for API compat, not displayed) */
   status?: string
-  /** Optional explicit progress 0-100 */
+  /** Optional explicit progress 0-100 (kept for API compat, not displayed) */
   progress?: number
 }
 
-export function SplashScreen(props: SplashScreenProps) {
+export function SplashScreen(props: SplashScreenProps): ReturnType<typeof Show> {
   const [shouldRender, setShouldRender] = createSignal(true)
 
   const onTransitionEnd = (): void => {
@@ -53,86 +24,32 @@ export function SplashScreen(props: SplashScreenProps) {
     }
   }
 
-  const progressPct = createMemo(() => {
-    if (props.progress != null) return props.progress
-    return estimateProgress(props.status)
-  })
-
   return (
     <Show when={shouldRender()}>
       <div
-        class="fixed inset-0 z-[9999] flex flex-col items-center justify-center bg-[var(--background)]"
+        class="fixed inset-0 z-[9999] flex items-center justify-center"
         classList={{ 'splash-fade-out': !props.visible }}
         onTransitionEnd={onTransitionEnd}
+        style={{ background: 'var(--background)' }}
+        aria-live="polite"
       >
-        {/* Mesh gradient background */}
-        <div class="splash-mesh" />
-
-        {/* Logo — 72x72 rounded with purple accent background */}
-        <div class="splash-logo mb-5">
-          <div
-            class="flex items-center justify-center rounded-[18px]"
-            style={{
-              width: '72px',
-              height: '72px',
-              background: 'var(--accent-subtle)',
-            }}
-          >
-            <span
-              class="font-bold select-none"
-              style={{
-                'font-size': '32px',
-                color: 'var(--accent)',
-                'line-height': '1',
-              }}
-            >
-              A
-            </span>
-          </div>
-        </div>
-
-        {/* App name */}
-        <h1
-          class="font-bold tracking-[0.15em] text-[var(--text-primary)] mb-1"
-          style={{ 'font-size': '20px' }}
-        >
-          AVA
-        </h1>
-
-        {/* Tagline */}
-        <p class="text-xs mb-8" style={{ color: 'var(--text-tertiary)' }}>
-          Your AI Dev Team
-        </p>
-
-        {/* Slim progress bar */}
+        {/* Logo mark — 64x64 rounded square with blue-purple gradient and blue glow */}
         <div
-          class="rounded-full overflow-hidden mb-4"
+          class="splash-logo flex h-16 w-16 items-center justify-center rounded-[16px]"
           style={{
-            width: '200px',
-            height: '3px',
-            background: 'var(--surface-raised)',
+            background:
+              'linear-gradient(180deg, var(--accent) 0%, color-mix(in srgb, var(--accent) 60%, var(--system-purple)) 100%)',
+            'box-shadow': '0 0 80px color-mix(in srgb, var(--accent) 10%, transparent)',
           }}
         >
-          <div
-            class="h-full rounded-full transition-[width] duration-500 ease-out"
-            style={{
-              width: `${progressPct()}%`,
-              background: 'var(--accent)',
-            }}
-          />
+          <span class="select-none text-[28px] font-extrabold leading-none text-[var(--text-on-accent)]">
+            A
+          </span>
         </div>
 
-        {/* Status text */}
-        <p class="text-xs h-4 transition-opacity duration-200" style={{ color: 'var(--gray-6)' }}>
-          {props.status ?? ''}
-        </p>
-
-        {/* Version — pinned to bottom */}
-        <span
-          class="absolute bottom-5 text-[10px] tracking-wide"
-          style={{ color: 'var(--gray-5)' }}
-        >
-          v2.1.0
+        {/* "ava" text — barely visible, near bottom */}
+        <span class="pointer-events-none absolute bottom-[30px] left-1/2 -translate-x-1/2 select-none font-ui-mono text-[11px] tracking-[4px] text-[var(--surface-raised)]">
+          ava
         </span>
       </div>
     </Show>

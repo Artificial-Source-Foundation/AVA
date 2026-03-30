@@ -9,9 +9,10 @@ use tokio::fs;
 use tracing::warn;
 
 /// Per-provider credential entry.
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Default, Serialize, Deserialize)]
 pub struct ProviderCredential {
     /// API key or token.
+    #[serde(default)]
     pub api_key: String,
     /// Optional base URL override (e.g., custom OpenAI-compatible endpoint).
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -36,6 +37,12 @@ pub struct ProviderCredential {
     /// to prevent LiteLLM routing issues with certain models.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub litellm_compatible: Option<bool>,
+    /// Override loop-prone detection for this provider.
+    /// When `true`, all models from this provider get aggressive stuck detection.
+    /// When `false`, relaxed detection is used regardless of model registry flags.
+    /// When `None` (default), falls back to model registry + heuristics.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub loop_prone: Option<bool>,
 }
 
 impl std::fmt::Debug for ProviderCredential {
@@ -342,6 +349,7 @@ impl CredentialStore {
                     oauth_expires_at: None,
                     oauth_account_id: None,
                     litellm_compatible: None,
+                    loop_prone: None,
                 });
         cred.oauth_token = Some(access_token.to_string());
         cred.oauth_refresh_token = refresh_token.map(String::from);
@@ -441,6 +449,7 @@ fn empty_credential() -> ProviderCredential {
         oauth_expires_at: None,
         oauth_account_id: None,
         litellm_compatible: None,
+        loop_prone: None,
     }
 }
 
@@ -523,6 +532,7 @@ mod tests {
             oauth_expires_at: None,
             oauth_account_id: None,
             litellm_compatible: None,
+            loop_prone: None,
         }
     }
 
@@ -557,6 +567,7 @@ mod tests {
                 oauth_expires_at: None,
                 oauth_account_id: None,
                 litellm_compatible: None,
+                loop_prone: None,
             },
         );
         store.save(&path).await.unwrap();
@@ -632,6 +643,7 @@ mod tests {
                 oauth_expires_at: Some(1),
                 oauth_account_id: None,
                 litellm_compatible: None,
+                loop_prone: None,
             },
         );
 
@@ -690,6 +702,7 @@ mod tests {
                 oauth_expires_at: Some(1),
                 oauth_account_id: None,
                 litellm_compatible: None,
+                loop_prone: None,
             },
         );
 
@@ -737,6 +750,7 @@ mod tests {
                 oauth_expires_at: Some(1),
                 oauth_account_id: None,
                 litellm_compatible: None,
+                loop_prone: None,
             },
         );
 

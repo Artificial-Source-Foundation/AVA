@@ -318,6 +318,21 @@ impl HookDispatcher {
             return Vec::new();
         }
 
+        self.dispatch_to_plugins(event, params, plugins, subscribers)
+            .await
+    }
+
+    pub async fn dispatch_to_plugins(
+        &self,
+        event: &HookEvent,
+        params: &Value,
+        plugins: &mut HashMap<String, PluginProcess>,
+        subscribers: &[String],
+    ) -> Vec<HookResponse> {
+        if subscribers.is_empty() {
+            return Vec::new();
+        }
+
         let method = format!("hook/{}", event.wire_name());
         let mut responses = Vec::new();
 
@@ -405,6 +420,26 @@ impl Default for HookDispatcher {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::manifest::{HookSubscriptions, PluginMeta, RuntimeConfig};
+    use crate::runtime::PluginProcess;
+    use tempfile::TempDir;
+
+    fn sleep_manifest() -> crate::manifest::PluginManifest {
+        crate::manifest::PluginManifest {
+            plugin: PluginMeta {
+                name: "slow-plugin".to_string(),
+                version: "0.1.0".to_string(),
+                description: String::new(),
+                author: String::new(),
+            },
+            runtime: RuntimeConfig {
+                command: "sh".to_string(),
+                args: vec!["-c".to_string(), "sleep 60".to_string()],
+                env: HashMap::new(),
+            },
+            hooks: HookSubscriptions::default(),
+        }
+    }
 
     #[test]
     fn hook_event_wire_name_roundtrip() {
@@ -647,5 +682,33 @@ mod tests {
             .await;
         // Missing process is skipped, no response
         assert!(responses.is_empty());
+    }
+
+    #[tokio::test]
+    async fn dispatch_times_out_unresponsive_plugin() {
+        let tmp = TempDir::new().unwrap();
+        let process = PluginProcess::spawn(&sleep_manifest(), tmp.path())
+            .await
+            .expect("spawn sleepy plugin");
+
+        let mut dispatcher = HookDispatcher::with_timeout(Duration::from_millis(50));
+        dispatcher.register("slow-plugin", &["auth".to_string()]);
+
+        let mut plugins = HashMap::new();
+        plugins.insert("slow-plugin".to_string(), process);
+
+        let responses = dispatcher
+            .dispatch(&HookEvent::Auth, &Value::Null, &mut plugins)
+            .await;
+
+        assert_eq!(responses.len(), 1);
+        assert!(responses[0]
+            .error
+            .as_deref()
+            .is_some_and(|error| error.contains("timed out")));
+
+        if let Some(process) = plugins.get_mut("slow-plugin") {
+            process.shutdown().await;
+        }
     }
 }

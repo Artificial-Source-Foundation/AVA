@@ -5,15 +5,10 @@
  * Supports recent workspaces, favorites, and folder browsing.
  */
 
-import { Clock, Folder, FolderOpen, FolderPlus, GitBranch, Search, Star } from 'lucide-solid'
+import { Clock, Folder, FolderOpen, FolderPlus, GitBranch, Search, Star, X } from 'lucide-solid'
 import { type Component, createSignal, For, Show } from 'solid-js'
 import { Button } from '../ui/Button'
 import { Dialog } from '../ui/Dialog'
-import { WorkspaceItem } from './workspace/WorkspaceItem'
-
-export type { QuickWorkspacePickerProps } from './workspace/QuickWorkspacePicker'
-// Re-export QuickWorkspacePicker for backward compat with index.ts
-export { QuickWorkspacePicker } from './workspace/QuickWorkspacePicker'
 
 // ============================================================================
 // Types
@@ -53,6 +48,78 @@ export interface WorkspaceSelectorDialogProps {
 
 export const WorkspaceSelectorDialog: Component<WorkspaceSelectorDialogProps> = (props) => {
   const [searchQuery, setSearchQuery] = createSignal('')
+
+  const WorkspaceRow: Component<{ workspace: Workspace }> = (rowProps) => (
+    <button
+      type="button"
+      onClick={() => handleSelect(rowProps.workspace)}
+      class="w-full flex items-center gap-3 p-3 rounded-[var(--radius-md)] text-left transition-colors bg-transparent hover:bg-[var(--surface-hover)]"
+    >
+      <div
+        class="flex items-center justify-center w-10 h-10 rounded-[var(--radius-md)] flex-shrink-0"
+        style={{
+          background:
+            props.currentWorkspace?.id === rowProps.workspace.id
+              ? 'var(--accent-subtle)'
+              : 'var(--surface-raised)',
+        }}
+      >
+        <Folder class="w-5 h-5 text-[var(--text-secondary)]" />
+      </div>
+
+      <div class="flex-1 min-w-0">
+        <div class="flex items-center gap-2 mb-0.5">
+          <span class="text-sm font-medium text-[var(--text-primary)] truncate">
+            {rowProps.workspace.name}
+          </span>
+          <Show when={rowProps.workspace.gitBranch}>
+            <div class="flex items-center gap-1 text-[10px] text-[var(--text-muted)]">
+              <GitBranch class="w-3 h-3" />
+              {rowProps.workspace.gitBranch}
+            </div>
+          </Show>
+        </div>
+        <p class="text-xs text-[var(--text-muted)] truncate">{rowProps.workspace.path}</p>
+      </div>
+
+      <div class="flex items-center gap-1 flex-shrink-0">
+        <Show when={props.onToggleFavorite}>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation()
+              props.onToggleFavorite?.(rowProps.workspace.id)
+            }}
+            class="p-1.5 rounded-[var(--radius-sm)] transition-colors hover:bg-[var(--surface-hover)]"
+            aria-label={
+              rowProps.workspace.isFavorite ? 'Remove from favorites' : 'Add to favorites'
+            }
+          >
+            <Star
+              class="w-4 h-4"
+              fill={rowProps.workspace.isFavorite ? 'currentColor' : 'none'}
+              style={{
+                color: rowProps.workspace.isFavorite ? 'var(--accent)' : 'var(--text-muted)',
+              }}
+            />
+          </button>
+        </Show>
+        <Show when={props.onRemove}>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation()
+              props.onRemove?.(rowProps.workspace.id)
+            }}
+            class="p-1.5 rounded-[var(--radius-sm)] transition-colors text-[var(--text-muted)] hover:text-[var(--error)] hover:bg-[var(--surface-hover)]"
+            aria-label="Remove workspace"
+          >
+            <X class="w-4 h-4" />
+          </button>
+        </Show>
+      </div>
+    </button>
+  )
 
   // Filter workspaces by search query
   const filteredWorkspaces = () => {
@@ -149,15 +216,7 @@ export const WorkspaceSelectorDialog: Component<WorkspaceSelectorDialogProps> = 
               </div>
               <div class="space-y-1">
                 <For each={groupedWorkspaces().favorites}>
-                  {(workspace) => (
-                    <WorkspaceItem
-                      workspace={workspace}
-                      isSelected={props.currentWorkspace?.id === workspace.id}
-                      onSelect={() => handleSelect(workspace)}
-                      onToggleFavorite={() => props.onToggleFavorite?.(workspace.id)}
-                      onRemove={() => props.onRemove?.(workspace.id)}
-                    />
-                  )}
+                  {(workspace) => <WorkspaceRow workspace={workspace} />}
                 </For>
               </div>
             </div>
@@ -172,15 +231,7 @@ export const WorkspaceSelectorDialog: Component<WorkspaceSelectorDialogProps> = 
               </div>
               <div class="space-y-1">
                 <For each={groupedWorkspaces().recent}>
-                  {(workspace) => (
-                    <WorkspaceItem
-                      workspace={workspace}
-                      isSelected={props.currentWorkspace?.id === workspace.id}
-                      onSelect={() => handleSelect(workspace)}
-                      onToggleFavorite={() => props.onToggleFavorite?.(workspace.id)}
-                      onRemove={() => props.onRemove?.(workspace.id)}
-                    />
-                  )}
+                  {(workspace) => <WorkspaceRow workspace={workspace} />}
                 </For>
               </div>
             </div>

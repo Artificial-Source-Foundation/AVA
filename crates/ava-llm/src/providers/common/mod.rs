@@ -10,14 +10,12 @@ use std::time::Duration;
 
 use ava_types::{AvaError, Result};
 use rand::Rng;
+use serde_json::Value;
 
 pub const DEFAULT_MAX_RETRIES: usize = 3;
 
 pub fn rate_limited_error(provider: &str, body: &str) -> AvaError {
-    let retry_after_secs = serde_json::from_str::<serde_json::Value>(body)
-        .ok()
-        .and_then(|v| v.get("retry_after")?.as_u64())
-        .unwrap_or(30);
+    let retry_after_secs = parse_retry_after_from_body(body).unwrap_or(30);
 
     AvaError::RateLimited {
         provider: provider.to_string(),
@@ -25,12 +23,12 @@ pub fn rate_limited_error(provider: &str, body: &str) -> AvaError {
     }
 }
 
-pub fn reqwest_error(error: reqwest::Error) -> AvaError {
+pub fn reqwest_error(provider: &str, error: reqwest::Error) -> AvaError {
     if error.is_timeout() {
-        AvaError::TimeoutError(format!("request timed out: {error}"))
+        AvaError::TimeoutError(format!("{provider} request timed out: {error}"))
     } else {
         AvaError::ProviderError {
-            provider: "http".to_string(),
+            provider: provider.to_string(),
             message: if error.is_connect() {
                 format!("connection failed (is the server reachable?): {error}")
             } else {
@@ -44,6 +42,14 @@ pub async fn validate_status(
     response: reqwest::Response,
     provider: &str,
 ) -> Result<reqwest::Response> {
+    validate_status_for_model(response, provider, None).await
+}
+
+pub async fn validate_status_for_model(
+    response: reqwest::Response,
+    provider: &str,
+    model: Option<&str>,
+) -> Result<reqwest::Response> {
     if response.status().is_success() {
         return Ok(response);
     }
@@ -56,7 +62,9 @@ pub async fn validate_status(
         .await
         .unwrap_or_else(|_| "<body unavailable>".to_string());
 
-    let body_short = truncate_body(&body, 200);
+    let body_short = truncate_body(&body_message(&body), 200);
+    let is_model_not_found = model.is_some() && indicates_model_not_found(&body_short);
+    let is_context_overflow = is_context_overflow_message(&body_short);
 
     match status.as_u16() {
         // 401 Unauthorized — credentials invalid or expired
@@ -78,6 +86,11 @@ pub async fn validate_status(
         }),
 
         // 404 Not Found — model or resource not found
+        404 if is_model_not_found => Err(AvaError::ModelNotFound {
+            provider: provider.to_string(),
+            model: model.unwrap_or_default().to_string(),
+        }),
+
         404 => Err(AvaError::ProviderError {
             provider: provider.to_string(),
             message: format!("resource not found ({status}): {body_short}"),
@@ -87,11 +100,7 @@ pub async fn validate_status(
         429 => {
             let retry_after_secs = retry_after
                 .map(|d| d.as_secs().max(1))
-                .or_else(|| {
-                    serde_json::from_str::<serde_json::Value>(&body)
-                        .ok()
-                        .and_then(|v| v.get("retry_after")?.as_u64())
-                })
+                .or_else(|| parse_retry_after_from_body(&body))
                 .unwrap_or(30);
 
             Err(AvaError::RateLimited {
@@ -101,9 +110,18 @@ pub async fn validate_status(
         }
 
         // 400, 422, etc. — bad request (terminal, don't retry)
+        400..=499 if is_model_not_found => Err(AvaError::ModelNotFound {
+            provider: provider.to_string(),
+            model: model.unwrap_or_default().to_string(),
+        }),
+
         400..=499 => Err(AvaError::ProviderError {
             provider: provider.to_string(),
-            message: format!("request failed ({status}): {body_short}"),
+            message: if is_context_overflow {
+                format!("context window exceeded ({status}): {body_short}")
+            } else {
+                format!("request failed ({status}): {body_short}")
+            },
         }),
 
         // 5xx — server error (retryable with backoff)
@@ -126,8 +144,108 @@ fn truncate_body(body: &str, max_len: usize) -> String {
     if body.len() <= max_len {
         body.to_string()
     } else {
-        format!("{}...", &body[..max_len])
+        let end = body
+            .char_indices()
+            .take_while(|(idx, _)| *idx < max_len)
+            .last()
+            .map(|(idx, ch)| idx + ch.len_utf8())
+            .unwrap_or(0);
+        format!("{}...", &body[..end])
     }
+}
+
+fn body_message(body: &str) -> String {
+    extract_error_message(body).unwrap_or_else(|| body.to_string())
+}
+
+fn extract_error_message(body: &str) -> Option<String> {
+    let value = serde_json::from_str::<Value>(body).ok()?;
+
+    if let Some(text) = value.as_str() {
+        let trimmed = text.trim();
+        if !trimmed.is_empty() {
+            return Some(trimmed.to_string());
+        }
+    }
+
+    for path in [
+        &["error", "message"][..],
+        &["error", "error", "message"][..],
+        &["message"][..],
+        &["detail"][..],
+        &["details"][..],
+    ] {
+        if let Some(text) = value_at_path(&value, path).and_then(Value::as_str) {
+            let trimmed = text.trim();
+            if !trimmed.is_empty() {
+                return Some(trimmed.to_string());
+            }
+        }
+    }
+
+    None
+}
+
+fn parse_retry_after_from_body(body: &str) -> Option<u64> {
+    let value = serde_json::from_str::<Value>(body).ok()?;
+    for path in [
+        &["retry_after"][..],
+        &["retry_after_secs"][..],
+        &["retry_after_seconds"][..],
+        &["error", "retry_after"][..],
+        &["error", "retry_after_secs"][..],
+    ] {
+        let Some(value) = value_at_path(&value, path) else {
+            continue;
+        };
+        if let Some(secs) = value.as_u64() {
+            return Some(secs.max(1));
+        }
+        if let Some(text) = value.as_str().and_then(|v| v.parse::<u64>().ok()) {
+            return Some(text.max(1));
+        }
+    }
+
+    None
+}
+
+fn value_at_path<'a>(value: &'a Value, path: &[&str]) -> Option<&'a Value> {
+    let mut current = value;
+    for segment in path {
+        current = current.get(*segment)?;
+    }
+    Some(current)
+}
+
+fn indicates_model_not_found(message: &str) -> bool {
+    let msg = message.to_lowercase();
+    (msg.contains("model")
+        && (msg.contains("not found")
+            || msg.contains("does not exist")
+            || msg.contains("unknown")
+            || msg.contains("unsupported")))
+        || (msg.contains("deployment")
+            && (msg.contains("not found") || msg.contains("does not exist")))
+        || msg.contains("no such model")
+        || msg.contains("engine not found")
+}
+
+fn is_context_overflow_message(message: &str) -> bool {
+    let msg = message.to_lowercase();
+    [
+        "context_length_exceeded",
+        "maximum context length",
+        "token limit",
+        "input is too long",
+        "request too large",
+        "prompt is too long",
+        "context window",
+        "too many tokens",
+        "payload too large",
+        "reduce your prompt",
+    ]
+    .iter()
+    .any(|pattern| msg.contains(pattern))
 }
 
 /// Parse retry delay from HTTP response headers.
@@ -260,7 +378,7 @@ pub async fn send_with_retry(
             Err(e) => {
                 attempts += 1;
                 if attempts > max_retries {
-                    return Err(reqwest_error(e));
+                    return Err(reqwest_error(provider, e));
                 }
                 let delay = compute_retry_delay(None, attempts, max_delay);
                 tracing::warn!(
@@ -673,6 +791,35 @@ mod tests {
     fn parse_retry_after_no_headers() {
         let headers = reqwest::header::HeaderMap::new();
         assert!(parse_retry_after(&headers).is_none());
+    }
+
+    #[test]
+    fn extract_error_message_prefers_nested_provider_message() {
+        let body = r#"{"error":{"message":"deployment not found"}}"#;
+        assert_eq!(
+            extract_error_message(body).as_deref(),
+            Some("deployment not found")
+        );
+    }
+
+    #[test]
+    fn parse_retry_after_from_body_supports_nested_fields() {
+        let body = r#"{"error":{"retry_after":12}}"#;
+        assert_eq!(parse_retry_after_from_body(body), Some(12));
+    }
+
+    #[test]
+    fn model_not_found_detection_catches_azure_style_messages() {
+        assert!(indicates_model_not_found(
+            "The API deployment for this resource does not exist"
+        ));
+    }
+
+    #[test]
+    fn context_overflow_detection_matches_common_provider_messages() {
+        assert!(is_context_overflow_message(
+            "This model's maximum context length was exceeded"
+        ));
     }
 
     #[test]

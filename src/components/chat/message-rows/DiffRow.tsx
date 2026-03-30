@@ -1,12 +1,17 @@
 /**
  * Diff Row
  *
- * File diff summary showing add/delete counts with expandable diff view.
- * Auto-expands for small diffs (< SMALL_DIFF_LINE_THRESHOLD changed lines).
- * For write/create tools with empty old content, shows "+N lines" new file badge.
+ * Matches Pencil "Tool States" design for edit diffs:
+ *
+ * Header: 40px, fill #ffffff04, pencil icon (12px #0A84FF),
+ *         filename (Geist Mono 11px weight 500 #86868B),
+ *         check icon (12px #34C759) + "Applied" (Geist Mono 10px #34C759)
+ * Body: side-by-side with Before (#1a0a0a) / After (#0a1a0a) panels
+ *
+ * Write/create: file-plus icon (14px #34C759), "+N lines" badge
  */
 
-import { ChevronRight, FileDiff, FilePlus } from 'lucide-solid'
+import { Check, ChevronDown, ChevronRight, FilePlus, Pencil } from 'lucide-solid'
 import { type Component, createEffect, createMemo, createSignal, Show } from 'solid-js'
 import type { ToolCall } from '../../../types'
 import { DiffViewer } from '../../ui/DiffViewer'
@@ -18,20 +23,10 @@ interface DiffRowProps {
 interface DiffStats {
   additions: number
   deletions: number
-  /** Total unified diff lines (add + remove, not unchanged) */
   changedLines: number
 }
 
-/**
- * Threshold for auto-expanding the diff view.
- * Diffs with fewer changed lines expand by default.
- */
 const SMALL_DIFF_LINE_THRESHOLD = 30
-
-/**
- * Threshold for treating a diff as "large" — collapses by default with a
- * "Show large diff (N lines)" button to avoid rendering 500+ lines.
- */
 const LARGE_DIFF_LINE_THRESHOLD = 500
 
 function computeDiffStats(oldContent: string, newContent: string): DiffStats {
@@ -63,27 +58,20 @@ function computeDiffStats(oldContent: string, newContent: string): DiffStats {
   return { additions, deletions, changedLines: additions + deletions }
 }
 
-function shortFileName(filePath?: string): string {
-  if (!filePath) return 'unknown file'
-  const parts = filePath.split('/')
-  return parts.slice(-2).join('/')
-}
-
 export const DiffRow: Component<DiffRowProps> = (props) => {
   const hasDiff = (): boolean =>
     !!(
       props.toolCall.diff?.oldContent !== undefined && props.toolCall.diff?.newContent !== undefined
     )
 
-  /** True when old content is empty — this is a new file write */
   const isNewFile = (): boolean => hasDiff() && props.toolCall.diff!.oldContent === ''
+  const isSuccess = (): boolean => props.toolCall.status === 'success'
 
   const stats = createMemo((): DiffStats => {
     if (!hasDiff()) return { additions: 0, deletions: 0, changedLines: 0 }
     return computeDiffStats(props.toolCall.diff!.oldContent, props.toolCall.diff!.newContent)
   })
 
-  /** For new files, count lines in the new content */
   const newFileLineCount = createMemo((): number => {
     if (!isNewFile()) return 0
     const content = props.toolCall.diff!.newContent
@@ -104,23 +92,35 @@ export const DiffRow: Component<DiffRowProps> = (props) => {
 
   const [expanded, setExpanded] = createSignal(false)
 
-  // Auto-expand small diffs once stats are computed; keep large diffs collapsed
   createEffect(() => {
     if (isSmallDiff() && !isLargeDiff()) setExpanded(true)
   })
 
-  const fileName = (): string => shortFileName(props.toolCall.filePath)
+  const fileName = (): string => {
+    const toolName = props.toolCall.name
+    const path = props.toolCall.filePath ?? 'unknown'
+    return `${toolName} ${path}`
+  }
 
   return (
     <Show when={hasDiff()}>
-      <div class="animate-tool-card-in rounded-[var(--radius-md)] border border-[var(--border-subtle)] overflow-hidden">
-        {/* Summary header */}
+      <div
+        class="chat-tool-shell animate-tool-card-in rounded-[10px] overflow-hidden"
+        style={{
+          background: 'var(--tool-card-background)',
+          border: '1px solid var(--border-default)',
+        }}
+      >
+        {/* Header -- 40px */}
         {/* biome-ignore lint/a11y/useSemanticElements: div+role=button avoids nested button which crashes WebKitGTK */}
         <div
           role="button"
           tabIndex={0}
           aria-expanded={expanded()}
-          class="flex items-center gap-2.5 px-3 py-2 text-[13px] cursor-pointer select-none hover:bg-[var(--alpha-white-3)] transition-colors duration-[var(--duration-fast)]"
+          class="tool-card-header flex cursor-pointer select-none items-center justify-between px-3.5 transition-colors duration-[var(--duration-fast)] hover:bg-[var(--alpha-white-5)]"
+          style={{
+            height: '40px',
+          }}
           onClick={() => setExpanded((v) => !v)}
           onKeyDown={(e) => {
             if (e.key === 'Enter' || e.key === ' ') {
@@ -129,61 +129,130 @@ export const DiffRow: Component<DiffRowProps> = (props) => {
             }
           }}
         >
-          {/* Icon: FilePlus for new file, FileDiff for edits */}
-          <Show
-            when={isNewFile()}
-            fallback={<FileDiff class="w-4 h-4 text-[var(--text-muted)] flex-shrink-0" />}
-          >
-            <FilePlus class="w-4 h-4 text-[var(--success)] flex-shrink-0" />
-          </Show>
-
-          <span class="text-[var(--text-secondary)] truncate">{fileName()}</span>
-
-          <span class="flex-1" />
-
-          {/* Large diff: show collapse hint when not expanded */}
-          <Show when={isLargeDiff() && !expanded()}>
-            <span class="text-[11px] text-[var(--text-muted)] tabular-nums font-mono">
-              Show large diff ({isNewFile() ? newFileLineCount() : stats().changedLines} lines)
+          {/* Left: icon + filename */}
+          <div class="flex items-center gap-1.5 min-w-0 flex-1">
+            <Show
+              when={!isNewFile()}
+              fallback={
+                <FilePlus
+                  class="flex-shrink-0"
+                  style={{ width: '14px', height: '14px', color: 'var(--success)' }}
+                />
+              }
+            >
+              <Pencil
+                class="flex-shrink-0"
+                style={{ width: '12px', height: '12px', color: 'var(--accent)' }}
+              />
+            </Show>
+            <span
+              class="truncate"
+              style={{
+                'font-family': 'var(--font-ui-mono), Geist Mono, monospace',
+                'font-size': '11px',
+                'font-weight': '500',
+                color: 'var(--text-tertiary)',
+              }}
+            >
+              {fileName()}
             </span>
-          </Show>
+          </div>
 
-          {/* New file: show line count badge */}
-          <Show when={isNewFile() && (!isLargeDiff() || expanded())}>
-            <span class="text-[11px] text-[var(--success)] tabular-nums font-mono">
-              +{newFileLineCount()} lines
-            </span>
-          </Show>
+          {/* Right: status badge + lines badge + chevron */}
+          <div class="flex items-center gap-1.5 flex-shrink-0">
+            {/* Applied badge for successful edits */}
+            <Show when={isSuccess() && !isNewFile()}>
+              <div class="flex items-center gap-1.5">
+                <Check
+                  class="flex-shrink-0"
+                  style={{ width: '12px', height: '12px', color: 'var(--success)' }}
+                />
+                <span
+                  style={{
+                    'font-family': 'var(--font-ui-mono), Geist Mono, monospace',
+                    'font-size': '10px',
+                    'font-weight': '500',
+                    color: 'var(--success)',
+                  }}
+                >
+                  Applied
+                </span>
+              </div>
+            </Show>
 
-          {/* Edit: show +/- diff counts */}
-          <Show when={!isNewFile()}>
-            <Show when={stats().additions > 0}>
-              <span class="text-[11px] text-[var(--success)] tabular-nums font-mono">
-                +{stats().additions}
+            {/* New file: +N lines badge */}
+            <Show when={isNewFile()}>
+              <span
+                style={{
+                  'font-family': 'var(--font-ui-mono), Geist Mono, monospace',
+                  'font-size': '10px',
+                  'font-weight': '500',
+                  color: 'var(--success)',
+                }}
+              >
+                +{newFileLineCount()} lines
               </span>
             </Show>
-            <Show when={stats().deletions > 0}>
-              <span class="text-[11px] text-[var(--error)] tabular-nums font-mono">
-                -{stats().deletions}
+
+            {/* Large diff hint */}
+            <Show when={isLargeDiff() && !expanded()}>
+              <span
+                class="tabular-nums"
+                style={{
+                  'font-family': 'var(--font-ui-mono), Geist Mono, monospace',
+                  'font-size': '11px',
+                  color: 'var(--text-muted)',
+                }}
+              >
+                Show large diff ({isNewFile() ? newFileLineCount() : stats().changedLines} lines)
               </span>
             </Show>
-          </Show>
 
-          <ChevronRight
-            class="w-4 h-4 flex-shrink-0 text-[var(--text-muted)] transition-transform duration-[var(--duration-fast)]"
-            classList={{ 'rotate-90': expanded() }}
-          />
+            {/* Duration placeholder */}
+            <Show when={props.toolCall.completedAt}>
+              <span
+                class="tabular-nums whitespace-nowrap"
+                style={{
+                  'font-family': 'var(--font-ui-mono), Geist Mono, monospace',
+                  'font-size': '11px',
+                  color: 'var(--text-muted)',
+                }}
+              >
+                {(() => {
+                  const ms = props.toolCall.completedAt! - props.toolCall.startedAt
+                  if (ms < 1000) return `${ms}ms`
+                  return `${(ms / 1000).toFixed(1)}s`
+                })()}
+              </span>
+            </Show>
+
+            {/* Chevron */}
+            <Show
+              when={expanded()}
+              fallback={
+                <ChevronRight
+                  class="flex-shrink-0"
+                  style={{ width: '14px', height: '14px', color: 'var(--text-muted)' }}
+                />
+              }
+            >
+              <ChevronDown
+                class="flex-shrink-0"
+                style={{ width: '14px', height: '14px', color: 'var(--text-muted)' }}
+              />
+            </Show>
+          </div>
         </div>
 
-        {/* Expanded diff view */}
+        {/* Expanded: side-by-side diff view */}
         <Show when={expanded()}>
-          <div class="max-h-[320px] overflow-auto border-t border-[var(--border-subtle)]">
+          <div class="max-h-[400px] overflow-auto" data-scrollable>
             <DiffViewer
               oldContent={props.toolCall.diff!.oldContent}
               newContent={props.toolCall.diff!.newContent}
               filename={props.toolCall.filePath}
-              mode="unified"
-              showLineNumbers={false}
+              mode="split"
+              showLineNumbers={true}
               class="border-0 rounded-none"
             />
           </div>

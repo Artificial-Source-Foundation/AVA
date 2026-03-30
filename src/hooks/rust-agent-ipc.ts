@@ -37,9 +37,15 @@ export interface AgentIpc {
       maxTurns?: number
       thinkingLevel?: string
       sessionId?: string
+      autoCompact?: boolean
+      compactionThreshold?: number
+      compactionProvider?: string
+      compactionModel?: string
     }
   ) => Promise<SubmitGoalResult | null>
   editAndResendRun: (messageId: string, newContent: string) => Promise<SubmitGoalResult | null>
+  retryRun: () => Promise<SubmitGoalResult | null>
+  regenerateRun: () => Promise<SubmitGoalResult | null>
   cancel: () => Promise<void>
   steer: (message: string) => Promise<void>
   followUp: (message: string) => Promise<void>
@@ -70,6 +76,10 @@ export function createAgentIpc(deps: IpcDeps): AgentIpc {
 
   let unlisten: UnlistenFn | null = null
   let eventSocket: WebSocket | null = null
+  let socketGeneration = 0
+
+  const isCurrentSocket = (ws: WebSocket, generation: number): boolean =>
+    eventSocket === ws && socketGeneration === generation
 
   const attachListener = async (): Promise<void> => {
     if (isTauri()) {
@@ -87,13 +97,17 @@ export function createAgentIpc(deps: IpcDeps): AgentIpc {
     } else {
       // Browser mode — connect via WebSocket (first run or reconnect)
       if (eventSocket) {
-        eventSocket.close()
+        const staleSocket = eventSocket
         eventSocket = null
+        socketGeneration += 1
+        staleSocket.close()
       }
       log.info('ws', 'Connecting to event WebSocket')
       const ws = createEventSocket()
+      const generation = ++socketGeneration
       eventSocket = ws
       ws.onmessage = (evt) => {
+        if (!isCurrentSocket(ws, generation)) return
         try {
           const event = JSON.parse(evt.data as string) as AgentEvent
           log.debug('ws', 'Message received', { type: event.type })
@@ -103,6 +117,7 @@ export function createAgentIpc(deps: IpcDeps): AgentIpc {
         }
       }
       ws.onerror = () => {
+        if (!isCurrentSocket(ws, generation)) return
         log.error('ws', 'WebSocket connection error')
         batch(() => {
           setError('WebSocket connection error')
@@ -114,6 +129,7 @@ export function createAgentIpc(deps: IpcDeps): AgentIpc {
         }
       }
       ws.onclose = () => {
+        if (!isCurrentSocket(ws, generation)) return
         log.warn('ws', 'WebSocket disconnected')
         // If the socket closes while the agent is still running, treat it as an error
         if (isRunning()) {
@@ -129,10 +145,24 @@ export function createAgentIpc(deps: IpcDeps): AgentIpc {
       }
       // Wait for the connection to open before returning
       await new Promise<void>((resolve, reject) => {
-        ws.addEventListener('open', () => resolve(), { once: true })
-        ws.addEventListener('error', () => reject(new Error('WebSocket connection failed')), {
-          once: true,
-        })
+        ws.addEventListener(
+          'open',
+          () => {
+            if (!isCurrentSocket(ws, generation)) return
+            resolve()
+          },
+          { once: true }
+        )
+        ws.addEventListener(
+          'error',
+          () => {
+            if (!isCurrentSocket(ws, generation)) return
+            reject(new Error('WebSocket connection failed'))
+          },
+          {
+            once: true,
+          }
+        )
       })
     }
   }
@@ -151,6 +181,7 @@ export function createAgentIpc(deps: IpcDeps): AgentIpc {
   const destroyListener = (): void => {
     detachListener()
     if (eventSocket) {
+      socketGeneration += 1
       eventSocket.close()
       eventSocket = null
     }
@@ -173,6 +204,10 @@ export function createAgentIpc(deps: IpcDeps): AgentIpc {
       maxTurns?: number
       thinkingLevel?: string
       sessionId?: string
+      autoCompact?: boolean
+      compactionThreshold?: number
+      compactionProvider?: string
+      compactionModel?: string
     }
   ): Promise<SubmitGoalResult | null> => {
     resetState()
@@ -189,6 +224,10 @@ export function createAgentIpc(deps: IpcDeps): AgentIpc {
           model: opts?.model ?? null,
           thinkingLevel: opts?.thinkingLevel ?? null,
           sessionId: opts?.sessionId ?? null,
+          autoCompact: opts?.autoCompact ?? null,
+          compactionThreshold: opts?.compactionThreshold ?? null,
+          compactionProvider: opts?.compactionProvider ?? null,
+          compactionModel: opts?.compactionModel ?? null,
         },
       }
 
@@ -280,6 +319,95 @@ export function createAgentIpc(deps: IpcDeps): AgentIpc {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       log.error('error', 'IPC invoke failed', { command: 'edit_and_resend', error: message })
+      setError(message)
+      setIsRunning(false)
+      completion.resolve = null
+      return null
+    } finally {
+      detachListener()
+    }
+  }
+
+  /**
+   * Retry the last failed message via the backend retry endpoint.
+   * Uses the same streaming infrastructure as run() so events are properly
+   * captured and the caller can settle the response into a placeholder message.
+   */
+  const retryRun = async (): Promise<SubmitGoalResult | null> => {
+    resetState()
+    setIsRunning(true)
+    resetMetrics()
+    log.info('streaming', 'Retry stream started')
+    try {
+      await attachListener()
+
+      if (isTauri()) {
+        const result = await invoke<SubmitGoalResult>('retry_last_message')
+        setLastResult(result)
+        return result
+      }
+
+      // Web mode: HTTP call returns immediately, wait for WebSocket completion
+      const completionPromise = new Promise<SubmitGoalResult | null>((resolve) => {
+        completion.resolve = resolve
+      })
+
+      const submitResult = await invoke<SubmitGoalResult>('retry_last_message')
+
+      const result = await completionPromise
+
+      const finalResult: SubmitGoalResult = result
+        ? { ...result, sessionId: result.sessionId || submitResult.sessionId }
+        : { success: false, turns: 0, sessionId: submitResult.sessionId }
+      setLastResult(finalResult)
+      return finalResult
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      log.error('error', 'IPC invoke failed', { command: 'retry_last_message', error: message })
+      setError(message)
+      setIsRunning(false)
+      completion.resolve = null
+      return null
+    } finally {
+      detachListener()
+    }
+  }
+
+  /**
+   * Regenerate the last assistant response via the backend regenerate endpoint.
+   * Same streaming infrastructure as retryRun().
+   */
+  const regenerateRun = async (): Promise<SubmitGoalResult | null> => {
+    resetState()
+    setIsRunning(true)
+    resetMetrics()
+    log.info('streaming', 'Regenerate stream started')
+    try {
+      await attachListener()
+
+      if (isTauri()) {
+        const result = await invoke<SubmitGoalResult>('regenerate_response')
+        setLastResult(result)
+        return result
+      }
+
+      // Web mode: HTTP call returns immediately, wait for WebSocket completion
+      const completionPromise = new Promise<SubmitGoalResult | null>((resolve) => {
+        completion.resolve = resolve
+      })
+
+      const submitResult = await invoke<SubmitGoalResult>('regenerate_response')
+
+      const result = await completionPromise
+
+      const finalResult: SubmitGoalResult = result
+        ? { ...result, sessionId: result.sessionId || submitResult.sessionId }
+        : { success: false, turns: 0, sessionId: submitResult.sessionId }
+      setLastResult(finalResult)
+      return finalResult
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      log.error('error', 'IPC invoke failed', { command: 'regenerate_response', error: message })
       setError(message)
       setIsRunning(false)
       completion.resolve = null
@@ -385,6 +513,8 @@ export function createAgentIpc(deps: IpcDeps): AgentIpc {
   return {
     run,
     editAndResendRun,
+    retryRun,
+    regenerateRun,
     cancel,
     steer,
     followUp,

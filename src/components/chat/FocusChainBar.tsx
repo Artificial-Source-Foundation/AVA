@@ -5,18 +5,23 @@
  */
 
 import { CheckCircle, Circle, Loader2 } from 'lucide-solid'
-import { type Component, createSignal, For, Show } from 'solid-js'
+import { type Component, createSignal, For, Match, Show, Switch } from 'solid-js'
 import { type FocusItem, useFocusChain } from '../../stores/focus-chain'
 
 const StatusIcon: Component<{ status: FocusItem['status'] }> = (props) => {
-  switch (props.status) {
-    case 'completed':
-      return <CheckCircle class="w-3 h-3 text-[var(--success)]" />
-    case 'in_progress':
-      return <Loader2 class="w-3 h-3 text-[var(--accent)] animate-spin" />
-    default:
-      return <Circle class="w-3 h-3 text-[var(--text-muted)]" />
-  }
+  return (
+    <Switch>
+      <Match when={props.status === 'completed'}>
+        <CheckCircle class="w-3 h-3 text-[var(--success)]" />
+      </Match>
+      <Match when={props.status === 'in_progress'}>
+        <Loader2 class="w-3 h-3 text-[var(--accent)] animate-spin" />
+      </Match>
+      <Match when={true}>
+        <Circle class="w-3 h-3 text-[var(--text-muted)]" />
+      </Match>
+    </Switch>
+  )
 }
 
 export const FocusChainBar: Component = () => {
@@ -35,8 +40,8 @@ export const FocusChainBar: Component = () => {
           {/* Progress bar */}
           <div class="w-16 h-1 bg-[var(--surface-raised)] rounded-full overflow-hidden shrink-0">
             <div
-              class="h-full bg-[var(--accent)] rounded-full transition-all duration-300"
-              style={{ width: `${progressPercent()}%` }}
+              class="h-full w-full origin-left bg-[var(--accent)] rounded-full transition-transform duration-300"
+              style={{ transform: `scaleX(${progressPercent() / 100})` }}
             />
           </div>
 

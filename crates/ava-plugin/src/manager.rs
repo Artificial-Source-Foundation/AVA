@@ -326,11 +326,16 @@ impl PluginManager {
         }
 
         let mut current_tools = tools;
-        for _plugin_name in &subscribers {
+        for plugin_name in &subscribers {
             let params = serde_json::json!({ "tools": current_tools });
             let responses = self
                 .dispatcher
-                .dispatch(&HookEvent::ToolDefinition, &params, &mut self.processes)
+                .dispatch_to_plugins(
+                    &HookEvent::ToolDefinition,
+                    &params,
+                    &mut self.processes,
+                    std::slice::from_ref(plugin_name),
+                )
                 .await;
 
             for resp in responses {
@@ -554,14 +559,15 @@ impl PluginManager {
         }
 
         let mut current = messages;
-        for _plugin_name in &subscribers {
+        for plugin_name in &subscribers {
             let params = serde_json::json!({ "messages": current });
             let responses = self
                 .dispatcher
-                .dispatch(
+                .dispatch_to_plugins(
                     &HookEvent::ChatMessagesTransform,
                     &params,
                     &mut self.processes,
+                    std::slice::from_ref(plugin_name),
                 )
                 .await;
 

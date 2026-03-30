@@ -106,53 +106,6 @@ fn derive_blocks(messages: &[UiMessage]) -> Vec<RenderBlock<'_>> {
     blocks
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::state::messages::MessageState;
-    use crate::state::theme::Theme;
-
-    #[test]
-    fn derive_blocks_groups_consecutive_tool_messages() {
-        let messages = vec![
-            UiMessage::new(MessageKind::User, "search this"),
-            UiMessage::new(MessageKind::ToolCall, "grep foo"),
-            UiMessage::new(MessageKind::ToolResult, "matched"),
-            UiMessage::new(MessageKind::Assistant, "done"),
-        ];
-
-        let blocks = derive_blocks(&messages);
-        assert_eq!(blocks.len(), 3);
-        assert!(matches!(blocks[0], RenderBlock::Message(_)));
-        assert!(matches!(blocks[1], RenderBlock::ActionGroup { .. }));
-        assert!(matches!(blocks[2], RenderBlock::Message(_)));
-    }
-
-    #[test]
-    fn expanded_tool_history_forces_finished_groups_open() {
-        let messages = vec![
-            UiMessage::new(MessageKind::ToolCall, "grep foo"),
-            UiMessage::new(MessageKind::ToolResult, "matched"),
-        ];
-        let blocks = derive_blocks(&messages);
-        let mut state = MessageState::default();
-        state.show_tools_expanded = true;
-
-        let expanded = match &blocks[0] {
-            RenderBlock::ActionGroup { messages, active } => render_action_group(
-                messages,
-                &Theme::default_theme(),
-                0,
-                80,
-                *active || state.show_tools_expanded,
-            ),
-            RenderBlock::Message(_) => panic!("expected action group"),
-        };
-
-        assert!(expanded.len() > 1, "expanded group should render details");
-    }
-}
-
 pub fn render_message_list(frame: &mut Frame<'_>, area: Rect, state: &mut AppState) {
     // Determine which messages to render based on view mode.
     // For BackgroundTask views, we need to copy from the shared state.
@@ -178,13 +131,6 @@ pub fn render_message_list(frame: &mut Frame<'_>, area: Rect, state: &mut AppSta
                 &bg_messages_owned
             }
         }
-        ViewMode::PraxisTask { task_id, .. } => {
-            if let Some(task) = state.praxis.task(*task_id) {
-                &task.messages
-            } else {
-                &state.messages.messages
-            }
-        }
     };
 
     // Empty state: show the welcome screen across the full area (main view only).
@@ -200,8 +146,6 @@ pub fn render_message_list(frame: &mut Frame<'_>, area: Rect, state: &mut AppSta
             // Sub-agent or background task with no messages — show a hint
             let hint_text = if matches!(state.view_mode, ViewMode::BackgroundTask { .. }) {
                 "No output from this background task yet."
-            } else if matches!(state.view_mode, ViewMode::PraxisTask { .. }) {
-                "No output from this Praxis task yet."
             } else {
                 "No messages in this sub-agent conversation."
             };
@@ -268,42 +212,6 @@ pub fn render_message_list(frame: &mut Frame<'_>, area: Rect, state: &mut AppSta
         lines.push(Line::raw(""));
     }
 
-    if let ViewMode::PraxisTask { task_id, goal } = &state.view_mode {
-        let truncated_goal = crate::text_utils::truncate_display(goal, 55);
-        let status_str = state
-            .praxis
-            .task(*task_id)
-            .map(|task| format!(" ({})", task.status))
-            .unwrap_or_default();
-        lines.push(Line::from(vec![
-            Span::styled(
-                "\u{2190} ",
-                Style::default()
-                    .fg(state.theme.accent)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                "Main",
-                Style::default()
-                    .fg(state.theme.primary)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(" > ", Style::default().fg(state.theme.text_dimmed)),
-            Span::styled(
-                format!("Praxis #{task_id}: {truncated_goal}"),
-                Style::default()
-                    .fg(state.theme.accent)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(status_str, Style::default().fg(state.theme.text_muted)),
-        ]));
-        lines.push(Line::from(Span::styled(
-            "\u{2500}".repeat(content_width as usize),
-            Style::default().fg(state.theme.border),
-        )));
-        lines.push(Line::raw(""));
-    }
-
     if let ViewMode::SubAgent { description, .. } = &state.view_mode {
         let truncated_desc = crate::text_utils::truncate_display(description, 60);
         lines.push(Line::from(vec![
@@ -338,7 +246,7 @@ pub fn render_message_list(frame: &mut Frame<'_>, area: Rect, state: &mut AppSta
     let show_thinking = state.agent.show_thinking;
 
     // Track per-source-message line ranges for mouse click hit-testing.
-    let mut line_ranges: Vec<(u16, u16)> = Vec::with_capacity(messages_source.len());
+    let mut line_ranges: Vec<(usize, usize)> = Vec::with_capacity(messages_source.len());
     // Index into messages_source — advances as we iterate render blocks.
     let mut src_idx = 0usize;
 
@@ -346,7 +254,7 @@ pub fn render_message_list(frame: &mut Frame<'_>, area: Rect, state: &mut AppSta
         if i > 0 {
             lines.push(Line::raw(""));
         }
-        let start = lines.len() as u16;
+        let start = lines.len();
         match block {
             RenderBlock::Message(message) => {
                 lines.extend(render_message_with_options(
@@ -356,7 +264,7 @@ pub fn render_message_list(frame: &mut Frame<'_>, area: Rect, state: &mut AppSta
                     content_width,
                     show_thinking,
                 ));
-                let end = lines.len() as u16;
+                let end = lines.len();
                 // Record range for this source message.
                 if src_idx < messages_source.len() {
                     line_ranges.push((start, end));
@@ -374,7 +282,7 @@ pub fn render_message_list(frame: &mut Frame<'_>, area: Rect, state: &mut AppSta
                     content_width,
                     *active || state.messages.show_tools_expanded || group_expanded,
                 ));
-                let end = lines.len() as u16;
+                let end = lines.len();
                 // Each message in the group gets the same range (the whole group).
                 for _ in 0..messages.len() {
                     if src_idx < messages_source.len() {
@@ -390,8 +298,8 @@ pub fn render_message_list(frame: &mut Frame<'_>, area: Rect, state: &mut AppSta
     lines.push(Line::raw(""));
 
     // Lines are pre-wrapped, so each Line = 1 visual row.
-    let total = lines.len() as u16;
-    let visible_height = area.height;
+    let total = lines.len();
+    let visible_height = usize::from(area.height);
 
     state.messages.messages_area = area;
     state.messages.message_line_ranges = line_ranges;
@@ -444,12 +352,12 @@ pub fn render_message_list(frame: &mut Frame<'_>, area: Rect, state: &mut AppSta
     // relying on Paragraph::scroll(). This guarantees that the Paragraph widget
     // receives only as many lines as fit in the area, preventing any possibility
     // of text bleeding past area.bottom().
-    let start = (state.messages.scroll_offset as usize).min(lines.len());
-    let end = (start + visible_height as usize).min(lines.len());
+    let start = state.messages.scroll_offset.min(lines.len());
     // Hard-cap to content_area.height — the Paragraph must NEVER receive more
     // lines than the area can display, otherwise text bleeds into the composer.
-    let max_visible = content_area.height as usize;
-    let visible_lines: Vec<Line<'static>> = lines.drain(start..end).take(max_visible).collect();
+    let max_visible = usize::from(content_area.height);
+    let visible_lines: Vec<Line<'static>> =
+        lines.into_iter().skip(start).take(max_visible).collect();
 
     // STEP 4: Hard-clamp every line to content_area.width.
     // This is the final safety net — even if wrapping or markdown rendering
@@ -474,8 +382,8 @@ pub fn render_message_list(frame: &mut Frame<'_>, area: Rect, state: &mut AppSta
     // Using the layout-split area (scrollbar_area_layout) guarantees the
     // scrollbar is exactly 1 column wide with no gap between it and the margin.
     if total > visible_height && !state.messages.auto_scroll {
-        let mut scrollbar_state = ScrollbarState::new(max_offset as usize)
-            .position(state.messages.scroll_offset as usize);
+        let mut scrollbar_state =
+            ScrollbarState::new(max_offset).position(state.messages.scroll_offset);
         let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
             .thumb_symbol("\u{2593}")
             .track_symbol(Some("\u{2591}"))
@@ -483,5 +391,54 @@ pub fn render_message_list(frame: &mut Frame<'_>, area: Rect, state: &mut AppSta
             .end_symbol(None)
             .style(Style::default().fg(state.theme.text_dimmed));
         frame.render_stateful_widget(scrollbar, scrollbar_area_layout, &mut scrollbar_state);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::messages::MessageState;
+    use crate::state::theme::Theme;
+
+    #[test]
+    fn derive_blocks_groups_consecutive_tool_messages() {
+        let messages = vec![
+            UiMessage::new(MessageKind::User, "search this"),
+            UiMessage::new(MessageKind::ToolCall, "grep foo"),
+            UiMessage::new(MessageKind::ToolResult, "matched"),
+            UiMessage::new(MessageKind::Assistant, "done"),
+        ];
+
+        let blocks = derive_blocks(&messages);
+        assert_eq!(blocks.len(), 3);
+        assert!(matches!(blocks[0], RenderBlock::Message(_)));
+        assert!(matches!(blocks[1], RenderBlock::ActionGroup { .. }));
+        assert!(matches!(blocks[2], RenderBlock::Message(_)));
+    }
+
+    #[test]
+    fn expanded_tool_history_forces_finished_groups_open() {
+        let messages = vec![
+            UiMessage::new(MessageKind::ToolCall, "grep foo"),
+            UiMessage::new(MessageKind::ToolResult, "matched"),
+        ];
+        let blocks = derive_blocks(&messages);
+        let state = MessageState {
+            show_tools_expanded: true,
+            ..MessageState::default()
+        };
+
+        let expanded = match &blocks[0] {
+            RenderBlock::ActionGroup { messages, active } => render_action_group(
+                messages,
+                &Theme::default_theme(),
+                0,
+                80,
+                *active || state.show_tools_expanded,
+            ),
+            RenderBlock::Message(_) => panic!("expected action group"),
+        };
+
+        assert!(expanded.len() > 1, "expanded group should render details");
     }
 }

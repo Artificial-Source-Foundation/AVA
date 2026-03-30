@@ -49,7 +49,7 @@ const WorkerCard: Component<{ member: TeamMember; domainColor: string; onClick: 
   return (
     <button
       type="button"
-      onClick={props.onClick}
+      onClick={() => props.onClick()}
       class="flex items-center gap-2 w-full text-left rounded-lg bg-[var(--gray-3)] px-2.5 py-1.5 hover:bg-[var(--surface-raised)] transition-colors cursor-pointer"
       aria-label={`View ${props.member.name} details`}
     >
@@ -121,9 +121,9 @@ const TeamGroupCard: Component<{
       {/* Progress bar: 3px, domain color fill on var(--gray-3) track */}
       <div class="w-full h-[3px] rounded-sm bg-[var(--gray-3)]">
         <div
-          class="h-full rounded-sm transition-all duration-300"
+          class="h-full w-full origin-left rounded-sm transition-transform duration-300"
           style={{
-            width: `${Math.round(props.group.progress * 100)}%`,
+            transform: `scaleX(${Math.round(props.group.progress * 100) / 100})`,
             background: props.group.lead.status === 'done' ? 'var(--success)' : domainColor(),
           }}
         />
@@ -180,14 +180,14 @@ export const TeamPanel: Component<TeamPanelProps> = (props) => {
 
   return (
     <div class="flex flex-col h-full" style={{ background: 'var(--background)' }}>
-      {/* Header: "Praxis Team" with users icon + "N working" badge */}
+      {/* Header: "HQ Team" with users icon + "N working" badge */}
       <div
         class="flex items-center justify-between px-4 py-3.5"
         style={{ 'border-bottom': '1px solid var(--border-subtle)' }}
       >
         <div class="flex items-center gap-2">
           <Users class="w-4 h-4" style={{ color: 'var(--accent)' }} />
-          <span class="text-[13px] font-semibold text-[var(--text-primary)]">Praxis Team</span>
+          <span class="text-[13px] font-semibold text-[var(--text-primary)]">HQ Team</span>
         </div>
         <div class="flex items-center gap-2">
           <Show when={workingCount() > 0}>

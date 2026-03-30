@@ -1,7 +1,11 @@
 /**
- * Step 4: Set Up Your Workspace
+ * Step 4: Set Up Workspace
  *
- * Three radio-style option cards: Trust Current Folder, Import Existing Config, Start Fresh.
+ * Three option cards (vertical stack, 8px gap):
+ * - Trust Current Folder: green folder-check icon, mono path, description
+ * - Import Existing Config: blue upload icon
+ * - Start Fresh: purple sparkles icon
+ * Selected = accent border. Nav: Back <- | dots | Continue.
  */
 
 import { FolderCheck, Sparkles, Upload } from 'lucide-solid'
@@ -21,6 +25,8 @@ interface WorkspaceOption {
   iconBg: string
   title: string
   description: string
+  /** If true, show the current path under the title in mono */
+  showPath?: boolean
 }
 
 const WORKSPACE_OPTIONS: WorkspaceOption[] = [
@@ -30,23 +36,24 @@ const WORKSPACE_OPTIONS: WorkspaceOption[] = [
     iconColor: '#22C55E',
     iconBg: 'rgba(34, 197, 94, 0.15)',
     title: 'Trust Current Folder',
-    description: '',
+    description: 'Load local config, MCP servers, and rules from this project',
+    showPath: true,
   },
   {
     id: 'import',
     icon: Upload,
-    iconColor: 'var(--accent)',
-    iconBg: 'var(--accent-subtle)',
+    iconColor: '#3B82F6',
+    iconBg: 'rgba(59, 130, 246, 0.15)',
     title: 'Import Existing Config',
     description: 'Load .ava/ folder from another project',
   },
   {
     id: 'fresh',
     icon: Sparkles,
-    iconColor: '#F59E0B',
-    iconBg: 'rgba(245, 158, 11, 0.15)',
+    iconColor: '#8B5CF6',
+    iconBg: 'rgba(139, 92, 246, 0.15)',
     title: 'Start Fresh',
-    description: 'Clean slate \u2014 no imported rules or tools',
+    description: 'Clean slate \u2014 no local config, no inherited rules',
   },
 ]
 
@@ -67,59 +74,73 @@ export interface WorkspaceStepProps {
 // ---------------------------------------------------------------------------
 
 export const WorkspaceStep: Component<WorkspaceStepProps> = (props) => (
-  <div class="flex flex-col items-center">
+  <div class="flex flex-col items-center w-full max-w-[520px]">
     {/* Header */}
     <h2 class="text-2xl font-bold text-[var(--text-primary)] tracking-tight mb-2">
-      Set Up Your Workspace
+      Set Up Workspace
     </h2>
-    <p class="text-sm text-[var(--text-muted)] mb-8">Choose how to handle your project folder</p>
+    <p class="text-sm text-[var(--text-muted)] mb-8">How should AVA handle this project?</p>
 
-    {/* Option cards */}
-    <div class="w-full max-w-[520px] flex flex-col gap-3 mb-10">
+    {/* Option cards - vertical stack, 8px gap */}
+    <div class="w-full flex flex-col gap-2 mb-10">
       <For each={WORKSPACE_OPTIONS}>
         {(option) => (
           <button
             type="button"
             onClick={() => props.onSelect(option.id)}
-            class="bg-[var(--surface-raised)] border rounded-xl p-4 text-left transition-all hover:border-[var(--gray-6)] flex items-start gap-3"
-            classList={{
-              'border-[var(--accent)]': props.selected === option.id,
-              'border-[var(--gray-5)]': props.selected !== option.id,
+            class="rounded-xl p-4 text-left transition-all flex items-start gap-3"
+            style={{
+              background: 'var(--surface)',
+              border:
+                props.selected === option.id
+                  ? '1px solid var(--accent)'
+                  : '1px solid var(--border-subtle)',
             }}
           >
-            {/* Icon */}
+            {/* Icon - 36px frame */}
             <div
-              class="w-10 h-10 rounded-[10px] flex items-center justify-center flex-shrink-0"
+              class="w-9 h-9 rounded-[10px] flex items-center justify-center flex-shrink-0"
               style={{ background: option.iconBg, color: option.iconColor }}
             >
-              <Dynamic component={option.icon} class="w-5 h-5" />
+              <Dynamic component={option.icon} class="w-[18px] h-[18px]" />
             </div>
 
             {/* Text */}
             <div class="flex-1 min-w-0">
               <p class="text-sm font-medium text-[var(--text-primary)]">{option.title}</p>
-              <p class="text-xs text-[var(--text-muted)] mt-0.5">
-                {option.id === 'trust' ? props.currentPath : option.description}
-              </p>
+              {option.showPath && (
+                <p
+                  class="text-xs mt-0.5"
+                  style={{
+                    color: 'var(--text-muted)',
+                    'font-family': '"JetBrains Mono", monospace',
+                    'font-size': '11px',
+                  }}
+                >
+                  {props.currentPath}
+                </p>
+              )}
+              <p class="text-xs text-[var(--text-muted)] mt-0.5">{option.description}</p>
             </div>
           </button>
         )}
       </For>
     </div>
 
-    {/* Navigation */}
-    <div class="w-full max-w-[520px] flex items-center justify-between">
+    {/* Navigation: Back <- | (dots in parent) | Continue */}
+    <div class="w-full flex items-center justify-between">
       <button
         type="button"
-        onClick={props.onPrev}
-        class="text-sm text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
+        onClick={() => props.onPrev()}
+        class="text-sm text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors flex items-center gap-1"
       >
+        <span aria-hidden="true">&larr;</span>
         Back
       </button>
       <button
         type="button"
-        onClick={props.onNext}
-        class="px-6 py-2.5 bg-[var(--accent)] hover:bg-[var(--violet-8)] text-white text-sm font-medium rounded-xl transition-colors"
+        onClick={() => props.onNext()}
+        class="px-6 py-2 bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white text-sm font-medium rounded-[10px] transition-colors"
       >
         Continue
       </button>

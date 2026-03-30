@@ -1,15 +1,20 @@
 //! Tauri commands for context compaction.
-//!
-//! Mirrors the TUI `/compact` command: takes conversation messages, applies
-//! tool-truncation + sliding-window strategies (with optional focus filtering),
-//! and returns the compacted result with token stats.
 
-use ava_context::strategies::CondensationStrategy;
-use ava_context::{estimate_tokens_for_message, SlidingWindowStrategy, ToolTruncationStrategy};
-use ava_types::{Message, Role};
+use std::sync::Arc;
+
+use async_trait::async_trait;
+use ava_context::{estimate_tokens_for_message, CondenserConfig, HybridCondenser};
+use ava_llm::provider::LLMProvider;
+use ava_types::{Message, Role, Session};
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
+use tauri::State;
+use uuid::Uuid;
 
-/// A single message as sent from the SolidJS frontend.
+use crate::bridge::DesktopBridge;
+
+const DEFAULT_CONTEXT_WINDOW: usize = 128_000;
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CompactMessage {
@@ -17,35 +22,39 @@ pub struct CompactMessage {
     pub content: String,
 }
 
-/// Result returned to the frontend after compaction.
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CompactContextResult {
-    /// Compacted messages (role + content).
-    pub messages: Vec<CompactMessageOut>,
-    /// Token count before compaction.
-    pub tokens_before: usize,
-    /// Token count after compaction.
-    pub tokens_after: usize,
-    /// Number of tokens saved.
-    pub tokens_saved: usize,
-    /// Number of messages before compaction.
-    pub messages_before: usize,
-    /// Number of messages after compaction.
-    pub messages_after: usize,
-    /// Human-readable summary of the compaction.
-    pub summary: String,
-}
-
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct CompactMessageOut {
     pub role: String,
     pub content: String,
 }
 
-fn parse_role(s: &str) -> Role {
-    match s {
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CompactContextResult {
+    pub messages: Vec<CompactMessageOut>,
+    pub tokens_before: usize,
+    pub tokens_after: usize,
+    pub tokens_saved: usize,
+    pub messages_before: usize,
+    pub messages_after: usize,
+    pub summary: String,
+    pub context_summary: String,
+    pub usage_before_percent: f64,
+}
+
+struct DesktopSummarizer(Arc<dyn LLMProvider>);
+
+#[async_trait]
+impl ava_context::Summarizer for DesktopSummarizer {
+    async fn summarize(&self, text: &str) -> std::result::Result<String, String> {
+        let messages = vec![Message::new(Role::User, text.to_string())];
+        self.0.generate(&messages).await.map_err(|e| e.to_string())
+    }
+}
+
+fn parse_role(role: &str) -> Role {
+    match role {
         "user" => Role::User,
         "assistant" => Role::Assistant,
         "tool" => Role::Tool,
@@ -53,7 +62,7 @@ fn parse_role(s: &str) -> Role {
     }
 }
 
-fn role_to_string(role: Role) -> &'static str {
+fn role_to_string(role: &Role) -> &'static str {
     match role {
         Role::User => "user",
         Role::Assistant => "assistant",
@@ -62,171 +71,283 @@ fn role_to_string(role: Role) -> &'static str {
     }
 }
 
-/// Compact conversation context to save tokens.
-///
-/// Takes the current conversation messages and an optional focus keyword.
-/// Returns the compacted messages along with before/after token stats.
+fn extract_context_summary(messages: &[Message]) -> Option<String> {
+    messages
+        .iter()
+        .rev()
+        .find(|message| {
+            message.role == Role::System && message.content.starts_with("## Conversation Summary")
+        })
+        .map(|message| message.content.clone())
+}
+
+fn is_compaction_summary(message: &Message) -> bool {
+    message.role == Role::System && message.content.starts_with("## Conversation Summary")
+}
+
+fn build_summary_line(
+    focus: Option<&str>,
+    tokens_before: usize,
+    tokens_after: usize,
+    messages_before: usize,
+    messages_after: usize,
+) -> String {
+    let saved = tokens_before.saturating_sub(tokens_after);
+    let condensed = messages_before.saturating_sub(messages_after);
+    match focus.filter(|value| !value.trim().is_empty()) {
+        Some(focus) => format!(
+            "Conversation compacted (focus: {focus}): {messages_before} messages -> summary (saved {saved} tokens, condensed {condensed} messages)."
+        ),
+        None => format!(
+            "Conversation compacted: {messages_before} messages -> summary (saved {saved} tokens, condensed {condensed} messages)."
+        ),
+    }
+}
+
+fn already_compact_result(
+    messages: &[Message],
+    tokens: usize,
+    usage_before_percent: f64,
+) -> CompactContextResult {
+    CompactContextResult {
+        messages: messages
+            .iter()
+            .map(|message| CompactMessageOut {
+                role: role_to_string(&message.role).to_string(),
+                content: message.content.clone(),
+            })
+            .collect(),
+        tokens_before: tokens,
+        tokens_after: tokens,
+        tokens_saved: 0,
+        messages_before: messages.len(),
+        messages_after: messages.len(),
+        summary: format!(
+            "Conversation is already compact. {tokens} tokens across {} messages.",
+            messages.len()
+        ),
+        context_summary: String::new(),
+        usage_before_percent,
+    }
+}
+
+fn to_frontend_messages(messages: &[Message]) -> Vec<CompactMessageOut> {
+    messages
+        .iter()
+        .map(|message| CompactMessageOut {
+            role: role_to_string(&message.role).to_string(),
+            content: message.content.clone(),
+        })
+        .collect()
+}
+
+fn hydrate_session(session_id: Uuid, existing: Option<Session>, messages: Vec<Message>) -> Session {
+    let mut session = existing.unwrap_or_else(|| Session::new().with_id(session_id));
+    session.messages = messages;
+    session.updated_at = Utc::now();
+    session
+}
+
+async fn save_session(
+    bridge: &DesktopBridge,
+    session_id: Uuid,
+    existing: Option<Session>,
+    messages: Vec<Message>,
+) -> Result<(), String> {
+    let session_manager = bridge.stack.session_manager.clone();
+    let session = hydrate_session(session_id, existing, messages);
+    tokio::task::spawn_blocking(move || session_manager.save(&session))
+        .await
+        .map_err(|e| format!("session save join error: {e}"))?
+        .map_err(|e| e.to_string())?;
+    *bridge.last_session_id.write().await = Some(session_id);
+    Ok(())
+}
+
+async fn resolve_compaction_provider(
+    bridge: &DesktopBridge,
+    compaction_provider: Option<&str>,
+    compaction_model: Option<&str>,
+) -> Result<Arc<dyn LLMProvider>, String> {
+    if let (Some(provider), Some(model)) = (compaction_provider, compaction_model) {
+        return bridge
+            .stack
+            .router
+            .route_required(provider, model)
+            .await
+            .map_err(|e| e.to_string());
+    }
+
+    let (provider, model) = bridge.stack.current_model().await;
+    bridge
+        .stack
+        .router
+        .route_required(&provider, &model)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+async fn build_condenser(
+    bridge: &DesktopBridge,
+    context_window: usize,
+    focus: Option<String>,
+    compaction_provider: Option<&str>,
+    compaction_model: Option<&str>,
+) -> Result<HybridCondenser, String> {
+    let provider =
+        resolve_compaction_provider(bridge, compaction_provider, compaction_model).await?;
+    let summarizer: Arc<dyn ava_context::Summarizer> = Arc::new(DesktopSummarizer(provider));
+    let config = CondenserConfig {
+        max_tokens: context_window,
+        target_tokens: context_window * 3 / 4,
+        preserve_recent_messages: 4,
+        preserve_recent_turns: 2,
+        focus,
+        ..Default::default()
+    };
+
+    Ok(ava_context::create_hybrid_condenser(
+        config,
+        Some(summarizer),
+    ))
+}
+
+fn simple_messages(messages: Vec<CompactMessage>) -> Vec<Message> {
+    messages
+        .into_iter()
+        .map(|message| Message::new(parse_role(&message.role), message.content))
+        .collect()
+}
+
 #[tauri::command]
 pub async fn compact_context(
     messages: Vec<CompactMessage>,
     focus: Option<String>,
     context_window: Option<usize>,
+    session_id: Option<String>,
+    compaction_provider: Option<String>,
+    compaction_model: Option<String>,
+    bridge: State<'_, DesktopBridge>,
 ) -> Result<CompactContextResult, String> {
-    if messages.is_empty() {
+    let session_uuid = session_id
+        .as_deref()
+        .map(Uuid::parse_str)
+        .transpose()
+        .map_err(|e| format!("invalid session id: {e}"))?
+        .or(*bridge.last_session_id.read().await);
+
+    let existing_session =
+        session_uuid.and_then(|id| bridge.stack.session_manager.get(id).ok().flatten());
+
+    let source_messages = existing_session
+        .as_ref()
+        .map(|session| session.messages.clone())
+        .filter(|session_messages| !session_messages.is_empty())
+        .unwrap_or_else(|| simple_messages(messages));
+
+    if source_messages.is_empty() {
         return Ok(CompactContextResult {
-            messages: vec![],
+            messages: Vec::new(),
             tokens_before: 0,
             tokens_after: 0,
             tokens_saved: 0,
             messages_before: 0,
             messages_after: 0,
             summary: "Nothing to compact -- conversation is empty.".to_string(),
+            context_summary: String::new(),
+            usage_before_percent: 0.0,
         });
     }
 
-    // Convert frontend messages to ava_types::Message
-    let typed_messages: Vec<Message> = messages
+    let window = context_window.unwrap_or(DEFAULT_CONTEXT_WINDOW);
+    let tokens_before: usize = source_messages
         .iter()
-        .map(|m| Message::new(parse_role(&m.role), &m.content))
-        .collect();
+        .map(estimate_tokens_for_message)
+        .sum();
+    let usage_before_percent = if window == 0 {
+        0.0
+    } else {
+        (tokens_before as f64 / window as f64) * 100.0
+    };
 
-    let before_tokens: usize = typed_messages.iter().map(estimate_tokens_for_message).sum();
-    let before_count = messages.len();
+    let mut condenser = build_condenser(
+        &bridge,
+        window,
+        focus.clone(),
+        compaction_provider.as_deref(),
+        compaction_model.as_deref(),
+    )
+    .await?;
 
-    let ctx_window = context_window.unwrap_or(128_000);
-    let usage_pct = before_tokens as f64 / ctx_window as f64 * 100.0;
+    let condensed = condenser
+        .force_condense(&source_messages)
+        .await
+        .map_err(|e| e.to_string())?;
 
-    // If usage is low and no focus keyword, skip compaction
-    if usage_pct < 50.0 && focus.is_none() {
-        let out_messages: Vec<CompactMessageOut> = messages
-            .iter()
-            .map(|m| CompactMessageOut {
-                role: m.role.clone(),
-                content: m.content.clone(),
-            })
-            .collect();
-        return Ok(CompactContextResult {
-            messages: out_messages,
-            tokens_before: before_tokens,
-            tokens_after: before_tokens,
-            tokens_saved: 0,
-            messages_before: before_count,
-            messages_after: before_count,
-            summary: format!(
-                "Context usage is low ({:.0}%), no compaction needed. {} tokens across {} messages.",
-                usage_pct, before_tokens, before_count,
-            ),
-        });
+    let tokens_after = condensed.estimated_tokens;
+    let messages_after = condensed.messages.len();
+    let context_summary = extract_context_summary(&condensed.messages).unwrap_or_default();
+
+    if messages_after >= source_messages.len() && tokens_after >= tokens_before {
+        return Ok(already_compact_result(
+            &source_messages,
+            tokens_before,
+            usage_before_percent,
+        ));
     }
 
-    let target_tokens = (ctx_window / 2).min(before_tokens * 3 / 4);
+    if let Some(session_uuid) = session_uuid {
+        let mut active_messages = condensed.messages.clone();
+        if let Some(summary_index) = active_messages.iter().position(is_compaction_summary) {
+            let next_timestamp = active_messages
+                .iter()
+                .skip(summary_index + 1)
+                .find(|message| !is_compaction_summary(message))
+                .map(|message| message.timestamp);
+            let previous_timestamp = condensed
+                .compacted_messages
+                .last()
+                .map(|message| message.timestamp)
+                .or_else(|| {
+                    active_messages[..summary_index]
+                        .iter()
+                        .rev()
+                        .find(|message| !is_compaction_summary(message))
+                        .map(|message| message.timestamp)
+                });
 
-    // Stage 1: Truncate long tool outputs
-    let truncated = ToolTruncationStrategy::default()
-        .condense(&typed_messages, target_tokens)
-        .unwrap_or_else(|_| typed_messages.clone());
-
-    // Stage 2: Sliding window to drop oldest messages
-    let condensed = SlidingWindowStrategy
-        .condense(&truncated, target_tokens)
-        .unwrap_or(truncated);
-
-    // Stage 3 (optional): Focus filtering
-    let final_messages = if let Some(ref focus_text) = focus {
-        let keywords: Vec<&str> = focus_text.split_whitespace().collect();
-        let mut kept_indices: Vec<bool> = vec![false; typed_messages.len()];
-
-        let condensed_set: std::collections::HashSet<String> =
-            condensed.iter().map(|m| m.content.clone()).collect();
-        for (i, msg) in typed_messages.iter().enumerate() {
-            if condensed_set.contains(&msg.content) {
-                kept_indices[i] = true;
-            }
-        }
-
-        // Also keep messages matching any focus keyword
-        for (i, msg) in typed_messages.iter().enumerate() {
-            if !kept_indices[i] {
-                let content_lower = msg.content.to_lowercase();
-                if keywords
-                    .iter()
-                    .any(|kw| content_lower.contains(&kw.to_lowercase()))
-                {
-                    kept_indices[i] = true;
+            if let Some(summary) = active_messages.get_mut(summary_index) {
+                if let Some(next_timestamp) = next_timestamp {
+                    summary.timestamp = next_timestamp - chrono::Duration::milliseconds(1);
+                } else if let Some(previous_timestamp) = previous_timestamp {
+                    summary.timestamp = previous_timestamp + chrono::Duration::milliseconds(1);
                 }
             }
         }
 
-        let mut focused: Vec<Message> = typed_messages
-            .iter()
-            .zip(kept_indices.iter())
-            .filter(|(_, kept)| **kept)
-            .map(|(m, _)| m.clone())
-            .collect();
-
-        // Trim from the front if still over target
-        let mut total: usize = focused.iter().map(estimate_tokens_for_message).sum();
-        while total > target_tokens && focused.len() > 1 {
-            let removed = focused.remove(0);
-            total -= estimate_tokens_for_message(&removed);
-        }
-        focused
-    } else {
-        condensed
-    };
-
-    let after_tokens: usize = final_messages.iter().map(estimate_tokens_for_message).sum();
-    let after_count = final_messages.len();
-    let saved_tokens = before_tokens.saturating_sub(after_tokens);
-    let dropped_count = before_count.saturating_sub(after_count);
-
-    if dropped_count == 0 {
-        let out_messages: Vec<CompactMessageOut> = final_messages
-            .iter()
-            .map(|m| CompactMessageOut {
-                role: role_to_string(m.role.clone()).to_string(),
-                content: m.content.clone(),
-            })
-            .collect();
-        return Ok(CompactContextResult {
-            messages: out_messages,
-            tokens_before: before_tokens,
-            tokens_after: after_tokens,
-            tokens_saved: saved_tokens,
-            messages_before: before_count,
-            messages_after: after_count,
-            summary: format!(
-                "Conversation is already compact. {} tokens across {} messages.",
-                before_tokens, before_count,
-            ),
-        });
+        let mut persisted_messages = condensed.compacted_messages.clone();
+        persisted_messages.extend(active_messages);
+        persisted_messages.sort_by_key(|message| message.timestamp);
+        save_session(&bridge, session_uuid, existing_session, persisted_messages).await?;
     }
 
-    let summary = if let Some(ref focus_text) = focus {
-        format!(
-            "Compacted conversation (focus: \"{focus_text}\"). Saved ~{saved_tokens} tokens (was {before_tokens}, now {after_tokens}). Dropped {dropped_count} messages, kept {after_count}.",
-        )
-    } else {
-        format!(
-            "Compacted conversation. Saved ~{saved_tokens} tokens (was {before_tokens}, now {after_tokens}). Dropped {dropped_count} messages, kept {after_count}.",
-        )
-    };
-
-    let out_messages: Vec<CompactMessageOut> = final_messages
-        .iter()
-        .map(|m| CompactMessageOut {
-            role: role_to_string(m.role.clone()).to_string(),
-            content: m.content.clone(),
-        })
-        .collect();
+    let summary = build_summary_line(
+        focus.as_deref(),
+        tokens_before,
+        tokens_after,
+        source_messages.len(),
+        messages_after,
+    );
 
     Ok(CompactContextResult {
-        messages: out_messages,
-        tokens_before: before_tokens,
-        tokens_after: after_tokens,
-        tokens_saved: saved_tokens,
-        messages_before: before_count,
-        messages_after: after_count,
+        messages: to_frontend_messages(&condensed.messages),
+        tokens_before,
+        tokens_after,
+        tokens_saved: tokens_before.saturating_sub(tokens_after),
+        messages_before: source_messages.len(),
+        messages_after,
         summary,
+        context_summary,
+        usage_before_percent,
     })
 }

@@ -10,12 +10,11 @@
  */
 
 import { ArrowLeft, CircleCheck, Loader, Square, TriangleAlert, Users, XCircle } from 'lucide-solid'
-import { type Component, createMemo, createSignal, For, onCleanup, Show } from 'solid-js'
+import { type Component, createMemo, For, Show } from 'solid-js'
 import { useTeam } from '../../stores/team'
 import { DOMAIN_COLORS } from '../../stores/team-helpers'
 import type { TeamMember } from '../../types/team'
 import { TeamChatInput } from './TeamChatInput'
-import { formatElapsed } from './tool-call-utils'
 
 interface TeamChatViewProps {
   onStopAgent: (memberId: string) => void
@@ -24,7 +23,6 @@ interface TeamChatViewProps {
 
 export const TeamChatView: Component<TeamChatViewProps> = (props) => {
   const team = useTeam()
-  const [_elapsed, setElapsed] = createSignal('')
 
   const member = (): TeamMember | null => team.selectedMember()
   const isWorking = () => member()?.status === 'working'
@@ -55,16 +53,6 @@ export const TeamChatView: Component<TeamChatViewProps> = (props) => {
     }
     return `${doneCalls}/${totalCalls}`
   })
-
-  // Live elapsed timer
-  const timer = setInterval(() => {
-    const m = member()
-    if (m && isWorking()) {
-      setElapsed(formatElapsed(m.createdAt))
-    }
-  }, 1000)
-
-  onCleanup(() => clearInterval(timer))
 
   return (
     <div class="flex flex-col h-full min-h-0" style={{ background: 'var(--background)' }}>

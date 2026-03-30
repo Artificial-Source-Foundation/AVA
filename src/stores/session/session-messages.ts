@@ -14,6 +14,7 @@ import {
 } from '../../services/database'
 import { logError } from '../../services/logger'
 import type { Message, MessageError } from '../../types'
+import { createLatestRequestGate } from './request-gate'
 import {
   currentSession,
   messages,
@@ -36,21 +37,31 @@ import {
 // ============================================================================
 
 const pendingInserts = new Map<string, Promise<void>>()
+const loadMessagesGate = createLatestRequestGate()
 
 // ============================================================================
 // Message Management
 // ============================================================================
 
 export async function loadSessionMessages(sessionId: string): Promise<void> {
+  const requestToken = loadMessagesGate.begin()
   setIsLoadingMessages(true)
   try {
     const dbMessages = await getMessages(sessionId)
+    if (!loadMessagesGate.isCurrent(requestToken) || currentSession()?.id !== sessionId) {
+      return
+    }
     setMessages(dbMessages)
   } catch (err) {
+    if (!loadMessagesGate.isCurrent(requestToken) || currentSession()?.id !== sessionId) {
+      return
+    }
     logError('Session', 'Failed to load messages', err)
     setMessages([])
   } finally {
-    setIsLoadingMessages(false)
+    if (loadMessagesGate.isCurrent(requestToken) && currentSession()?.id === sessionId) {
+      setIsLoadingMessages(false)
+    }
   }
 }
 
@@ -304,8 +315,18 @@ export async function createCheckpoint(description: string): Promise<string | nu
     createdAt: Date.now(),
   })
 
-  // Lazy import to avoid circular — setCheckpoints is from session-state
-  const { setCheckpoints } = await import('./session-state')
+  // Lazy import to avoid circular — setCheckpoints/setMemoryItems are from session-state
+  const { setCheckpoints, setMemoryItems } = await import('./session-state')
+  const memItem = {
+    id,
+    sessionId: sess.id,
+    type: 'checkpoint' as const,
+    title: description,
+    preview: JSON.stringify(snapshot),
+    tokens: 0,
+    createdAt: Date.now(),
+  }
+  setMemoryItems((prev) => [...prev, memItem])
   setCheckpoints((prev) => [
     ...prev,
     { id, timestamp: Date.now(), description, messageCount: messages().length },

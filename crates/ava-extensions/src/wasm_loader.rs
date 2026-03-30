@@ -59,11 +59,10 @@ mod tests {
 
     #[test]
     fn load_error_message_is_actionable() {
-        let loader = WasmLoader::default();
+        let loader = WasmLoader;
         let result = loader.load(Path::new("/any/path.wasm"));
-        let err = match result {
-            Err(e) => e,
-            Ok(_) => panic!("expected Err, got Ok"),
+        let Err(err) = result else {
+            panic!("expected Err, got Ok");
         };
         let msg = err.to_string();
         // The error message should guide the caller toward alternatives.

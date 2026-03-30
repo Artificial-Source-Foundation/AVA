@@ -4,6 +4,7 @@ use ava_tui::auth::run_auth;
 use ava_tui::benchmark;
 use ava_tui::config::cli::{CliArgs, Command};
 use ava_tui::headless::run_headless;
+use ava_tui::hq_cli::run_hq_command;
 use ava_tui::plugin_commands::run_plugin;
 use ava_tui::review::run_review;
 use clap::Parser;
@@ -63,6 +64,7 @@ async fn main() -> Result<()> {
         Some(Command::Review(args)) => return run_review(args).await,
         Some(Command::Auth { action }) => return run_auth(action).await,
         Some(Command::Plugin { action }) => return run_plugin(action).await,
+        Some(Command::Hq { action }) => return run_hq_command(action).await,
         #[cfg(feature = "web")]
         Some(Command::Serve { port, host }) => {
             return ava_tui::web::run_server(&host, port).await;
@@ -106,6 +108,7 @@ async fn main() -> Result<()> {
                 worker_spec,
                 cli.max_turns,
                 suite,
+                cli.task_filter.as_deref(),
             )
             .await?;
             return Ok(());
@@ -156,6 +159,7 @@ async fn main() -> Result<()> {
                 suite,
                 imported_tasks,
                 language_filter,
+                cli.task_filter.as_deref(),
             )
             .await?;
             return Ok(());
@@ -194,7 +198,7 @@ fn init_logging(is_tui: bool, verbose: u8) -> tracing_appender::non_blocking::Wo
     let file_filter = tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
         tracing_subscriber::EnvFilter::new(
             "info,ava_agent=debug,ava_llm=debug,ava_tui=debug,ava_tools=debug,\
-             ava_praxis=debug,ava_config=debug,ava_session=debug,ava_context=debug,\
+             ava_hq=debug,ava_config=debug,ava_session=debug,ava_context=debug,\
              ava_permissions=info,ava_mcp=info,ava_auth=info,ava_platform=info",
         )
     });

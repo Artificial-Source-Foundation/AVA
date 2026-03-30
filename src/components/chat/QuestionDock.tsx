@@ -2,14 +2,16 @@
  * Question Dock Component
  *
  * Inline, non-modal widget that sits between MessageList and MessageInput
- * in the chat area. Displays when the agent uses the `question` tool to
- * ask the user a clarifying question. Supports both free-text input and
- * multiple-choice options.
+ * in the chat area. Card-style design matching Approval Dock. Displays when
+ * the agent uses the `question` tool to ask the user a clarifying question.
  *
- * Keyboard: Enter = Submit (free-text), Escape = Dismiss with empty answer
+ * Supports multiple-choice radio options (first selected with blue border/dot,
+ * others muted) with a final freeform "Type your own answer..." italic option.
+ *
+ * Keyboard: Enter = Submit, Escape = Dismiss with empty answer
  */
 
-import { Check, CircleHelp, Send, X } from 'lucide-solid'
+import { CircleHelp } from 'lucide-solid'
 import { type Component, createEffect, createSignal, For, onCleanup, Show } from 'solid-js'
 import type { QuestionRequest } from '../../hooks/useAgent'
 
@@ -29,6 +31,7 @@ export interface QuestionDockProps {
 export const QuestionDock: Component<QuestionDockProps> = (props) => {
   const [answer, setAnswer] = createSignal('')
   const [selectedOption, setSelectedOption] = createSignal<number | null>(null)
+  const [freeformActive, setFreeformActive] = createSignal(false)
 
   const isMultipleChoice = (): boolean => {
     const req = props.request
@@ -40,10 +43,16 @@ export const QuestionDock: Component<QuestionDockProps> = (props) => {
     if (props.request) {
       setAnswer('')
       setSelectedOption(null)
+      setFreeformActive(false)
     }
   })
 
   const handleSubmit = (): void => {
+    if (freeformActive()) {
+      const text = answer().trim()
+      if (text) props.onResolve(text)
+      return
+    }
     if (isMultipleChoice()) {
       const idx = selectedOption()
       if (idx !== null && props.request) {
@@ -61,6 +70,12 @@ export const QuestionDock: Component<QuestionDockProps> = (props) => {
     props.onResolve('')
   }
 
+  const canSubmit = (): boolean => {
+    if (freeformActive()) return answer().trim().length > 0
+    if (isMultipleChoice()) return selectedOption() !== null
+    return answer().trim().length > 0
+  }
+
   // Keyboard shortcuts
   createEffect(() => {
     if (!props.request) return
@@ -76,6 +91,14 @@ export const QuestionDock: Component<QuestionDockProps> = (props) => {
         }
       }
 
+      // Freeform input in multiple-choice mode
+      if (freeformActive() && target instanceof HTMLInputElement) {
+        if (e.key === 'Enter') {
+          e.preventDefault()
+          handleSubmit()
+        }
+      }
+
       // Escape always dismisses
       if (e.key === 'Escape') {
         e.preventDefault()
@@ -83,7 +106,12 @@ export const QuestionDock: Component<QuestionDockProps> = (props) => {
       }
 
       // For multiple-choice, Enter submits the selected option
-      if (isMultipleChoice() && e.key === 'Enter' && selectedOption() !== null) {
+      if (
+        isMultipleChoice() &&
+        !freeformActive() &&
+        e.key === 'Enter' &&
+        selectedOption() !== null
+      ) {
         e.preventDefault()
         handleSubmit()
       }
@@ -94,11 +122,19 @@ export const QuestionDock: Component<QuestionDockProps> = (props) => {
   })
 
   let textareaRef: HTMLTextAreaElement | undefined
+  let freeformInputRef: HTMLInputElement | undefined
 
   // Auto-focus the textarea when a free-text question appears
   createEffect(() => {
     if (props.request && !isMultipleChoice() && textareaRef) {
       textareaRef.focus()
+    }
+  })
+
+  // Auto-focus the freeform input when activated
+  createEffect(() => {
+    if (freeformActive() && freeformInputRef) {
+      freeformInputRef.focus()
     }
   })
 
@@ -108,49 +144,59 @@ export const QuestionDock: Component<QuestionDockProps> = (props) => {
         role="dialog"
         aria-label="Agent question"
         aria-labelledby="question-dock-text"
-        class="border-t border-b border-[var(--border-subtle)] bg-[var(--surface-raised)]"
-        style={{ animation: 'approvalSlideUp 150ms ease-out' }}
+        style={{
+          width: '620px',
+          'max-width': '100%',
+          'border-radius': '12px',
+          background: 'var(--surface)',
+          border: '1px solid var(--border-default)',
+          'box-shadow': '0 12px 24px rgba(0, 0, 0, 0.4)',
+          overflow: 'hidden',
+          'align-self': 'center',
+          animation: 'approvalSlideUp 150ms ease-out',
+        }}
       >
-        {/* Header row */}
-        <div class="flex items-center gap-2.5 px-4 py-2">
-          {/* Question icon */}
-          <div
-            class="p-1.5 rounded-[var(--radius-md)] flex-shrink-0"
-            style={{ background: 'var(--accent-subtle)' }}
-          >
+        {/* Header bar */}
+        <div
+          class="flex items-center justify-between"
+          style={{
+            height: '44px',
+            padding: '0 16px',
+            background: 'var(--background-subtle)',
+          }}
+        >
+          <div class="flex items-center gap-2.5" style={{ height: '100%' }}>
             <CircleHelp class="w-4 h-4" style={{ color: 'var(--accent)' }} />
+            <span class="text-[13px] font-semibold" style={{ color: 'var(--text-primary)' }}>
+              AVA has a question
+            </span>
           </div>
-
-          {/* Label */}
-          <span class="text-sm font-medium text-[var(--text-primary)]">Agent Question</span>
-
-          {/* Spacer */}
-          <div class="flex-1" />
-
-          {/* Dismiss button */}
-          <button
-            type="button"
-            onClick={handleDismiss}
-            class="inline-flex items-center gap-1 rounded-[var(--radius-sm)] border border-[var(--border-default)] bg-[var(--surface)] px-2 py-1 text-[var(--text-xs)] font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-raised)] transition-colors"
-            title="Skip question (Escape)"
-          >
-            <X class="w-3 h-3" />
-            Skip
-          </button>
         </div>
 
-        {/* Question text */}
-        <div class="px-4 pb-3">
+        {/* Body */}
+        <div
+          style={{
+            padding: '16px',
+            display: 'flex',
+            'flex-direction': 'column',
+            gap: '14px',
+          }}
+        >
+          {/* Question text */}
           <p
             id="question-dock-text"
-            class="text-sm text-[var(--text-primary)] leading-relaxed whitespace-pre-wrap"
+            style={{
+              color: 'var(--text-secondary)',
+              'font-size': '13px',
+              'line-height': '1.5',
+              margin: '0',
+              'white-space': 'pre-wrap',
+            }}
           >
             {props.request!.question}
           </p>
-        </div>
 
-        {/* Answer area */}
-        <div class="px-4 pb-3">
+          {/* Answer area */}
           <Show
             when={isMultipleChoice()}
             fallback={
@@ -162,87 +208,208 @@ export const QuestionDock: Component<QuestionDockProps> = (props) => {
                   onInput={(e) => setAnswer(e.currentTarget.value)}
                   placeholder="Type your answer..."
                   rows={2}
-                  class="
-                    flex-1 resize-none
-                    rounded-[var(--radius-md)]
-                    border border-[var(--border-default)]
-                    bg-[var(--surface)]
-                    px-3 py-2
-                    text-sm text-[var(--text-primary)]
-                    placeholder:text-[var(--text-muted)]
-                    focus:outline-none focus:border-[var(--accent)]
-                    transition-colors
-                  "
+                  style={{
+                    flex: '1',
+                    resize: 'none',
+                    'border-radius': '6px',
+                    border: '1px solid var(--border-default)',
+                    background: 'var(--background-subtle)',
+                    padding: '8px 12px',
+                    'font-size': '13px',
+                    color: 'var(--text-primary)',
+                    outline: 'none',
+                  }}
                 />
-                <button
-                  type="button"
-                  onClick={handleSubmit}
-                  disabled={!answer().trim()}
-                  class="
-                    self-end
-                    inline-flex items-center gap-1
-                    rounded-[var(--radius-sm)]
-                    border border-[var(--accent)]
-                    px-3 py-2
-                    text-[var(--text-sm)] font-medium
-                    text-[var(--accent)]
-                    hover:bg-[var(--accent)] hover:text-white
-                    disabled:opacity-40 disabled:pointer-events-none
-                    transition-colors
-                  "
-                  title="Submit answer (Enter)"
-                >
-                  <Send class="w-3.5 h-3.5" />
-                  Send
-                </button>
               </div>
             }
           >
-            {/* Multiple-choice options */}
-            <div class="space-y-1.5">
+            {/* Multiple-choice radio options */}
+            <div style={{ display: 'flex', 'flex-direction': 'column', gap: '6px' }}>
               <For each={props.request!.options}>
-                {(option, index) => (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSelectedOption(index())
-                      // Submit immediately on click for multiple-choice
-                      props.onResolve(option)
-                    }}
-                    class="
-                      w-full flex items-center gap-3
-                      px-3 py-2
-                      rounded-[var(--radius-md)]
-                      border text-left text-sm
-                      transition-colors duration-[var(--duration-fast)]
-                    "
-                    classList={{
-                      'border-[var(--accent)] bg-[var(--accent-subtle)] text-[var(--accent)]':
-                        selectedOption() === index(),
-                      'border-[var(--border-default)] text-[var(--text-primary)] hover:border-[var(--accent)] hover:bg-[var(--surface-raised)]':
-                        selectedOption() !== index(),
-                    }}
-                  >
-                    <div
-                      class="
-                        w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0
-                        transition-colors duration-[var(--duration-fast)]
-                      "
-                      classList={{
-                        'border-[var(--accent)] bg-[var(--accent)]': selectedOption() === index(),
-                        'border-[var(--border-default)]': selectedOption() !== index(),
+                {(option, index) => {
+                  const isSelected = () => selectedOption() === index() && !freeformActive()
+                  return (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedOption(index())
+                        setFreeformActive(false)
+                      }}
+                      class="flex items-center transition-colors"
+                      style={{
+                        width: '100%',
+                        height: '36px',
+                        padding: '0 12px',
+                        gap: '10px',
+                        'border-radius': '6px',
+                        background: 'var(--background-subtle)',
+                        border: `1px solid ${isSelected() ? 'var(--accent-border)' : 'var(--border-subtle)'}`,
+                        cursor: 'pointer',
+                        'text-align': 'left',
                       }}
                     >
-                      <Show when={selectedOption() === index()}>
-                        <Check class="w-3 h-3 text-white" />
-                      </Show>
-                    </div>
-                    <span>{option}</span>
-                  </button>
-                )}
+                      {/* Radio circle */}
+                      <div
+                        style={{
+                          width: '14px',
+                          height: '14px',
+                          'border-radius': '50%',
+                          border: `${isSelected() ? '2px' : '1.5px'} solid ${isSelected() ? 'var(--accent)' : 'var(--text-muted)'}`,
+                          display: 'flex',
+                          'align-items': 'center',
+                          'justify-content': 'center',
+                          'flex-shrink': '0',
+                          position: 'relative',
+                        }}
+                      >
+                        <Show when={isSelected()}>
+                          <div
+                            style={{
+                              width: '6px',
+                              height: '6px',
+                              'border-radius': '50%',
+                              background: 'var(--accent)',
+                            }}
+                          />
+                        </Show>
+                      </div>
+                      <span
+                        style={{
+                          color: isSelected() ? 'var(--text-primary)' : 'var(--text-secondary)',
+                          'font-family': 'var(--font-mono)',
+                          'font-size': '11px',
+                        }}
+                      >
+                        {option}
+                      </span>
+                    </button>
+                  )
+                }}
               </For>
+
+              {/* Freeform option — always last */}
+              <button
+                type="button"
+                onClick={() => {
+                  setFreeformActive(true)
+                  setSelectedOption(null)
+                }}
+                class="flex items-center transition-colors"
+                style={{
+                  width: '100%',
+                  height: '36px',
+                  padding: '0 12px',
+                  gap: '10px',
+                  'border-radius': '6px',
+                  background: 'var(--background-subtle)',
+                  border: `1px solid ${freeformActive() ? 'var(--accent-border)' : 'var(--border-subtle)'}`,
+                  cursor: 'pointer',
+                  'text-align': 'left',
+                }}
+              >
+                {/* Radio circle */}
+                <div
+                  style={{
+                    width: '14px',
+                    height: '14px',
+                    'border-radius': '50%',
+                    border: `${freeformActive() ? '2px' : '1.5px'} solid ${freeformActive() ? 'var(--accent)' : 'var(--text-muted)'}`,
+                    display: 'flex',
+                    'align-items': 'center',
+                    'justify-content': 'center',
+                    'flex-shrink': '0',
+                  }}
+                >
+                  <Show when={freeformActive()}>
+                    <div
+                      style={{
+                        width: '6px',
+                        height: '6px',
+                        'border-radius': '50%',
+                        background: 'var(--accent)',
+                      }}
+                    />
+                  </Show>
+                </div>
+                <Show
+                  when={freeformActive()}
+                  fallback={
+                    <span
+                      style={{
+                        color: 'var(--text-muted)',
+                        'font-size': '11px',
+                        'font-style': 'italic',
+                      }}
+                    >
+                      Type your own answer...
+                    </span>
+                  }
+                >
+                  <input
+                    ref={freeformInputRef}
+                    type="text"
+                    value={answer()}
+                    onInput={(e) => setAnswer(e.currentTarget.value)}
+                    placeholder="Type your own answer..."
+                    style={{
+                      flex: '1',
+                      background: 'transparent',
+                      border: 'none',
+                      outline: 'none',
+                      color: 'var(--text-primary)',
+                      'font-size': '11px',
+                      'font-style': 'italic',
+                    }}
+                  />
+                </Show>
+              </button>
             </div>
           </Show>
+
+          {/* Action buttons — right-aligned */}
+          <div class="flex items-center justify-end gap-2">
+            {/* Skip — ghost */}
+            <button
+              type="button"
+              onClick={handleDismiss}
+              class="inline-flex items-center justify-center transition-colors"
+              style={{
+                padding: '8px 16px',
+                'border-radius': '6px',
+                background: 'rgba(255, 255, 255, 0.024)',
+                border: '1px solid var(--border-default)',
+                color: 'var(--text-secondary)',
+                'font-size': '12px',
+                'font-weight': '500',
+                cursor: 'pointer',
+              }}
+              title="Skip question (Escape)"
+            >
+              Skip
+            </button>
+
+            {/* Answer — blue filled */}
+            <button
+              type="button"
+              onClick={handleSubmit}
+              disabled={!canSubmit()}
+              class="inline-flex items-center justify-center transition-colors"
+              style={{
+                padding: '8px 20px',
+                'border-radius': '6px',
+                background: canSubmit() ? 'var(--accent)' : 'var(--accent-muted)',
+                color: 'white',
+                'font-size': '12px',
+                'font-weight': '600',
+                cursor: canSubmit() ? 'pointer' : 'default',
+                opacity: canSubmit() ? '1' : '0.5',
+                border: 'none',
+              }}
+              title="Submit answer (Enter)"
+            >
+              Answer
+            </button>
+          </div>
         </div>
       </div>
     </Show>

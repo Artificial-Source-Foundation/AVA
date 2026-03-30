@@ -75,33 +75,33 @@ export const DiffViewer: Component<DiffViewerProps> = (props) => {
   }
 
   const lineStyles = {
-    add: 'bg-[var(--success-subtle)] text-[var(--success)]',
-    remove: 'bg-[var(--error-subtle)] text-[var(--error)]',
-    unchanged: 'text-[var(--text-secondary)]',
+    add: 'bg-[#34C75918] text-[#7AE582]',
+    remove: 'bg-[#FF453A18] text-[#FF6961]',
+    unchanged: 'text-[var(--gray-8)]',
   }
 
   const lineNumberStyles = {
-    add: 'text-[var(--success)] bg-[var(--success-subtle)]',
-    remove: 'text-[var(--error)] bg-[var(--error-subtle)]',
-    unchanged: 'text-[var(--text-muted)] bg-[var(--surface-sunken)]',
+    add: 'text-[#7AE582] bg-[#34C75910]',
+    remove: 'text-[#FF6961] bg-[#FF453A10]',
+    unchanged: 'text-[var(--gray-6)] bg-[var(--gray-0)]',
   }
 
   return (
-    <div
-      class={`border border-[var(--border-default)] rounded-[var(--radius-lg)] overflow-hidden ${props.class ?? ''}`}
-    >
+    <div class={`border border-[#ffffff08] rounded-[10px] overflow-hidden ${props.class ?? ''}`}>
       {/* Header */}
-      <div class="flex items-center justify-between px-4 py-2 bg-[var(--surface-raised)] border-b border-[var(--border-subtle)]">
+      <div class="flex items-center justify-between px-3 h-9 bg-[#ffffff04] border-b border-[#ffffff08]">
         <div class="flex items-center gap-3">
           <Show when={props.filename}>
-            <span class="text-sm font-medium text-[var(--text-primary)]">{props.filename}</span>
+            <span class="text-[11px] font-[var(--font-ui-mono)] text-[var(--gray-8)]">
+              {props.filename}
+            </span>
           </Show>
-          <div class="flex items-center gap-2 text-xs">
-            <span class="flex items-center gap-1 text-[var(--success)]">
+          <div class="flex items-center gap-2 text-[10px] font-[var(--font-ui-mono)]">
+            <span class="flex items-center gap-0.5 text-[#7AE582]">
               <Plus class="w-3 h-3" />
               {stats().additions}
             </span>
-            <span class="flex items-center gap-1 text-[var(--error)]">
+            <span class="flex items-center gap-0.5 text-[#FF6961]">
               <Minus class="w-3 h-3" />
               {stats().deletions}
             </span>
@@ -138,7 +138,7 @@ export const DiffViewer: Component<DiffViewerProps> = (props) => {
       {/* Diff Content — Unified */}
       <Show when={mode() === 'unified'}>
         <div class="overflow-x-auto">
-          <table class="w-full text-sm font-mono">
+          <table class="w-full text-[11px] font-[var(--font-ui-mono)]">
             <tbody>
               <For each={diffLines()}>
                 {(line) => (
@@ -172,29 +172,44 @@ export const DiffViewer: Component<DiffViewerProps> = (props) => {
       {/* Diff Content — Split (side-by-side) */}
       <Show when={mode() === 'split'}>
         <div class="overflow-x-auto">
-          <table class="w-full text-sm font-mono">
+          {/* Before / After column labels */}
+          <div class="flex border-b border-[#ffffff08]">
+            <div class="w-1/2 px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--gray-6)] bg-[#1a0a0a]">
+              Before
+            </div>
+            <div class="w-1/2 px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--gray-6)] bg-[#0a1a0a] border-l border-[#ffffff08]">
+              After
+            </div>
+          </div>
+          <table class="w-full text-[11px] font-[var(--font-ui-mono)]">
             <tbody>
               <For each={splitPairs()}>
                 {(pair: SplitPair) => {
                   const leftType = pair.left?.type ?? 'unchanged'
                   const rightType = pair.right?.type ?? 'unchanged'
-                  const leftStyle = pair.left ? lineStyles[leftType] : 'bg-[var(--surface-sunken)]'
+                  const leftStyle = pair.left
+                    ? leftType === 'remove'
+                      ? 'bg-[#FF453A18] text-[#FF6961]'
+                      : lineStyles[leftType]
+                    : 'bg-[#1a0a0a]'
                   const rightStyle = pair.right
-                    ? lineStyles[rightType]
-                    : 'bg-[var(--surface-sunken)]'
+                    ? rightType === 'add'
+                      ? 'bg-[#34C75918] text-[#7AE582]'
+                      : lineStyles[rightType]
+                    : 'bg-[#0a1a0a]'
                   const leftNumStyle = pair.left
                     ? lineNumberStyles[leftType]
-                    : 'bg-[var(--surface-sunken)]'
+                    : 'bg-[#1a0a0a] text-[var(--gray-6)]'
                   const rightNumStyle = pair.right
                     ? lineNumberStyles[rightType]
-                    : 'bg-[var(--surface-sunken)]'
+                    : 'bg-[#0a1a0a] text-[var(--gray-6)]'
 
                   return (
                     <tr>
-                      {/* Left side (old) */}
+                      {/* Left side (old) — "Before" panel */}
                       <Show when={showLineNumbers()}>
                         <td
-                          class={`px-2 py-0.5 text-right select-none w-10 border-r border-[var(--border-subtle)] ${leftNumStyle}`}
+                          class={`px-2 py-0.5 text-right select-none w-10 border-r border-[#ffffff08] ${leftNumStyle}`}
                         >
                           {pair.left?.oldLineNumber ?? ''}
                         </td>
@@ -207,12 +222,12 @@ export const DiffViewer: Component<DiffViewerProps> = (props) => {
                       </td>
 
                       {/* Divider */}
-                      <td class="w-px bg-[var(--border-default)]" />
+                      <td class="w-px bg-[#ffffff08]" />
 
-                      {/* Right side (new) */}
+                      {/* Right side (new) — "After" panel */}
                       <Show when={showLineNumbers()}>
                         <td
-                          class={`px-2 py-0.5 text-right select-none w-10 border-r border-[var(--border-subtle)] ${rightNumStyle}`}
+                          class={`px-2 py-0.5 text-right select-none w-10 border-r border-[#ffffff08] ${rightNumStyle}`}
                         >
                           {pair.right?.newLineNumber ?? ''}
                         </td>

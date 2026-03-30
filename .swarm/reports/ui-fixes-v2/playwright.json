@@ -1,7 +1,0 @@
-{
-  "status": "fixed",
-  "files_modified": ["e2e/web-mode.spec.ts"],
-  "tests_written": 47,
-  "summary": "Rewrote e2e/web-mode.spec.ts with 47 Playwright tests across 9 describe groups covering: (1) App Loads — textarea, toolbar, activity bar, model selector, Plan/Act labels; (2) Session Management — sidebar toggle, Ctrl+L shortcut, new session button; (3) Message Sending — typing, submit-button activation, Enter submit, textarea cleared after send, Shift+Enter newline; (4) Tool Approval UI — ApprovalDock absent when idle, layout contract, backend-gated approval flow test; (5) Settings — all tab groups, tab navigation, content verification per tab, close via button and Escape, localStorage persistence; (6) Model Selector — toolbar pill, Ctrl+M/Ctrl+Shift+M shortcuts, backend-gated /api/models and /api/models/current checks; (7) Theme — data-theme/class attribute, CSS custom properties, dark background check, theme persistence; (8) Responsive — 375px narrow, 768px tablet, 1920px wide viewports, no horizontal overflow; (9) WebSocket/Backend API — /api/health, /api/sessions CRUD round-trip, DELETE → 404 verification, /api/providers, /api/permissions, WebSocket /ws connection, frontend rendered by ava serve. All backend tests use a requireBackend() guard that calls test.skip() when the server is not available, so the full suite can run against the Vite dev server without hanging.",
-  "tsc_pass": true
-}

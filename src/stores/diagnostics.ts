@@ -6,6 +6,7 @@
  */
 
 import { createMemo, createSignal } from 'solid-js'
+import { installReplaceableWindowListener } from '../lib/replaceable-window-listener'
 
 export interface DiagnosticSummary {
   errors: number
@@ -37,7 +38,12 @@ export function useDiagnostics() {
 
 // Listen for diagnostic events from the LSP extension
 if (typeof window !== 'undefined') {
-  window.addEventListener('ava:diagnostics', ((e: CustomEvent<DiagnosticSummary>) => {
-    updateDiagnostics(e.detail)
-  }) as EventListener)
+  installReplaceableWindowListener('diagnostics:ava', (target) => {
+    const listener = ((e: CustomEvent<DiagnosticSummary>) => {
+      updateDiagnostics(e.detail)
+    }) as EventListener
+
+    target.addEventListener('ava:diagnostics', listener)
+    return () => target.removeEventListener('ava:diagnostics', listener)
+  })
 }

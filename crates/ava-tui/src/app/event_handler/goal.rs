@@ -70,14 +70,6 @@ impl App {
             return;
         }
 
-        if let Some(praxis_goal) = self.pending_praxis_goal.take() {
-            self.state
-                .messages
-                .push(UiMessage::new(MessageKind::User, goal));
-            self.launch_praxis_task(praxis_goal.goal, app_tx);
-            return;
-        }
-
         // Handle custom slash commands — resolve prompt and redirect as agent goal
         if goal.starts_with('/') {
             if let Some(result) = self.try_resolve_custom_command(&goal) {

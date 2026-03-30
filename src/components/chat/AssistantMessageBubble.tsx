@@ -8,6 +8,7 @@ import { useTeam } from '../../stores/team'
 import type { Message, ToolCall } from '../../types'
 import type { PlanData } from '../../types/rust-ipc'
 import { TEAM_DOMAINS, type TeamDomain } from '../../types/team'
+import { ContextSummaryCard } from './ContextSummaryCard'
 import { InlinePlanCard } from './InlinePlanCard'
 import {
   InterleavedThinkingSegments,
@@ -80,7 +81,7 @@ function parseLeadQuestion(content: string): LeadQuestion | null {
 const LeadQuestionCard: Component<{ question: LeadQuestion }> = (props) => {
   return (
     <div
-      class="w-full rounded-[var(--radius-xl)] bg-[var(--gray-3)] overflow-hidden my-1"
+      class="my-1 w-full overflow-hidden rounded-[var(--radius-xl)] bg-[var(--gray-3)]"
       style={{
         border: `1px solid color-mix(in srgb, ${props.question.color} 25%, transparent)`,
       }}
@@ -150,6 +151,7 @@ function formatTimestamp(msg: Message): string {
 
 interface AssistantMessageBubbleProps {
   message: Message
+  readOnly?: boolean
   isStreaming: boolean
   isLastMessage: boolean
   isRetrying: boolean
@@ -166,6 +168,13 @@ interface AssistantMessageBubbleProps {
   onBranch: () => void
   onRewind: () => void
   onRetry: () => void
+}
+
+interface ContextSummaryMetadata {
+  source: 'manual' | 'auto'
+  summary: string
+  tokensSaved: number
+  usageBeforePercent?: number
 }
 
 export const AssistantMessageBubble: Component<AssistantMessageBubbleProps> = (props) => {
@@ -197,6 +206,12 @@ export const AssistantMessageBubble: Component<AssistantMessageBubbleProps> = (p
     const plan = meta.plan as PlanData
     if (plan.steps && Array.isArray(plan.steps) && plan.summary) return plan
     return null
+  })
+
+  const contextSummary = createMemo((): ContextSummaryMetadata | null => {
+    const summary = props.message.metadata?.contextSummary as ContextSummaryMetadata | undefined
+    if (!summary?.summary) return null
+    return summary
   })
 
   /** Detect if this message is relaying a lead's question */
@@ -247,9 +262,9 @@ export const AssistantMessageBubble: Component<AssistantMessageBubbleProps> = (p
 
   const TimestampLine = () => {
     return (
-      <div class="relative h-[20px] flex justify-start">
+      <div class="relative h-[20px] flex justify-start overflow-visible">
         <Show when={!props.isStreaming}>
-          <div class="font-[var(--font-ui-mono)] text-[11px] tracking-wide text-[var(--gray-7)] pt-1 transition-all duration-200 group-hover:-translate-y-3 group-hover:opacity-0 tabular-nums">
+          <div class="font-[var(--font-ui-mono)] text-[11px] tracking-wider text-[var(--text-muted)] pt-1.5 opacity-0 transition-opacity duration-200 group-hover:opacity-100 tabular-nums">
             {formatTimestamp(props.message)}
             <Show when={props.message.model}>
               {' '}
@@ -274,6 +289,7 @@ export const AssistantMessageBubble: Component<AssistantMessageBubbleProps> = (p
           <div class="absolute left-0 top-0 pt-1">
             <MessageActions
               message={props.message}
+              readOnly={props.readOnly}
               isLastMessage={props.isLastMessage}
               onEdit={props.onStartEdit}
               onRegenerate={props.onRegenerate}
@@ -291,7 +307,7 @@ export const AssistantMessageBubble: Component<AssistantMessageBubbleProps> = (p
 
   return (
     <div
-      class="relative group w-[90%] min-w-0"
+      class="relative group w-full min-w-0"
       classList={{
         'pl-3': isDirectorMessage(),
       }}
@@ -342,6 +358,18 @@ export const AssistantMessageBubble: Component<AssistantMessageBubbleProps> = (p
           )}
         </Show>
 
+        <Show when={contextSummary()}>
+          {(summary) => (
+            <ContextSummaryCard
+              summaryLine={props.message.content}
+              summary={summary().summary}
+              source={summary().source}
+              tokensSaved={summary().tokensSaved}
+              usageBeforePercent={summary().usageBeforePercent}
+            />
+          )}
+        </Show>
+
         {/* Lead question relay card */}
         <Show when={leadQuestion()}>{(q) => <LeadQuestionCard question={q()} />}</Show>
 
@@ -357,7 +385,7 @@ export const AssistantMessageBubble: Component<AssistantMessageBubbleProps> = (p
 
         <Show when={!isActiveStreaming()}>
           {/* When content is a lead question, skip normal rendering (card handles it) */}
-          <Show when={!leadQuestion()}>
+          <Show when={!leadQuestion() && !contextSummary()}>
             {/* When interleaved thinking segments handle tools, only render text segments */}
             <Show when={thinkingSegments()}>
               <Show when={props.message.content}>
@@ -432,7 +460,7 @@ export const AssistantMessageBubble: Component<AssistantMessageBubbleProps> = (p
         <Show when={isTruncated() && props.isLastMessage}>
           <button
             type="button"
-            onClick={props.onRegenerate}
+            onClick={() => props.onRegenerate()}
             class="mt-1 flex items-center gap-1.5 text-[11px] text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors"
             title="Response may be truncated — continue generation"
           >

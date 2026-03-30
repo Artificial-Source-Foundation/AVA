@@ -6,7 +6,7 @@
  */
 
 import { Check, ChevronDown, ChevronRight, Copy } from 'lucide-solid'
-import { type Component, createSignal, For, Show } from 'solid-js'
+import { type Component, createEffect, createSignal, For, Show } from 'solid-js'
 
 const MAX_DEPTH = 5
 
@@ -15,7 +15,13 @@ interface StructuredOutputViewProps {
 }
 
 const ValueDisplay: Component<{ value: unknown; depth: number }> = (props) => {
-  const [expanded, setExpanded] = createSignal(props.depth < 2)
+  const [expanded, setExpanded] = createSignal(false)
+
+  createEffect(() => {
+    if (props.depth < 2) {
+      setExpanded(true)
+    }
+  })
 
   const isObject = () =>
     props.value !== null && typeof props.value === 'object' && !Array.isArray(props.value)

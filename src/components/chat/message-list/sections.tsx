@@ -1,5 +1,6 @@
 import { Bug, Code, FlaskConical, Wand2 } from 'lucide-solid'
-import { type Component, For } from 'solid-js'
+import { type Component, createMemo, For } from 'solid-js'
+import { Dynamic } from 'solid-js/web'
 
 const SUGGESTION_CARDS = [
   {
@@ -27,8 +28,15 @@ const SUGGESTION_CARDS = [
   },
 ]
 
+function getGreeting(): string {
+  const hour = new Date().getHours()
+  if (hour < 12) return 'Good morning'
+  if (hour < 18) return 'Good afternoon'
+  return 'Good evening'
+}
+
 export const MessageListLoading: Component = () => (
-  <div class="space-y-4 animate-pulse">
+  <div class="space-y-4 animate-pulse-subtle">
     <div class="h-16 bg-[var(--surface-raised)] rounded-[var(--radius-lg)] w-2/3" />
     <div class="h-24 bg-[var(--surface-raised)] rounded-[var(--radius-lg)] w-3/4 ml-auto" />
     <div class="h-16 bg-[var(--surface-raised)] rounded-[var(--radius-lg)] w-2/3" />
@@ -40,85 +48,93 @@ export const MessageListEmpty: Component = () => {
     window.dispatchEvent(new CustomEvent('ava:set-input', { detail: { text: prompt } }))
   }
 
+  const greeting = createMemo(() => getGreeting())
+
   return (
     <div class="flex flex-col items-center justify-center h-full select-none">
-      {/* Logo */}
-      <div
-        class="w-16 h-16 mb-5 rounded-2xl flex items-center justify-center"
-        style={{ background: 'var(--accent-subtle)' }}
-      >
-        <span class="text-2xl font-bold" style={{ color: 'var(--accent)' }}>
-          A
-        </span>
-      </div>
+      <div class="flex flex-col items-center w-full" style={{ 'max-width': '600px' }}>
+        {/* AVA logo mark */}
+        <div class="welcome-logo-mark" />
 
-      {/* Heading */}
-      <h2 class="font-semibold" style={{ 'font-size': '20px', color: 'var(--text-primary)' }}>
-        How can I help?
-      </h2>
+        {/* Time-based greeting */}
+        <p
+          class="mt-4"
+          style={{
+            'font-size': '13px',
+            color: 'var(--gray-6)',
+            'letter-spacing': '0.01em',
+          }}
+        >
+          {greeting()}
+        </p>
 
-      {/* Subtitle */}
-      <p
-        class="mt-2 text-center max-w-sm"
-        style={{ 'font-size': '13px', color: 'var(--text-muted)' }}
-      >
-        Ask anything about your codebase, or try one of these:
-      </p>
+        {/* Heading */}
+        <h2
+          class="mt-2"
+          style={{
+            'font-size': '20px',
+            'font-weight': '600',
+            color: 'var(--gray-12)',
+            'letter-spacing': '-0.02em',
+            'line-height': '1.3',
+          }}
+        >
+          What are you working on?
+        </h2>
 
-      {/* Suggestion cards — 2x2 grid */}
-      <div class="mt-5 grid grid-cols-2 gap-2.5 w-full" style={{ 'max-width': '500px' }}>
-        <For each={SUGGESTION_CARDS}>
-          {(card) => (
-            <button
-              type="button"
-              onClick={() => insertSuggestion(card.prompt)}
-              class="
-                flex items-center gap-3 text-left
-                rounded-xl
-                transition-colors
-                group
-              "
-              style={{
-                background: 'var(--gray-3)',
-                border: '1px solid var(--border-subtle)',
-                padding: '12px 16px',
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.borderColor = 'var(--gray-6)'
-                e.currentTarget.style.background = 'var(--surface-raised)'
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.borderColor = 'var(--border-subtle)'
-                e.currentTarget.style.background = 'var(--gray-3)'
-              }}
-            >
-              <card.icon class="w-4 h-4 flex-shrink-0" style={{ color: 'var(--gray-7)' }} />
-              <span style={{ 'font-size': '13px', color: 'var(--gray-9)' }}>{card.label}</span>
-            </button>
-          )}
-        </For>
-      </div>
+        {/* Subtitle */}
+        <p
+          class="text-center"
+          style={{
+            'margin-top': '8px',
+            'font-size': '14px',
+            color: 'var(--gray-8)',
+            'line-height': '1.5',
+          }}
+        >
+          Describe a task, or start with one of these.
+        </p>
 
-      {/* Keyboard shortcut hints */}
-      <div
-        class="mt-6 flex items-center gap-1"
-        style={{ 'font-size': '11px', color: 'var(--gray-6)' }}
-      >
-        <span>
-          <kbd class="font-mono">Ctrl+/</kbd> commands
-        </span>
-        <span aria-hidden="true" class="mx-1.5">
-          &middot;
-        </span>
-        <span>
-          <kbd class="font-mono">Ctrl+M</kbd> model
-        </span>
-        <span aria-hidden="true" class="mx-1.5">
-          &middot;
-        </span>
-        <span>
-          <kbd class="font-mono">Ctrl+T</kbd> thinking
-        </span>
+        {/* Suggestion cards — 2x2 grid */}
+        <div class="mt-6 grid grid-cols-2 w-full" style={{ gap: '10px', 'max-width': '480px' }}>
+          <For each={SUGGESTION_CARDS}>
+            {(card) => (
+              <button
+                type="button"
+                onClick={() => insertSuggestion(card.prompt)}
+                class="welcome-suggestion-card"
+              >
+                <Dynamic
+                  component={card.icon}
+                  class="flex-shrink-0"
+                  style={{ width: '18px', height: '18px', color: 'var(--gray-6)' }}
+                />
+                <span
+                  style={{
+                    'font-size': '14px',
+                    color: 'var(--gray-9)',
+                    'line-height': '1.4',
+                  }}
+                >
+                  {card.label}
+                </span>
+              </button>
+            )}
+          </For>
+        </div>
+
+        {/* Keyboard shortcut hints */}
+        <div class="mt-8 flex items-center justify-center" style={{ gap: '20px' }}>
+          <span class="welcome-hint">
+            <kbd>Ctrl+/</kbd> commands
+          </span>
+          <span class="welcome-hint">
+            <kbd>Ctrl+M</kbd> model
+          </span>
+          <span class="welcome-hint">
+            <kbd>Ctrl+T</kbd> thinking
+          </span>
+        </div>
       </div>
     </div>
   )
@@ -131,7 +147,7 @@ interface ScrollToBottomButtonProps {
 export const ScrollToBottomButton: Component<ScrollToBottomButtonProps> = (props) => (
   <button
     type="button"
-    onClick={props.onClick}
+    onClick={() => props.onClick()}
     class="
       absolute bottom-4 right-8
       p-2 rounded-full
@@ -139,10 +155,11 @@ export const ScrollToBottomButton: Component<ScrollToBottomButtonProps> = (props
       shadow-md
       text-[var(--text-secondary)]
       hover:bg-[var(--accent)] hover:text-white hover:border-[var(--accent)]
-      transition-all duration-[var(--duration-fast)]
+      transition-[background-color,border-color,color,transform] duration-[var(--duration-fast)]
       z-10
     "
     title="Scroll to bottom"
+    aria-label="Scroll to bottom"
   >
     <svg
       class="w-5 h-5"

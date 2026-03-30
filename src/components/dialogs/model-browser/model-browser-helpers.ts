@@ -8,7 +8,10 @@
  */
 
 import type { LLMProviderConfig } from '../../../config/defaults/provider-defaults'
-import { getModelFromCatalog } from '../../../services/providers/models-dev-catalog'
+import {
+  getModelFromCatalog,
+  isBlockedModelId,
+} from '../../../services/providers/models-dev-catalog'
 import type {
   BrowsableModel,
   FilterState,
@@ -16,6 +19,50 @@ import type {
   ModelPricing,
   SortOption,
 } from './model-browser-types'
+
+export function buildModelSpec(modelId: string, providerId?: string | null): string {
+  return providerId ? `${providerId}/${modelId}` : modelId
+}
+
+export function matchesModelSelection(
+  value: string | null | undefined,
+  modelId: string,
+  providerId: string
+): boolean {
+  if (!value) return false
+  if (value === modelId) return true
+  return value === buildModelSpec(modelId, providerId)
+}
+
+export function findSelectedModel(
+  models: BrowsableModel[],
+  value: string | null | undefined,
+  providerId?: string | null
+): BrowsableModel | undefined {
+  return (
+    models.find(
+      (model) =>
+        matchesModelSelection(value, model.id, model.providerId) &&
+        (!providerId || model.providerId === providerId)
+    ) ?? models.find((model) => matchesModelSelection(value, model.id, model.providerId))
+  )
+}
+
+export function formatModelSelectionLabel(
+  models: BrowsableModel[],
+  value: string | null | undefined,
+  options?: {
+    autoLabel?: string
+    includeProvider?: boolean
+    providerId?: string | null
+  }
+): string {
+  const selected = findSelectedModel(models, value, options?.providerId)
+  if (!selected) return options?.autoLabel ?? 'Auto'
+  return options?.includeProvider === false
+    ? selected.name
+    : `${selected.providerName} - ${selected.name}`
+}
 
 // ============================================================================
 // Catalog-Backed Lookups (with hardcoded fallbacks)
@@ -156,6 +203,8 @@ export function aggregateModels(providers: LLMProviderConfig[]): BrowsableModel[
   const models: BrowsableModel[] = []
   for (const provider of providers) {
     for (const model of provider.models) {
+      // Skip known-outdated models that may have been added from stale API data
+      if (isBlockedModelId(model.id)) continue
       models.push({
         id: model.id,
         name: model.name,

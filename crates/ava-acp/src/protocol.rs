@@ -37,6 +37,8 @@ pub struct AgentQuery {
     pub resume: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_budget_usd: Option<f64>,
 }
 
 /// Permission mode for agent execution.
@@ -208,6 +210,7 @@ impl AgentQuery {
             session_id: None,
             resume: false,
             model: None,
+            max_budget_usd: None,
         }
     }
 }
@@ -233,12 +236,14 @@ mod tests {
             session_id: None,
             resume: false,
             model: Some("opus".into()),
+            max_budget_usd: Some(1.5),
         };
         let json = serde_json::to_string(&query).unwrap();
         let parsed: AgentQuery = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.prompt, "fix the bug");
         assert_eq!(parsed.max_turns, Some(10));
         assert_eq!(parsed.permission_mode, Some(PermissionMode::AcceptEdits));
+        assert_eq!(parsed.max_budget_usd, Some(1.5));
     }
 
     #[test]

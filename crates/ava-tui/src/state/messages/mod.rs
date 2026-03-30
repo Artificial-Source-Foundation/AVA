@@ -9,14 +9,14 @@ pub use types::{MessageKind, SubAgentData, UiMessage};
 #[derive(Debug)]
 pub struct MessageState {
     pub messages: Vec<UiMessage>,
-    pub scroll_offset: u16,
+    pub scroll_offset: usize,
     pub auto_scroll: bool,
     pub unseen_count: usize,
     pub show_tools_expanded: bool,
     /// Set by the renderer each frame.
-    pub total_lines: u16,
+    pub total_lines: usize,
     /// Set by the renderer each frame (content area height minus borders).
-    pub visible_height: u16,
+    pub visible_height: usize,
     /// Tick counter for spinner animation.
     pub spinner_tick: usize,
     /// Set by the renderer each frame — the area where messages are drawn.
@@ -25,7 +25,7 @@ pub struct MessageState {
     /// Set by the renderer each frame — maps each source message index to
     /// its `(start_line, end_line)` in the total line buffer (exclusive end).
     /// Used for mapping click positions to message indices.
-    pub message_line_ranges: Vec<(u16, u16)>,
+    pub message_line_ranges: Vec<(usize, usize)>,
 }
 
 impl Default for MessageState {
@@ -62,12 +62,12 @@ impl MessageState {
         self.spinner_tick = self.spinner_tick.wrapping_add(1);
     }
 
-    pub fn scroll_up(&mut self, by: u16) {
+    pub fn scroll_up(&mut self, by: usize) {
         self.auto_scroll = false;
         self.scroll_offset = self.scroll_offset.saturating_sub(by);
     }
 
-    pub fn scroll_down(&mut self, by: u16) {
+    pub fn scroll_down(&mut self, by: usize) {
         self.scroll_offset = self.scroll_offset.saturating_add(by);
         let bottom = self.total_lines.saturating_sub(self.visible_height);
         if self.scroll_offset >= bottom {
@@ -181,7 +181,7 @@ impl MessageState {
         if row < area.y || row >= area.y + area.height {
             return None;
         }
-        let visual_row = row - area.y;
+        let visual_row = usize::from(row - area.y);
         let absolute_line = visual_row + self.scroll_offset;
         for (i, &(start, end)) in self.message_line_ranges.iter().enumerate() {
             if absolute_line >= start && absolute_line < end {
@@ -206,5 +206,42 @@ impl MessageState {
         self.auto_scroll = true;
         self.unseen_count = 0;
         self.total_lines = 0;
+        self.visible_height = 0;
+        self.message_line_ranges.clear();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn large_history_scroll_math_does_not_truncate() {
+        let mut state = MessageState {
+            total_lines: 120_000,
+            visible_height: 80,
+            ..Default::default()
+        };
+
+        state.scroll_down(200_000);
+        assert!(state.auto_scroll);
+        assert_eq!(state.scroll_offset, 119_920);
+
+        state.scroll_up(40_000);
+        assert!(!state.auto_scroll);
+        assert_eq!(state.scroll_offset, 79_920);
+    }
+
+    #[test]
+    fn message_index_at_row_handles_large_offsets() {
+        let state = MessageState {
+            messages_area: ratatui::layout::Rect::new(0, 0, 80, 20),
+            scroll_offset: 70_000,
+            message_line_ranges: vec![(69_999, 70_002), (70_002, 70_010)],
+            ..MessageState::default()
+        };
+
+        assert_eq!(state.message_index_at_row(0), Some(0));
+        assert_eq!(state.message_index_at_row(3), Some(1));
     }
 }

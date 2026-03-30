@@ -214,23 +214,33 @@ impl UiMessage {
                 let mut result = Vec::new();
 
                 match tool {
-                    // Show full output for edit/write tools with diff coloring
+                    // Show side-by-side diff for edit/write tools when terminal is wide enough
                     "edit" | "write" | "multiedit" | "apply_patch" => {
-                        for (i, line) in content_lines.iter().enumerate() {
-                            let prefix = if i == 0 { "\u{25be} " } else { "  " };
-                            let line_style = if line.starts_with('+') {
-                                Style::default().fg(ratatui::style::Color::Green)
-                            } else if line.starts_with('-') {
-                                Style::default().fg(ratatui::style::Color::Red)
-                            } else if line.starts_with('@') {
-                                Style::default().fg(ratatui::style::Color::Cyan)
-                            } else {
-                                dim_style
-                            };
-                            result.push(Line::from(Span::styled(
-                                format!("{prefix}{line}"),
-                                line_style,
-                            )));
+                        let sbs_width = width.saturating_sub(Self::BAR_PREFIX_WIDTH);
+                        if let Some(sbs_lines) = crate::rendering::diff::render_side_by_side(
+                            &self.content,
+                            theme,
+                            sbs_width,
+                        ) {
+                            result.extend(sbs_lines);
+                        } else {
+                            // Fallback: unified diff coloring
+                            for (i, line) in content_lines.iter().enumerate() {
+                                let prefix = if i == 0 { "\u{25be} " } else { "  " };
+                                let line_style = if line.starts_with('+') {
+                                    Style::default().fg(ratatui::style::Color::Green)
+                                } else if line.starts_with('-') {
+                                    Style::default().fg(ratatui::style::Color::Red)
+                                } else if line.starts_with('@') {
+                                    Style::default().fg(ratatui::style::Color::Cyan)
+                                } else {
+                                    dim_style
+                                };
+                                result.push(Line::from(Span::styled(
+                                    format!("{prefix}{line}"),
+                                    line_style,
+                                )));
+                            }
                         }
                     }
                     // Read: show summary
@@ -571,6 +581,17 @@ impl UiMessage {
                         .and_then(|d| d.duration)
                         .map(|d| format!("{:.1}s", d.as_secs_f64()))
                         .unwrap_or_default();
+                    let provider_str = data
+                        .and_then(|d| d.provider.as_deref())
+                        .map(|provider| format!("via {provider}"));
+                    let resumed_str = data.filter(|d| d.resumed).map(|_| "resumed".to_string());
+                    let cost_str = data
+                        .and_then(|d| d.cost_usd)
+                        .map(|cost| format!("${cost:.4}"));
+                    let token_str = data.and_then(|d| match (d.input_tokens, d.output_tokens) {
+                        (Some(input), Some(output)) => Some(format!("{input}/{output} tok")),
+                        _ => None,
+                    });
 
                     let (icon, icon_style) = if is_failed {
                         (
@@ -607,13 +628,26 @@ impl UiMessage {
                     ));
                     result.push(Line::from(header_line_spans));
 
-                    let stats = if !duration_str.is_empty() {
-                        format!("{tool_count} tools, {duration_str}")
-                    } else if tool_count > 0 {
-                        format!("{tool_count} tools")
-                    } else {
-                        String::new()
-                    };
+                    let mut stats_parts = Vec::new();
+                    if tool_count > 0 {
+                        stats_parts.push(format!("{tool_count} tools"));
+                    }
+                    if !duration_str.is_empty() {
+                        stats_parts.push(duration_str);
+                    }
+                    if let Some(provider_str) = provider_str {
+                        stats_parts.push(provider_str);
+                    }
+                    if let Some(resumed_str) = resumed_str {
+                        stats_parts.push(resumed_str);
+                    }
+                    if let Some(cost_str) = cost_str {
+                        stats_parts.push(cost_str);
+                    }
+                    if let Some(token_str) = token_str {
+                        stats_parts.push(token_str);
+                    }
+                    let stats = stats_parts.join(", ");
                     if !stats.is_empty() {
                         let stats_width = display_width(&stats);
                         let stats_pad = inner_width.saturating_sub(stats_width);

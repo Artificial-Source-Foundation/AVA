@@ -33,14 +33,14 @@ export const ProviderRowClearConfirm: Component<ProviderRowClearConfirmProps> = 
       <div class="flex items-center gap-2 ml-5.5">
         <button
           type="button"
-          onClick={props.onConfirm}
-          class="px-2.5 py-1 text-[var(--settings-text-badge)] font-medium text-white bg-[var(--error)] rounded-[var(--radius-md)] hover:brightness-110 transition-colors"
+          onClick={() => props.onConfirm()}
+          class="px-2.5 py-1 text-[var(--settings-text-badge)] font-medium text-white bg-[var(--error)] rounded-[var(--radius-md)] hover:bg-[color-mix(in_srgb,var(--error)_88%,white_12%)] transition-colors"
         >
           Yes, clear
         </button>
         <button
           type="button"
-          onClick={props.onCancel}
+          onClick={() => props.onCancel()}
           class="px-2.5 py-1 text-[var(--settings-text-badge)] text-[var(--text-secondary)] bg-[var(--surface-raised)] border border-[var(--border-subtle)] rounded-[var(--radius-md)] hover:border-[var(--border-default)] transition-colors"
         >
           Cancel

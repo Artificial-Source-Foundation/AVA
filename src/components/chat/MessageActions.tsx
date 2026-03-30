@@ -3,6 +3,8 @@
  *
  * Hover actions: copy, edit (user), regenerate (assistant), delete/rollback.
  * Premium floating toolbar with smooth transitions.
+ *
+ * When readOnly is set (e.g. HQ Director mode), only Copy is shown.
  */
 
 import { Check, Copy, GitFork, Pencil, RefreshCw, Trash2, Undo2 } from 'lucide-solid'
@@ -13,6 +15,7 @@ import type { Message } from '../../types'
 interface MessageActionsProps {
   message: Message
   isLastMessage: boolean
+  readOnly?: boolean
   onEdit: () => void
   onRegenerate: () => void
   onCopy: () => void
@@ -36,7 +39,9 @@ export const MessageActions: Component<MessageActionsProps> = (props) => {
   const [copied, setCopied] = createSignal(false)
   const { success } = useNotification()
 
-  const handleCopy = async () => {
+  const handleCopy = async (e: MouseEvent) => {
+    e.stopPropagation()
+    e.preventDefault()
     try {
       const plainText = props.message.content
       // Feature: Rich clipboard copy — write both HTML (preserves formatting) and plain text
@@ -67,26 +72,50 @@ export const MessageActions: Component<MessageActionsProps> = (props) => {
     }
   }
 
+  /**
+   * Wrap an action handler to stop propagation.
+   *
+   * Message rows use `content-visibility: auto` for virtual-scrolling
+   * performance.  That CSS property implies `contain: layout style paint`
+   * which creates a new stacking context.  SolidJS's delegated `onClick`
+   * (registered on the document root) can mis-route the event when the
+   * target lives inside a paint-contained subtree, causing toolbar clicks
+   * to accidentally trigger unrelated global shortcut actions.
+   *
+   * Using the non-delegated `on:click` binding (see JSX below) attaches
+   * the handler directly on the DOM element, bypassing delegation
+   * entirely.  We also call `stopPropagation` + `preventDefault` so the
+   * event never reaches other document-level listeners.
+   */
+  const wrap = (fn: () => void) => (e: MouseEvent) => {
+    e.stopPropagation()
+    e.preventDefault()
+    fn()
+  }
+
   return (
     <div
       class="
-        absolute -top-3 right-0
-        opacity-0 group-hover:opacity-100 focus-within:opacity-100
+        absolute -top-3 right-0 z-10
+        opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto focus-within:opacity-100 focus-within:pointer-events-auto
         transition-opacity duration-[var(--duration-fast)]
         flex gap-0.5
-        bg-[var(--surface-overlay)]
-        border border-[var(--border-subtle)]
-        rounded-[var(--radius-md)]
         p-0.5
-        shadow-md
       "
+      style={{
+        background: 'var(--dropdown-surface)',
+        border: '1px solid var(--dropdown-border)',
+        'border-radius': 'var(--dropdown-radius)',
+        'box-shadow': 'var(--modal-shadow)',
+      }}
       role="toolbar"
       aria-label="Message actions"
+      on:click={(e: MouseEvent) => e.stopPropagation()}
     >
-      {/* Copy button — all messages */}
+      {/* Copy button — always visible, even in readOnly */}
       <button
         type="button"
-        onClick={handleCopy}
+        on:click={handleCopy}
         class={btnClass}
         title={copied() ? 'Copied!' : 'Copy message'}
         aria-label={copied() ? 'Copied' : 'Copy message'}
@@ -96,71 +125,74 @@ export const MessageActions: Component<MessageActionsProps> = (props) => {
         </Show>
       </button>
 
-      {/* Edit button for user messages */}
-      <Show when={props.message.role === 'user'}>
+      {/* Mutation actions — hidden in readOnly mode */}
+      <Show when={!props.readOnly}>
+        {/* Edit button for user messages */}
+        <Show when={props.message.role === 'user'}>
+          <button
+            type="button"
+            on:click={wrap(() => props.onEdit())}
+            disabled={props.isLoading}
+            class={btnClass}
+            title="Edit message"
+            aria-label="Edit message"
+          >
+            <Pencil class="w-3.5 h-3.5" />
+          </button>
+        </Show>
+
+        {/* Regenerate button for assistant messages (without errors) */}
+        <Show when={props.message.role === 'assistant' && !props.message.error}>
+          <button
+            type="button"
+            on:click={wrap(() => props.onRegenerate())}
+            disabled={props.isLoading}
+            class={btnClass}
+            title="Regenerate response"
+            aria-label="Regenerate response"
+          >
+            <RefreshCw class="w-3.5 h-3.5" />
+          </button>
+        </Show>
+
+        {/* Branch button — all messages */}
         <button
           type="button"
-          onClick={() => props.onEdit()}
+          on:click={wrap(() => props.onBranch())}
           disabled={props.isLoading}
           class={btnClass}
-          title="Edit message"
-          aria-label="Edit message"
+          title="Branch conversation here"
+          aria-label="Branch conversation here"
         >
-          <Pencil class="w-3.5 h-3.5" />
+          <GitFork class="w-3.5 h-3.5" />
         </button>
-      </Show>
 
-      {/* Regenerate button for assistant messages (without errors) */}
-      <Show when={props.message.role === 'assistant' && !props.message.error}>
+        {/* Rewind button — non-last messages only */}
+        <Show when={!props.isLastMessage}>
+          <button
+            type="button"
+            on:click={wrap(() => props.onRewind())}
+            disabled={props.isLoading}
+            class={btnClass}
+            title="Rewind to here"
+            aria-label="Rewind conversation to this point"
+          >
+            <Undo2 class="w-3.5 h-3.5" />
+          </button>
+        </Show>
+
+        {/* Delete / Rollback button — all messages */}
         <button
           type="button"
-          onClick={() => props.onRegenerate()}
+          on:click={wrap(() => props.onDelete())}
           disabled={props.isLoading}
-          class={btnClass}
-          title="Regenerate response"
-          aria-label="Regenerate response"
+          class={`${btnClass} hover:text-[var(--error)]`}
+          title={props.isLastMessage ? 'Delete message' : 'Delete message and rollback'}
+          aria-label={props.isLastMessage ? 'Delete message' : 'Delete and rollback'}
         >
-          <RefreshCw class="w-3.5 h-3.5" />
+          <Trash2 class="w-3.5 h-3.5" />
         </button>
       </Show>
-
-      {/* Branch button — all messages */}
-      <button
-        type="button"
-        onClick={() => props.onBranch()}
-        disabled={props.isLoading}
-        class={btnClass}
-        title="Branch conversation here"
-        aria-label="Branch conversation here"
-      >
-        <GitFork class="w-3.5 h-3.5" />
-      </button>
-
-      {/* Rewind button — non-last messages only */}
-      <Show when={!props.isLastMessage}>
-        <button
-          type="button"
-          onClick={() => props.onRewind()}
-          disabled={props.isLoading}
-          class={btnClass}
-          title="Rewind to here"
-          aria-label="Rewind conversation to this point"
-        >
-          <Undo2 class="w-3.5 h-3.5" />
-        </button>
-      </Show>
-
-      {/* Delete / Rollback button — all messages */}
-      <button
-        type="button"
-        onClick={() => props.onDelete()}
-        disabled={props.isLoading}
-        class={`${btnClass} hover:text-[var(--error)]`}
-        title={props.isLastMessage ? 'Delete message' : 'Delete message and rollback'}
-        aria-label={props.isLastMessage ? 'Delete message' : 'Delete and rollback'}
-      >
-        <Trash2 class="w-3.5 h-3.5" />
-      </button>
     </div>
   )
 }

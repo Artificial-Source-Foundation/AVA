@@ -2,11 +2,14 @@
  * Model Selector Button
  *
  * Pill-shaped button that opens the Model Browser dialog.
- * Shows "Provider | Model" with chevron-down icon.
+ * Shows the actual provider logo + model name.
  */
 
-import { ChevronDown } from 'lucide-solid'
-import type { Accessor, Component } from 'solid-js'
+import { type Accessor, type Component, createMemo } from 'solid-js'
+import { Dynamic } from 'solid-js/web'
+import { useSession } from '../../../stores/session'
+import { useSettings } from '../../../stores/settings'
+import { getProviderLogo } from '../../icons/provider-logo-map'
 
 // ---------------------------------------------------------------------------
 // Props
@@ -21,20 +24,64 @@ export interface ModelSelectorProps {
 // Component
 // ---------------------------------------------------------------------------
 
-export const ModelSelector: Component<ModelSelectorProps> = (props) => (
-  <button
-    type="button"
-    onClick={props.onToggle}
-    class="
-      flex items-center gap-1 px-2.5 py-1
-      text-[var(--text-xs)] text-[var(--text-secondary)]
-      bg-[var(--alpha-white-5)]
-      rounded-full
-      hover:bg-[var(--alpha-white-8)]
-      transition-colors
-    "
-  >
-    <ChevronDown class="w-3 h-3" />
-    <span class="truncate max-w-[200px]">{props.currentModelDisplay()}</span>
-  </button>
-)
+export const ModelSelector: Component<ModelSelectorProps> = (props) => {
+  const { selectedProvider, selectedModel } = useSession()
+  const { settings } = useSettings()
+
+  const providerId = createMemo(() => {
+    // 1. Check session-level selected provider
+    const sessionProv = selectedProvider()
+    if (sessionProv) return sessionProv
+
+    // 2. Infer from model ID by checking provider model lists
+    const modelId = selectedModel()
+    if (modelId) {
+      for (const prov of settings().providers) {
+        if (prov.models.some((m) => m.id === modelId)) return prov.id
+      }
+      // 3. Infer from model name patterns
+      if (/gpt|o3-|o4-|chatgpt/i.test(modelId)) return 'openai'
+      if (/claude|sonnet|opus|haiku/i.test(modelId)) return 'anthropic'
+      if (/gemini/i.test(modelId)) return 'google'
+      if (/deepseek/i.test(modelId)) return 'deepseek'
+      if (/mistral|codestral/i.test(modelId)) return 'mistral'
+      if (/llama|qwen/i.test(modelId)) return 'ollama'
+    }
+
+    return 'anthropic'
+  })
+
+  const logo = createMemo(() => getProviderLogo(providerId()))
+
+  return (
+    <button
+      type="button"
+      onClick={() => props.onToggle()}
+      class="
+        flex items-center
+        bg-[var(--alpha-white-5)]
+        rounded-[6px]
+        hover:bg-[var(--alpha-white-8)]
+        transition-colors
+      "
+      aria-label="Open model selector"
+      style={{
+        gap: '4px',
+        padding: '4px 8px',
+      }}
+    >
+      <Dynamic component={logo()} class="w-[12px] h-[12px] shrink-0" />
+      <span
+        class="truncate max-w-[160px]"
+        style={{
+          'font-size': '10px',
+          'font-weight': '500',
+          color: 'var(--text-tertiary)',
+          'font-family': "var(--font-ui-mono, 'Geist Mono', ui-monospace, monospace)",
+        }}
+      >
+        {props.currentModelDisplay()}
+      </span>
+    </button>
+  )
+}

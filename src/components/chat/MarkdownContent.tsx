@@ -67,6 +67,11 @@ export const MarkdownContent: Component<MarkdownContentProps> = (props) => {
   let pendingContent = ''
   let lastRenderedContent = ''
 
+  const needsPostRenderEnhancements = (html: string): boolean =>
+    html.includes('code-block-wrapper') ||
+    html.includes('data-copy-code') ||
+    html.includes('data-apply-code')
+
   onCleanup(() => {
     if (streamRenderTimer !== null) clearTimeout(streamRenderTimer)
   })
@@ -126,7 +131,9 @@ export const MarkdownContent: Component<MarkdownContentProps> = (props) => {
   createEffect(
     on(renderedHtml, () => {
       if (!containerRef) return
-      containerRef.innerHTML = renderedHtml()
+      const html = renderedHtml()
+      containerRef.innerHTML = html
+      if (props.isStreaming || !needsPostRenderEnhancements(html)) return
       queueMicrotask(() => {
         attachCopyHandlers(containerRef)
         attachExpandHandlers(containerRef)
@@ -150,7 +157,7 @@ export const MarkdownContent: Component<MarkdownContentProps> = (props) => {
         <div class="relative">
           <div
             ref={containerRef}
-            class="message-content leading-relaxed"
+            class="message-content markdown-render-surface leading-relaxed"
             style={{ 'font-size': 'var(--chat-font-size)' }}
             data-line-numbers={settings().behavior.lineNumbers ? '' : undefined}
             data-word-wrap={settings().behavior.wordWrap ? '' : undefined}

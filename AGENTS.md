@@ -1,4 +1,4 @@
-<!-- Last verified: 2026-03-23 -->
+<!-- Last verified: 2026-03-26 -->
 # AI Coding Agent Instructions (v3)
 
 > Instructions for AI assistants working on AVA. This file is auto-injected into the AVA agent's system prompt.
@@ -34,13 +34,14 @@ AVA is a Rust-first AI coding assistant (CLI/TUI + Tauri desktop) with a 21-crat
 
 - 21 Rust crates in the root workspace (`src-tauri/` remains outside the workspace)
 - 9 default tools: `read`, `write`, `edit`, `bash`, `glob`, `grep`, `web_fetch`, `web_search`, `git_read`
-- Additional tools load separately at runtime (for example `task`, `todo_*`, `question`, `plan`, MCP, and TOML custom tools)
+- Additional tools load separately at runtime (for example `subagent`, `todo_*`, `question`, `plan`, MCP, and TOML custom tools)
 
 ## Where To Put New Code
 
 - New tools: `crates/ava-tools/src/core/` (implement `Tool` trait)
 - New providers: `crates/ava-llm/src/providers/`
 - New agent features: `crates/ava-agent/` or `crates/ava-praxis/`
+- External agent integration: `crates/ava-acp/` (Agent Client Protocol)
 - TUI features: `crates/ava-tui/`
 - Desktop commands: `src-tauri/src/commands/`
 - Configuration: `crates/ava-config/`
@@ -93,10 +94,10 @@ pnpm lint && pnpm format:check && pnpm typecheck
 
 **This is mandatory.** After completing a feature, fix, or refactor:
 
-1. **Update `docs/development/CHANGELOG.md`** — add entry under current version section
-2. **Update `docs/development/backlog.md`** — check off completed items
+1. **Update `CHANGELOG.md`** — add entry under current version section
+2. **Update `docs/backlog.md`** — check off completed items
 3. **Update `CLAUDE.md`** if crate count, tool count, or architecture changed
-4. **Update `docs/architecture/crate-map.md`** if crates were added or removed
+4. **Update `docs/crate-map.md`** if crates were added or removed
 5. **Run `just check`** before committing
 
 Docs must always reflect the current codebase. Never let them drift.
@@ -116,8 +117,8 @@ Docs must always reflect the current codebase. Never let them drift.
 2. `AGENTS.md` — this file
 3. `docs/README.md` — documentation entry point
 4. `docs/plugins.md` — TOML custom tools and MCP guide
-5. `docs/architecture/crate-map.md` — crate dependency map
+5. `docs/crate-map.md` — crate dependency map
 6. `docs/architecture/plugin-system.md` — power plugin design
-7. `docs/development/CHANGELOG.md` — version history
-8. `docs/development/backlog.md` — current backlog
+7. `CHANGELOG.md` — version history
+8. `docs/backlog.md` — current backlog
 9. `docs/ideas/` — archived feature designs (reference only)

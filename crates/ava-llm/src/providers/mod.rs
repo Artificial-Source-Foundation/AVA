@@ -31,7 +31,38 @@ pub use ollama::OllamaProvider;
 pub use openai::OpenAIProvider;
 pub use openrouter::OpenRouterProvider;
 
+pub fn is_known_provider(provider_name: &str) -> bool {
+    matches!(
+        provider_name.to_ascii_lowercase().as_str(),
+        "anthropic"
+            | "openai"
+            | "chatgpt"
+            | "openrouter"
+            | "inception"
+            | "xai"
+            | "mistral"
+            | "groq"
+            | "deepseek"
+            | "gemini"
+            | "copilot"
+            | "ollama"
+            | "azure"
+            | "bedrock"
+            | "alibaba"
+            | "alibaba-cn"
+            | "zai-coding-plan"
+            | "zhipuai-coding-plan"
+            | "kimi-for-coding"
+            | "minimax-coding-plan"
+            | "minimax-cn-coding-plan"
+    )
+}
+
 /// Return the default base URL for a known provider name.
+///
+/// Providers with deployment- or region-specific endpoints (for example Azure
+/// OpenAI and Bedrock) are recognized by [`is_known_provider`] but return
+/// `None` here because their base URLs must come from user credentials.
 pub fn base_url_for_provider(provider_name: &str) -> Option<&'static str> {
     match provider_name.to_ascii_lowercase().as_str() {
         "anthropic" => Some("https://api.anthropic.com"),
@@ -160,6 +191,7 @@ pub fn create_provider(
                     OpenAIProvider::with_base_url(pool, oauth_token, model, base_url)
                         .with_responses_api(true)
                         .with_subscription(true)
+                        .with_provider_label("openai")
                         .with_chatgpt_account_id(account_id),
                 ))
             } else {
@@ -190,6 +222,7 @@ pub fn create_provider(
                     .unwrap_or_else(|| openai::looks_like_litellm_proxy(&base_url));
                 Ok(Box::new(
                     OpenAIProvider::with_base_url(pool, api_key, model, base_url)
+                        .with_provider_label("openai")
                         .with_litellm_compatible(litellm),
                 ))
             }
@@ -265,6 +298,66 @@ pub fn create_provider(
                 .unwrap_or_else(|| "http://localhost:11434".to_string());
             Ok(Box::new(OllamaProvider::new(pool, base_url, model)))
         }
+        "azure" => {
+            let entry = credential.ok_or_else(|| AvaError::MissingApiKey {
+                provider: "azure".to_string(),
+            })?;
+            let api_key = entry
+                .effective_api_key()
+                .ok_or_else(|| AvaError::MissingApiKey {
+                    provider: "azure".to_string(),
+                })?
+                .to_string();
+            let base_url = entry.base_url.clone().ok_or_else(|| {
+                AvaError::ConfigError(
+                    "Azure OpenAI requires providers.azure.base_url in ~/.ava/credentials.json"
+                        .to_string(),
+                )
+            })?;
+            let deployment = entry.org_id.clone().unwrap_or_else(|| model.to_string());
+            Ok(Box::new(AzureOpenAIProvider::new(
+                pool, api_key, model, base_url, deployment,
+            )))
+        }
+        "bedrock" => {
+            let entry = credential.ok_or_else(|| AvaError::MissingApiKey {
+                provider: "bedrock".to_string(),
+            })?;
+            let access_key_id = entry
+                .effective_api_key()
+                .ok_or_else(|| AvaError::MissingApiKey {
+                    provider: "bedrock".to_string(),
+                })?
+                .to_string();
+            let secret_access_key = entry.oauth_token.clone().ok_or_else(|| {
+                AvaError::ConfigError(
+                    "Bedrock requires providers.bedrock.oauth_token to store the AWS secret access key"
+                        .to_string(),
+                )
+            })?;
+            let region = entry
+                .org_id
+                .clone()
+                .unwrap_or_else(|| "us-east-1".to_string());
+            if let Some(base_url) = entry.base_url.clone() {
+                Ok(Box::new(BedrockProvider::with_base_url(
+                    pool,
+                    access_key_id,
+                    secret_access_key,
+                    region,
+                    model,
+                    base_url,
+                )))
+            } else {
+                Ok(Box::new(BedrockProvider::new(
+                    pool,
+                    access_key_id,
+                    secret_access_key,
+                    region,
+                    model,
+                )))
+            }
+        }
         // OpenAI-compatible providers (xAI Grok, Mistral, Groq, DeepSeek)
         "xai" | "mistral" | "groq" | "deepseek" => {
             let entry = credential.ok_or_else(|| AvaError::MissingApiKey {
@@ -284,9 +377,10 @@ pub fn create_provider(
                 _ => unreachable!(),
             };
             let base_url = entry.base_url.as_deref().unwrap_or(default_url);
-            Ok(Box::new(OpenAIProvider::with_base_url(
-                pool, api_key, model, base_url,
-            )))
+            Ok(Box::new(
+                OpenAIProvider::with_base_url(pool, api_key, model, base_url)
+                    .with_provider_label(normalized.clone()),
+            ))
         }
         // ChatGPT — explicit provider alias for the Responses API.
         // Users can also configure OAuth under the "openai" provider name
@@ -319,6 +413,7 @@ pub fn create_provider(
                 OpenAIProvider::with_base_url(pool, oauth_token, model, base_url)
                     .with_responses_api(true)
                     .with_subscription(true)
+                    .with_provider_label("chatgpt")
                     .with_chatgpt_account_id(account_id),
             ))
         }
@@ -345,7 +440,8 @@ pub fn create_provider(
             };
             Ok(Box::new(
                 OpenAIProvider::with_base_url(pool, api_key, model, base_url)
-                    .with_thinking_format(thinking_format),
+                    .with_thinking_format(thinking_format)
+                    .with_provider_label(normalized.clone()),
             ))
         }
         // Anthropic-compatible coding plan providers
@@ -371,15 +467,16 @@ pub fn create_provider(
                 _ => unreachable!(),
             };
             let base_url = entry.base_url.as_deref().unwrap_or(default_url);
-            Ok(Box::new(AnthropicProvider::with_base_url(
-                pool, api_key, model, base_url,
-            )))
+            Ok(Box::new(
+                AnthropicProvider::with_base_url(pool, api_key, model, base_url)
+                    .with_provider_label(normalized.clone()),
+            ))
         }
         _ => Err(AvaError::ProviderError {
             provider: provider_name.to_string(),
             message:
                 "unknown provider. Available: anthropic, openai, chatgpt, openrouter, inception, \
-                      xai, mistral, groq, deepseek, copilot, gemini, ollama, \
+                      xai, mistral, groq, deepseek, copilot, gemini, ollama, azure, bedrock, \
                       alibaba, alibaba-cn, zai-coding-plan, zhipuai-coding-plan, kimi-for-coding, \
                       minimax-coding-plan, minimax-cn-coding-plan"
                     .to_string(),
@@ -439,6 +536,7 @@ pub fn create_provider_with_plugins(
                     let new_pool = pool;
                     return Ok(Box::new(
                         AnthropicProvider::with_base_url(new_pool, api_key, model, base_url)
+                            .with_provider_label(normalized.clone())
                             .with_plugin_manager(plugin_manager),
                     ));
                 }
@@ -515,6 +613,12 @@ mod tests {
     }
 
     #[test]
+    fn is_known_provider_includes_dynamic_endpoint_providers() {
+        assert!(is_known_provider("azure"));
+        assert!(is_known_provider("bedrock"));
+    }
+
+    #[test]
     fn copilot_requires_oauth_token() {
         let mut store = CredentialStore::default();
         // Set credential without OAuth token — should fail
@@ -529,6 +633,7 @@ mod tests {
                 oauth_expires_at: None,
                 oauth_account_id: None,
                 litellm_compatible: None,
+                loop_prone: None,
             },
         );
         let result = create_provider("copilot", "gpt-4o", &store, default_pool());
@@ -550,6 +655,7 @@ mod tests {
                 oauth_expires_at: None,
                 oauth_account_id: None,
                 litellm_compatible: None,
+                loop_prone: None,
             },
         );
         let provider = create_provider("copilot", "gpt-4o", &store, default_pool())
@@ -571,6 +677,7 @@ mod tests {
                     oauth_expires_at: None,
                     oauth_account_id: None,
                     litellm_compatible: None,
+                    loop_prone: None,
                 },
             );
         }
@@ -693,6 +800,7 @@ mod tests {
                 oauth_expires_at: Some(u64::MAX), // far future
                 oauth_account_id: None,
                 litellm_compatible: None,
+                loop_prone: None,
             },
         );
         let provider = create_provider("openai", "codex-mini", &store, default_pool())
@@ -718,6 +826,7 @@ mod tests {
             oauth_expires_at: Some(u64::MAX),
             oauth_account_id: None,
             litellm_compatible: None,
+            loop_prone: None,
         };
 
         assert_eq!(

@@ -6,7 +6,7 @@
  */
 
 import { Dialog } from '@kobalte/core/dialog'
-import { type Component, createEffect, createSignal, on } from 'solid-js'
+import { type Component, createEffect, createSignal, on, onCleanup, onMount, Show } from 'solid-js'
 
 interface ExpandedEditorProps {
   open: boolean
@@ -15,9 +15,23 @@ interface ExpandedEditorProps {
   onClose: () => void
 }
 
+// Track how many ExpandedEditor instances are currently mounted.
+// Only the first mounter renders the actual dialog — duplicates
+// created by orphaned reactive roots are suppressed.
+let mountCount = 0
+
 export const ExpandedEditor: Component<ExpandedEditorProps> = (props) => {
+  const [isFirst, setIsFirst] = createSignal(false)
   let textareaRef: HTMLTextAreaElement | undefined
   const [text, setText] = createSignal('')
+
+  onMount(() => {
+    mountCount++
+    if (mountCount === 1) setIsFirst(true)
+  })
+  onCleanup(() => {
+    mountCount--
+  })
 
   createEffect(
     on(
@@ -35,6 +49,9 @@ export const ExpandedEditor: Component<ExpandedEditorProps> = (props) => {
     )
   )
 
+  // If another instance already mounted, skip rendering the portal
+  const shouldRender = () => isFirst()
+
   const handleKeyDown = (e: KeyboardEvent) => {
     if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
       e.preventDefault()
@@ -43,33 +60,46 @@ export const ExpandedEditor: Component<ExpandedEditorProps> = (props) => {
   }
 
   return (
-    <Dialog open={props.open} onOpenChange={(open) => !open && props.onClose()}>
-      <Dialog.Portal>
-        <Dialog.Overlay class="fixed inset-0 z-[var(--z-modal)] bg-black/40" />
-        <Dialog.Content
-          class="
+    <Show when={shouldRender()}>
+      <Dialog open={props.open} onOpenChange={(open) => !open && props.onClose()}>
+        <Dialog.Portal>
+          <Dialog.Overlay
+            class="fixed inset-0 z-[var(--z-modal)]"
+            style={{ background: 'var(--modal-overlay)' }}
+          />
+          <Dialog.Content
+            class="
             fixed z-[var(--z-modal)]
             top-[10%] left-1/2 -translate-x-1/2
             w-[min(720px,90vw)]
             max-h-[70vh]
-            bg-[var(--surface-overlay)] border border-[var(--border-default)]
-            rounded-[var(--radius-xl)] shadow-[var(--shadow-xl)]
             flex flex-col overflow-hidden
           "
-        >
-          <div class="px-4 py-2 border-b border-[var(--border-subtle)] flex items-center justify-between flex-shrink-0">
-            <span class="text-xs font-semibold text-[var(--text-secondary)]">Expanded Editor</span>
-            <span class="text-[9px] text-[var(--text-muted)]">
-              <kbd class="font-mono">Ctrl+Enter</kbd> to apply
-            </span>
-          </div>
+            style={{
+              background: 'var(--modal-surface)',
+              border: '1px solid var(--modal-border)',
+              'border-radius': 'var(--modal-radius-lg)',
+              'box-shadow': 'var(--modal-shadow)',
+            }}
+          >
+            <div
+              class="px-4 py-2 flex items-center justify-between flex-shrink-0"
+              style={{ 'border-bottom': '1px solid var(--modal-border)' }}
+            >
+              <span class="text-xs font-semibold text-[var(--text-secondary)]">
+                Expanded Editor
+              </span>
+              <span class="text-[9px] text-[var(--text-muted)]">
+                <kbd class="font-mono">Ctrl+Enter</kbd> to apply
+              </span>
+            </div>
 
-          <textarea
-            ref={textareaRef}
-            value={text()}
-            onInput={(e) => setText(e.currentTarget.value)}
-            onKeyDown={handleKeyDown}
-            class="
+            <textarea
+              ref={textareaRef}
+              value={text()}
+              onInput={(e) => setText(e.currentTarget.value)}
+              onKeyDown={handleKeyDown}
+              class="
               flex-1 w-full p-4 bg-transparent resize-none
               text-sm text-[var(--text-primary)]
               font-mono leading-relaxed
@@ -77,23 +107,27 @@ export const ExpandedEditor: Component<ExpandedEditorProps> = (props) => {
               focus:outline-none
               min-h-[300px]
             "
-            placeholder="Write your prompt..."
-          />
+              placeholder="Write your prompt..."
+            />
 
-          <div class="px-4 py-2 border-t border-[var(--border-subtle)] flex items-center justify-between flex-shrink-0">
-            <span class="text-[9px] text-[var(--text-muted)]">
-              <kbd class="font-mono">Esc</kbd> cancel
-            </span>
-            <button
-              type="button"
-              onClick={() => props.onApply(text())}
-              class="px-3 py-1 text-xs bg-[var(--accent)] text-white rounded-[var(--radius-md)] hover:bg-[var(--accent-hover)] transition-colors"
+            <div
+              class="px-4 py-2 flex items-center justify-between flex-shrink-0"
+              style={{ 'border-top': '1px solid var(--modal-border)' }}
             >
-              Apply
-            </button>
-          </div>
-        </Dialog.Content>
-      </Dialog.Portal>
-    </Dialog>
+              <span class="text-[9px] text-[var(--text-muted)]">
+                <kbd class="font-mono">Esc</kbd> cancel
+              </span>
+              <button
+                type="button"
+                onClick={() => props.onApply(text())}
+                class="px-3 py-1 text-xs bg-[var(--accent)] text-white rounded-[var(--radius-md)] hover:bg-[var(--accent-hover)] transition-colors"
+              >
+                Apply
+              </button>
+            </div>
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog>
+    </Show>
   )
 }

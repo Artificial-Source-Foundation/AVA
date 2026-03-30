@@ -32,8 +32,8 @@ export const DEFAULT_UI: UISettings = {
 
 export const DEFAULT_APPEARANCE: AppearanceSettings = {
   uiScale: 1.0,
-  accentColor: 'violet',
-  customAccentColor: '#8b5cf6',
+  accentColor: 'blue',
+  customAccentColor: '#0A84FF',
   fontMono: 'default',
   fontSans: 'default',
   fontLigatures: true,
@@ -56,6 +56,7 @@ export const DEFAULT_GENERATION: GenerationSettings = {
   customInstructions: '',
   weakModel: '',
   editorModel: '',
+  compactionModel: '',
   thinkingEnabled: false,
   reasoningEffort: 'off',
   autoCompact: true,

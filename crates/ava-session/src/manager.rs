@@ -12,6 +12,71 @@ use crate::helpers::{
 };
 use crate::{Bookmark, SessionManager};
 
+fn serialize_json<T: serde::Serialize>(value: &T) -> Result<String> {
+    serde_json::to_string(value).map_err(|error| AvaError::SerializationError(error.to_string()))
+}
+
+fn deserialize_json<T: serde::de::DeserializeOwned>(
+    index: usize,
+    raw: &str,
+) -> std::result::Result<T, rusqlite::Error> {
+    serde_json::from_str(raw).map_err(|error| {
+        rusqlite::Error::FromSqlConversionFailure(
+            index,
+            rusqlite::types::Type::Text,
+            Box::new(error),
+        )
+    })
+}
+
+pub(crate) fn row_to_message(
+    row: &rusqlite::Row<'_>,
+) -> std::result::Result<Message, rusqlite::Error> {
+    let tool_calls = deserialize_json::<Vec<ava_types::ToolCall>>(4, &row.get::<_, String>(4)?)?;
+    let tool_results =
+        deserialize_json::<Vec<ava_types::ToolResult>>(5, &row.get::<_, String>(5)?)?;
+    let tool_call_id: Option<String> = row.get(6)?;
+    let images_json: String = row
+        .get::<_, Option<String>>(7)?
+        .unwrap_or_else(|| "[]".to_string());
+    let images = deserialize_json::<Vec<ava_types::ImageContent>>(7, &images_json)?;
+    let parent_id_str: Option<String> = row.get(8)?;
+    let parent_id = parent_id_str
+        .as_deref()
+        .map(parse_uuid)
+        .transpose()
+        .map_err(to_conversion_error)?;
+    let agent_visible = row.get::<_, Option<i64>>(9)?.unwrap_or(1) != 0;
+    let user_visible = row.get::<_, Option<i64>>(10)?.unwrap_or(1) != 0;
+    let original_content: Option<String> = row.get(11)?;
+    let structured_content_json: String = row
+        .get::<_, Option<String>>(12)?
+        .unwrap_or_else(|| "[]".to_string());
+    let structured_content =
+        deserialize_json::<Vec<ava_types::StructuredContentBlock>>(12, &structured_content_json)?;
+    let metadata_json: String = row
+        .get::<_, Option<String>>(13)?
+        .unwrap_or_else(|| "{}".to_string());
+    let metadata = deserialize_json::<serde_json::Value>(13, &metadata_json)?;
+
+    Ok(Message {
+        id: parse_uuid(&row.get::<_, String>(0)?).map_err(to_conversion_error)?,
+        role: str_to_role(&row.get::<_, String>(1)?).map_err(to_conversion_error)?,
+        content: row.get(2)?,
+        timestamp: parse_datetime(&row.get::<_, String>(3)?).map_err(to_conversion_error)?,
+        tool_calls,
+        tool_results,
+        tool_call_id,
+        images,
+        parent_id,
+        agent_visible,
+        user_visible,
+        original_content,
+        structured_content,
+        metadata,
+    })
+}
+
 impl SessionManager {
     pub fn save(&self, session: &Session) -> Result<()> {
         tracing::debug!(
@@ -52,34 +117,7 @@ impl SessionManager {
             Self::upsert_message_in_tx(&tx, session.id, message)?;
         }
 
-        // Remove orphaned messages that are no longer in the session's message
-        // list.  This replaces the old DELETE-all + INSERT-all pattern with a
-        // targeted cleanup that only removes messages whose IDs are absent from
-        // the current set.
-        if !session.messages.is_empty() {
-            // Build a comma-separated list of quoted message IDs for the NOT IN clause.
-            let id_list: Vec<String> = session.messages.iter().map(|m| m.id.to_string()).collect();
-            let placeholders: String = id_list.iter().map(|_| "?").collect::<Vec<_>>().join(",");
-            let sql = format!(
-                "DELETE FROM messages WHERE session_id = ?1 AND id NOT IN ({placeholders})"
-            );
-            let mut stmt = tx.prepare(&sql).map_err(db_error)?;
-            let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> =
-                vec![Box::new(session.id.to_string())];
-            for id in &id_list {
-                param_values.push(Box::new(id.clone()));
-            }
-            let params_ref: Vec<&dyn rusqlite::types::ToSql> =
-                param_values.iter().map(|p| p.as_ref()).collect();
-            stmt.execute(params_ref.as_slice()).map_err(db_error)?;
-        } else {
-            // Session has no messages — remove all messages for this session.
-            tx.execute(
-                "DELETE FROM messages WHERE session_id = ?1",
-                params![session.id.to_string()],
-            )
-            .map_err(db_error)?;
-        }
+        Self::delete_orphaned_messages_in_tx(&tx, session.id, &session.messages)?;
 
         tx.commit().map_err(db_error)
     }
@@ -137,8 +175,9 @@ impl SessionManager {
         message_id: Uuid,
         content: &str,
     ) -> Result<()> {
-        let conn = self.open_conn()?;
-        let updated = conn
+        let mut conn = self.open_conn()?;
+        let tx = conn.transaction().map_err(db_error)?;
+        let updated = tx
             .execute(
                 "UPDATE messages SET content = ?1 WHERE id = ?2 AND session_id = ?3",
                 params![content, message_id.to_string(), session_id.to_string()],
@@ -151,13 +190,13 @@ impl SessionManager {
             )));
         }
 
-        conn.execute(
+        tx.execute(
             "UPDATE sessions SET updated_at = ?1 WHERE id = ?2",
             params![Utc::now().to_rfc3339(), session_id.to_string()],
         )
         .map_err(db_error)?;
 
-        Ok(())
+        tx.commit().map_err(db_error)
     }
 
     /// Upsert a single message row within an existing transaction.
@@ -167,32 +206,91 @@ impl SessionManager {
         message: &Message,
     ) -> Result<()> {
         tx.execute(
-            "INSERT INTO messages (id, session_id, role, content, timestamp, tool_calls, tool_results, tool_call_id, images, parent_id)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+            "INSERT INTO messages (id, session_id, role, content, timestamp, tool_calls, tool_results, tool_call_id, images, parent_id, agent_visible, user_visible, original_content, structured_content, metadata)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
              ON CONFLICT(id) DO UPDATE SET
-               content = excluded.content,
-               tool_calls = excluded.tool_calls,
-               tool_results = excluded.tool_results,
-               tool_call_id = excluded.tool_call_id,
-               images = excluded.images,
-               parent_id = excluded.parent_id",
+                content = excluded.content,
+                tool_calls = excluded.tool_calls,
+                tool_results = excluded.tool_results,
+                tool_call_id = excluded.tool_call_id,
+                images = excluded.images,
+                parent_id = excluded.parent_id,
+                agent_visible = excluded.agent_visible,
+                user_visible = excluded.user_visible,
+                original_content = excluded.original_content,
+                structured_content = excluded.structured_content,
+                metadata = excluded.metadata",
             params![
                 message.id.to_string(),
                 session_id.to_string(),
                 role_to_str(&message.role),
                 message.content,
                 message.timestamp.to_rfc3339(),
-                serde_json::to_string(&message.tool_calls)
-                    .map_err(|error| AvaError::SerializationError(error.to_string()))?,
-                serde_json::to_string(&message.tool_results)
-                    .map_err(|error| AvaError::SerializationError(error.to_string()))?,
+                serialize_json(&message.tool_calls)?,
+                serialize_json(&message.tool_results)?,
                 message.tool_call_id.as_deref(),
-                serde_json::to_string(&message.images)
-                    .map_err(|error| AvaError::SerializationError(error.to_string()))?,
+                serialize_json(&message.images)?,
                 message.parent_id.map(|id| id.to_string()),
+                i64::from(message.agent_visible),
+                i64::from(message.user_visible),
+                message.original_content.as_deref(),
+                serialize_json(&message.structured_content)?,
+                serialize_json(&message.metadata)?,
             ],
         )
         .map_err(db_error)?;
+        Ok(())
+    }
+
+    fn delete_orphaned_messages_in_tx(
+        tx: &rusqlite::Transaction<'_>,
+        session_id: Uuid,
+        messages: &[Message],
+    ) -> Result<()> {
+        if messages.is_empty() {
+            tx.execute(
+                "DELETE FROM messages WHERE session_id = ?1",
+                params![session_id.to_string()],
+            )
+            .map_err(db_error)?;
+            return Ok(());
+        }
+
+        tx.execute_batch(
+            "CREATE TEMP TABLE IF NOT EXISTS current_session_message_ids (
+                 id TEXT PRIMARY KEY
+             );
+             DELETE FROM current_session_message_ids;",
+        )
+        .map_err(db_error)?;
+
+        {
+            let mut insert = tx
+                .prepare("INSERT INTO current_session_message_ids (id) VALUES (?1)")
+                .map_err(db_error)?;
+            for message in messages {
+                insert
+                    .execute(params![message.id.to_string()])
+                    .map_err(db_error)?;
+            }
+        }
+
+        let deleted = tx
+            .execute(
+                "DELETE FROM messages
+                 WHERE session_id = ?1
+                   AND id NOT IN (SELECT id FROM current_session_message_ids)",
+                params![session_id.to_string()],
+            )
+            .map_err(db_error)?;
+
+        tracing::debug!(
+            session_id = %session_id,
+            retained = messages.len(),
+            deleted,
+            "synchronized persisted session messages"
+        );
+
         Ok(())
     }
 
@@ -254,6 +352,49 @@ impl SessionManager {
             }
         }
         Ok(sessions)
+    }
+
+    pub fn find_recent_child_by_external_link(
+        &self,
+        parent_id: Uuid,
+        agent_type: &str,
+        provider: &str,
+        cwd: &str,
+    ) -> Result<Option<Session>> {
+        let children = self.get_children(parent_id)?;
+        Ok(children.into_iter().rev().find(|session| {
+            session.metadata.get("agent_type").and_then(Value::as_str) == Some(agent_type)
+                && session
+                    .metadata
+                    .get("externalLink")
+                    .and_then(|value| {
+                        serde_json::from_value::<ava_types::ExternalSessionLink>(value.clone()).ok()
+                    })
+                    .is_some_and(|link| {
+                        link.provider.as_deref() == Some(provider)
+                            && link.cwd.as_deref() == Some(cwd)
+                            && link.external_session_id.as_deref().is_some()
+                    })
+        }))
+    }
+
+    pub fn recent_delegation_records(
+        &self,
+        parent_id: Uuid,
+        limit: usize,
+    ) -> Result<Vec<ava_types::DelegationRecord>> {
+        let mut records = Vec::new();
+        for session in self.get_children(parent_id)?.into_iter().rev() {
+            if let Some(record) = session.metadata.get("delegation").and_then(|value| {
+                serde_json::from_value::<ava_types::DelegationRecord>(value.clone()).ok()
+            }) {
+                records.push(record);
+                if records.len() >= limit {
+                    break;
+                }
+            }
+        }
+        Ok(records)
     }
 
     pub fn delete(&self, id: Uuid) -> Result<()> {
@@ -335,32 +476,7 @@ impl SessionManager {
 
         // Upsert each message
         for message in new_messages {
-            tx.execute(
-                "INSERT INTO messages (id, session_id, role, content, timestamp, tool_calls, tool_results, tool_call_id, images, parent_id)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
-                 ON CONFLICT(id) DO UPDATE SET
-                   content = excluded.content,
-                   tool_calls = excluded.tool_calls,
-                   tool_results = excluded.tool_results,
-                   images = excluded.images,
-                   parent_id = excluded.parent_id",
-                params![
-                    message.id.to_string(),
-                    session_id.to_string(),
-                    role_to_str(&message.role),
-                    message.content,
-                    message.timestamp.to_rfc3339(),
-                    serde_json::to_string(&message.tool_calls)
-                        .map_err(|error| AvaError::SerializationError(error.to_string()))?,
-                    serde_json::to_string(&message.tool_results)
-                        .map_err(|error| AvaError::SerializationError(error.to_string()))?,
-                    message.tool_call_id.as_deref(),
-                    serde_json::to_string(&message.images)
-                        .map_err(|error| AvaError::SerializationError(error.to_string()))?,
-                    message.parent_id.map(|id| id.to_string()),
-                ],
-            )
-            .map_err(db_error)?;
+            Self::upsert_message_in_tx(&tx, session_id, message)?;
         }
 
         // Update session metadata
@@ -506,66 +622,13 @@ impl SessionManager {
 
         let mut messages_stmt = conn
             .prepare(
-                "SELECT id, role, content, timestamp, tool_calls, tool_results, tool_call_id, images, parent_id
+                "SELECT id, role, content, timestamp, tool_calls, tool_results, tool_call_id, images, parent_id, agent_visible, user_visible, original_content, structured_content, metadata
                  FROM messages WHERE session_id = ?1 ORDER BY timestamp ASC, id ASC",
             )
             .map_err(db_error)?;
 
         let messages = messages_stmt
-            .query_map(params![session_id.clone()], |row| {
-                let tool_calls =
-                    serde_json::from_str::<Vec<ava_types::ToolCall>>(&row.get::<_, String>(4)?)
-                        .map_err(|error| {
-                            rusqlite::Error::FromSqlConversionFailure(
-                                4,
-                                rusqlite::types::Type::Text,
-                                Box::new(error),
-                            )
-                        })?;
-                let tool_results =
-                    serde_json::from_str::<Vec<ava_types::ToolResult>>(&row.get::<_, String>(5)?)
-                        .map_err(|error| {
-                        rusqlite::Error::FromSqlConversionFailure(
-                            5,
-                            rusqlite::types::Type::Text,
-                            Box::new(error),
-                        )
-                    })?;
-                let tool_call_id: Option<String> = row.get(6)?;
-                let images_json: String = row
-                    .get::<_, Option<String>>(7)?
-                    .unwrap_or_else(|| "[]".to_string());
-                let images = serde_json::from_str::<Vec<ava_types::ImageContent>>(&images_json)
-                    .map_err(|error| {
-                        rusqlite::Error::FromSqlConversionFailure(
-                            7,
-                            rusqlite::types::Type::Text,
-                            Box::new(error),
-                        )
-                    })?;
-                let parent_id_str: Option<String> = row.get(8)?;
-                let parent_id = parent_id_str
-                    .as_deref()
-                    .map(parse_uuid)
-                    .transpose()
-                    .map_err(to_conversion_error)?;
-
-                Ok(Message {
-                    id: parse_uuid(&row.get::<_, String>(0)?).map_err(to_conversion_error)?,
-                    role: str_to_role(&row.get::<_, String>(1)?).map_err(to_conversion_error)?,
-                    content: row.get(2)?,
-                    timestamp: parse_datetime(&row.get::<_, String>(3)?)
-                        .map_err(to_conversion_error)?,
-                    tool_calls,
-                    tool_results,
-                    tool_call_id,
-                    images,
-                    parent_id,
-                    agent_visible: true,
-                    user_visible: true,
-                    original_content: None,
-                })
-            })
+            .query_map(params![session_id.clone()], row_to_message)
             .map_err(db_error)?
             .collect::<std::result::Result<Vec<_>, _>>()
             .map_err(db_error)?;
@@ -602,9 +665,18 @@ impl SessionManager {
                 .map_err(db_error)?;
         }
 
-        // Run migrations for existing databases (idempotent — ignores "duplicate column" errors)
+        // Run migrations for existing databases. Re-applying already-landed ALTERs is
+        // expected, but anything else should fail loudly so the app does not continue
+        // on a partially migrated schema.
         for sql in MIGRATION_SQL {
-            let _ = conn.execute_batch(sql);
+            if let Err(error) = conn.execute_batch(sql) {
+                if should_ignore_migration_error(&error) {
+                    tracing::trace!(migration = %sql, error = %error, "ignoring already-applied session migration");
+                    continue;
+                }
+
+                return Err(db_error(error));
+            }
         }
 
         Ok(())
@@ -633,9 +705,18 @@ impl SessionManager {
     }
 }
 
+fn should_ignore_migration_error(error: &rusqlite::Error) -> bool {
+    let message = error.to_string().to_ascii_lowercase();
+    message.contains("duplicate column name")
+        || message.contains("already exists")
+        || message.contains("duplicate key name")
+}
+
 #[cfg(test)]
 mod bookmark_tests {
+    use super::should_ignore_migration_error;
     use crate::*;
+    use rusqlite::Error as SqlError;
     use uuid::Uuid;
 
     fn temp_manager() -> (SessionManager, tempfile::TempDir) {
@@ -721,12 +802,38 @@ mod bookmark_tests {
         let bookmarks = mgr.list_bookmarks(session.id).unwrap();
         assert!(bookmarks.is_empty());
     }
+
+    #[test]
+    fn duplicate_column_migration_errors_are_ignored() {
+        let error = SqlError::SqliteFailure(
+            rusqlite::ffi::Error {
+                code: rusqlite::ErrorCode::Unknown,
+                extended_code: 1,
+            },
+            Some("duplicate column name: tool_call_id".to_string()),
+        );
+
+        assert!(should_ignore_migration_error(&error));
+    }
+
+    #[test]
+    fn unexpected_migration_errors_are_not_ignored() {
+        let error = SqlError::SqliteFailure(
+            rusqlite::ffi::Error {
+                code: rusqlite::ErrorCode::ReadOnly,
+                extended_code: 8,
+            },
+            Some("attempt to write a readonly database".to_string()),
+        );
+
+        assert!(!should_ignore_migration_error(&error));
+    }
 }
 
 #[cfg(test)]
 mod incremental_tests {
     use crate::*;
-    use ava_types::{Message, Role};
+    use ava_types::{Message, Role, TokenUsage};
     use uuid::Uuid;
 
     fn temp_manager() -> (SessionManager, tempfile::TempDir) {
@@ -831,6 +938,27 @@ mod incremental_tests {
     }
 
     #[test]
+    fn save_incremental_survives_manager_restart() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("test.db");
+        let mgr = SessionManager::new(&db_path).unwrap();
+        let session = mgr.create().unwrap();
+        mgr.save(&session).unwrap();
+
+        let message = Message::new(Role::Assistant, "checkpointed after restart");
+        let message_id = message.id;
+        mgr.save_incremental(session.id, &[message], &TokenUsage::default(), None)
+            .unwrap();
+        drop(mgr);
+
+        let reopened = SessionManager::new(&db_path).unwrap();
+        let loaded = reopened.get(session.id).unwrap().unwrap();
+        assert_eq!(loaded.messages.len(), 1);
+        assert_eq!(loaded.messages[0].id, message_id);
+        assert_eq!(loaded.messages[0].content, "checkpointed after restart");
+    }
+
+    #[test]
     fn save_removes_orphaned_messages() {
         let (mgr, _dir) = temp_manager();
         let mut session = mgr.create().unwrap();
@@ -868,5 +996,35 @@ mod incremental_tests {
         assert_eq!(loaded.messages.len(), 2);
         assert_eq!(loaded.messages[0].id, m1_id);
         assert_eq!(loaded.messages[1].id, m2_id);
+    }
+
+    #[test]
+    fn save_incremental_updates_tool_call_id() {
+        let (mgr, _dir) = temp_manager();
+        let session = mgr.create().unwrap();
+        mgr.save(&session).unwrap();
+
+        let mut tool_message = Message::new(Role::Tool, "tool output").with_tool_call_id("call-1");
+        let message_id = tool_message.id;
+
+        mgr.save_incremental(
+            session.id,
+            &[tool_message.clone()],
+            &TokenUsage::default(),
+            None,
+        )
+        .unwrap();
+
+        let loaded = mgr.get(session.id).unwrap().unwrap();
+        assert_eq!(loaded.messages[0].tool_call_id.as_deref(), Some("call-1"));
+
+        tool_message.tool_call_id = Some("call-2".to_string());
+        mgr.save_incremental(session.id, &[tool_message], &TokenUsage::default(), None)
+            .unwrap();
+
+        let loaded = mgr.get(session.id).unwrap().unwrap();
+        assert_eq!(loaded.messages.len(), 1);
+        assert_eq!(loaded.messages[0].id, message_id);
+        assert_eq!(loaded.messages[0].tool_call_id.as_deref(), Some("call-2"));
     }
 }

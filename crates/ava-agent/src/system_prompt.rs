@@ -28,69 +28,123 @@ fn prompt_profile(
     }
 }
 
+fn model_supports_reasoning_for_prompt(provider_kind: ProviderKind, model_name: &str) -> bool {
+    let model_lower = model_name.to_lowercase();
+    registry_model_for_prompt(provider_kind, model_name)
+        .map(|model| model.capabilities.reasoning)
+        .unwrap_or_else(|| match provider_kind {
+            ProviderKind::Anthropic | ProviderKind::Bedrock => {
+                model_lower.contains("claude-opus-4.6")
+                    || model_lower.contains("claude-sonnet-4.6")
+                    || model_lower.contains("claude-opus-4-6")
+                    || model_lower.contains("claude-sonnet-4-6")
+                    || model_lower.contains("k2p5")
+                    || model_lower.contains("kimi-k2.5")
+            }
+            ProviderKind::OpenAI | ProviderKind::AzureOpenAI | ProviderKind::Inception => {
+                model_lower.starts_with("o3")
+                    || model_lower.starts_with("o4")
+                    || model_lower.contains("gpt-5")
+                    || model_lower.contains("codex")
+            }
+            ProviderKind::Gemini => {
+                model_lower.contains("gemini-2.5") || model_lower.contains("gemini-3")
+            }
+            ProviderKind::OpenRouter | ProviderKind::Copilot => {
+                model_lower.contains("claude")
+                    || model_lower.contains("gpt-5")
+                    || model_lower.contains("codex")
+                    || model_lower.starts_with("o3")
+                    || model_lower.starts_with("o4")
+                    || model_lower.contains("gemini-3")
+            }
+            ProviderKind::Ollama => false,
+        })
+}
+
+fn provider_notes(title: &str, lines: &[&str]) -> String {
+    let mut suffix = format!("## Provider notes ({title})\n");
+    for line in lines {
+        suffix.push_str("- ");
+        suffix.push_str(line);
+        suffix.push('\n');
+    }
+    suffix
+}
+
 /// Return provider-specific instructions to append to the base system prompt.
 ///
 /// The core system prompt stays the same for all providers. This function returns
 /// an additive suffix that optimizes instructions for each provider family's
 /// tool-calling and reasoning conventions.
 ///
-/// Returns `None` for providers that work well with the default prompt.
+/// Returns `None` only when the base prompt needs no provider-specific tuning.
 pub fn provider_prompt_suffix(provider_kind: ProviderKind, model_name: &str) -> Option<String> {
-    let model_lower = model_name.to_lowercase();
+    let reasoning = model_supports_reasoning_for_prompt(provider_kind, model_name);
     match provider_kind {
-        ProviderKind::Anthropic => {
-            let mut suffix = String::from(
-                "## Provider notes (Anthropic Claude)\n\
-                 - Keep visible reasoning brief.\n\
-                 - Keep pre-tool prose minimal unless it adds concrete value.\n",
-            );
-            let is_thinking_model = registry_model_for_prompt(provider_kind, model_name)
-                .map(|model| model.capabilities.reasoning)
-                .unwrap_or_else(|| {
-                    model_lower.contains("claude-opus-4.6")
-                        || model_lower.contains("claude-sonnet-4.6")
-                        || model_lower.contains("claude-opus-4-6")
-                        || model_lower.contains("claude-sonnet-4-6")
-                });
-            if is_thinking_model {
-                suffix.push_str(
-                    "- Extended thinking is available; use it only for genuinely complex tasks.\n",
+        ProviderKind::Anthropic | ProviderKind::Bedrock => {
+            let mut lines = vec![
+                "Follow structured instructions closely and keep pre-tool prose minimal.",
+                "Prefer one decisive tool/action at a time unless safe parallel work is obvious.",
+                "After a tool failure, briefly explain the new plan instead of retrying blindly.",
+            ];
+            if reasoning {
+                lines.push(
+                    "Use extended or adaptive thinking only for genuinely hard tasks; keep visible reasoning terse.",
                 );
             }
-            Some(suffix)
+            Some(provider_notes("Anthropic-style", &lines))
         }
-        ProviderKind::OpenAI => {
-            let is_reasoning_model = registry_model_for_prompt(provider_kind, model_name)
-                .map(|model| model.capabilities.reasoning)
-                .unwrap_or_else(|| {
-                    model_lower.starts_with("o3")
-                        || model_lower.starts_with("o4")
-                        || model_lower.contains("codex")
-                });
-            let mut suffix = String::from(
-                "## Provider notes (OpenAI)\n\
-                 - Use function calling for all tool interactions.\n\
-                 - Use parallel function calls when independent work can happen together.\n",
-            );
-            if is_reasoning_model {
-                suffix.push_str("- Keep visible reasoning focused on actions and results.\n");
+        ProviderKind::OpenAI | ProviderKind::AzureOpenAI | ProviderKind::Inception => {
+            let mut lines = vec![
+                "Use function calling for all tool interactions.",
+                "Make tool arguments explicit and schema-accurate; prefer one well-formed call over speculative retries.",
+                "Keep visible updates brief and action-oriented.",
+            ];
+            if reasoning {
+                lines.push(
+                    "Reasoning models work best with concise instructions and short visible summaries.",
+                );
             } else {
-                suffix.push_str("- Think briefly, then act.\n");
+                lines.push("Think briefly, then act.");
             }
-            Some(suffix)
+            Some(provider_notes("OpenAI-style", &lines))
         }
-        ProviderKind::Gemini => Some(String::from(
-            "## Provider notes (Google Gemini)\n\
-                 - Be explicit with tool arguments.\n\
-                 - Read tool errors carefully before retrying.\n",
+        ProviderKind::Copilot => Some(provider_notes(
+            "GitHub Copilot",
+            &[
+                "Copilot may proxy different backend families, so stick to plain function-calling patterns.",
+                "Keep tool arguments short, explicit, and schema-accurate.",
+                "If a tool call fails due to formatting, retry once with a simpler argument shape.",
+            ],
         )),
-        ProviderKind::OpenRouter => Some(String::from(
-            "## Provider notes (OpenRouter)\n\
-                 - Use function calling for all tool interactions.\n\
-                 - Be explicit and concise in your tool arguments.\n",
+        ProviderKind::Gemini => {
+            let mut lines = vec![
+                "Be explicit with tool arguments and expected outcomes.",
+                "Read tool errors carefully and adjust before retrying.",
+                "Keep progress updates short and structured.",
+            ];
+            if reasoning {
+                lines.push("Use thinking for planning-heavy work, not trivial edits.");
+            }
+            Some(provider_notes("Google Gemini", &lines))
+        }
+        ProviderKind::OpenRouter => Some(provider_notes(
+            "OpenRouter",
+            &[
+                "Backend routing can vary, so rely only on the documented tool contract.",
+                "Keep tool calls conservative, explicit, and schema-accurate.",
+                "If a call fails due to formatting, retry once with a simpler argument shape.",
+            ],
         )),
-        // Other providers use the base prompt without additions
-        _ => None,
+        ProviderKind::Ollama => Some(provider_notes(
+            "Ollama / local models",
+            &[
+                "Use short, concrete instructions and avoid unnecessary prose.",
+                "Prefer one tool call at a time when the next step is uncertain.",
+                "Re-check tool output before continuing; do not assume hidden state.",
+            ],
+        )),
     }
 }
 
@@ -166,8 +220,12 @@ pub fn build_system_prompt(
             prompt.push_str(
                 "- Read files before modifying them. Never guess at code you haven't seen.\n",
             );
+            prompt.push_str(
+                "- Follow instruction priority: system and tool rules first, then repo guidance, then the user's request.\n",
+            );
             prompt.push_str("- Prefer native tools (read, edit, glob, grep) over bash equivalents — they are faster, sandboxed, and produce structured output.\n");
             prompt.push_str("- When calling multiple tools with no dependencies between them, make all independent calls in parallel.\n");
+            prompt.push_str("- After a tool fails, adapt before retrying. Do not repeat the same call unchanged without new information.\n");
             if profile == PromptProfile::Standard {
                 prompt.push_str("- Run tests after making changes when a test suite exists.\n");
                 prompt.push_str("- For multi-step tasks, use `todo_write` to track progress. Mark items `in_progress` as you start them and `completed` when done.\n");
@@ -205,8 +263,23 @@ pub fn build_system_prompt(
     prompt.push_str("### Communication\n");
     prompt
         .push_str("- Lead with the action or answer, not the reasoning. Be concise and direct.\n");
+    prompt.push_str(
+        "- Give brief, action-oriented progress updates only when helpful; do not narrate hidden reasoning.\n",
+    );
     prompt.push_str("- When referencing code, use `file_path:line_number` format.\n");
     prompt.push_str("- Avoid filler, time estimates, and unnecessary verbosity.\n\n");
+
+    if tool_visibility_profile != crate::routing::ToolVisibilityProfile::AnswerOnly
+        && tools.iter().any(|tool| tool.name == "subagent")
+    {
+        prompt.push_str("### Delegation\n");
+        prompt.push_str("- Keep small, single-file work in the main thread.\n");
+        prompt.push_str("- Use `subagent` only for self-contained chunks whose result can be summarized back clearly.\n");
+        prompt.push_str("- Prefer `scout` or `explore` for read-only reconnaissance, `plan` for design-only breakdowns, `review` for a final pass, and `worker` or `subagent` for isolated implementation.\n");
+        prompt.push_str("- Use `background: true` when the sub-agent's work is independent and you can continue without its result. Use foreground (default) when you need the result before proceeding.\n");
+        prompt.push_str("- Avoid chaining sub-agents for every step; delegate only when it saves context or speeds up exploration.\n");
+        prompt.push_str("- After making significant multi-file edits or complex refactors, spawn a `review` subagent to catch bugs, security issues, and regressions. Skip review for trivial single-file fixes, config changes, or documentation edits.\n\n");
+    }
 
     if native_tools && tool_visibility_profile != crate::routing::ToolVisibilityProfile::AnswerOnly
     {
@@ -406,6 +479,26 @@ mod tests {
         assert!(!prompt.contains("### attempt_completion"));
     }
 
+    #[test]
+    fn prompt_adds_delegation_guidance_when_subagent_tool_is_available() {
+        let mut tools = mock_tools();
+        tools.push(Tool {
+            name: "subagent".to_string(),
+            description: "Spawn a sub-agent".to_string(),
+            parameters: json!({}),
+        });
+        let prompt = build_system_prompt(
+            &tools,
+            true,
+            ProviderKind::OpenAI,
+            "gpt-5.4",
+            crate::routing::ToolVisibilityProfile::Full,
+        );
+
+        assert!(prompt.contains("### Delegation"));
+        assert!(prompt.contains("Prefer `scout` or `explore`"));
+    }
+
     // ── provider_prompt_suffix tests ──────────────────────────────────
 
     #[test]
@@ -445,7 +538,7 @@ mod tests {
     fn openai_o_series_gets_reasoning_note() {
         let suffix = provider_prompt_suffix(ProviderKind::OpenAI, "o3-mini");
         let text = suffix.unwrap();
-        assert!(text.contains("actions and results"));
+        assert!(text.contains("Reasoning models") || text.contains("concise instructions"));
     }
 
     #[test]
@@ -462,9 +555,30 @@ mod tests {
     }
 
     #[test]
-    fn ollama_no_suffix() {
-        // Ollama uses generic prompts — no provider-specific suffix
+    fn ollama_suffix_mentions_local_model_guidance() {
         let suffix = provider_prompt_suffix(ProviderKind::Ollama, "llama3");
-        assert!(suffix.is_none());
+        let text = suffix.unwrap();
+        assert!(text.contains("local") || text.contains("Ollama"));
+    }
+
+    #[test]
+    fn azure_reuses_openai_style_suffix() {
+        let suffix = provider_prompt_suffix(ProviderKind::AzureOpenAI, "gpt-5.4");
+        let text = suffix.unwrap();
+        assert!(text.contains("OpenAI-style"));
+    }
+
+    #[test]
+    fn bedrock_reuses_anthropic_style_suffix() {
+        let suffix = provider_prompt_suffix(ProviderKind::Bedrock, "claude-sonnet-4.6");
+        let text = suffix.unwrap();
+        assert!(text.contains("Anthropic-style"));
+    }
+
+    #[test]
+    fn copilot_suffix_mentions_proxy_behavior() {
+        let suffix = provider_prompt_suffix(ProviderKind::Copilot, "gpt-4o");
+        let text = suffix.unwrap();
+        assert!(text.contains("proxy") || text.contains("Copilot"));
     }
 }

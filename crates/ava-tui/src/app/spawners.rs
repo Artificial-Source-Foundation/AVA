@@ -6,12 +6,8 @@ impl App {
         let recent_models = self.state.agent.recent_models.clone();
         let current_model = self.state.agent.model_name.clone();
         let current_provider = self.state.agent.provider_name.clone();
-        let cli_agents = self
-            .state
-            .agent
-            .stack_handle()
-            .map(|s| s.cli_agents().to_vec())
-            .unwrap_or_default();
+        // CLI agents (Gemini CLI, Claude Code, etc.) are not shown in the model
+        // selector — they're only available as HQ/delegation worker targets.
         let app_tx_for_load = app_tx.clone();
         let load = async move {
             let credentials = ava_config::CredentialStore::load_default()
@@ -24,13 +20,12 @@ impl App {
                 catalog
             };
             effective_catalog.merge_fallback();
-            let selector = ModelSelectorState::from_catalog_with_cli(
+            let selector = ModelSelectorState::from_catalog(
                 &effective_catalog,
                 &credentials,
                 &recent_models,
                 &current_model,
                 &current_provider,
-                &cli_agents,
             );
             let _ = app_tx_for_load.send(AppEvent::ModelSelectorLoaded(Ok(selector)));
         };
@@ -261,7 +256,7 @@ impl App {
 
     /// Spawn a code review on working directory changes. Results appear as chat messages.
     pub(crate) fn spawn_review_pass(&mut self, app_tx: mpsc::UnboundedSender<AppEvent>) {
-        use ava_praxis::review::{
+        use ava_hq::review::{
             build_review_system_prompt, collect_diff, format_text, parse_review_output,
             run_review_agent, DiffMode, Severity,
         };

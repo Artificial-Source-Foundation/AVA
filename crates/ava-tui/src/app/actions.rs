@@ -31,7 +31,7 @@ impl App {
     pub(crate) fn show_shortcuts_overlay(&mut self) {
         let shortcuts = "\
 Navigation
-  Tab / Shift+Tab          Cycle mode (Code/Plan/Praxis)
+  Tab / Shift+Tab          Cycle mode (Code/Plan)
   Ctrl+K / Ctrl+/          Command palette
   Ctrl+M                   Switch model
   Ctrl+L                   Session picker

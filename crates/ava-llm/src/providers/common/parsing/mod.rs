@@ -9,6 +9,7 @@ pub use parse_responses_api::*;
 
 use ava_types::{AvaError, Result, StreamChunk, StreamToolCall, Tool, ToolCall};
 use serde_json::{json, Value};
+use tracing::{debug, warn};
 use uuid::Uuid;
 
 pub fn model_pricing_usd_per_million(model: &str) -> (f64, f64) {
@@ -57,6 +58,9 @@ pub fn model_pricing_usd_per_million(model: &str) -> (f64, f64) {
 /// `cache_creation_input_tokens`, OpenAI `prompt_tokens_details.cached_tokens`).
 pub fn parse_usage(payload: &Value) -> Option<ava_types::TokenUsage> {
     let usage = payload.get("usage")?;
+    if usage.is_null() {
+        return None;
+    }
     let input = usage
         .get("input_tokens")
         .or_else(|| usage.get("prompt_tokens"))
@@ -136,6 +140,9 @@ pub fn estimate_cost_with_cache_usd(
     out_rate: f64,
 ) -> f64 {
     let m = 1_000_000.0;
+    // Anthropic-style `input_tokens` excludes `cache_creation_tokens`, so the
+    // creation surcharge is additive rather than something we should subtract
+    // from the normal input bucket first.
     let non_cached_input = usage.input_tokens.saturating_sub(usage.cache_read_tokens);
     non_cached_input as f64 / m * in_rate
         + usage.cache_read_tokens as f64 / m * in_rate * 0.1
@@ -212,6 +219,179 @@ impl SseParser {
         }
 
         events
+    }
+}
+
+/// Incremental UTF-8 decoder for streamed HTTP chunks.
+///
+/// Providers can split multi-byte code points across network chunk boundaries.
+/// This decoder buffers incomplete trailing sequences and drops only genuinely
+/// invalid byte ranges.
+#[derive(Debug, Default)]
+pub struct Utf8Accumulator {
+    pending: Vec<u8>,
+}
+
+impl Utf8Accumulator {
+    pub fn new() -> Self {
+        Self {
+            pending: Vec::new(),
+        }
+    }
+
+    pub fn decode<B: AsRef<[u8]>>(&mut self, bytes: B, provider: &str) -> Option<String> {
+        let bytes = bytes.as_ref();
+        if bytes.is_empty() && self.pending.is_empty() {
+            return None;
+        }
+
+        let mut combined = std::mem::take(&mut self.pending);
+        combined.extend_from_slice(bytes);
+
+        let mut cursor = 0;
+        let mut output = String::new();
+
+        while cursor < combined.len() {
+            match std::str::from_utf8(&combined[cursor..]) {
+                Ok(valid) => {
+                    output.push_str(valid);
+                    cursor = combined.len();
+                }
+                Err(error) => {
+                    let valid_up_to = error.valid_up_to();
+                    if valid_up_to > 0 {
+                        let valid = &combined[cursor..cursor + valid_up_to];
+                        output.push_str(
+                            std::str::from_utf8(valid)
+                                .expect("valid UTF-8 prefix should always decode"),
+                        );
+                        cursor += valid_up_to;
+                    }
+
+                    match error.error_len() {
+                        Some(invalid_len) => {
+                            warn!(
+                                provider,
+                                invalid_bytes = invalid_len,
+                                "dropping invalid UTF-8 bytes from provider stream"
+                            );
+                            cursor = cursor.saturating_add(invalid_len);
+                        }
+                        None => {
+                            self.pending.extend_from_slice(&combined[cursor..]);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        if output.is_empty() {
+            None
+        } else {
+            Some(output)
+        }
+    }
+}
+
+/// Buffered NDJSON parser that handles partial network chunks and optional
+/// trailing newlines.
+#[derive(Debug, Default)]
+pub struct NdjsonParser {
+    buffer: String,
+}
+
+impl NdjsonParser {
+    pub fn new() -> Self {
+        Self {
+            buffer: String::new(),
+        }
+    }
+
+    pub fn feed(&mut self, chunk: &str) -> Vec<String> {
+        self.buffer.push_str(chunk);
+        let mut events = Vec::new();
+
+        while let Some(pos) = self.buffer.find('\n') {
+            let mut line = self.buffer[..pos].to_string();
+            self.buffer = self.buffer[pos + 1..].to_string();
+            if line.ends_with('\r') {
+                line.pop();
+            }
+            let trimmed = line.trim();
+            if !trimmed.is_empty() {
+                events.push(trimmed.to_string());
+            }
+        }
+
+        let trimmed = self.buffer.trim();
+        if !trimmed.is_empty() && serde_json::from_str::<Value>(trimmed).is_ok() {
+            events.push(trimmed.to_string());
+            self.buffer.clear();
+        }
+
+        events
+    }
+}
+
+pub fn decode_stream_chunk<B: AsRef<[u8]>>(
+    utf8: &mut Utf8Accumulator,
+    chunk: std::result::Result<B, reqwest::Error>,
+    provider: &str,
+) -> Option<String> {
+    match chunk {
+        Ok(bytes) => utf8.decode(bytes, provider),
+        Err(error) => {
+            warn!(provider, error = %error, "dropping errored provider stream chunk");
+            None
+        }
+    }
+}
+
+pub fn parse_json_stream_payload(line: &str, provider: &str) -> Option<Value> {
+    match serde_json::from_str::<Value>(line) {
+        Ok(payload) => Some(payload),
+        Err(error) => {
+            debug!(
+                provider,
+                error = %error,
+                line = %truncate_log_text(line, 240),
+                "dropping malformed streaming JSON payload"
+            );
+            None
+        }
+    }
+}
+
+pub fn completion_text_or_tool_calls(
+    parsed: Result<String>,
+    provider: &str,
+    tool_call_count: usize,
+) -> Result<String> {
+    match parsed {
+        Ok(content) => Ok(content),
+        Err(error) if tool_call_count > 0 => {
+            warn!(
+                provider,
+                tool_call_count,
+                error = %error,
+                "failed to parse text content, continuing with tool calls"
+            );
+            Ok(String::new())
+        }
+        Err(error) => Err(AvaError::ProviderError {
+            provider: provider.to_string(),
+            message: format!("failed to parse completion payload: {error}"),
+        }),
+    }
+}
+
+fn truncate_log_text(text: &str, max_chars: usize) -> String {
+    if text.chars().count() <= max_chars {
+        text.to_string()
+    } else {
+        let truncated: String = text.chars().take(max_chars).collect();
+        format!("{truncated}...")
     }
 }
 
@@ -698,13 +878,7 @@ mod tests {
 
     #[test]
     fn parse_usage_null_usage() {
-        // When usage is JSON null, get("usage") returns Some(Null),
-        // but sub-field lookups return None, so we get zeroed usage.
-        let u = parse_usage(&json!({"usage": null}));
-        assert!(u.is_some());
-        let u = u.unwrap();
-        assert_eq!(u.input_tokens, 0);
-        assert_eq!(u.output_tokens, 0);
+        assert!(parse_usage(&json!({"usage": null})).is_none());
     }
 
     // ── estimate_cost_usd ──
@@ -757,8 +931,8 @@ mod tests {
         let cl100k = estimate_tokens(text);
         let o200k = estimate_tokens_for_model(text, "gpt-4o");
         // Both should be reasonable; they may differ slightly
-        assert!(cl100k >= 8 && cl100k <= 12, "cl100k got {cl100k}");
-        assert!(o200k >= 8 && o200k <= 12, "o200k got {o200k}");
+        assert!((8..=12).contains(&cl100k), "cl100k got {cl100k}");
+        assert!((8..=12).contains(&o200k), "o200k got {o200k}");
     }
 
     // ── parse_sse_lines ──
@@ -858,6 +1032,53 @@ mod tests {
         // Complete the second event
         let events = parser.feed("ond\n\n");
         assert_eq!(events, vec!["second"]);
+    }
+
+    #[test]
+    fn utf8_accumulator_buffers_split_multibyte_sequences() {
+        let mut utf8 = Utf8Accumulator::new();
+
+        assert!(utf8.decode([0xF0, 0x9F], "test").is_none());
+        assert_eq!(utf8.decode([0x94, 0xA5], "test"), Some("🔥".to_string()));
+    }
+
+    #[test]
+    fn ndjson_parser_buffers_split_lines() {
+        let mut parser = NdjsonParser::new();
+
+        assert!(parser.feed("{\"message\":{\"content\":\"hel").is_empty());
+        let events = parser.feed("lo\"}}\n");
+        assert_eq!(events, vec!["{\"message\":{\"content\":\"hello\"}}"]);
+    }
+
+    #[test]
+    fn ndjson_parser_emits_complete_json_without_newline() {
+        let mut parser = NdjsonParser::new();
+        let events = parser.feed("{\"done\":true}");
+        assert_eq!(events, vec!["{\"done\":true}"]);
+    }
+
+    #[test]
+    fn completion_text_or_tool_calls_errors_without_tool_calls() {
+        let result = completion_text_or_tool_calls(
+            Err(AvaError::SerializationError("bad payload".to_string())),
+            "test",
+            0,
+        );
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn completion_text_or_tool_calls_allows_tool_only_payloads() {
+        let result = completion_text_or_tool_calls(
+            Err(AvaError::SerializationError("bad payload".to_string())),
+            "test",
+            1,
+        )
+        .unwrap();
+
+        assert!(result.is_empty());
     }
 
     // ── Ollama ──

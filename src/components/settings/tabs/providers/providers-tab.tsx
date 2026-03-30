@@ -1,15 +1,11 @@
 /**
- * Providers Tab (Redesigned)
+ * Providers Tab — Pencil macOS-inspired design.
  *
- * Uses SettingsCard bento-grid pattern for consistency with other settings tabs.
- * Single card wrapping search + 2-column provider grid.
+ * Page title + 2-column provider grid cards.
  */
 
-import { Cloud } from 'lucide-solid'
 import { type Component, createMemo, createSignal } from 'solid-js'
 import type { ProviderModel } from '../../../../config/defaults/provider-defaults'
-import { SettingsCard } from '../../SettingsCard'
-import { SETTINGS_CARD_GAP } from '../../settings-constants'
 import { ProvidersTabGrid } from './providers-tab-grid'
 import { ProvidersTabHeader } from './providers-tab-header'
 
@@ -41,38 +37,44 @@ export const ProvidersTab: Component<ProvidersTabProps> = (props) => {
   })
 
   return (
-    <div class="grid grid-cols-1" style={{ gap: SETTINGS_CARD_GAP }}>
-      <SettingsCard
-        icon={Cloud}
-        title="LLM Providers"
-        description="Configure API keys and manage provider connections. Keys stored locally — never sent to AVA servers."
+    <div style={{ display: 'flex', 'flex-direction': 'column', gap: '32px' }}>
+      {/* Page title */}
+      <h1
+        style={{
+          'font-family': 'Geist, sans-serif',
+          'font-size': '22px',
+          'font-weight': '600',
+          color: '#F5F5F7',
+        }}
       >
-        <ProvidersTabHeader
-          connectedCount={connectedCount}
-          searchQuery={searchQuery}
-          onSearchChange={setSearchQuery}
-        />
+        Providers
+      </h1>
 
-        <ProvidersTabGrid
-          providers={filteredProviders()}
-          expandedIds={expandedIds()}
-          onToggleExpand={(id) =>
-            setExpandedIds((prev) => {
-              const next = new Set(prev)
-              if (next.has(id)) next.delete(id)
-              else next.add(id)
-              return next
-            })
-          }
-          onToggle={props.onToggle}
-          onSaveApiKey={props.onSaveApiKey}
-          onClearApiKey={props.onClearApiKey}
-          onSetDefaultModel={props.onSetDefaultModel}
-          onTestConnection={props.onTestConnection}
-          onUpdateModels={props.onUpdateModels}
-          onSaveBaseUrl={props.onSaveBaseUrl}
-        />
-      </SettingsCard>
+      <ProvidersTabHeader
+        connectedCount={connectedCount}
+        searchQuery={searchQuery}
+        onSearchChange={setSearchQuery}
+      />
+
+      <ProvidersTabGrid
+        providers={filteredProviders()}
+        expandedIds={expandedIds()}
+        onToggleExpand={(id) =>
+          setExpandedIds((prev) => {
+            const next = new Set(prev)
+            if (next.has(id)) next.delete(id)
+            else next.add(id)
+            return next
+          })
+        }
+        onToggle={props.onToggle}
+        onSaveApiKey={props.onSaveApiKey}
+        onClearApiKey={props.onClearApiKey}
+        onSetDefaultModel={props.onSetDefaultModel}
+        onTestConnection={props.onTestConnection}
+        onUpdateModels={props.onUpdateModels}
+        onSaveBaseUrl={props.onSaveBaseUrl}
+      />
     </div>
   )
 }

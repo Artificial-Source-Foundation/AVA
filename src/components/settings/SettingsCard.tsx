@@ -2,12 +2,12 @@
  * Settings Card
  *
  * Reusable bento-style card for grouping settings sections.
- * Provides a glass-morphic raised surface with icon + title + description.
+ * Uses theme-aware CSS variables for proper light/dark mode support.
+ * Header: icon + title (14px/500) + description (12px).
  */
 
 import type { Component, JSX } from 'solid-js'
 import { Show } from 'solid-js'
-import { Dynamic } from 'solid-js/web'
 
 interface SettingsCardProps {
   icon?: Component<{ class?: string }>
@@ -17,19 +17,48 @@ interface SettingsCardProps {
 }
 
 export const SettingsCard: Component<SettingsCardProps> = (props) => (
-  <div class="rounded-[var(--radius-xl)] border border-[var(--gray-5)] bg-[var(--gray-3)] p-6 space-y-4">
-    <div class="flex items-start gap-3">
+  <div
+    style={{
+      display: 'flex',
+      'flex-direction': 'column',
+      gap: '16px',
+      background: 'var(--surface)',
+      border: '1px solid var(--border-subtle)',
+      'border-radius': '12px',
+      padding: '20px',
+    }}
+  >
+    <div class="flex items-center gap-2.5 min-w-0">
       <Show when={props.icon}>
-        <div class="p-2 rounded-[var(--radius-md)] bg-[var(--accent-subtle)] text-[var(--accent)] flex-shrink-0">
-          <Dynamic component={props.icon!} class="w-5 h-5" />
-        </div>
+        {(() => {
+          const Icon = props.icon!
+          return (
+            <span class="shrink-0 w-4 h-4" style={{ color: 'var(--text-secondary)' }}>
+              <Icon class="w-4 h-4" />
+            </span>
+          )
+        })()}
       </Show>
       <div class="min-w-0">
-        <h3 class="text-[var(--settings-text-title)] font-semibold text-[var(--text-primary)]">
+        <h3
+          style={{
+            'font-family': 'Geist, sans-serif',
+            'font-size': '14px',
+            'font-weight': '500',
+            color: 'var(--text-primary)',
+          }}
+        >
           {props.title}
         </h3>
         <Show when={props.description}>
-          <p class="text-[var(--settings-text-description)] text-[var(--gray-8)] mt-0.5">
+          <p
+            style={{
+              'font-family': 'Geist, sans-serif',
+              'font-size': '12px',
+              color: 'var(--text-muted)',
+              'margin-top': '2px',
+            }}
+          >
             {props.description}
           </p>
         </Show>

@@ -31,6 +31,7 @@ portable-pty = "0.8"
 uuid = { version = "1", features = ["v4"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+async-trait = "0.1"
 tokio = { version = "1", features = ["full"] }
 tracing = "0.1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
@@ -45,7 +46,7 @@ ava-permissions = { path = "../crates/ava-permissions" }
 ava-extensions = { path = "../crates/ava-extensions" }
 ava-validator = { path = "../crates/ava-validator" }
 ava-agent = { path = "../crates/ava-agent" }
-ava-praxis = { path = "../crates/ava-praxis" }
+ava-hq = { path = "../crates/ava-hq" }
 ava-llm = { path = "../crates/ava-llm" }
 ava-mcp = { path = "../crates/ava-mcp" }
 ava-session = { path = "../crates/ava-session" }

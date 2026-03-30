@@ -201,71 +201,55 @@ impl ToolRegistry {
         })?;
 
         let mut result = tool.execute(tool_call.arguments.clone()).await;
+        let mut retry_attempts = 0;
 
-        // Auto-retry read-only tools on transient failures
-        if result.is_err() && retry_middleware::is_retryable_tool(&tool_call.name) {
-            let original_err = result
-                .as_ref()
-                .err()
-                .map(|e| e.to_string())
-                .unwrap_or_default();
-            if retry_middleware::is_transient_error(&original_err) {
-                for attempt in 0..retry_middleware::MAX_RETRIES {
-                    if let Some(backoff) = retry_middleware::backoff_for_attempt(attempt) {
-                        debug!(
-                            tool = %tool_call.name,
-                            attempt = attempt + 1,
-                            max = retry_middleware::MAX_RETRIES,
-                            backoff_ms = backoff.as_millis() as u64,
-                            error = %original_err,
-                            "retrying read-only tool after transient error"
-                        );
-                        tokio::time::sleep(backoff).await;
-                        result = tool.execute(tool_call.arguments.clone()).await;
-                        if result.is_ok() {
-                            debug!(
-                                tool = %tool_call.name,
-                                attempt = attempt + 1,
-                                "retry succeeded"
-                            );
-                            break;
-                        }
-                    }
-                }
-            }
+        while retry_attempts < retry_middleware::MAX_RETRIES {
+            let Some(error_message) = retryable_tool_failure(&tool_call.name, &result) else {
+                break;
+            };
+            let Some(backoff) = retry_middleware::backoff_for_attempt(retry_attempts) else {
+                break;
+            };
+
+            retry_attempts += 1;
+            debug!(
+                tool = %tool_call.name,
+                attempt = retry_attempts,
+                max = retry_middleware::MAX_RETRIES,
+                backoff_ms = backoff.as_millis() as u64,
+                error = %error_message,
+                "retrying read-only tool after transient failure"
+            );
+            tokio::time::sleep(backoff).await;
+            result = tool.execute(tool_call.arguments.clone()).await;
         }
 
-        // Also retry when the tool returns Ok but with is_error=true (soft errors)
-        if let Ok(ref tool_result) = result {
-            if tool_result.is_error
-                && retry_middleware::is_retryable_tool(&tool_call.name)
-                && retry_middleware::is_transient_error(&tool_result.content)
-            {
-                let original_content = tool_result.content.clone();
-                for attempt in 0..retry_middleware::MAX_RETRIES {
-                    if let Some(backoff) = retry_middleware::backoff_for_attempt(attempt) {
-                        debug!(
-                            tool = %tool_call.name,
-                            attempt = attempt + 1,
-                            max = retry_middleware::MAX_RETRIES,
-                            backoff_ms = backoff.as_millis() as u64,
-                            error = %original_content,
-                            "retrying read-only tool after transient soft error"
-                        );
-                        tokio::time::sleep(backoff).await;
-                        result = tool.execute(tool_call.arguments.clone()).await;
-                        if let Ok(ref r) = result {
-                            if !r.is_error {
-                                debug!(
-                                    tool = %tool_call.name,
-                                    attempt = attempt + 1,
-                                    "retry succeeded"
-                                );
-                                break;
-                            }
-                        }
-                    }
+        if retry_attempts > 0 {
+            match &result {
+                Ok(tool_result) if !tool_result.is_error => {
+                    debug!(
+                        tool = %tool_call.name,
+                        attempts = retry_attempts,
+                        "read-only tool retries recovered successfully"
+                    );
                 }
+                Ok(tool_result) if !retry_middleware::is_transient_error(&tool_result.content) => {
+                    debug!(
+                        tool = %tool_call.name,
+                        attempts = retry_attempts,
+                        error = %tool_result.content,
+                        "read-only tool retries ended with non-transient soft failure"
+                    );
+                }
+                Err(error) if !retry_middleware::is_transient_error(&error.to_string()) => {
+                    debug!(
+                        tool = %tool_call.name,
+                        attempts = retry_attempts,
+                        error = %error,
+                        "read-only tool retries ended with non-transient failure"
+                    );
+                }
+                _ => {}
             }
         }
 
@@ -403,5 +387,153 @@ impl ToolRegistry {
         };
 
         (result, record)
+    }
+}
+
+fn retryable_tool_failure(tool_name: &str, result: &Result<ToolResult>) -> Option<String> {
+    if !retry_middleware::is_retryable_tool(tool_name) {
+        return None;
+    }
+
+    match result {
+        Err(error) => {
+            let message = error.to_string();
+            retry_middleware::is_transient_error(&message).then_some(message)
+        }
+        Ok(tool_result) if tool_result.is_error => {
+            retry_middleware::is_transient_error(&tool_result.content)
+                .then_some(tool_result.content.clone())
+        }
+        Ok(_) => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::VecDeque;
+    use std::sync::{Arc, Mutex};
+
+    use super::*;
+
+    #[derive(Clone)]
+    enum MockOutcome {
+        Hard(Result<ToolResult>),
+    }
+
+    struct SequencedTool {
+        name: &'static str,
+        outcomes: Arc<Mutex<VecDeque<MockOutcome>>>,
+        calls: Arc<Mutex<usize>>,
+    }
+
+    impl SequencedTool {
+        fn new(name: &'static str, outcomes: Vec<MockOutcome>) -> (Self, Arc<Mutex<usize>>) {
+            let calls = Arc::new(Mutex::new(0));
+            (
+                Self {
+                    name,
+                    outcomes: Arc::new(Mutex::new(outcomes.into())),
+                    calls: calls.clone(),
+                },
+                calls,
+            )
+        }
+    }
+
+    #[async_trait]
+    impl Tool for SequencedTool {
+        fn name(&self) -> &str {
+            self.name
+        }
+
+        fn description(&self) -> &str {
+            "Sequenced test tool"
+        }
+
+        fn parameters(&self) -> Value {
+            serde_json::json!({
+                "type": "object"
+            })
+        }
+
+        async fn execute(&self, _args: Value) -> Result<ToolResult> {
+            *self.calls.lock().unwrap() += 1;
+            match self.outcomes.lock().unwrap().pop_front() {
+                Some(MockOutcome::Hard(result)) => result,
+                None => Ok(ToolResult {
+                    call_id: String::new(),
+                    content: "ok".to_string(),
+                    is_error: false,
+                }),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn retries_stop_when_follow_up_error_is_non_transient() {
+        let mut registry = ToolRegistry::new();
+        let (tool, calls) = SequencedTool::new(
+            "read",
+            vec![
+                MockOutcome::Hard(Err(AvaError::TimeoutError("timed out".to_string()))),
+                MockOutcome::Hard(Err(AvaError::ValidationError(
+                    "invalid argument".to_string(),
+                ))),
+                MockOutcome::Hard(Err(AvaError::TimeoutError(
+                    "should not be retried".to_string(),
+                ))),
+            ],
+        );
+        registry.register(tool);
+
+        let result = registry
+            .execute(ToolCall {
+                id: "call-1".to_string(),
+                name: "read".to_string(),
+                arguments: serde_json::json!({}),
+            })
+            .await;
+
+        assert!(matches!(result, Err(AvaError::ValidationError(_))));
+        assert_eq!(*calls.lock().unwrap(), 2);
+    }
+
+    #[tokio::test]
+    async fn retries_stop_when_soft_error_turns_permanent() {
+        let mut registry = ToolRegistry::new();
+        let (tool, calls) = SequencedTool::new(
+            "read",
+            vec![
+                MockOutcome::Hard(Ok(ToolResult {
+                    call_id: String::new(),
+                    content: "timeout while reading".to_string(),
+                    is_error: true,
+                })),
+                MockOutcome::Hard(Ok(ToolResult {
+                    call_id: String::new(),
+                    content: "file not found".to_string(),
+                    is_error: true,
+                })),
+                MockOutcome::Hard(Ok(ToolResult {
+                    call_id: String::new(),
+                    content: "should not be retried".to_string(),
+                    is_error: true,
+                })),
+            ],
+        );
+        registry.register(tool);
+
+        let result = registry
+            .execute(ToolCall {
+                id: "call-2".to_string(),
+                name: "read".to_string(),
+                arguments: serde_json::json!({}),
+            })
+            .await
+            .unwrap();
+
+        assert!(result.is_error);
+        assert_eq!(result.content, "file not found");
+        assert_eq!(*calls.lock().unwrap(), 2);
     }
 }

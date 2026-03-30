@@ -19,7 +19,8 @@ const [imageModalSrc, setImageModalSrc] = createSignal<string | null>(null)
 const ImageModal: Component = () => (
   <Show when={imageModalSrc()}>
     <div
-      class="fixed inset-0 z-50 flex items-center justify-center bg-black/70"
+      class="fixed inset-0 z-50 flex items-center justify-center"
+      style={{ background: 'var(--modal-overlay)' }}
       onClick={() => setImageModalSrc(null)}
       onKeyDown={(e) => {
         if (e.key === 'Escape') setImageModalSrc(null)
@@ -70,7 +71,8 @@ const PasteModal: Component = () => {
   return (
     <Show when={data()}>
       <div
-        class="fixed inset-0 z-50 flex items-center justify-center bg-black/70"
+        class="fixed inset-0 z-50 flex items-center justify-center"
+        style={{ background: 'var(--modal-overlay)' }}
         onClick={() => setPasteModalData(null)}
         onKeyDown={(e) => {
           if (e.key === 'Escape') setPasteModalData(null)
@@ -80,7 +82,13 @@ const PasteModal: Component = () => {
         {/* biome-ignore lint/a11y/noStaticElementInteractions: modal stop propagation */}
         {/* biome-ignore lint/a11y/useKeyWithClickEvents: handled on parent */}
         <div
-          class="w-[min(95vw,900px)] h-[min(90vh,800px)] flex flex-col rounded-lg bg-[var(--surface-overlay)] border border-[var(--border-default)] shadow-2xl"
+          class="w-[min(95vw,900px)] h-[min(90vh,800px)] flex flex-col"
+          style={{
+            background: 'var(--modal-surface)',
+            border: '1px solid var(--modal-border)',
+            'border-radius': 'var(--modal-radius-lg)',
+            'box-shadow': 'var(--modal-shadow)',
+          }}
           onClick={(e) => e.stopPropagation()}
         >
           <div class="flex items-center justify-between px-4 py-3 border-b border-[var(--border-subtle)]">

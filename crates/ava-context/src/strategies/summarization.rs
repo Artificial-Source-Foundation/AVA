@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -11,8 +12,66 @@ pub struct SummarizationStrategy {
     summarizer: Option<Arc<dyn Summarizer>>,
     batch_size: usize,
     preserve_recent: usize,
-    /// Previous summary to build upon incrementally.
+    preserve_recent_turns: usize,
+    focus: Option<String>,
     previous_summary: Option<String>,
+}
+
+struct SummaryData {
+    task: String,
+    progress: Vec<String>,
+    decisions: Vec<String>,
+    files_touched: Vec<String>,
+    current_state: String,
+    open_issues: Vec<String>,
+}
+
+impl SummaryData {
+    fn to_markdown(&self) -> String {
+        let progress = if self.progress.is_empty() {
+            "No substantial progress recorded.".to_string()
+        } else {
+            self.progress.join(" ")
+        };
+        let decisions = if self.decisions.is_empty() {
+            "- None recorded".to_string()
+        } else {
+            self.decisions
+                .iter()
+                .map(|item| format!("- {item}"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        let files = if self.files_touched.is_empty() {
+            "- None recorded".to_string()
+        } else {
+            self.files_touched
+                .iter()
+                .map(|item| format!("- {item}"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        let issues = if self.open_issues.is_empty() {
+            "- None".to_string()
+        } else {
+            self.open_issues
+                .iter()
+                .map(|item| format!("- {item}"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+
+        format!(
+            "## Conversation Summary\n\
+             **Task**: {}\n\
+             **Progress**: {}\n\
+             **Key Decisions**:\n{}\n\
+             **Files Touched**:\n{}\n\
+             **Current State**: {}\n\
+             **Open Issues**:\n{}",
+            self.task, progress, decisions, files, self.current_state, issues
+        )
+    }
 }
 
 impl SummarizationStrategy {
@@ -20,243 +79,301 @@ impl SummarizationStrategy {
         summarizer: Option<Arc<dyn Summarizer>>,
         batch_size: usize,
         preserve_recent: usize,
+        preserve_recent_turns: usize,
+        focus: Option<String>,
     ) -> Self {
         Self {
             summarizer,
             batch_size,
             preserve_recent,
+            preserve_recent_turns,
+            focus,
             previous_summary: None,
         }
     }
 
-    /// Set a previous summary to build upon incrementally.
     pub fn set_previous_summary(&mut self, summary: Option<String>) {
         self.previous_summary = summary;
     }
 
-    /// Get the last summary produced (stored after each condense call).
     pub fn previous_summary(&self) -> Option<&str> {
         self.previous_summary.as_deref()
     }
 
-    /// Extract key information from messages without an LLM call.
-    fn heuristic_summary(messages: &[Message], previous_summary: Option<&str>) -> String {
-        let mut files_read = Vec::new();
-        let mut files_modified = Vec::new();
-        let mut tool_names = Vec::new();
-        let mut errors = Vec::new();
-        let mut decisions = Vec::new();
+    fn is_pinned(message: &Message) -> bool {
+        message
+            .metadata
+            .get("pinned")
+            .and_then(|value| value.as_bool())
+            .unwrap_or(false)
+    }
 
-        // Seed from previous summary's file tracking lines
-        if let Some(prev) = previous_summary {
-            for line in prev.lines() {
-                if let Some(rest) = line.strip_prefix("Files read: ") {
-                    for p in rest.split(", ") {
-                        let p = p.trim().to_string();
-                        if !p.is_empty() && !files_read.contains(&p) {
-                            files_read.push(p);
-                        }
-                    }
-                } else if let Some(rest) = line.strip_prefix("Files modified: ") {
-                    for p in rest.split(", ") {
-                        let p = p.trim().to_string();
-                        if !p.is_empty() && !files_modified.contains(&p) {
-                            files_modified.push(p);
-                        }
+    fn focus_keywords(focus: Option<&str>) -> Vec<String> {
+        focus
+            .unwrap_or_default()
+            .split(|ch: char| ch.is_whitespace() || ch == ',' || ch == ':')
+            .map(str::trim)
+            .filter(|item| !item.is_empty())
+            .map(str::to_lowercase)
+            .collect()
+    }
+
+    fn message_matches_focus(message: &Message, keywords: &[String]) -> bool {
+        if keywords.is_empty() {
+            return false;
+        }
+
+        let mut haystack = message.content.to_lowercase();
+
+        for call in &message.tool_calls {
+            haystack.push('\n');
+            haystack.push_str(&call.name.to_lowercase());
+            haystack.push('\n');
+            haystack.push_str(&call.arguments.to_string().to_lowercase());
+        }
+
+        for result in &message.tool_results {
+            haystack.push('\n');
+            haystack.push_str(&result.content.to_lowercase());
+        }
+
+        keywords.iter().any(|keyword| haystack.contains(keyword))
+    }
+
+    fn extract_paths(text: &str, files: &mut Vec<String>) {
+        for word in text.split_whitespace() {
+            let candidate = word.trim_matches(|ch: char| {
+                !ch.is_alphanumeric() && ch != '/' && ch != '.' && ch != '_' && ch != '-'
+            });
+            let looks_like_path = candidate.starts_with('/')
+                || candidate.starts_with("./")
+                || candidate.starts_with("src/")
+                || candidate.starts_with("crates/")
+                || candidate.ends_with(".rs")
+                || candidate.ends_with(".ts")
+                || candidate.ends_with(".tsx")
+                || candidate.ends_with(".js")
+                || candidate.ends_with(".json")
+                || candidate.ends_with(".md");
+            if looks_like_path
+                && !candidate.is_empty()
+                && !files.iter().any(|item| item == candidate)
+            {
+                files.push(candidate.to_string());
+            }
+        }
+    }
+
+    fn push_unique(items: &mut Vec<String>, value: String, limit: usize) {
+        if value.is_empty() || items.iter().any(|item| item == &value) {
+            return;
+        }
+        if items.len() < limit {
+            items.push(value);
+        }
+    }
+
+    fn collect_summary_data(
+        messages: &[Message],
+        previous_summary: Option<&str>,
+        focus: Option<&str>,
+    ) -> SummaryData {
+        let mut task = previous_summary
+            .and_then(|summary| {
+                summary
+                    .lines()
+                    .find_map(|line| line.strip_prefix("**Task**: ").map(str::trim))
+            })
+            .unwrap_or("Continue the active coding task.")
+            .to_string();
+        let mut progress = Vec::new();
+        let mut decisions = Vec::new();
+        let mut files_touched = Vec::new();
+        let mut current_state = previous_summary
+            .and_then(|summary| {
+                summary
+                    .lines()
+                    .find_map(|line| line.strip_prefix("**Current State**: ").map(str::trim))
+            })
+            .unwrap_or("Conversation is mid-task.")
+            .to_string();
+        let mut open_issues = Vec::new();
+
+        if let Some(summary) = previous_summary {
+            for line in summary.lines() {
+                if let Some(path) = line.strip_prefix("- ") {
+                    let path = path.trim();
+                    let looks_like_path = path.contains('/') || path.contains('.');
+                    if looks_like_path {
+                        Self::push_unique(&mut files_touched, path.to_string(), 16);
                     }
                 }
             }
         }
 
-        for msg in messages {
-            // Extract file paths (common patterns: /path/to/file, ./relative)
-            for word in msg.content.split_whitespace() {
-                let trimmed = word.trim_matches(|c: char| {
-                    !c.is_alphanumeric() && c != '/' && c != '.' && c != '_' && c != '-'
-                });
-                if (trimmed.starts_with('/') || trimmed.starts_with("./"))
-                    && trimmed.len() > 2
-                    && !files_read.contains(&trimmed.to_string())
-                    && !files_modified.contains(&trimmed.to_string())
-                {
-                    files_read.push(trimmed.to_string());
-                }
+        let focus_label = focus.filter(|item| !item.trim().is_empty()).map(str::trim);
+        let mut last_user = None;
+        let mut last_non_empty = None;
+
+        for message in messages {
+            if !message.content.trim().is_empty() {
+                last_non_empty = Some(message.content.trim().to_string());
             }
 
-            // Classify files as read vs modified based on tool calls
-            for call in &msg.tool_calls {
-                if !tool_names.contains(&call.name) {
-                    tool_names.push(call.name.clone());
-                }
-                // Extract file path from tool arguments if present
-                let path = call
+            if message.role == Role::User && !message.content.trim().is_empty() {
+                last_user = Some(message.content.trim().to_string());
+            }
+
+            Self::extract_paths(&message.content, &mut files_touched);
+
+            for call in &message.tool_calls {
+                if let Some(path) = call
                     .arguments
                     .get("file_path")
                     .or_else(|| call.arguments.get("path"))
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string());
-                if let Some(p) = path {
-                    let is_write = matches!(
-                        call.name.as_str(),
-                        "write" | "edit" | "apply_patch" | "multiedit"
-                    );
-                    if is_write {
-                        if !files_modified.contains(&p) {
-                            files_modified.push(p.clone());
-                        }
-                        // Remove from files_read if it was there
-                        files_read.retain(|f| f != &p);
-                    } else if !files_read.contains(&p) && !files_modified.contains(&p) {
-                        files_read.push(p);
+                    .and_then(|value| value.as_str())
+                {
+                    Self::push_unique(&mut files_touched, path.to_string(), 16);
+                }
+                Self::push_unique(
+                    &mut progress,
+                    format!("Used `{}` during the preserved work.", call.name),
+                    8,
+                );
+            }
+
+            for result in &message.tool_results {
+                if result.is_error {
+                    let snippet = result
+                        .content
+                        .lines()
+                        .next()
+                        .unwrap_or(result.content.as_str());
+                    Self::push_unique(&mut open_issues, snippet.trim().to_string(), 6);
+                }
+            }
+
+            if message.role == Role::Assistant {
+                let trimmed = message.content.trim();
+                if !trimmed.is_empty() {
+                    if trimmed.len() <= 280 {
+                        Self::push_unique(&mut decisions, trimmed.to_string(), 6);
+                    }
+                    if progress.len() < 8 {
+                        Self::push_unique(&mut progress, trimmed.to_string(), 8);
                     }
                 }
             }
-
-            // Extract tool names from tool results
-            for result in &msg.tool_results {
-                if !result.call_id.is_empty() {
-                    let name = result.call_id.split('_').next().unwrap_or(&result.call_id);
-                    if !tool_names.contains(&name.to_string()) {
-                        tool_names.push(name.to_string());
-                    }
-                }
-                if result.is_error && !result.content.is_empty() {
-                    let snippet: String = result.content.chars().take(120).collect();
-                    errors.push(snippet);
-                }
-            }
-
-            // Capture short assistant messages as potential decisions
-            if msg.role == Role::Assistant
-                && !msg.content.trim().is_empty()
-                && msg.content.len() < 300
-            {
-                decisions.push(msg.content.trim().to_string());
-            }
         }
 
-        let mut lines = Vec::new();
-
-        if previous_summary.is_some() {
-            lines.push(format!(
-                "[Updated summary — {} new messages]",
-                messages.len()
-            ));
-        } else {
-            lines.push(format!("[Summary of {} previous messages]", messages.len()));
+        if let Some(user) = last_user {
+            task = user;
+        }
+        if let Some(state) = last_non_empty {
+            current_state = state;
         }
 
-        if !files_read.is_empty() {
-            let paths: Vec<_> = files_read.iter().take(20).cloned().collect();
-            lines.push(format!("Files read: {}", paths.join(", ")));
-        }
-        if !files_modified.is_empty() {
-            let paths: Vec<_> = files_modified.iter().take(20).cloned().collect();
-            lines.push(format!("Files modified: {}", paths.join(", ")));
-        }
-        if !tool_names.is_empty() {
-            let names: Vec<_> = tool_names.iter().take(15).cloned().collect();
-            lines.push(format!("- Tools used: {}", names.join(", ")));
-        }
-        if !errors.is_empty() {
-            let errs: Vec<_> = errors.iter().take(5).cloned().collect();
-            lines.push(format!("- Errors encountered: {}", errs.join("; ")));
-        }
-        if !decisions.is_empty() {
-            let decs: Vec<_> = decisions.iter().take(5).cloned().collect();
-            lines.push("- Key points:".to_string());
-            for dec in decs {
-                lines.push(format!("  - {dec}"));
-            }
+        if let Some(label) = focus_label {
+            Self::push_unique(
+                &mut decisions,
+                format!("Preserved extra detail for focus `{label}`."),
+                6,
+            );
         }
 
-        lines.join("\n")
+        SummaryData {
+            task,
+            progress,
+            decisions,
+            files_touched,
+            current_state,
+            open_issues,
+        }
     }
 
-    /// Format messages into text for the LLM summarization prompt.
+    fn heuristic_group_summary(messages: &[Message], focus: Option<&str>) -> String {
+        let data = Self::collect_summary_data(messages, None, focus);
+        let mut parts = Vec::new();
+        parts.push(format!("Task: {}.", data.task));
+        if !data.progress.is_empty() {
+            parts.push(format!("Progress: {}.", data.progress.join(" ")));
+        }
+        if !data.files_touched.is_empty() {
+            parts.push(format!("Files: {}.", data.files_touched.join(", ")));
+        }
+        if !data.decisions.is_empty() {
+            parts.push(format!("Key decisions: {}.", data.decisions.join(" ")));
+        }
+        parts.push(format!("Current state: {}.", data.current_state));
+        if !data.open_issues.is_empty() {
+            parts.push(format!("Open issues: {}.", data.open_issues.join("; ")));
+        }
+        parts.join(" ")
+    }
+
+    fn heuristic_summary(
+        messages: &[Message],
+        previous_summary: Option<&str>,
+        focus: Option<&str>,
+    ) -> String {
+        Self::collect_summary_data(messages, previous_summary, focus).to_markdown()
+    }
+
     fn format_messages_for_prompt(messages: &[Message]) -> String {
         let mut parts = Vec::new();
-        for msg in messages {
-            let role = match msg.role {
+        for message in messages {
+            let role = match message.role {
                 Role::System => "system",
                 Role::User => "user",
                 Role::Assistant => "assistant",
                 Role::Tool => "tool",
             };
-            parts.push(format!("[{role}]: {}", msg.content));
-            for result in &msg.tool_results {
+            if !message.content.trim().is_empty() {
+                parts.push(format!("[{role}] {}", message.content.trim()));
+            }
+            for result in &message.tool_results {
                 let status = if result.is_error { "error" } else { "ok" };
-                let snippet: String = result.content.chars().take(500).collect();
-                parts.push(format!("  tool_result({status}): {snippet}"));
+                let snippet: String = result.content.chars().take(600).collect();
+                parts.push(format!("[tool_result:{status}] {snippet}"));
             }
         }
         parts.join("\n")
     }
 
-    /// Split messages into (system, old_batch, recent) preserving system prompt and recent messages.
-    /// Never splits between a tool call (assistant with tool_calls) and its tool results.
-    fn partition_messages(
-        messages: &[Message],
-        batch_size: usize,
-        preserve_recent: usize,
-    ) -> (Vec<Message>, Vec<Message>, Vec<Message>) {
-        let mut system_msgs = Vec::new();
-        let mut non_system: Vec<Message> = Vec::new();
+    fn recent_turn_boundary(messages: &[Message], preserve_recent_turns: usize) -> usize {
+        if preserve_recent_turns == 0 || messages.is_empty() {
+            return messages.len();
+        }
 
-        for msg in messages {
-            if msg.role == Role::System {
-                system_msgs.push(msg.clone());
-            } else {
-                non_system.push(msg.clone());
+        let mut seen = 0;
+        for idx in (0..messages.len()).rev() {
+            if messages[idx].role == Role::User {
+                seen += 1;
+                if seen >= preserve_recent_turns {
+                    return idx;
+                }
             }
         }
-
-        let preserve = preserve_recent.min(non_system.len());
-        let available = non_system.len().saturating_sub(preserve);
-        let batch = batch_size.min(available);
-
-        if batch == 0 {
-            return (system_msgs, Vec::new(), non_system);
-        }
-
-        // Find a safe cut point that doesn't split tool call/result pairs
-        let cut = Self::find_safe_cut_point(&non_system, batch);
-
-        if cut == 0 {
-            return (system_msgs, Vec::new(), non_system);
-        }
-
-        let old_batch = non_system[..cut].to_vec();
-        let recent = non_system[cut..].to_vec();
-
-        (system_msgs, old_batch, recent)
+        0
     }
 
-    /// Find a safe cut point that never splits between a tool call and its results.
-    /// Starting from `target_index`, adjusts backward or forward to avoid orphaned
-    /// tool calls or tool results.
     fn find_safe_cut_point(messages: &[Message], target_index: usize) -> usize {
         let target = target_index.min(messages.len());
+        if target == 0 || target >= messages.len() {
+            return target;
+        }
 
-        // If cutting right at a tool result, walk back to include the assistant tool call
-        if target < messages.len() && messages[target].role == Role::Tool {
+        if messages[target].role == Role::Tool {
             let mut idx = target;
-            // Walk back past all consecutive tool results
             while idx > 0 && messages[idx].role == Role::Tool {
                 idx -= 1;
             }
-            // If the message before the tool results is an assistant with tool_calls,
-            // we must not cut between it and its results — cut before the assistant
             if messages[idx].role == Role::Assistant && !messages[idx].tool_calls.is_empty() {
                 return idx;
             }
-            // Otherwise just use the original target
         }
 
-        // If the message just before the cut is an assistant with tool_calls,
-        // its tool results would be in the "recent" side — include them in old_batch instead
         if target > 0
-            && target < messages.len()
             && messages[target - 1].role == Role::Assistant
             && !messages[target - 1].tool_calls.is_empty()
         {
@@ -268,6 +385,192 @@ impl SummarizationStrategy {
         }
 
         target
+    }
+
+    fn expand_protected_indices(
+        messages: &[Message],
+        indices: &BTreeSet<usize>,
+    ) -> BTreeSet<usize> {
+        let mut expanded = indices.clone();
+
+        for idx in indices.iter().copied() {
+            if idx >= messages.len() {
+                continue;
+            }
+
+            let mut start = idx;
+            let mut end = idx;
+
+            if messages[idx].role == Role::Tool {
+                while start > 0 && messages[start - 1].role == Role::Tool {
+                    start -= 1;
+                }
+                if start > 0
+                    && messages[start - 1].role == Role::Assistant
+                    && !messages[start - 1].tool_calls.is_empty()
+                {
+                    start -= 1;
+                }
+            }
+
+            if messages[idx].role == Role::Assistant && !messages[idx].tool_calls.is_empty() {
+                while end + 1 < messages.len() && messages[end + 1].role == Role::Tool {
+                    end += 1;
+                }
+            }
+
+            for protect in start..=end {
+                expanded.insert(protect);
+            }
+        }
+
+        expanded
+    }
+
+    fn partition_messages(
+        messages: &[Message],
+        preserve_recent: usize,
+        preserve_recent_turns: usize,
+        focus: Option<&str>,
+    ) -> (Vec<Message>, Vec<Message>, Vec<Message>) {
+        let mut system_messages = Vec::new();
+        let mut non_system = Vec::new();
+
+        for message in messages {
+            if message.role == Role::System {
+                system_messages.push(message.clone());
+            } else {
+                non_system.push(message.clone());
+            }
+        }
+
+        if non_system.is_empty() {
+            return (system_messages, Vec::new(), Vec::new());
+        }
+
+        let recent_boundary = non_system.len().saturating_sub(preserve_recent);
+        let turn_boundary = Self::recent_turn_boundary(&non_system, preserve_recent_turns);
+        let mut protected = BTreeSet::new();
+        let safe_boundary =
+            Self::find_safe_cut_point(&non_system, recent_boundary.min(turn_boundary));
+        for idx in safe_boundary..non_system.len() {
+            protected.insert(idx);
+        }
+
+        let focus_keywords = Self::focus_keywords(focus);
+        for (idx, message) in non_system.iter().enumerate() {
+            if Self::is_pinned(message) || Self::message_matches_focus(message, &focus_keywords) {
+                protected.insert(idx);
+            }
+        }
+
+        let protected = Self::expand_protected_indices(&non_system, &protected);
+        let mut summarize = Vec::new();
+        let mut preserved = Vec::new();
+
+        for (idx, message) in non_system.into_iter().enumerate() {
+            if protected.contains(&idx) {
+                preserved.push(message);
+            } else {
+                summarize.push(message);
+            }
+        }
+
+        (system_messages, summarize, preserved)
+    }
+
+    fn group_messages(messages: &[Message], batch_size: usize) -> Vec<Vec<Message>> {
+        if messages.is_empty() {
+            return Vec::new();
+        }
+
+        let mut groups = Vec::new();
+        let mut current = Vec::new();
+        let mut turns = 0_usize;
+        let batch_size = batch_size.max(1);
+
+        for message in messages {
+            let starts_new_turn = message.role == Role::User && !current.is_empty();
+            let exceeds_turn_budget = starts_new_turn && turns >= 3;
+            let exceeds_size_budget = current.len() >= batch_size;
+
+            if exceeds_turn_budget || exceeds_size_budget {
+                groups.push(std::mem::take(&mut current));
+                turns = 0;
+            }
+
+            if message.role == Role::User {
+                turns += 1;
+            }
+            current.push(message.clone());
+        }
+
+        if !current.is_empty() {
+            groups.push(current);
+        }
+
+        groups
+    }
+
+    async fn summarize_group(&self, messages: &[Message], ordinal: usize, total: usize) -> String {
+        let focus = self.focus.as_deref();
+        if let Some(summarizer) = &self.summarizer {
+            let formatted = Self::format_messages_for_prompt(messages);
+            let focus_hint = focus.unwrap_or("none");
+            let prompt = format!(
+                "You are summarizing slice {ordinal} of {total} from an AI coding conversation.\n\
+                 Focus hint: {focus_hint}.\n\
+                 Preserve: key task progress, files touched, important decisions, active errors, and what needs to happen next.\n\
+                 Drop: redundant tool output, repeated explanations, and resolved back-and-forth.\n\
+                 Return exactly one concise paragraph (4-7 sentences).\n\n{formatted}"
+            );
+            if let Ok(summary) = summarizer.summarize(&prompt).await {
+                if !summary.trim().is_empty() {
+                    return summary.trim().to_string();
+                }
+            }
+        }
+
+        Self::heuristic_group_summary(messages, focus)
+    }
+
+    async fn merge_summaries(&self, messages: &[Message], group_summaries: &[String]) -> String {
+        let previous_summary = self.previous_summary.as_deref();
+        let focus = self.focus.as_deref();
+
+        if let Some(summarizer) = &self.summarizer {
+            let focus_hint = focus.unwrap_or("none");
+            let prior = previous_summary
+                .map(|summary| format!("Previous summary:\n{summary}\n\n"))
+                .unwrap_or_default();
+            let grouped = group_summaries
+                .iter()
+                .enumerate()
+                .map(|(idx, summary)| format!("Group {}:\n{}", idx + 1, summary.trim()))
+                .collect::<Vec<_>>()
+                .join("\n\n");
+            let prompt = format!(
+                "You are summarizing an AI coding conversation for context continuity.\n\
+                 Preserve: key decisions made, files modified, errors encountered, current task state.\n\
+                 Drop: redundant tool outputs, repeated explanations, resolved back-and-forth.\n\
+                 Focus hint: {focus_hint}.\n\
+                 Format your final answer exactly as:\n\
+                 ## Conversation Summary\n\
+                 **Task**: ...\n\
+                 **Progress**: ...\n\
+                 **Key Decisions**:\n- ...\n\
+                 **Files Touched**:\n- ...\n\
+                 **Current State**: ...\n\
+                 **Open Issues**:\n- ...\n\n{prior}{grouped}"
+            );
+            if let Ok(summary) = summarizer.summarize(&prompt).await {
+                if !summary.trim().is_empty() {
+                    return summary.trim().to_string();
+                }
+            }
+        }
+
+        Self::heuristic_summary(messages, previous_summary, focus)
     }
 }
 
@@ -282,66 +585,38 @@ impl AsyncCondensationStrategy for SummarizationStrategy {
     }
 
     async fn condense(&self, messages: &[Message], max_tokens: usize) -> Result<Vec<Message>> {
-        let (system_msgs, old_batch, recent) =
-            Self::partition_messages(messages, self.batch_size, self.preserve_recent);
+        let (system_messages, summarize, preserved) = Self::partition_messages(
+            messages,
+            self.preserve_recent,
+            self.preserve_recent_turns,
+            self.focus.as_deref(),
+        );
 
-        // Nothing to summarize
-        if old_batch.is_empty() {
+        if summarize.is_empty() {
             return Ok(messages.to_vec());
         }
 
-        let prev = self.previous_summary.as_deref();
-
-        // Try LLM summarization, fall back to heuristic
-        let summary_text = if let Some(summarizer) = &self.summarizer {
-            let formatted = Self::format_messages_for_prompt(&old_batch);
-            let prompt = if let Some(previous) = prev {
-                format!(
-                    "You are summarizing a conversation. Here is the previous summary:\n\n\
-                     {previous}\n\n\
-                     Here are the new messages since that summary:\n\n\
-                     {formatted}\n\n\
-                     Update the summary to include the new information. Format:\n\
-                     - Goal: what the user is trying to accomplish\n\
-                     - Progress: what has been done so far (files read, changes made, tools used)\n\
-                     - Current state: where things stand now\n\
-                     Files read: <comma-separated list>\n\
-                     Files modified: <comma-separated list>"
-                )
-            } else {
-                format!(
-                    "Summarize the following conversation concisely, preserving key decisions, \
-                     file paths mentioned, and tool outcomes. Format:\n\
-                     - Goal: what the user is trying to accomplish\n\
-                     - Progress: what has been done so far (files read, changes made, tools used)\n\
-                     - Current state: where things stand now\n\
-                     Files read: <comma-separated list>\n\
-                     Files modified: <comma-separated list>\n\n\
-                     {formatted}"
-                )
-            };
-            match summarizer.summarize(&prompt).await {
-                Ok(summary) => summary,
-                Err(_) => Self::heuristic_summary(&old_batch, prev),
-            }
-        } else {
-            Self::heuristic_summary(&old_batch, prev)
-        };
-
-        let summary_msg = Message::new(Role::System, summary_text);
-
-        // Rebuild: system messages + summary + recent
-        let mut result = system_msgs;
-        result.push(summary_msg);
-        result.extend(recent);
-
-        // Check if we're under budget; if not, return as-is (sliding window will handle the rest)
-        let total: usize = result.iter().map(estimate_tokens_for_message).sum();
-        if total <= max_tokens {
-            return Ok(result);
+        let groups = Self::group_messages(&summarize, self.batch_size);
+        let mut group_summaries = Vec::with_capacity(groups.len());
+        for (idx, group) in groups.iter().enumerate() {
+            group_summaries.push(self.summarize_group(group, idx + 1, groups.len()).await);
         }
 
-        // Still over budget — return what we have (the condenser pipeline will try the next strategy)
+        let summary_text = self.merge_summaries(&summarize, &group_summaries).await;
+        let summary_message = Message::new(Role::System, summary_text);
+
+        let mut result = system_messages;
+        result.push(summary_message);
+        result.extend(preserved);
+
+        let total: usize = result.iter().map(estimate_tokens_for_message).sum();
+        if total > max_tokens {
+            tracing::warn!(
+                total,
+                max_tokens,
+                "summarization output still exceeds token budget; returning fallback candidate"
+            );
+        }
         Ok(result)
     }
 }
@@ -349,285 +624,93 @@ impl AsyncCondensationStrategy for SummarizationStrategy {
 #[cfg(test)]
 mod tests {
     use ava_types::{Message, Role, ToolCall, ToolResult};
+    use serde_json::json;
 
     use super::*;
 
     #[tokio::test]
-    async fn heuristic_summary_extracts_file_paths() {
+    async fn heuristic_summary_uses_required_sections() {
         let messages = vec![
-            Message::new(Role::User, "Please read /src/main.rs"),
-            Message::new(Role::Assistant, "I'll read that file"),
-            Message::new(Role::User, "Also check ./tests/test.rs"),
+            Message::new(
+                Role::User,
+                "Implement /compact for src/components/chat/MessageInput.tsx",
+            ),
+            Message::new(
+                Role::Assistant,
+                "I inspected the slash command handler and found a gap.",
+            ),
         ];
-        let summary = SummarizationStrategy::heuristic_summary(&messages, None);
-        assert!(summary.contains("/src/main.rs"));
-        assert!(summary.contains("./tests/test.rs"));
+
+        let summary = SummarizationStrategy::heuristic_summary(&messages, None, None);
+        assert!(summary.contains("## Conversation Summary"));
+        assert!(summary.contains("**Task**:"));
+        assert!(summary.contains("**Progress**:"));
+        assert!(summary.contains("**Files Touched**:"));
     }
 
     #[tokio::test]
-    async fn heuristic_summary_extracts_tool_names() {
-        let mut msg = Message::new(Role::Assistant, "reading file");
-        msg.tool_calls.push(ToolCall {
+    async fn condense_preserves_recent_turns_and_pinned_messages() {
+        let strategy = SummarizationStrategy::new(None, 4, 2, 2, None);
+        let mut pinned = Message::new(Role::Assistant, "Keep this architecture note");
+        pinned.metadata = json!({ "pinned": true });
+
+        let messages = vec![
+            Message::new(Role::System, "system prompt"),
+            Message::new(Role::User, "turn one"),
+            pinned.clone(),
+            Message::new(Role::User, "turn two"),
+            Message::new(Role::Assistant, "recent response"),
+            Message::new(Role::User, "turn three"),
+            Message::new(Role::Assistant, "latest response"),
+        ];
+
+        let condensed = strategy.condense(&messages, 10_000).await.unwrap();
+        assert_eq!(condensed[0].content, "system prompt");
+        assert!(condensed
+            .iter()
+            .any(|message| message.content == pinned.content));
+        assert!(condensed
+            .iter()
+            .any(|message| message.content == "turn three"));
+        assert!(condensed
+            .iter()
+            .any(|message| message.content == "latest response"));
+        assert!(condensed
+            .iter()
+            .any(|message| message.content.contains("## Conversation Summary")));
+    }
+
+    #[tokio::test]
+    async fn condense_keeps_tool_pairs_when_focus_matches_tool_result() {
+        let strategy = SummarizationStrategy::new(None, 3, 1, 1, Some("auth".to_string()));
+        let mut assistant = Message::new(Role::Assistant, "Investigating auth flow");
+        assistant.tool_calls.push(ToolCall {
             id: "call_1".to_string(),
             name: "read".to_string(),
-            arguments: serde_json::Value::Null,
+            arguments: json!({ "path": "src/auth.rs" }),
         });
-        let messages = vec![msg];
-        let summary = SummarizationStrategy::heuristic_summary(&messages, None);
-        assert!(summary.contains("read"));
-    }
-
-    #[tokio::test]
-    async fn heuristic_summary_extracts_errors() {
-        let mut msg = Message::new(Role::Tool, "error output");
-        msg.tool_results.push(ToolResult {
+        let mut tool = Message::new(Role::Tool, "auth middleware implementation");
+        tool.tool_call_id = Some("call_1".to_string());
+        tool.tool_results.push(ToolResult {
             call_id: "call_1".to_string(),
-            content: "file not found: /tmp/missing".to_string(),
-            is_error: true,
+            content: "auth token validation".to_string(),
+            is_error: false,
         });
-        let messages = vec![msg];
-        let summary = SummarizationStrategy::heuristic_summary(&messages, None);
-        assert!(summary.contains("file not found"));
-    }
 
-    #[tokio::test]
-    async fn partition_preserves_system_and_recent() {
         let messages = vec![
             Message::new(Role::System, "system prompt"),
-            Message::new(Role::User, "msg1"),
-            Message::new(Role::User, "msg2"),
-            Message::new(Role::User, "msg3"),
-            Message::new(Role::User, "msg4"),
-            Message::new(Role::User, "msg5"),
+            Message::new(Role::User, "older task"),
+            assistant.clone(),
+            tool.clone(),
+            Message::new(Role::User, "latest task"),
         ];
-        let (system, old, recent) = SummarizationStrategy::partition_messages(&messages, 3, 2);
-        assert_eq!(system.len(), 1);
-        assert_eq!(system[0].content, "system prompt");
-        assert_eq!(old.len(), 3);
-        assert_eq!(recent.len(), 2);
-        assert_eq!(recent[0].content, "msg4");
-        assert_eq!(recent[1].content, "msg5");
-    }
 
-    #[tokio::test]
-    async fn condense_without_summarizer_uses_heuristic() {
-        let strategy = SummarizationStrategy::new(None, 5, 2);
-        let messages = vec![
-            Message::new(Role::System, "system prompt"),
-            Message::new(Role::User, "read /src/lib.rs"),
-            Message::new(Role::Assistant, "done"),
-            Message::new(Role::User, "read /src/main.rs"),
-            Message::new(Role::Assistant, "done"),
-            Message::new(Role::User, "what now?"),
-            Message::new(Role::Assistant, "all done"),
-        ];
-        let result = strategy.condense(&messages, 10_000).await.unwrap();
-        // Should have: system prompt + summary + 2 recent messages
-        assert!(result.len() < messages.len());
-        assert_eq!(result[0].content, "system prompt");
-        // Second message should be the summary
-        assert!(result[1].content.contains("[Summary of"));
-    }
-
-    #[tokio::test]
-    async fn condense_noop_when_nothing_to_summarize() {
-        let strategy = SummarizationStrategy::new(None, 5, 10);
-        let messages = vec![
-            Message::new(Role::System, "system prompt"),
-            Message::new(Role::User, "hello"),
-            Message::new(Role::Assistant, "hi"),
-        ];
-        // preserve_recent=10 but only 2 non-system messages → nothing to summarize
-        let result = strategy.condense(&messages, 10_000).await.unwrap();
-        assert_eq!(result.len(), messages.len());
-    }
-
-    struct MockSummarizer;
-
-    #[async_trait]
-    impl Summarizer for MockSummarizer {
-        async fn summarize(&self, _text: &str) -> std::result::Result<String, String> {
-            Ok("LLM summary: user asked to read files and got results".to_string())
-        }
-    }
-
-    #[tokio::test]
-    async fn condense_with_llm_summarizer() {
-        let summarizer = Arc::new(MockSummarizer);
-        let strategy = SummarizationStrategy::new(Some(summarizer), 3, 1);
-        let messages = vec![
-            Message::new(Role::System, "system prompt"),
-            Message::new(Role::User, "read /src/lib.rs"),
-            Message::new(Role::Assistant, "file contents..."),
-            Message::new(Role::User, "read /src/main.rs"),
-            Message::new(Role::Assistant, "more contents..."),
-            Message::new(Role::User, "what now?"),
-        ];
-        let result = strategy.condense(&messages, 10_000).await.unwrap();
-        // system + LLM summary + 1 recent
-        assert!(result.len() < messages.len());
-        assert!(result[1].content.contains("LLM summary"));
-    }
-
-    struct FailingSummarizer;
-
-    #[async_trait]
-    impl Summarizer for FailingSummarizer {
-        async fn summarize(&self, _text: &str) -> std::result::Result<String, String> {
-            Err("network error".to_string())
-        }
-    }
-
-    #[tokio::test]
-    async fn condense_falls_back_to_heuristic_on_llm_failure() {
-        let summarizer = Arc::new(FailingSummarizer);
-        let strategy = SummarizationStrategy::new(Some(summarizer), 3, 1);
-        let messages = vec![
-            Message::new(Role::System, "system prompt"),
-            Message::new(Role::User, "read /src/lib.rs"),
-            Message::new(Role::Assistant, "ok"),
-            Message::new(Role::User, "read /src/main.rs"),
-            Message::new(Role::Assistant, "ok"),
-            Message::new(Role::User, "done?"),
-        ];
-        let result = strategy.condense(&messages, 10_000).await.unwrap();
-        assert!(result.len() < messages.len());
-        // Should use heuristic, not LLM
-        assert!(result[1].content.contains("[Summary of"));
-    }
-
-    #[tokio::test]
-    async fn iterative_heuristic_summary_builds_on_previous() {
-        let previous =
-            "Files read: /src/old.rs\nFiles modified: /src/changed.rs\n- Tools used: read";
-        let messages = vec![
-            Message::new(Role::User, "Now read /src/new.rs"),
-            Message::new(Role::Assistant, "reading"),
-        ];
-        let summary = SummarizationStrategy::heuristic_summary(&messages, Some(previous));
-        // Should contain files from both previous and new
-        assert!(
-            summary.contains("/src/old.rs"),
-            "should preserve previous files_read"
-        );
-        assert!(
-            summary.contains("/src/changed.rs"),
-            "should preserve previous files_modified"
-        );
-        assert!(summary.contains("/src/new.rs"), "should include new file");
-        assert!(
-            summary.contains("[Updated summary"),
-            "should indicate incremental update"
-        );
-    }
-
-    #[tokio::test]
-    async fn heuristic_summary_tracks_read_vs_modified() {
-        let mut read_msg = Message::new(Role::Assistant, "reading file");
-        read_msg.tool_calls.push(ToolCall {
-            id: "call_1".to_string(),
-            name: "read".to_string(),
-            arguments: serde_json::json!({"file_path": "/src/lib.rs"}),
-        });
-        let mut write_msg = Message::new(Role::Assistant, "writing file");
-        write_msg.tool_calls.push(ToolCall {
-            id: "call_2".to_string(),
-            name: "edit".to_string(),
-            arguments: serde_json::json!({"file_path": "/src/main.rs"}),
-        });
-        let messages = vec![read_msg, write_msg];
-        let summary = SummarizationStrategy::heuristic_summary(&messages, None);
-        assert!(
-            summary.contains("Files read: /src/lib.rs"),
-            "read file should be in Files read"
-        );
-        assert!(
-            summary.contains("Files modified: /src/main.rs"),
-            "edited file should be in Files modified"
-        );
-    }
-
-    #[tokio::test]
-    async fn partition_never_splits_tool_call_from_result() {
-        let tc = ToolCall {
-            id: "call_1".to_string(),
-            name: "read".to_string(),
-            arguments: serde_json::json!({"path": "/tmp/file"}),
-        };
-        let messages = vec![
-            Message::new(Role::System, "system"),
-            Message::new(Role::User, "msg1"),
-            Message::new(Role::User, "msg2"),
-            Message::new(Role::Assistant, "calling tool").with_tool_calls(vec![tc]),
-            Message::new(Role::Tool, "tool result").with_tool_call_id("call_1"),
-            Message::new(Role::User, "msg5"),
-        ];
-        // batch_size=3 would normally cut at index 3 (non-system), which is the assistant
-        // with tool_calls. The safe cut should include its tool result.
-        let (_system, old, _recent) = SummarizationStrategy::partition_messages(&messages, 3, 1);
-        // The old batch should include the assistant + tool result pair
-        let has_assistant = old.iter().any(|m| m.role == Role::Assistant);
-        let has_tool = old.iter().any(|m| m.role == Role::Tool);
-        assert_eq!(
-            has_assistant, has_tool,
-            "assistant and tool must stay together"
-        );
-    }
-
-    #[tokio::test]
-    async fn partition_does_not_cut_at_orphaned_tool_result() {
-        let tc = ToolCall {
-            id: "call_1".to_string(),
-            name: "read".to_string(),
-            arguments: serde_json::json!({"path": "/tmp/file"}),
-        };
-        let messages = vec![
-            Message::new(Role::System, "system"),
-            Message::new(Role::User, "msg1"),
-            Message::new(Role::Assistant, "calling tool").with_tool_calls(vec![tc]),
-            Message::new(Role::Tool, "tool result").with_tool_call_id("call_1"),
-            Message::new(Role::User, "msg4"),
-            Message::new(Role::User, "msg5"),
-        ];
-        // batch_size=2 in non-system would target index 2, which is a Tool result.
-        // Safe cut should walk back to before the assistant.
-        let (_system, old, _recent) = SummarizationStrategy::partition_messages(&messages, 2, 2);
-        // The tool result should not be orphaned from its assistant
-        let has_assistant = old.iter().any(|m| m.role == Role::Assistant);
-        let has_tool = old.iter().any(|m| m.role == Role::Tool);
-        if has_tool {
-            assert!(
-                has_assistant,
-                "tool result should not be separated from its assistant call"
-            );
-        }
-    }
-
-    #[tokio::test]
-    async fn iterative_condense_with_previous_summary() {
-        let mut strategy = SummarizationStrategy::new(None, 3, 1);
-        strategy.set_previous_summary(Some(
-            "Files read: /old/file.rs\n- Tools used: read".to_string(),
-        ));
-        let messages = vec![
-            Message::new(Role::System, "system prompt"),
-            Message::new(Role::User, "read /src/lib.rs"),
-            Message::new(Role::Assistant, "done"),
-            Message::new(Role::User, "read /src/main.rs"),
-            Message::new(Role::Assistant, "done"),
-            Message::new(Role::User, "what now?"),
-        ];
-        let result = strategy.condense(&messages, 10_000).await.unwrap();
-        assert!(result.len() < messages.len());
-        // Summary should be an updated summary building on the previous one
-        let summary = &result[1].content;
-        assert!(
-            summary.contains("[Updated summary"),
-            "should be an incremental update"
-        );
-        assert!(
-            summary.contains("/old/file.rs"),
-            "should preserve previous file tracking"
-        );
+        let condensed = strategy.condense(&messages, 10_000).await.unwrap();
+        assert!(condensed
+            .iter()
+            .any(|message| message.content == assistant.content));
+        assert!(condensed
+            .iter()
+            .any(|message| message.content == tool.content));
     }
 }

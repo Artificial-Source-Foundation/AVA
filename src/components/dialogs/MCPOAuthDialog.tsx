@@ -56,8 +56,19 @@ export const MCPOAuthDialog: Component<MCPOAuthDialogProps> = (props) => {
 
   return (
     <Show when={props.open}>
-      <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-        <div class="bg-[var(--surface-overlay)] border border-[var(--border-default)] rounded-[var(--radius-xl)] p-6 max-w-md w-full shadow-2xl space-y-4">
+      <div
+        class="fixed inset-0 z-50 flex items-center justify-center"
+        style={{ background: 'var(--modal-overlay)' }}
+      >
+        <div
+          class="p-6 max-w-md w-full space-y-4"
+          style={{
+            background: 'var(--modal-surface)',
+            border: '1px solid var(--modal-border)',
+            'border-radius': 'var(--modal-radius-sm)',
+            'box-shadow': 'var(--modal-shadow)',
+          }}
+        >
           {/* Header */}
           <div class="flex items-center justify-between">
             <div class="flex items-center gap-2">
@@ -67,7 +78,8 @@ export const MCPOAuthDialog: Component<MCPOAuthDialogProps> = (props) => {
             <button
               type="button"
               onClick={handleClose}
-              class="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
+              class="p-1 rounded-[var(--radius-sm)] hover:bg-[var(--alpha-white-5)] transition-colors"
+              style={{ color: 'var(--close-button-color)' }}
             >
               <X class="w-4 h-4" />
             </button>
@@ -113,7 +125,7 @@ export const MCPOAuthDialog: Component<MCPOAuthDialogProps> = (props) => {
                 <button
                   type="button"
                   onClick={() => void handleAuthorize()}
-                  class="px-3 py-1.5 text-xs font-medium bg-[var(--accent)] text-white rounded-[var(--radius-md)] hover:brightness-110 transition-colors flex items-center gap-1.5"
+                  class="px-3 py-1.5 text-xs font-medium bg-[var(--accent)] text-white rounded-[var(--radius-md)] hover:bg-[var(--accent-hover)] transition-colors flex items-center gap-1.5"
                 >
                   <ExternalLink class="w-3 h-3" />
                   Authorize
@@ -157,7 +169,7 @@ export const MCPOAuthDialog: Component<MCPOAuthDialogProps> = (props) => {
                     setStatus('consent')
                     setError(null)
                   }}
-                  class="px-3 py-1.5 text-xs font-medium bg-[var(--accent)] text-white rounded-[var(--radius-md)] hover:brightness-110 transition-colors"
+                  class="px-3 py-1.5 text-xs font-medium bg-[var(--accent)] text-white rounded-[var(--radius-md)] hover:bg-[var(--accent-hover)] transition-colors"
                 >
                   Retry
                 </button>

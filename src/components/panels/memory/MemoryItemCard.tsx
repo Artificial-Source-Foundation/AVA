@@ -1,10 +1,12 @@
 /**
  * Memory Item Card
  *
- * Expandable card showing a single memory item with type badge, preview, and actions.
+ * Card showing a single memory item with type badge and preview text.
+ * Design: rounded-6, bg #0F0F12, border #ffffff06, type badge (project=blue, feedback=green),
+ * title + description, 10px padding, 6px gap.
  */
 
-import { ChevronRight, Trash2 } from 'lucide-solid'
+import { Trash2 } from 'lucide-solid'
 import { type Component, createSignal, Show } from 'solid-js'
 import type { MemoryItem } from '../../../types'
 import { formatTokens, memoryTypeConfig } from './memory-config'
@@ -23,100 +25,61 @@ export const MemoryItemCard: Component<MemoryItemCardProps> = (props) => {
     <button
       type="button"
       onClick={() => setExpanded(!expanded())}
-      class={`
-        w-full text-left
-        density-section-px density-section-py
-        rounded-[var(--radius-lg)]
-        border
-        transition-all duration-[var(--duration-fast)]
-        ${
-          expanded()
-            ? 'border-[var(--accent)] bg-[var(--accent-subtle)]'
-            : 'border-[var(--border-subtle)] hover:border-[var(--border-default)] hover:bg-[var(--surface-raised)]'
-        }
-      `}
+      class="w-full text-left rounded-[6px] p-2.5 border transition-colors"
+      classList={{
+        'border-[var(--accent)] bg-[var(--accent-subtle)]': expanded(),
+        'border-[var(--border-subtle)] bg-[var(--background-subtle)] hover:border-[var(--border-default)]':
+          !expanded(),
+      }}
+      style={
+        {
+          '--memory-accent': config().color,
+          '--memory-accent-bg': config().bg,
+        } as { '--memory-accent': string; '--memory-accent-bg': string }
+      }
     >
-      <div class="flex items-start gap-3">
-        {/* Item Icon */}
-        <div
-          class="p-2 rounded-[var(--radius-md)] flex-shrink-0"
-          style={{ background: config().bg }}
-        >
-          {(() => {
-            const ItemIcon = config().icon
-            return <ItemIcon class="w-4 h-4" style={{ color: config().color }} />
-          })()}
-        </div>
+      {/* Header row: title + type badge */}
+      <div class="flex items-center justify-between gap-2">
+        <span class="text-[11px] font-medium text-[var(--text-primary)] truncate flex-1">
+          {props.item.title}
+        </span>
+        <span class="inline-flex items-center px-1.5 py-0.5 text-[9px] font-medium rounded-md flex-shrink-0 bg-[var(--memory-accent-bg)] text-[var(--memory-accent)]">
+          {config().label}
+        </span>
+      </div>
 
-        {/* Item Info */}
-        <div class="flex-1 min-w-0">
-          <div class="flex items-center justify-between gap-2">
-            <span class="text-sm font-medium text-[var(--text-primary)] truncate">
-              {props.item.title}
-            </span>
-            <span
-              class="flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-medium rounded-full flex-shrink-0"
-              style={{ background: config().bg, color: config().color }}
-            >
-              {config().label}
-            </span>
+      {/* Preview text */}
+      <p class="text-[10px] text-[var(--text-muted)] mt-1.5 line-clamp-2 leading-relaxed">
+        {props.item.preview}
+      </p>
+
+      {/* Expanded details */}
+      <Show when={expanded()}>
+        <div class="mt-2.5 pt-2.5 border-t border-[var(--border-subtle)] space-y-2">
+          <div class="text-[10px] text-[var(--text-secondary)] p-2 bg-[var(--surface)] rounded-[4px] max-h-32 overflow-y-auto leading-relaxed">
+            {props.item.preview}
           </div>
 
-          <p class="text-xs text-[var(--text-muted)] mt-1 line-clamp-2">{props.item.preview}</p>
-
-          {/* Token count */}
-          <div class="flex items-center gap-2 mt-2">
-            <span class="text-xs text-[var(--text-muted)]">
+          <div class="flex items-center justify-between">
+            <span class="text-[10px] text-[var(--text-muted)]">
               {formatTokens(props.item.tokens)} tokens
             </span>
-            <Show when={props.item.source}>
-              <span class="text-xs text-[var(--text-muted)]">&middot;</span>
-              <span class="text-xs text-[var(--text-muted)] truncate">{props.item.source}</span>
+            <Show when={props.item.id !== 'conversation-current'}>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  props.onRemove(props.item.id)
+                }}
+                class="flex items-center gap-1 px-1.5 py-0.5 text-[10px] text-[var(--system-red)] hover:bg-[var(--system-red)]/10 rounded-[4px] transition-colors"
+              >
+                <Trash2 class="w-2.5 h-2.5" />
+                Remove
+              </button>
             </Show>
           </div>
-
-          {/* Expanded details */}
-          <Show when={expanded()}>
-            <div class="mt-3 pt-3 border-t border-[var(--border-subtle)] space-y-2">
-              <div class="text-xs text-[var(--text-secondary)] p-2 bg-[var(--surface-sunken)] rounded-[var(--radius-md)] max-h-32 overflow-y-auto">
-                {props.item.preview}
-              </div>
-
-              <Show when={props.item.id !== 'conversation-current'}>
-                <div class="flex items-center justify-end">
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      props.onRemove(props.item.id)
-                    }}
-                    class="
-                      flex items-center gap-1 px-2 py-1
-                      text-xs text-[var(--error)]
-                      hover:bg-[var(--error-subtle)]
-                      rounded-[var(--radius-md)]
-                      transition-colors
-                    "
-                  >
-                    <Trash2 class="w-3 h-3" />
-                    Remove
-                  </button>
-                </div>
-              </Show>
-            </div>
-          </Show>
         </div>
-
-        {/* Expand indicator */}
-        <ChevronRight
-          class={`
-            w-4 h-4 flex-shrink-0
-            text-[var(--text-muted)]
-            transition-transform duration-[var(--duration-fast)]
-            ${expanded() ? 'rotate-90' : ''}
-          `}
-        />
-      </div>
+      </Show>
     </button>
   )
 }

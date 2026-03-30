@@ -4,6 +4,7 @@ use std::time::Instant;
 
 use ava_tools::monitor::{hash_arguments, ToolExecution};
 use ava_types::{Message, Role, Session, ToolCall, ToolResult};
+use futures::StreamExt;
 use serde_json::{json, Value};
 use tokio::sync::mpsc;
 use tracing::{debug, warn};
@@ -12,10 +13,13 @@ use ava_tools::registry::ToolRegistry;
 
 use super::repetition::RepetitionDetector;
 use super::{AgentEvent, AgentLoop, MAX_TOOLS_PER_TURN};
-use crate::instructions::{contextual_instructions_for_file, matching_rule_instructions_for_file};
+use crate::instructions::{
+    contextual_instructions_for_file_once, matching_rule_instructions_for_file,
+};
 use crate::stuck::StuckDetector;
 
 const MAX_TOOL_RESULT_BYTES: usize = 50_000;
+const MAX_CONCURRENT_READ_ONLY_TOOLS: usize = 8;
 const POST_EDIT_VALIDATION_TOOLS: &[&str] = &["edit", "multiedit", "write", "apply_patch"];
 const VALIDATION_FAILURE_MARKER: &str = "[post-edit validation status: failed]";
 const MAX_TOUCHED_PATHS_FOR_RULES: usize = 20;
@@ -31,25 +35,9 @@ fn touched_file_path(tool_call: &ToolCall) -> Option<PathBuf> {
     }
 }
 
-fn touched_file_paths(tool_call: &ToolCall, result: &ToolResult) -> Vec<PathBuf> {
+fn instruction_trigger_paths(tool_call: &ToolCall) -> Vec<PathBuf> {
     match tool_call.name.as_str() {
         "read" | "write" | "edit" => touched_file_path(tool_call).into_iter().collect(),
-        "glob" => result
-            .content
-            .lines()
-            .map(str::trim)
-            .filter(|line| !line.is_empty())
-            .map(PathBuf::from)
-            .collect(),
-        "grep" => result
-            .content
-            .lines()
-            // Grep emits `path:line:content`; split on the first colon and treat the
-            // left side as the path. This assumes normal Unix-style paths.
-            .filter_map(|line| line.split_once(':').map(|(path, _)| path.trim()))
-            .filter(|path| !path.is_empty())
-            .map(PathBuf::from)
-            .collect(),
         _ => Vec::new(),
     }
 }
@@ -440,7 +428,7 @@ impl AgentLoop {
             if let Some(project_root) = self.project_root.clone() {
                 if ava_config::is_project_trusted(&project_root) {
                     let mut sections = Vec::new();
-                    let touched_paths = touched_file_paths(tool_call, &result);
+                    let touched_paths = instruction_trigger_paths(tool_call);
                     if touched_paths.len() > MAX_TOUCHED_PATHS_FOR_RULES {
                         debug!(
                             tool = %tool_call.name,
@@ -458,10 +446,23 @@ impl AgentLoop {
                         .iter()
                         .filter_map(|path| normalize_touched_path(&project_root, path))
                     {
-                        if tool_call.name == "read" {
-                            if let Some(instructions) =
-                                contextual_instructions_for_file(&file_path, &project_root)
-                            {
+                        {
+                            let mut activated_context = self
+                                .activated_context_paths
+                                .lock()
+                                .unwrap_or_else(|error| error.into_inner());
+                            if let Some(instructions) = contextual_instructions_for_file_once(
+                                &file_path,
+                                &project_root,
+                                &mut activated_context,
+                            ) {
+                                let instruction_tokens = estimate_tokens(&instructions);
+                                debug!(
+                                    file = %file_path.display(),
+                                    instruction_tokens,
+                                    tool = %tool_call.name,
+                                    "activated contextual file guidance"
+                                );
                                 sections.push(instructions);
                             }
                         }
@@ -641,6 +642,39 @@ impl AgentLoop {
         }
     }
 
+    /// Add tool results to context and session, marked as internal (not user-visible).
+    ///
+    /// Used by stuck-detector and repetition-detector nudge paths so that the
+    /// raw tool output does not appear as regular messages on session reload.
+    pub(super) fn add_tool_results_internal(
+        &mut self,
+        tool_calls: &[ToolCall],
+        results: &[ToolResult],
+        session: &mut Session,
+    ) {
+        let mut ri = 0;
+        for tool_call in tool_calls {
+            if tool_call.name == "attempt_completion" {
+                continue;
+            }
+            let mut tool_message = if let Some(result) = results.get(ri) {
+                ri += 1;
+                Message::new(Role::Tool, result.content.clone())
+                    .with_tool_call_id(&tool_call.id)
+                    .with_tool_results(vec![result.clone()])
+            } else {
+                Message::new(
+                    Role::Tool,
+                    format!("Error: tool '{}' did not produce a result", tool_call.name),
+                )
+                .with_tool_call_id(&tool_call.id)
+            };
+            tool_message.user_visible = false;
+            self.context.add_message(tool_message.clone());
+            session.add_message(tool_message);
+        }
+    }
+
     /// Execute tool calls with steering support and event emission.
     ///
     /// Returns (tool_results, steering_triggered, repetition_warning).
@@ -689,15 +723,27 @@ impl AgentLoop {
 
         // Read-only tools concurrently
         if !read_calls.is_empty() {
-            let futs: Vec<_> = read_calls
+            let concurrency = read_calls.len().min(MAX_CONCURRENT_READ_ONLY_TOOLS);
+            let agent = &*self;
+            let read_batch: Vec<(usize, ToolCall)> = read_calls
                 .iter()
-                .map(|(_, tc)| self.execute_tool_call_timed(tc))
+                .map(|(i, tc)| (*i, (*tc).clone()))
                 .collect();
-            let results = futures::future::join_all(futs).await;
-            for (pos, (i, _)) in read_calls.iter().enumerate() {
-                let (result, execution) = results[pos].clone();
-                indexed_results.push((*i, result, execution));
-            }
+            debug!(
+                requested = read_calls.len(),
+                concurrency, "executing read-only tool batch"
+            );
+
+            let results = futures::stream::iter(read_batch)
+                .map(|(i, tc)| async move {
+                    let (result, execution) = agent.execute_tool_call_timed(&tc).await;
+                    (i, result, execution)
+                })
+                .buffer_unordered(MAX_CONCURRENT_READ_ONLY_TOOLS)
+                .collect::<Vec<_>>()
+                .await;
+
+            indexed_results.extend(results);
         }
 
         // Poll for steering after read-only batch
@@ -1143,4 +1189,129 @@ pub fn is_plan_path(path: &str) -> bool {
     }
     // Must be under .ava/plans/
     normalized.contains(".ava/plans/")
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use async_trait::async_trait;
+    use ava_context::ContextManager;
+    use ava_llm::providers::MockProvider;
+    use ava_tools::registry::{Tool as ToolTrait, ToolRegistry};
+    use ava_types::ThinkingLevel;
+
+    use super::*;
+    use crate::stuck::StuckDetector;
+
+    struct SlowReadTool {
+        active: Arc<AtomicUsize>,
+        max_active: Arc<AtomicUsize>,
+    }
+
+    #[async_trait]
+    impl ToolTrait for SlowReadTool {
+        fn name(&self) -> &str {
+            "read"
+        }
+
+        fn description(&self) -> &str {
+            "Slow read tool"
+        }
+
+        fn parameters(&self) -> Value {
+            serde_json::json!({
+                "type": "object",
+                "required": ["path"],
+                "properties": {
+                    "path": { "type": "string" }
+                }
+            })
+        }
+
+        async fn execute(&self, args: Value) -> ava_types::Result<ToolResult> {
+            let current = self.active.fetch_add(1, Ordering::SeqCst) + 1;
+            self.max_active.fetch_max(current, Ordering::SeqCst);
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            self.active.fetch_sub(1, Ordering::SeqCst);
+
+            Ok(ToolResult {
+                call_id: String::new(),
+                content: args
+                    .get("path")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string(),
+                is_error: false,
+            })
+        }
+    }
+
+    fn test_config() -> super::super::AgentConfig {
+        super::super::AgentConfig {
+            max_turns: 10,
+            max_budget_usd: 0.0,
+            token_limit: 128_000,
+            provider: String::new(),
+            model: "mock".to_string(),
+            max_cost_usd: 1.0,
+            loop_detection: true,
+            custom_system_prompt: None,
+            thinking_level: ThinkingLevel::Off,
+            thinking_budget_tokens: None,
+            system_prompt_suffix: None,
+            project_root: None,
+            enable_dynamic_rules: false,
+            extended_tools: false,
+            plan_mode: false,
+            auto_compact: true,
+            post_edit_validation: None,
+            stream_timeout_secs: 90,
+            prompt_caching: true,
+        }
+    }
+
+    #[tokio::test]
+    async fn read_only_tools_respect_concurrency_cap() {
+        let active = Arc::new(AtomicUsize::new(0));
+        let max_active = Arc::new(AtomicUsize::new(0));
+
+        let mut registry = ToolRegistry::new();
+        registry.register(SlowReadTool {
+            active: active.clone(),
+            max_active: max_active.clone(),
+        });
+
+        let mut agent = AgentLoop::new(
+            Box::new(MockProvider::new("mock", vec![])),
+            registry,
+            ContextManager::new(4_096),
+            test_config(),
+        );
+
+        let tool_calls: Vec<ToolCall> = (0..(MAX_CONCURRENT_READ_ONLY_TOOLS * 2 + 3))
+            .map(|index| ToolCall {
+                id: format!("call-{index}"),
+                name: "read".to_string(),
+                arguments: serde_json::json!({ "path": format!("file-{index}.rs") }),
+            })
+            .collect();
+
+        let mut detector = StuckDetector::new();
+        let mut repetition_detector = RepetitionDetector::new(100);
+        let (results, steering_triggered, repetition_warning) = agent
+            .execute_tools_unified(&tool_calls, &mut detector, &mut repetition_detector, &None)
+            .await;
+
+        assert_eq!(results.len(), tool_calls.len());
+        assert!(!steering_triggered);
+        assert!(repetition_warning.is_none());
+        assert!(
+            max_active.load(Ordering::SeqCst) <= MAX_CONCURRENT_READ_ONLY_TOOLS,
+            "expected at most {MAX_CONCURRENT_READ_ONLY_TOOLS} concurrent tools, saw {}",
+            max_active.load(Ordering::SeqCst)
+        );
+    }
 }

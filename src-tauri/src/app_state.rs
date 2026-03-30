@@ -100,6 +100,10 @@ impl AppState {
         }
     }
 
+    pub fn database(&self) -> &Arc<ava_db::Database> {
+        &self.db
+    }
+
     pub fn _memory(&self) -> &Arc<Mutex<ava_memory::MemorySystem>> {
         &self.memory
     }

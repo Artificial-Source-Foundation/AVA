@@ -134,8 +134,8 @@ export function refreshAllProviderModels(): void {
       autoFetchModels(provider.id)
     }
   }
-  // Also refresh CLI agents (no credentials needed — they're discovered by binary)
-  refreshCLIAgents()
+  // CLI agents are discovered at startup via AgentStack for HQ delegation only.
+  // They are not shown in the provider/model selector UI.
 }
 
 /**
@@ -331,15 +331,15 @@ export function exportAgents(agentIds?: string[]): string {
     : settings().agents.filter((a) => a.isCustom)
   // Strip icon (Component) — not serializable
   const serializable = agents.map(({ icon: _icon, ...rest }) => rest)
-  return JSON.stringify({ praxis_agents: serializable, version: 1 }, null, 2)
+  return JSON.stringify({ hq_agents: serializable, version: 1 }, null, 2)
 }
 
 export function importAgents(json: string): { imported: number; skipped: number } {
   const data = JSON.parse(json) as {
-    praxis_agents?: Array<Omit<AgentPreset, 'icon'>>
+    hq_agents?: Array<Omit<AgentPreset, 'icon'>>
     version?: number
   }
-  if (!data.praxis_agents || !Array.isArray(data.praxis_agents)) {
+  if (!data.hq_agents || !Array.isArray(data.hq_agents)) {
     throw new Error('Invalid agent export format')
   }
 
@@ -347,7 +347,7 @@ export function importAgents(json: string): { imported: number; skipped: number 
   let imported = 0
   let skipped = 0
 
-  for (const raw of data.praxis_agents) {
+  for (const raw of data.hq_agents) {
     if (existingIds.has(raw.id)) {
       skipped++
       continue

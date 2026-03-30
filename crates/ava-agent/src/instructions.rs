@@ -676,6 +676,48 @@ pub fn contextual_instructions_for_file(file_path: &Path, project_root: &Path) -
     None
 }
 
+/// Load contextual instructions for a specific file path, but only once per
+/// session for each canonical `AGENTS.md` path.
+pub fn contextual_instructions_for_file_once(
+    file_path: &Path,
+    project_root: &Path,
+    activated_instruction_paths: &mut HashSet<PathBuf>,
+) -> Option<String> {
+    let mut dir = file_path.parent()?;
+    let project_root =
+        fs::canonicalize(project_root).unwrap_or_else(|_| project_root.to_path_buf());
+
+    loop {
+        let agents_md = dir.join("AGENTS.md");
+        if agents_md.is_file() {
+            let canonical = fs::canonicalize(&agents_md).ok()?;
+            if !canonical.starts_with(&project_root) {
+                return None;
+            }
+            if activated_instruction_paths.contains(&canonical) {
+                return None;
+            }
+            let content = fs::read_to_string(&agents_md).ok()?;
+            let trimmed = content.trim();
+            if trimmed.is_empty() {
+                return None;
+            }
+            activated_instruction_paths.insert(canonical);
+            return Some(format!(
+                "# Context from {}\n\n{}",
+                agents_md.display(),
+                trimmed
+            ));
+        }
+        if dir == project_root {
+            break;
+        }
+        dir = dir.parent()?;
+    }
+
+    None
+}
+
 /// Try to read a single file and append it as a section.
 /// Deduplicates by canonical path and skips empty content.
 fn try_load_file(path: &Path, seen: &mut HashSet<PathBuf>, sections: &mut Vec<String>) {
@@ -739,6 +781,7 @@ fn try_load_file_inner(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashSet;
     use std::fs;
     use tempfile::TempDir;
 
@@ -778,7 +821,7 @@ mod tests {
         assert_eq!(estimate_tokens("abcd"), 1);
         // "abcdefgh" is 1-2 tokens depending on BPE merges
         let count = estimate_tokens("abcdefgh");
-        assert!(count >= 1 && count <= 3, "got {count}");
+        assert!((1..=3).contains(&count), "got {count}");
         // Empty string is 0 tokens
         assert_eq!(estimate_tokens(""), 0);
     }
@@ -1332,6 +1375,69 @@ mod tests {
             !text.contains("General source rules."),
             "Parent AGENTS.md should NOT be included when a closer one exists"
         );
+    }
+
+    #[test]
+    fn test_contextual_instructions_for_file_once_dedupes_same_agents_file() {
+        let tmp = TempDir::new().unwrap();
+        let src_dir = tmp.path().join("src");
+        let nested_dir = src_dir.join("nested");
+        fs::create_dir_all(&nested_dir).unwrap();
+        fs::write(src_dir.join("AGENTS.md"), "Shared source guidance.").unwrap();
+        fs::write(src_dir.join("main.rs"), "fn main() {}").unwrap();
+        fs::write(nested_dir.join("lib.rs"), "pub fn lib() {}").unwrap();
+
+        let mut activated = HashSet::new();
+
+        let first = contextual_instructions_for_file_once(
+            &src_dir.join("main.rs"),
+            tmp.path(),
+            &mut activated,
+        );
+        assert!(
+            first.is_some(),
+            "first matching file should activate guidance"
+        );
+
+        let second = contextual_instructions_for_file_once(
+            &nested_dir.join("lib.rs"),
+            tmp.path(),
+            &mut activated,
+        );
+        assert!(
+            second.is_none(),
+            "same AGENTS.md should not be injected twice in one session"
+        );
+    }
+
+    #[test]
+    fn test_contextual_instructions_for_file_once_allows_more_specific_nested_agents() {
+        let tmp = TempDir::new().unwrap();
+        let src_dir = tmp.path().join("src");
+        let api_dir = src_dir.join("api");
+        fs::create_dir_all(&api_dir).unwrap();
+        fs::write(src_dir.join("AGENTS.md"), "General source guidance.").unwrap();
+        fs::write(api_dir.join("AGENTS.md"), "API guidance.").unwrap();
+        fs::write(src_dir.join("main.rs"), "fn main() {}").unwrap();
+        fs::write(api_dir.join("handler.rs"), "fn handle() {}").unwrap();
+
+        let mut activated = HashSet::new();
+
+        let first = contextual_instructions_for_file_once(
+            &src_dir.join("main.rs"),
+            tmp.path(),
+            &mut activated,
+        )
+        .expect("source guidance should load");
+        assert!(first.contains("General source guidance."));
+
+        let second = contextual_instructions_for_file_once(
+            &api_dir.join("handler.rs"),
+            tmp.path(),
+            &mut activated,
+        )
+        .expect("more specific nested guidance should still load once");
+        assert!(second.contains("API guidance."));
     }
 
     // --- trust gate tests ---

@@ -5,6 +5,7 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::Json;
 use serde::{Deserialize, Serialize};
+use tracing::{debug, warn};
 
 use super::api::{error_response, ErrorResponse};
 use super::state::WebState;
@@ -155,6 +156,7 @@ pub(crate) async fn create_session(
         .save(&session)
         .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
 
+    debug!(session_id = %session.id, title = %req.name, "session created");
     Ok(Json(SessionSummary {
         id: session.id.to_string(),
         title: req.name,
@@ -204,6 +206,7 @@ pub(crate) async fn get_session(
     let messages: Vec<MessageSummary> = session
         .messages
         .iter()
+        .filter(|m| m.user_visible)
         .map(|m| MessageSummary {
             id: m.id.to_string(),
             role: format!("{:?}", m.role).to_lowercase(),
@@ -250,6 +253,7 @@ pub(crate) async fn get_session_messages(
     let messages: Vec<MessageSummary> = session
         .messages
         .iter()
+        .filter(|m| m.user_visible)
         .map(|m| {
             // Embed tool_calls inside the metadata JSON object under the "toolCalls" key
             // so that the frontend mapper (metadata?.toolCalls) can reconstruct them on
@@ -331,8 +335,12 @@ pub(crate) async fn delete_session(
         .stack
         .session_manager
         .delete(uuid)
-        .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
+        .map_err(|e| {
+            warn!(session_id = %uuid, error = %e, "failed to delete session");
+            error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string())
+        })?;
 
+    debug!(session_id = %uuid, "session deleted");
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -625,4 +633,109 @@ pub(crate) async fn list_session_memory(Path(_id): Path<String>) -> impl IntoRes
 /// List checkpoints for a session (stub — returns empty array).
 pub(crate) async fn list_session_checkpoints(Path(_id): Path<String>) -> impl IntoResponse {
     Json(serde_json::json!([]))
+}
+
+// ============================================================================
+// Duplicate / Fork Session
+// ============================================================================
+
+#[derive(Deserialize)]
+pub struct DuplicateSessionRequest {
+    /// Name for the new session. Auto-generated from source if omitted.
+    #[serde(default)]
+    pub name: Option<String>,
+    /// Optional client-provided ID for the new session.
+    #[serde(default)]
+    pub id: Option<String>,
+}
+
+/// Duplicate a session: creates a new session with all messages copied from the source.
+/// Used by both "Duplicate" and "Fork" actions in the frontend.
+pub(crate) async fn duplicate_session(
+    State(state): State<WebState>,
+    Path(source_id): Path<String>,
+    Json(req): Json<DuplicateSessionRequest>,
+) -> Result<Json<SessionSummary>, (StatusCode, Json<ErrorResponse>)> {
+    let source_uuid = uuid::Uuid::parse_str(&source_id).map_err(|e| {
+        error_response(StatusCode::BAD_REQUEST, &format!("Invalid session ID: {e}"))
+    })?;
+
+    // Load source session with all messages
+    let source_session = state
+        .inner
+        .stack
+        .session_manager
+        .get(source_uuid)
+        .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?
+        .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "Source session not found"))?;
+
+    // Create new session
+    let mut new_session = state
+        .inner
+        .stack
+        .session_manager
+        .create()
+        .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
+
+    // Use client-provided ID if given
+    if let Some(ref id_str) = req.id {
+        if let Ok(id) = uuid::Uuid::parse_str(id_str) {
+            new_session.id = id;
+        }
+    }
+
+    // Set title — use provided name or auto-generate from source
+    let title = req.name.clone().unwrap_or_else(|| {
+        let source_title = source_session
+            .metadata
+            .get("title")
+            .and_then(|v| v.as_str())
+            .unwrap_or("Untitled");
+        format!("{source_title} (copy)")
+    });
+    if let Some(map) = new_session.metadata.as_object_mut() {
+        map.insert("title".to_string(), serde_json::Value::String(title));
+    }
+
+    // Save the new session first
+    state
+        .inner
+        .stack
+        .session_manager
+        .save(&new_session)
+        .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
+
+    // Copy all visible messages from source to new session
+    let message_count = source_session
+        .messages
+        .iter()
+        .filter(|m| m.user_visible)
+        .count();
+    for msg in &source_session.messages {
+        if !msg.user_visible {
+            continue;
+        }
+        let mut cloned = msg.clone();
+        cloned.id = uuid::Uuid::new_v4();
+        state
+            .inner
+            .stack
+            .session_manager
+            .add_message(new_session.id, &cloned)
+            .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
+    }
+
+    let final_title = new_session
+        .metadata
+        .get("title")
+        .and_then(|v| v.as_str())
+        .unwrap_or("Untitled")
+        .to_string();
+    Ok(Json(SessionSummary {
+        id: new_session.id.to_string(),
+        title: final_title,
+        message_count,
+        created_at: new_session.created_at.to_rfc3339(),
+        updated_at: new_session.updated_at.to_rfc3339(),
+    }))
 }

@@ -7,7 +7,7 @@ use ava_types::{AvaError, Message, Result, StreamChunk, ThinkingLevel};
 use futures::{Stream, StreamExt};
 use serde_json::{json, Value};
 
-use tracing::{debug, instrument, warn};
+use tracing::{debug, instrument};
 
 use crate::circuit_breaker::CircuitBreaker;
 use crate::pool::ConnectionPool;
@@ -251,7 +251,8 @@ impl LLMProvider for BedrockProvider {
         }
 
         let response = self.send_request(request).await?;
-        let response = common::validate_status(response, "Bedrock").await?;
+        let response =
+            common::validate_status_for_model(response, "Bedrock", Some(&self.model)).await?;
         let payload: Value = response
             .json()
             .await
@@ -280,18 +281,18 @@ impl LLMProvider for BedrockProvider {
         }
 
         let response = self.send_request(request).await?;
-        let response = common::validate_status(response, "Bedrock").await?;
+        let response =
+            common::validate_status_for_model(response, "Bedrock", Some(&self.model)).await?;
 
         let mut sse_parser = common::SseParser::new();
+        let mut utf8 = common::Utf8Accumulator::new();
         let stream = response.bytes_stream().flat_map(move |chunk| {
-            let chunks = chunk
-                .ok()
-                .and_then(|bytes| String::from_utf8(bytes.to_vec()).ok())
+            let chunks = common::decode_stream_chunk(&mut utf8, chunk, "Bedrock")
                 .map(|text| {
                     sse_parser
                         .feed(&text)
                         .into_iter()
-                        .filter_map(|line| serde_json::from_str::<Value>(&line).ok())
+                        .filter_map(|line| common::parse_json_stream_payload(&line, "Bedrock"))
                         .filter_map(|payload| common::parse_anthropic_stream_chunk(&payload))
                         .collect::<Vec<_>>()
                 })
@@ -357,7 +358,8 @@ impl LLMProvider for BedrockProvider {
         }
 
         let response = self.send_request(request).await?;
-        let response = common::validate_status(response, "Bedrock").await?;
+        let response =
+            common::validate_status_for_model(response, "Bedrock", Some(&self.model)).await?;
         let payload: Value = response
             .json()
             .await
@@ -365,11 +367,12 @@ impl LLMProvider for BedrockProvider {
 
         debug!(provider = "Bedrock", "raw response payload: {payload}");
 
-        let content = common::parse_anthropic_completion_payload(&payload).unwrap_or_else(|e| {
-            warn!(provider = "Bedrock", "failed to parse completion: {e}");
-            String::new()
-        });
         let tool_calls = common::parse_anthropic_tool_calls(&payload);
+        let content = common::completion_text_or_tool_calls(
+            common::parse_anthropic_completion_payload(&payload),
+            "Bedrock",
+            tool_calls.len(),
+        )?;
         let usage = common::parse_usage(&payload);
 
         Ok(LLMResponse {
@@ -400,18 +403,18 @@ impl LLMProvider for BedrockProvider {
         }
 
         let response = self.send_request(request).await?;
-        let response = common::validate_status(response, "Bedrock").await?;
+        let response =
+            common::validate_status_for_model(response, "Bedrock", Some(&self.model)).await?;
 
         let mut sse_parser = common::SseParser::new();
+        let mut utf8 = common::Utf8Accumulator::new();
         let stream = response.bytes_stream().flat_map(move |chunk| {
-            let chunks = chunk
-                .ok()
-                .and_then(|bytes| String::from_utf8(bytes.to_vec()).ok())
+            let chunks = common::decode_stream_chunk(&mut utf8, chunk, "Bedrock")
                 .map(|text| {
                     sse_parser
                         .feed(&text)
                         .into_iter()
-                        .filter_map(|line| serde_json::from_str::<Value>(&line).ok())
+                        .filter_map(|line| common::parse_json_stream_payload(&line, "Bedrock"))
                         .filter_map(|payload| common::parse_anthropic_stream_chunk(&payload))
                         .collect::<Vec<_>>()
                 })
@@ -462,9 +465,13 @@ impl LLMProvider for BedrockProvider {
 ///
 /// Only supports `https://host/path` format (which is all Bedrock needs).
 fn parse_url_host_path(url: &str) -> Option<(String, String)> {
-    let without_scheme = url
-        .strip_prefix("https://")
-        .or_else(|| url.strip_prefix("http://"))?;
+    let (default_port, without_scheme) = if let Some(rest) = url.strip_prefix("https://") {
+        (Some("443"), rest)
+    } else if let Some(rest) = url.strip_prefix("http://") {
+        (Some("80"), rest)
+    } else {
+        return None;
+    };
     let (host, path) = match without_scheme.find('/') {
         Some(idx) => (
             without_scheme[..idx].to_string(),
@@ -472,10 +479,9 @@ fn parse_url_host_path(url: &str) -> Option<(String, String)> {
         ),
         None => (without_scheme.to_string(), "/".to_string()),
     };
-    // Strip port from host if present
-    let host = match host.find(':') {
-        Some(idx) => host[..idx].to_string(),
-        None => host,
+    let host = match host.rsplit_once(':') {
+        Some((hostname, port)) if Some(port) == default_port => hostname.to_string(),
+        _ => host,
     };
     Some((host, path))
 }
@@ -844,6 +850,13 @@ mod tests {
     #[test]
     fn parse_url_host_path_with_port() {
         let (host, path) = parse_url_host_path("https://localhost:8080/model/test").unwrap();
+        assert_eq!(host, "localhost:8080");
+        assert_eq!(path, "/model/test");
+    }
+
+    #[test]
+    fn parse_url_host_path_strips_default_https_port() {
+        let (host, path) = parse_url_host_path("https://localhost:443/model/test").unwrap();
         assert_eq!(host, "localhost");
         assert_eq!(path, "/model/test");
     }

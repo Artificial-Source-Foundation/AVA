@@ -22,7 +22,7 @@ export const FilterDropdown: Component<FilterDropdownProps> = (props) => {
     <div class="relative">
       <button
         type="button"
-        onClick={props.onToggleMenu}
+        onClick={() => props.onToggleMenu()}
         class={`
           flex items-center gap-1.5 px-2.5 py-1.5
           rounded-[var(--radius-md)]
@@ -46,22 +46,32 @@ export const FilterDropdown: Component<FilterDropdownProps> = (props) => {
         <div
           class="
             absolute right-0 top-full mt-1
-            bg-[var(--surface-overlay)]
-            border border-[var(--border-default)]
-            rounded-[var(--radius-lg)]
-            shadow-lg
             py-1 min-w-[140px]
             z-10
+            animate-dropdown-in
           "
+          style={{
+            background: 'var(--dropdown-surface)',
+            border: '1px solid var(--dropdown-border)',
+            'border-radius': 'var(--dropdown-radius)',
+            'box-shadow': 'var(--modal-shadow)',
+          }}
         >
           <button
             type="button"
             onClick={() => props.onFilterChange('all')}
             class={`
-              w-full flex items-center justify-between gap-2 px-3 py-2
-              text-xs text-left
-              ${props.filterType === 'all' ? 'bg-[var(--accent-subtle)] text-[var(--accent)]' : 'text-[var(--text-secondary)] hover:bg-[var(--surface-raised)]'}
+              w-full flex items-center justify-between gap-2 px-3 text-left
+              ${props.filterType === 'all' ? '' : 'hover:bg-[var(--dropdown-item-hover)]'}
             `}
+            style={{
+              height: '32px',
+              'font-size': '13px',
+              background:
+                props.filterType === 'all' ? 'var(--dropdown-item-active-bg)' : 'transparent',
+              color:
+                props.filterType === 'all' ? 'var(--dropdown-item-active-text)' : 'var(--gray-9)',
+            }}
           >
             <span>All Operations</span>
             <span class="text-[var(--text-muted)]">{props.counts.all}</span>
@@ -74,7 +84,7 @@ export const FilterDropdown: Component<FilterDropdownProps> = (props) => {
                 class={`
                   w-full flex items-center justify-between gap-2 px-3 py-2
                   text-xs text-left
-                  ${props.filterType === type ? 'bg-[var(--accent-subtle)] text-[var(--accent)]' : 'text-[var(--text-secondary)] hover:bg-[var(--surface-raised)]'}
+                  ${props.filterType === type ? '' : 'hover:bg-[var(--dropdown-item-hover)]'}
                 `}
               >
                 <span class="flex items-center gap-2">

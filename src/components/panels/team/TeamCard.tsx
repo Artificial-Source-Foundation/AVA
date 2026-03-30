@@ -1,18 +1,18 @@
 import { ChevronDown, ChevronRight } from 'lucide-solid'
 import { type Component, createSignal, For, Show } from 'solid-js'
 
-export interface PraxisEngineerNode {
+export interface HqEngineerNode {
   id: string
   task: string
   status: 'coding' | 'reviewing' | 'approved' | 'merging' | 'complete' | 'failed'
   reviewAttempts: number
 }
 
-export interface PraxisLeadNode {
+export interface HqLeadNode {
   id: string
   domain: string
   status: 'pending' | 'active' | 'complete' | 'failed'
-  engineers: PraxisEngineerNode[]
+  engineers: HqEngineerNode[]
 }
 
 function statusDot(status: string): string {
@@ -29,7 +29,7 @@ function statusDot(status: string): string {
   return 'bg-[var(--text-muted)]'
 }
 
-export const TeamCard: Component<{ lead: PraxisLeadNode }> = (props) => {
+export const TeamCard: Component<{ lead: HqLeadNode }> = (props) => {
   const [expanded, setExpanded] = createSignal(true)
 
   return (

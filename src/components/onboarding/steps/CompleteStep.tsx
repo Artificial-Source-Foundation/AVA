@@ -1,22 +1,22 @@
 /**
  * Step 5: You're All Set
  *
- * Green checkmark, keyboard shortcuts table, and "Start Coding" CTA.
+ * Green checkmark circle (56px), title, shortcuts table in dark card,
+ * "Start Coding" CTA button.
  */
 
-import { Check } from 'lucide-solid'
-import { type Component, For } from 'solid-js'
+import { Check, Rocket } from 'lucide-solid'
+import { type Component, For, Show } from 'solid-js'
 
 // ---------------------------------------------------------------------------
 // Shortcut data
 // ---------------------------------------------------------------------------
 
-const SHORTCUTS: { label: string; keys: string }[] = [
-  { label: 'New session', keys: 'Ctrl+N' },
-  { label: 'Command palette', keys: 'Ctrl+/' },
-  { label: 'Switch model', keys: 'Ctrl+M' },
-  { label: 'Toggle thinking', keys: 'Ctrl+T' },
-  { label: 'Toggle sidebar', keys: 'Ctrl+S' },
+const SHORTCUTS: { label: string; mod: string; key: string }[] = [
+  { label: 'New session', mod: 'Ctrl', key: 'N' },
+  { label: 'Command palette', mod: 'Ctrl', key: 'K' },
+  { label: 'Switch model', mod: 'Ctrl', key: 'M' },
+  { label: 'Settings', mod: 'Ctrl', key: ',' },
 ]
 
 // ---------------------------------------------------------------------------
@@ -33,46 +33,73 @@ export interface CompleteStepProps {
 
 export const CompleteStep: Component<CompleteStepProps> = (props) => (
   <div class="flex flex-col items-center">
-    {/* Green checkmark */}
+    {/* Green checkmark circle - 56px */}
     <div
-      class="w-16 h-16 rounded-full flex items-center justify-center mb-6"
-      style={{ background: 'var(--success-subtle)' }}
+      class="w-14 h-14 rounded-full flex items-center justify-center mb-6"
+      style={{ background: 'rgba(34, 197, 94, 0.15)' }}
     >
-      <Check class="w-8 h-8 text-[var(--success)]" />
+      <Check class="w-7 h-7" style={{ color: '#22C55E' }} />
     </div>
 
     {/* Title */}
-    <h2 class="text-2xl font-bold text-[var(--text-primary)] tracking-tight mb-8">
+    <h2 class="text-[22px] font-bold text-[var(--text-primary)] tracking-tight mb-2">
       You're All Set
     </h2>
 
-    {/* Shortcuts */}
-    <div class="w-full max-w-[400px] flex flex-col gap-2 mb-10">
+    {/* Subtitle */}
+    <p class="text-sm text-[var(--text-muted)] mb-8">Here are a few shortcuts to get you started</p>
+
+    {/* Shortcuts card - dark surface, rounded-8, subtle border */}
+    <div
+      class="w-full max-w-[380px] rounded-lg overflow-hidden mb-10"
+      style={{
+        background: 'var(--surface)',
+        border: '1px solid var(--border-subtle)',
+      }}
+    >
       <For each={SHORTCUTS}>
-        {(shortcut) => (
-          <div class="flex items-center justify-between py-1.5">
-            <span class="text-sm text-[var(--text-primary)]">{shortcut.label}</span>
-            <kbd
-              class="px-2 py-1 text-xs rounded-md"
-              style={{
-                background: 'var(--surface-raised)',
-                color: 'var(--text-muted)',
-                'font-family': '"JetBrains Mono", monospace',
-              }}
-            >
-              {shortcut.keys}
-            </kbd>
-          </div>
+        {(shortcut, i) => (
+          <>
+            <Show when={i() > 0}>
+              <div style={{ 'border-top': '1px solid var(--border-subtle)' }} />
+            </Show>
+            <div class="flex items-center justify-between px-4" style={{ height: '36px' }}>
+              <span class="text-sm text-[var(--text-primary)]">{shortcut.label}</span>
+              <div class="flex items-center gap-1">
+                <kbd
+                  class="px-1.5 py-0.5 text-[10px] rounded"
+                  style={{
+                    background: 'rgba(255, 255, 255, 0.03)',
+                    color: 'var(--text-muted)',
+                    'font-family': '"JetBrains Mono", monospace',
+                  }}
+                >
+                  {shortcut.mod}
+                </kbd>
+                <kbd
+                  class="px-1.5 py-0.5 text-[10px] rounded"
+                  style={{
+                    background: 'rgba(255, 255, 255, 0.03)',
+                    color: 'var(--text-muted)',
+                    'font-family': '"JetBrains Mono", monospace',
+                  }}
+                >
+                  {shortcut.key}
+                </kbd>
+              </div>
+            </div>
+          </>
         )}
       </For>
     </div>
 
-    {/* Start Coding button */}
+    {/* Start Coding button - blue filled, rounded-10, with rocket */}
     <button
       type="button"
-      onClick={props.onComplete}
-      class="px-10 py-3 bg-[var(--accent)] hover:bg-[var(--violet-8)] text-white text-sm font-semibold rounded-xl transition-colors"
+      onClick={() => props.onComplete()}
+      class="px-8 py-3 bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white text-sm font-semibold rounded-[10px] transition-colors flex items-center gap-2"
     >
+      <Rocket class="w-4 h-4" />
       Start Coding
     </button>
   </div>

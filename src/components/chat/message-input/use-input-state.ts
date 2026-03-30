@@ -1,13 +1,21 @@
 import { type Accessor, createEffect, createMemo, createSignal, on, onCleanup } from 'solid-js'
+import { useChatMode } from '../../../contexts/chat-mode'
+import { useNotification } from '../../../contexts/notification'
 import { useAgent } from '../../../hooks/useAgent'
 import { useChat } from '../../../hooks/useChat'
 import { useElapsedTimer } from '../../../hooks/useElapsedTimer'
 import { generateMessageId } from '../../../lib/ids'
 import type { CommandEntry } from '../../../services/command-resolver'
 import { parseSlashCommand } from '../../../services/command-resolver'
+import {
+  applyCompactionResult,
+  parseCompactFocus,
+  requestConversationCompaction,
+} from '../../../services/context-compaction'
 import type { SearchableFile } from '../../../services/file-search'
 import { openInExternalEditor } from '../../../services/ide-integration'
 import { getStash, popStash, pushStash } from '../../../services/prompt-stash'
+import { useLayout } from '../../../stores/layout'
 import { useSession } from '../../../stores/session'
 import { useSettings } from '../../../stores/settings'
 import { createAttachmentState } from './attachment-bar'
@@ -70,7 +78,12 @@ export function useInputState(): InputState {
   const attachments = createAttachmentState()
   const chat = useChat()
   const agent = useAgent()
+  const notify = useNotification()
   const sessionStore = useSession()
+  const layout = useLayout()
+
+  // ── Chat mode context (director mode overrides) ────────────────────────
+  const chatMode = useChatMode()
   const { selectedModel, messages } = sessionStore
   const settingsStore = useSettings()
   const { settings } = settingsStore
@@ -89,7 +102,9 @@ export function useInputState(): InputState {
       .map((m) => m.content)
       .reverse()
   )
-  const isProcessing = createMemo(() => chat.isStreaming() || agent.isRunning())
+  const isProcessing = createMemo(
+    () => chatMode?.isStreaming() ?? (chat.isStreaming() || agent.isRunning())
+  )
   // Input is NOT disabled during processing -- mid-stream messaging allows
   // users to type while the agent runs (Enter = queue, Ctrl+Enter = interrupt)
   const inputDisabled = createMemo(() => false)
@@ -99,12 +114,14 @@ export function useInputState(): InputState {
       attachments.pendingPastes().length > 0 ||
       attachments.pendingImages().length > 0
   )
-  const placeholder = createMemo(() =>
-    isProcessing()
-      ? 'Type a message... (Enter = queue, Ctrl+Enter = interrupt)'
-      : agent.isPlanMode()
-        ? 'Plan your approach... (Ctrl+/ for commands)'
-        : 'Ask anything... (Ctrl+/ for commands)'
+  const placeholder = createMemo(
+    () =>
+      chatMode?.placeholder?.() ??
+      (isProcessing()
+        ? 'Type a message...'
+        : agent.isPlanMode()
+          ? 'Plan your approach...'
+          : 'Ask anything...')
   )
 
   // Auto-resize textarea
@@ -122,13 +139,21 @@ export function useInputState(): InputState {
   }
 
   // Elapsed timer during streaming
-  const elapsedSecondsFromTimer = useElapsedTimer(() => chat.streamingStartedAt())
+  const elapsedSecondsFromTimer = useElapsedTimer(
+    () => chatMode?.streamStartedAt?.() ?? chat.streamingStartedAt()
+  )
 
   // Clear queue on session change
   createEffect(
     on(
       () => sessionStore.currentSession()?.id,
-      () => chat.clearQueue()
+      () => {
+        chat.clearQueue()
+        queueMicrotask(() => {
+          if (!textareaRef || document.activeElement === textareaRef) return
+          textareaRef.focus()
+        })
+      }
     )
   )
 
@@ -179,9 +204,29 @@ export function useInputState(): InputState {
     const hasImages = attachments.pendingImages().length > 0
     if ((!message && !hasPastes && !hasImages) || submitting) return
 
-    // Handle /later and /queue slash commands locally
-    const parsed = parseSlashCommand(message)
+    // Handle local slash commands (skip session-specific ones in director mode)
+    const parsed = chatMode ? null : parseSlashCommand(message)
     if (parsed) {
+      if (parsed.name === 'compact') {
+        if (isProcessing()) {
+          notify.error('Compaction unavailable', 'Wait for the current response to finish')
+          return
+        }
+        try {
+          notify.info('Compacting conversation...', 'Summarizing older context')
+          const result = await requestConversationCompaction(parseCompactFocus(parsed.args))
+          applyCompactionResult(result, 'manual')
+        } catch (err) {
+          notify.error(
+            'Compaction failed',
+            err instanceof Error ? err.message : 'Unknown compaction error'
+          )
+        }
+        setInput('')
+        setHistoryIndex(-1)
+        if (textareaRef) textareaRef.style.height = 'auto'
+        return
+      }
       if (parsed.name === 'later') {
         const laterMsg = parsed.args.trim()
         if (laterMsg) {
@@ -216,6 +261,169 @@ export function useInputState(): InputState {
         if (textareaRef) textareaRef.style.height = 'auto'
         return
       }
+
+      // Helper to clear input after handling a command
+      const clearInput = (): void => {
+        setInput('')
+        setHistoryIndex(-1)
+        if (textareaRef) textareaRef.style.height = 'auto'
+      }
+
+      if (parsed.name === 'clear') {
+        sessionStore.setMessages([])
+        clearInput()
+        return
+      }
+      if (parsed.name === 'new') {
+        clearInput()
+        await sessionStore.createNewSession(parsed.args.trim() || undefined)
+        return
+      }
+      if (parsed.name === 'sessions') {
+        layout.toggleSessionSwitcher()
+        clearInput()
+        return
+      }
+      if (parsed.name === 'model') {
+        if (parsed.args.trim()) {
+          // If args provided, let the agent handle model switching
+        } else {
+          layout.toggleQuickModelPicker()
+          clearInput()
+          return
+        }
+      }
+      if (parsed.name === 'theme') {
+        layout.openSettings()
+        clearInput()
+        return
+      }
+      if (parsed.name === 'permissions') {
+        layout.openSettings()
+        clearInput()
+        return
+      }
+      if (parsed.name === 'think') {
+        const thinkArg = parsed.args.trim().toLowerCase()
+        const currentEnabled = settings().generation.thinkingEnabled
+        const shouldEnable =
+          thinkArg === 'show' ? true : thinkArg === 'hide' ? false : !currentEnabled
+        settingsStore.updateSettings({
+          generation: {
+            ...settings().generation,
+            thinkingEnabled: shouldEnable,
+          },
+        })
+        notify.info('Thinking', shouldEnable ? 'Thinking enabled' : 'Thinking disabled')
+        clearInput()
+        return
+      }
+      if (parsed.name === 'export') {
+        // Trigger the export-chat shortcut action (Ctrl+Shift+E)
+        document.dispatchEvent(
+          new KeyboardEvent('keydown', { key: 'E', ctrlKey: true, shiftKey: true, bubbles: true })
+        )
+        clearInput()
+        return
+      }
+      if (parsed.name === 'copy') {
+        const msgs = messages()
+        const lastAssistant = [...msgs].reverse().find((m) => m.role === 'assistant')
+        if (lastAssistant) {
+          void navigator.clipboard.writeText(lastAssistant.content).then(() => {
+            notify.info('Copied', 'Response copied to clipboard')
+          })
+        } else {
+          notify.info('Nothing to copy', 'No assistant response found')
+        }
+        clearInput()
+        return
+      }
+      if (parsed.name === 'help') {
+        const sessionId = sessionStore.currentSession()?.id ?? ''
+        sessionStore.addMessage({
+          id: generateMessageId('sys'),
+          sessionId,
+          role: 'system',
+          content: [
+            '**Available Commands**\n',
+            '| Command | Description |',
+            '|---------|-------------|',
+            '| `/model` | Show or switch model |',
+            '| `/think [show\\|hide]` | Toggle thinking visibility |',
+            '| `/theme` | Open theme settings |',
+            '| `/permissions` | Open permissions settings |',
+            '| `/new [title]` | Start a new session |',
+            '| `/sessions` | Open session picker |',
+            '| `/commit` | Inspect commit readiness |',
+            '| `/export` | Export conversation |',
+            '| `/copy` | Copy last response |',
+            '| `/compact [focus]` | Compact conversation |',
+            '| `/later <msg>` | Queue post-complete message |',
+            '| `/queue` | Show message queue |',
+            '| `/clear` | Clear chat |',
+            '| `/shortcuts` | Show keyboard shortcuts |',
+            '| `/settings` | Open settings |',
+            '| `/btw <question>` | Side conversation |',
+            '| `/rewind` | Checkpoint history |',
+          ].join('\n'),
+          createdAt: Date.now(),
+        })
+        clearInput()
+        return
+      }
+      if (parsed.name === 'shortcuts') {
+        const sessionId = sessionStore.currentSession()?.id ?? ''
+        sessionStore.addMessage({
+          id: generateMessageId('sys'),
+          sessionId,
+          role: 'system',
+          content: [
+            '**Keyboard Shortcuts**\n',
+            '| Shortcut | Action |',
+            '|----------|--------|',
+            '| `Ctrl+/` or `Ctrl+K` | Command palette |',
+            '| `Ctrl+N` | New chat |',
+            '| `Ctrl+L` | Session switcher |',
+            '| `Ctrl+M` | Quick model picker |',
+            '| `Ctrl+Shift+M` | Model browser |',
+            '| `Ctrl+S` | Toggle sidebar |',
+            '| `Ctrl+T` | Cycle thinking level |',
+            '| `Ctrl+J` | Toggle bottom panel |',
+            '| `Ctrl+,` | Open settings |',
+            '| `Ctrl+E` | Expanded editor |',
+            '| `Ctrl+F` | Search chat |',
+            '| `Ctrl+Y` | Copy last response |',
+            '| `Ctrl+Shift+E` | Export chat |',
+            '| `Ctrl+Enter` | Interrupt & send |',
+            '| `Alt+Enter` | Post-complete message |',
+            '| `Double-Escape` | Cancel agent |',
+          ].join('\n'),
+          createdAt: Date.now(),
+        })
+        clearInput()
+        return
+      }
+      if (parsed.name === 'settings') {
+        layout.openSettings()
+        clearInput()
+        return
+      }
+    }
+
+    // ── Director mode: delegate send to context handler ───────────────
+    if (chatMode?.sendMessage) {
+      submitting = true
+      setSendCount((c) => c + 1)
+      setInput('')
+      setHistoryIndex(-1)
+      if (textareaRef) textareaRef.style.height = 'auto'
+      try {
+        await chatMode.sendMessage(message)
+      } finally {
+        submitting = false
+      }
+      return
     }
 
     // Mid-stream messaging: queue for next turn when agent is running (Enter)
@@ -357,6 +565,14 @@ export function useInputState(): InputState {
       return
     }
 
+    if (!isProcessing() && e.key === 'Escape' && document.activeElement === textareaRef) {
+      e.preventDefault()
+      textareaRef?.blur()
+      mention.setMentionOpen(false)
+      slash.setSlashOpen(false)
+      return
+    }
+
     // Mid-stream messaging keybinds (while agent is running).
     // During processing, Enter queues for next turn (regardless of sendKey setting).
     // Ctrl+Enter interrupts. Alt+Enter queues post-complete.
@@ -437,7 +653,8 @@ export function useInputState(): InputState {
   }
 
   const handleCancel = (): void => {
-    agent.cancel()
+    if (chatMode?.cancelStream) chatMode.cancelStream()
+    else agent.cancel()
   }
 
   // Menu-driven mid-stream send helpers (for context menu on send button)

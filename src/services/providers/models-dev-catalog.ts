@@ -162,6 +162,12 @@ export async function syncModelsCatalog(): Promise<ModelsDevCatalog | null> {
 // Query
 // ============================================================================
 
+/** Known-outdated model ID patterns that should never appear in the browser */
+const BLOCKED_MODEL_PATTERNS = [
+  'aurora', // xAI Aurora Alpha — experimental, never GA
+  'codestral-2501', // Mistral legacy preview
+]
+
 /** Non-coding model patterns to filter out */
 function isNonCodingModel(model: ModelsDevModel): boolean {
   const id = model.id.toLowerCase()
@@ -171,8 +177,11 @@ function isNonCodingModel(model: ModelsDevModel): boolean {
   if (id.includes('moderation') || id.includes('realtime')) return true
   // Filter by modalities — must support text output
   if (model.modalities?.output && !model.modalities.output.includes('text')) return true
-  // Filter deprecated
-  if (model.status === 'deprecated') return true
+  // Filter deprecated and pre-release models
+  if (model.status === 'deprecated' || model.status === 'alpha' || model.status === 'preview')
+    return true
+  // Filter known-outdated models by ID pattern
+  if (BLOCKED_MODEL_PATTERNS.some((pattern) => id.includes(pattern))) return true
   // Must support tool calling for coding use
   if (model.tool_call === false) return true
   return false
@@ -238,6 +247,15 @@ export function getModelFromCatalog(
     if (provider.models?.[modelId]) return provider.models[modelId]
   }
   return null
+}
+
+/**
+ * Check if a model ID matches the blocklist of known-outdated models.
+ * Useful for filtering models from provider configs that bypass the catalog.
+ */
+export function isBlockedModelId(modelId: string): boolean {
+  const id = modelId.toLowerCase()
+  return BLOCKED_MODEL_PATTERNS.some((pattern) => id.includes(pattern))
 }
 
 /** Reset memory cache (for testing) */

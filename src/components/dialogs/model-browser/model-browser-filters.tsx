@@ -1,7 +1,8 @@
 /**
  * Model Browser Filters
  *
- * Provider dropdown, search bar, capability chips, and sort selector.
+ * Search bar, provider dropdown, capability filter pills, and sort selector.
+ * macOS-inspired styling with subtle glass backgrounds.
  */
 
 import { Search } from 'lucide-solid'
@@ -33,28 +34,28 @@ const SORT_OPTIONS: { id: SortOption; label: string }[] = [
 ]
 
 export const ModelBrowserFilters: Component<ModelBrowserFiltersProps> = (props) => (
-  <div class="space-y-2.5 py-3">
+  <div class="space-y-3 py-3">
     {/* Search + Provider row */}
     <div class="flex items-center gap-2">
       <div class="relative flex-1">
-        <Search class="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[var(--text-muted)]" />
+        <Search class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#48484A]" />
         <input
           type="text"
           value={props.filters.search}
           onInput={(e) => props.onSearchChange(e.currentTarget.value)}
           placeholder="Search models..."
-          class="w-full pl-8 pr-3 py-1.5 text-xs bg-[var(--input-background)] text-[var(--text-primary)] placeholder:text-[var(--input-placeholder)] border border-[var(--input-border)] rounded-[var(--radius-md)] focus:outline-none focus:border-[var(--input-border-focus)] transition-colors"
+          class="w-full pl-10 pr-3 py-2 text-[13px] bg-[rgba(255,255,255,0.04)] text-[#F5F5F7] placeholder:text-[#48484A] border border-[rgba(255,255,255,0.06)] rounded-[8px] focus:outline-none focus:border-[var(--accent)] transition-colors duration-150"
         />
       </div>
       <select
         value={props.filters.provider ?? ''}
         onChange={(e) => props.onProviderChange(e.currentTarget.value || null)}
-        class="px-2.5 py-1.5 text-xs bg-[var(--input-background)] text-[var(--text-primary)] border border-[var(--input-border)] rounded-[var(--radius-md)] focus:outline-none focus:border-[var(--input-border-focus)] transition-colors appearance-none cursor-pointer"
+        class="px-3 py-2 text-[13px] bg-[rgba(255,255,255,0.04)] text-[#F5F5F7] border border-[rgba(255,255,255,0.06)] rounded-[8px] focus:outline-none focus:border-[var(--accent)] transition-colors duration-150 appearance-none cursor-pointer"
         style={{
-          'background-image': `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2352525b' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")`,
+          'background-image': `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2348484A' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")`,
           'background-repeat': 'no-repeat',
-          'background-position': 'right 8px center',
-          'padding-right': '24px',
+          'background-position': 'right 10px center',
+          'padding-right': '28px',
         }}
       >
         <option value="">All Providers</option>
@@ -62,7 +63,7 @@ export const ModelBrowserFilters: Component<ModelBrowserFiltersProps> = (props) 
       </select>
     </div>
 
-    {/* Capability chips + sort */}
+    {/* Capability pills + sort */}
     <div class="flex items-center justify-between">
       <div class="flex items-center gap-1.5">
         <For each={ALL_CAPABILITIES}>
@@ -73,12 +74,12 @@ export const ModelBrowserFilters: Component<ModelBrowserFiltersProps> = (props) 
                 type="button"
                 onClick={() => props.onCapabilityToggle(cap.id)}
                 class={`
-                  px-2 py-0.5 text-[10px] font-medium rounded-full
-                  border transition-colors
+                  px-2.5 py-1 text-[11px] font-medium rounded-full
+                  transition-all duration-150 cursor-pointer
                   ${
                     isActive()
-                      ? 'border-[var(--accent)] text-[var(--accent)] bg-[var(--accent)]/10'
-                      : 'border-[var(--border-subtle)] text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:border-[var(--border-default)]'
+                      ? 'bg-[var(--accent)] text-white shadow-[0_0_8px_rgba(10,132,255,0.3)]'
+                      : 'bg-[rgba(255,255,255,0.04)] text-[#48484A] hover:text-[#C8C8CC] hover:bg-[rgba(255,255,255,0.06)]'
                   }
                 `}
               >
@@ -88,19 +89,18 @@ export const ModelBrowserFilters: Component<ModelBrowserFiltersProps> = (props) 
           }}
         </For>
       </div>
-      <div class="flex items-center gap-1.5">
-        <span class="text-[10px] text-[var(--text-muted)]">Sort:</span>
+      <div class="flex items-center gap-0.5 bg-[rgba(255,255,255,0.04)] rounded-[8px] p-0.5">
         <For each={SORT_OPTIONS}>
           {(opt) => (
             <button
               type="button"
               onClick={() => props.onSortChange(opt.id)}
               class={`
-                px-1.5 py-0.5 text-[10px] rounded-[var(--radius-sm)] transition-colors
+                px-2.5 py-1 text-[11px] font-medium rounded-[6px] transition-all duration-150 cursor-pointer
                 ${
                   props.filters.sort === opt.id
-                    ? 'text-[var(--accent)] bg-[var(--accent)]/10'
-                    : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)]'
+                    ? 'text-[#F5F5F7] bg-[rgba(255,255,255,0.08)]'
+                    : 'text-[#48484A] hover:text-[#C8C8CC]'
                 }
               `}
             >

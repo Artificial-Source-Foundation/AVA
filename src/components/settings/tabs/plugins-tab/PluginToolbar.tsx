@@ -27,7 +27,7 @@ export const PluginToolbar: Component<PluginToolbarProps> = (props) => {
       <div class="flex items-center gap-1.5">
         <button
           type="button"
-          onClick={props.onShowWizard}
+          onClick={() => props.onShowWizard()}
           class={SETTINGS_TOOLBAR_BUTTON_CLASS}
           title="Create a new plugin"
         >
@@ -36,7 +36,7 @@ export const PluginToolbar: Component<PluginToolbarProps> = (props) => {
         </button>
         <button
           type="button"
-          onClick={props.onShowPublish}
+          onClick={() => props.onShowPublish()}
           class={SETTINGS_TOOLBAR_BUTTON_CLASS}
           title="Publish a plugin"
         >
@@ -45,7 +45,7 @@ export const PluginToolbar: Component<PluginToolbarProps> = (props) => {
         </button>
         <button
           type="button"
-          onClick={props.onShowGitDialog}
+          onClick={() => props.onShowGitDialog()}
           class={SETTINGS_TOOLBAR_BUTTON_CLASS}
           title="Install from Git repository"
         >
@@ -54,7 +54,7 @@ export const PluginToolbar: Component<PluginToolbarProps> = (props) => {
         </button>
         <button
           type="button"
-          onClick={props.onShowLinkDialog}
+          onClick={() => props.onShowLinkDialog()}
           class={SETTINGS_TOOLBAR_BUTTON_CLASS}
           title="Link local plugin directory"
         >

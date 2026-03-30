@@ -1,5 +1,4 @@
 use std::path::PathBuf;
-use std::time::SystemTime;
 
 use async_trait::async_trait;
 use serde_json::{json, Value};
@@ -57,25 +56,30 @@ impl Tool for GlobTool {
 
         let query = base_path.join(pattern).to_string_lossy().to_string();
 
-        let mut matches: Vec<(PathBuf, SystemTime)> = Vec::new();
+        let mut matches: Vec<PathBuf> = Vec::new();
         for entry in glob::glob(&query).map_err(|e| AvaError::ToolError(e.to_string()))? {
             let path = entry.map_err(|e| AvaError::ToolError(e.to_string()))?;
-            let modified = std::fs::metadata(&path)
-                .and_then(|m| m.modified())
-                .unwrap_or(SystemTime::UNIX_EPOCH);
-            matches.push((path, modified));
+            matches.push(path);
         }
 
-        matches.sort_by(|a, b| b.1.cmp(&a.1));
+        matches.sort_by(|left, right| left.to_string_lossy().cmp(&right.to_string_lossy()));
+        let truncated = matches.len() > MAX_RESULTS;
         if matches.len() > MAX_RESULTS {
             matches.truncate(MAX_RESULTS);
         }
 
-        let content = matches
+        let mut lines = matches
             .into_iter()
-            .map(|(path, _)| path.to_string_lossy().to_string())
-            .collect::<Vec<String>>()
-            .join("\n");
+            .map(|path| path.to_string_lossy().to_string())
+            .collect::<Vec<String>>();
+        if truncated {
+            lines.push(String::new());
+            lines.push(format!(
+                "(Results are truncated: showing first {MAX_RESULTS} results. Consider using a more specific path or pattern.)"
+            ));
+        }
+
+        let content = lines.join("\n");
 
         Ok(ToolResult {
             call_id: String::new(),

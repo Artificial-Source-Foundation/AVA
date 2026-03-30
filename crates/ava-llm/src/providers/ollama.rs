@@ -68,7 +68,8 @@ impl LLMProvider for OllamaProvider {
             .json(&self.build_request_body(messages, false));
 
         let response = common::send_retrying(request, "Ollama").await?;
-        let response = common::validate_status(response, "Ollama").await?;
+        let response =
+            common::validate_status_for_model(response, "Ollama", Some(&self.model)).await?;
         let payload: Value = response
             .json()
             .await
@@ -88,14 +89,17 @@ impl LLMProvider for OllamaProvider {
             .json(&self.build_request_body(messages, true));
 
         let response = common::send_retrying(request, "Ollama").await?;
-        let response = common::validate_status(response, "Ollama").await?;
-        let stream = response.bytes_stream().flat_map(|chunk| {
-            let chunks = chunk
-                .ok()
-                .and_then(|bytes| String::from_utf8(bytes.to_vec()).ok())
+        let response =
+            common::validate_status_for_model(response, "Ollama", Some(&self.model)).await?;
+        let mut utf8 = common::Utf8Accumulator::new();
+        let mut ndjson_parser = common::NdjsonParser::new();
+        let stream = response.bytes_stream().flat_map(move |chunk| {
+            let chunks = common::decode_stream_chunk(&mut utf8, chunk, "Ollama")
                 .map(|text| {
-                    text.lines()
-                        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+                    ndjson_parser
+                        .feed(&text)
+                        .into_iter()
+                        .filter_map(|line| common::parse_json_stream_payload(&line, "Ollama"))
                         .filter_map(|payload| {
                             let done = payload
                                 .get("done")
@@ -144,14 +148,19 @@ impl LLMProvider for OllamaProvider {
             .json(&self.build_request_body_with_tools(messages, tools, false));
 
         let response = common::send_retrying(request, "Ollama").await?;
-        let response = common::validate_status(response, "Ollama").await?;
+        let response =
+            common::validate_status_for_model(response, "Ollama", Some(&self.model)).await?;
         let payload: Value = response
             .json()
             .await
             .map_err(|error| AvaError::SerializationError(error.to_string()))?;
 
-        let content = common::parse_ollama_completion_payload(&payload).unwrap_or_default();
         let tool_calls = common::parse_ollama_tool_calls(&payload);
+        let content = common::completion_text_or_tool_calls(
+            common::parse_ollama_completion_payload(&payload),
+            "Ollama",
+            tool_calls.len(),
+        )?;
         let usage = common::parse_ollama_usage(&payload);
 
         Ok(LLMResponse {
@@ -174,14 +183,17 @@ impl LLMProvider for OllamaProvider {
             .json(&self.build_request_body_with_tools(messages, tools, true));
 
         let response = common::send_retrying(request, "Ollama").await?;
-        let response = common::validate_status(response, "Ollama").await?;
-        let stream = response.bytes_stream().flat_map(|chunk| {
-            let chunks = chunk
-                .ok()
-                .and_then(|bytes| String::from_utf8(bytes.to_vec()).ok())
+        let response =
+            common::validate_status_for_model(response, "Ollama", Some(&self.model)).await?;
+        let mut utf8 = common::Utf8Accumulator::new();
+        let mut ndjson_parser = common::NdjsonParser::new();
+        let stream = response.bytes_stream().flat_map(move |chunk| {
+            let chunks = common::decode_stream_chunk(&mut utf8, chunk, "Ollama")
                 .map(|text| {
-                    text.lines()
-                        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+                    ndjson_parser
+                        .feed(&text)
+                        .into_iter()
+                        .filter_map(|line| common::parse_json_stream_payload(&line, "Ollama"))
                         .filter_map(|payload| {
                             let done = payload
                                 .get("done")

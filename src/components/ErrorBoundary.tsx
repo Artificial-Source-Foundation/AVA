@@ -1,24 +1,18 @@
 /**
  * Error Boundary Component
  *
- * Premium error page matching the AVA design language.
- * Shows a full-screen error with glass card, animations, and helpful actions.
+ * Minimalist text-only error screen matching the Pencil design.
+ * Pure black background, centered error details with stack trace,
+ * and simple text-only action links.
  */
 
 import {
-  AlertTriangle,
-  Bug,
-  ChevronDown,
-  ChevronUp,
-  Copy,
-  ExternalLink,
-  RefreshCw,
-  RotateCcw,
-} from 'lucide-solid'
-import {
   type Component,
+  createEffect,
   createSignal,
+  For,
   type JSX,
+  onCleanup,
   Show,
   ErrorBoundary as SolidErrorBoundary,
 } from 'solid-js'
@@ -30,150 +24,121 @@ interface ErrorFallbackProps {
   reset: () => void
 }
 
+/** Parse stack trace into individual lines */
+function parseStackLines(stack: string | undefined): string[] {
+  if (!stack) return []
+  return stack
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .slice(0, 15)
+}
+
 const ErrorFallback: Component<ErrorFallbackProps> = (props) => {
-  const [showDetails, setShowDetails] = createSignal(false)
   const [copied, setCopied] = createSignal(false)
+  let copiedResetTimer: number | undefined
 
-  // eslint-disable-next-line solid/reactivity -- one-time log at mount
-  log.error('error', `Caught render error: ${props.error.message}`, props.error.stack)
-  logFatal('ErrorBoundary', `Caught render error: ${props.error.message}`, props.error.stack)
+  createEffect(() => {
+    log.error('error', `Caught render error: ${props.error.message}`, props.error.stack)
+    logFatal('ErrorBoundary', `Caught render error: ${props.error.message}`, props.error.stack)
+  })
 
-  const copyError = async () => {
-    const errorText = `Error: ${props.error.message}\n\nStack:\n${props.error.stack || 'No stack trace'}`
-    await navigator.clipboard.writeText(errorText)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
+  const copyError = async (): Promise<void> => {
+    try {
+      const errorText = `Error: ${props.error.message}\n\nStack:\n${props.error.stack || 'No stack trace'}`
+      await navigator.clipboard.writeText(errorText)
+      setCopied(true)
+      window.clearTimeout(copiedResetTimer)
+      copiedResetTimer = window.setTimeout(() => setCopied(false), 2000)
+    } catch {
+      setCopied(false)
+    }
   }
 
+  onCleanup(() => {
+    window.clearTimeout(copiedResetTimer)
+  })
+
+  const stackLines = (): string[] => parseStackLines(props.error.stack)
+
   return (
-    <div
-      class="fixed inset-0 z-50 flex flex-col items-center justify-center"
-      style={{ background: 'var(--background)' }}
-    >
-      {/* Error icon */}
-      <div
-        class="flex items-center justify-center mb-6"
-        style={{
-          width: '72px',
-          height: '72px',
-          'border-radius': '18px',
-          background: 'var(--error-subtle)',
-        }}
-      >
-        <AlertTriangle class="w-9 h-9" style={{ color: 'var(--error)' }} />
-      </div>
+    <div class="fixed inset-0 z-50 flex flex-col items-center justify-center bg-[var(--background)]">
+      {/* Inner container — vertically stacked, centered */}
+      <div class="flex flex-col items-center gap-10">
+        {/* Title + error message */}
+        <div class="flex flex-col items-center gap-3">
+          <h1 class="m-0 text-lg font-medium text-[var(--text-primary)]">Something went wrong.</h1>
+          <p class="m-0 font-ui-mono text-[12px] text-[var(--text-muted)]">
+            {props.error.message || 'An unexpected error occurred'}
+          </p>
+        </div>
 
-      {/* Title */}
-      <h1 class="text-xl font-bold tracking-tight mb-2" style={{ color: 'var(--text-primary)' }}>
-        Something went wrong
-      </h1>
-      <p class="text-sm mb-6" style={{ color: 'var(--text-muted)' }}>
-        AVA encountered an unexpected error
-      </p>
-
-      {/* Error message */}
-      <div
-        class="w-full max-w-lg mb-8 text-left"
-        style={{
-          background: 'var(--surface-raised)',
-          border: '1px solid var(--gray-5)',
-          'border-radius': '12px',
-          padding: '14px 18px',
-        }}
-      >
-        <p class="text-sm font-mono break-all leading-relaxed" style={{ color: 'var(--error)' }}>
-          {props.error.message || 'An unexpected error occurred'}
-        </p>
-      </div>
-
-      {/* Action buttons */}
-      <div class="flex items-center gap-3 mb-8">
-        <button
-          type="button"
-          onClick={() => props.reset()}
-          class="inline-flex items-center gap-2 px-7 py-3 text-sm font-semibold text-white transition-colors"
-          style={{ background: 'var(--accent)', 'border-radius': '12px' }}
-        >
-          <RotateCcw class="w-4 h-4" />
-          Try Again
-        </button>
-        <button
-          type="button"
-          onClick={() => window.location.reload()}
-          class="inline-flex items-center gap-2 px-7 py-3 text-sm font-medium transition-colors"
-          style={{
-            background: 'var(--surface-raised)',
-            border: '1px solid var(--gray-5)',
-            'border-radius': '12px',
-            color: 'var(--gray-9)',
-          }}
-        >
-          <RefreshCw class="w-4 h-4" />
-          Reload
-        </button>
-      </div>
-
-      {/* Expandable details */}
-      <button
-        type="button"
-        onClick={() => setShowDetails(!showDetails())}
-        class="flex items-center gap-1.5 text-xs transition-colors"
-        style={{ color: 'var(--text-tertiary)' }}
-      >
-        <Bug class="w-3.5 h-3.5" />
-        Technical details
-        {showDetails() ? <ChevronUp class="w-3.5 h-3.5" /> : <ChevronDown class="w-3.5 h-3.5" />}
-      </button>
-
-      <Show when={showDetails()}>
-        <div
-          class="mt-4 w-full max-w-lg text-left"
-          style={{
-            background: 'var(--surface-raised)',
-            border: '1px solid var(--gray-5)',
-            'border-radius': '12px',
-            padding: '16px',
-          }}
-        >
-          <div class="flex items-center justify-between mb-2">
-            <span class="text-xs font-mono" style={{ color: 'var(--text-tertiary)' }}>
-              Stack Trace
+        {/* Error details block */}
+        <div class="w-[520px] max-w-[90vw] overflow-hidden rounded-[10px] border border-[var(--border-subtle)] bg-[var(--background-subtle)]">
+          {/* Header: "Error details" + "Copy" */}
+          <div class="flex h-[30px] items-center justify-between bg-[var(--alpha-white-3)] px-3">
+            <span class="font-ui-mono text-[9px] font-medium tracking-[1px] text-[var(--text-muted)]">
+              Error details
             </span>
             <button
               type="button"
               onClick={copyError}
-              class="inline-flex items-center gap-1 px-2 py-1 text-xs transition-colors"
-              style={{
-                color: 'var(--text-muted)',
-                background: 'var(--gray-5)',
-                'border-radius': '6px',
-              }}
+              class="border-none bg-transparent p-0 font-ui-mono text-[9px] font-medium text-[var(--accent)]"
+              aria-label="Copy error details"
             >
-              <Copy class="w-3 h-3" />
               {copied() ? 'Copied' : 'Copy'}
             </button>
           </div>
-          <pre
-            class="text-xs font-mono whitespace-pre-wrap overflow-x-auto max-h-48 overflow-y-auto leading-relaxed"
-            style={{ color: 'var(--text-muted)' }}
-          >
-            {props.error.stack || 'No stack trace available'}
-          </pre>
-        </div>
-      </Show>
 
-      {/* Report link */}
-      <div class="mt-6">
-        <a
-          href="https://github.com/g0dxn4/AVA/issues/new"
-          target="_blank"
-          rel="noopener noreferrer"
-          class="inline-flex items-center gap-1.5 text-xs transition-colors"
-          style={{ color: 'var(--text-tertiary)' }}
-        >
-          Report this issue
-          <ExternalLink class="w-3.5 h-3.5" />
-        </a>
+          {/* Stack trace body — capped height with scroll */}
+          <div class="max-h-[200px] overflow-y-auto px-3 py-2.5">
+            <Show
+              when={stackLines().length > 0}
+              fallback={
+                <p class="m-0 font-ui-mono text-[11px] text-[var(--error)]">
+                  {props.error.message || 'No stack trace available'}
+                </p>
+              }
+            >
+              <div class="flex flex-col gap-1">
+                <For each={stackLines()}>
+                  {(line, index) => (
+                    <span
+                      class="break-all font-ui-mono text-[11px] leading-[1.4]"
+                      classList={{
+                        'text-[var(--error)]': index() === 0,
+                        'text-[var(--surface-overlay)]': index() > 0 && index() < 3,
+                        'text-[var(--surface-raised)]': index() >= 3,
+                      }}
+                    >
+                      {line}
+                    </span>
+                  )}
+                </For>
+              </div>
+            </Show>
+          </div>
+        </div>
+
+        {/* Actions: Reload + Report issue */}
+        <div class="flex items-center gap-6">
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            class="border-none bg-transparent p-0 text-sm font-medium text-[var(--accent)]"
+          >
+            Reload
+          </button>
+          <span class="text-sm text-[var(--surface-overlay)]">&middot;</span>
+          <a
+            href="https://github.com/ASF-GROUP/AVA/issues/new"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="text-sm text-[var(--text-tertiary)] no-underline"
+          >
+            Report issue
+          </a>
+        </div>
       </div>
     </div>
   )

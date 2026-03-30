@@ -68,7 +68,24 @@ function App() {
   // Show toast when auto-compaction triggers
   onMount(() => {
     const handleCompacted = (e: Event) => {
-      const { removed, tokensSaved } = (e as CustomEvent).detail
+      const detail = (
+        e as CustomEvent<{
+          source?: 'manual' | 'auto'
+          removed?: number
+          tokensSaved?: number
+          usageBeforePercent?: number
+        }>
+      ).detail
+      if (detail?.source === 'auto') {
+        info(
+          'Context automatically compacted',
+          `Was at ${Math.round(detail.usageBeforePercent ?? 0)}% of the window`
+        )
+        return
+      }
+
+      const removed = detail?.removed ?? 0
+      const tokensSaved = detail?.tokensSaved ?? 0
       info(
         'Context compacted',
         `Removed ${removed} message${removed !== 1 ? 's' : ''}, saved ~${Math.round(tokensSaved / 1000)}k tokens`

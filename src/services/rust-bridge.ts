@@ -1,6 +1,17 @@
 import { isTauri, invoke as tauriInvoke } from '@tauri-apps/api/core'
 import { apiInvoke } from '../lib/api-client'
 import type {
+  HqActivityEvent,
+  HqAgent,
+  HqDashboardMetrics,
+  HqDirectorMessage,
+  HqEpic,
+  HqIssue,
+  HqPlan,
+  HqSettings,
+  HqWorkspaceBootstrapResult,
+} from '../types/hq'
+import type {
   AgentStatus,
   AgentToolInfo,
   BrowserToolResult,
@@ -297,30 +308,97 @@ export const rustBackend = {
   searchSessions: (query: string): Promise<SessionSummary[]> =>
     invokeCommand('search_sessions', { query }),
 
-  // Praxis multi-agent
-  startPraxis: (
+  // HQ multi-agent
+  startHq: (
     goal: string,
     domain?: string,
     teamConfig?: import('../types/rust-ipc').TeamConfigPayload
   ): Promise<void> =>
-    invokeCommand('start_praxis', {
+    invokeCommand('start_hq', {
       args: { goal, domain: domain ?? null, teamConfig: teamConfig ?? null },
     }),
-  getPraxisStatus: (): Promise<import('../types/rust-ipc').PraxisStatusResult> =>
-    invokeCommand('get_praxis_status'),
-  cancelPraxis: (): Promise<void> => invokeCommand('cancel_praxis'),
+  getHqStatus: (): Promise<import('../types/rust-ipc').HqStatusResult> =>
+    invokeCommand('get_hq_status'),
+  cancelHq: (): Promise<void> => invokeCommand('cancel_hq'),
   steerLead: (leadId: string, message: string): Promise<void> =>
     invokeCommand('steer_lead', { leadId, message }),
+  createEpic: (title: string, description: string): Promise<HqEpic> =>
+    invokeCommand('create_epic', { title, description }),
+  listEpics: (): Promise<HqEpic[]> => invokeCommand('list_epics'),
+  getEpic: (id: string): Promise<{ epic: HqEpic; issues: HqIssue[] } | null> =>
+    invokeCommand('get_epic', { id }),
+  updateEpic: (args: {
+    id: string
+    title?: string
+    description?: string
+    status?: string
+    progress?: number
+  }): Promise<HqEpic | null> => invokeCommand('update_epic', { args }),
+  createIssue: (epicId: string, title: string, description: string): Promise<HqIssue> =>
+    invokeCommand('create_issue', { epicId, title, description }),
+  listIssues: (epicId?: string): Promise<HqIssue[]> => invokeCommand('list_issues', { epicId }),
+  getIssue: (id: string): Promise<HqIssue | null> => invokeCommand('get_issue', { id }),
+  updateIssue: (args: {
+    id: string
+    title?: string
+    description?: string
+    status?: string
+    priority?: string
+    assigneeId?: string
+    assigneeName?: string
+    phaseLabel?: string
+  }): Promise<HqIssue | null> => invokeCommand('update_issue', { args }),
+  moveIssue: (id: string, status: string): Promise<HqIssue | null> =>
+    invokeCommand('move_issue', { id, status }),
+  addComment: (issueId: string, content: string): Promise<HqIssue | null> =>
+    invokeCommand('add_comment', { issueId, content }),
+  getPlan: (epicId: string): Promise<HqPlan | null> => invokeCommand('get_plan', { epicId }),
+  approvePlan: (planId: string): Promise<HqPlan | null> =>
+    invokeCommand('approve_plan', { planId }),
+  rejectPlan: (planId: string, feedback: string): Promise<HqPlan | null> =>
+    invokeCommand('reject_plan', { planId, feedback }),
+  getAgents: (): Promise<HqAgent[]> => invokeCommand('get_agents'),
+  getAgent: (id: string): Promise<HqAgent | null> => invokeCommand('get_agent', { id }),
+  getDashboardMetrics: (): Promise<HqDashboardMetrics> => invokeCommand('get_dashboard_metrics'),
+  getActivityFeed: (): Promise<HqActivityEvent[]> => invokeCommand('get_activity_feed'),
+  getDirectorChat: (): Promise<HqDirectorMessage[]> => invokeCommand('get_director_chat'),
+  sendDirectorMessage: (
+    message: string,
+    epicId?: string | null,
+    teamConfig?: import('../types/rust-ipc').TeamConfigPayload | null
+  ): Promise<void> =>
+    invokeCommand('send_director_message', {
+      message,
+      epicId: epicId ?? null,
+      teamConfig: teamConfig ?? null,
+    }),
+  getHqSettings: (): Promise<HqSettings> => invokeCommand('get_hq_settings'),
+  bootstrapHqWorkspace: (args?: {
+    directorModel?: string | null
+    force?: boolean
+  }): Promise<HqWorkspaceBootstrapResult> => invokeCommand('bootstrap_hq_workspace', { args }),
+  updateHqSettings: (args: Partial<HqSettings>): Promise<HqSettings> =>
+    invokeCommand('update_hq_settings', { args }),
 
   // Context compaction
   compactContext: (
     messages: CompactMessage[],
     focus?: string,
-    contextWindow?: number
+    contextWindow?: number,
+    sessionId?: string,
+    compactionProvider?: string,
+    compactionModel?: string
   ): Promise<CompactContextResult> =>
     invokeCommand('compact_context', {
       messages,
       focus: focus ?? null,
       contextWindow: contextWindow ?? null,
+      sessionId: sessionId ?? null,
+      compactionProvider: compactionProvider ?? null,
+      compactionModel: compactionModel ?? null,
     }),
+
+  // Subscription usage
+  getSubscriptionUsage: (): Promise<import('../types/rust-ipc').SubscriptionUsage[]> =>
+    invokeCommand('get_subscription_usage'),
 }

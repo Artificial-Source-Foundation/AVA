@@ -196,7 +196,7 @@ export function createAgentActions(deps: ActionDeps) {
         : alwaysAllow
           ? 'always'
           : 'once'
-      rustAgent.markToolApproval(current.toolName, decision)
+      rustAgent.markToolApproval(current.toolName, decision, current.toolCallId)
     }
     setPendingApproval(null)
     void rustAgentBridge.resolveApproval(approved, alwaysAllow ?? false).catch((err) => {
@@ -273,20 +273,160 @@ export function createAgentActions(deps: ActionDeps) {
     setMessageQueue([])
   }
 
-  async function retryMessage(_assistantMessageId: string): Promise<void> {
+  async function retryMessage(assistantMessageId: string): Promise<void> {
     if (rustAgent.isRunning()) return
-    log.info('agent', 'Retrying last message')
+    log.info('agent', 'Retrying last message', { assistantMessageId })
+
+    // ── 1. Reset agent UI state ──────────────────────────────────────
     batch(() => {
       setCurrentThought('')
       setDoomLoopDetected(false)
       setToolActivity([])
       setStreamingTokenEstimate(0)
       setStreamingStartedAt(Date.now())
+      streaming.setStreamingContentOffset(0)
+      streaming.setToolCallsOffset(0)
+      streaming.setThinkingSegmentsOffset(0)
     })
+
+    // ── 2. Clear the error from the existing assistant message and reuse it ──
+    const selectedModelId = session.selectedModel()
+    const selectedProviderId = session.selectedProvider() || undefined
+    session.updateMessage(assistantMessageId, {
+      content: '',
+      error: undefined,
+      toolCalls: undefined,
+      tokensUsed: undefined,
+      costUSD: undefined,
+      metadata: undefined,
+      model: selectedModelId,
+    })
+    setLiveMessageId(assistantMessageId)
+
+    // ── 3. Call the backend's retry API via the streaming IPC layer ──
     try {
-      await rustBackend.retryLastMessage()
+      const runStartedAt = Date.now()
+      const result = await rustAgent.retryRun()
+      const errorText = rustAgent.error()
+
+      if (errorText) {
+        const isCancelled =
+          errorText === 'Agent run cancelled by user' || errorText.includes('cancelled by user')
+        if (isCancelled) {
+          const partialContent = rustAgent.streamingContent()
+          const elapsedMs = Date.now() - runStartedAt
+          if (partialContent) {
+            session.updateMessage(assistantMessageId, {
+              content: partialContent,
+              metadata: {
+                provider: selectedProviderId,
+                model: selectedModelId,
+                elapsedMs,
+                cancelled: true,
+              },
+            })
+          } else {
+            session.deleteMessage(assistantMessageId)
+          }
+          return
+        }
+        batch(() => {
+          session.updateMessage(assistantMessageId, {
+            content: '',
+            error: { type: 'unknown', message: errorText, timestamp: Date.now() },
+          })
+          rustAgent.endRun()
+        })
+        return
+      }
+
+      // ── 4. Settle the assistant response ───────────────────────────
+      const content = rustAgent.streamingContent()
+      const elapsedMs = Date.now() - runStartedAt
+      const thinking = rustAgent.thinkingContent()
+      const segments = rustAgent.thinkingSegments()
+
+      batch(() => {
+        if (content) {
+          session.updateMessage(assistantMessageId, {
+            content,
+            tokensUsed: rustAgent.tokenUsage().output,
+            costUSD: rustAgent.tokenUsage().cost || undefined,
+            toolCalls: rustAgent.activeToolCalls(),
+            metadata: {
+              provider: selectedProviderId,
+              model: selectedModelId,
+              mode: isPlanMode() ? 'plan' : 'code',
+              elapsedMs,
+              ...(thinking ? { thinking } : {}),
+              ...(segments.length > 1 ? { thinkingSegments: segments } : {}),
+            },
+          })
+        } else {
+          session.deleteMessage(assistantMessageId)
+        }
+        rustAgent.endRun()
+        setLiveMessageId(null)
+        setStreamingStartedAt(null)
+      })
+
+      // ── 5. Sync from backend in web mode ──────────────────────────
+      const sessionId = session.currentSession()?.id ?? ''
+      const backendSessionId = result?.sessionId || sessionId
+      if (!isTauri() && backendSessionId) {
+        try {
+          const apiBase = (import.meta.env.VITE_API_URL as string) || ''
+          const res = await fetch(`${apiBase}/api/sessions/${backendSessionId}/messages`)
+          if (res.ok) {
+            const rawMsgs = (await res.json()) as Array<Record<string, unknown>>
+            const backendMsgs: Message[] = rawMsgs.map((m) => {
+              const metaRaw = m.metadata
+              const metadata =
+                typeof metaRaw === 'string'
+                  ? (JSON.parse(metaRaw) as Record<string, unknown>)
+                  : (metaRaw as Record<string, unknown> | undefined)
+              return {
+                id: m.id as string,
+                sessionId: backendSessionId,
+                role: m.role as Message['role'],
+                content: (m.content as string) ?? '',
+                createdAt:
+                  typeof m.created_at === 'number'
+                    ? m.created_at
+                    : typeof m.timestamp === 'string'
+                      ? new Date(m.timestamp).getTime()
+                      : Date.now(),
+                tokensUsed: (m.tokens_used as number) || undefined,
+                costUSD: (m.cost_usd as number | null) ?? undefined,
+                model: (m.model as string | null) ?? undefined,
+                metadata,
+                toolCalls: (metadata?.toolCalls as Message['toolCalls']) ?? undefined,
+              }
+            })
+            session.replaceMessagesFromBackend(backendMsgs)
+            registerBackendSessionId(sessionId, backendSessionId)
+          }
+        } catch (syncErr) {
+          log.warn('agent', 'Failed to sync messages from backend after retry', {
+            error: String(syncErr),
+          })
+        }
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      log.error('agent', 'Unexpected error in retryMessage', { error: msg })
+      batch(() => {
+        session.updateMessage(assistantMessageId, {
+          content: '',
+          error: { type: 'unknown', message: msg, timestamp: Date.now() },
+        })
+        rustAgent.endRun()
+      })
     } finally {
-      setStreamingStartedAt(null)
+      batch(() => {
+        setStreamingStartedAt(null)
+        setLiveMessageId(null)
+      })
     }
   }
 
@@ -480,20 +620,160 @@ export function createAgentActions(deps: ActionDeps) {
     }
   }
 
-  async function regenerateResponse(_assistantMessageId: string): Promise<void> {
+  async function regenerateResponse(assistantMessageId: string): Promise<void> {
     if (rustAgent.isRunning()) return
-    log.info('agent', 'Regenerating response')
+    log.info('agent', 'Regenerating response', { assistantMessageId })
+
+    // ── 1. Reset agent UI state ──────────────────────────────────────
     batch(() => {
       setCurrentThought('')
       setDoomLoopDetected(false)
       setToolActivity([])
       setStreamingTokenEstimate(0)
       setStreamingStartedAt(Date.now())
+      streaming.setStreamingContentOffset(0)
+      streaming.setToolCallsOffset(0)
+      streaming.setThinkingSegmentsOffset(0)
     })
+
+    // ── 2. Clear the existing assistant message and reuse it ─────────
+    const selectedModelId = session.selectedModel()
+    const selectedProviderId = session.selectedProvider() || undefined
+    session.updateMessage(assistantMessageId, {
+      content: '',
+      error: undefined,
+      toolCalls: undefined,
+      tokensUsed: undefined,
+      costUSD: undefined,
+      metadata: undefined,
+      model: selectedModelId,
+    })
+    setLiveMessageId(assistantMessageId)
+
+    // ── 3. Call the backend's regenerate API via the streaming IPC layer ──
     try {
-      await rustBackend.regenerateResponse()
+      const runStartedAt = Date.now()
+      const result = await rustAgent.regenerateRun()
+      const errorText = rustAgent.error()
+
+      if (errorText) {
+        const isCancelled =
+          errorText === 'Agent run cancelled by user' || errorText.includes('cancelled by user')
+        if (isCancelled) {
+          const partialContent = rustAgent.streamingContent()
+          const elapsedMs = Date.now() - runStartedAt
+          if (partialContent) {
+            session.updateMessage(assistantMessageId, {
+              content: partialContent,
+              metadata: {
+                provider: selectedProviderId,
+                model: selectedModelId,
+                elapsedMs,
+                cancelled: true,
+              },
+            })
+          } else {
+            session.deleteMessage(assistantMessageId)
+          }
+          return
+        }
+        batch(() => {
+          session.updateMessage(assistantMessageId, {
+            content: '',
+            error: { type: 'unknown', message: errorText, timestamp: Date.now() },
+          })
+          rustAgent.endRun()
+        })
+        return
+      }
+
+      // ── 4. Settle the assistant response ───────────────────────────
+      const content = rustAgent.streamingContent()
+      const elapsedMs = Date.now() - runStartedAt
+      const thinking = rustAgent.thinkingContent()
+      const segments = rustAgent.thinkingSegments()
+
+      batch(() => {
+        if (content) {
+          session.updateMessage(assistantMessageId, {
+            content,
+            tokensUsed: rustAgent.tokenUsage().output,
+            costUSD: rustAgent.tokenUsage().cost || undefined,
+            toolCalls: rustAgent.activeToolCalls(),
+            metadata: {
+              provider: selectedProviderId,
+              model: selectedModelId,
+              mode: isPlanMode() ? 'plan' : 'code',
+              elapsedMs,
+              ...(thinking ? { thinking } : {}),
+              ...(segments.length > 1 ? { thinkingSegments: segments } : {}),
+            },
+          })
+        } else {
+          session.deleteMessage(assistantMessageId)
+        }
+        rustAgent.endRun()
+        setLiveMessageId(null)
+        setStreamingStartedAt(null)
+      })
+
+      // ── 5. Sync from backend in web mode ──────────────────────────
+      const sessionId = session.currentSession()?.id ?? ''
+      const backendSessionId = result?.sessionId || sessionId
+      if (!isTauri() && backendSessionId) {
+        try {
+          const apiBase = (import.meta.env.VITE_API_URL as string) || ''
+          const res = await fetch(`${apiBase}/api/sessions/${backendSessionId}/messages`)
+          if (res.ok) {
+            const rawMsgs = (await res.json()) as Array<Record<string, unknown>>
+            const backendMsgs: Message[] = rawMsgs.map((m) => {
+              const metaRaw = m.metadata
+              const metadata =
+                typeof metaRaw === 'string'
+                  ? (JSON.parse(metaRaw) as Record<string, unknown>)
+                  : (metaRaw as Record<string, unknown> | undefined)
+              return {
+                id: m.id as string,
+                sessionId: backendSessionId,
+                role: m.role as Message['role'],
+                content: (m.content as string) ?? '',
+                createdAt:
+                  typeof m.created_at === 'number'
+                    ? m.created_at
+                    : typeof m.timestamp === 'string'
+                      ? new Date(m.timestamp).getTime()
+                      : Date.now(),
+                tokensUsed: (m.tokens_used as number) || undefined,
+                costUSD: (m.cost_usd as number | null) ?? undefined,
+                model: (m.model as string | null) ?? undefined,
+                metadata,
+                toolCalls: (metadata?.toolCalls as Message['toolCalls']) ?? undefined,
+              }
+            })
+            session.replaceMessagesFromBackend(backendMsgs)
+            registerBackendSessionId(sessionId, backendSessionId)
+          }
+        } catch (syncErr) {
+          log.warn('agent', 'Failed to sync messages from backend after regenerate', {
+            error: String(syncErr),
+          })
+        }
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      log.error('agent', 'Unexpected error in regenerateResponse', { error: msg })
+      batch(() => {
+        session.updateMessage(assistantMessageId, {
+          content: '',
+          error: { type: 'unknown', message: msg, timestamp: Date.now() },
+        })
+        rustAgent.endRun()
+      })
     } finally {
-      setStreamingStartedAt(null)
+      batch(() => {
+        setStreamingStartedAt(null)
+        setLiveMessageId(null)
+      })
     }
   }
 

@@ -4,8 +4,8 @@
  * Premium, minimal, dark-first design tokens.
  * Architecture: Primitives → Semantic Tokens → Component Tokens
  *
- * Design: High-contrast dark with monospace accents.
- * Inspired by Obsidian, Arc, Vercel, OpenCode.
+ * Design: macOS-inspired dark with monospace accents.
+ * Inspired by macOS system design, Obsidian, Arc, Vercel.
  */
 
 :root {
@@ -14,20 +14,20 @@
      Base color palette - never use directly in components
      ======================================== */
 
-  /* Gray scale (deep dark, high contrast) */
-  --gray-0: #09090b;
-  --gray-1: #0c0c0e;
-  --gray-2: #111113;
-  --gray-3: #18181b;
-  --gray-4: #1c1c1f;
-  --gray-5: #27272a;
-  --gray-6: #3f3f46;
-  --gray-7: #52525b;
-  --gray-8: #71717a;
-  --gray-9: #a1a1aa;
-  --gray-10: #d4d4d8;
-  --gray-11: #e4e4e7;
-  --gray-12: #f4f4f5;
+  /* Gray scale (macOS-inspired warm dark) */
+  --gray-0: #0a0a0c;
+  --gray-1: #0f0f12;
+  --gray-2: #111114;
+  --gray-3: #1c1c1e;
+  --gray-4: #2c2c2e;
+  --gray-5: #38383a;
+  --gray-6: #48484a;
+  --gray-7: #636366;
+  --gray-8: #86868b;
+  --gray-9: #c8c8cc;
+  --gray-10: #d1d1d6;
+  --gray-11: #e5e5ea;
+  --gray-12: #f5f5f7;
 
   /* Alpha variants for overlays and glass effects */
   --alpha-white-3: rgba(255, 255, 255, 0.03);
@@ -43,69 +43,77 @@
   --alpha-black-60: rgba(0, 0, 0, 0.6);
 
   /* Glass & Depth (solid alpha — no backdrop-filter for Tauri perf) */
-  --glass-bg: rgba(17, 17, 19, 0.88);
-  --glass-bg-strong: rgba(24, 24, 27, 0.95);
+  --glass-bg: rgba(17, 17, 20, 0.88);
+  --glass-bg-strong: rgba(28, 28, 30, 0.95);
   --glass-border: rgba(255, 255, 255, 0.07);
   --glass-border-hover: rgba(255, 255, 255, 0.12);
 
   /* Depth shadows (layered for realism) */
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
-  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.25), 0 1px 3px rgba(0, 0, 0, 0.2);
-  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.3), 0 2px 8px rgba(0, 0, 0, 0.2);
-  --shadow-glow: 0 0 20px var(--violet-alpha-20);
+  --shadow-xs: 0 1px 1px rgba(0, 0, 0, 0.15);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.2), 0 1px 1px rgba(0, 0, 0, 0.12);
+  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.2), 0 1px 4px rgba(0, 0, 0, 0.15);
+  --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.25), 0 2px 8px rgba(0, 0, 0, 0.15);
+  --shadow-glow: 0 0 20px rgba(10, 132, 255, 0.2);
 
-  /* Accent - Electric Violet */
-  --violet-1: #1a1025;
-  --violet-2: #251538;
-  --violet-3: #351f52;
-  --violet-4: #46296d;
-  --violet-5: #5a3485;
-  --violet-6: #7048a6;
-  --violet-7: #8b5cf6;
-  --violet-8: #a78bfa;
-  --violet-9: #c4b5fd;
-  --violet-alpha-15: rgba(139, 92, 246, 0.15);
-  --violet-alpha-20: rgba(139, 92, 246, 0.2);
-  --violet-alpha-30: rgba(139, 92, 246, 0.3);
-  --violet-alpha-40: rgba(139, 92, 246, 0.4);
+  /* macOS System Colors */
+  --system-blue: #0a84ff;
+  --system-green: #34c759;
+  --system-red: #ff453a;
+  --system-amber: #f5a623;
+  --system-purple: #5e5ce6;
 
-  /* Success - Emerald Green */
+  /* Accent - macOS Blue (was Electric Violet) */
+  --violet-1: #001a33;
+  --violet-2: #002b55;
+  --violet-3: #003d7a;
+  --violet-4: #0052a3;
+  --violet-5: #006acc;
+  --violet-6: #0070e0;
+  --violet-7: #0a84ff;
+  --violet-8: #409cff;
+  --violet-9: #70b5ff;
+  --violet-alpha-15: rgba(10, 132, 255, 0.15);
+  --violet-alpha-20: rgba(10, 132, 255, 0.2);
+  --violet-alpha-30: rgba(10, 132, 255, 0.3);
+  --violet-alpha-40: rgba(10, 132, 255, 0.4);
+
+  /* Success - macOS Green */
   --green-1: #052e16;
-  --green-2: #14532d;
+  --green-2: #0d4422;
   --green-3: #166534;
-  --green-4: #22c55e;
-  --green-5: #4ade80;
-  --green-alpha-15: rgba(34, 197, 94, 0.15);
-  --green-alpha-20: rgba(34, 197, 94, 0.2);
-  --green-alpha-30: rgba(34, 197, 94, 0.3);
+  --green-4: #34c759;
+  --green-5: #5bd778;
+  --green-alpha-15: rgba(52, 199, 89, 0.15);
+  --green-alpha-20: rgba(52, 199, 89, 0.2);
+  --green-alpha-30: rgba(52, 199, 89, 0.3);
 
-  /* Warning - Amber */
-  --amber-1: #451a03;
-  --amber-2: #78350f;
-  --amber-3: #b45309;
-  --amber-4: #eab308;
-  --amber-5: #fbbf24;
-  --amber-alpha-15: rgba(234, 179, 8, 0.15);
-  --amber-alpha-20: rgba(234, 179, 8, 0.2);
+  /* Warning - macOS Amber */
+  --amber-1: #3d2800;
+  --amber-2: #5c3d00;
+  --amber-3: #8a5c00;
+  --amber-4: #f5a623;
+  --amber-5: #f7b84c;
+  --amber-alpha-15: rgba(245, 166, 35, 0.15);
+  --amber-alpha-20: rgba(245, 166, 35, 0.2);
 
-  /* Error - Red */
-  --red-1: #450a0a;
-  --red-2: #7f1d1d;
-  --red-3: #b91c1c;
-  --red-4: #ef4444;
-  --red-5: #f87171;
-  --red-alpha-15: rgba(239, 68, 68, 0.15);
-  --red-alpha-20: rgba(239, 68, 68, 0.2);
-  --red-alpha-30: rgba(239, 68, 68, 0.3);
+  /* Error - macOS Red */
+  --red-1: #3d0a07;
+  --red-2: #6b1410;
+  --red-3: #a11f1a;
+  --red-4: #ff453a;
+  --red-5: #ff6961;
+  --red-alpha-15: rgba(255, 69, 58, 0.15);
+  --red-alpha-20: rgba(255, 69, 58, 0.2);
+  --red-alpha-30: rgba(255, 69, 58, 0.3);
 
-  /* Info - Blue */
-  --blue-1: #0c1929;
-  --blue-2: #1e3a5f;
-  --blue-3: #1d4ed8;
-  --blue-4: #3b82f6;
-  --blue-5: #60a5fa;
-  --blue-alpha-15: rgba(59, 130, 246, 0.15);
-  --blue-alpha-20: rgba(59, 130, 246, 0.2);
+  /* Info - Blue (aligned with system-blue) */
+  --blue-1: #001a33;
+  --blue-2: #002b55;
+  --blue-3: #0052a3;
+  --blue-4: #0a84ff;
+  --blue-5: #409cff;
+  --blue-alpha-15: rgba(10, 132, 255, 0.15);
+  --blue-alpha-20: rgba(10, 132, 255, 0.2);
 
   /* Provider Colors */
   --orange-4: #f97316;
@@ -135,19 +143,20 @@
   --surface-raised: var(--gray-3);
   --surface-overlay: var(--gray-4);
   --surface-sunken: var(--gray-1);
-  --surface-glass: rgba(24, 24, 27, 0.6);
-  --surface-glass-strong: rgba(31, 31, 35, 0.95);
+  --surface-glass: rgba(28, 28, 30, 0.6);
+  --surface-glass-strong: rgba(44, 44, 46, 0.95);
 
   /* Text */
   --text-primary: var(--gray-12);
   --text-secondary: var(--gray-9);
   --text-tertiary: var(--gray-8);
-  --text-muted: var(--gray-7);
+  --text-muted: var(--gray-6);
 
   /* Borders */
   --border-subtle: var(--alpha-white-5);
   --border-default: var(--alpha-white-10);
   --border-strong: var(--alpha-white-15);
+  --border-accent: var(--accent-border);
   --border-interactive: var(--alpha-white-10);
   --border-emphasis: rgba(255, 255, 255, 0.18);
 
@@ -252,7 +261,7 @@
   --agent-custom: var(--pink-4);
   --agent-custom-subtle: var(--pink-alpha-15);
 
-  /* Praxis Director */
+  /* HQ Director */
   --director: var(--amber-4);
   --director-subtle: var(--amber-alpha-15);
   --director-border: var(--amber-alpha-20);
@@ -262,10 +271,10 @@
      ======================================== */
 
   /* Sidebar */
-  --sidebar-background: #0f0f12;
-  --sidebar-border: var(--gray-5);
+  --sidebar-background: var(--gray-1);
+  --sidebar-border: var(--border-subtle);
   --sidebar-item-hover: var(--alpha-white-5);
-  --sidebar-item-active: var(--gray-3);
+  --sidebar-item-active: var(--alpha-white-8);
 
   /* Input */
   --input-background: var(--surface-glass);
@@ -299,37 +308,88 @@
   --card-shadow: var(--shadow-sm);
 
   /* Chat */
-  --chat-user-bg: var(--violet-8);
-  --chat-user-text: white;
+  --chat-user-bg: #1c1c20;
+  --chat-user-text: #f5f5f7;
   --chat-assistant-bg: transparent;
-  --chat-assistant-text: var(--gray-10);
+  --chat-assistant-text: var(--text-secondary);
   --chat-assistant-border: none;
+  --chat-streaming-indicator: var(--accent);
+
+  /* Tooling and chat chrome */
+  --tool-card-background: var(--gray-1);
+  --tool-card-header: var(--alpha-white-3);
+  --tool-card-running-border: var(--accent-border);
+  --tool-card-running-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 8%, transparent);
+  --thinking-accent: var(--system-purple);
+  --thinking-subtle: color-mix(in srgb, var(--system-purple) 8%, transparent);
+  --thinking-border: color-mix(in srgb, var(--system-purple) 20%, transparent);
+  --thinking-badge: color-mix(in srgb, var(--system-purple) 12%, transparent);
+  --welcome-card-background: var(--surface);
+  --welcome-card-border: var(--border-subtle);
+  --welcome-card-border-hover: var(--border-default);
+  --welcome-logo-start: var(--system-blue);
+  --welcome-logo-end: var(--system-purple);
+
+  /* Desktop chrome */
+  --titlebar-background: var(--surface);
+  --titlebar-border: var(--border-subtle);
+  --window-control-border: var(--gray-6);
+  --window-control-hover: var(--alpha-white-10);
+  --window-control-close-background: var(--error-subtle);
+  --window-control-close-hover: color-mix(in srgb, var(--error) 24%, transparent);
+  --menu-text: var(--text-tertiary);
+  --menu-text-active: var(--text-primary);
+  --menu-hover: var(--alpha-white-10);
+  --menu-shortcut: var(--text-muted);
+  --inspector-background: var(--surface-sunken);
+  --inspector-border: var(--border-subtle);
 
   /* Code */
   --code-background: var(--surface-raised);
   --code-text: var(--text-primary);
 
-  /* Settings typography scale */
-  --settings-text-title: 16px;
-  --settings-text-label: 14px;
-  --settings-text-description: 13px;
+  /* Settings typography scale (Pencil macOS design) */
+  --settings-text-title: 22px;
+  --settings-text-section: 14px;
+  --settings-text-label: 13px;
+  --settings-text-description: 12px;
   --settings-text-input: 12px;
-  --settings-text-button: 11px;
-  --settings-text-badge: 10px;
-  --settings-text-caption: 9px;
-  --settings-card-gap: 28px;
-  --settings-card-padding: 24px;
+  --settings-text-button: 13px;
+  --settings-text-badge: 11px;
+  --settings-text-caption: 10px;
+  --settings-card-gap: 32px;
+  --settings-card-padding: 16px;
+  --settings-nav-width: 220px;
+  --settings-nav-group-label: 10px;
+  --settings-nav-item: 13px;
+
+  /* Modal / Dialog / Dropdown */
+  --modal-overlay: rgba(0, 0, 0, 0.6);
+  --modal-surface: #111114;
+  --modal-border: rgba(255, 255, 255, 0.06);
+  --modal-radius-lg: 16px;
+  --modal-radius-sm: 12px;
+  --modal-shadow: 0 24px 48px rgba(0, 0, 0, 0.4);
+  --dropdown-surface: #111114;
+  --dropdown-border: rgba(255, 255, 255, 0.08);
+  --dropdown-radius: 10px;
+  --dropdown-item-hover: rgba(255, 255, 255, 0.047);
+  --dropdown-item-active-bg: rgba(10, 132, 255, 0.082);
+  --dropdown-item-active-text: #0a84ff;
+  --dropdown-separator: rgba(255, 255, 255, 0.024);
+  --close-button-color: var(--gray-6);
+  --close-button-hover: var(--gray-12);
 
   /* Chat font size (overridden by applyAppearance) */
   --chat-font-size: 13px;
 
   /* Density defaults (overridden by applyAppearance — must exist before JS runs) */
   --density-spacing: 1;
-  --density-py: 0.375rem;
-  --density-px: 0.75rem;
-  --density-gap: 0.5rem;
-  --density-section-py: 0.75rem;
-  --density-section-px: 1rem;
+  --density-py: 0.5rem;
+  --density-px: 1rem;
+  --density-gap: 0.625rem;
+  --density-section-py: 1rem;
+  --density-section-px: 1.25rem;
 
   /* Syntax highlighting tokens (defaults = One Dark) */
   --syntax-keyword: #c678dd;
@@ -347,6 +407,7 @@
 
   --font-sans: "Geist", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --font-mono: "Geist Mono", "JetBrains Mono", "Fira Code", "SF Mono", monospace;
+  --font-ui: var(--font-sans);
   --font-ui-mono: var(--font-mono); /* For labels, badges, status, agent names */
 
   --text-2xs: 0.625rem; /* 10px */
@@ -376,11 +437,11 @@
   --space-10: 40px;
   --space-12: 48px;
 
-  --radius-sm: 3px;
-  --radius-md: 5px;
-  --radius-lg: 8px;
-  --radius-xl: 10px;
-  --radius-2xl: 14px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+  --radius-xl: 12px;
+  --radius-2xl: 16px;
   --radius-full: 9999px;
 
   /* Icon Rail / Activity Bar */
@@ -390,15 +451,15 @@
      MOTION
      ======================================== */
 
-  --duration-instant: 50ms;
-  --duration-fast: 100ms;
-  --duration-normal: 150ms;
-  --duration-slow: 220ms;
-  --duration-slower: 350ms;
+  --duration-instant: 60ms;
+  --duration-fast: 120ms;
+  --duration-normal: 180ms;
+  --duration-slow: 260ms;
+  --duration-slower: 400ms;
 
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
-  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ease-spring: cubic-bezier(0.22, 1.4, 0.36, 1);
 
   /* ========================================
      Z-INDEX
@@ -516,27 +577,6 @@
   animation: tool-card-in var(--duration-normal) var(--ease-out) forwards;
 }
 
-/* Typing indicator dots */
-@keyframes typing-pulse {
-  0%,
-  100% {
-    opacity: 0.25;
-    transform: scale(0.85);
-  }
-  50% {
-    opacity: 1;
-    transform: scale(1);
-  }
-}
-
-.typing-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 9999px;
-  background: var(--accent);
-  animation: typing-pulse 1.4s ease-in-out infinite;
-}
-
 /* Blinking cursor for streaming text */
 @keyframes blink-cursor {
   0%,
@@ -555,48 +595,16 @@
 }
 
 /* Shimmer effect for streaming text content */
-@keyframes shimmer-text {
-  0% {
-    background-position: -200% 0;
-  }
-  100% {
-    background-position: 200% 0;
-  }
-}
-
 .shimmer-text {
-  background: linear-gradient(
-    90deg,
-    var(--text-secondary) 0%,
-    var(--accent) 50%,
-    var(--text-secondary) 100%
-  );
-  background-size: 200% 100%;
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
-  animation: shimmer-text 2s ease-in-out infinite;
+  color: var(--text-primary);
+  -webkit-text-fill-color: currentColor;
 }
 
 /* Thinking shimmer — sweeping gradient across summary text while streaming.
    Uses background-clip:text for GPU-only compositing (no layout thrash). */
-@keyframes thinking-shimmer-sweep {
-  0% {
-    background-position: 200% center;
-  }
-  100% {
-    background-position: -200% center;
-  }
-}
-
 .thinking-shimmer {
-  background: linear-gradient(90deg, currentColor 0%, var(--accent) 50%, currentColor 100%);
-  background-size: 200% 100%;
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
-  color: transparent;
-  animation: thinking-shimmer-sweep 2s linear infinite;
+  color: var(--text-primary);
+  -webkit-text-fill-color: currentColor;
 }
 
 /* ========================================
@@ -641,10 +649,10 @@
 
   /* Surfaces */
   --surface: #ffffff;
-  --surface-raised: #f0f0f3;
+  --surface-raised: #f2f2f5;
   --surface-overlay: #ffffff;
-  --surface-sunken: #e8e8ec;
-  --surface-glass: rgba(255, 255, 255, 0.8);
+  --surface-sunken: #eaeaed;
+  --surface-glass: rgba(255, 255, 255, 0.85);
   --surface-glass-strong: rgba(255, 255, 255, 0.95);
 
   /* Text — all must be readable on light backgrounds */
@@ -683,7 +691,7 @@
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.06);
   --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08), 0 1px 3px rgba(0, 0, 0, 0.05);
   --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.1), 0 2px 8px rgba(0, 0, 0, 0.06);
-  --shadow-glow: 0 0 20px var(--violet-alpha-20);
+  --shadow-glow: 0 0 20px rgba(10, 132, 255, 0.2);
 
   /* Components */
   --sidebar-background: rgba(244, 244, 246, 0.95);
@@ -697,58 +705,106 @@
   --card-background: #ffffff;
   --card-border: rgba(0, 0, 0, 0.1);
   --card-hover-border: rgba(0, 0, 0, 0.15);
-  --code-background: #f0f0f3;
+  --code-background: #e8e8ec;
   --code-text: #18181b;
-  --chat-user-bg: var(--accent);
-  --chat-user-text: white;
-  --chat-assistant-bg: #f0f0f3;
-  --chat-assistant-text: #18181b;
-  --chat-assistant-border: rgba(0, 0, 0, 0.08);
+  --chat-user-bg: #e8e8ec;
+  --chat-user-text: #18181b;
+  --chat-assistant-bg: transparent;
+  --chat-assistant-text: #3f3f46;
+  --chat-assistant-border: none;
+  --tool-card-background: var(--surface);
+  --tool-card-header: var(--alpha-white-3);
+  --thinking-subtle: color-mix(in srgb, var(--system-purple) 10%, transparent);
+  --thinking-border: color-mix(in srgb, var(--system-purple) 24%, transparent);
+  --thinking-badge: color-mix(in srgb, var(--system-purple) 14%, transparent);
+  --welcome-card-background: var(--surface);
+  --welcome-card-border: var(--border-subtle);
+  --welcome-card-border-hover: var(--border-default);
+  --titlebar-background: var(--surface);
+  --titlebar-border: var(--border-subtle);
+  --window-control-border: var(--gray-7);
+  --window-control-hover: var(--alpha-white-10);
+  --window-control-close-background: var(--error-subtle);
+  --window-control-close-hover: color-mix(in srgb, var(--error) 18%, transparent);
+  --menu-text: var(--text-tertiary);
+  --menu-text-active: var(--text-primary);
+  --menu-hover: var(--alpha-white-8);
+  --menu-shortcut: var(--text-muted);
+  --inspector-background: var(--surface);
+  --inspector-border: var(--border-subtle);
+
+  /* Modal / Dialog / Dropdown (light) */
+  --modal-overlay: rgba(0, 0, 0, 0.25);
+  --modal-surface: #ffffff;
+  --modal-border: rgba(0, 0, 0, 0.1);
+  --modal-shadow: 0 24px 48px rgba(0, 0, 0, 0.12);
+  --dropdown-surface: #ffffff;
+  --dropdown-border: rgba(0, 0, 0, 0.12);
+  --dropdown-item-hover: rgba(0, 0, 0, 0.04);
+  --dropdown-item-active-bg: rgba(10, 132, 255, 0.1);
+  --dropdown-item-active-text: #0a84ff;
+  --dropdown-separator: rgba(0, 0, 0, 0.06);
+  --close-button-color: #9898a0;
+  --close-button-hover: #18181b;
 
   /* Button overrides */
   --button-ghost-text: #3f3f46;
   --button-ghost-hover: rgba(0, 0, 0, 0.06);
   --button-ghost-active: rgba(0, 0, 0, 0.1);
 
+  /* Accent — more visible on light backgrounds */
+  --accent-subtle: rgba(10, 132, 255, 0.1);
+  --accent-muted: rgba(10, 132, 255, 0.2);
+
   /* Feedback — slightly adjusted for light backgrounds */
-  --success-subtle: rgba(34, 197, 94, 0.1);
-  --warning-subtle: rgba(234, 179, 8, 0.1);
-  --error-subtle: rgba(239, 68, 68, 0.1);
-  --info-subtle: rgba(59, 130, 246, 0.1);
+  --success-subtle: rgba(52, 199, 89, 0.1);
+  --warning-subtle: rgba(245, 166, 35, 0.1);
+  --error-subtle: rgba(255, 69, 58, 0.1);
+  --info-subtle: rgba(10, 132, 255, 0.1);
 
-  /* Scrollbar */
-  --gray-6: #d4d4d8;
-  --gray-7: #a1a1aa;
+  /* Gray primitives — fully inverted for light surfaces */
+  --gray-0: #ffffff;
+  --gray-1: #f9f9fa;
+  --gray-2: #f4f4f5;
+  --gray-3: #ebebed;
+  --gray-4: #e1e1e4;
+  --gray-5: #d4d4d8;
+  --gray-6: #9898a0;
+  --gray-7: #74747c;
+  --gray-8: #5a5a62;
+  --gray-9: #44444c;
+  --gray-10: #333338;
+  --gray-11: #252529;
+  --gray-12: #18181b;
 
-  /* Gray primitives needed for light mode UI */
-  --gray-1: #f4f4f5;
-  --gray-3: #e4e4e7;
+  /* Shadows */
+  --shadow-xs: 0 1px 1px rgba(0, 0, 0, 0.04);
 }
 
 /* ========================================
    ACCENT COLOR PRESETS
    Override accent tokens via [data-accent] on <html>.
-   Default (violet) needs no selector.
+   Default (blue / macOS #0A84FF) needs no selector — it's the :root accent.
    ======================================== */
 
-[data-accent="blue"] {
-  --accent: #3b82f6;
-  --accent-hover: #60a5fa;
-  --accent-active: #2563eb;
-  --accent-subtle: rgba(59, 130, 246, 0.15);
-  --accent-muted: #1e3a5f;
-  --accent-border: rgba(59, 130, 246, 0.3);
-  --accent-glow: rgba(59, 130, 246, 0.4);
+[data-accent="violet"] {
+  --accent: #8b5cf6;
+  --accent-hover: #a78bfa;
+  --accent-active: #7c3aed;
+  --accent-subtle: rgba(139, 92, 246, 0.15);
+  --accent-muted: #2e1065;
+  --accent-border: rgba(139, 92, 246, 0.3);
+  --accent-glow: rgba(139, 92, 246, 0.4);
 }
 
 [data-accent="green"] {
-  --accent: #22c55e;
-  --accent-hover: #4ade80;
-  --accent-active: #16a34a;
-  --accent-subtle: rgba(34, 197, 94, 0.15);
-  --accent-muted: #14532d;
-  --accent-border: rgba(34, 197, 94, 0.3);
-  --accent-glow: rgba(34, 197, 94, 0.4);
+  --accent: #34c759;
+  --accent-hover: #5bd778;
+  --accent-active: #28a745;
+  --accent-subtle: rgba(52, 199, 89, 0.15);
+  --accent-muted: #0d4422;
+  --accent-border: rgba(52, 199, 89, 0.3);
+  --accent-glow: rgba(52, 199, 89, 0.4);
 }
 
 [data-accent="rose"] {

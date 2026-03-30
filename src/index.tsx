@@ -47,50 +47,51 @@ const DesignSystemPreview = lazy(() =>
 )
 
 const LoadingFallback = () => (
-  <div class="fixed inset-0 z-[9999] flex flex-col items-center justify-center bg-[var(--background)]">
-    <div class="splash-logo mb-6">
-      <svg
-        width="64"
-        height="64"
-        viewBox="0 0 64 64"
-        fill="none"
-        xmlns="http://www.w3.org/2000/svg"
-        aria-hidden="true"
+  <div
+    class="fixed inset-0 z-[9999] flex items-center justify-center"
+    style={{ background: '#0A0A0C' }}
+  >
+    <div
+      class="splash-logo"
+      style={{
+        width: '64px',
+        height: '64px',
+        'border-radius': '16px',
+        background: 'linear-gradient(180deg, #0A84FF 0%, #5E5CE6 100%)',
+        display: 'flex',
+        'align-items': 'center',
+        'justify-content': 'center',
+        'box-shadow': '0 0 80px #0A84FF10',
+      }}
+    >
+      <span
+        style={{
+          color: '#FFFFFF',
+          'font-family': 'Geist, system-ui, sans-serif',
+          'font-size': '28px',
+          'font-weight': '800',
+          'line-height': '1',
+          'user-select': 'none',
+        }}
       >
-        <path
-          d="M32 4L58 32L32 60L6 32L32 4Z"
-          stroke="var(--accent)"
-          stroke-width="2.5"
-          fill="none"
-          opacity="0.3"
-        />
-        <path
-          d="M32 12L50 32L32 52L14 32L32 12Z"
-          stroke="var(--accent)"
-          stroke-width="2"
-          fill="var(--accent)"
-          opacity="0.15"
-        />
-        <path d="M32 20L42 32L32 44L22 32L32 20Z" fill="var(--accent)" opacity="0.6" />
-      </svg>
+        A
+      </span>
     </div>
-    <h1 class="text-xl font-semibold tracking-widest uppercase text-[var(--text-primary)] mb-8">
-      AVA
-    </h1>
-    <div class="flex gap-1.5">
-      <span
-        class="splash-dot w-1.5 h-1.5 rounded-full bg-[var(--accent)]"
-        style="animation-delay: 0ms"
-      />
-      <span
-        class="splash-dot w-1.5 h-1.5 rounded-full bg-[var(--accent)]"
-        style="animation-delay: 150ms"
-      />
-      <span
-        class="splash-dot w-1.5 h-1.5 rounded-full bg-[var(--accent)]"
-        style="animation-delay: 300ms"
-      />
-    </div>
+    <span
+      style={{
+        position: 'absolute',
+        bottom: '30px',
+        left: '50%',
+        transform: 'translateX(-50%)',
+        color: '#1C1C1E',
+        'font-family': '"Geist Mono", ui-monospace, monospace',
+        'font-size': '11px',
+        'letter-spacing': '4px',
+        'user-select': 'none',
+      }}
+    >
+      ava
+    </span>
   </div>
 )
 

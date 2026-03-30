@@ -107,6 +107,8 @@ impl AzureOpenAIProvider {
         let mut body = self.build_request_body(messages, stream);
         if !tools.is_empty() {
             body["tools"] = json!(common::tools_to_openai_format(tools));
+            body["tool_choice"] = json!("auto");
+            body["parallel_tool_calls"] = json!(true);
         }
         body
     }
@@ -164,17 +166,17 @@ impl LLMProvider for AzureOpenAIProvider {
         let request = self.auth_request(request);
 
         let response = self.send_request(request).await?;
-        let response = common::validate_status(response, "Azure OpenAI").await?;
+        let response =
+            common::validate_status_for_model(response, "Azure OpenAI", Some(&self.model)).await?;
         let mut sse_parser = common::SseParser::new();
+        let mut utf8 = common::Utf8Accumulator::new();
         let stream = response.bytes_stream().flat_map(move |chunk| {
-            let chunks = chunk
-                .ok()
-                .and_then(|bytes| String::from_utf8(bytes.to_vec()).ok())
+            let chunks = common::decode_stream_chunk(&mut utf8, chunk, "Azure OpenAI")
                 .map(|text| {
                     sse_parser
                         .feed(&text)
                         .into_iter()
-                        .filter_map(|line| serde_json::from_str::<Value>(&line).ok())
+                        .filter_map(|line| common::parse_json_stream_payload(&line, "Azure OpenAI"))
                         .filter_map(|payload| common::parse_openai_stream_chunk(&payload))
                         .collect::<Vec<_>>()
                 })
@@ -290,17 +292,17 @@ impl LLMProvider for AzureOpenAIProvider {
         let request = self.auth_request(request);
 
         let response = self.send_request(request).await?;
-        let response = common::validate_status(response, "Azure OpenAI").await?;
+        let response =
+            common::validate_status_for_model(response, "Azure OpenAI", Some(&self.model)).await?;
         let mut sse_parser = common::SseParser::new();
+        let mut utf8 = common::Utf8Accumulator::new();
         let stream = response.bytes_stream().flat_map(move |chunk| {
-            let chunks = chunk
-                .ok()
-                .and_then(|bytes| String::from_utf8(bytes.to_vec()).ok())
+            let chunks = common::decode_stream_chunk(&mut utf8, chunk, "Azure OpenAI")
                 .map(|text| {
                     sse_parser
                         .feed(&text)
                         .into_iter()
-                        .filter_map(|line| serde_json::from_str::<Value>(&line).ok())
+                        .filter_map(|line| common::parse_json_stream_payload(&line, "Azure OpenAI"))
                         .filter_map(|payload| common::parse_openai_stream_chunk(&payload))
                         .collect::<Vec<_>>()
                 })
@@ -472,6 +474,8 @@ mod tests {
         assert!(body.get("tools").is_some());
         let tool_defs = body["tools"].as_array().unwrap();
         assert_eq!(tool_defs.len(), 1);
+        assert_eq!(body["tool_choice"], json!("auto"));
+        assert_eq!(body["parallel_tool_calls"], json!(true));
     }
 
     #[test]

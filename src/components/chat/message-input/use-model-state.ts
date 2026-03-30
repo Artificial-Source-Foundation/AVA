@@ -6,6 +6,7 @@
  */
 
 import { type Accessor, createEffect, createMemo } from 'solid-js'
+import { useChatMode } from '../../../contexts/chat-mode'
 import { updateCoreBudgetLimit } from '../../../services/core-bridge'
 import { getModelFromCatalog } from '../../../services/providers/models-dev-catalog'
 import { useSession } from '../../../stores/session'
@@ -31,6 +32,7 @@ export interface ModelState {
 // ---------------------------------------------------------------------------
 
 export function useModelState(): ModelState {
+  const chatMode = useChatMode()
   const sessionStore = useSession()
   const { selectedModel, selectedProvider, setSelectedModel } = sessionStore
   const { settings, updateSettings } = useSettings()
@@ -85,6 +87,9 @@ export function useModelState(): ModelState {
   })
 
   const currentModelDisplay = createMemo(() => {
+    // Director mode can override the model display label
+    if (chatMode?.modelDisplay) return chatMode.modelDisplay()
+
     const modelId = selectedModel()
     const provId = selectedProvider()
     if (provId) {

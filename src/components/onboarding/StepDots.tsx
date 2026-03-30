@@ -2,7 +2,7 @@
  * StepDots
  *
  * Reusable step indicator dots for the onboarding flow.
- * Active dot uses accent color (scaled up), completed dots are solid accent, rest use gray-5.
+ * Active dot: 8px accent blue. Completed: 6px accent blue. Remaining: 6px #48484A.
  */
 
 import { type Component, For } from 'solid-js'
@@ -17,12 +17,13 @@ export const StepDots: Component<StepDotsProps> = (props) => (
     <For each={Array.from({ length: props.total })}>
       {(_, i) => (
         <div
-          class="w-2 h-2 rounded-full transition-all duration-300"
+          class="rounded-full transition-all duration-300"
           classList={{
-            'bg-[var(--accent)] scale-125': i() === props.current,
-            'bg-[var(--accent)]': i() < props.current,
-            'bg-[var(--gray-5)]': i() > props.current,
+            'w-2 h-2 bg-[var(--accent)]': i() === props.current,
+            'w-1.5 h-1.5 bg-[var(--accent)]': i() < props.current,
+            'w-1.5 h-1.5': i() > props.current,
           }}
+          style={i() > props.current ? { background: '#48484A' } : undefined}
         />
       )}
     </For>

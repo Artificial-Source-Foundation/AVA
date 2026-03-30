@@ -5,8 +5,6 @@
 //! messages transforms and chat params, plus completion detection helpers
 //! (turn/budget limits, natural completion, attempt_completion).
 
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
 use std::time::{Duration, Instant};
 
 use ava_llm::ThinkingConfig;
@@ -16,6 +14,7 @@ use tokio::sync::mpsc;
 use tracing::{debug, info, trace, warn};
 
 use super::response;
+use super::response::request_dedup_hash;
 use super::{AgentEvent, AgentLoop};
 use crate::stuck::StuckDetector;
 use crate::system_prompt::{build_system_prompt, provider_prompt_suffix};
@@ -24,6 +23,52 @@ use super::response::parse_tool_calls;
 
 /// Tools that modify files — used to decide when to emit `StreamingEditProgress`.
 const EDIT_TOOL_NAMES: &[&str] = &["write", "edit", "multiedit", "apply_patch"];
+
+/// Ensure every assistant tool_call has a matching Tool result in the message list.
+///
+/// After visibility filtering (compaction marks some messages `agent_visible=false`),
+/// an assistant message with tool_calls may remain while its corresponding tool result
+/// messages were filtered out. OpenAI returns 400 "No tool output found for function
+/// call" in this case. This function appends synthetic error results for any orphaned
+/// tool_calls, making the history valid for all providers.
+pub(super) fn ensure_tool_call_consistency(messages: &mut Vec<Message>) {
+    use std::collections::HashSet;
+
+    let answered: HashSet<&str> = messages
+        .iter()
+        .filter(|m| m.role == Role::Tool)
+        .filter_map(|m| m.tool_call_id.as_deref())
+        .collect();
+
+    let mut synthetic = Vec::new();
+    for msg in messages.iter() {
+        if msg.role != Role::Assistant {
+            continue;
+        }
+        for tc in &msg.tool_calls {
+            if !answered.contains(tc.id.as_str()) {
+                let content = "[Tool result removed during context compaction]".to_string();
+                let result = ava_types::ToolResult {
+                    call_id: tc.id.clone(),
+                    content: content.clone(),
+                    is_error: true,
+                };
+                let tool_msg = Message::new(Role::Tool, content)
+                    .with_tool_call_id(&tc.id)
+                    .with_tool_results(vec![result]);
+                synthetic.push(tool_msg);
+            }
+        }
+    }
+
+    if !synthetic.is_empty() {
+        tracing::debug!(
+            count = synthetic.len(),
+            "injected synthetic tool results for orphaned tool_calls after visibility filtering"
+        );
+        messages.extend(synthetic);
+    }
+}
 
 /// Extract a file path from partially-accumulated JSON arguments.
 ///
@@ -127,15 +172,7 @@ impl AgentLoop {
         // Dedup guard — hash last message content + message count so context growth
         // (new tool results) breaks the dedup even if the last message content is
         // identical (e.g. same compile error).
-        let dedup_hash = {
-            let msgs = self.context.get_messages();
-            let mut hasher = DefaultHasher::new();
-            msgs.len().hash(&mut hasher);
-            if let Some(last) = msgs.last() {
-                last.content.hash(&mut hasher);
-            }
-            hasher.finish()
-        };
+        let dedup_hash = request_dedup_hash(self.context.get_messages());
         if let (Some(prev_hash), Some(prev_time)) = (self.last_request_hash, self.last_request_time)
         {
             if dedup_hash == prev_hash && prev_time.elapsed().as_secs() < 2 {
@@ -146,18 +183,15 @@ impl AgentLoop {
 
         // chat.params hook: allow plugins to modify per-call LLM parameters.
         if let Some(ref pm) = self.plugin_manager.clone() {
-            let has_hook = pm
-                .lock()
-                .await
-                .has_hook_subscribers(ava_plugin::HookEvent::ChatParams);
-            if has_hook {
+            let mut pm = pm.lock().await;
+            if pm.has_hook_subscribers(ava_plugin::HookEvent::ChatParams) {
                 let params = serde_json::json!({
                     "model": self.config.model,
                     "max_tokens": self.config.token_limit,
                     "thinking_level": format!("{:?}", self.config.thinking_level).to_lowercase(),
                     "thinking_budget_tokens": self.config.thinking_budget_tokens,
                 });
-                let modified = pm.lock().await.apply_chat_params_hook(params).await;
+                let modified = pm.apply_chat_params_hook(params).await;
                 // Apply supported overrides back to config.
                 if let Some(v) = modified.get("max_tokens").and_then(|v| v.as_u64()) {
                     self.config.token_limit = v as usize;
@@ -203,14 +237,8 @@ impl AgentLoop {
         };
 
         // Set dedup hash on success with non-empty response
-        match &result {
-            Ok((text, calls, _)) => {
-                if !text.trim().is_empty() || !calls.is_empty() {
-                    self.last_request_hash = Some(dedup_hash);
-                    self.last_request_time = Some(Instant::now());
-                }
-            }
-            Err(_) => {
+        if let Ok((text, calls, _)) = &result {
+            if !text.trim().is_empty() || !calls.is_empty() {
                 self.last_request_hash = Some(dedup_hash);
                 self.last_request_time = Some(Instant::now());
             }
@@ -225,13 +253,15 @@ impl AgentLoop {
     /// hook returns unchanged content, the original context messages are returned as-is.
     async fn apply_messages_transform(&mut self) -> Vec<Message> {
         let Some(ref pm) = self.plugin_manager.clone() else {
-            return self
+            let mut msgs: Vec<Message> = self
                 .context
                 .get_messages()
                 .iter()
                 .filter(|m| m.agent_visible)
                 .cloned()
                 .collect();
+            ensure_tool_call_consistency(&mut msgs);
+            return msgs;
         };
 
         if !pm
@@ -239,13 +269,15 @@ impl AgentLoop {
             .await
             .has_hook_subscribers(ava_plugin::HookEvent::ChatMessagesTransform)
         {
-            return self
+            let mut msgs: Vec<Message> = self
                 .context
                 .get_messages()
                 .iter()
                 .filter(|m| m.agent_visible)
                 .cloned()
                 .collect();
+            ensure_tool_call_consistency(&mut msgs);
+            return msgs;
         }
 
         // Only send agent-visible messages to the LLM. Compacted messages
@@ -317,6 +349,7 @@ impl AgentLoop {
                 result.push(Message::new(role, content));
             }
         }
+        ensure_tool_call_consistency(&mut result);
         result
     }
 
@@ -426,7 +459,9 @@ impl AgentLoop {
                     first_text_ms = Some(provider_request_start.elapsed().as_millis() as u64);
                 }
                 full_text.push_str(text);
-                Self::emit(event_tx, AgentEvent::Token(text.to_string()));
+                if !self.suppress_next_tokens {
+                    Self::emit(event_tx, AgentEvent::Token(text.to_string()));
+                }
             }
             // Emit thinking
             if let Some(ref thinking) = chunk.thinking {
@@ -526,7 +561,7 @@ impl AgentLoop {
         let tool_calls = if native_tools && !accumulated_tool_calls.is_empty() {
             response::finalize_tool_calls(accumulated_tool_calls)
         } else if !native_tools {
-            parse_tool_calls(&full_text).unwrap_or_default()
+            parse_tool_calls(&full_text)?
         } else {
             vec![]
         };

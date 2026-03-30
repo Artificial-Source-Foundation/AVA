@@ -34,10 +34,13 @@ logs/
 *.log
 npm-debug.log*
 
-# Environment
+# Environment & secrets
 .env
 .env.local
 .env.*.local
+*.pem
+*.key
+credentials.json
 
 # Test coverage
 coverage/
@@ -47,12 +50,8 @@ coverage/
 *.temp
 .tmp/
 
-# Reference code (cloned repos for inspiration)
-docs/reference-code/
-docs/research/source-code/
-
-# Memory bank (personal session notes)
-docs/memory-bank/
+# Docs (local dev reference, not tracked)
+docs/
 
 # Local git worktrees
 .worktrees/

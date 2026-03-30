@@ -75,8 +75,14 @@ pub struct AgentLoop {
     snapshot_manager: ava_tools::core::file_snapshot::SharedSnapshotManager,
     /// Trusted project root used for contextual instruction resolution.
     project_root: Option<std::path::PathBuf>,
+    /// Tracks contextual `AGENTS.md` files already injected during this session.
+    activated_context_paths: std::sync::Mutex<HashSet<std::path::PathBuf>>,
     /// Tracks `.ava/rules/*.md` files already injected during this session.
     activated_rule_paths: std::sync::Mutex<HashSet<std::path::PathBuf>>,
+    /// When true, suppress `AgentEvent::Token` emissions for the current turn.
+    /// Set after a stuck-detector `InjectMessage` so the model's acknowledgment
+    /// of the nudge doesn't leak into the visible assistant response.
+    suppress_next_tokens: bool,
     /// When false, skip on-demand project rule injection entirely.
     enable_dynamic_rules: bool,
     /// Cached active tool definitions for this loop configuration.
@@ -97,6 +103,9 @@ pub struct AgentConfig {
     #[serde(default)]
     pub max_budget_usd: f64,
     pub token_limit: usize,
+    /// Provider name (e.g., "anthropic", "openai", "zai-coding-plan").
+    #[serde(default)]
+    pub provider: String,
     pub model: String,
     #[serde(default = "default_max_cost")]
     pub max_cost_usd: f64,
@@ -199,6 +208,12 @@ fn default_enable_dynamic_rules() -> bool {
 
 /// Events emitted during streaming agent execution for UI consumption.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CompactedMessagePreview {
+    pub role: String,
+    pub content: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum AgentEvent {
     Token(String),
     /// Thinking/reasoning content from the model (displayed separately in UI).
@@ -222,6 +237,18 @@ pub enum AgentEvent {
         threshold_percent: u8,
         current_cost_usd: f64,
         max_budget_usd: f64,
+    },
+    ContextCompacted {
+        auto: bool,
+        tokens_before: usize,
+        tokens_after: usize,
+        tokens_saved: usize,
+        messages_before: usize,
+        messages_after: usize,
+        usage_before_percent: f64,
+        summary: String,
+        context_summary: String,
+        active_messages: Vec<CompactedMessagePreview>,
     },
     /// A file edit has completed. Contains the unified diff for UI display.
     DiffPreview {
@@ -256,6 +283,12 @@ pub enum AgentEvent {
         output_tokens: usize,
         /// Estimated cost in USD for the sub-agent's LLM calls.
         cost_usd: f64,
+        /// Specialist/subagent type label when known.
+        agent_type: Option<String>,
+        /// External provider/runtime when applicable.
+        provider: Option<String>,
+        /// Whether this subagent reused a previous external session.
+        resumed: bool,
     },
     /// A project-state snapshot was taken before a write/edit tool execution.
     /// The TUI can use the commit hash for rewind/restore operations.
@@ -307,7 +340,9 @@ impl AgentLoop {
             session_id: None,
             snapshot_manager: ava_tools::core::file_snapshot::new_shared_snapshot_manager(),
             project_root,
+            activated_context_paths: std::sync::Mutex::new(HashSet::new()),
             activated_rule_paths: std::sync::Mutex::new(HashSet::new()),
+            suppress_next_tokens: false,
             enable_dynamic_rules,
             cached_tool_defs: std::sync::Mutex::new(None),
             cached_hooked_tool_defs: std::sync::Mutex::new(None),
@@ -360,6 +395,17 @@ impl AgentLoop {
         self.project_root = project_root;
         self.enable_dynamic_rules = enable_dynamic_rules;
         self
+    }
+
+    fn reset_dynamic_instruction_activation(&self) {
+        self.activated_context_paths
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .clear();
+        self.activated_rule_paths
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .clear();
     }
 
     async fn has_plugin_hook_subscribers(&self, event: ava_plugin::HookEvent) -> bool {
@@ -482,8 +528,17 @@ impl AgentLoop {
         } else {
             Session::new()
         };
-        let mut detector = StuckDetector::new();
-        let mut repetition_detector = RepetitionDetector::default();
+        let loop_thresholds = crate::stuck::LoopThresholds::for_provider_model(
+            &self.config.provider,
+            &self.config.model,
+        );
+        let rep_threshold = if loop_thresholds.tool_repeat_count < 3 {
+            2
+        } else {
+            3
+        };
+        let mut detector = StuckDetector::with_thresholds(loop_thresholds);
+        let mut repetition_detector = RepetitionDetector::new(rep_threshold);
         let mut total_usage = TokenUsage::default();
         let mut total_cost_usd = 0.0;
         let is_subscription = self.llm.capabilities().is_subscription;
@@ -612,6 +667,46 @@ impl AgentLoop {
                         self.broadcast_event_to_plugins(&err_event).await;
                         return Err(error);
                     }
+                    if let Some(report) = self.context.last_compaction_report().cloned() {
+                        let active_messages = self
+                            .context
+                            .get_agent_visible_messages()
+                            .into_iter()
+                            .map(|message| CompactedMessagePreview {
+                                role: match message.role {
+                                    Role::System => "system".to_string(),
+                                    Role::User => "user".to_string(),
+                                    Role::Assistant => "assistant".to_string(),
+                                    Role::Tool => "tool".to_string(),
+                                },
+                                content: message.content.clone(),
+                            })
+                            .collect();
+                        let usage_before_percent = if self.config.token_limit == 0 {
+                            0.0
+                        } else {
+                            (report.tokens_before as f64 / self.config.token_limit as f64) * 100.0
+                        };
+                        Self::emit(
+                            &event_tx,
+                            AgentEvent::ContextCompacted {
+                                auto: true,
+                                tokens_before: report.tokens_before,
+                                tokens_after: report.tokens_after,
+                                tokens_saved: report.tokens_saved,
+                                messages_before: report.messages_before,
+                                messages_after: report.messages_after,
+                                usage_before_percent,
+                                summary: format!(
+                                    "Context automatically compacted: {} messages -> summary (saved {} tokens).",
+                                    report.messages_before, report.tokens_saved
+                                ),
+                                context_summary: report.summary.unwrap_or_default(),
+                                active_messages,
+                            },
+                        );
+                    }
+                    self.reset_dynamic_instruction_activation();
 
                     Self::emit(
                         &event_tx,
@@ -711,13 +806,15 @@ impl AgentLoop {
 
             // --- Repetition detection ---
             if let Some(ref warning) = repetition_warning {
-                let assistant_message = Message::new(Role::Assistant, response_text.clone())
+                let mut assistant_message = Message::new(Role::Assistant, response_text.clone())
                     .with_tool_calls(tool_calls.clone());
+                assistant_message.user_visible = false;
                 self.context.add_message(assistant_message.clone());
                 session.add_message(assistant_message);
-                self.add_tool_results(&tool_calls, &tool_results, &mut session);
+                self.add_tool_results_internal(&tool_calls, &tool_results, &mut session);
                 Self::emit(&event_tx, AgentEvent::Progress(warning.clone()));
-                let nudge = Message::new(Role::User, warning.clone());
+                let mut nudge = Message::new(Role::User, warning.clone());
+                nudge.user_visible = false;
                 self.context.add_message(nudge.clone());
                 session.add_message(nudge);
                 continue;
@@ -730,7 +827,7 @@ impl AgentLoop {
                 tool_results = tool_results.len(),
                 "running stuck detection"
             );
-            match detector.check(
+            match detector.check_with_cooldown(
                 &response_text,
                 &tool_calls,
                 &tool_results,
@@ -740,15 +837,22 @@ impl AgentLoop {
             ) {
                 StuckAction::Continue => {}
                 StuckAction::InjectMessage(msg) => {
-                    let assistant_message = Message::new(Role::Assistant, response_text.clone())
-                        .with_tool_calls(tool_calls.clone());
+                    let mut assistant_message =
+                        Message::new(Role::Assistant, response_text.clone())
+                            .with_tool_calls(tool_calls.clone());
+                    assistant_message.user_visible = false;
                     self.context.add_message(assistant_message.clone());
                     session.add_message(assistant_message);
-                    self.add_tool_results(&tool_calls, &tool_results, &mut session);
+                    self.add_tool_results_internal(&tool_calls, &tool_results, &mut session);
                     Self::emit(&event_tx, AgentEvent::Progress(msg.clone()));
-                    let nudge = Message::new(Role::User, msg);
+                    let mut nudge = Message::new(Role::User, msg);
+                    nudge.user_visible = false;
                     self.context.add_message(nudge.clone());
                     session.add_message(nudge);
+                    // Suppress token output for the next turn so the model's
+                    // acknowledgment of the nudge doesn't leak into the visible
+                    // assistant response bubble.
+                    self.suppress_next_tokens = true;
                     continue;
                 }
                 StuckAction::Stop(reason) => {
@@ -756,7 +860,64 @@ impl AgentLoop {
                     session.add_message(Message::new(Role::System, reason));
                     break;
                 }
+                StuckAction::NeedsJudge(context_summary) => {
+                    // Layer 3: Ask the same model (fresh, no context) if the agent is stuck
+                    debug!("Layer 3 LLM-as-judge triggered");
+                    Self::emit(
+                        &event_tx,
+                        AgentEvent::Progress(
+                            "checking if agent is stuck (LLM judge)...".to_string(),
+                        ),
+                    );
+                    let judge_prompt = format!(
+                        "You are an AI agent monitor. Analyze this agent's recent behavior and determine if it is stuck in a loop.\n\n\
+                         {context_summary}\n\n\
+                         Respond with EXACTLY one line:\n\
+                         - \"STUCK: <brief reason>\" if the agent is repeating itself or making no progress\n\
+                         - \"NOT_STUCK\" if the agent is making genuine progress"
+                    );
+                    let judge_msgs = vec![Message::new(Role::User, judge_prompt)];
+                    let judge_result = tokio::time::timeout(
+                        std::time::Duration::from_secs(10),
+                        self.llm.generate(&judge_msgs),
+                    )
+                    .await;
+
+                    match judge_result {
+                        Ok(Ok(response)) => {
+                            let trimmed = response.trim();
+                            if let Some(reason) = trimmed.strip_prefix("STUCK:") {
+                                let reason = reason.trim();
+                                let msg = format!(
+                                    "LLM judge determined agent is stuck: {reason}. Try a completely different approach."
+                                );
+                                let assistant_message =
+                                    Message::new(Role::Assistant, response_text.clone())
+                                        .with_tool_calls(tool_calls.clone());
+                                self.context.add_message(assistant_message.clone());
+                                session.add_message(assistant_message);
+                                self.add_tool_results(&tool_calls, &tool_results, &mut session);
+                                Self::emit(&event_tx, AgentEvent::Progress(msg.clone()));
+                                let nudge = Message::new(Role::User, msg);
+                                self.context.add_message(nudge.clone());
+                                session.add_message(nudge);
+                                continue;
+                            }
+                            // NOT_STUCK — continue normally
+                        }
+                        Ok(Err(e)) => {
+                            debug!(error = %e, "LLM judge call failed, continuing");
+                        }
+                        Err(_) => {
+                            debug!("LLM judge timed out after 10s, continuing");
+                        }
+                    }
+                }
             }
+
+            // Response passed stuck detection — this is a productive turn.
+            // Reset token suppression so output streams normally again.
+            self.suppress_next_tokens = false;
 
             // --- Empty response handling ---
             if response_text.trim().is_empty() && tool_calls.is_empty() {
@@ -772,8 +933,13 @@ impl AgentLoop {
                 break;
             }
 
-            let assistant_message = Message::new(Role::Assistant, response_text.clone())
+            let mut assistant_message = Message::new(Role::Assistant, response_text.clone())
                 .with_tool_calls(tool_calls.clone());
+            // When suppress_next_tokens is active, this is the model's internal
+            // acknowledgment of a stuck-detector nudge — hide it from the UI.
+            if self.suppress_next_tokens {
+                assistant_message.user_visible = false;
+            }
             self.context.add_message(assistant_message.clone());
             session.add_message(assistant_message);
 
@@ -785,10 +951,11 @@ impl AgentLoop {
                 // nudge the agent to retry instead of silently completing.
                 if last_turn_all_failed && turn < self.effective_max_turns() {
                     last_turn_all_failed = false; // fire once to avoid infinite nudge loop
-                    let nudge = Message::new(
+                    let mut nudge = Message::new(
                         Role::User,
                         "Your previous tool calls all failed. Review the errors above and try a different approach to complete the task.".to_string(),
                     );
+                    nudge.user_visible = false;
                     self.context.add_message(nudge.clone());
                     session.add_message(nudge);
                     Self::emit(
@@ -886,9 +1053,55 @@ impl AgentLoop {
                         }
                     }
                     if let Err(error) = self.context.compact_async().await {
-                        Self::emit(&event_tx, AgentEvent::Error(error.to_string()));
-                        return Err(error.into());
+                        warn!(error = %error, "background auto-compaction failed; continuing run");
+                        Self::emit(
+                            &event_tx,
+                            AgentEvent::Progress(format!(
+                                "context compaction skipped after failure: {error}"
+                            )),
+                        );
+                        continue;
                     }
+                    if let Some(report) = self.context.last_compaction_report().cloned() {
+                        let active_messages = self
+                            .context
+                            .get_agent_visible_messages()
+                            .into_iter()
+                            .map(|message| CompactedMessagePreview {
+                                role: match message.role {
+                                    Role::System => "system".to_string(),
+                                    Role::User => "user".to_string(),
+                                    Role::Assistant => "assistant".to_string(),
+                                    Role::Tool => "tool".to_string(),
+                                },
+                                content: message.content.clone(),
+                            })
+                            .collect();
+                        let usage_before_percent = if self.config.token_limit == 0 {
+                            0.0
+                        } else {
+                            (report.tokens_before as f64 / self.config.token_limit as f64) * 100.0
+                        };
+                        Self::emit(
+                            &event_tx,
+                            AgentEvent::ContextCompacted {
+                                auto: true,
+                                tokens_before: report.tokens_before,
+                                tokens_after: report.tokens_after,
+                                tokens_saved: report.tokens_saved,
+                                messages_before: report.messages_before,
+                                messages_after: report.messages_after,
+                                usage_before_percent,
+                                summary: format!(
+                                    "Context automatically compacted: {} messages -> summary (saved {} tokens).",
+                                    report.messages_before, report.tokens_saved
+                                ),
+                                context_summary: report.summary.unwrap_or_default(),
+                                active_messages,
+                            },
+                        );
+                    }
+                    self.reset_dynamic_instruction_activation();
                     Self::emit(
                         &event_tx,
                         AgentEvent::Progress("context compacted".to_string()),
@@ -1006,6 +1219,7 @@ mod tests {
         let config = AgentConfig {
             max_turns: 10,
             token_limit: 128_000,
+            provider: String::new(),
             model: "mock".to_string(),
             max_budget_usd: 0.0,
             max_cost_usd: 1.0,
@@ -1040,6 +1254,7 @@ mod tests {
         let config = AgentConfig {
             max_turns: 10,
             token_limit: 128_000,
+            provider: String::new(),
             model: "mock".to_string(),
             max_budget_usd: 0.0,
             max_cost_usd: 10.0,
@@ -1077,6 +1292,7 @@ mod tests {
         let config = AgentConfig {
             max_turns: 10,
             token_limit: 128_000,
+            provider: String::new(),
             model: "mock".to_string(),
             max_budget_usd: 0.0,
             max_cost_usd: 10.0,
@@ -1131,6 +1347,7 @@ mod tests {
         let config = AgentConfig {
             max_turns: 10,
             token_limit: 128_000,
+            provider: String::new(),
             model: "mock".to_string(),
             max_budget_usd: 0.0,
             max_cost_usd: 10.0,
@@ -1185,6 +1402,7 @@ mod tests {
         let config = AgentConfig {
             max_turns: 10,
             token_limit: 128_000,
+            provider: String::new(),
             model: "mock".to_string(),
             max_budget_usd: 0.0,
             max_cost_usd: 0.0, // Zero threshold = immediate stop
@@ -1214,6 +1432,7 @@ mod tests {
         let config = AgentConfig {
             max_turns: 10,
             token_limit: 128_000,
+            provider: String::new(),
             model: "mock".to_string(),
             max_budget_usd: 0.0,
             max_cost_usd: 0.0,

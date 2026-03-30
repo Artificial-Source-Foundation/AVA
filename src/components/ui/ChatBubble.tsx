@@ -58,39 +58,34 @@ export const ChatBubble: Component<ChatBubbleProps> = (props) => {
       `}
       {...others}
     >
-      {/* Avatar */}
-      <Show when={showAvatar() && !isSystem()}>
+      {/* Avatar — only for system messages */}
+      <Show when={showAvatar() && isSystem()}>
         <div class="flex-shrink-0">
-          <Avatar
-            src={local.avatarSrc}
-            initials={local.avatarInitials ?? (isUser() ? 'U' : 'AI')}
-            size="sm"
-          />
+          <Avatar src={local.avatarSrc} initials={local.avatarInitials ?? 'S'} size="sm" />
         </div>
       </Show>
 
       {/* Message bubble */}
       <div
         class={`
-          max-w-[80%]
-          ${isSystem() ? 'max-w-full' : ''}
+          ${isUser() ? 'max-w-[70%]' : isSystem() ? 'max-w-full' : 'w-full'}
         `}
       >
         <div
           class={`
-            px-4 py-2.5
-            rounded-[var(--radius-2xl)]
             text-sm
             leading-relaxed
             ${
               isUser()
                 ? `
+              px-4 py-3
               bg-[var(--chat-user-bg)]
               text-[var(--chat-user-text)]
-              rounded-br-[var(--radius-md)]
+              rounded-[16px] rounded-br-[4px]
             `
                 : isSystem()
                   ? `
+              px-4 py-2.5
               bg-[var(--surface-sunken)]
               text-[var(--text-tertiary)]
               text-xs
@@ -98,10 +93,7 @@ export const ChatBubble: Component<ChatBubbleProps> = (props) => {
               rounded-[var(--radius-lg)]
             `
                   : `
-              bg-[var(--chat-assistant-bg)]
               text-[var(--chat-assistant-text)]
-              border border-[var(--chat-assistant-border)]
-              rounded-bl-[var(--radius-md)]
             `
             }
           `}
@@ -110,7 +102,7 @@ export const ChatBubble: Component<ChatBubbleProps> = (props) => {
 
           {/* Streaming cursor */}
           <Show when={local.isStreaming}>
-            <span class="inline-block w-2 h-4 ml-1 bg-current animate-pulse rounded-sm" />
+            <span class="inline-block w-2 h-4 ml-1 bg-current animate-pulse-subtle rounded-sm" />
           </Show>
         </div>
 
@@ -135,8 +127,7 @@ export const ChatBubble: Component<ChatBubbleProps> = (props) => {
  */
 export const TypingIndicator: Component<{ class?: string }> = (props) => (
   <div class={`flex gap-3 ${props.class ?? ''}`}>
-    <Avatar initials="AI" size="sm" />
-    <div class="px-4 py-3 bg-[var(--chat-assistant-bg)] border border-[var(--chat-assistant-border)] rounded-[var(--radius-2xl)] rounded-bl-[var(--radius-md)]">
+    <div class="py-2">
       <div class="flex gap-1">
         <span class="w-2 h-2 bg-[var(--text-tertiary)] rounded-full animate-bounce [animation-delay:-0.3s]" />
         <span class="w-2 h-2 bg-[var(--text-tertiary)] rounded-full animate-bounce [animation-delay:-0.15s]" />

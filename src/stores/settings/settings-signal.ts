@@ -7,6 +7,7 @@
 import { createRoot, createSignal } from 'solid-js'
 import { debugLog } from '../../lib/debug-log'
 import { log } from '../../lib/logger'
+import { installReplaceableWindowListener } from '../../lib/replaceable-window-listener'
 import { applyAppearanceToDOM } from './settings-appearance'
 import { hydrateAgents, hydrateProviders } from './settings-hydration'
 import { loadSettings, saveSettings } from './settings-persistence'
@@ -20,46 +21,51 @@ const { settings, setSettingsRaw } = createRoot(() => {
   const [settings, setSettingsRaw] = createSignal<AppSettings>(initial)
 
   // Listen for settings changes from core-v2 extensions (bidirectional sync)
-  window.addEventListener('ava:core-settings-changed', ((e: CustomEvent) => {
-    const { category, value } = e.detail as { category: string; value: unknown }
-    if (!value || typeof value !== 'object') return
+  installReplaceableWindowListener('settings-signal:core-settings', (target) => {
+    const listener = ((e: CustomEvent) => {
+      const { category, value } = e.detail as { category: string; value: unknown }
+      if (!value || typeof value !== 'object') return
 
-    const patch = value as Record<string, unknown>
-    setSettingsRaw((prev) => {
-      // Map known core categories back to AppSettings fields
-      if (category === 'permissions') {
-        return {
-          ...prev,
-          autoApprovedTools: (patch.autoApprovePatterns as string[]) ?? prev.autoApprovedTools,
+      const patch = value as Record<string, unknown>
+      setSettingsRaw((prev) => {
+        // Map known core categories back to AppSettings fields
+        if (category === 'permissions') {
+          return {
+            ...prev,
+            autoApprovedTools: (patch.autoApprovePatterns as string[]) ?? prev.autoApprovedTools,
+          }
         }
-      }
-      if (category === 'context') {
-        return {
-          ...prev,
-          generation: {
-            ...prev.generation,
-            maxTokens: (patch.maxTokens as number) ?? prev.generation.maxTokens,
-            autoCompact: (patch.autoCompact as boolean) ?? prev.generation.autoCompact,
-            compactionThreshold:
-              (patch.compactionThreshold as number) ?? prev.generation.compactionThreshold,
-          },
+        if (category === 'context') {
+          return {
+            ...prev,
+            generation: {
+              ...prev.generation,
+              maxTokens: (patch.maxTokens as number) ?? prev.generation.maxTokens,
+              autoCompact: (patch.autoCompact as boolean) ?? prev.generation.autoCompact,
+              compactionThreshold:
+                (patch.compactionThreshold as number) ?? prev.generation.compactionThreshold,
+            },
+          }
         }
-      }
-      if (category === 'git') {
-        return {
-          ...prev,
-          git: {
-            ...prev.git,
-            enabled: (patch.enabled as boolean) ?? prev.git.enabled,
-            autoCommit: (patch.autoCommit as boolean) ?? prev.git.autoCommit,
-            commitPrefix: (patch.messagePrefix as string) ?? prev.git.commitPrefix,
-          },
+        if (category === 'git') {
+          return {
+            ...prev,
+            git: {
+              ...prev.git,
+              enabled: (patch.enabled as boolean) ?? prev.git.enabled,
+              autoCommit: (patch.autoCommit as boolean) ?? prev.git.autoCommit,
+              commitPrefix: (patch.messagePrefix as string) ?? prev.git.commitPrefix,
+            },
+          }
         }
-      }
-      // Unknown categories (extension-specific) — ignore
-      return prev
-    })
-  }) as EventListener)
+        // Unknown categories (extension-specific) — ignore
+        return prev
+      })
+    }) as EventListener
+
+    target.addEventListener('ava:core-settings-changed', listener)
+    return () => target.removeEventListener('ava:core-settings-changed', listener)
+  })
 
   return { settings, setSettingsRaw }
 })

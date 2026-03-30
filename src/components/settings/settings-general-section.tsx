@@ -1,175 +1,197 @@
-import { Bot, Download, Eye, GitBranch, Monitor, Trash2, Upload } from 'lucide-solid'
-import { type Component, createSignal, For, Show } from 'solid-js'
-import type { UISettings } from '../../stores/settings'
+/**
+ * General Settings Section
+ *
+ * Card-based layout matching BehaviorTab / AppearanceTab pattern.
+ * 4 cards: Interface, Git, Automation (future), Data.
+ * Each card: #111114 surface, #ffffff08 border, rounded-12, 20px padding, 16px gap.
+ */
+
+import { Database, Download, GitBranch, Monitor, Upload } from 'lucide-solid'
+import { type Component, Show } from 'solid-js'
 import { useSettings } from '../../stores/settings'
 import { Toggle } from '../ui/Toggle'
 import { ToggleRow } from '../ui/ToggleRow'
 import { SettingsCard } from './SettingsCard'
-import { SETTINGS_CARD_GAP } from './settings-constants'
 
 export const GeneralSection: Component = () => {
-  const {
-    settings,
-    updateUI,
-    updateAgentLimits,
-    updateBehavior,
-    updateGit,
-    exportSettings,
-    importSettings,
-    resetSettings,
-  } = useSettings()
-  const [confirmClear, setConfirmClear] = createSignal(false)
-
-  const uiToggles: { key: keyof UISettings; label: string }[] = [
-    { key: 'showBottomPanel', label: 'Show memory panel on start' },
-    { key: 'showAgentActivity', label: 'Show agent activity panel' },
-    { key: 'compactMessages', label: 'Compact message layout' },
-    { key: 'showInfoBar', label: 'Show chat info bar' },
-    { key: 'showTokenCount', label: 'Show token count' },
-    { key: 'showModelInTitleBar', label: 'Show model in title bar' },
-  ]
-
-  const handleClearAll = (): void => {
-    localStorage.clear()
-    resetSettings()
-    setConfirmClear(false)
-    window.location.reload()
-  }
+  const { settings, updateUI, updateGit, exportSettings, importSettings } = useSettings()
 
   return (
-    <div class="grid grid-cols-1" style={{ gap: SETTINGS_CARD_GAP }}>
-      <SettingsCard icon={Monitor} title="Interface" description="Layout and display preferences">
-        <div class="space-y-0.5">
-          <For each={uiToggles}>
-            {(toggle) => (
-              <div class="flex items-center justify-between py-2">
-                <span class="text-[var(--settings-text-label)] text-[var(--text-secondary)]">
-                  {toggle.label}
-                </span>
-                <Toggle
-                  checked={!!settings().ui[toggle.key]}
-                  onChange={() => updateUI({ [toggle.key]: !settings().ui[toggle.key] })}
-                />
-              </div>
-            )}
-          </For>
-        </div>
-      </SettingsCard>
+    <div class="flex flex-col" style={{ gap: '24px' }}>
+      {/* Page title */}
+      <h2
+        style={{
+          'font-family': 'Geist, sans-serif',
+          'font-size': '22px',
+          'font-weight': '600',
+          color: '#F5F5F7',
+          margin: '0',
+        }}
+      >
+        General
+      </h2>
 
-      <SettingsCard icon={Bot} title="Agent" description="AI agent behavior settings">
+      {/* Interface Card */}
+      <SettingsCard
+        icon={Monitor}
+        title="Interface"
+        description="Panel visibility and layout preferences"
+      >
         <ToggleRow
-          label="Auto-fix lint errors after edits"
-          description="Run linter after file changes and feed errors back to agent"
-          checked={settings().agentLimits.autoFixLint}
-          onChange={(v) => updateAgentLimits({ autoFixLint: v })}
+          label="Show memory panel"
+          description="Display the memory panel in the sidebar"
+          checked={!!settings().ui.showBottomPanel}
+          onChange={() => updateUI({ showBottomPanel: !settings().ui.showBottomPanel })}
+        />
+        <ToggleRow
+          label="Show activity panel"
+          description="Display agent activity in the sidebar"
+          checked={!!settings().ui.showAgentActivity}
+          onChange={() => updateUI({ showAgentActivity: !settings().ui.showAgentActivity })}
+        />
+        <ToggleRow
+          label="Compact layout"
+          description="Reduce padding and spacing throughout the UI"
+          checked={!!settings().ui.compactMessages}
+          onChange={() => updateUI({ compactMessages: !settings().ui.compactMessages })}
+        />
+        <ToggleRow
+          label="Show token count"
+          description="Display token usage in the status bar"
+          checked={!!settings().ui.showTokenCount}
+          onChange={() => updateUI({ showTokenCount: !settings().ui.showTokenCount })}
         />
       </SettingsCard>
 
-      <SettingsCard icon={GitBranch} title="Git Integration" description="Version control settings">
+      {/* Git Card */}
+      <SettingsCard icon={GitBranch} title="Git" description="Version control and commit behavior">
         <ToggleRow
           label="Enable git integration"
-          description="Detect git repos and enable auto-commit features"
+          description="Track file changes with git snapshots"
           checked={settings().git.enabled}
           onChange={(v) => updateGit({ enabled: v })}
         />
         <Show when={settings().git.enabled}>
-          <ToggleRow
-            label="Auto-commit AI edits"
-            description="Commit file changes after each successful AI edit. Enables undo."
-            checked={settings().git.autoCommit}
-            onChange={(v) => updateGit({ autoCommit: v })}
-          />
-          <Show when={settings().git.autoCommit}>
-            <div class="flex items-center justify-between py-2 gap-3">
-              <div>
-                <span class="text-[var(--settings-text-label)] text-[var(--text-secondary)]">
-                  Commit prefix
-                </span>
-                <p class="text-[var(--settings-text-description)] text-[var(--gray-8)]">
-                  Prepended to auto-commit messages
-                </p>
-              </div>
-              <input
-                type="text"
-                value={settings().git.commitPrefix}
-                onInput={(e) => updateGit({ commitPrefix: e.currentTarget.value })}
-                class="w-32 px-3 py-2 text-[var(--settings-text-label)] rounded-[var(--radius-md)] bg-[var(--gray-3)] text-[var(--text-primary)] border border-[var(--gray-5)] focus:border-[var(--accent)] outline-none"
-                placeholder="[ava]"
+          <div class="flex items-center justify-between" style={{ width: '100%' }}>
+            <div style={{ display: 'flex', 'flex-direction': 'column', gap: '2px' }}>
+              <span
+                style={{
+                  'font-family': 'Geist, sans-serif',
+                  'font-size': '13px',
+                  color: '#C8C8CC',
+                }}
+              >
+                Auto-commit
+              </span>
+              <span
+                style={{
+                  'font-family': 'Geist, sans-serif',
+                  'font-size': '12px',
+                  color: '#48484A',
+                }}
+              >
+                Automatically commit after each task
+              </span>
+            </div>
+            <div class="flex items-center" style={{ gap: '12px' }}>
+              <Show when={settings().git.autoCommit}>
+                <div
+                  class="flex items-center"
+                  style={{
+                    'border-radius': '8px',
+                    background: '#111114',
+                    border: '1px solid #ffffff0a',
+                    height: '32px',
+                    padding: '0 12px',
+                  }}
+                >
+                  <input
+                    type="text"
+                    value={settings().git.commitPrefix}
+                    onInput={(e) => updateGit({ commitPrefix: e.currentTarget.value })}
+                    class="outline-none"
+                    style={{
+                      background: 'transparent',
+                      'font-family': 'Geist Mono, monospace',
+                      'font-size': '12px',
+                      color: '#F5F5F7',
+                      width: '60px',
+                      border: 'none',
+                    }}
+                    placeholder="[ava]"
+                  />
+                </div>
+              </Show>
+              <Toggle
+                checked={settings().git.autoCommit}
+                onChange={(v) => updateGit({ autoCommit: v })}
               />
             </div>
-          </Show>
+          </div>
         </Show>
       </SettingsCard>
 
-      <SettingsCard icon={Eye} title="Integrations" description="File and clipboard watchers">
-        <ToggleRow
-          label="Watch for AI comments"
-          description="Detect // AI! and // AI? in project files"
-          checked={settings().behavior.fileWatcher}
-          onChange={(v) => updateBehavior({ fileWatcher: v })}
-        />
-        <ToggleRow
-          label="Clipboard watcher"
-          description="Detect clipboard changes with code or LLM output"
-          checked={settings().behavior.clipboardWatcher}
-          onChange={(v) => updateBehavior({ clipboardWatcher: v })}
-        />
-      </SettingsCard>
-
-      <SettingsCard icon={Download} title="Data" description="Import, export, and reset">
-        <div class="flex flex-wrap gap-2.5">
+      {/* Data Card */}
+      <SettingsCard
+        icon={Database}
+        title="Data"
+        description="Import, export, and manage application data"
+      >
+        <div class="flex items-center" style={{ gap: '12px', width: '100%' }}>
           <button
             type="button"
             onClick={() => exportSettings()}
-            class="flex items-center gap-2 px-4 py-2.5 text-[var(--settings-text-description)] text-[var(--text-secondary)] bg-[var(--gray-2)] border border-[var(--gray-5)] rounded-[var(--radius-md)] hover:border-[var(--accent-muted)] transition-colors"
+            class="flex items-center transition-colors"
+            style={{
+              gap: '6px',
+              'border-radius': '8px',
+              border: '1px solid #ffffff0a',
+              height: '32px',
+              padding: '0 14px',
+              color: '#C8C8CC',
+              'font-family': 'Geist, sans-serif',
+              'font-size': '13px',
+              background: 'transparent',
+              cursor: 'pointer',
+            }}
           >
-            <Download class="w-4 h-4" />
-            Export Settings
+            <Download style={{ width: '14px', height: '14px' }} />
+            Export Data
           </button>
           <button
             type="button"
             onClick={() => importSettings()}
-            class="flex items-center gap-2 px-4 py-2.5 text-[var(--settings-text-description)] text-[var(--text-secondary)] bg-[var(--gray-2)] border border-[var(--gray-5)] rounded-[var(--radius-md)] hover:border-[var(--accent-muted)] transition-colors"
+            class="flex items-center transition-colors"
+            style={{
+              gap: '6px',
+              'border-radius': '8px',
+              border: '1px solid #ffffff0a',
+              height: '32px',
+              padding: '0 14px',
+              color: '#C8C8CC',
+              'font-family': 'Geist, sans-serif',
+              'font-size': '13px',
+              background: 'transparent',
+              cursor: 'pointer',
+            }}
           >
-            <Upload class="w-4 h-4" />
-            Import Settings
+            <Upload style={{ width: '14px', height: '14px' }} />
+            Import Data
           </button>
-          <Show
-            when={confirmClear()}
-            fallback={
-              <button
-                type="button"
-                onClick={() => setConfirmClear(true)}
-                class="flex items-center gap-2 px-4 py-2.5 text-[var(--settings-text-description)] text-[var(--error)] bg-[var(--gray-2)] border border-[var(--gray-5)] rounded-[var(--radius-md)] hover:border-[var(--error)] transition-colors"
-              >
-                <Trash2 class="w-4 h-4" />
-                Clear All Data
-              </button>
-            }
-          >
-            <div class="flex items-center gap-2">
-              <span class="text-[var(--settings-text-description)] text-[var(--error)]">
-                Are you sure?
-              </span>
-              <button
-                type="button"
-                onClick={handleClearAll}
-                class="px-4 py-2.5 text-[var(--settings-text-description)] text-white bg-[var(--error)] rounded-[var(--radius-md)] hover:brightness-110 transition-colors"
-              >
-                Yes, clear everything
-              </button>
-              <button
-                type="button"
-                onClick={() => setConfirmClear(false)}
-                class="px-4 py-2.5 text-[var(--settings-text-description)] text-[var(--text-secondary)] bg-[var(--gray-2)] border border-[var(--gray-5)] rounded-[var(--radius-md)] transition-colors"
-              >
-                Cancel
-              </button>
-            </div>
-          </Show>
         </div>
-        <div class="pt-3">
-          <span class="text-[var(--settings-text-input)] font-mono text-[var(--gray-8)]">
+        <div class="flex items-center" style={{ gap: '8px' }}>
+          <span
+            style={{ 'font-family': 'Geist, sans-serif', 'font-size': '13px', color: '#48484A' }}
+          >
+            Version
+          </span>
+          <span
+            style={{
+              'font-family': 'Geist Mono, monospace',
+              'font-size': '13px',
+              color: '#C8C8CC',
+            }}
+          >
             AVA v2.1.0
           </span>
         </div>

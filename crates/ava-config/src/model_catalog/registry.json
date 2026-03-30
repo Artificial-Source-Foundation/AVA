@@ -227,7 +227,8 @@
       "aliases": ["deepseek-v3"],
       "capabilities": {
         "tool_call": true,
-        "streaming": true
+        "streaming": true,
+        "loop_prone": true
       },
       "limits": {
         "context_window": 131072,
@@ -245,7 +246,8 @@
       "aliases": [],
       "capabilities": {
         "tool_call": true,
-        "streaming": true
+        "streaming": true,
+        "loop_prone": true
       },
       "limits": {
         "context_window": 131072,
@@ -409,7 +411,8 @@
       "aliases": ["mixtral-8x7b-32768"],
       "capabilities": {
         "tool_call": true,
-        "streaming": true
+        "streaming": true,
+        "loop_prone": true
       },
       "limits": {
         "context_window": 32768,
@@ -427,7 +430,8 @@
       "aliases": ["gemma2-9b-it"],
       "capabilities": {
         "tool_call": true,
-        "streaming": true
+        "streaming": true,
+        "loop_prone": true
       },
       "limits": {
         "context_window": 8192,
@@ -445,7 +449,8 @@
       "aliases": ["mercury2"],
       "capabilities": {
         "tool_call": true,
-        "streaming": true
+        "streaming": true,
+        "loop_prone": true
       },
       "limits": {
         "context_window": 128000,
@@ -463,7 +468,8 @@
       "aliases": ["glm4.7"],
       "capabilities": {
         "tool_call": true,
-        "streaming": true
+        "streaming": true,
+        "loop_prone": true
       },
       "limits": {
         "context_window": 204800,
@@ -481,7 +487,8 @@
       "aliases": ["glm4.6"],
       "capabilities": {
         "tool_call": true,
-        "streaming": true
+        "streaming": true,
+        "loop_prone": true
       },
       "limits": {
         "context_window": 204800,
@@ -499,7 +506,8 @@
       "aliases": ["glm4.5"],
       "capabilities": {
         "tool_call": true,
-        "streaming": true
+        "streaming": true,
+        "loop_prone": true
       },
       "limits": {
         "context_window": 131072,
@@ -517,7 +525,8 @@
       "aliases": ["glm4.5-flash"],
       "capabilities": {
         "tool_call": true,
-        "streaming": true
+        "streaming": true,
+        "loop_prone": true
       },
       "limits": {
         "context_window": 131072,
@@ -535,7 +544,8 @@
       "aliases": ["glm4.7-flash"],
       "capabilities": {
         "tool_call": true,
-        "streaming": true
+        "streaming": true,
+        "loop_prone": true
       },
       "limits": {
         "context_window": 204800,
@@ -553,7 +563,8 @@
       "aliases": ["glm4-plus"],
       "capabilities": {
         "tool_call": true,
-        "streaming": true
+        "streaming": true,
+        "loop_prone": true
       },
       "limits": {
         "context_window": 131072,
@@ -571,7 +582,8 @@
       "aliases": ["glm4-long"],
       "capabilities": {
         "tool_call": true,
-        "streaming": true
+        "streaming": true,
+        "loop_prone": true
       },
       "limits": {
         "context_window": 1048576,
@@ -590,7 +602,8 @@
       "capabilities": {
         "tool_call": true,
         "vision": true,
-        "streaming": true
+        "streaming": true,
+        "loop_prone": true
       },
       "limits": {
         "context_window": 8192,
@@ -608,7 +621,8 @@
       "aliases": ["codegeex4"],
       "capabilities": {
         "tool_call": true,
-        "streaming": true
+        "streaming": true,
+        "loop_prone": true
       },
       "limits": {
         "context_window": 131072,
@@ -626,7 +640,8 @@
       "aliases": [],
       "capabilities": {
         "tool_call": true,
-        "streaming": true
+        "streaming": true,
+        "loop_prone": true
       },
       "limits": {
         "context_window": 204800,
@@ -644,7 +659,8 @@
       "aliases": [],
       "capabilities": {
         "tool_call": true,
-        "streaming": true
+        "streaming": true,
+        "loop_prone": true
       },
       "limits": {
         "context_window": 204800,
@@ -662,7 +678,8 @@
       "aliases": [],
       "capabilities": {
         "tool_call": true,
-        "streaming": true
+        "streaming": true,
+        "loop_prone": true
       },
       "limits": {
         "context_window": 131072,
@@ -680,7 +697,8 @@
       "aliases": [],
       "capabilities": {
         "tool_call": true,
-        "streaming": true
+        "streaming": true,
+        "loop_prone": true
       },
       "limits": {
         "context_window": 131072,
@@ -698,7 +716,8 @@
       "aliases": [],
       "capabilities": {
         "tool_call": true,
-        "streaming": true
+        "streaming": true,
+        "loop_prone": true
       },
       "limits": {
         "context_window": 204800,
@@ -716,7 +735,8 @@
       "aliases": [],
       "capabilities": {
         "tool_call": true,
-        "streaming": true
+        "streaming": true,
+        "loop_prone": true
       },
       "limits": {
         "context_window": 131072,
@@ -734,7 +754,8 @@
       "aliases": [],
       "capabilities": {
         "tool_call": true,
-        "streaming": true
+        "streaming": true,
+        "loop_prone": true
       },
       "limits": {
         "context_window": 1048576,
@@ -753,7 +774,8 @@
       "capabilities": {
         "tool_call": true,
         "vision": true,
-        "streaming": true
+        "streaming": true,
+        "loop_prone": true
       },
       "limits": {
         "context_window": 8192,
@@ -771,7 +793,8 @@
       "aliases": [],
       "capabilities": {
         "tool_call": true,
-        "streaming": true
+        "streaming": true,
+        "loop_prone": true
       },
       "limits": {
         "context_window": 131072,

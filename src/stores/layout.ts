@@ -100,8 +100,9 @@ function setRightPanelWidth(w: number): void {
 
 function switchRightPanelTab(tab: dialogs.RightPanelTab): void {
   log.debug('nav', 'Right panel tab changed', { tab })
+  const wasVisible = rightPanelVisible()
   dialogs.switchRightPanelTab(tab, () => {
-    if (!rightPanelVisible()) setRightPanelVisible(true)
+    if (!wasVisible) setRightPanelVisible(true)
   })
 }
 
@@ -144,6 +145,40 @@ function switchBottomPanelTab(tab: BottomPanelTab): void {
 }
 
 // ============================================================================
+// Subagent Detail View
+// ============================================================================
+
+/** Tool call ID of the subagent currently being viewed (null = normal chat) */
+const [viewingSubagentId, setViewingSubagentIdRaw] = createSignal<string | null>(null)
+
+function openSubagentDetail(toolCallId: string): void {
+  log.debug('nav', 'Subagent detail opened', { toolCallId })
+  setViewingSubagentIdRaw(toolCallId)
+}
+
+function closeSubagentDetail(): void {
+  log.debug('nav', 'Subagent detail closed')
+  setViewingSubagentIdRaw(null)
+}
+
+// ============================================================================
+// Plan Full-Screen Viewer
+// ============================================================================
+
+/** Plan ID currently being viewed in full-screen Plannotator mode (null = not viewing) */
+const [viewingPlanId, setViewingPlanIdRaw] = createSignal<string | null>(null)
+
+function openPlanViewer(planId: string): void {
+  log.debug('nav', 'Plan viewer opened', { planId })
+  setViewingPlanIdRaw(planId)
+}
+
+function closePlanViewer(): void {
+  log.debug('nav', 'Plan viewer closed')
+  setViewingPlanIdRaw(null)
+}
+
+// ============================================================================
 // Code Editor
 // ============================================================================
 
@@ -155,6 +190,30 @@ function openCodeEditor(filePath: string): void {
 
 function closeCodeEditor(): void {
   setCodeEditorFileRaw(null)
+}
+
+// ============================================================================
+// Dashboard
+// ============================================================================
+
+const [dashboardVisible, setDashboardVisibleRaw] = createSignal(false)
+
+function setDashboardVisible(visible: boolean): void {
+  setDashboardVisibleRaw(visible)
+}
+
+function openDashboard(): void {
+  log.debug('nav', 'Dashboard opened')
+  setDashboardVisible(true)
+}
+
+function closeDashboard(): void {
+  log.debug('nav', 'Dashboard closed')
+  setDashboardVisible(false)
+}
+
+function toggleDashboard(): void {
+  setDashboardVisible(!dashboardVisible())
 }
 
 // ============================================================================
@@ -234,6 +293,13 @@ export function useLayout() {
     closeSettings: dialogs.closeSettings,
     toggleSettings: dialogs.toggleSettings,
 
+    // Dashboard
+    dashboardVisible,
+    setDashboardVisible,
+    openDashboard,
+    closeDashboard,
+    toggleDashboard,
+
     // Project hub
     projectHubVisible,
     setProjectHubVisible,
@@ -266,5 +332,15 @@ export function useLayout() {
     openChatSearch: dialogs.openChatSearch,
     closeChatSearch: dialogs.closeChatSearch,
     toggleChatSearch: dialogs.toggleChatSearch,
+
+    // Subagent detail view
+    viewingSubagentId,
+    openSubagentDetail,
+    closeSubagentDetail,
+
+    // Plan full-screen viewer
+    viewingPlanId,
+    openPlanViewer,
+    closePlanViewer,
   }
 }

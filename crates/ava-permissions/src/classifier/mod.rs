@@ -3,7 +3,7 @@ mod rules;
 
 pub use rules::is_safe_git_command;
 
-use parser::{extract_words_heuristic, extract_words_treesitter};
+use parser::{extract_words_heuristic, extract_words_treesitter, parse_command_ast};
 use rules::{check_blocked_patterns, check_high_risk_patterns, check_whole_command_high_risk};
 
 use crate::tags::{RiskLevel, SafetyTag};
@@ -62,8 +62,9 @@ impl CommandClassification {
 /// Uses a BLOCKLIST approach: all commands default to Low risk (auto-approve),
 /// and only specific dangerous patterns are flagged as High or Critical.
 ///
-/// Parses pipes (`|`), chains (`&&`, `||`, `;`), and returns the HIGHEST risk
-/// from all parts. Uses tree-sitter for word extraction, falls back to heuristic.
+/// Uses tree-sitter AST to properly parse pipes, chains, subshells, and command
+/// substitution. Falls back to heuristic splitting if tree-sitter fails, with
+/// extra scrutiny applied to heuristic-parsed commands.
 pub fn classify_bash_command(command: &str) -> CommandClassification {
     // Check whole-command blocked patterns FIRST (before splitting).
     // This catches patterns that span pipes/chains like `curl ... | sh` and fork bombs.
@@ -75,101 +76,75 @@ pub fn classify_bash_command(command: &str) -> CommandClassification {
     // Check whole-command high-risk patterns (cross-pipe patterns like base64 | curl).
     if let Some(high_result) = check_whole_command_high_risk(&lower_full) {
         // Don't return early — merge and continue so per-part checks can also contribute.
-        let parts = split_command_parts(command);
+        let ast = parse_command_ast(command);
         let mut result = high_result;
-        for part in &parts {
-            let part_result = classify_single_command(part.trim());
+        for cmd in ast.commands() {
+            let part_result = classify_parsed_command(cmd);
             result.merge_highest(&part_result);
         }
         return result;
     }
 
-    let parts = split_command_parts(command);
-    if parts.is_empty() {
+    // Use tree-sitter AST to split commands (handles subshells, substitution, etc.)
+    let ast = parse_command_ast(command);
+    let commands = ast.commands();
+    if commands.is_empty() {
         return CommandClassification::low();
     }
 
     let mut result = CommandClassification::low();
-    for part in &parts {
-        let part_result = classify_single_command(part.trim());
+
+    // If AST parsing had errors, escalate risk on otherwise-Low commands
+    // (fail-closed: unparseable commands get extra scrutiny)
+    let extra_scrutiny = ast.needs_extra_scrutiny();
+
+    for cmd in commands {
+        let part_result = classify_parsed_command(cmd);
         result.merge_highest(&part_result);
     }
+
+    // If we couldn't fully parse and nothing was flagged, bump to High
+    // for commands that contain suspicious characters (potential bypass)
+    if extra_scrutiny
+        && result.risk_level == RiskLevel::Low
+        && contains_suspicious_patterns(&lower_full)
+    {
+        result.risk_level = RiskLevel::High;
+        result.tags.push(SafetyTag::ExecuteCommand);
+        result.warnings.push(
+            "Command could not be fully parsed by tree-sitter; applying extra scrutiny".to_string(),
+        );
+    }
+
     result
 }
 
-/// Split a command on pipes and chain operators, returning individual parts.
-fn split_command_parts(command: &str) -> Vec<String> {
-    let mut parts = Vec::new();
-    let mut current = String::new();
-    let mut chars = command.chars().peekable();
-    let mut in_single_quote = false;
-    let mut in_double_quote = false;
-    let mut prev_char = None;
-
-    while let Some(ch) = chars.next() {
-        match ch {
-            '\'' if !in_double_quote && prev_char != Some('\\') => {
-                in_single_quote = !in_single_quote;
-                current.push(ch);
-            }
-            '"' if !in_single_quote && prev_char != Some('\\') => {
-                in_double_quote = !in_double_quote;
-                current.push(ch);
-            }
-            '|' if !in_single_quote && !in_double_quote => {
-                if chars.peek() == Some(&'|') {
-                    chars.next(); // consume second |
-                }
-                if !current.trim().is_empty() {
-                    parts.push(current.trim().to_string());
-                }
-                current.clear();
-            }
-            '&' if !in_single_quote && !in_double_quote => {
-                if chars.peek() == Some(&'&') {
-                    chars.next(); // consume second &
-                }
-                if !current.trim().is_empty() {
-                    parts.push(current.trim().to_string());
-                }
-                current.clear();
-            }
-            ';' if !in_single_quote && !in_double_quote => {
-                if !current.trim().is_empty() {
-                    parts.push(current.trim().to_string());
-                }
-                current.clear();
-            }
-            _ => {
-                current.push(ch);
-            }
-        }
-        prev_char = Some(ch);
-    }
-
-    if !current.trim().is_empty() {
-        parts.push(current.trim().to_string());
-    }
-    parts
+/// Check for patterns that might indicate a bypass attempt in unparseable commands.
+fn contains_suspicious_patterns(lower: &str) -> bool {
+    // Patterns that are suspicious in commands we can't fully parse
+    lower.contains("eval ")
+        || lower.contains("exec ")
+        || lower.contains("\\x")       // hex escapes
+        || lower.contains("\\u{")      // unicode escapes
+        || lower.contains('\u{200b}')  // zero-width space
+        || lower.contains("$'\\") // ANSI-C quoting with escapes
 }
 
-/// Classify a single command (no pipes/chains).
-///
-/// Blocklist approach:
-/// 1. Critical patterns → blocked (always denied)
-/// 2. High-risk patterns → warn (ask user)
-/// 3. Everything else → Low (auto-approve)
-fn classify_single_command(command: &str) -> CommandClassification {
-    let lower = command.to_ascii_lowercase();
+/// Classify a parsed command (already split by the AST parser).
+fn classify_parsed_command(cmd: &parser::ParsedCommand) -> CommandClassification {
+    let lower = cmd.text.to_ascii_lowercase();
 
     // 1. Check blocked patterns (Critical)
-    if let Some(reason) = check_blocked_patterns(&lower, command) {
+    if let Some(reason) = check_blocked_patterns(&lower, &cmd.text) {
         return CommandClassification::blocked(reason);
     }
 
-    // Try tree-sitter for word extraction
-    let words =
-        extract_words_treesitter(command).unwrap_or_else(|| extract_words_heuristic(command));
+    // Use pre-extracted words from AST (already properly parsed)
+    let words = if cmd.words.is_empty() {
+        extract_words_treesitter(&cmd.text).unwrap_or_else(|| extract_words_heuristic(&cmd.text))
+    } else {
+        cmd.words.clone()
+    };
 
     let first_word = words.first().map(|s| s.as_str()).unwrap_or("");
 
@@ -179,6 +154,26 @@ fn classify_single_command(command: &str) -> CommandClassification {
     }
 
     // 3. Everything else: Low risk (auto-approve)
+    CommandClassification::low()
+}
+
+/// Classify a single command string (legacy API, kept for compatibility).
+#[allow(dead_code)]
+fn classify_single_command(command: &str) -> CommandClassification {
+    let lower = command.to_ascii_lowercase();
+
+    if let Some(reason) = check_blocked_patterns(&lower, command) {
+        return CommandClassification::blocked(reason);
+    }
+
+    let words =
+        extract_words_treesitter(command).unwrap_or_else(|| extract_words_heuristic(command));
+    let first_word = words.first().map(|s| s.as_str()).unwrap_or("");
+
+    if let Some(result) = check_high_risk_patterns(first_word, &lower, &words) {
+        return result;
+    }
+
     CommandClassification::low()
 }
 

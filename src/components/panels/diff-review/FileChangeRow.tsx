@@ -31,7 +31,7 @@ export const FileChangeRow: Component<FileChangeRowProps> = (props) => {
       {/* File header row */}
       <button
         type="button"
-        onClick={props.onToggle}
+        onClick={() => props.onToggle()}
         class="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-[var(--surface-raised)] transition-colors"
       >
         <Show

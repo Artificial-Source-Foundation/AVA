@@ -49,7 +49,7 @@ fn syntax_validation_hotpaths(c: &mut Criterion) {
     let large = build_balanced_source(800);
 
     group.bench_with_input(BenchmarkId::new("payload", "small"), &small, |b, source| {
-        b.iter(|| validator.validate(black_box(source.as_str())))
+        b.iter(|| validator.validate(black_box(source.as_str())));
     });
     group.bench_with_input(
         BenchmarkId::new("payload", "medium"),
@@ -57,7 +57,7 @@ fn syntax_validation_hotpaths(c: &mut Criterion) {
         |b, source| b.iter(|| validator.validate(black_box(source.as_str()))),
     );
     group.bench_with_input(BenchmarkId::new("payload", "large"), &large, |b, source| {
-        b.iter(|| validator.validate(black_box(source.as_str())))
+        b.iter(|| validator.validate(black_box(source.as_str())));
     });
 
     group.finish();
@@ -72,13 +72,13 @@ fn retry_pipeline_hotpath(c: &mut Criterion) {
 
     c.bench_function("retry_pipeline_fail_fix_pass", |b| {
         b.iter(|| {
-            validate_with_retry(
+            let _ = validate_with_retry(
                 black_box(&pipeline),
                 black_box(source),
                 black_box(&fixer),
                 black_box(DEFAULT_MAX_ATTEMPTS),
-            )
-        })
+            );
+        });
     });
 }
 

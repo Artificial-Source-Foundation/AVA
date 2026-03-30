@@ -2,7 +2,7 @@
  * Settings Modal — OpenCode-inspired Design
  */
 
-import { type Component, createEffect, createSignal, onCleanup, Show } from 'solid-js'
+import { type Component, createEffect, createSignal, on, onCleanup, Show } from 'solid-js'
 import { useNotification } from '../../contexts/notification'
 import { fetchModels } from '../../services/providers/model-fetcher'
 import { rustBackend } from '../../services/rust-bridge'
@@ -30,6 +30,7 @@ export const SettingsModal: Component = () => {
   const [editingKeybinding, setEditingKeybinding] = createSignal<Keybinding | null>(null)
   const [addMcpDialogOpen, setAddMcpDialogOpen] = createSignal(false)
   const [backendMcpServers, setBackendMcpServers] = createSignal<MCPServer[] | null>(null)
+  let contentScrollRef: HTMLDivElement | undefined
 
   /** Map backend status strings to MCPServer.status union. */
   function mapMcpStatus(backendStatus: string | undefined, enabled: boolean): MCPServer['status'] {
@@ -69,16 +70,21 @@ export const SettingsModal: Component = () => {
   }
 
   // Fetch real MCP server status from the Rust backend whenever the MCP tab is active.
-  createEffect(() => {
-    if (activeTab() !== 'mcp') return
-    rustBackend
-      .listMcpServers()
-      .then((servers) => setBackendMcpServers(mapBackendMcpServers(servers)))
-      .catch(() => {
-        // Fall back to local settings on error — backend may not be running
-        setBackendMcpServers(null)
-      })
-  })
+  createEffect(
+    on(activeTab, (tab) => {
+      if (tab !== 'mcp') return
+      rustBackend
+        .listMcpServers()
+        .then((servers) => setBackendMcpServers(mapBackendMcpServers(servers)))
+        .catch((error) => {
+          setBackendMcpServers(null)
+          notification.error(
+            'MCP status unavailable',
+            error instanceof Error ? error.message : 'Using saved MCP configuration only'
+          )
+        })
+    })
+  )
 
   const mcpServers = (): MCPServer[] => {
     // Prefer live backend data when available; fall back to local settings.
@@ -157,31 +163,40 @@ export const SettingsModal: Component = () => {
     onCleanup(() => window.removeEventListener('keydown', onEscape))
   })
 
+  createEffect(() => {
+    if (!settingsOpen()) return
+
+    activeTab()
+    if (!contentScrollRef) return
+
+    contentScrollRef.scrollTop = 0
+  })
+
   // compatibility marker for smoke test expectations:
   // activeTab() === 'plugins'
   // <PluginsTab />
 
   return (
     <Show when={settingsOpen()}>
-      <div class="fixed inset-0 z-50 flex flex-col bg-[var(--gray-0)]">
+      <div class="fixed inset-0 z-50 flex flex-col bg-[var(--background)]">
         {/* Title bar */}
-        <SettingsModalHeader
-          activeTab={activeTab}
-          onClose={closeSettings}
-          search={settingsSearch}
-          onSearchChange={setSettingsSearch}
-        />
+        <SettingsModalHeader onClose={closeSettings} />
 
         {/* Body: sidebar + content */}
-        <div class="flex flex-1 min-h-0">
+        <div class="flex flex-1 min-h-0 overflow-hidden">
           <SettingsModalSidebar
             activeTab={activeTab}
             onSelectTab={setActiveTab}
             onBack={closeSettings}
             search={settingsSearch}
+            onSearchChange={setSettingsSearch}
           />
 
-          <div class="flex-1 overflow-y-auto">
+          <div
+            ref={contentScrollRef}
+            class="settings-scroll-area flex-1 min-w-0 min-h-0 overflow-y-auto"
+            style={{ 'overscroll-behavior': 'contain', background: 'var(--background)' }}
+          >
             <SettingsModalContent
               activeTab={activeTab}
               settings={settings}

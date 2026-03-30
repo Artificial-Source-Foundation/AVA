@@ -319,6 +319,7 @@ checksum = "c08606f8c3cbf4ce6ec8e28fb0014a2c086708fe954eaa885384a6165172e7e8"
 name = "ava"
 version = "2.0.0"
 dependencies = [
+ "async-trait",
  "ava-agent",
  "ava-auth",
  "ava-codebase",
@@ -326,12 +327,12 @@ dependencies = [
  "ava-context",
  "ava-db",
  "ava-extensions",
+ "ava-hq",
  "ava-llm",
  "ava-mcp",
  "ava-memory",
  "ava-permissions",
  "ava-platform",
- "ava-praxis",
  "ava-session",
  "ava-tools",
  "ava-types",
@@ -362,12 +363,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "ava-acp"
+version = "2.2.7"
+dependencies = [
+ "async-stream",
+ "async-trait",
+ "ava-llm",
+ "ava-types",
+ "futures",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-stream",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
 name = "ava-agent"
 version = "2.0.0"
 dependencies = [
  "async-stream",
  "async-trait",
- "ava-cli-providers",
+ "ava-acp",
  "ava-codebase",
  "ava-config",
  "ava-context",
@@ -397,7 +415,7 @@ dependencies = [
 
 [[package]]
 name = "ava-auth"
-version = "2.1.0"
+version = "2.2.7"
 dependencies = [
  "base64 0.22.1",
  "open",
@@ -411,22 +429,6 @@ dependencies = [
  "tracing",
  "url",
  "urlencoding",
-]
-
-[[package]]
-name = "ava-cli-providers"
-version = "2.1.0"
-dependencies = [
- "async-trait",
- "ava-llm",
- "ava-types",
- "futures",
- "serde",
- "serde_json",
- "tokio",
- "tokio-stream",
- "tokio-util",
- "tracing",
 ]
 
 [[package]]
@@ -502,8 +504,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "ava-hq"
+version = "2.2.7"
+dependencies = [
+ "async-trait",
+ "ava-acp",
+ "ava-agent",
+ "ava-context",
+ "ava-llm",
+ "ava-platform",
+ "ava-tools",
+ "ava-types",
+ "futures",
+ "regex",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "ava-llm"
-version = "2.1.0"
+version = "2.2.7"
 dependencies = [
  "async-trait",
  "ava-auth",
@@ -526,7 +550,7 @@ dependencies = [
 
 [[package]]
 name = "ava-mcp"
-version = "2.1.0"
+version = "2.2.7"
 dependencies = [
  "async-trait",
  "ava-tools",
@@ -607,27 +631,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ava-praxis"
-version = "2.1.0"
-dependencies = [
- "async-trait",
- "ava-agent",
- "ava-context",
- "ava-llm",
- "ava-platform",
- "ava-tools",
- "ava-types",
- "futures",
- "regex",
- "serde",
- "serde_json",
- "tokio",
- "tokio-util",
- "tracing",
- "uuid",
-]
-
-[[package]]
 name = "ava-sandbox"
 version = "2.0.0"
 dependencies = [
@@ -639,7 +642,7 @@ dependencies = [
 
 [[package]]
 name = "ava-session"
-version = "2.1.0"
+version = "2.2.7"
 dependencies = [
  "ava-types",
  "chrono",

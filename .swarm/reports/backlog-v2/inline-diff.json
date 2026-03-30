@@ -1,6 +1,0 @@
-{
-  "status": "fixed",
-  "files_modified": ["src/hooks/use-rust-agent.ts", "src/components/chat/message-rows/DiffRow.tsx"],
-  "summary": "Implemented inline diff views for edit and write tool cards. Two changes: (1) In use-rust-agent.ts, the tool_call event handler now extracts filePath from args (path/file_path/filePath), and the tool_result handler populates diff data from args — for edit/apply_patch/multiedit tools using old_text/new_text args, and for write/write_file/create_file tools using content arg (with empty oldContent to mark as new file). (2) In DiffRow.tsx, added auto-expand for small diffs (< 30 changed lines) via createEffect, new-file detection when oldContent is empty (shows FilePlus icon + '+N lines' badge instead of +/- diff counts), and SMALL_DIFF_LINE_THRESHOLD constant. The existing MessageBubble.tsx dispatch already routes tc.diff && tc.name !== 'bash' to DiffRow, so write tools now show DiffRow automatically. TypeScript passes with no errors.",
-  "tsc_pass": true
-}

@@ -4,7 +4,8 @@
  * Provides a reactive task progress indicator.
  */
 
-import { createMemo, createSignal, onCleanup, onMount } from 'solid-js'
+import { createMemo, createSignal } from 'solid-js'
+import { installReplaceableWindowListener } from '../lib/replaceable-window-listener'
 
 export interface FocusItem {
   id: string
@@ -20,17 +21,20 @@ interface FocusUpdateDetail {
 const [focusItems, setFocusItems] = createSignal<FocusItem[]>([])
 const [currentFocus, setCurrentFocus] = createSignal<string | null>(null)
 
-export function useFocusChain() {
-  onMount(() => {
-    const handler = (e: Event) => {
+if (typeof window !== 'undefined') {
+  installReplaceableWindowListener('focus-chain:updated', (target) => {
+    const listener = (e: Event) => {
       const detail = (e as CustomEvent<FocusUpdateDetail>).detail
       if (detail.items) setFocusItems(detail.items)
       if (detail.currentFocus !== undefined) setCurrentFocus(detail.currentFocus)
     }
-    window.addEventListener('ava:focus-updated', handler)
-    onCleanup(() => window.removeEventListener('ava:focus-updated', handler))
-  })
 
+    target.addEventListener('ava:focus-updated', listener)
+    return () => target.removeEventListener('ava:focus-updated', listener)
+  })
+}
+
+export function useFocusChain() {
   const completedCount = createMemo(
     () => focusItems().filter((i) => i.status === 'completed').length
   )

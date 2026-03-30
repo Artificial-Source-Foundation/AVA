@@ -28,6 +28,14 @@ pre-commit:
       glob: "**/*.{ts,tsx}"
       run: npx tsc --noEmit
 
+pre-push:
+  commands:
+    test-quick:
+      run: cargo nextest run -p ava-agent -p ava-tools -j 4 --status-level fail
+      skip:
+        - merge
+        - rebase
+
 commit-msg:
   commands:
     commitlint:

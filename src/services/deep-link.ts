@@ -110,10 +110,16 @@ export function handleDeepLink(url: string): void {
  */
 export function initDeepLinks(): Disposable {
   const cleanups: Array<() => void> = []
+  let disposed = false
 
   // 1. Try Tauri deep-link plugin (handles OS-level ava:// URLs)
   tryTauriDeepLink().then((cleanup) => {
-    if (cleanup) cleanups.push(cleanup)
+    if (!cleanup) return
+    if (disposed) {
+      cleanup()
+      return
+    }
+    cleanups.push(cleanup)
   })
 
   // 2. In-app custom event listener (for programmatic deep links)
@@ -129,12 +135,16 @@ export function initDeepLinks(): Disposable {
     const { tab } = (e as CustomEvent<{ tab: string }>).detail
     // Open settings and switch to the specified tab
     const layoutModule = import('../stores/layout')
-    layoutModule.then(({ useLayout }) => {
-      const { openSettings } = useLayout()
-      openSettings()
-      // Dispatch tab switch event for SettingsDialog to pick up
-      window.dispatchEvent(new CustomEvent('ava:settings-tab', { detail: { tab } }))
-    })
+    layoutModule
+      .then(({ useLayout }) => {
+        const { openSettings } = useLayout()
+        openSettings()
+        // Dispatch tab switch event for SettingsDialog to pick up
+        window.dispatchEvent(new CustomEvent('ava:settings-tab', { detail: { tab } }))
+      })
+      .catch((error) => {
+        logError('DeepLink', `Failed to open settings deep link: ${String(error)}`)
+      })
   }
   window.addEventListener('ava:deep-link-settings', settingsHandler)
   cleanups.push(() => window.removeEventListener('ava:deep-link-settings', settingsHandler))
@@ -142,10 +152,14 @@ export function initDeepLinks(): Disposable {
   const sessionHandler = (e: Event) => {
     const { sessionId } = (e as CustomEvent<{ sessionId: string }>).detail
     const sessionModule = import('../stores/session')
-    sessionModule.then(({ useSession }) => {
-      const session = useSession()
-      session.switchSession(sessionId)
-    })
+    sessionModule
+      .then(({ useSession }) => {
+        const session = useSession()
+        return session.switchSession(sessionId)
+      })
+      .catch((error) => {
+        logError('DeepLink', `Failed to switch session via deep link: ${String(error)}`)
+      })
   }
   window.addEventListener('ava:deep-link-session', sessionHandler)
   cleanups.push(() => window.removeEventListener('ava:deep-link-session', sessionHandler))
@@ -153,15 +167,19 @@ export function initDeepLinks(): Disposable {
   const workflowHandler = (e: Event) => {
     const { workflowId } = (e as CustomEvent<{ workflowId: string }>).detail
     const workflowModule = import('../stores/workflows')
-    workflowModule.then(({ useWorkflows }) => {
-      const { workflows, applyWorkflow } = useWorkflows()
-      const wf = workflows().find((w) => w.id === workflowId)
-      if (wf) {
-        applyWorkflow(wf)
-      } else {
-        logError('DeepLink', `Workflow not found: ${workflowId}`)
-      }
-    })
+    workflowModule
+      .then(({ useWorkflows }) => {
+        const { workflows, applyWorkflow } = useWorkflows()
+        const wf = workflows().find((w) => w.id === workflowId)
+        if (wf) {
+          applyWorkflow(wf)
+        } else {
+          logError('DeepLink', `Workflow not found: ${workflowId}`)
+        }
+      })
+      .catch((error) => {
+        logError('DeepLink', `Failed to apply workflow deep link: ${String(error)}`)
+      })
   }
   window.addEventListener('ava:deep-link-workflow', workflowHandler)
   cleanups.push(() => window.removeEventListener('ava:deep-link-workflow', workflowHandler))
@@ -170,7 +188,9 @@ export function initDeepLinks(): Disposable {
 
   return {
     dispose: () => {
+      disposed = true
       for (const cleanup of cleanups) cleanup()
+      cleanups.length = 0
     },
   }
 }

@@ -8,7 +8,6 @@ mod exporting;
 mod git_commit;
 mod input_handling;
 mod modals;
-mod praxis;
 mod spawners;
 
 use crate::config::cli::CliArgs;
@@ -23,7 +22,6 @@ use crate::state::input::InputState;
 use crate::state::keybinds::{Action, KeybindState};
 use crate::state::messages::{MessageKind, MessageState, UiMessage};
 use crate::state::permission::PermissionState;
-use crate::state::praxis::PraxisState;
 use crate::state::rewind::RewindState;
 use crate::state::session::SessionState;
 use crate::state::theme::Theme;
@@ -61,11 +59,6 @@ use tracing::debug;
 pub(crate) struct PendingBackgroundGoal {
     pub goal: String,
     pub isolated_branch: bool,
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct PendingPraxisGoal {
-    pub goal: String,
 }
 
 #[derive(Debug, Clone)]
@@ -135,11 +128,9 @@ pub struct AppState {
     pub toast: ToastState,
     pub status_message: Option<StatusMessage>,
 
-    // ── Background & Multi-Agent ────────────────────────────────────────
+    // ── Background ─────────────────────────────────────────────────────
     /// Shared background task state.
     pub background: SharedBackgroundState,
-    /// Praxis multi-agent task state.
-    pub praxis: PraxisState,
 
     // ── Sidebar & Todo ──────────────────────────────────────────────────
     /// Cached snapshot of the agent's todo list for sidebar rendering.
@@ -216,8 +207,6 @@ pub enum ViewMode {
         /// Goal description for the header breadcrumb.
         goal: String,
     },
-    /// View a Praxis task's output and worker state.
-    PraxisTask { task_id: usize, goal: String },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -275,8 +264,6 @@ pub struct App {
     last_esc_time: Option<std::time::Instant>,
     /// Pending background goal from `/bg` command (consumed in submit_goal).
     pub(crate) pending_bg_goal: Option<PendingBackgroundGoal>,
-    /// Pending Praxis goal from `/praxis` command (consumed in submit_goal).
-    pub(crate) pending_praxis_goal: Option<PendingPraxisGoal>,
     /// Images pending attachment to the next user message.
     pub(crate) pending_images: Vec<ava_types::ImageContent>,
     next_run_id: u64,
@@ -394,9 +381,8 @@ impl App {
             // Notifications
             toast: ToastState::default(),
             status_message: None,
-            // Background & Multi-Agent
+            // Background
             background: new_shared(),
-            praxis: PraxisState::default(),
             // Sidebar & Todo
             todo_items: Vec::new(),
             todo_state,
@@ -425,7 +411,6 @@ impl App {
             plan_rx: Some(plan_rx),
             last_esc_time: None,
             pending_bg_goal: None,
-            pending_praxis_goal: None,
             pending_images: Vec::new(),
             next_run_id: 1,
             foreground_run_id: None,
@@ -688,23 +673,6 @@ impl App {
             match result {
                 Ok(run) => {
                     self.finish_run(run);
-                    // Auto-review: run a code review after successful runs if enabled.
-                    // Default is true; disable with `features.auto_review: false` in config.yaml.
-                    let auto_review = self
-                        .data_dir
-                        .join("config.yaml")
-                        .exists()
-                        .then(|| {
-                            std::fs::read_to_string(self.data_dir.join("config.yaml"))
-                                .ok()
-                                .and_then(|s| serde_yaml::from_str::<ava_config::Config>(&s).ok())
-                                .map(|c| c.features.auto_review)
-                        })
-                        .flatten()
-                        .unwrap_or(true);
-                    if auto_review {
-                        self.spawn_review_pass(app_tx.clone());
-                    }
                 }
                 Err(err) => {
                     self.is_streaming.store(false, Ordering::Relaxed);
@@ -1004,9 +972,8 @@ impl App {
             // Notifications
             toast: ToastState::default(),
             status_message: None,
-            // Background & Multi-Agent
+            // Background
             background: new_shared(),
-            praxis: PraxisState::default(),
             // Sidebar & Todo
             todo_items: Vec::new(),
             todo_state: None,
@@ -1035,7 +1002,6 @@ impl App {
             plan_rx: None,
             last_esc_time: None,
             pending_bg_goal: None,
-            pending_praxis_goal: None,
             pending_images: Vec::new(),
             next_run_id: 1,
             foreground_run_id: None,

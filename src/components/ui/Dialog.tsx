@@ -70,10 +70,10 @@ export const Dialog: Component<DialogProps> = (props) => {
         <KobalteDialog.Overlay
           class="
             fixed inset-0 z-50
-            bg-black/60
             data-[expanded]:animate-in data-[expanded]:fade-in-0
             data-[closed]:animate-out data-[closed]:fade-out-0
           "
+          style={{ background: 'var(--modal-overlay)' }}
         />
 
         {/* Content */}
@@ -85,22 +85,29 @@ export const Dialog: Component<DialogProps> = (props) => {
           onEscapeKeyDown={(e) => {
             if (!closeOnEsc()) e.preventDefault()
           }}
+          onKeyDown={(e: KeyboardEvent) => e.stopPropagation()}
           class={`
             fixed left-1/2 top-1/2 z-50
             -translate-x-1/2 -translate-y-1/2
             w-full ${sizeStyles[size()]}
-            glass-strong
-            rounded-[var(--radius-xl)]
-            shadow-2xl
             data-[expanded]:animate-in data-[expanded]:fade-in-0 data-[expanded]:zoom-in-95 data-[expanded]:slide-in-from-left-1/2 data-[expanded]:slide-in-from-top-[48%]
             data-[closed]:animate-out data-[closed]:fade-out-0 data-[closed]:zoom-out-95 data-[closed]:slide-out-to-left-1/2 data-[closed]:slide-out-to-top-[48%]
             duration-200
             ${local.class ?? ''}
           `}
+          style={{
+            background: 'var(--modal-surface)',
+            border: '1px solid var(--modal-border)',
+            'border-radius': 'var(--modal-radius-lg)',
+            'box-shadow': 'var(--modal-shadow)',
+          }}
         >
           {/* Header */}
           <Show when={local.title || showClose()}>
-            <div class="flex items-start justify-between gap-4 p-4 border-b border-[var(--border-subtle)]">
+            <div
+              class="flex items-start justify-between gap-4 p-4 border-b"
+              style={{ 'border-color': 'var(--modal-border)' }}
+            >
               <div class="flex-1">
                 <Show when={local.title}>
                   <KobalteDialog.Title class="text-lg font-semibold text-[var(--text-primary)]">
@@ -116,15 +123,14 @@ export const Dialog: Component<DialogProps> = (props) => {
               <Show when={showClose()}>
                 <KobalteDialog.CloseButton
                   class="
+                    dialog-close-button
                     p-1.5 rounded-[var(--radius-md)]
-                    text-[var(--text-tertiary)]
-                    hover:text-[var(--text-primary)]
-                    hover:bg-[var(--surface-raised)]
+                    hover:bg-[var(--alpha-white-5)]
                     transition-colors duration-[var(--duration-fast)]
                   "
                   aria-label="Close dialog"
                 >
-                  <X class="w-5 h-5" />
+                  <X class="w-4 h-4" />
                 </KobalteDialog.CloseButton>
               </Show>
             </div>
@@ -140,7 +146,10 @@ export const Dialog: Component<DialogProps> = (props) => {
 
           {/* Footer */}
           <Show when={local.footer}>
-            <div class="flex items-center justify-end gap-2 p-4 border-t border-[var(--border-subtle)] bg-[var(--surface-sunken)]">
+            <div
+              class="flex items-center justify-end gap-2 p-4 border-t"
+              style={{ 'border-color': 'var(--modal-border)' }}
+            >
               {local.footer}
             </div>
           </Show>

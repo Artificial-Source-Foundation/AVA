@@ -17,6 +17,8 @@ use crate::providers::openai::OpenAIProvider;
 #[derive(Clone)]
 pub struct OpenRouterProvider {
     inner: OpenAIProvider,
+    // Keep the raw OpenRouter connection details here because the reasoning-specific
+    // request paths build their own bodies instead of delegating fully to `inner`.
     pool: Arc<ConnectionPool>,
     api_key: String,
     model: String,
@@ -48,7 +50,9 @@ impl OpenRouterProvider {
                 api_key.clone(),
                 model.clone(),
                 base_url.clone(),
-            ),
+            )
+            .with_request_defaults(Self::request_defaults())
+            .with_provider_label("openrouter"),
             pool,
             api_key,
             model,
@@ -85,6 +89,8 @@ impl OpenRouterProvider {
 
         if !tools.is_empty() {
             body["tools"] = json!(common::tools_to_openai_format(tools));
+            body["tool_choice"] = json!("auto");
+            body["parallel_tool_calls"] = json!(true);
         }
 
         if thinking != ThinkingLevel::Off && self.supports_reasoning() {
@@ -98,7 +104,18 @@ impl OpenRouterProvider {
             body["reasoning"] = json!({ "effort": effort });
         }
 
+        body["provider"] = Self::request_defaults()["provider"].clone();
+
         body
+    }
+
+    fn request_defaults() -> Value {
+        json!({
+            "provider": {
+                "allow_fallbacks": false,
+                "require_parameters": true
+            }
+        })
     }
 
     async fn client(&self) -> Result<Arc<reqwest::Client>> {
@@ -219,14 +236,19 @@ impl LLMProvider for OpenRouterProvider {
             .json(&body);
 
         let response = self.send_request(request).await?;
-        let response = common::validate_status(response, "OpenRouter").await?;
+        let response =
+            common::validate_status_for_model(response, "OpenRouter", Some(&self.model)).await?;
         let payload: Value = response
             .json()
             .await
             .map_err(|error| AvaError::SerializationError(error.to_string()))?;
 
-        let content = OpenAIProvider::parse_response_payload(&payload).unwrap_or_default();
         let tool_calls = common::parse_openai_tool_calls(&payload);
+        let content = common::completion_text_or_tool_calls(
+            OpenAIProvider::parse_response_payload(&payload),
+            "OpenRouter",
+            tool_calls.len(),
+        )?;
         let usage = common::parse_usage(&payload);
 
         Ok(LLMResponse {
@@ -258,17 +280,17 @@ impl LLMProvider for OpenRouterProvider {
             .json(&body);
 
         let response = self.send_request(request).await?;
-        let response = common::validate_status(response, "OpenRouter").await?;
+        let response =
+            common::validate_status_for_model(response, "OpenRouter", Some(&self.model)).await?;
         let mut sse_parser = common::SseParser::new();
+        let mut utf8 = common::Utf8Accumulator::new();
         let stream = response.bytes_stream().flat_map(move |chunk| {
-            let chunks = chunk
-                .ok()
-                .and_then(|bytes| String::from_utf8(bytes.to_vec()).ok())
+            let chunks = common::decode_stream_chunk(&mut utf8, chunk, "OpenRouter")
                 .map(|text| {
                     sse_parser
                         .feed(&text)
                         .into_iter()
-                        .filter_map(|line| serde_json::from_str::<Value>(&line).ok())
+                        .filter_map(|line| common::parse_json_stream_payload(&line, "OpenRouter"))
                         .filter_map(|payload| common::parse_openai_stream_chunk(&payload))
                         .collect::<Vec<_>>()
                 })
@@ -278,5 +300,44 @@ impl LLMProvider for OpenRouterProvider {
         });
 
         Ok(Box::pin(stream))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use ava_types::{Message, Role};
+    use serde_json::json;
+
+    use super::*;
+    use crate::pool::ConnectionPool;
+
+    #[test]
+    fn request_defaults_disable_fallbacks_and_require_parameters() {
+        let defaults = OpenRouterProvider::request_defaults();
+        assert_eq!(defaults["provider"]["allow_fallbacks"], json!(false));
+        assert_eq!(defaults["provider"]["require_parameters"], json!(true));
+    }
+
+    #[test]
+    fn reasoning_body_keeps_openrouter_provider_constraints() {
+        let provider =
+            OpenRouterProvider::new(Arc::new(ConnectionPool::new()), "key", "openai/gpt-5");
+        let body = provider.build_request_body_with_reasoning(
+            &[Message::new(Role::User, "Search the repo")],
+            &[ava_types::Tool {
+                name: "read".to_string(),
+                description: "Read a file".to_string(),
+                parameters: json!({"type": "object", "properties": {"path": {"type": "string"}}}),
+            }],
+            false,
+            ThinkingLevel::Medium,
+        );
+
+        assert_eq!(body["provider"]["allow_fallbacks"], json!(false));
+        assert_eq!(body["provider"]["require_parameters"], json!(true));
+        assert_eq!(body["tool_choice"], json!("auto"));
+        assert_eq!(body["parallel_tool_calls"], json!(true));
     }
 }

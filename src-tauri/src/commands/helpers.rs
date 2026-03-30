@@ -1,15 +1,15 @@
-//! Shared helper functions for agent and praxis commands.
+//! Shared helper functions for agent and hq commands.
 
-/// Parse a domain string from the frontend into a Praxis [`Domain`].
-pub fn parse_domain(s: &str) -> Option<ava_praxis::Domain> {
+/// Parse a domain string from the frontend into an HQ [`Domain`].
+pub fn parse_domain(s: &str) -> Option<ava_hq::Domain> {
     match s.to_lowercase().as_str() {
-        "frontend" => Some(ava_praxis::Domain::Frontend),
-        "backend" => Some(ava_praxis::Domain::Backend),
-        "qa" => Some(ava_praxis::Domain::QA),
-        "research" => Some(ava_praxis::Domain::Research),
-        "debug" => Some(ava_praxis::Domain::Debug),
-        "fullstack" => Some(ava_praxis::Domain::Fullstack),
-        "devops" => Some(ava_praxis::Domain::DevOps),
+        "frontend" => Some(ava_hq::Domain::Frontend),
+        "backend" => Some(ava_hq::Domain::Backend),
+        "qa" => Some(ava_hq::Domain::QA),
+        "research" => Some(ava_hq::Domain::Research),
+        "debug" => Some(ava_hq::Domain::Debug),
+        "fullstack" => Some(ava_hq::Domain::Fullstack),
+        "devops" => Some(ava_hq::Domain::DevOps),
         _ => None,
     }
 }

@@ -1,6 +1,8 @@
 use super::input::{populate_queue_from_cli, spawn_stdin_reader};
 use super::spawn_auto_approve_requests;
+use crate::app::{App, ModalType};
 use crate::config::cli::CliArgs;
+use crate::state::messages::MessageKind;
 use ava_agent::message_queue::MessageQueue;
 use ava_agent::stack::{AgentStack, AgentStackConfig};
 use ava_agent::AgentEvent;
@@ -10,16 +12,147 @@ use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
-use tracing::debug;
+use tracing::{debug, info, warn};
+
+enum HeadlessSlashOutcome {
+    NotHandled,
+    ExecuteGoal(String),
+    Message(MessageKind, String),
+}
+
+fn dispatch_headless_slash_with_app(app: &mut App, goal: &str) -> HeadlessSlashOutcome {
+    let trimmed = goal.trim();
+    if !trimmed.starts_with('/') {
+        return HeadlessSlashOutcome::NotHandled;
+    }
+
+    // Clear status before running the command so we can detect if it was set.
+    app.state.status_message = None;
+
+    if let Some((kind, msg)) = app.handle_slash_command(trimmed, None) {
+        return HeadlessSlashOutcome::Message(kind, msg);
+    }
+
+    if let Some(result) = app.try_resolve_custom_command(trimmed) {
+        return match result {
+            Ok(resolved) => HeadlessSlashOutcome::ExecuteGoal(resolved),
+            Err(err) => HeadlessSlashOutcome::Message(MessageKind::Error, err),
+        };
+    }
+
+    // Some commands (e.g. /permissions, /think, /copy, /clear) mutate TUI state
+    // and return None instead of a display message. Check if the command had
+    // side-effects we can report.
+
+    if app.state.active_modal.is_some() {
+        if let Some(panel) = &app.state.info_panel {
+            return HeadlessSlashOutcome::Message(
+                MessageKind::System,
+                format!("{}\n\n{}", panel.title, panel.content),
+            );
+        }
+
+        let cmd = trimmed.split_whitespace().next().unwrap_or(trimmed);
+        let modal_label = match app.state.active_modal {
+            Some(ModalType::SessionList) => "session list",
+            Some(ModalType::ThemeSelector) => "theme selector",
+            Some(ModalType::ModelSelector) => "model selector",
+            Some(ModalType::ProviderConnect) => "provider picker",
+            Some(ModalType::ToolList) => "tool list",
+            Some(ModalType::AgentList) => "agent list",
+            Some(ModalType::CopyPicker) => "copy picker",
+            Some(ModalType::TaskList) => "task list",
+            Some(ModalType::DiffPreview) => "diff preview",
+            Some(ModalType::InfoPanel) => "info panel",
+            _ => "interactive modal",
+        };
+        return HeadlessSlashOutcome::Message(
+            MessageKind::Error,
+            format!(
+                "{cmd} opens the {modal_label} in the interactive TUI and is not available in headless mode."
+            ),
+        );
+    }
+
+    // Check if the command set a status message (e.g. /permissions toggle,
+    // /think show/hide, /clear). If so, it was handled — report the status text.
+    if let Some(ref status) = app.state.status_message {
+        return HeadlessSlashOutcome::Message(MessageKind::System, status.text.clone());
+    }
+
+    // Check if the command pushed a toast notification.
+    if let Some(msg) = app.state.toast.take_last() {
+        return HeadlessSlashOutcome::Message(MessageKind::System, msg);
+    }
+
+    HeadlessSlashOutcome::Message(
+        MessageKind::Error,
+        format!("Unknown slash command: {trimmed}"),
+    )
+}
+
+async fn dispatch_headless_slash_command(
+    cli: &CliArgs,
+    goal: &str,
+) -> Result<HeadlessSlashOutcome> {
+    let trimmed = goal.trim();
+    if !trimmed.starts_with('/') {
+        return Ok(HeadlessSlashOutcome::NotHandled);
+    }
+
+    let mut app = App::new(cli.clone()).await?;
+    Ok(dispatch_headless_slash_with_app(&mut app, trimmed))
+}
+
+fn print_headless_slash_message(json_mode: bool, kind: MessageKind, message: &str) {
+    if json_mode {
+        let kind = match kind {
+            MessageKind::Error => "error",
+            _ => "system",
+        };
+        println!(
+            "{}",
+            serde_json::json!({"type": "slash_command", "kind": kind, "message": message})
+        );
+        return;
+    }
+
+    match kind {
+        MessageKind::Error => eprintln!("{message}"),
+        _ => println!("{message}"),
+    }
+}
 
 pub(super) async fn run_single_agent(cli: CliArgs, goal: &str) -> Result<()> {
+    let goal = match dispatch_headless_slash_command(&cli, goal).await? {
+        HeadlessSlashOutcome::NotHandled => goal.to_string(),
+        HeadlessSlashOutcome::ExecuteGoal(resolved) => {
+            info!(resolved = %resolved, "slash command resolved to agent goal");
+            resolved
+        }
+        HeadlessSlashOutcome::Message(kind, message) => {
+            debug!(command = %goal, "slash command handled directly");
+            print_headless_slash_message(cli.json, kind, &message);
+            return Ok(());
+        }
+    };
+
     let data_dir = dirs::home_dir().unwrap_or_default().join(".ava");
     let runtime_lean = cli.runtime_lean_settings();
 
     let (provider, model) = cli.resolve_provider_model().await?;
     if provider.is_none() {
+        warn!("no provider configured — cannot run agent");
         return Err(eyre!(crate::config::cli::NO_PROVIDER_ERROR));
     }
+    info!(
+        provider = ?provider,
+        model = ?model,
+        max_turns = cli.max_turns,
+        auto_approve = cli.auto_approve,
+        goal_len = goal.len(),
+        "starting headless agent run"
+    );
 
     if runtime_lean.auto_lean {
         tracing::info!(
@@ -75,7 +208,7 @@ pub(super) async fn run_single_agent(cli: CliArgs, goal: &str) -> Result<()> {
         cancel_clone.cancel();
     });
 
-    let goal_owned = goal.to_string();
+    let goal_owned = goal;
     let max_turns = cli.max_turns;
     let cli_images = load_cli_images(&cli.image);
     let stack = Arc::new(stack);
@@ -95,7 +228,7 @@ pub(super) async fn run_single_agent(cli: CliArgs, goal: &str) -> Result<()> {
             .await
     });
 
-    let mut files_edited = false;
+    let mut _files_edited = false;
     if json_mode {
         while let Some(event) = rx.recv().await {
             let json = match &event {
@@ -131,6 +264,29 @@ pub(super) async fn run_single_agent(cli: CliArgs, goal: &str) -> Result<()> {
                 } => {
                     serde_json::json!({"type": "budget_warning", "threshold_percent": threshold_percent, "current_cost_usd": current_cost_usd, "max_budget_usd": max_budget_usd})
                 }
+                AgentEvent::ContextCompacted {
+                    auto,
+                    tokens_before,
+                    tokens_after,
+                    tokens_saved,
+                    messages_before,
+                    messages_after,
+                    usage_before_percent,
+                    summary,
+                    ..
+                } => {
+                    serde_json::json!({
+                        "type": "context_compacted",
+                        "auto": auto,
+                        "tokens_before": tokens_before,
+                        "tokens_after": tokens_after,
+                        "tokens_saved": tokens_saved,
+                        "messages_before": messages_before,
+                        "messages_after": messages_after,
+                        "usage_before_percent": usage_before_percent,
+                        "summary": summary,
+                    })
+                }
                 AgentEvent::SubAgentComplete {
                     session_id,
                     messages,
@@ -145,7 +301,7 @@ pub(super) async fn run_single_agent(cli: CliArgs, goal: &str) -> Result<()> {
                     additions,
                     deletions,
                 } => {
-                    files_edited = true;
+                    _files_edited = true;
                     serde_json::json!({"type": "diff_preview", "file": file.display().to_string(), "diff": diff_text, "additions": additions, "deletions": deletions})
                 }
                 AgentEvent::MCPToolsChanged {
@@ -218,6 +374,13 @@ pub(super) async fn run_single_agent(cli: CliArgs, goal: &str) -> Result<()> {
                 } => eprintln!(
                     "[budget warning: ${current_cost_usd:.2}/${max_budget_usd:.2} ({threshold_percent}%)]"
                 ),
+                AgentEvent::ContextCompacted { summary, .. } => {
+                    if in_text {
+                        println!();
+                        in_text = false;
+                    }
+                    eprintln!("[{summary}]");
+                }
                 AgentEvent::ToolStats(_)
                 | AgentEvent::TokenUsage { .. }
                 | AgentEvent::SubAgentComplete { .. }
@@ -232,7 +395,7 @@ pub(super) async fn run_single_agent(cli: CliArgs, goal: &str) -> Result<()> {
                         println!();
                         in_text = false;
                     }
-                    files_edited = true;
+                    _files_edited = true;
                     eprintln!(
                         "[diff: {} +{} -{}]",
                         file.display(),
@@ -264,6 +427,12 @@ pub(super) async fn run_single_agent(cli: CliArgs, goal: &str) -> Result<()> {
     let result = handle.await??;
     let cost_summary = crate::session_summary::cost_summary(&result.session);
     let route_summary = crate::session_summary::route_summary(&result.session);
+    info!(
+        success = result.success,
+        turns = result.turns,
+        session_id = %result.session.id,
+        "headless agent run completed"
+    );
 
     if json_mode {
         println!(
@@ -309,20 +478,12 @@ pub(super) async fn run_single_agent(cli: CliArgs, goal: &str) -> Result<()> {
         );
     }
 
-    // Auto-review: when the agent edited files, review and auto-fix issues.
-    // Triggered automatically when files were edited (if config allows), or explicitly with --review.
-    let config_auto_review = dirs::home_dir()
-        .map(|h| h.join(".ava/config.yaml"))
-        .filter(|p| p.exists())
-        .and_then(|p| std::fs::read_to_string(p).ok())
-        .and_then(|s| serde_yaml::from_str::<ava_config::Config>(&s).ok())
-        .map(|c| c.features.auto_review)
-        .unwrap_or(true);
-    let should_review = result.success && (cli.review || (files_edited && config_auto_review));
-    if should_review {
+    // Explicit review: only run when user passes --review (e.g. CI pipelines).
+    // Normal code review is handled by the agent itself via `subagent(agent_type: "review")`
+    // when it decides a review is warranted — no automatic post-completion review.
+    if result.success && cli.review {
         let review_findings = run_post_completion_review(&cli).await;
         if let Some(findings) = review_findings {
-            // Re-run the agent to fix the review findings
             eprintln!("\n[review] Auto-fixing issues...");
             let fix_goal = format!(
                 "A code review found the following issues in your recent changes. Fix them:\n\n{}",
@@ -392,11 +553,11 @@ pub(super) async fn run_single_agent(cli: CliArgs, goal: &str) -> Result<()> {
 /// Run a code review on working directory changes after the agent completes.
 /// Returns `Some(findings_text)` if actionable issues found, `None` otherwise.
 async fn run_post_completion_review(cli: &CliArgs) -> Option<String> {
-    use ava_platform::StandardPlatform;
-    use ava_praxis::review::{
+    use ava_hq::review::{
         build_review_system_prompt, collect_diff, format_text, parse_review_output,
         run_review_agent, DiffMode, Severity,
     };
+    use ava_platform::StandardPlatform;
 
     eprintln!("\n[review] Running post-completion code review...");
 
@@ -529,7 +690,12 @@ fn truncate_str(s: &str, max_len: usize) -> String {
     if s.len() <= max_len {
         s.to_string()
     } else {
-        format!("{}...", &s[..max_len])
+        let end = s
+            .char_indices()
+            .take_while(|(idx, _)| *idx < max_len)
+            .last()
+            .map_or(0, |(idx, ch)| idx + ch.len_utf8());
+        format!("{}...", &s[..end])
     }
 }
 
@@ -548,4 +714,54 @@ pub(super) fn load_cli_images(paths: &[String]) -> Vec<ImageContent> {
         }
     }
     images
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_app() -> (App, tempfile::TempDir) {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let db_path = tmp.path().join("test.db");
+        (App::test_new(&db_path), tmp)
+    }
+
+    #[test]
+    fn headless_compact_slash_returns_system_message() {
+        let (mut app, _tmp) = make_app();
+        let outcome = dispatch_headless_slash_with_app(&mut app, "/compact");
+        match outcome {
+            HeadlessSlashOutcome::Message(MessageKind::System, msg) => {
+                assert!(
+                    msg.to_lowercase().contains("compact") || msg.to_lowercase().contains("empty")
+                );
+            }
+            _ => panic!("expected system message for /compact"),
+        }
+    }
+
+    #[test]
+    fn headless_help_slash_returns_help_text_not_agent_goal() {
+        let (mut app, _tmp) = make_app();
+        let outcome = dispatch_headless_slash_with_app(&mut app, "/help");
+        match outcome {
+            HeadlessSlashOutcome::Message(MessageKind::System, msg) => {
+                assert!(msg.contains("Help"));
+                assert!(msg.contains("/compact"));
+            }
+            _ => panic!("expected help text for /help"),
+        }
+    }
+
+    #[test]
+    fn headless_unknown_slash_returns_error() {
+        let (mut app, _tmp) = make_app();
+        let outcome = dispatch_headless_slash_with_app(&mut app, "/definitely-unknown-command");
+        match outcome {
+            HeadlessSlashOutcome::Message(MessageKind::Error, msg) => {
+                assert!(!msg.trim().is_empty());
+            }
+            _ => panic!("expected error for unknown slash command"),
+        }
+    }
 }

@@ -38,11 +38,14 @@ export const SlashCommandPopover: Component<SlashCommandPopoverProps> = (props) 
         class="
           absolute bottom-full left-0 right-0 mb-1 z-[var(--z-popover)]
           max-h-[320px] overflow-y-auto
-          bg-[var(--surface-overlay)] border border-[var(--border-default)]
-          rounded-[var(--radius-lg)] shadow-[var(--shadow-lg)]
-          backdrop-blur-sm
           animate-dropdown-in
         "
+        style={{
+          background: 'var(--dropdown-surface)',
+          border: '1px solid var(--dropdown-border)',
+          'border-radius': 'var(--dropdown-radius)',
+          'box-shadow': 'var(--modal-shadow)',
+        }}
         role="listbox"
       >
         {/* Built-in commands */}
@@ -72,7 +75,10 @@ export const SlashCommandPopover: Component<SlashCommandPopoverProps> = (props) 
         {/* Custom commands */}
         <Show when={grouped().custom.length > 0}>
           <Show when={grouped().builtIn.length > 0}>
-            <div class="mx-3 border-t border-[var(--border-subtle)]" />
+            <div
+              class="mx-3"
+              style={{ 'border-top': '1px solid var(--dropdown-separator)', margin: '4px 12px' }}
+            />
           </Show>
           <div class="px-3 pt-2 pb-1">
             <span class="text-[9px] font-medium uppercase tracking-wider text-[var(--text-muted)]">
@@ -97,7 +103,10 @@ export const SlashCommandPopover: Component<SlashCommandPopoverProps> = (props) 
         </Show>
 
         {/* Footer */}
-        <div class="px-3 py-1.5 border-t border-[var(--border-subtle)] text-[9px] text-[var(--text-muted)] flex items-center gap-3">
+        <div
+          class="px-3 py-1.5 text-[9px] flex items-center gap-3"
+          style={{ 'border-top': '1px solid var(--dropdown-separator)', color: 'var(--gray-6)' }}
+        >
           <span>
             <kbd class="px-1 py-0.5 bg-[var(--surface-raised)] rounded text-[8px] font-[var(--font-mono)]">
               ↑↓
@@ -133,22 +142,33 @@ const CommandRow: Component<{
     type="button"
     role="option"
     aria-selected={props.isSelected()}
-    class="flex items-center gap-2.5 w-full px-2 py-1.5 text-left text-xs rounded-[var(--radius-md)] transition-colors"
-    classList={{
-      'bg-[var(--accent-subtle)] text-[var(--text-primary)]': props.isSelected(),
-      'text-[var(--text-secondary)] hover:bg-[var(--alpha-white-5)]': !props.isSelected(),
+    class="flex items-center gap-2.5 w-full px-3 text-left rounded-[var(--radius-md)] transition-colors"
+    style={{
+      height: '34px',
+      'font-size': '13px',
+      'font-family': 'var(--font-sans)',
+      background: props.isSelected() ? 'var(--dropdown-item-active-bg)' : 'transparent',
+      color: props.isSelected() ? 'var(--dropdown-item-active-text)' : 'var(--gray-9)',
     }}
     onClick={() => props.onSelect(props.cmd)}
   >
     {props.icon === 'builtin' ? (
-      <Terminal class="w-3.5 h-3.5 text-[var(--accent)] flex-shrink-0 opacity-70" />
+      <Terminal
+        class="w-3.5 h-3.5 flex-shrink-0"
+        style={{ color: props.isSelected() ? 'var(--dropdown-item-active-text)' : 'var(--gray-7)' }}
+      />
     ) : (
-      <Puzzle class="w-3.5 h-3.5 text-[var(--success)] flex-shrink-0 opacity-70" />
+      <Puzzle
+        class="w-3.5 h-3.5 flex-shrink-0"
+        style={{
+          color: props.isSelected() ? 'var(--dropdown-item-active-text)' : 'var(--success)',
+        }}
+      />
     )}
-    <span class="font-semibold font-[var(--font-mono)] text-[var(--text-xs)]">
+    <span class="font-semibold font-[var(--font-mono)]" style={{ 'font-size': '13px' }}>
       /{props.cmd.name}
     </span>
-    <span class="text-[var(--text-muted)] text-[var(--text-2xs)] truncate">
+    <span class="truncate" style={{ 'font-size': '11px', color: 'var(--gray-6)' }}>
       {props.cmd.description}
     </span>
   </button>

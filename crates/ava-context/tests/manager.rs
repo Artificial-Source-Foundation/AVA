@@ -1,4 +1,4 @@
-use ava_context::ContextManager;
+use ava_context::{create_hybrid_condenser, CondenserConfig, ContextManager};
 use ava_types::{Message, Role, ToolResult};
 
 #[test]
@@ -236,4 +236,33 @@ fn agent_visible_messages_exclude_compacted() {
             "all returned messages should be agent_visible"
         );
     }
+}
+
+#[tokio::test]
+async fn compact_async_tracks_latest_iterative_summary() {
+    let config = CondenserConfig::default();
+    let condenser = create_hybrid_condenser(config.clone(), None);
+    let mut manager = ContextManager::new_with_condenser(config, condenser);
+
+    manager.add_message(Message::new(Role::System, "system prompt"));
+    manager.add_message(Message::new(
+        Role::System,
+        "[Summary of 4 previous messages]",
+    ));
+    manager.add_message(Message::new(
+        Role::System,
+        "[Updated summary - 2 new messages]\nFiles read: src/lib.rs",
+    ));
+    manager.add_message(Message::new(Role::User, "latest user message"));
+
+    manager.compact_async().await.expect("summary extraction");
+    let second_summary = manager
+        .last_summary()
+        .expect("updated summary should be stored")
+        .to_string();
+
+    assert!(
+        second_summary.starts_with("[Updated summary"),
+        "unexpected second summary: {second_summary}"
+    );
 }

@@ -7,6 +7,10 @@ use serde_json::{json, Value};
 
 use crate::registry::Tool;
 
+const DEFAULT_MAX_LENGTH: usize = 50_000;
+const MIN_DOWNLOAD_BYTES: usize = 64 * 1024;
+const MAX_DOWNLOAD_BYTES: usize = 1024 * 1024;
+
 static RE_SCRIPT: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?is)<script[^>]*>.*?</script>").unwrap());
 static RE_STYLE: LazyLock<Regex> =
@@ -89,6 +93,10 @@ fn is_private_ipv6(ip: &std::net::Ipv6Addr) -> bool {
 ///
 /// This performs both hostname-based blocking (for known local names) and
 /// DNS resolution to catch hostnames that resolve to private IP ranges.
+///
+/// Limitation: reqwest performs its own DNS lookup when the real request is
+/// sent, so this remains best-effort protection against rebinding rather than
+/// a same-resolution guarantee.
 pub(crate) fn is_blocked_url(url: &str) -> Result<(), AvaError> {
     let lower = url.to_lowercase();
 
@@ -183,6 +191,65 @@ fn is_blocked_url_bool(url: &str) -> bool {
     is_blocked_url(url).is_err()
 }
 
+pub(crate) fn validate_redirect_target(
+    url: &url::Url,
+    previous_len: usize,
+) -> Result<(), std::io::Error> {
+    if previous_len >= 5 {
+        return Err(std::io::Error::other("too many redirects"));
+    }
+    if is_blocked_url_bool(url.as_str()) {
+        return Err(std::io::Error::other(
+            "redirect blocked: private/internal network address",
+        ));
+    }
+    Ok(())
+}
+
+fn response_byte_limit(max_length: usize) -> usize {
+    max_length
+        .saturating_mul(4)
+        .saturating_add(8192)
+        .clamp(MIN_DOWNLOAD_BYTES, MAX_DOWNLOAD_BYTES)
+}
+
+async fn read_response_body_limited(
+    response: &mut reqwest::Response,
+    byte_limit: usize,
+) -> Result<(Vec<u8>, bool), AvaError> {
+    let mut body = Vec::new();
+    let mut truncated = false;
+
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(|e| AvaError::ToolError(format!("Failed to read response body: {e}")))?
+    {
+        let remaining = byte_limit.saturating_sub(body.len());
+        if chunk.len() > remaining {
+            body.extend_from_slice(&chunk[..remaining]);
+            truncated = true;
+            break;
+        }
+
+        body.extend_from_slice(&chunk);
+    }
+
+    Ok((body, truncated))
+}
+
+fn truncate_to_char_boundary(content: &str, max_length: usize) -> (String, bool) {
+    if content.len() <= max_length {
+        return (content.to_string(), false);
+    }
+
+    let mut truncate_at = max_length;
+    while truncate_at > 0 && !content.is_char_boundary(truncate_at) {
+        truncate_at -= 1;
+    }
+    (format!("{}[truncated]", &content[..truncate_at]), true)
+}
+
 /// Strip HTML tags and extract text content.
 fn strip_html(html: &str) -> String {
     // Remove script and style blocks entirely
@@ -233,7 +300,7 @@ impl Tool for WebFetchTool {
                 "max_length": {
                     "type": "integer",
                     "minimum": 1,
-                    "description": "Maximum characters to return (default: 50000)"
+                    "description": "Maximum UTF-8 bytes of processed text to return (default: 50000)"
                 }
             }
         })
@@ -248,7 +315,8 @@ impl Tool for WebFetchTool {
         let max_length = args
             .get("max_length")
             .and_then(Value::as_u64)
-            .unwrap_or(50_000) as usize;
+            .unwrap_or(DEFAULT_MAX_LENGTH as u64) as usize;
+        let byte_limit = response_byte_limit(max_length);
 
         tracing::debug!(tool = "web_fetch", %url, "executing web_fetch tool");
 
@@ -259,19 +327,16 @@ impl Tool for WebFetchTool {
         let client = reqwest::Client::builder()
             .user_agent("ava/2.1")
             .timeout(std::time::Duration::from_secs(30))
-            .redirect(reqwest::redirect::Policy::custom(|attempt| {
-                if attempt.previous().len() >= 5 {
-                    attempt.error(std::io::Error::other("too many redirects"))
-                } else if is_blocked_url_bool(attempt.url().as_str()) {
-                    attempt.stop()
-                } else {
-                    attempt.follow()
-                }
-            }))
+            .redirect(reqwest::redirect::Policy::custom(
+                |attempt| match validate_redirect_target(attempt.url(), attempt.previous().len()) {
+                    Ok(()) => attempt.follow(),
+                    Err(error) => attempt.error(error),
+                },
+            ))
             .build()
             .map_err(|e| AvaError::ToolError(format!("Failed to create HTTP client: {e}")))?;
 
-        let response = match client.get(url).send().await {
+        let mut response = match client.get(url).send().await {
             Ok(resp) => resp,
             Err(e) => {
                 if e.is_timeout() {
@@ -305,13 +370,12 @@ impl Tool for WebFetchTool {
             .unwrap_or("unknown")
             .to_string();
 
-        let body = response
-            .text()
-            .await
-            .map_err(|e| AvaError::ToolError(format!("Failed to read response body: {e}")))?;
+        let (body_bytes, body_truncated) =
+            read_response_body_limited(&mut response, byte_limit).await?;
+        let body = String::from_utf8_lossy(&body_bytes).to_string();
 
         // Process content based on content type
-        let processed = if content_type.contains("application/json") {
+        let processed = if content_type.contains("application/json") && !body_truncated {
             // Try to pretty-print JSON
             match serde_json::from_str::<Value>(&body) {
                 Ok(parsed) => serde_json::to_string_pretty(&parsed).unwrap_or(body),
@@ -325,21 +389,14 @@ impl Tool for WebFetchTool {
         };
 
         // Truncate if needed
-        let (content, truncated) = if processed.len() > max_length {
-            let mut truncate_at = max_length;
-            while truncate_at > 0 && !processed.is_char_boundary(truncate_at) {
-                truncate_at -= 1;
-            }
-            (format!("{}[truncated]", &processed[..truncate_at]), true)
-        } else {
-            (processed, false)
-        };
+        let (content, char_truncated) = truncate_to_char_boundary(&processed, max_length);
+        let truncated = body_truncated || char_truncated;
 
         // Build result with metadata
         let mut meta = format!("URL: {final_url}\nStatus: {status}\nContent-Type: {content_type}");
         if truncated {
             meta.push_str(&format!(
-                "\nNote: Response truncated to {max_length} characters"
+                "\nNote: Response truncated to {max_length} UTF-8 bytes"
             ));
         }
         if status >= 400 {
@@ -478,6 +535,35 @@ mod tests {
         let html = "&amp; &lt; &gt; &quot; &#39;";
         let text = strip_html(html);
         assert_eq!(text, "& < > \" '");
+    }
+
+    #[test]
+    fn redirect_validation_blocks_private_targets() {
+        let url = url::Url::parse("http://169.254.169.254/latest").unwrap();
+        let error = validate_redirect_target(&url, 0).unwrap_err();
+        assert!(error.to_string().contains("redirect blocked"));
+    }
+
+    #[test]
+    fn redirect_validation_limits_redirect_hops() {
+        let url = url::Url::parse("https://example.com").unwrap();
+        let error = validate_redirect_target(&url, 5).unwrap_err();
+        assert!(error.to_string().contains("too many redirects"));
+    }
+
+    #[test]
+    fn response_byte_limit_scales_and_caps() {
+        assert_eq!(response_byte_limit(10), MIN_DOWNLOAD_BYTES);
+        assert_eq!(response_byte_limit(DEFAULT_MAX_LENGTH), 208_192);
+        assert_eq!(response_byte_limit(5_000_000), MAX_DOWNLOAD_BYTES);
+    }
+
+    #[test]
+    fn truncate_to_char_boundary_preserves_utf8() {
+        let content = "alpha🙂beta";
+        let (truncated, did_truncate) = truncate_to_char_boundary(content, 9);
+        assert!(did_truncate);
+        assert_eq!(truncated, "alpha🙂[truncated]");
     }
 
     #[tokio::test]

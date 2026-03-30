@@ -1,14 +1,14 @@
 /**
  * Keybindings Settings Tab
  *
- * Bento-grid layout using SettingsCard, matching AppearanceTab/BehaviorTab.
- * View and customize keyboard shortcuts.
+ * Pencil design: search input (rounded-8, #ffffff08 bg, #ffffff0a border),
+ * category cards (#111114, rounded-12, 12px gap between rows),
+ * key combos in Geist Mono 11px #48484A, labels in 13px #C8C8CC.
  */
 
-import { Code2, Compass, Keyboard, MessageCircle, Settings2 } from 'lucide-solid'
+import { Compass, Keyboard, MessageCircle, Settings2 } from 'lucide-solid'
 import { type Component, createSignal, For, Show } from 'solid-js'
 import { SettingsCard } from '../SettingsCard'
-import { SETTINGS_CARD_GAP } from '../settings-constants'
 
 // ============================================================================
 // Types
@@ -36,26 +36,33 @@ export interface KeybindingsTabProps {
 
 const formatKey = (key: string): string => {
   const keyMap: Record<string, string> = {
-    meta: '⌘',
+    meta: 'Ctrl',
     ctrl: 'Ctrl',
     alt: 'Alt',
-    shift: '⇧',
-    enter: '↵',
+    shift: 'Shift',
+    enter: 'Enter',
     escape: 'Esc',
-    backspace: '⌫',
+    backspace: 'Backspace',
     delete: 'Del',
     tab: 'Tab',
     space: 'Space',
-    arrowup: '↑',
-    arrowdown: '↓',
-    arrowleft: '←',
-    arrowright: '→',
+    arrowup: 'Up',
+    arrowdown: 'Down',
+    arrowleft: 'Left',
+    arrowright: 'Right',
   }
   return keyMap[key.toLowerCase()] || key.toUpperCase()
 }
 
 const KeyCombo: Component<{ keys: string[] }> = (props) => (
-  <span class="text-[var(--settings-text-input)] font-mono text-[var(--text-muted)] bg-[var(--surface-raised)] border border-[var(--border-subtle)] rounded px-1.5 py-0.5">
+  <span
+    style={{
+      'font-family': 'Geist Mono, monospace',
+      'font-size': '11px',
+      'font-weight': '400',
+      color: '#48484A',
+    }}
+  >
     {props.keys.map((k) => formatKey(k)).join(' + ')}
   </span>
 )
@@ -95,73 +102,111 @@ export const KeybindingsTab: Component<KeybindingsTabProps> = (props) => {
       General: { icon: Settings2, description: 'Global shortcuts' },
       Navigation: { icon: Compass, description: 'Tab and panel shortcuts' },
       Chat: { icon: MessageCircle, description: 'Message and conversation shortcuts' },
-      Editor: { icon: Code2, description: 'Text editing shortcuts' },
     }
 
   const defaultMeta = { icon: Keyboard, description: 'Keyboard shortcuts' }
 
   return (
-    <div class="space-y-5">
-      {/* Search + Reset All */}
-      <div class="space-y-2">
-        <input
-          type="text"
-          placeholder="Search shortcuts..."
-          value={searchQuery()}
-          onInput={(e) => setSearchQuery(e.currentTarget.value)}
-          class="
-            w-full px-3 py-2
-            bg-[var(--input-background)]
-            border border-[var(--input-border)]
-            rounded-[var(--radius-md)]
-            text-[var(--settings-text-input)] text-[var(--text-primary)]
-            placeholder:text-[var(--input-placeholder)]
-            focus:outline-none focus:border-[var(--input-border-focus)]
-            transition-colors
-          "
-        />
+    <div class="flex flex-col" style={{ gap: '24px' }}>
+      {/* Page title */}
+      <h2
+        style={{
+          'font-family': 'Geist, sans-serif',
+          'font-size': '22px',
+          'font-weight': '600',
+          color: '#F5F5F7',
+          margin: '0',
+        }}
+      >
+        Shortcuts
+      </h2>
 
-        <Show when={customCount() > 0 && props.onResetAll}>
-          <div class="flex items-center justify-between py-1">
-            <span class="text-[var(--settings-text-badge)] text-[var(--text-muted)]">
-              {customCount()} customized
-            </span>
-            <button
-              type="button"
-              onClick={() => props.onResetAll?.()}
-              class="text-[var(--settings-text-badge)] text-[var(--text-muted)] hover:text-[var(--warning)] transition-colors"
-            >
-              Reset all
-            </button>
-          </div>
-        </Show>
-      </div>
+      {/* Search input */}
+      <input
+        type="text"
+        placeholder="Search shortcuts..."
+        value={searchQuery()}
+        onInput={(e) => setSearchQuery(e.currentTarget.value)}
+        style={{
+          width: '100%',
+          padding: '8px 12px',
+          background: '#ffffff08',
+          border: '1px solid #ffffff0a',
+          'border-radius': '8px',
+          'font-family': 'Geist, sans-serif',
+          'font-size': '12px',
+          color: '#F5F5F7',
+          outline: 'none',
+        }}
+      />
 
-      {/* Category cards in bento grid */}
+      <Show when={customCount() > 0 && props.onResetAll}>
+        <div class="flex items-center justify-between">
+          <span
+            style={{ 'font-family': 'Geist, sans-serif', 'font-size': '11px', color: '#48484A' }}
+          >
+            {customCount()} customized
+          </span>
+          <button
+            type="button"
+            onClick={() => props.onResetAll?.()}
+            style={{
+              'font-family': 'Geist, sans-serif',
+              'font-size': '11px',
+              color: '#48484A',
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+            }}
+          >
+            Reset all
+          </button>
+        </div>
+      </Show>
+
+      {/* Category cards */}
       <Show
         when={filteredKeybindings().length > 0}
         fallback={
-          <p class="text-[var(--settings-text-description)] text-[var(--text-muted)] text-center py-6">
+          <p
+            class="text-center py-6"
+            style={{ 'font-family': 'Geist, sans-serif', 'font-size': '12px', color: '#48484A' }}
+          >
             No shortcuts found
           </p>
         }
       >
-        <div class="grid grid-cols-1" style={{ gap: SETTINGS_CARD_GAP }}>
+        <div class="flex flex-col" style={{ gap: '24px' }}>
           <For each={Object.entries(grouped())}>
             {([category, bindings]) => {
               const meta = categoryMeta[category] ?? defaultMeta
               return (
-                <SettingsCard icon={meta.icon} title={category} description={meta.description}>
-                  <div class="space-y-0.5">
+                <SettingsCard icon={meta.icon} title={category}>
+                  <div class="flex flex-col" style={{ gap: '0px' }}>
                     <For each={bindings}>
                       {(kb) => (
-                        <div class="flex items-center justify-between py-1.5 group">
-                          <div class="flex-1 min-w-0">
-                            <span class="text-[var(--settings-text-label)] text-[var(--text-secondary)]">
+                        <div
+                          class="flex items-center justify-between group"
+                          style={{ padding: '6px 0' }}
+                        >
+                          <div class="flex items-center gap-1.5 min-w-0">
+                            <span
+                              style={{
+                                'font-family': 'Geist, sans-serif',
+                                'font-size': '13px',
+                                color: '#C8C8CC',
+                              }}
+                            >
                               {kb.action}
                             </span>
                             <Show when={kb.isCustom}>
-                              <span class="ml-1.5 text-[var(--settings-text-caption)] text-[var(--accent)]">
+                              <span
+                                style={{
+                                  'font-family': 'Geist, sans-serif',
+                                  'font-size': '10px',
+                                  color: '#0A84FF',
+                                }}
+                              >
                                 modified
                               </span>
                             </Show>
@@ -172,7 +217,15 @@ export const KeybindingsTab: Component<KeybindingsTabProps> = (props) => {
                               <button
                                 type="button"
                                 onClick={() => props.onEdit?.(kb.id)}
-                                class="text-[var(--settings-text-button)] text-[var(--text-muted)] hover:text-[var(--accent)] opacity-0 group-hover:opacity-100 transition-[color,opacity]"
+                                class="opacity-0 group-hover:opacity-100 transition-opacity"
+                                style={{
+                                  'font-family': 'Geist, sans-serif',
+                                  'font-size': '11px',
+                                  color: '#48484A',
+                                  background: 'none',
+                                  border: 'none',
+                                  cursor: 'pointer',
+                                }}
                               >
                                 Edit
                               </button>
@@ -181,7 +234,15 @@ export const KeybindingsTab: Component<KeybindingsTabProps> = (props) => {
                               <button
                                 type="button"
                                 onClick={() => props.onReset?.(kb.id)}
-                                class="text-[var(--settings-text-button)] text-[var(--text-muted)] hover:text-[var(--warning)] opacity-0 group-hover:opacity-100 transition-[color,opacity]"
+                                class="opacity-0 group-hover:opacity-100 transition-opacity"
+                                style={{
+                                  'font-family': 'Geist, sans-serif',
+                                  'font-size': '11px',
+                                  color: '#48484A',
+                                  background: 'none',
+                                  border: 'none',
+                                  cursor: 'pointer',
+                                }}
                               >
                                 Reset
                               </button>
@@ -245,24 +306,10 @@ export const defaultKeybindings: Keybinding[] = [
     category: 'Navigation',
   },
   {
-    id: 'tab-files',
-    action: 'Go to Files',
-    description: 'Switch to Files tab',
-    keys: ['meta', '3'],
-    category: 'Navigation',
-  },
-  {
-    id: 'tab-memory',
-    action: 'Go to Memory',
-    description: 'Switch to Memory tab',
-    keys: ['meta', '4'],
-    category: 'Navigation',
-  },
-  {
-    id: 'tab-terminal',
-    action: 'Go to Terminal',
-    description: 'Switch to Terminal tab',
-    keys: ['meta', '5'],
+    id: 'toggle-sidebar',
+    action: 'Toggle Sidebar',
+    description: 'Show or hide the sidebar',
+    keys: ['meta', 's'],
     category: 'Navigation',
   },
 
@@ -287,35 +334,5 @@ export const defaultKeybindings: Keybinding[] = [
     description: 'Clear current conversation',
     keys: ['meta', 'shift', 'k'],
     category: 'Chat',
-  },
-
-  // Editor
-  {
-    id: 'copy',
-    action: 'Copy',
-    description: 'Copy selected text',
-    keys: ['meta', 'c'],
-    category: 'Editor',
-  },
-  {
-    id: 'paste',
-    action: 'Paste',
-    description: 'Paste from clipboard',
-    keys: ['meta', 'v'],
-    category: 'Editor',
-  },
-  {
-    id: 'undo',
-    action: 'Undo',
-    description: 'Undo last action',
-    keys: ['meta', 'z'],
-    category: 'Editor',
-  },
-  {
-    id: 'redo',
-    action: 'Redo',
-    description: 'Redo last undone action',
-    keys: ['meta', 'shift', 'z'],
-    category: 'Editor',
   },
 ]

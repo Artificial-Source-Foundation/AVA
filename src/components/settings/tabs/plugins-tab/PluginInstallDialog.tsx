@@ -50,8 +50,19 @@ export const GitInstallDialog: Component<GitInstallDialogProps> = (props) => {
 
   return (
     <Show when={props.open()}>
-      <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-        <div class="bg-[var(--surface-overlay)] border border-[var(--border-default)] rounded-[var(--radius-xl)] p-6 max-w-md w-full shadow-2xl space-y-4">
+      <div
+        class="fixed inset-0 z-50 flex items-center justify-center"
+        style={{ background: 'var(--modal-overlay)' }}
+      >
+        <div
+          class="p-6 max-w-md w-full space-y-4"
+          style={{
+            background: 'var(--modal-surface)',
+            border: '1px solid var(--modal-border)',
+            'border-radius': 'var(--modal-radius-sm)',
+            'box-shadow': 'var(--modal-shadow)',
+          }}
+        >
           <div class="flex items-center gap-2">
             <GitBranch class="w-4 h-4 text-[var(--accent)]" />
             <h3 class="text-sm font-semibold text-[var(--text-primary)]">Install from Git</h3>
@@ -77,7 +88,7 @@ export const GitInstallDialog: Component<GitInstallDialogProps> = (props) => {
           <div class="flex gap-2 justify-end">
             <button
               type="button"
-              onClick={props.onClose}
+              onClick={() => props.onClose()}
               class="px-3 py-1.5 text-xs text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors"
             >
               Cancel
@@ -86,7 +97,7 @@ export const GitInstallDialog: Component<GitInstallDialogProps> = (props) => {
               type="button"
               onClick={() => void handleGitInstall()}
               disabled={!gitUrl().trim() || gitInstalling()}
-              class="px-3 py-1.5 text-xs font-medium bg-[var(--accent)] text-white rounded-[var(--radius-md)] hover:brightness-110 transition-colors disabled:opacity-50"
+              class="px-3 py-1.5 text-xs font-medium bg-[var(--accent)] text-white rounded-[var(--radius-md)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-50"
             >
               {gitInstalling() ? 'Installing...' : 'Install'}
             </button>
@@ -132,8 +143,19 @@ export const LinkLocalDialog: Component<LinkLocalDialogProps> = (props) => {
 
   return (
     <Show when={props.open()}>
-      <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-        <div class="bg-[var(--surface-overlay)] border border-[var(--border-default)] rounded-[var(--radius-xl)] p-6 max-w-md w-full shadow-2xl space-y-4">
+      <div
+        class="fixed inset-0 z-50 flex items-center justify-center"
+        style={{ background: 'var(--modal-overlay)' }}
+      >
+        <div
+          class="p-6 max-w-md w-full space-y-4"
+          style={{
+            background: 'var(--modal-surface)',
+            border: '1px solid var(--modal-border)',
+            'border-radius': 'var(--modal-radius-sm)',
+            'box-shadow': 'var(--modal-shadow)',
+          }}
+        >
           <div class="flex items-center gap-2">
             <FolderSymlink class="w-4 h-4 text-[var(--accent)]" />
             <h3 class="text-sm font-semibold text-[var(--text-primary)]">Link Local Extension</h3>
@@ -159,7 +181,7 @@ export const LinkLocalDialog: Component<LinkLocalDialogProps> = (props) => {
           <div class="flex gap-2 justify-end">
             <button
               type="button"
-              onClick={props.onClose}
+              onClick={() => props.onClose()}
               class="px-3 py-1.5 text-xs text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors"
             >
               Cancel
@@ -168,7 +190,7 @@ export const LinkLocalDialog: Component<LinkLocalDialogProps> = (props) => {
               type="button"
               onClick={() => void handleLinkLocal()}
               disabled={!linkPath().trim() || linkInstalling()}
-              class="px-3 py-1.5 text-xs font-medium bg-[var(--accent)] text-white rounded-[var(--radius-md)] hover:brightness-110 transition-colors disabled:opacity-50"
+              class="px-3 py-1.5 text-xs font-medium bg-[var(--accent)] text-white rounded-[var(--radius-md)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-50"
             >
               {linkInstalling() ? 'Linking...' : 'Link'}
             </button>
@@ -193,8 +215,19 @@ export const PermissionConfirmDialog: Component<PermissionConfirmDialogProps> = 
   return (
     <Show when={props.plugin()}>
       {(plugin) => (
-        <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-          <div class="bg-[var(--surface-overlay)] border border-[var(--border-default)] rounded-[var(--radius-xl)] p-6 max-w-md w-full shadow-2xl space-y-4">
+        <div
+          class="fixed inset-0 z-50 flex items-center justify-center"
+          style={{ background: 'var(--modal-overlay)' }}
+        >
+          <div
+            class="p-6 max-w-md w-full space-y-4"
+            style={{
+              background: 'var(--modal-surface)',
+              border: '1px solid var(--modal-border)',
+              'border-radius': 'var(--modal-radius-sm)',
+              'box-shadow': 'var(--modal-shadow)',
+            }}
+          >
             <div class="flex items-center gap-2">
               <AlertTriangle class="w-4 h-4 text-[var(--warning)]" />
               <h3 class="text-sm font-semibold text-[var(--text-primary)]">
@@ -239,7 +272,7 @@ export const PermissionConfirmDialog: Component<PermissionConfirmDialogProps> = 
               <button
                 type="button"
                 onClick={props.onConfirm}
-                class="px-3 py-1.5 text-xs font-medium bg-[var(--warning)] text-white rounded-[var(--radius-md)] hover:brightness-110 transition-colors"
+                class="px-3 py-1.5 text-xs font-medium bg-[var(--warning)] text-white rounded-[var(--radius-md)] hover:bg-[color-mix(in_srgb,var(--warning)_90%,white_10%)] transition-colors"
               >
                 Install Anyway
               </button>

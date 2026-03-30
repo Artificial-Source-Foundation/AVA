@@ -12,7 +12,7 @@ use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
-use tracing::debug;
+use tracing::{debug, info, warn};
 
 enum HeadlessSlashOutcome {
     NotHandled,
@@ -26,6 +26,9 @@ fn dispatch_headless_slash_with_app(app: &mut App, goal: &str) -> HeadlessSlashO
         return HeadlessSlashOutcome::NotHandled;
     }
 
+    // Clear status before running the command so we can detect if it was set.
+    app.state.status_message = None;
+
     if let Some((kind, msg)) = app.handle_slash_command(trimmed, None) {
         return HeadlessSlashOutcome::Message(kind, msg);
     }
@@ -36,6 +39,10 @@ fn dispatch_headless_slash_with_app(app: &mut App, goal: &str) -> HeadlessSlashO
             Err(err) => HeadlessSlashOutcome::Message(MessageKind::Error, err),
         };
     }
+
+    // Some commands (e.g. /permissions, /think, /copy, /clear) mutate TUI state
+    // and return None instead of a display message. Check if the command had
+    // side-effects we can report.
 
     if app.state.active_modal.is_some() {
         if let Some(panel) = &app.state.info_panel {
@@ -65,6 +72,17 @@ fn dispatch_headless_slash_with_app(app: &mut App, goal: &str) -> HeadlessSlashO
                 "{cmd} opens the {modal_label} in the interactive TUI and is not available in headless mode."
             ),
         );
+    }
+
+    // Check if the command set a status message (e.g. /permissions toggle,
+    // /think show/hide, /clear). If so, it was handled — report the status text.
+    if let Some(ref status) = app.state.status_message {
+        return HeadlessSlashOutcome::Message(MessageKind::System, status.text.clone());
+    }
+
+    // Check if the command pushed a toast notification.
+    if let Some(msg) = app.state.toast.take_last() {
+        return HeadlessSlashOutcome::Message(MessageKind::System, msg);
     }
 
     HeadlessSlashOutcome::Message(
@@ -108,8 +126,12 @@ fn print_headless_slash_message(json_mode: bool, kind: MessageKind, message: &st
 pub(super) async fn run_single_agent(cli: CliArgs, goal: &str) -> Result<()> {
     let goal = match dispatch_headless_slash_command(&cli, goal).await? {
         HeadlessSlashOutcome::NotHandled => goal.to_string(),
-        HeadlessSlashOutcome::ExecuteGoal(resolved) => resolved,
+        HeadlessSlashOutcome::ExecuteGoal(resolved) => {
+            info!(resolved = %resolved, "slash command resolved to agent goal");
+            resolved
+        }
         HeadlessSlashOutcome::Message(kind, message) => {
+            debug!(command = %goal, "slash command handled directly");
             print_headless_slash_message(cli.json, kind, &message);
             return Ok(());
         }
@@ -120,8 +142,17 @@ pub(super) async fn run_single_agent(cli: CliArgs, goal: &str) -> Result<()> {
 
     let (provider, model) = cli.resolve_provider_model().await?;
     if provider.is_none() {
+        warn!("no provider configured — cannot run agent");
         return Err(eyre!(crate::config::cli::NO_PROVIDER_ERROR));
     }
+    info!(
+        provider = ?provider,
+        model = ?model,
+        max_turns = cli.max_turns,
+        auto_approve = cli.auto_approve,
+        goal_len = goal.len(),
+        "starting headless agent run"
+    );
 
     if runtime_lean.auto_lean {
         tracing::info!(
@@ -396,6 +427,12 @@ pub(super) async fn run_single_agent(cli: CliArgs, goal: &str) -> Result<()> {
     let result = handle.await??;
     let cost_summary = crate::session_summary::cost_summary(&result.session);
     let route_summary = crate::session_summary::route_summary(&result.session);
+    info!(
+        success = result.success,
+        turns = result.turns,
+        session_id = %result.session.id,
+        "headless agent run completed"
+    );
 
     if json_mode {
         println!(

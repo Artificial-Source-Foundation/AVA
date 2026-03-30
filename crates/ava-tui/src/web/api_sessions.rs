@@ -5,6 +5,7 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::Json;
 use serde::{Deserialize, Serialize};
+use tracing::{debug, warn};
 
 use super::api::{error_response, ErrorResponse};
 use super::state::WebState;
@@ -155,6 +156,7 @@ pub(crate) async fn create_session(
         .save(&session)
         .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
 
+    debug!(session_id = %session.id, title = %req.name, "session created");
     Ok(Json(SessionSummary {
         id: session.id.to_string(),
         title: req.name,
@@ -333,8 +335,12 @@ pub(crate) async fn delete_session(
         .stack
         .session_manager
         .delete(uuid)
-        .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
+        .map_err(|e| {
+            warn!(session_id = %uuid, error = %e, "failed to delete session");
+            error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string())
+        })?;
 
+    debug!(session_id = %uuid, "session deleted");
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -635,8 +641,9 @@ pub(crate) async fn list_session_checkpoints(Path(_id): Path<String>) -> impl In
 
 #[derive(Deserialize)]
 pub struct DuplicateSessionRequest {
-    /// Name for the new session.
-    pub name: String,
+    /// Name for the new session. Auto-generated from source if omitted.
+    #[serde(default)]
+    pub name: Option<String>,
     /// Optional client-provided ID for the new session.
     #[serde(default)]
     pub id: Option<String>,
@@ -677,12 +684,17 @@ pub(crate) async fn duplicate_session(
         }
     }
 
-    // Set title
+    // Set title — use provided name or auto-generate from source
+    let title = req.name.clone().unwrap_or_else(|| {
+        let source_title = source_session
+            .metadata
+            .get("title")
+            .and_then(|v| v.as_str())
+            .unwrap_or("Untitled");
+        format!("{source_title} (copy)")
+    });
     if let Some(map) = new_session.metadata.as_object_mut() {
-        map.insert(
-            "title".to_string(),
-            serde_json::Value::String(req.name.clone()),
-        );
+        map.insert("title".to_string(), serde_json::Value::String(title));
     }
 
     // Save the new session first
@@ -713,9 +725,15 @@ pub(crate) async fn duplicate_session(
             .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
     }
 
+    let final_title = new_session
+        .metadata
+        .get("title")
+        .and_then(|v| v.as_str())
+        .unwrap_or("Untitled")
+        .to_string();
     Ok(Json(SessionSummary {
         id: new_session.id.to_string(),
-        title: req.name,
+        title: final_title,
         message_count,
         created_at: new_session.created_at.to_rfc3339(),
         updated_at: new_session.updated_at.to_rfc3339(),

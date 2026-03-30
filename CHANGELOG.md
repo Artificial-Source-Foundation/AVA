@@ -11,10 +11,15 @@ All notable changes to AVA are documented in this file.
 - Web mode now has a `POST /api/sessions/{id}/duplicate` endpoint for server-side session fork/duplicate with message copying.
 - Slash command registry expanded from 3 to 25 commands with local UI handlers for `/clear`, `/new`, `/sessions`, `/model`, `/theme`, `/export`, `/copy`, `/help`, `/shortcuts`, `/settings`, plus agent-handled commands.
 - About AVA dialog implemented in Help menu with version info and GitHub link.
+- Structured `tracing` logging for web API (HTTP request/response via `TraceLayer`) and headless CLI (agent start/complete with provider/model/turns/session_id, session CRUD, HQ lookups).
 - Model browser now filters out deprecated/alpha-status models and known-outdated entries (e.g. Aurora Alpha).
 - Session delete now requires confirmation before permanent removal.
 
 ### Fixed
+- **HQ API: nonexistent resources returned 200+null** — `get_agent` and `get_plan` endpoints now return proper 404 status codes when the requested resource doesn't exist.
+- **HQ settings not persisting** — `UpdateHqSettingsRequest` used `snake_case` serde while the response DTO used `camelCase`, so the request payload was silently ignored. Both now use `camelCase`.
+- **Headless slash commands returned "Unknown"** — `/permissions`, `/think`, `/copy`, and `/clear` mutate TUI state and return `None` instead of a display message; headless dispatch now checks `status_message` and toast state to detect handled commands.
+- **Session duplicate required name field** — `DuplicateSessionRequest.name` is now optional; auto-generates "X (copy)" from the source session title when omitted.
 - **Critical: Ctrl+F search infinite loop** — `defaultAdapter()` was re-invoked as a reactive getter on every signal change, re-creating the SearchBar JSX element, which fired mount effects, wrote signals, and caused a cascading re-render loop. Adapter is now computed once at component init.
 - **Message action buttons (edit/copy/rewind) misrouted** — SolidJS event delegation combined with `content-visibility: auto` containment caused click events to resolve to wrong handlers. Switched all toolbar buttons to non-delegated `on:click` with `stopPropagation`.
 - **Session fork/duplicate created empty sessions in web mode** — The web database fallback silently no-oped `INSERT INTO messages`. Now routes through a dedicated backend API endpoint.

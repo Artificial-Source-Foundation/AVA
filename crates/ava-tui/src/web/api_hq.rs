@@ -2,6 +2,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
+use tracing::debug;
+
 use ava_config::{HqAgentOverride, HqConfig};
 use ava_db::models::{
     HqActivityRecord, HqAgentRecord, HqChatMessageRecord, HqEpicRecord, HqIssueRecord, HqPlanRecord,
@@ -227,7 +229,7 @@ pub struct SendDirectorMessageRequest {
 }
 
 #[derive(Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[serde(rename_all = "camelCase")]
 pub struct UpdateHqSettingsRequest {
     pub director_model: Option<String>,
     pub tone_preference: Option<String>,
@@ -1065,18 +1067,29 @@ pub async fn create_epic(
 pub async fn get_plan(
     Path(epic_id): Path<String>,
     State(state): State<WebState>,
-) -> Result<Json<Option<HqPlanDto>>, String> {
+) -> Result<Json<HqPlanDto>, (axum::http::StatusCode, String)> {
     let repo = repo(&state);
-    let Some(record) = repo
-        .get_plan_by_epic(&epic_id)
-        .await
-        .map_err(|error| error.to_string())?
+    let Some(record) = repo.get_plan_by_epic(&epic_id).await.map_err(|error| {
+        (
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            error.to_string(),
+        )
+    })?
     else {
-        return Ok(Json(None));
+        debug!(epic_id = %epic_id, "HQ plan not found for epic");
+        return Err((
+            axum::http::StatusCode::NOT_FOUND,
+            "Plan not found".to_string(),
+        ));
     };
-    Ok(Json(Some(
-        serde_json::from_str(&record.plan_json).map_err(|error| error.to_string())?,
-    )))
+    Ok(Json(serde_json::from_str(&record.plan_json).map_err(
+        |error| {
+            (
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                error.to_string(),
+            )
+        },
+    )?))
 }
 
 pub async fn approve_plan(
@@ -1174,15 +1187,28 @@ pub async fn get_agents(State(state): State<WebState>) -> Result<Json<Vec<HqAgen
 pub async fn get_agent(
     Path(id): Path<String>,
     State(state): State<WebState>,
-) -> Result<Json<Option<HqAgentDto>>, String> {
+) -> Result<Json<HqAgentDto>, (axum::http::StatusCode, String)> {
     let repo = repo(&state);
-    ensure_director_agent(&state, &repo).await?;
-    Ok(Json(
-        repo.get_agent(&id)
-            .await
-            .map_err(|error| error.to_string())?
-            .map(map_agent),
-    ))
+    ensure_director_agent(&state, &repo)
+        .await
+        .map_err(|error| (axum::http::StatusCode::INTERNAL_SERVER_ERROR, error))?;
+    let agent = repo
+        .get_agent(&id)
+        .await
+        .map_err(|error| {
+            (
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                error.to_string(),
+            )
+        })?
+        .ok_or_else(|| {
+            debug!(agent_id = %id, "HQ agent not found");
+            (
+                axum::http::StatusCode::NOT_FOUND,
+                format!("Agent '{id}' not found"),
+            )
+        })?;
+    Ok(Json(map_agent(agent)))
 }
 
 pub async fn get_activity_feed(

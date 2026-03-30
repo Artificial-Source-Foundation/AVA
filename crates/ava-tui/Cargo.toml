@@ -74,7 +74,7 @@ base64 = "0.22"
 png = "0.18"
 notify = "6"
 axum = { version = "0.8", features = ["ws"], optional = true }
-tower-http = { version = "0.6", features = ["cors", "fs"], optional = true }
+tower-http = { version = "0.6", features = ["cors", "fs", "trace"], optional = true }
 
 [features]
 default = []

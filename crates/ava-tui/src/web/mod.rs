@@ -75,6 +75,7 @@ use axum::routing::{get, patch, post};
 use axum::Router;
 use color_eyre::Result;
 use tower_http::cors::{Any, CorsLayer};
+use tower_http::trace::TraceLayer;
 use tracing::info;
 
 use self::state::WebState;
@@ -211,6 +212,7 @@ fn build_router(state: WebState) -> Router {
         // Health check
         .route("/api/health", get(api::health))
         .layer(cors)
+        .layer(TraceLayer::new_for_http())
         .with_state(state)
 }
 

@@ -50,6 +50,11 @@ impl ToastState {
     pub fn is_empty(&self) -> bool {
         self.toasts.is_empty()
     }
+
+    /// Pop the most recently pushed toast message, if any.
+    pub fn take_last(&mut self) -> Option<String> {
+        self.toasts.pop().map(|t| t.message)
+    }
 }
 
 #[cfg(test)]

@@ -62,8 +62,8 @@ pub use agent_commands::{
     resolve_question, retry_last_message, steer_agent, submit_goal, undo_last_edit,
 };
 pub use config_commands::{
-    get_config, get_feature_flags, sync_hq_agent_overrides, update_feature_flags,
-    update_llm_config,
+    get_config, get_feature_flags, load_credentials, sync_credentials, sync_hq_agent_overrides,
+    update_feature_flags, update_llm_config,
 };
 pub use context_commands::compact_context;
 pub use hq_commands::{

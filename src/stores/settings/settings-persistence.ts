@@ -133,6 +133,79 @@ export function syncAllApiKeys(current: AppSettings): void {
 }
 
 // ============================================================================
+// Rust Credential Store Sync — Desktop ↔ ~/.ava/credentials.json
+// ============================================================================
+
+/**
+ * Push all Desktop provider API keys to the Rust CredentialStore
+ * (~/.ava/credentials.json) so the TUI/CLI can use them.
+ * Fire-and-forget — never blocks the UI.
+ */
+function syncCredentialsToCore(s: AppSettings): void {
+  const credentials = s.providers
+    .filter((p) => p.apiKey)
+    .map((p) => ({ provider: p.id, apiKey: p.apiKey }))
+  if (credentials.length === 0) return
+
+  invoke('sync_credentials', { credentials }).catch((err) => {
+    logWarn('settings', 'Credential sync to credentials.json failed', err)
+  })
+}
+
+interface CoreCredentialEntry {
+  provider: string
+  apiKey: string
+}
+
+/**
+ * Load credentials from ~/.ava/credentials.json and merge any API keys that
+ * exist in the Rust store but are missing from the Desktop settings.
+ *
+ * Returns a providers patch (only providers that need updating), or null if
+ * no changes are needed.
+ */
+async function loadCredentialsFromCore(
+  currentProviders: LLMProviderConfig[]
+): Promise<Partial<AppSettings> | null> {
+  try {
+    const entries = await invoke<CoreCredentialEntry[]>('load_credentials')
+    if (!entries || entries.length === 0) return null
+
+    const providerMap = new Map(currentProviders.map((p) => [p.id, p]))
+    let changed = false
+    const updatedProviders = currentProviders.map((p) => ({ ...p }))
+
+    for (const entry of entries) {
+      const existing = providerMap.get(entry.provider)
+      // Only backfill if Desktop doesn't already have a key for this provider
+      if (existing && !existing.apiKey && entry.apiKey) {
+        const idx = updatedProviders.findIndex((p) => p.id === entry.provider)
+        if (idx >= 0) {
+          updatedProviders[idx] = {
+            ...updatedProviders[idx],
+            apiKey: entry.apiKey,
+            status: 'connected',
+            enabled: true,
+          }
+          // Also write to localStorage credential cache
+          syncProviderCredentials(entry.provider, entry.apiKey)
+          changed = true
+        }
+      }
+    }
+
+    if (!changed) return null
+    logInfo('settings', 'Loaded credentials from credentials.json', {
+      count: entries.length,
+    })
+    return { providers: updatedProviders } as Partial<AppSettings>
+  } catch (err) {
+    logWarn('settings', 'Failed to load credentials from credentials.json', err)
+    return null
+  }
+}
+
+// ============================================================================
 // Core Settings Sync — pushes frontend AppSettings → core SettingsManager
 // ============================================================================
 
@@ -167,6 +240,9 @@ export function pushSettingsToCore(s: AppSettings): void {
 
   // Sync shared feature flags to config.yaml (fire-and-forget)
   syncFeatureFlagsToYaml(s)
+
+  // Sync provider API keys to ~/.ava/credentials.json (fire-and-forget)
+  syncCredentialsToCore(s)
 }
 
 /**
@@ -244,7 +320,9 @@ interface CoreFeatureFlags {
  * Returns a partial patch — the caller is responsible for merging it into the
  * signal and persisting.
  */
-export async function loadSharedSettingsFromCore(): Promise<Partial<AppSettings> | null> {
+export async function loadSharedSettingsFromCore(
+  currentProviders?: LLMProviderConfig[]
+): Promise<Partial<AppSettings> | null> {
   try {
     const [configResult, flagsResult] = await Promise.allSettled([
       invoke<Record<string, unknown>>('get_config'),
@@ -285,6 +363,15 @@ export async function loadSharedSettingsFromCore(): Promise<Partial<AppSettings>
       const flags = flagsResult.value
       if (flags.enable_git != null) {
         patch.git = { enabled: flags.enable_git } as AppSettings['git']
+        changed = true
+      }
+    }
+
+    // --- Credentials from ~/.ava/credentials.json ---
+    if (currentProviders) {
+      const credPatch = await loadCredentialsFromCore(currentProviders)
+      if (credPatch) {
+        Object.assign(patch, credPatch)
         changed = true
       }
     }

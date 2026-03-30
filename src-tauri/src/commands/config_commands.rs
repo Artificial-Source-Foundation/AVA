@@ -1,7 +1,9 @@
 //! Tauri commands for reading and writing configuration.
 
 use ava_config::HqAgentOverride;
+use serde::Deserialize;
 use tauri::State;
+use tracing::debug;
 
 use crate::bridge::DesktopBridge;
 
@@ -122,4 +124,83 @@ pub async fn get_feature_flags(
 ) -> Result<serde_json::Value, String> {
     let cfg = bridge.stack.config.get().await;
     serde_json::to_value(&cfg.features).map_err(|e| e.to_string())
+}
+
+// ============================================================================
+// Credential Sync — Desktop ↔ ~/.ava/credentials.json
+// ============================================================================
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CredentialEntry {
+    pub provider: String,
+    pub api_key: String,
+}
+
+/// Sync provider API keys from the Desktop frontend into ~/.ava/credentials.json.
+///
+/// Additive: only sets keys that are provided; does not remove existing entries.
+/// Skips empty API keys silently.
+#[tauri::command]
+pub async fn sync_credentials(
+    credentials: Vec<CredentialEntry>,
+    bridge: State<'_, DesktopBridge>,
+) -> Result<(), String> {
+    let count = credentials.len();
+    bridge
+        .stack
+        .config
+        .update_credentials(|store| {
+            for entry in &credentials {
+                let key = entry.api_key.trim();
+                if key.is_empty() {
+                    continue;
+                }
+                // Preserve existing fields (base_url, org_id, oauth, etc.) if present
+                let mut cred = store
+                    .providers
+                    .get(&entry.provider)
+                    .cloned()
+                    .unwrap_or_default();
+                cred.api_key = key.to_string();
+                store.set(&entry.provider, cred);
+            }
+        })
+        .await
+        .map_err(|e| e.to_string())?;
+
+    bridge
+        .stack
+        .config
+        .save_credentials()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    debug!(count, "Synced Desktop credentials to credentials.json");
+    Ok(())
+}
+
+/// Load provider credentials from ~/.ava/credentials.json for the Desktop frontend.
+///
+/// Returns a list of `{ provider, apiKey }` entries for all providers that have a
+/// non-empty API key. OAuth tokens and other sensitive fields are NOT returned —
+/// only static API keys that the Desktop settings panel manages.
+#[tauri::command]
+pub async fn load_credentials(
+    bridge: State<'_, DesktopBridge>,
+) -> Result<Vec<serde_json::Value>, String> {
+    let store = bridge.stack.config.credentials().await;
+    let mut entries = Vec::new();
+    for provider_name in store.providers() {
+        if let Some(cred) = store.providers.get(provider_name) {
+            let key = cred.api_key.trim();
+            if !key.is_empty() {
+                entries.push(serde_json::json!({
+                    "provider": provider_name,
+                    "apiKey": key,
+                }));
+            }
+        }
+    }
+    Ok(entries)
 }

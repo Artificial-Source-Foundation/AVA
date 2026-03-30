@@ -150,7 +150,9 @@ export async function hydrateSettingsFromFS(): Promise<void> {
 
   // After FS hydration, also pull shared settings from config.yaml so the
   // Desktop reflects the same provider/model/features the TUI last used.
-  const patch = await loadSharedFromCoreImpl()
+  // Pass current providers so credentials.json keys can be backfilled.
+  const currentProviders = settings().providers
+  const patch = await loadSharedFromCoreImpl(currentProviders)
   if (!patch) return
 
   setSettingsRaw((prev) => {
@@ -162,6 +164,10 @@ export async function hydrateSettingsFromFS(): Promise<void> {
     // Deep-merge git sub-object
     if (patch.git) {
       next.git = { ...prev.git, ...patch.git }
+    }
+    // Merge providers (credentials backfill from credentials.json)
+    if (patch.providers) {
+      next.providers = patch.providers
     }
     saveSettings(next)
     return next

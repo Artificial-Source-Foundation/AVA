@@ -60,6 +60,11 @@ lto = "thin"
 codegen-units = 1
 strip = true
 
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"
+
 [workspace.lints.rust]
 unsafe_code = "deny"
 rust_2018_idioms = { level = "warn", priority = -1 }

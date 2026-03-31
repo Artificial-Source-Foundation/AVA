@@ -72,90 +72,174 @@ fn provider_notes(title: &str, lines: &[&str]) -> String {
     suffix
 }
 
-/// Return provider-specific instructions to append to the base system prompt.
+/// Return model-aware instructions to append to the base system prompt.
 ///
-/// The core system prompt stays the same for all providers. This function returns
-/// an additive suffix that optimizes instructions for each provider family's
-/// tool-calling and reasoning conventions.
-///
-/// Returns `None` only when the base prompt needs no provider-specific tuning.
+/// Tuning is based on the **model family** (Claude, GPT, Gemini, etc.) not the
+/// provider — the same model behaves the same whether served through OpenAI,
+/// Copilot, or OpenRouter. Provider-specific routing quirks (rate limits, proxy
+/// behavior) are appended separately when relevant.
 pub fn provider_prompt_suffix(provider_kind: ProviderKind, model_name: &str) -> Option<String> {
+    let model_lower = model_name.to_lowercase();
     let reasoning = model_supports_reasoning_for_prompt(provider_kind, model_name);
-    match provider_kind {
-        ProviderKind::Anthropic | ProviderKind::Bedrock => {
-            let mut lines = vec![
-                "Follow structured instructions closely and keep pre-tool prose minimal.",
-                "Prefer one decisive tool/action at a time unless safe parallel work is obvious.",
-                "After a tool failure, briefly explain the new plan instead of retrying blindly.",
-                "Claude excels at nuanced reasoning — use it for architecture decisions, not for trivial file reads.",
-                "When given large contexts, prioritize the most recent instructions and tool results over older history.",
-            ];
-            if reasoning {
-                lines.push(
-                    "Use extended thinking only for genuinely hard tasks (complex refactors, architecture). For simple edits, think briefly and act. Keep visible reasoning terse.",
-                );
-            }
-            Some(provider_notes("Anthropic-style", &lines))
-        }
-        ProviderKind::OpenAI | ProviderKind::AzureOpenAI | ProviderKind::Inception => {
-            let mut lines = vec![
-                "Use function calling for all tool interactions. Make arguments explicit and schema-accurate.",
-                "Prefer parallel function calls when operations are independent — this is a strength of OpenAI models.",
-                "Keep visible text updates brief and action-oriented. The function calls do the work; text is for status only.",
-            ];
-            if reasoning {
-                lines.push(
-                    "Reasoning models work best with concise instructions. Don't over-explain in visible output — the model reasons internally. Keep summaries to 1-2 sentences.",
-                );
-            } else {
-                lines.push("Think briefly in visible text, then act with tools. Don't over-plan.");
-            }
-            if model_name.contains("codex") || model_name.contains("5.3") {
-                lines.push("Codex models are optimized for code tasks. Favor code output over prose explanations.");
-            }
-            Some(provider_notes("OpenAI-style", &lines))
-        }
-        ProviderKind::Copilot => Some(provider_notes(
-            "GitHub Copilot",
-            &[
-                "Copilot proxies different backends (Claude, GPT, etc.) — stick to plain function-calling patterns that work across all.",
-                "Keep tool arguments short, explicit, and schema-accurate. Avoid complex nested objects when simpler works.",
-                "If a tool call fails due to formatting, retry once with a simpler argument shape.",
-                "Copilot has rate limits — minimize unnecessary tool calls. Batch reads, use grep over multiple reads.",
-            ],
-        )),
-        ProviderKind::Gemini => {
-            let mut lines = vec![
-                "Be explicit with tool argument types and expected outcomes. Gemini is strict about schema compliance.",
-                "Read tool errors carefully and adjust before retrying. Don't retry the same failed call unchanged.",
-                "Keep progress updates short and structured. Gemini works well with numbered lists and clear step indicators.",
-                "Prefer grep/glob to discover files before reading them individually — Gemini handles large context well but extra turns are expensive.",
-            ];
-            if reasoning {
-                lines.push("Use thinking for planning-heavy work and complex multi-step reasoning. For trivial edits, skip thinking and act directly.");
-            }
-            Some(provider_notes("Google Gemini", &lines))
-        }
-        ProviderKind::OpenRouter => Some(provider_notes(
-            "OpenRouter",
-            &[
-                "Backend routing varies (Anthropic, OpenAI, etc.) — rely only on the documented tool contract.",
-                "Keep tool calls conservative, explicit, and schema-accurate. Some backends are stricter than others.",
-                "If a call fails due to formatting, retry once with a simpler argument shape.",
-                "Monitor token usage — OpenRouter charges per-token. Minimize unnecessary output and tool calls.",
-            ],
-        )),
-        ProviderKind::Ollama => Some(provider_notes(
-            "Ollama / local models",
-            &[
-                "Use short, concrete instructions. Local models have smaller context windows — every token counts.",
-                "Prefer one tool call at a time when the next step is uncertain. Chain only when you're confident.",
-                "Re-check tool output before continuing — local models are more likely to hallucinate tool results.",
-                "Keep code edits small and focused. Large multi-file refactors may exceed context limits.",
-                "If tool calling fails, fall back to describing what needs to change and let the user apply it.",
-            ],
-        )),
+
+    // ── Model-family tuning (primary) ────────────────────────────────
+    let model_lines = model_family_notes(&model_lower, reasoning);
+
+    // ── Provider-routing quirks (secondary, only when relevant) ──────
+    let routing_lines = provider_routing_notes(provider_kind);
+
+    if model_lines.is_empty() && routing_lines.is_empty() {
+        return None;
     }
+
+    let label = model_family_label(&model_lower, provider_kind);
+    let mut all_lines = model_lines;
+    all_lines.extend(routing_lines);
+    Some(provider_notes(
+        &label,
+        &all_lines.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
+    ))
+}
+
+/// Model-family behavioral tuning — same model, same instructions regardless of provider.
+fn model_family_notes(model_lower: &str, reasoning: bool) -> Vec<String> {
+    let mut lines = Vec::new();
+
+    if is_claude_model(model_lower) {
+        // Claude (Anthropic) family
+        lines
+            .push("Follow structured instructions closely and keep pre-tool prose minimal.".into());
+        lines.push(
+            "Prefer one decisive tool/action at a time unless safe parallel work is obvious."
+                .into(),
+        );
+        lines.push(
+            "After a tool failure, briefly explain the new plan instead of retrying blindly."
+                .into(),
+        );
+        lines.push("When given large contexts, prioritize the most recent instructions and tool results over older history.".into());
+        if reasoning {
+            lines.push("Use extended thinking only for genuinely hard tasks (complex refactors, architecture). For simple edits, think briefly and act.".into());
+        }
+    } else if is_gpt_model(model_lower) {
+        // GPT / OpenAI family
+        lines.push("Use function calling for all tool interactions. Make arguments explicit and schema-accurate.".into());
+        lines.push("Prefer parallel function calls when operations are independent.".into());
+        lines.push("Keep visible text updates brief — function calls do the work, text is for status only.".into());
+        if is_codex_model(model_lower) {
+            lines.push("Codex models are optimized for code. Favor code output over prose. Minimize explanations.".into());
+        }
+        if reasoning {
+            lines.push(
+                "Reasoning happens internally. Keep visible output to 1-2 sentence summaries."
+                    .into(),
+            );
+        } else {
+            lines.push("Think briefly, then act. Don't over-plan in visible output.".into());
+        }
+    } else if is_gemini_model(model_lower) {
+        // Gemini (Google) family
+        lines.push(
+            "Be explicit with tool argument types — Gemini is strict about schema compliance."
+                .into(),
+        );
+        lines.push("Prefer grep/glob to discover files before reading them individually. Extra turns are more expensive than larger reads.".into());
+        lines.push(
+            "Keep progress updates short and structured. Use numbered lists for multi-step plans."
+                .into(),
+        );
+        if reasoning {
+            lines.push("Use thinking for planning-heavy work. For trivial edits, skip thinking and act directly.".into());
+        }
+    } else if is_deepseek_model(model_lower) {
+        // DeepSeek family
+        lines.push("DeepSeek models handle long code well. Read full files when needed rather than partial reads.".into());
+        lines.push(
+            "Keep tool arguments simple and explicit. Avoid deeply nested argument structures."
+                .into(),
+        );
+        if reasoning {
+            lines.push("DeepSeek reasoning is strong — use it for complex logic. Keep visible reasoning terse.".into());
+        }
+    } else if is_mercury_model(model_lower) {
+        // Inception Mercury family
+        lines.push("Mercury models are extremely fast. Use this speed for iterative exploration — try, check, adjust.".into());
+        lines.push("Keep tool arguments simple. If a read returns empty, retry with explicit offset/limit rather than 0.".into());
+        lines.push(
+            "Favor many small focused tool calls over fewer large ones — latency is low.".into(),
+        );
+    } else if is_local_model(model_lower) {
+        // Local / small models (Ollama, llama, etc.)
+        lines.push("Use short, concrete instructions. Local models have smaller context windows — every token counts.".into());
+        lines.push("Prefer one tool call at a time when the next step is uncertain.".into());
+        lines.push("Re-check tool output before continuing — local models are more likely to hallucinate tool results.".into());
+        lines.push("Keep code edits small and focused. Large multi-file refactors may exceed context limits.".into());
+        lines.push(
+            "If tool calling fails, describe what needs to change and let the user apply it."
+                .into(),
+        );
+    }
+
+    lines
+}
+
+/// Provider-level routing quirks — only for transport/proxy behavior, not model behavior.
+fn provider_routing_notes(provider_kind: ProviderKind) -> Vec<String> {
+    match provider_kind {
+        ProviderKind::Copilot => vec![
+            "Copilot has rate limits — minimize unnecessary tool calls. Batch reads when possible.".into(),
+        ],
+        ProviderKind::OpenRouter => vec![
+            "OpenRouter routes to different backends. Keep tool calls schema-accurate — some backends are stricter.".into(),
+        ],
+        ProviderKind::Ollama => vec![
+            "Running locally via Ollama. No network latency but limited by local hardware.".into(),
+        ],
+        _ => vec![],
+    }
+}
+
+fn model_family_label(model_lower: &str, provider_kind: ProviderKind) -> String {
+    if is_claude_model(model_lower) {
+        "Claude".to_string()
+    } else if is_gpt_model(model_lower) {
+        "GPT".to_string()
+    } else if is_gemini_model(model_lower) {
+        "Gemini".to_string()
+    } else if is_deepseek_model(model_lower) {
+        "DeepSeek".to_string()
+    } else if is_mercury_model(model_lower) {
+        "Mercury".to_string()
+    } else {
+        format!("{provider_kind:?}")
+    }
+}
+
+fn is_claude_model(m: &str) -> bool {
+    m.contains("claude") || m.contains("haiku") || m.contains("sonnet") || m.contains("opus")
+}
+fn is_gpt_model(m: &str) -> bool {
+    m.starts_with("gpt") || m.starts_with("o3") || m.starts_with("o4") || m.contains("gpt-")
+}
+fn is_codex_model(m: &str) -> bool {
+    m.contains("codex")
+}
+fn is_gemini_model(m: &str) -> bool {
+    m.contains("gemini")
+}
+fn is_deepseek_model(m: &str) -> bool {
+    m.contains("deepseek")
+}
+fn is_mercury_model(m: &str) -> bool {
+    m.contains("mercury")
+}
+fn is_local_model(m: &str) -> bool {
+    m.contains("llama")
+        || m.contains("mistral")
+        || m.contains("phi-")
+        || m.contains("qwen")
+        || m.contains("codestral")
+        || m.contains("starcoder")
 }
 
 fn registry_model_for_prompt(
@@ -518,86 +602,104 @@ mod tests {
         assert!(prompt.contains("Prefer `scout` or `explore`"));
     }
 
-    // ── provider_prompt_suffix tests ──────────────────────────────────
+    // ── model-based prompt suffix tests ────────────────────────────────
 
     #[test]
-    fn anthropic_suffix_is_present() {
+    fn claude_model_gets_claude_tuning() {
         let suffix = provider_prompt_suffix(ProviderKind::Anthropic, "claude-sonnet-4");
-        assert!(suffix.is_some());
         let text = suffix.unwrap();
-        assert!(text.contains("Anthropic"));
+        assert!(text.contains("Claude"));
+        assert!(text.contains("structured instructions"));
     }
 
     #[test]
-    fn anthropic_thinking_model_gets_thinking_note() {
+    fn claude_thinking_model_gets_thinking_note() {
         let suffix = provider_prompt_suffix(ProviderKind::Anthropic, "claude-sonnet-4.6");
         let text = suffix.unwrap();
-        assert!(
-            text.contains("thinking"),
-            "should mention thinking for 4.6 models"
-        );
+        assert!(text.contains("thinking"));
     }
 
     #[test]
-    fn anthropic_non_thinking_model_no_thinking_note() {
+    fn claude_non_thinking_model_no_thinking_note() {
         let suffix = provider_prompt_suffix(ProviderKind::Anthropic, "claude-haiku-4");
         let text = suffix.unwrap();
-        // Haiku is not a thinking model, should not have thinking note
         assert!(!text.contains("thinking"));
     }
 
     #[test]
-    fn openai_suffix_mentions_function_calling() {
+    fn gpt_model_gets_function_calling() {
         let suffix = provider_prompt_suffix(ProviderKind::OpenAI, "gpt-4.1");
         let text = suffix.unwrap();
-        assert!(text.contains("function calling") || text.contains("function call"));
+        assert!(text.contains("function call"));
     }
 
     #[test]
-    fn openai_o_series_gets_reasoning_note() {
+    fn gpt_o_series_gets_reasoning_note() {
         let suffix = provider_prompt_suffix(ProviderKind::OpenAI, "o3-mini");
         let text = suffix.unwrap();
-        assert!(text.contains("Reasoning models") || text.contains("concise instructions"));
+        assert!(text.contains("Reasoning") || text.contains("internally"));
     }
 
     #[test]
-    fn gemini_suffix_mentions_explicit_params() {
+    fn codex_model_gets_code_first_note() {
+        let suffix = provider_prompt_suffix(ProviderKind::OpenAI, "gpt-5.3-codex");
+        let text = suffix.unwrap();
+        assert!(text.contains("Codex") || text.contains("code"));
+    }
+
+    #[test]
+    fn gemini_model_gets_schema_note() {
         let suffix = provider_prompt_suffix(ProviderKind::Gemini, "gemini-2.5-pro");
         let text = suffix.unwrap();
-        assert!(text.contains("explicit") || text.contains("parameter"));
+        assert!(text.contains("schema") || text.contains("explicit"));
     }
 
     #[test]
-    fn openrouter_suffix_present() {
-        let suffix = provider_prompt_suffix(ProviderKind::OpenRouter, "some/model");
-        assert!(suffix.is_some());
+    fn deepseek_model_gets_tuning() {
+        let suffix = provider_prompt_suffix(ProviderKind::OpenAI, "deepseek-chat");
+        let text = suffix.unwrap();
+        assert!(text.contains("DeepSeek"));
     }
 
     #[test]
-    fn ollama_suffix_mentions_local_model_guidance() {
+    fn mercury_model_gets_speed_note() {
+        let suffix = provider_prompt_suffix(ProviderKind::Inception, "mercury-2");
+        let text = suffix.unwrap();
+        assert!(text.contains("Mercury") || text.contains("fast"));
+    }
+
+    #[test]
+    fn ollama_local_model_gets_local_guidance() {
         let suffix = provider_prompt_suffix(ProviderKind::Ollama, "llama3");
         let text = suffix.unwrap();
-        assert!(text.contains("local") || text.contains("Ollama"));
+        assert!(text.contains("Local") || text.contains("local"));
     }
 
     #[test]
-    fn azure_reuses_openai_style_suffix() {
-        let suffix = provider_prompt_suffix(ProviderKind::AzureOpenAI, "gpt-5.4");
-        let text = suffix.unwrap();
-        assert!(text.contains("OpenAI-style"));
+    fn same_model_same_tuning_across_providers() {
+        // GPT-5.4 should get GPT tuning whether from OpenAI, Copilot, or Azure
+        let openai = provider_prompt_suffix(ProviderKind::OpenAI, "gpt-5.4").unwrap();
+        let copilot = provider_prompt_suffix(ProviderKind::Copilot, "gpt-5.4").unwrap();
+        let azure = provider_prompt_suffix(ProviderKind::AzureOpenAI, "gpt-5.4").unwrap();
+        // All should contain GPT-specific tuning
+        assert!(openai.contains("function call"));
+        assert!(copilot.contains("function call"));
+        assert!(azure.contains("function call"));
     }
 
     #[test]
-    fn bedrock_reuses_anthropic_style_suffix() {
-        let suffix = provider_prompt_suffix(ProviderKind::Bedrock, "claude-sonnet-4.6");
+    fn claude_on_copilot_gets_claude_tuning_plus_routing() {
+        let suffix = provider_prompt_suffix(ProviderKind::Copilot, "claude-sonnet-4.6");
         let text = suffix.unwrap();
-        assert!(text.contains("Anthropic-style"));
+        // Should have Claude model tuning AND Copilot routing note
+        assert!(text.contains("Claude"));
+        assert!(text.contains("Copilot") || text.contains("rate limit"));
     }
 
     #[test]
-    fn copilot_suffix_mentions_proxy_behavior() {
-        let suffix = provider_prompt_suffix(ProviderKind::Copilot, "gpt-4o");
+    fn openrouter_adds_routing_note() {
+        let suffix = provider_prompt_suffix(ProviderKind::OpenRouter, "anthropic/claude-sonnet-4");
         let text = suffix.unwrap();
-        assert!(text.contains("proxy") || text.contains("Copilot"));
+        assert!(text.contains("OpenRouter"));
     }
 }

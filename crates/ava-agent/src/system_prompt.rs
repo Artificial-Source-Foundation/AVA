@@ -2,32 +2,6 @@ use ava_config::model_catalog::registry::{registry, RegisteredModel};
 use ava_llm::ProviderKind;
 use ava_types::Tool;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum PromptProfile {
-    Standard,
-    Lean,
-}
-
-fn prompt_profile(
-    provider_kind: ProviderKind,
-    model_name: &str,
-    native_tools: bool,
-) -> PromptProfile {
-    if !native_tools {
-        return PromptProfile::Standard;
-    }
-
-    let frontier_or_reasoning = registry_model_for_prompt(provider_kind, model_name)
-        .map(|model| model.capabilities.reasoning)
-        .unwrap_or(false);
-
-    if frontier_or_reasoning {
-        PromptProfile::Lean
-    } else {
-        PromptProfile::Standard
-    }
-}
-
 fn model_supports_reasoning_for_prompt(provider_kind: ProviderKind, model_name: &str) -> bool {
     let model_lower = model_name.to_lowercase();
     registry_model_for_prompt(provider_kind, model_name)
@@ -392,122 +366,76 @@ fn registry_model_for_prompt(
     None
 }
 
+// ── Prompt file templates (per model family) ────────────────────────────
+const PROMPT_GPT: &str = include_str!("prompts/gpt.txt");
+const PROMPT_CLAUDE: &str = include_str!("prompts/claude.txt");
+const PROMPT_GEMINI: &str = include_str!("prompts/gemini.txt");
+const PROMPT_DEFAULT: &str = include_str!("prompts/default.txt");
+
+/// Select the base prompt template for the given model.
+fn select_base_prompt(model_name: &str) -> &'static str {
+    let m = model_name.to_lowercase();
+    if is_claude_model(&m) {
+        PROMPT_CLAUDE
+    } else if is_codex_model(&m) || is_gpt_model(&m) || is_grok_model(&m) {
+        PROMPT_GPT
+    } else if is_gemini_model(&m) {
+        PROMPT_GEMINI
+    } else {
+        PROMPT_DEFAULT
+    }
+}
+
 /// Build a system prompt that tells the LLM it's an AI coding agent with tools.
 ///
-/// For providers with native tool calling, this prompt is shorter (tool defs
-/// are sent via the API). For text-only providers, tool schemas are embedded
-/// in the prompt with the JSON envelope format.
+/// Uses per-model-family prompt templates (loaded from `prompts/*.txt`) instead
+/// of a generic one-size-fits-all prompt. Tool definitions are appended for
+/// text-only providers; native tool callers get them via the API.
 pub fn build_system_prompt(
     tools: &[Tool],
     native_tools: bool,
-    provider_kind: ProviderKind,
+    _provider_kind: ProviderKind,
     model_name: &str,
     tool_visibility_profile: crate::routing::ToolVisibilityProfile,
 ) -> String {
-    let mut prompt = String::with_capacity(2048);
-    let profile = prompt_profile(provider_kind, model_name, native_tools);
+    let mut prompt = String::with_capacity(4096);
 
-    prompt.push_str(
-        "You are AVA, an AI coding assistant. You help users with software engineering tasks \
-         by reading files, writing code, running commands, and searching codebases.\n\n",
-    );
+    // Base prompt — model-family specific
+    prompt.push_str(select_base_prompt(model_name));
+    prompt.push('\n');
 
-    prompt.push_str("## Rules\n\n### Workflow\n");
-    match tool_visibility_profile {
-        crate::routing::ToolVisibilityProfile::AnswerOnly => {
-            prompt.push_str("- Answer directly and concisely. Do not call tools unless they are explicitly provided and truly required.\n\n");
-        }
-        _ => {
-            prompt.push_str(
-                "- Read files before modifying them. Never guess at code you haven't seen.\n",
-            );
-            prompt.push_str(
-                "- Do not re-read files you have already read or just edited in this conversation. The edit tool returns a diff confirming the change — trust it. Only re-read a file if another tool or process may have modified it since you last saw it.\n",
-            );
-            prompt.push_str(
-                "- When editing multiple sections of the same file, batch them into as few edit calls as possible rather than making many small edits with re-reads between them.\n",
-            );
-            prompt.push_str(
-                "- Follow instruction priority: system and tool rules first, then repo guidance, then the user's request.\n",
-            );
-            prompt.push_str("- Prefer native tools (read, edit, glob, grep) over bash equivalents — they are faster, sandboxed, and produce structured output.\n");
-            prompt.push_str("- When calling multiple tools with no dependencies between them, make all independent calls in parallel. Combine turns whenever possible — use grep to find points of interest instead of reading many files individually.\n");
-            prompt.push_str("- After a tool fails, adapt before retrying. Do not repeat the same call unchanged without new information.\n");
-            if profile == PromptProfile::Standard {
-                prompt.push_str("- Run tests after making changes when a test suite exists.\n");
-                prompt.push_str("- For multi-step tasks, use `todo_write` to track progress. Mark items `in_progress` as you start them and `completed` when done.\n");
-            } else {
-                prompt.push_str("- Run tests when a test suite exists. Use `todo_write` only for genuinely multi-step work.\n");
-            }
-            prompt.push_str("- When your task is complete, call `attempt_completion` with a result describing what you did.\n\n");
-        }
-    }
+    // Sandbox note (all models)
+    prompt.push_str("\n# Environment\n");
+    prompt.push_str("Package installation commands (pip, npm, cargo add, etc.) run in a restricted sandbox. The .git and .ava directories are read-only. If pip fails with \"externally-managed-environment\", create a virtual environment first (`python -m venv .venv`). For npm, use local installs (not -g).\n");
 
-    prompt.push_str("### Code discipline\n");
-    prompt.push_str("- Do only what was asked. Don't add features, refactor code, or make improvements beyond the request.\n");
-    prompt.push_str("- Never assume a library is available — check the manifest (package.json, Cargo.toml, etc.) first.\n");
-    if profile == PromptProfile::Standard {
-        prompt.push_str(
-            "- Follow existing naming conventions, patterns, and formatting in the codebase.\n",
-        );
-        prompt.push_str(
-            "- Prefer direct changes over speculative abstractions or extra comments.\n\n",
-        );
-    } else {
-        prompt.push_str("- Match the existing codebase style and keep changes direct.\n\n");
-    }
-
-    prompt.push_str("### Executing with care\n");
-    prompt.push_str("- Consider reversibility before destructive actions (force push, delete, rm -rf). Ask the user first for hard-to-reverse operations.\n");
-    prompt.push_str("- When encountering obstacles, investigate — don't use destructive actions as shortcuts. Files you find may be in-progress work.\n");
-    if profile == PromptProfile::Standard {
-        prompt.push_str("- If your approach is blocked after a fair attempt, reconsider instead of brute-forcing.\n");
-    } else {
-        prompt.push_str("- Reconsider when blocked instead of brute-forcing.\n");
-    }
-    prompt.push_str("- Package installation commands (pip, npm, cargo add, etc.) run in a restricted sandbox. The .git and .ava directories are read-only. If pip fails with \"externally-managed-environment\", create a virtual environment first (`python -m venv .venv`). For npm, use local installs (not -g).\n\n");
-
-    prompt.push_str("### Communication\n");
-    prompt.push_str("- Minimize output tokens. Be concise while maintaining accuracy. Lead with the action or answer, not reasoning.\n");
-    if profile == PromptProfile::Standard {
-        prompt.push_str("- Aim for fewer than 4 lines of text output (excluding tool use) per response whenever practical.\n");
-    }
-    prompt.push_str("- After completing work, briefly confirm what you did. Do not explain your code or summarize your actions unless the user asks.\n");
-    prompt.push_str("- When referencing code, use `file_path:line_number` format.\n");
-    prompt.push_str("- Avoid filler, preamble (\"Here is...\", \"The answer is...\"), postamble, and unnecessary verbosity.\n");
-    prompt.push_str("- Do the work without asking questions when the request is clear. Infer missing details from the codebase. Only ask when genuinely ambiguous.\n");
-    prompt.push_str("- Distinguish directives (requests for action) from inquiries (requests for analysis). For inquiries, research and explain — do NOT modify files unless explicitly asked.\n");
-    prompt.push_str("- Prioritize technical accuracy over validating beliefs. Disagree when the user is wrong. Objective guidance is more valuable than false agreement.\n\n");
-
+    // Delegation (when subagent tool is available)
     if tool_visibility_profile != crate::routing::ToolVisibilityProfile::AnswerOnly
         && tools.iter().any(|tool| tool.name == "subagent")
     {
-        prompt.push_str("### Delegation\n");
+        prompt.push_str("\n# Delegation\n");
         prompt.push_str("- Keep small, single-file work in the main thread.\n");
         prompt.push_str("- Use `subagent` only for self-contained chunks whose result can be summarized back clearly.\n");
         prompt.push_str("- Prefer `scout` or `explore` for read-only reconnaissance, `plan` for design-only breakdowns, `review` for a final pass, and `worker` or `subagent` for isolated implementation.\n");
-        prompt.push_str("- Use `background: true` when the sub-agent's work is independent and you can continue without its result. Use foreground (default) when you need the result before proceeding.\n");
-        prompt.push_str("- Avoid chaining sub-agents for every step; delegate only when it saves context or speeds up exploration.\n");
-        prompt.push_str("- After making significant multi-file edits or complex refactors, spawn a `review` subagent to catch bugs, security issues, and regressions. Skip review for trivial single-file fixes, config changes, or documentation edits.\n\n");
+        prompt.push_str("- Use `background: true` when the sub-agent's work is independent. Use foreground when you need the result before proceeding.\n");
+        prompt.push_str("- After significant multi-file edits, spawn a `review` subagent. Skip review for trivial fixes.\n");
     }
 
+    // Tool definitions (text-only providers embed schemas; native callers use API)
     if native_tools && tool_visibility_profile != crate::routing::ToolVisibilityProfile::AnswerOnly
     {
         prompt.push_str(
-            "## Tool use\n\nUse the provided native tool/function calling interface for tool interactions.\n\n",
+            "\n# Tool use\nUse the provided native tool/function calling interface for tool interactions.\n",
         );
     } else if !native_tools
         && tool_visibility_profile != crate::routing::ToolVisibilityProfile::AnswerOnly
     {
-        // Text-only provider — embed full schemas and specify the JSON envelope.
-        prompt.push_str("## Tools\n\n");
+        prompt.push_str("\n# Tools\n\n");
         prompt.push_str(
             "To call tools, respond with ONLY a JSON object in this exact format:\n\
              ```json\n\
              {\"tool_calls\": [{\"name\": \"tool_name\", \"arguments\": {\"param\": \"value\"}}]}\n\
              ```\n\n\
-             Do NOT mix tool calls with natural text. Either respond with a JSON tool call \
-             or with natural text, never both.\n\n",
+             Do NOT mix tool calls with natural text.\n\n",
         );
 
         for tool in tools {
@@ -520,11 +448,11 @@ pub fn build_system_prompt(
         }
     }
 
-    // Always include attempt_completion since it's a virtual tool.
+    // attempt_completion virtual tool
     if tool_visibility_profile != crate::routing::ToolVisibilityProfile::AnswerOnly
         && !tools.iter().any(|t| t.name == "attempt_completion")
     {
-        prompt.push_str("### attempt_completion\n");
+        prompt.push_str("\n### attempt_completion\n");
         prompt.push_str(
             "Call this when you have completed the task. \
              Parameters: {\"result\": \"description of what you did\"}\n",
@@ -632,46 +560,51 @@ mod tests {
             "gpt-4.1",
             crate::routing::ToolVisibilityProfile::Full,
         );
-        // Should be well under 2000 tokens (~8000 chars) for 2 tools
+        // Template-based prompts are larger but still reasonable for 2 tools
         assert!(
-            prompt.len() < 4500,
+            prompt.len() < 6000,
             "prompt too long: {} chars",
             prompt.len()
         );
     }
 
     #[test]
-    fn lean_profile_is_shorter_for_frontier_native_models() {
+    fn different_models_get_different_base_prompts() {
         let tools = mock_tools();
-        let standard = build_system_prompt(
-            &tools,
-            true,
-            ProviderKind::OpenAI,
-            "gpt-4.1",
-            crate::routing::ToolVisibilityProfile::Full,
-        );
-        let lean = build_system_prompt(
+        let gpt = build_system_prompt(
             &tools,
             true,
             ProviderKind::OpenAI,
             "gpt-5.4",
             crate::routing::ToolVisibilityProfile::Full,
         );
-        assert!(lean.len() < standard.len());
-        assert!(lean.contains("Run tests when a test suite exists."));
+        let claude = build_system_prompt(
+            &tools,
+            true,
+            ProviderKind::Anthropic,
+            "claude-sonnet-4.6",
+            crate::routing::ToolVisibilityProfile::Full,
+        );
+        // GPT prompt has examples, Claude prompt has structured instructions
+        assert!(gpt.contains("examples"));
+        assert!(claude.contains("structured instructions"));
+        // Both have core AVA identity
+        assert!(gpt.contains("AVA"));
+        assert!(claude.contains("AVA"));
     }
 
     #[test]
-    fn lean_profile_uses_registry_for_copilot_model_aliases() {
+    fn copilot_claude_gets_claude_prompt() {
         let tools = mock_tools();
-        let lean = build_system_prompt(
+        let prompt = build_system_prompt(
             &tools,
             true,
             ProviderKind::Copilot,
             "claude-sonnet-4.6",
             crate::routing::ToolVisibilityProfile::Full,
         );
-        assert!(lean.contains("Run tests when a test suite exists."));
+        // Should get Claude base prompt even through Copilot provider
+        assert!(prompt.contains("structured instructions"));
     }
 
     #[test]
@@ -705,8 +638,8 @@ mod tests {
             crate::routing::ToolVisibilityProfile::Full,
         );
 
-        assert!(prompt.contains("### Delegation"));
-        assert!(prompt.contains("Prefer `scout` or `explore`"));
+        assert!(prompt.contains("# Delegation"));
+        assert!(prompt.contains("scout") && prompt.contains("explore"));
     }
 
     // ── model-based prompt suffix tests ────────────────────────────────

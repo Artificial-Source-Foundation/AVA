@@ -269,17 +269,14 @@ pub fn build_system_prompt(
     prompt.push_str("### Communication\n");
     prompt.push_str("- Minimize output tokens. Be concise while maintaining accuracy. Lead with the action or answer, not reasoning.\n");
     if profile == PromptProfile::Standard {
-        prompt.push_str("- Aim for fewer than 3 lines of text output (excluding tool use) per response whenever practical.\n");
+        prompt.push_str("- Aim for fewer than 4 lines of text output (excluding tool use) per response whenever practical.\n");
     }
-    prompt.push_str(
-        "- Do not narrate hidden reasoning or give play-by-play of your thought process.\n",
-    );
+    prompt.push_str("- After completing work, briefly confirm what you did. Do not explain your code or summarize your actions unless the user asks.\n");
     prompt.push_str("- When referencing code, use `file_path:line_number` format.\n");
-    prompt.push_str(
-        "- Avoid filler, preamble, postamble, time estimates, and unnecessary verbosity.\n",
-    );
+    prompt.push_str("- Avoid filler, preamble (\"Here is...\", \"The answer is...\"), postamble, and unnecessary verbosity.\n");
     prompt.push_str("- Do the work without asking questions when the request is clear. Infer missing details from the codebase. Only ask when genuinely ambiguous.\n");
-    prompt.push_str("- Distinguish directives (requests for action) from inquiries (requests for analysis). For inquiries, research and explain — do NOT modify files unless explicitly asked.\n\n");
+    prompt.push_str("- Distinguish directives (requests for action) from inquiries (requests for analysis). For inquiries, research and explain — do NOT modify files unless explicitly asked.\n");
+    prompt.push_str("- Prioritize technical accuracy over validating beliefs. Disagree when the user is wrong. Objective guidance is more valuable than false agreement.\n\n");
 
     if tool_visibility_profile != crate::routing::ToolVisibilityProfile::AnswerOnly
         && tools.iter().any(|tool| tool.name == "subagent")

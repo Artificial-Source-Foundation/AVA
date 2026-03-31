@@ -10,15 +10,23 @@ macOS-luxury SolidJS desktop, and a web serve mode with 65+ REST endpoints.
 
 **Highlights:**
 - **Pure Rust architecture** — 40K LOC, 1,962+ tests, 0 failures
-- **21 LLM providers** — Anthropic, OpenAI, Gemini, Copilot, DeepSeek, Inception, and 15 more
-- **9 default tools** — read, write, edit, bash, glob, grep, web_fetch, web_search, git_read — all verified via CLI smoke tests
+- **22 LLM providers** — Anthropic, OpenAI, Gemini, Copilot, DeepSeek, Inception, and 16 more
+- **13 model families** — per-model system prompt tuning for Claude, Codex, GPT, Gemini, DeepSeek, Mercury, Grok, GLM, Kimi, MiniMax, Qwen, Mistral, Local
+- **9 default tools** — read, write, edit, bash, glob, grep, web_fetch, web_search, git_read — all verified via CLI smoke tests (0% error rate)
 - **HQ multi-agent** — Director → Scouts → Leads → Workers with LLM-powered planning and Board of Directors
 - **Desktop app** — SolidJS + Tauri with 15 settings tabs, 25 slash commands, 19+ keyboard shortcuts
 - **Web mode** — `ava serve` with 65+ REST API endpoints, WebSocket streaming, full session/HQ CRUD
+- **Two products, one backend** — TUI/CLI and Desktop/Web share config.yaml, credentials.json, and the Rust agent runtime
 - **3-tier mid-stream messaging** — Steer (Enter), Follow-up (Alt+Enter), Post-complete (Ctrl+Alt+Enter)
 - **E2E tested** — 182 Playwright UI tests, 65 API endpoint tests, 25 CLI slash command tests, 0 tool errors across all models
+- **Instant startup** — TUI loads in <40ms (deferred codebase indexing + CLI agent discovery)
 
 ### Added
+- **13 model-family system prompts** — per-model behavioral tuning for Claude (adaptive thinking), Codex (code-first parallel tools), GPT (function calling), Gemini (schema strictness), DeepSeek (long code + 8K limit), Mercury (speed-optimized), Grok (fast/direct), GLM (bilingual + strict JSON), Kimi (256K context + 100+ tool calls), MiniMax (multi-file SWE-bench), Qwen (1M context + agentic), Mistral/Codestral (80+ languages), Local (small context + hallucination checks). Provider routing quirks appended separately.
+- **Bidirectional config sync** — Desktop settings (provider, model, temperature, maxTokens, credentials, features) now sync to `config.yaml` and `credentials.json` via Tauri IPC. TUI changes are loaded by Desktop on startup. New commands: `update_llm_config`, `update_feature_flags`, `sync_credentials`, `load_credentials`, `get_feature_flags`.
+- **Configurable codebase indexing** — `features.enable_codebase_index: false` in config.yaml disables the in-memory BM25+PageRank index (~5-20MB RAM savings).
+- **Session logging on by default** — JSONL logs to `~/.ava/log/{session}.jsonl` with 7-day auto-rotation.
+- **Self-update from source** — `ava update` falls back to `cargo install --git` when no pre-built binary exists, and copies to `~/.ava/bin/` (the install.sh location).
 - HQ desktop backend now has real SQLite-backed orchestration state: epics, issues, comments, plans, agents, activity feed, director chat, and HQ settings all load through new Tauri commands instead of frontend mock data.
 - Desktop chat now has a real `/compact` slash command, structured context-summary cards, configurable auto-compaction settings (toggle, threshold, compaction model), and Tauri/Rust session compaction wired to the agent context pipeline instead of the old frontend-only sliding-window stub.
 - Web mode now has a `POST /api/context/compact` endpoint with full LLM-backed hybrid compaction.
@@ -30,6 +38,13 @@ macOS-luxury SolidJS desktop, and a web serve mode with 65+ REST endpoints.
 - Session delete now requires confirmation before permanent removal.
 
 ### Fixed
+- **TUI word wrap** — words were cut in half at terminal edge because `BAR_PREFIX_WIDTH` was 3 but the Unicode bar character measured 4 columns. Now correct.
+- **Agent re-reading files 10+ times** — system prompt now instructs "don't re-read files after editing" and "batch edits into fewer calls." Verified: 0 re-reads in smoke tests.
+- **`2>/dev/null` blocked as dangerous** — command classifier matched `>/dev/` in safe stderr redirects. Now exempts `2>/dev/null` and `&>/dev/null`.
+- **Read tool `limit=0` truncated to 0 lines** — `limit=0` now means "use default limit" instead of "show nothing." Affected Mercury-2 models.
+- **TUI startup took 2.3s** — codebase indexing (tantivy, ~2s) and CLI agent discovery (5 subprocess spawns, ~1.5s) now deferred. Startup is <40ms.
+- **`ava update` wrote to wrong PATH location** — `cargo install` writes to `~/.cargo/bin/` but users installed via `install.sh` run from `~/.ava/bin/`. Updater now copies to the running exe's location.
+- **Session migration logs polluted debug output** — 10 "already-applied migration" messages demoted from debug to trace level.
 - **HQ API: nonexistent resources returned 200+null** — `get_agent` and `get_plan` endpoints now return proper 404 status codes when the requested resource doesn't exist.
 - **HQ settings not persisting** — `UpdateHqSettingsRequest` used `snake_case` serde while the response DTO used `camelCase`, so the request payload was silently ignored. Both now use `camelCase`.
 - **Headless slash commands returned "Unknown"** — `/permissions`, `/think`, `/copy`, and `/clear` mutate TUI state and return `None` instead of a display message; headless dispatch now checks `status_message` and toast state to detect handled commands.

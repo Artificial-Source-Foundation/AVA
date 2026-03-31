@@ -71,6 +71,9 @@ pub enum ToolTier {
     Extended,
     /// Plugin tools (MCP, custom TOML) — sent when registered.
     Plugin,
+    /// F11 — Deferred tools: not in the prompt, but always executable.
+    /// Discovered via the `tool_search` tool. Reduces prompt size for rarely-used tools.
+    Deferred,
 }
 
 /// Where a tool came from — used for grouping in `/tools` and selective reload.
@@ -305,6 +308,46 @@ impl ToolRegistry {
             .collect();
         tools.sort_by(|left, right| left.name.cmp(&right.name));
         tools
+    }
+
+    /// F11 — List names of deferred tools (not in the prompt but always executable).
+    pub fn list_deferred_tool_names(&self) -> Vec<String> {
+        let mut names: Vec<String> = self
+            .tools
+            .keys()
+            .filter(|name| {
+                self.tiers.get(*name).copied().unwrap_or(ToolTier::Default) == ToolTier::Deferred
+            })
+            .cloned()
+            .collect();
+        names.sort();
+        names
+    }
+
+    /// F11 — Search tools by keyword, returning full schemas for matching tools.
+    /// Searches across all tiers (including deferred).
+    pub fn search_tools(&self, query: &str) -> Vec<ToolDefinition> {
+        let query_lower = query.to_lowercase();
+        let keywords: Vec<&str> = query_lower.split_whitespace().collect();
+
+        let mut matches: Vec<ToolDefinition> = self
+            .tools
+            .values()
+            .filter(|tool| {
+                let name_lower = tool.name().to_lowercase();
+                let desc_lower = tool.description().to_lowercase();
+                keywords
+                    .iter()
+                    .all(|kw| name_lower.contains(kw) || desc_lower.contains(kw))
+            })
+            .map(|tool| ToolDefinition {
+                name: tool.name().to_string(),
+                description: tool.description().to_string(),
+                parameters: tool.parameters(),
+            })
+            .collect();
+        matches.sort_by(|a, b| a.name.cmp(&b.name));
+        matches
     }
 
     /// List tools with their source information.

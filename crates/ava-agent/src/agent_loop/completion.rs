@@ -15,6 +15,7 @@ use tracing::{debug, info, trace, warn};
 
 use super::response;
 use super::response::request_dedup_hash;
+use super::tool_execution::READ_ONLY_TOOLS;
 use super::{AgentEvent, AgentLoop};
 use crate::stuck::StuckDetector;
 use crate::system_prompt::{build_system_prompt, provider_prompt_suffix};
@@ -111,20 +112,30 @@ impl AgentLoop {
         {
             return;
         }
-        let mut system = if let Some(ref custom) = self.config.custom_system_prompt {
-            custom.clone()
+        let (static_prefix, is_custom) = if let Some(ref custom) = self.config.custom_system_prompt
+        {
+            (custom.clone(), true)
         } else {
             let native = self.llm.supports_tools();
             let provider_kind = self.llm.provider_kind();
             let tool_defs = self.active_tool_defs_with_hooks().await;
-            build_system_prompt(
-                &tool_defs,
-                native,
-                provider_kind,
-                &self.config.model,
-                self.tool_visibility_profile,
+            (
+                build_system_prompt(
+                    &tool_defs,
+                    native,
+                    provider_kind,
+                    &self.config.model,
+                    self.tool_visibility_profile,
+                ),
+                false,
             )
         };
+
+        // F2 — Cache boundary: record where the stable prefix ends.
+        // Everything after this point is dynamic (changes per-session).
+        let cache_boundary = static_prefix.len();
+        let mut system = static_prefix;
+
         // Append provider-specific instructions (additive — does not replace the base prompt).
         let provider_kind = self.llm.provider_kind();
         if let Some(p_suffix) = provider_prompt_suffix(provider_kind, &self.config.model) {
@@ -152,11 +163,18 @@ impl AgentLoop {
             model = %self.config.model,
             prompt_chars = system.len(),
             prompt_tokens = estimate_tokens(&system),
+            cache_boundary,
             has_suffix = self.config.system_prompt_suffix.is_some(),
             dynamic_rules = self.enable_dynamic_rules,
             "system prompt prepared"
         );
-        self.context.add_message(Message::new(Role::System, system));
+        let mut msg = Message::new(Role::System, system);
+        // F2: Store cache boundary offset in metadata so providers can split
+        // the prompt into cacheable (static) and non-cacheable (dynamic) parts.
+        if !is_custom && self.config.prompt_caching && cache_boundary > 0 {
+            msg.metadata = serde_json::json!({"cache_boundary": cache_boundary});
+        }
+        self.context.add_message(msg);
     }
 
     /// Generate LLM response — streaming when `event_tx` is present, non-streaming otherwise.
@@ -354,6 +372,11 @@ impl AgentLoop {
     }
 
     /// Streaming LLM call: emits Token, Thinking, and TokenUsage events.
+    ///
+    /// F1 — Streaming tool execution: read-only tools whose arguments are fully
+    /// accumulated are dispatched to the registry immediately (while the stream
+    /// continues). Pre-dispatched results are returned alongside finalized tool
+    /// calls so the main loop can skip re-executing them.
     async fn generate_turn_streaming(
         &mut self,
         native_tools: bool,
@@ -410,26 +433,80 @@ impl AgentLoop {
         let mut first_text_ms: Option<u64> = None;
         let mut first_tool_ms: Option<u64> = None;
 
-        // Per-chunk silence timeout: if no chunk arrives within this window,
-        // the stream is cancelled. A value of 0 disables the timeout.
+        // F8 — Stream Idle Watchdog: two-stage silence detection.
+        // Stage 1 (warning): after half the timeout, emit a warning event.
+        // Stage 2 (kill): after the full timeout, cancel the stream.
+        // Both timers reset on each received chunk.
         let timeout_secs = self.config.stream_timeout_secs;
         let use_timeout = timeout_secs > 0;
-        let timeout_duration = Duration::from_secs(timeout_secs);
+        let kill_duration = Duration::from_secs(timeout_secs);
+        let warn_duration = Duration::from_secs(timeout_secs / 2);
+        let mut warning_emitted = false;
+
+        // F1 — Pre-dispatch tracking: indices of tool calls already dispatched
+        // while the stream was still active. Maps accumulator index → JoinHandle.
+        let mut pre_dispatched: std::collections::HashMap<
+            usize,
+            tokio::task::JoinHandle<ava_types::ToolResult>,
+        > = std::collections::HashMap::new();
 
         loop {
             let maybe_chunk = if use_timeout {
-                match tokio::time::timeout(timeout_duration, stream.next()).await {
-                    Ok(chunk) => chunk,
-                    Err(_elapsed) => {
-                        let msg = format!(
-                            "LLM stream timed out after {timeout_secs} seconds of silence. \
-                             The provider may be overloaded."
-                        );
-                        warn!("{msg}");
-                        return Err(ava_types::AvaError::ProviderError {
-                            provider: self.config.model.clone(),
-                            message: msg,
-                        });
+                // Two-stage watchdog: first check warning, then kill.
+                if !warning_emitted {
+                    // Stage 1: wait for chunk OR warning timeout
+                    match tokio::time::timeout(warn_duration, stream.next()).await {
+                        Ok(chunk) => chunk,
+                        Err(_elapsed) => {
+                            // Warning stage: emit event, then wait for remaining time
+                            #[allow(unused_assignments)]
+                            {
+                                warning_emitted = true;
+                            }
+                            let warn_secs = timeout_secs / 2;
+                            warn!(
+                                elapsed_secs = warn_secs,
+                                "stream silence warning: no chunks received for {warn_secs}s"
+                            );
+                            Self::emit(
+                                event_tx,
+                                AgentEvent::StreamSilenceWarning {
+                                    elapsed_secs: warn_secs,
+                                },
+                            );
+                            // Stage 2: wait remaining time for kill
+                            let remaining = kill_duration.saturating_sub(warn_duration);
+                            match tokio::time::timeout(remaining, stream.next()).await {
+                                Ok(chunk) => chunk,
+                                Err(_elapsed) => {
+                                    let msg = format!(
+                                        "LLM stream timed out after {timeout_secs} seconds of silence. \
+                                         The provider may be overloaded."
+                                    );
+                                    warn!("{msg}");
+                                    return Err(ava_types::AvaError::ProviderError {
+                                        provider: self.config.model.clone(),
+                                        message: msg,
+                                    });
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    // Warning already emitted this silence window; wait for kill timeout only
+                    match tokio::time::timeout(kill_duration, stream.next()).await {
+                        Ok(chunk) => chunk,
+                        Err(_elapsed) => {
+                            let msg = format!(
+                                "LLM stream timed out after {timeout_secs} seconds of silence. \
+                                 The provider may be overloaded."
+                            );
+                            warn!("{msg}");
+                            return Err(ava_types::AvaError::ProviderError {
+                                provider: self.config.model.clone(),
+                                message: msg,
+                            });
+                        }
                     }
                 }
             } else {
@@ -444,6 +521,8 @@ impl AgentLoop {
                 first_chunk_ms = Some(provider_request_start.elapsed().as_millis() as u64);
             }
             chunk_count += 1;
+            // F8: Reset watchdog warning state on each received chunk.
+            warning_emitted = false;
             trace!(
                 chunk_count,
                 has_content = chunk.content.is_some(),
@@ -500,6 +579,37 @@ impl AgentLoop {
                     }
                 }
             }
+            // F1 — Pre-dispatch: if a tool call just became complete and it's
+            // read-only, spawn its execution now (overlaps with continued streaming).
+            if let Some(ref tc) = chunk.tool_call {
+                if let Some(acc) = accumulated_tool_calls.iter().find(|a| a.index == tc.index) {
+                    if !pre_dispatched.contains_key(&acc.index)
+                        && acc.is_complete()
+                        && READ_ONLY_TOOLS.contains(&acc.name.as_str())
+                    {
+                        if let Some(tool_call) = acc.to_tool_call() {
+                            debug!(
+                                tool = %tool_call.name,
+                                index = acc.index,
+                                "F1: pre-dispatching read-only tool during stream"
+                            );
+                            let tools = self.tools.clone();
+                            let join = tokio::spawn(async move {
+                                match tools.execute(tool_call).await {
+                                    Ok(result) => result,
+                                    Err(err) => ava_types::ToolResult {
+                                        call_id: String::new(),
+                                        content: err.to_string(),
+                                        is_error: true,
+                                    },
+                                }
+                            });
+                            pre_dispatched.insert(acc.index, join);
+                        }
+                    }
+                }
+            }
+
             // Capture usage (may arrive in message_start and message_delta)
             if let Some(ref usage) = chunk.usage {
                 if let Some(ref mut existing) = last_usage {
@@ -557,6 +667,29 @@ impl AgentLoop {
             }
         }
 
+        // F1 — Collect pre-dispatched results before finalization.
+        // Map accumulator index → tool result for tools that ran during the stream.
+        if !pre_dispatched.is_empty() {
+            debug!(
+                count = pre_dispatched.len(),
+                "F1: collecting pre-dispatched tool results"
+            );
+        }
+        // Build index→id mapping before finalization consumes the accumulators.
+        let acc_index_to_id: std::collections::HashMap<usize, String> = accumulated_tool_calls
+            .iter()
+            .map(|a| {
+                (
+                    a.index,
+                    if a.id.is_empty() {
+                        String::new()
+                    } else {
+                        a.id.clone()
+                    },
+                )
+            })
+            .collect();
+
         // Convert accumulated tool calls or parse from text
         let tool_calls = if native_tools && !accumulated_tool_calls.is_empty() {
             response::finalize_tool_calls(accumulated_tool_calls)
@@ -565,6 +698,26 @@ impl AgentLoop {
         } else {
             vec![]
         };
+
+        // F1: Await and store pre-dispatched results keyed by tool call ID.
+        self.pre_dispatched_results.clear();
+        for (acc_idx, handle) in pre_dispatched {
+            if let Ok(mut result) = handle.await {
+                // Map accumulator index to the finalized tool call ID.
+                if let Some(id) = acc_index_to_id.get(&acc_idx) {
+                    if !id.is_empty() {
+                        result.call_id = id.clone();
+                        self.pre_dispatched_results.insert(id.clone(), result);
+                    }
+                }
+            }
+        }
+        if !self.pre_dispatched_results.is_empty() {
+            info!(
+                count = self.pre_dispatched_results.len(),
+                "F1: pre-dispatched tool results ready"
+            );
+        }
 
         Ok((full_text, tool_calls, last_usage))
     }

@@ -7,6 +7,7 @@ use ava_types::{AvaError, ToolResult};
 use serde_json::{json, Value};
 
 use crate::core::hashline::{self, HashlineCache};
+use crate::core::read_state::ReadStateCache;
 use crate::registry::Tool;
 
 /// Default maximum lines returned when no explicit `limit` is provided.
@@ -19,6 +20,8 @@ const MAX_READ_SIZE: u64 = 10 * 1024 * 1024;
 pub struct ReadTool {
     platform: Arc<dyn Platform>,
     hashline_cache: HashlineCache,
+    /// F10 — Shared read-state cache for stale file detection.
+    read_state_cache: Option<ReadStateCache>,
 }
 
 impl ReadTool {
@@ -26,7 +29,14 @@ impl ReadTool {
         Self {
             platform,
             hashline_cache,
+            read_state_cache: None,
         }
+    }
+
+    /// Attach a shared read-state cache for stale file detection (F10).
+    pub fn with_read_state_cache(mut self, cache: ReadStateCache) -> Self {
+        self.read_state_cache = Some(cache);
+        self
     }
 }
 
@@ -106,6 +116,19 @@ impl Tool for ReadTool {
                 other => other,
             })?;
 
+        // F10 — Record file mtime in the read-state cache for stale detection.
+        if let Some(ref cache) = self.read_state_cache {
+            if let Ok(meta) = tokio::fs::metadata(&file_path).await {
+                if let Ok(mtime) = meta.modified() {
+                    let token_count = content.len() / 4; // rough estimate
+                    if let Ok(mut c) = cache.write() {
+                        // Turn 0 as placeholder — actual turn injected externally if needed.
+                        c.record_read(file_path.clone(), mtime, token_count, 0);
+                    }
+                }
+            }
+        }
+
         // Populate hashline cache when hash_lines is enabled
         if hash_lines {
             let entries = hashline::build_cache(&content);
@@ -144,8 +167,11 @@ impl Tool for ReadTool {
         }
 
         // If even the truncated-by-lines content is large, save to disk
-        let content =
-            super::output_fallback::save_tool_output_fallback("read", &content, 100 * 1024);
+        let content = super::output_fallback::save_tool_output_fallback(
+            "read",
+            &content,
+            super::output_fallback::tool_inline_limit("read"),
+        );
         let content = super::secret_redaction::redact_secrets(&content);
 
         Ok(ToolResult {

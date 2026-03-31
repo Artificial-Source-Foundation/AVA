@@ -72,6 +72,16 @@ impl EditEngine {
     }
 
     pub fn apply(&self, request: &EditRequest) -> Result<EditResult, EditError> {
+        // F7 — Quote Normalization: Normalize curly/smart quotes in old_text
+        // before matching. LLMs and copy-paste from rich text editors often
+        // introduce U+2018/2019 (single) and U+201C/201D (double) quotes that
+        // won't match the file's ASCII quotes.
+        let normalized = normalize_request_quotes(request);
+        if normalized.old_text != request.old_text {
+            tracing::debug!("F7: normalized curly quotes in edit old_text");
+        }
+        let request = &normalized;
+
         // Tier 1: Confident strategies — stop at first success.
         for strategy in &self.confident {
             if let Some(content) = strategy.apply(request)? {
@@ -495,6 +505,52 @@ fn replacement_already_exists(content: &str, new_text: &str) -> bool {
     })
 }
 
+/// Normalize curly/smart quotes to their ASCII equivalents.
+///
+/// Replaces:
+/// - U+2018 LEFT SINGLE QUOTATION MARK  → '
+/// - U+2019 RIGHT SINGLE QUOTATION MARK → '
+/// - U+201C LEFT DOUBLE QUOTATION MARK  → "
+/// - U+201D RIGHT DOUBLE QUOTATION MARK → "
+fn normalize_quotes(s: &str) -> String {
+    // Fast path: if no smart quotes are present, return as-is.
+    if !s.contains('\u{2018}')
+        && !s.contains('\u{2019}')
+        && !s.contains('\u{201C}')
+        && !s.contains('\u{201D}')
+    {
+        return s.to_string();
+    }
+    s.chars()
+        .map(|c| match c {
+            '\u{2018}' | '\u{2019}' => '\'',
+            '\u{201C}' | '\u{201D}' => '"',
+            _ => c,
+        })
+        .collect()
+}
+
+/// Return a new EditRequest with curly quotes normalized in `old_text`,
+/// `before_anchor`, and `after_anchor`. The `new_text` is intentionally
+/// left unchanged — the user may want curly quotes in the output.
+fn normalize_request_quotes(request: &EditRequest) -> EditRequest {
+    let normalized_old = normalize_quotes(&request.old_text);
+    // Only allocate a new request if something actually changed.
+    if normalized_old == request.old_text {
+        return request.clone();
+    }
+    EditRequest {
+        content: request.content.clone(),
+        old_text: normalized_old,
+        new_text: request.new_text.clone(),
+        before_anchor: request.before_anchor.as_ref().map(|a| normalize_quotes(a)),
+        after_anchor: request.after_anchor.as_ref().map(|a| normalize_quotes(a)),
+        line_number: request.line_number,
+        regex_pattern: request.regex_pattern.clone(),
+        occurrence: request.occurrence,
+    }
+}
+
 /// Compute similarity ratio between two strings using character-level diff.
 /// Returns a value between 0.0 (completely different) and 1.0 (identical).
 fn line_similarity_ratio(a: &str, b: &str) -> f64 {
@@ -780,6 +836,43 @@ mod tests {
         assert!(error.contains("Best similarity score achieved"));
         assert!(error.contains("line 2"));
         assert!(error.contains("Replacement text already exists in the file"));
+    }
+
+    #[test]
+    fn quote_normalization_matches_curly_to_straight() {
+        let engine = EditEngine::new();
+        // File has straight quotes, LLM sends curly quotes in old_text
+        let content = r#"let msg = "hello world";"#;
+        let old_text = "let msg = \u{201C}hello world\u{201D};"; // curly double quotes
+        let new_text = r#"let msg = "goodbye world";"#;
+
+        let req = EditRequest::new(content, old_text, new_text);
+        let result = engine.apply(&req);
+        assert!(
+            result.is_ok(),
+            "curly quotes should match straight: {result:?}"
+        );
+        assert!(result.unwrap().content.contains("goodbye world"));
+    }
+
+    #[test]
+    fn quote_normalization_preserves_new_text_quotes() {
+        // new_text should NOT be normalized — user may want curly quotes
+        let normalized = super::normalize_quotes("don\u{2019}t touch \u{201C}this\u{201D}");
+        assert_eq!(normalized, "don't touch \"this\"");
+
+        // But in normalize_request_quotes, new_text is untouched
+        let req = EditRequest::new("content", "old", "new \u{201C}curly\u{201D}");
+        let normalized_req = super::normalize_request_quotes(&req);
+        assert_eq!(normalized_req.new_text, "new \u{201C}curly\u{201D}");
+    }
+
+    #[test]
+    fn quote_normalization_noop_for_straight_quotes() {
+        let req = EditRequest::new("content", "old text", "new text");
+        let normalized = super::normalize_request_quotes(&req);
+        // Should return the same content (no allocation)
+        assert_eq!(normalized.old_text, "old text");
     }
 
     #[test]

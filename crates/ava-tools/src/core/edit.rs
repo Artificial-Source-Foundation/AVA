@@ -8,6 +8,7 @@ use serde_json::{json, Value};
 
 use crate::core::file_backup::FileBackupSession;
 use crate::core::hashline::{self, HashlineCache};
+use crate::core::read_state::ReadStateCache;
 use crate::edit::{EditEngine, EditRequest};
 use crate::git::GhostSnapshotter;
 use crate::registry::Tool;
@@ -18,6 +19,8 @@ pub struct EditTool {
     hashline_cache: HashlineCache,
     snapshotter: GhostSnapshotter,
     backup_session: FileBackupSession,
+    /// F10 — Shared read-state cache for stale file detection.
+    read_state_cache: Option<ReadStateCache>,
 }
 
 impl EditTool {
@@ -28,6 +31,7 @@ impl EditTool {
             hashline_cache,
             snapshotter: GhostSnapshotter::new(),
             backup_session: crate::core::file_backup::new_backup_session(),
+            read_state_cache: None,
         }
     }
 
@@ -43,7 +47,14 @@ impl EditTool {
             hashline_cache,
             snapshotter: GhostSnapshotter::new(),
             backup_session,
+            read_state_cache: None,
         }
+    }
+
+    /// Attach a shared read-state cache for stale file detection (F10).
+    pub fn with_read_state_cache(mut self, cache: ReadStateCache) -> Self {
+        self.read_state_cache = Some(cache);
+        self
     }
 }
 
@@ -99,6 +110,24 @@ impl Tool for EditTool {
             return Err(crate::core::path_suggest::missing_file_error(path, &file_path).await);
         }
         let original = self.platform.read_file(&file_path).await?;
+
+        // F10 — Stale file detection: check if the file was modified since last read.
+        let stale_warning = if let Some(ref cache) = self.read_state_cache {
+            if let Ok(meta) = tokio::fs::metadata(&file_path).await {
+                if let Ok(current_mtime) = meta.modified() {
+                    cache
+                        .read()
+                        .ok()
+                        .and_then(|c| c.check_stale(&file_path, current_mtime))
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
 
         // Strategy 0: Try hash-anchored resolution before the fuzzy cascade.
         // Strip hash anchors from new_text as well (LLM may copy them).
@@ -159,8 +188,15 @@ impl Tool for EditTool {
 
         let change_lines = line_diff_count(&original, &updated);
         let diff_text = compute_unified_diff(&original, &updated, path);
-        let mut content =
-            format!("Applied {strategy}; changed {change_lines} lines{snapshot_note}");
+        let mut content = String::new();
+        // F10: Prepend stale warning if file was modified since last read.
+        if let Some(ref warning) = stale_warning {
+            content.push_str(warning);
+            content.push_str("\n\n");
+        }
+        content.push_str(&format!(
+            "Applied {strategy}; changed {change_lines} lines{snapshot_note}"
+        ));
         if !diff_text.is_empty() {
             content.push_str("\n\n");
             content.push_str(&diff_text);

@@ -12,6 +12,33 @@ pub enum ToolVisibilityProfile {
     AnswerOnly,
 }
 
+/// F17 — Effort level for a task, used to scale thinking budgets and sub-agent resources.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum EffortLevel {
+    /// Simple tasks: greetings, one-liners, quick lookups. Minimal thinking.
+    Low,
+    /// Standard tasks: single-file edits, focused debugging. Normal thinking.
+    Medium,
+    /// Complex tasks: multi-file refactors, architecture, deep analysis. Maximum thinking.
+    High,
+}
+
+impl EffortLevel {
+    /// Return the fraction of the configured thinking budget to use.
+    pub fn thinking_budget_fraction(self) -> f64 {
+        match self {
+            EffortLevel::Low => 0.25,
+            EffortLevel::Medium => 0.6,
+            EffortLevel::High => 1.0,
+        }
+    }
+
+    /// Scale a thinking budget by this effort level.
+    pub fn scale_budget(self, budget: Option<u32>) -> Option<u32> {
+        budget.map(|b| (b as f64 * self.thinking_budget_fraction()) as u32)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct TaskRoutingIntent {
     pub profile: RoutingProfile,
@@ -31,6 +58,8 @@ pub struct TaskAnalysis {
     pub routing: TaskRoutingIntent,
     pub tool_visibility: ToolVisibilityProfile,
     pub delegation: SubagentDelegationPolicy,
+    /// F17 — Estimated effort level for thinking budget scaling.
+    pub effort: EffortLevel,
 }
 
 #[derive(Debug, Clone)]
@@ -58,11 +87,13 @@ pub fn analyze_task_full(
     let routing = classify_routing(&signals, thinking, plan_mode);
     let tool_visibility = classify_tool_visibility(&signals, thinking, plan_mode);
     let delegation = classify_delegation(&signals, &tool_visibility);
+    let effort = classify_effort(&signals);
 
     TaskAnalysis {
         routing,
         tool_visibility,
         delegation,
+        effort,
     }
 }
 
@@ -406,6 +437,54 @@ fn contains_keyword(text: &str, keyword: &str) -> bool {
         .any(|token| !token.is_empty() && token == keyword)
 }
 
+/// F17 — Classify effort based on task signals.
+///
+/// Low: short greetings, exact-reply tasks, trivial lookups.
+/// Medium: standard edits, focused debugging, single-file work.
+/// High: multi-file refactors, architecture, broad investigation.
+fn classify_effort(signals: &TaskSignals) -> EffortLevel {
+    // Trivial tasks: very short, no write intent, no complexity signals
+    if signals.trimmed.len() <= 80
+        && signals.line_count <= 2
+        && !signals.mentions_write
+        && !signals.broad_task
+        && signals.file_reference_count == 0
+    {
+        tracing::debug!(
+            effort = "Low",
+            prompt_len = signals.trimmed.len(),
+            lines = signals.line_count,
+            "F17: classified effort level (short, no write, no complexity)"
+        );
+        return EffortLevel::Low;
+    }
+
+    // Complex tasks: broad scope, many files, long prompts
+    if signals.broad_task
+        || signals.file_reference_count >= 3
+        || signals.trimmed.len() > 500
+        || signals.line_count > 8
+    {
+        tracing::debug!(
+            effort = "High",
+            broad_task = signals.broad_task,
+            file_refs = signals.file_reference_count,
+            prompt_len = signals.trimmed.len(),
+            lines = signals.line_count,
+            "F17: classified effort level (broad/complex)"
+        );
+        return EffortLevel::High;
+    }
+
+    tracing::debug!(
+        effort = "Medium",
+        prompt_len = signals.trimmed.len(),
+        lines = signals.line_count,
+        "F17: classified effort level (standard)"
+    );
+    EffortLevel::Medium
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -539,5 +618,43 @@ mod tests {
 
         assert!(policy.enable_subagent_tool);
         assert_eq!(policy.max_subagents, 3);
+    }
+
+    // --- F17: Effort level tests ---
+
+    #[test]
+    fn effort_low_for_greeting() {
+        let analysis = analyze_task_full("Hello!", &[], ThinkingLevel::Off, false);
+        assert_eq!(analysis.effort, EffortLevel::Low);
+    }
+
+    #[test]
+    fn effort_medium_for_single_file_edit() {
+        let analysis = analyze_task_full(
+            "Fix the typo in src/main.rs where 'recieve' should be 'receive'.",
+            &[],
+            ThinkingLevel::Off,
+            false,
+        );
+        assert_eq!(analysis.effort, EffortLevel::Medium);
+    }
+
+    #[test]
+    fn effort_high_for_multi_file_refactor() {
+        let analysis = analyze_task_full(
+            "Investigate why config.rs, client.rs, and tests.rs disagree about retry behavior across files, then refactor the shared logic into a common module.",
+            &[],
+            ThinkingLevel::Off,
+            false,
+        );
+        assert_eq!(analysis.effort, EffortLevel::High);
+    }
+
+    #[test]
+    fn effort_budget_scaling() {
+        assert_eq!(EffortLevel::Low.scale_budget(Some(10_000)), Some(2_500));
+        assert_eq!(EffortLevel::Medium.scale_budget(Some(10_000)), Some(6_000));
+        assert_eq!(EffortLevel::High.scale_budget(Some(10_000)), Some(10_000));
+        assert_eq!(EffortLevel::Low.scale_budget(None), None);
     }
 }

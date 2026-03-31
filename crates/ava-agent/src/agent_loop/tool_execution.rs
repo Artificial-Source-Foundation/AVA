@@ -424,6 +424,22 @@ impl AgentLoop {
         };
         truncate_tool_result(&mut result);
 
+        // F12 — Injection scanning: check untrusted tool results for prompt injection.
+        if !result.is_error && ava_permissions::injection::should_scan_tool(&tool_call.name) {
+            let scan = ava_permissions::injection::scan_for_injection(&result.content);
+            if scan.suspicious {
+                warn!(
+                    tool = %tool_call.name,
+                    patterns = ?scan.matched_patterns,
+                    "prompt injection patterns detected in tool output"
+                );
+                result.content = ava_permissions::injection::wrap_suspicious_result(
+                    &result.content,
+                    &scan.matched_patterns,
+                );
+            }
+        }
+
         if !result.is_error {
             if let Some(project_root) = self.project_root.clone() {
                 if ava_config::is_project_trusted(&project_root) {
@@ -723,27 +739,49 @@ impl AgentLoop {
 
         // Read-only tools concurrently
         if !read_calls.is_empty() {
-            let concurrency = read_calls.len().min(MAX_CONCURRENT_READ_ONLY_TOOLS);
-            let agent = &*self;
-            let read_batch: Vec<(usize, ToolCall)> = read_calls
-                .iter()
-                .map(|(i, tc)| (*i, (*tc).clone()))
-                .collect();
-            debug!(
-                requested = read_calls.len(),
-                concurrency, "executing read-only tool batch"
-            );
+            // F1: Split into pre-dispatched (already executed during stream) and pending.
+            let mut pending_reads: Vec<(usize, ToolCall)> = Vec::new();
+            for (i, tc) in &read_calls {
+                if let Some(pre_result) = self.pre_dispatched_results.remove(&tc.id) {
+                    debug!(
+                        tool = %tc.name,
+                        "F1: using pre-dispatched result from streaming"
+                    );
+                    let execution = ava_tools::monitor::ToolExecution {
+                        tool_name: tc.name.clone(),
+                        arguments_hash: ava_tools::monitor::hash_arguments(&tc.arguments),
+                        success: !pre_result.is_error,
+                        duration: std::time::Duration::ZERO, // timing was during stream
+                        timestamp: Instant::now(),
+                    };
+                    indexed_results.push((*i, pre_result, execution));
+                } else {
+                    pending_reads.push((*i, (*tc).clone()));
+                }
+            }
 
-            let results = futures::stream::iter(read_batch)
-                .map(|(i, tc)| async move {
-                    let (result, execution) = agent.execute_tool_call_timed(&tc).await;
-                    (i, result, execution)
-                })
-                .buffer_unordered(MAX_CONCURRENT_READ_ONLY_TOOLS)
-                .collect::<Vec<_>>()
-                .await;
+            if !pending_reads.is_empty() {
+                let concurrency = pending_reads.len().min(MAX_CONCURRENT_READ_ONLY_TOOLS);
+                let agent = &*self;
+                debug!(
+                    total = read_calls.len(),
+                    pre_dispatched = read_calls.len() - pending_reads.len(),
+                    pending = pending_reads.len(),
+                    concurrency,
+                    "executing read-only tool batch"
+                );
 
-            indexed_results.extend(results);
+                let results = futures::stream::iter(pending_reads)
+                    .map(|(i, tc)| async move {
+                        let (result, execution) = agent.execute_tool_call_timed(&tc).await;
+                        (i, result, execution)
+                    })
+                    .buffer_unordered(MAX_CONCURRENT_READ_ONLY_TOOLS)
+                    .collect::<Vec<_>>()
+                    .await;
+
+                indexed_results.extend(results);
+            }
         }
 
         // Poll for steering after read-only batch

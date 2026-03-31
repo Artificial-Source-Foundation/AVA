@@ -88,6 +88,21 @@ impl AnthropicProvider {
         self
     }
 
+    /// F16 — Consolidated beta header management.
+    ///
+    /// All Anthropic beta headers are applied through this single method,
+    /// making it easy to add new betas and ensuring consistency across
+    /// all request paths (generate, stream, thinking, tools).
+    ///
+    /// For first-party Anthropic providers, applies interleaved-thinking beta.
+    /// Third-party Anthropic-compatible providers skip Anthropic-specific headers.
+    fn apply_beta_headers(&self, request: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+        if self.third_party {
+            return request;
+        }
+        request.header("anthropic-beta", "interleaved-thinking-2025-05-14")
+    }
+
     pub fn with_provider_label(mut self, provider_label: impl Into<String>) -> Self {
         self.provider_label = provider_label.into();
         self
@@ -113,6 +128,14 @@ impl AnthropicProvider {
     }
 
     fn build_request_body(&self, messages: &[Message], stream: bool) -> Value {
+        // F2 — Extract cache boundary from system message metadata.
+        let cache_boundary = messages
+            .iter()
+            .find(|m| m.role == ava_types::Role::System)
+            .and_then(|m| m.metadata.get("cache_boundary"))
+            .and_then(|v| v.as_u64())
+            .map(|v| v as usize);
+
         let (system, mapped_messages) = common::map_messages_anthropic(messages);
         let cache = self.use_prompt_caching();
         let mut body = json!({
@@ -123,14 +146,34 @@ impl AnthropicProvider {
         });
 
         if let Some(system_message) = system {
-            let mut block = json!({
-                "type": "text",
-                "text": system_message,
-            });
-            if cache {
-                block["cache_control"] = json!({"type": "ephemeral"});
+            // F2 — Cache boundary splitting: when we have a cache boundary and
+            // prompt caching is enabled, split the system prompt into two blocks.
+            // The static prefix gets `cache_control: ephemeral` so Anthropic
+            // caches it across turns. The dynamic suffix is sent uncached.
+            if cache && cache_boundary.is_some_and(|b| b > 0 && b < system_message.len()) {
+                let boundary = cache_boundary.unwrap();
+                let static_prefix = &system_message[..boundary];
+                let dynamic_suffix = &system_message[boundary..];
+                let mut prefix_block = json!({
+                    "type": "text",
+                    "text": static_prefix,
+                });
+                prefix_block["cache_control"] = json!({"type": "ephemeral"});
+                let suffix_block = json!({
+                    "type": "text",
+                    "text": dynamic_suffix,
+                });
+                body["system"] = json!([prefix_block, suffix_block]);
+            } else {
+                let mut block = json!({
+                    "type": "text",
+                    "text": system_message,
+                });
+                if cache {
+                    block["cache_control"] = json!({"type": "ephemeral"});
+                }
+                body["system"] = json!([block]);
             }
-            body["system"] = json!([block]);
         }
 
         body
@@ -498,9 +541,7 @@ impl LLMProvider for AnthropicProvider {
         let body = self.build_request_body_with_thinking(messages, tools, true, thinking);
         let client = self.client().await?;
         let mut request = self.build_request(&client);
-        if !self.third_party {
-            request = request.header("anthropic-beta", "interleaved-thinking-2025-05-14");
-        }
+        request = self.apply_beta_headers(request);
         let request = request.json(&body);
         let request = self.with_plugin_headers(request).await;
 
@@ -530,9 +571,7 @@ impl LLMProvider for AnthropicProvider {
         let body = self.build_request_body_with_thinking_config(messages, tools, true, thinking);
         let client = self.client().await?;
         let mut request = self.build_request(&client);
-        if !self.third_party {
-            request = request.header("anthropic-beta", "interleaved-thinking-2025-05-14");
-        }
+        request = self.apply_beta_headers(request);
         let request = request.json(&body);
         let request = self.with_plugin_headers(request).await;
 
@@ -611,9 +650,7 @@ impl LLMProvider for AnthropicProvider {
         let body = self.build_request_body_with_thinking(messages, tools, false, thinking);
         let client = self.client().await?;
         let mut request = self.build_request(&client);
-        if !self.third_party {
-            request = request.header("anthropic-beta", "interleaved-thinking-2025-05-14");
-        }
+        request = self.apply_beta_headers(request);
         let request = request.json(&body);
         let request = self.with_plugin_headers(request).await;
 
@@ -685,9 +722,7 @@ impl LLMProvider for AnthropicProvider {
         let body = self.build_request_body_with_thinking_config(messages, tools, false, thinking);
         let client = self.client().await?;
         let mut request = self.build_request(&client);
-        if !self.third_party {
-            request = request.header("anthropic-beta", "interleaved-thinking-2025-05-14");
-        }
+        request = self.apply_beta_headers(request);
         let request = request.json(&body);
         let request = self.with_plugin_headers(request).await;
 
@@ -912,6 +947,58 @@ mod tests {
             tool_defs[0]["cache_control"],
             json!({"type": "ephemeral"}),
             "native provider should add cache_control to last tool"
+        );
+    }
+
+    #[test]
+    fn cache_boundary_splits_system_into_two_blocks() {
+        let provider = AnthropicProvider::new(pool(), "key", "claude-sonnet-4");
+        let static_prefix = "You are a helpful assistant.\n\n# Tools\nread, write, edit";
+        let dynamic_suffix = "\n\n## Provider notes\nKeep it brief.";
+        let full_system = format!("{static_prefix}{dynamic_suffix}");
+
+        let mut sys_msg = Message::new(ava_types::Role::System, &full_system);
+        sys_msg.metadata = json!({"cache_boundary": static_prefix.len()});
+
+        let body = provider.build_request_body(
+            &[sys_msg, Message::new(ava_types::Role::User, "hello")],
+            false,
+        );
+
+        let system = body["system"].as_array().expect("system should be array");
+        assert_eq!(system.len(), 2, "should split into 2 system blocks");
+        // First block: static prefix with cache_control
+        assert_eq!(system[0]["text"].as_str().unwrap(), static_prefix);
+        assert_eq!(
+            system[0]["cache_control"],
+            json!({"type": "ephemeral"}),
+            "static prefix should have cache_control"
+        );
+        // Second block: dynamic suffix without cache_control
+        assert_eq!(system[1]["text"].as_str().unwrap(), dynamic_suffix);
+        assert!(
+            system[1].get("cache_control").is_none(),
+            "dynamic suffix should not have cache_control"
+        );
+    }
+
+    #[test]
+    fn no_cache_boundary_uses_single_block() {
+        let provider = AnthropicProvider::new(pool(), "key", "claude-sonnet-4");
+        let body = provider.build_request_body(
+            &[
+                Message::new(ava_types::Role::System, "You are helpful."),
+                Message::new(ava_types::Role::User, "hello"),
+            ],
+            false,
+        );
+
+        let system = body["system"].as_array().expect("system should be array");
+        assert_eq!(system.len(), 1, "no boundary → single block");
+        assert_eq!(
+            system[0]["cache_control"],
+            json!({"type": "ephemeral"}),
+            "single block should still have cache_control"
         );
     }
 

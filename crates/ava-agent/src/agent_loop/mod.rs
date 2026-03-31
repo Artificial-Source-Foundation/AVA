@@ -50,7 +50,7 @@ pub const LLM_STREAM_TIMEOUT_SECS: u64 = 90;
 /// Read-only tools are executed concurrently; write tools run sequentially.
 pub struct AgentLoop {
     pub llm: Box<dyn LLMProvider>,
-    pub tools: ToolRegistry,
+    pub tools: Arc<ToolRegistry>,
     pub context: ContextManager,
     pub config: AgentConfig,
     pub(crate) last_request_hash: Option<u64>,
@@ -92,6 +92,9 @@ pub struct AgentLoop {
     cached_hooked_tool_defs: std::sync::Mutex<Option<Vec<ava_types::Tool>>>,
     /// Visible tool subset for the current goal.
     tool_visibility_profile: crate::routing::ToolVisibilityProfile,
+    /// F1 — Pre-dispatched tool results from streaming execution.
+    /// Maps finalized tool call index → pre-executed result.
+    pre_dispatched_results: std::collections::HashMap<String, ava_types::ToolResult>,
 }
 
 /// Configuration for a single agent loop run — turn limits, cost caps, and model identity.
@@ -227,6 +230,12 @@ pub enum AgentEvent {
     /// unexpectedly, the last checkpoint is recoverable.
     Checkpoint(Session),
     Error(String),
+    /// F8 — Stream silence warning: emitted when no chunks have arrived for half
+    /// the configured timeout. Gives the UI a chance to inform the user before
+    /// the hard kill at the full timeout.
+    StreamSilenceWarning {
+        elapsed_secs: u64,
+    },
     ToolStats(ava_tools::monitor::ToolStats),
     TokenUsage {
         input_tokens: usize,
@@ -326,7 +335,7 @@ impl AgentLoop {
         let enable_dynamic_rules = config.enable_dynamic_rules;
         Self {
             llm,
-            tools,
+            tools: Arc::new(tools),
             context,
             config,
             last_request_hash: None,
@@ -347,6 +356,7 @@ impl AgentLoop {
             cached_tool_defs: std::sync::Mutex::new(None),
             cached_hooked_tool_defs: std::sync::Mutex::new(None),
             tool_visibility_profile: crate::routing::ToolVisibilityProfile::Full,
+            pre_dispatched_results: std::collections::HashMap::new(),
         }
     }
 

@@ -24,11 +24,18 @@ use crate::transport::{HttpTransport, HttpTransportConfig, StdioTransport};
 // ExtensionManager — connects to MCP servers and aggregates their tools
 // ---------------------------------------------------------------------------
 
+/// F13 — Debounce window for batching `list_changed` notifications.
+const LIST_CHANGED_DEBOUNCE_MS: u64 = 500;
+
 pub struct ExtensionManager {
     /// MCP clients keyed by server name, each behind a Mutex for interior mutability.
     clients: HashMap<String, Arc<Mutex<MCPClient>>>,
     /// All discovered tools, each tagged with the server name that owns it.
     tools: Vec<(String, MCPTool)>,
+    /// F13 — Servers that have pending `list_changed` notifications awaiting batch refresh.
+    pending_refresh: std::collections::HashSet<String>,
+    /// F13 — When the debounce window started (first pending notification).
+    debounce_start: Option<std::time::Instant>,
 }
 
 impl ExtensionManager {
@@ -37,6 +44,8 @@ impl ExtensionManager {
         Self {
             clients: HashMap::new(),
             tools: Vec::new(),
+            pending_refresh: std::collections::HashSet::new(),
+            debounce_start: None,
         }
     }
 
@@ -189,6 +198,66 @@ impl ExtensionManager {
                     format_timeout(timeout_duration)
                 ))
             })?
+    }
+
+    /// F13 — Queue a server for batched tool refresh.
+    ///
+    /// Instead of immediately re-fetching tools on every `list_changed` notification,
+    /// this queues the server name and starts a debounce window. Call
+    /// `flush_pending_refresh()` after the debounce period to batch-refresh all
+    /// queued servers in one pass.
+    pub fn queue_refresh(&mut self, server_name: &str) {
+        tracing::debug!(server = server_name, "F13: queued MCP server for refresh");
+        if self.pending_refresh.is_empty() {
+            self.debounce_start = Some(std::time::Instant::now());
+        }
+        self.pending_refresh.insert(server_name.to_string());
+    }
+
+    /// F13 — Check if the debounce window has elapsed and pending refreshes should be flushed.
+    pub fn should_flush_refresh(&self) -> bool {
+        if self.pending_refresh.is_empty() {
+            return false;
+        }
+        self.debounce_start
+            .map(|start| start.elapsed().as_millis() >= LIST_CHANGED_DEBOUNCE_MS as u128)
+            .unwrap_or(false)
+    }
+
+    /// F13 — Batch-refresh all queued servers and return results.
+    ///
+    /// Clears the pending set and debounce timer. Returns a vec of
+    /// `(server_name, tool_count)` for each successfully refreshed server.
+    pub async fn flush_pending_refresh(&mut self) -> Vec<(String, usize)> {
+        let servers: Vec<String> = self.pending_refresh.drain().collect();
+        self.debounce_start = None;
+
+        tracing::info!(
+            count = servers.len(),
+            "F13: flushing batched MCP server refreshes"
+        );
+
+        let mut results = Vec::new();
+        for server_name in servers {
+            match self.reload_server_tools(&server_name).await {
+                Ok(tools) => {
+                    info!(
+                        server = %server_name,
+                        tool_count = tools.len(),
+                        "F13: batch-refreshed MCP server tools"
+                    );
+                    results.push((server_name, tools.len()));
+                }
+                Err(e) => {
+                    warn!(
+                        server = %server_name,
+                        error = %e,
+                        "F13: failed to refresh MCP server tools"
+                    );
+                }
+            }
+        }
+        results
     }
 
     /// Re-fetch the tool list from a single server and update the registry.

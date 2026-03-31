@@ -73,6 +73,12 @@ pub fn classify_bash_command(command: &str) -> CommandClassification {
         return CommandClassification::blocked(reason);
     }
 
+    // F9: Check parser differential patterns (IFS, brace expansion, unicode, ANSI-C quoting).
+    // These run on the original (not lowercased) command to detect case-sensitive patterns.
+    if let Some(diff_result) = rules::check_parser_differential(command) {
+        return diff_result;
+    }
+
     // Check whole-command high-risk patterns (cross-pipe patterns like base64 | curl).
     if let Some(high_result) = check_whole_command_high_risk(&lower_full) {
         // Don't return early — merge and continue so per-part checks can also contribute.

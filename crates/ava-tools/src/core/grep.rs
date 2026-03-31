@@ -180,8 +180,8 @@ impl Tool for GrepTool {
                 "\n\n(Results truncated: showing first {MAX_MATCHES} matches. Consider using a more specific path or pattern.)"
             ));
         }
-        let content =
-            super::output_fallback::save_tool_output_fallback("grep", &content, 100 * 1024);
+        let limit = super::output_fallback::tool_inline_limit("grep");
+        let content = super::output_fallback::save_tool_output_fallback("grep", &content, limit);
 
         Ok(ToolResult {
             call_id: String::new(),

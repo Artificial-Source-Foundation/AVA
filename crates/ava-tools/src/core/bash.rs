@@ -13,7 +13,10 @@ use std::path::PathBuf;
 use crate::registry::{Tool, ToolOutput};
 
 const DEFAULT_TIMEOUT_MS: u64 = 120_000;
-const MAX_OUTPUT_BYTES: usize = 100 * 1024;
+/// F6: Use per-tool inline limit instead of hardcoded value.
+fn max_output_bytes() -> usize {
+    super::output_fallback::tool_inline_limit("bash")
+}
 
 pub struct BashTool {
     platform: Arc<dyn Platform>,
@@ -151,7 +154,7 @@ impl Tool for BashTool {
             let rendered = super::output_fallback::save_tool_output_fallback_tail(
                 "bash",
                 &rendered,
-                MAX_OUTPUT_BYTES,
+                max_output_bytes(),
             );
             let rendered = super::secret_redaction::redact_secrets(&rendered);
 
@@ -182,7 +185,7 @@ impl Tool for BashTool {
         let rendered = super::output_fallback::save_tool_output_fallback_tail(
             "bash",
             &rendered,
-            MAX_OUTPUT_BYTES,
+            max_output_bytes(),
         );
         let rendered = super::secret_redaction::redact_secrets(&rendered);
 

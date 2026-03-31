@@ -16,6 +16,13 @@ pub fn save_tool_output_fallback(tool_name: &str, content: &str, max_inline_size
         return content.to_string();
     }
 
+    tracing::info!(
+        tool = tool_name,
+        original_size = content.len(),
+        truncated_size = max_inline_size,
+        "F6: truncating tool output (head)"
+    );
+
     let output_dir = match dirs::home_dir() {
         Some(home) => home.join(".ava/tool-output"),
         None => return truncate_with_path_notice(content, max_inline_size, None),
@@ -47,6 +54,13 @@ pub fn save_tool_output_fallback_tail(
     if content.len() <= max_inline_size {
         return content.to_string();
     }
+
+    tracing::info!(
+        tool = tool_name,
+        original_size = content.len(),
+        truncated_size = max_inline_size,
+        "F6: truncating tool output (tail)"
+    );
 
     let output_dir = match dirs::home_dir() {
         Some(home) => home.join(".ava/tool-output"),
@@ -145,6 +159,24 @@ fn truncate_tail_with_path_notice(content: &str, max_size: usize, path: Option<&
 /// Default inline size limit for tool outputs (chars).
 /// Outputs exceeding this are saved to disk with a pointer.
 pub const DEFAULT_MAX_INLINE_SIZE: usize = 50_000;
+
+/// F6 — Per-tool inline size limits.
+///
+/// Returns the maximum inline size for a given tool. Tools that produce
+/// large outputs (grep, bash) get smaller limits to keep the context lean.
+/// `read` gets a generous limit since the LLM often needs full file content.
+pub fn tool_inline_limit(tool_name: &str) -> usize {
+    match tool_name {
+        "grep" => 20_000,
+        "bash" => 30_000,
+        "web_fetch" => 30_000,
+        "web_search" => 20_000,
+        "glob" => 20_000,
+        "read" => 100_000,           // generous — LLM needs file content
+        "edit" | "write" => 100_000, // edit results include diffs
+        _ => DEFAULT_MAX_INLINE_SIZE,
+    }
+}
 
 /// Large response threshold (200K chars, inspired by Goose).
 /// Used for very large tool outputs that should always spill to disk.

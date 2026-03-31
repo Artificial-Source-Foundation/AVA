@@ -436,7 +436,12 @@ async fn grep_tool_caps_output_at_max_matches() {
         match_lines <= 500,
         "expected at most 500 matches, got {match_lines}"
     );
-    assert!(result.content.contains("Results truncated"));
+    // Either the match-count truncation message or the disk-fallback truncation
+    // message should be present (when many matches overflow the inline limit).
+    assert!(
+        result.content.contains("Results truncated") || result.content.contains("output truncated"),
+        "expected truncation notice in grep output"
+    );
 }
 
 // --- Tool Registry Tests ---

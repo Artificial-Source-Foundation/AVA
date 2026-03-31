@@ -115,7 +115,8 @@ pub(crate) async fn run_worker(
             | AgentEvent::ContextCompacted { .. }
             | AgentEvent::SnapshotTaken { .. }
             | AgentEvent::PlanStepComplete { .. }
-            | AgentEvent::StreamingEditProgress { .. } => {}
+            | AgentEvent::StreamingEditProgress { .. }
+            | AgentEvent::StreamSilenceWarning { .. } => {}
         }
     }
 

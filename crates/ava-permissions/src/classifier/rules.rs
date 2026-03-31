@@ -1151,3 +1151,203 @@ fn check_path_hijacking(lower: &str) -> Option<CommandClassification> {
 
     None
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// F9 — Parser Differential Security Checks
+//
+// These detect commands where our parser might interpret the command
+// differently from how the actual shell (bash/zsh) would execute it.
+// Based on Claude Code's 23 bash security validators.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Check for parser differential patterns that could bypass security analysis.
+///
+/// Returns High risk classification for commands that could be parsed differently
+/// by our classifier vs. the actual shell, creating a security gap.
+pub(super) fn check_parser_differential(original: &str) -> Option<CommandClassification> {
+    // 1. IFS manipulation: changes word splitting, can make safe-looking commands dangerous.
+    if original.contains("IFS=") || original.contains("${IFS") || original.contains("$IFS") {
+        return Some(CommandClassification {
+            risk_level: RiskLevel::High,
+            tags: vec![SafetyTag::ExecuteCommand],
+            warnings: vec![
+                "IFS manipulation detected — can alter command word splitting".to_string(),
+            ],
+            blocked: false,
+            reason: None,
+        });
+    }
+
+    // 2. Brace expansion: `{rm,-rf,/}` expands to `rm -rf /` in bash.
+    if let Some(classification) = check_brace_expansion(original) {
+        return Some(classification);
+    }
+
+    // 3. ANSI-C quoting: `$'\x72\x6d'` decodes to `rm` at shell level.
+    if original.contains("$'\\x") || original.contains("$'\\u") || original.contains("$'\\U") {
+        return Some(CommandClassification {
+            risk_level: RiskLevel::High,
+            tags: vec![SafetyTag::ExecuteCommand],
+            warnings: vec!["ANSI-C quoting ($'\\x..') can encode hidden commands".to_string()],
+            blocked: false,
+            reason: None,
+        });
+    }
+
+    // 4. Unicode whitespace: invisible characters that may cause parser differentials.
+    if contains_unicode_whitespace(original) {
+        return Some(CommandClassification {
+            risk_level: RiskLevel::High,
+            tags: vec![SafetyTag::ExecuteCommand],
+            warnings: vec![
+                "Unicode whitespace detected — may cause parser differential".to_string(),
+            ],
+            blocked: false,
+            reason: None,
+        });
+    }
+
+    // 5. Zsh-specific dangerous builtins.
+    let lower = original.to_ascii_lowercase();
+    for cmd in &[
+        "zmodload", "emulate", "zsocket", "zpty", "ztcp", "sysopen", "sysread", "syswrite",
+        "zf_open", "zf_close", "zf_read", "mapfile",
+    ] {
+        if lower.starts_with(cmd) || lower.contains(&format!(" {cmd}")) {
+            return Some(CommandClassification {
+                risk_level: RiskLevel::Medium,
+                tags: vec![SafetyTag::ExecuteCommand],
+                warnings: vec![format!(
+                    "Zsh built-in '{cmd}' can access system resources directly"
+                )],
+                blocked: false,
+                reason: None,
+            });
+        }
+    }
+
+    // 6. Locale-dependent quoting: `$"..."` is locale-expanded in bash.
+    if original.contains("$\"") {
+        return Some(CommandClassification {
+            risk_level: RiskLevel::Medium,
+            tags: vec![SafetyTag::ExecuteCommand],
+            warnings: vec![
+                "Locale-dependent quoting ($\"...\") may produce unexpected content".to_string(),
+            ],
+            blocked: false,
+            reason: None,
+        });
+    }
+
+    None
+}
+
+fn check_brace_expansion(cmd: &str) -> Option<CommandClassification> {
+    let mut i = 0;
+    let bytes = cmd.as_bytes();
+    while i < bytes.len() {
+        if bytes[i] == b'{' {
+            if let Some(close) = cmd[i..].find('}') {
+                let inner = &cmd[i + 1..i + close];
+                if inner.contains(',') {
+                    let lower_parts: Vec<String> = inner
+                        .split(',')
+                        .map(|p| p.trim().to_ascii_lowercase())
+                        .collect();
+                    const DANGEROUS_IN_BRACE: &[&str] = &[
+                        "rm", "dd", "mkfs", "chmod", "chown", "sudo", "curl", "wget", "nc", "ncat",
+                        "bash", "sh", "zsh", "python", "perl", "ruby",
+                    ];
+                    for dangerous in DANGEROUS_IN_BRACE {
+                        if lower_parts.iter().any(|p| p == dangerous) {
+                            return Some(CommandClassification {
+                                risk_level: RiskLevel::High,
+                                tags: vec![SafetyTag::ExecuteCommand],
+                                warnings: vec![format!(
+                                    "Brace expansion contains dangerous command: {{{inner}}}"
+                                )],
+                                blocked: false,
+                                reason: None,
+                            });
+                        }
+                    }
+                }
+                i += close + 1;
+            } else {
+                i += 1;
+            }
+        } else {
+            i += 1;
+        }
+    }
+    None
+}
+
+fn contains_unicode_whitespace(s: &str) -> bool {
+    s.chars().any(|c| {
+        matches!(
+            c,
+            '\u{00A0}'
+                | '\u{1680}'
+                | '\u{2000}'
+                | '\u{2001}'
+                | '\u{2002}'
+                | '\u{2003}'
+                | '\u{2004}'
+                | '\u{2005}'
+                | '\u{2006}'
+                | '\u{2007}'
+                | '\u{2008}'
+                | '\u{2009}'
+                | '\u{200A}'
+                | '\u{202F}'
+                | '\u{205F}'
+                | '\u{3000}'
+        )
+    })
+}
+
+#[cfg(test)]
+mod parser_differential_tests {
+    use super::*;
+
+    #[test]
+    fn ifs_manipulation_detected() {
+        assert!(check_parser_differential("IFS=/ rm -rf /").is_some());
+    }
+
+    #[test]
+    fn brace_expansion_with_dangerous_command() {
+        let r = check_parser_differential("echo {rm,-rf,/}");
+        assert!(r.is_some());
+        assert_eq!(r.unwrap().risk_level, RiskLevel::High);
+    }
+
+    #[test]
+    fn brace_expansion_safe() {
+        assert!(check_parser_differential("echo {a,b,c}").is_none());
+    }
+
+    #[test]
+    fn ansi_c_quoting_detected() {
+        assert!(check_parser_differential("$'\\x72\\x6d' -rf /").is_some());
+    }
+
+    #[test]
+    fn unicode_whitespace_detected() {
+        assert!(check_parser_differential("rm\u{00A0}-rf /").is_some());
+    }
+
+    #[test]
+    fn zsh_builtins_detected() {
+        let r = check_parser_differential("zmodload zsh/system");
+        assert!(r.is_some());
+        assert_eq!(r.unwrap().risk_level, RiskLevel::Medium);
+    }
+
+    #[test]
+    fn normal_command_passes() {
+        assert!(check_parser_differential("ls -la").is_none());
+        assert!(check_parser_differential("cargo test --workspace").is_none());
+    }
+}

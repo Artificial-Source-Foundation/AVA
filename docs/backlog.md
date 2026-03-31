@@ -86,6 +86,13 @@
    - **Expanded Editor (Ctrl+E)** rendered 11 duplicate dialog portals due to orphaned reactive roots from `computations created outside a createRoot` — added `mountCount` singleton guard in `ExpandedEditor.tsx` so only the first instance renders the portal.
    - **Other**: todos cleared on session switch, expanded editor deduped to single instance, About AVA dialog implemented, @ file mention race condition fixed (Tauri FS scope expansion), `/compact` web endpoint added with full hybrid compaction, composer glow removed.
 
+## Sprint 61 — Completed (2026-03-31)
+1. **Claude Code Intelligence Adoption (18 features)** — All 18 features from CC analysis implemented across 4 waves: raw stream processing (F5), quote normalization (F7), stream idle watchdog (F8), parser differential security (F9), compaction circuit breaker (F15), sticky beta headers (F16), streaming tool execution (F1), prompt cache boundary (F2), smart context pruning (F4), stale file detection (F10), tool result injection scanning (F12), session memory compaction (F3), per-tool output limits (F6), deferred tool loading + ToolSearch (F11), batched MCP updates (F13), effort levels (F17), session backgrounding gap analysis (F14), vim text objects gap analysis (F18).
+
+## Sprint 62 — Planned
+1. **Session detach/reattach (from F14)** — Wire Ctrl+B to session-level detach, persist agent state to disk, background agent loop continues, `ava --resume` to reattach. Design doc: `docs/gap-analysis-session-backgrounding.md`.
+2. **Vim mode Phase 1 (from F18)** — INSERT/NORMAL mode switching, basic motions (h/j/k/l/w/b/e/0/$), operators (d/c/y), linewise (dd/cc/yy), paste (p/P). Behind `tui.vim_mode` config flag. Design doc: `docs/gap-analysis-vim-text-objects.md`.
+
 ## High
 1. **Cancel deletes all messages** — Cancelling an agent run wipes the entire conversation. Should preserve everything up to the cancel point. OpenCode stops in place.
 

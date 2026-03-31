@@ -510,6 +510,12 @@ impl App {
                     .messages
                     .push(UiMessage::new(MessageKind::Error, err));
             }
+            ava_agent::AgentEvent::StreamSilenceWarning { elapsed_secs } => {
+                self.set_status(
+                    format!("Stream silent for {elapsed_secs}s — waiting for provider..."),
+                    StatusLevel::Warn,
+                );
+            }
         }
     }
 }

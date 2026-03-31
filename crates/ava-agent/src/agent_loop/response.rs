@@ -30,6 +30,36 @@ pub(super) struct ToolCallAccumulator {
     pub arguments_json: String,
 }
 
+impl ToolCallAccumulator {
+    /// F1 — Check if the accumulated arguments form valid JSON.
+    ///
+    /// Used during streaming to detect when a tool call's arguments are complete
+    /// so read-only tools can be pre-dispatched before the stream finishes.
+    pub fn is_complete(&self) -> bool {
+        if self.name.is_empty() || self.arguments_json.is_empty() {
+            return false;
+        }
+        serde_json::from_str::<serde_json::Value>(&self.arguments_json).is_ok()
+    }
+
+    /// Convert to a `ToolCall` if complete.
+    pub fn to_tool_call(&self) -> Option<ToolCall> {
+        if !self.is_complete() {
+            return None;
+        }
+        let arguments = serde_json::from_str(&self.arguments_json).ok()?;
+        Some(ToolCall {
+            id: if self.id.is_empty() {
+                Uuid::new_v4().to_string()
+            } else {
+                self.id.clone()
+            },
+            name: self.name.clone(),
+            arguments,
+        })
+    }
+}
+
 pub(super) fn accumulate_tool_call(
     accumulators: &mut Vec<ToolCallAccumulator>,
     tc: &StreamToolCall,
@@ -56,6 +86,18 @@ pub(super) fn accumulate_tool_call(
     }
 }
 
+/// Merge streaming tool argument fragments.
+///
+/// **F5 — Raw Stream Processing**: Instead of re-parsing JSON on every incoming
+/// delta (O(n²) over the lifetime of a tool call), we simply accumulate raw
+/// string fragments. All JSON validation is deferred to `finalize_tool_calls`,
+/// which parses once at the end.
+///
+/// We keep three cheap guards:
+/// 1. Skip empty deltas.
+/// 2. Skip exact duplicates (some providers re-send the complete payload).
+/// 3. Re-open a trailing `}` when a provider flushes a complete JSON object
+///    then sends a `,<field>:...}` continuation fragment.
 fn merge_tool_arguments(existing: &mut String, incoming: &str) {
     if incoming.is_empty() {
         return;
@@ -66,44 +108,22 @@ fn merge_tool_arguments(existing: &mut String, incoming: &str) {
         return;
     }
 
+    // Cheap string-level dedup: some providers re-send the full payload.
     if existing == incoming {
         return;
     }
 
-    let parsed_existing = serde_json::from_str::<Value>(existing).ok();
-    let parsed_incoming = serde_json::from_str::<Value>(incoming).ok();
-
-    if let Some(incoming_value) = parsed_incoming {
-        if parsed_existing.as_ref() == Some(&incoming_value) {
-            return;
+    // Re-open heuristic: if we already have a complete JSON object and the
+    // next fragment starts with `,`, strip the trailing `}` so the fragment
+    // can be stitched in. This handles providers that flush `{"a":1}` then
+    // send `,"b":2}` as a continuation.
+    if incoming.trim_start().starts_with(',') && existing.trim_end().ends_with('}') {
+        while existing.ends_with(char::is_whitespace) {
+            existing.pop();
         }
-
-        existing.clear();
-        existing.push_str(incoming);
-        return;
-    }
-
-    if parsed_existing.is_some() {
-        if existing.trim() == "{}" {
-            existing.clear();
-            existing.push_str(incoming);
-            return;
+        if existing.ends_with('}') {
+            existing.pop();
         }
-
-        // Some providers flush a syntactically complete JSON object before
-        // streaming one last `,<field>:...}` fragment. Re-open the object so
-        // the trailing delta can be stitched back in instead of being dropped.
-        if incoming.trim_start().starts_with(',') && existing.trim_end().ends_with('}') {
-            while existing.ends_with(char::is_whitespace) {
-                existing.pop();
-            }
-            if existing.ends_with('}') {
-                existing.pop();
-            }
-        }
-
-        existing.push_str(incoming);
-        return;
     }
 
     existing.push_str(incoming);
@@ -700,6 +720,43 @@ mod tests {
             tool_calls[0].arguments,
             serde_json::json!({"pattern": "**/*.md"})
         );
+    }
+
+    #[test]
+    fn accumulator_is_complete_with_valid_json() {
+        let acc = ToolCallAccumulator {
+            index: 0,
+            id: "call-1".to_string(),
+            name: "read".to_string(),
+            arguments_json: r#"{"path":"src/main.rs"}"#.to_string(),
+        };
+        assert!(acc.is_complete());
+        let tc = acc.to_tool_call().unwrap();
+        assert_eq!(tc.name, "read");
+        assert_eq!(tc.arguments["path"], "src/main.rs");
+    }
+
+    #[test]
+    fn accumulator_is_incomplete_with_partial_json() {
+        let acc = ToolCallAccumulator {
+            index: 0,
+            id: "call-1".to_string(),
+            name: "read".to_string(),
+            arguments_json: r#"{"path":"src/m"#.to_string(),
+        };
+        assert!(!acc.is_complete());
+        assert!(acc.to_tool_call().is_none());
+    }
+
+    #[test]
+    fn accumulator_is_incomplete_without_name() {
+        let acc = ToolCallAccumulator {
+            index: 0,
+            id: "call-1".to_string(),
+            name: String::new(),
+            arguments_json: r#"{"path":"x"}"#.to_string(),
+        };
+        assert!(!acc.is_complete());
     }
 
     #[test]

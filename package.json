@@ -1,6 +1,6 @@
 {
   "name": "ava",
-  "version": "3.0.0",
+  "version": "3.0.1",
   "description": "Multi-Agent AI Coding Assistant - Tauri desktop app with ACP support",
   "type": "module",
   "packageManager": "pnpm@10.29.2",

@@ -106,7 +106,7 @@ fn model_family_notes(model_lower: &str, reasoning: bool) -> Vec<String> {
     let mut lines = Vec::new();
 
     if is_claude_model(model_lower) {
-        // Claude (Anthropic) family
+        // Claude Opus 4.6 / Sonnet 4.6 / Haiku 4.5 — up to 1M context
         lines
             .push("Follow structured instructions closely and keep pre-tool prose minimal.".into());
         lines.push(
@@ -119,16 +119,31 @@ fn model_family_notes(model_lower: &str, reasoning: bool) -> Vec<String> {
         );
         lines.push("When given large contexts, prioritize the most recent instructions and tool results over older history.".into());
         if reasoning {
-            lines.push("Use extended thinking only for genuinely hard tasks (complex refactors, architecture). For simple edits, think briefly and act.".into());
+            if model_lower.contains("opus") {
+                lines.push("Use adaptive thinking for genuinely hard tasks (architecture, complex refactors). For simple edits, keep thinking minimal.".into());
+            } else {
+                lines.push("Use extended thinking for hard tasks only. For simple edits, think briefly and act.".into());
+            }
+        }
+    } else if is_codex_model(model_lower) {
+        // GPT-5.3 Codex — 400K context, code-optimized, Responses API preferred
+        lines.push(
+            "Codex is optimized for code. Favor code output over prose. Minimize explanations."
+                .into(),
+        );
+        lines.push("Maximize parallel tool calls — never read files one-by-one unless logically unavoidable.".into());
+        lines.push("Keep preambles to 1 sentence + 1-2 sentence plan before tool calls. Update every 1-3 steps.".into());
+        lines.push(
+            "Keep visible output brief — 1-2 sentences at milestones, not play-by-play.".into(),
+        );
+        if reasoning {
+            lines.push("Use medium reasoning for interactive coding, high/xhigh only for the hardest tasks.".into());
         }
     } else if is_gpt_model(model_lower) {
-        // GPT / OpenAI family
+        // GPT-5.4 / o3 / o4 — up to 1M context, general purpose
         lines.push("Use function calling for all tool interactions. Make arguments explicit and schema-accurate.".into());
-        lines.push("Prefer parallel function calls when operations are independent.".into());
+        lines.push("Prefer parallel function calls when operations are independent — this is a core strength.".into());
         lines.push("Keep visible text updates brief — function calls do the work, text is for status only.".into());
-        if is_codex_model(model_lower) {
-            lines.push("Codex models are optimized for code. Favor code output over prose. Minimize explanations.".into());
-        }
         if reasoning {
             lines.push(
                 "Reasoning happens internally. Keep visible output to 1-2 sentence summaries."
@@ -138,28 +153,31 @@ fn model_family_notes(model_lower: &str, reasoning: bool) -> Vec<String> {
             lines.push("Think briefly, then act. Don't over-plan in visible output.".into());
         }
     } else if is_gemini_model(model_lower) {
-        // Gemini (Google) family
+        // Gemini 3.1 Pro / 3 Flash / 2.5 — up to 1M context
         lines.push(
             "Be explicit with tool argument types — Gemini is strict about schema compliance."
                 .into(),
         );
-        lines.push("Prefer grep/glob to discover files before reading them individually. Extra turns are more expensive than larger reads.".into());
+        lines.push("Prefer grep/glob to discover files before reading individually. Extra turns are more expensive than larger reads.".into());
         lines.push(
             "Keep progress updates short and structured. Use numbered lists for multi-step plans."
                 .into(),
         );
+        if model_lower.contains("flash") {
+            lines.push("Flash is optimized for speed. Keep tool chains short and focused.".into());
+        }
         if reasoning {
             lines.push("Use thinking for planning-heavy work. For trivial edits, skip thinking and act directly.".into());
         }
     } else if is_deepseek_model(model_lower) {
-        // DeepSeek V3.2 family — 671B MoE, 128K context, open-weight
+        // DeepSeek V3.2 — 671B MoE, 128K context, open-weight
         lines.push("DeepSeek handles long code well. Read full files when needed rather than partial reads.".into());
         lines.push(
             "Keep tool arguments simple and explicit. Avoid deeply nested argument structures."
                 .into(),
         );
+        lines.push("Note: chat mode has an 8K output limit. Keep individual edits focused.".into());
         if reasoning {
-            // V3.2 reasoner: must pass reasoning_content back in multi-turn or get 400 errors
             lines.push("DeepSeek reasoning is olympiad-level strong — use it for complex logic and math. Keep visible reasoning terse.".into());
         }
     } else if is_mercury_model(model_lower) {
@@ -262,6 +280,8 @@ fn provider_routing_notes(provider_kind: ProviderKind) -> Vec<String> {
 fn model_family_label(model_lower: &str, provider_kind: ProviderKind) -> String {
     if is_claude_model(model_lower) {
         "Claude".to_string()
+    } else if is_codex_model(model_lower) {
+        "Codex".to_string()
     } else if is_gpt_model(model_lower) {
         "GPT".to_string()
     } else if is_gemini_model(model_lower) {
@@ -291,7 +311,9 @@ fn is_claude_model(m: &str) -> bool {
     m.contains("claude") || m.contains("haiku") || m.contains("sonnet") || m.contains("opus")
 }
 fn is_gpt_model(m: &str) -> bool {
-    m.starts_with("gpt") || m.starts_with("o3") || m.starts_with("o4") || m.contains("gpt-")
+    // GPT family but NOT Codex (Codex has its own tuning)
+    (m.starts_with("gpt") || m.starts_with("o3") || m.starts_with("o4") || m.contains("gpt-"))
+        && !m.contains("codex")
 }
 fn is_codex_model(m: &str) -> bool {
     m.contains("codex")

@@ -168,6 +168,43 @@ fn model_family_notes(model_lower: &str, reasoning: bool) -> Vec<String> {
         lines.push(
             "Favor many small focused tool calls over fewer large ones — latency is low.".into(),
         );
+    } else if is_grok_model(model_lower) {
+        // xAI Grok family
+        lines.push(
+            "Grok models are fast and direct. Match that tone — be concise, skip ceremony.".into(),
+        );
+        lines.push(
+            "Prefer parallel tool calls when possible. Grok handles concurrent operations well."
+                .into(),
+        );
+        if reasoning {
+            lines.push("Grok reasoning is strong for code analysis. Use it for debugging and complex logic. Keep visible output terse.".into());
+        }
+    } else if is_glm_model(model_lower) {
+        // ZhipuAI GLM family
+        lines.push("Keep tool arguments explicit and JSON-compliant. GLM models are strict about schema format.".into());
+        lines.push(
+            "GLM handles Chinese and English equally well. Match the user's language in responses."
+                .into(),
+        );
+        lines.push("Prefer sequential tool calls over parallel when the task involves multiple dependent edits.".into());
+    } else if is_kimi_model(model_lower) {
+        // Kimi (Moonshot) family
+        lines.push(
+            "Kimi handles very long contexts well. Don't hesitate to read full files when needed."
+                .into(),
+        );
+        lines.push("Keep tool arguments simple and well-structured. Prefer explicit paths over globs when the target is known.".into());
+    } else if is_mistral_model(model_lower) {
+        // Mistral family (includes Codestral, Mixtral)
+        lines.push("Keep tool arguments concise. Mistral models work best with clear, direct instructions.".into());
+        if model_lower.contains("codestral") {
+            lines.push(
+                "Codestral is optimized for code generation. Favor code output over explanations."
+                    .into(),
+            );
+        }
+        lines.push("Prefer one tool call at a time for complex chains. Parallel calls for independent reads.".into());
     } else if is_local_model(model_lower) {
         // Local / small models (Ollama, llama, etc.)
         lines.push("Use short, concrete instructions. Local models have smaller context windows — every token counts.".into());
@@ -210,6 +247,14 @@ fn model_family_label(model_lower: &str, provider_kind: ProviderKind) -> String 
         "DeepSeek".to_string()
     } else if is_mercury_model(model_lower) {
         "Mercury".to_string()
+    } else if is_grok_model(model_lower) {
+        "Grok".to_string()
+    } else if is_glm_model(model_lower) {
+        "GLM".to_string()
+    } else if is_kimi_model(model_lower) {
+        "Kimi".to_string()
+    } else if is_mistral_model(model_lower) {
+        "Mistral".to_string()
     } else {
         format!("{provider_kind:?}")
     }
@@ -233,13 +278,20 @@ fn is_deepseek_model(m: &str) -> bool {
 fn is_mercury_model(m: &str) -> bool {
     m.contains("mercury")
 }
+fn is_grok_model(m: &str) -> bool {
+    m.contains("grok")
+}
+fn is_glm_model(m: &str) -> bool {
+    m.contains("glm") || m.contains("codegeex")
+}
+fn is_kimi_model(m: &str) -> bool {
+    m.contains("kimi") || m.contains("moonshot")
+}
+fn is_mistral_model(m: &str) -> bool {
+    m.contains("mistral") || m.contains("mixtral") || m.contains("codestral")
+}
 fn is_local_model(m: &str) -> bool {
-    m.contains("llama")
-        || m.contains("mistral")
-        || m.contains("phi-")
-        || m.contains("qwen")
-        || m.contains("codestral")
-        || m.contains("starcoder")
+    m.contains("llama") || m.contains("phi-") || m.contains("qwen") || m.contains("starcoder")
 }
 
 fn registry_model_for_prompt(

@@ -32,6 +32,7 @@ interface SettingsModalContentProps {
   onRemoveMcpServer: (id: string) => void
   onAddMcpServer: () => void
   onRefreshMcpServers?: () => void
+  onToggleMcpServer?: (name: string, enabled: boolean) => void
 }
 
 export const SettingsModalContent: Component<SettingsModalContentProps> = (props) => {
@@ -93,6 +94,7 @@ export const SettingsModalContent: Component<SettingsModalContentProps> = (props
             onRemove={props.onRemoveMcpServer}
             onAdd={props.onAddMcpServer}
             onRefresh={props.onRefreshMcpServers}
+            onToggle={props.onToggleMcpServer}
           />
         )
       case 'plugins':

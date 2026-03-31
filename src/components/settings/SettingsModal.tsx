@@ -34,6 +34,7 @@ export const SettingsModal: Component = () => {
 
   /** Map backend status strings to MCPServer.status union. */
   function mapMcpStatus(backendStatus: string | undefined, enabled: boolean): MCPServer['status'] {
+    if (!enabled) return 'disabled'
     switch (backendStatus) {
       case 'connected':
         return 'connected'
@@ -42,9 +43,9 @@ export const SettingsModal: Component = () => {
       case 'failed':
         return 'error'
       case 'disabled':
-        return 'disconnected'
+        return 'disabled'
       default:
-        return enabled ? 'connecting' : 'disconnected'
+        return enabled ? 'connecting' : 'disabled'
     }
   }
 
@@ -56,13 +57,14 @@ export const SettingsModal: Component = () => {
       const local = settings().mcpServers.find((ls) => ls.name === s.name)
       const url =
         local?.url ??
-        (local?.command
-          ? `${local.command} ${(local.args ?? []).join(' ')}`.trim()
-          : `[${s.scope}]`)
+        (local?.command ? `${local.command} ${(local.args ?? []).join(' ')}`.trim() : '')
       return {
         id: s.name,
         name: s.name,
         url,
+        enabled: s.enabled,
+        scope: s.scope as 'global' | 'local' | undefined,
+        toolCount: s.toolCount,
         status: mapMcpStatus(s.status, s.enabled),
         description: `${s.toolCount} tool${s.toolCount !== 1 ? 's' : ''} · ${s.scope}`,
       }
@@ -94,6 +96,7 @@ export const SettingsModal: Component = () => {
       id: s.name,
       name: s.name,
       url: s.url ?? (s.command ? `${s.command} ${(s.args ?? []).join(' ')}` : 'stdio'),
+      enabled: true,
       status: 'disconnected' as const,
       description: `${s.type} transport`,
     }))
@@ -105,6 +108,18 @@ export const SettingsModal: Component = () => {
       .listMcpServers()
       .then((servers) => setBackendMcpServers(mapBackendMcpServers(servers)))
       .catch(() => setBackendMcpServers(null))
+  }
+
+  const handleToggleMcp = (name: string, enabled: boolean): void => {
+    const action = enabled ? rustBackend.enableMcpServer(name) : rustBackend.disableMcpServer(name)
+    action
+      .then(() => handleRefreshMcp())
+      .catch((error) => {
+        notification.error(
+          `Failed to ${enabled ? 'enable' : 'disable'} ${name}`,
+          error instanceof Error ? error.message : String(error)
+        )
+      })
   }
 
   const keybindings = () =>
@@ -211,6 +226,7 @@ export const SettingsModal: Component = () => {
               onRemoveMcpServer={removeMcpServer}
               onAddMcpServer={() => setAddMcpDialogOpen(true)}
               onRefreshMcpServers={handleRefreshMcp}
+              onToggleMcpServer={handleToggleMcp}
             />
           </div>
         </div>

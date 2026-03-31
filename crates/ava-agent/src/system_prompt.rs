@@ -87,62 +87,72 @@ pub fn provider_prompt_suffix(provider_kind: ProviderKind, model_name: &str) -> 
                 "Follow structured instructions closely and keep pre-tool prose minimal.",
                 "Prefer one decisive tool/action at a time unless safe parallel work is obvious.",
                 "After a tool failure, briefly explain the new plan instead of retrying blindly.",
+                "Claude excels at nuanced reasoning — use it for architecture decisions, not for trivial file reads.",
+                "When given large contexts, prioritize the most recent instructions and tool results over older history.",
             ];
             if reasoning {
                 lines.push(
-                    "Use extended or adaptive thinking only for genuinely hard tasks; keep visible reasoning terse.",
+                    "Use extended thinking only for genuinely hard tasks (complex refactors, architecture). For simple edits, think briefly and act. Keep visible reasoning terse.",
                 );
             }
             Some(provider_notes("Anthropic-style", &lines))
         }
         ProviderKind::OpenAI | ProviderKind::AzureOpenAI | ProviderKind::Inception => {
             let mut lines = vec![
-                "Use function calling for all tool interactions.",
-                "Make tool arguments explicit and schema-accurate; prefer one well-formed call over speculative retries.",
-                "Keep visible updates brief and action-oriented.",
+                "Use function calling for all tool interactions. Make arguments explicit and schema-accurate.",
+                "Prefer parallel function calls when operations are independent — this is a strength of OpenAI models.",
+                "Keep visible text updates brief and action-oriented. The function calls do the work; text is for status only.",
             ];
             if reasoning {
                 lines.push(
-                    "Reasoning models work best with concise instructions and short visible summaries.",
+                    "Reasoning models work best with concise instructions. Don't over-explain in visible output — the model reasons internally. Keep summaries to 1-2 sentences.",
                 );
             } else {
-                lines.push("Think briefly, then act.");
+                lines.push("Think briefly in visible text, then act with tools. Don't over-plan.");
+            }
+            if model_name.contains("codex") || model_name.contains("5.3") {
+                lines.push("Codex models are optimized for code tasks. Favor code output over prose explanations.");
             }
             Some(provider_notes("OpenAI-style", &lines))
         }
         ProviderKind::Copilot => Some(provider_notes(
             "GitHub Copilot",
             &[
-                "Copilot may proxy different backend families, so stick to plain function-calling patterns.",
-                "Keep tool arguments short, explicit, and schema-accurate.",
+                "Copilot proxies different backends (Claude, GPT, etc.) — stick to plain function-calling patterns that work across all.",
+                "Keep tool arguments short, explicit, and schema-accurate. Avoid complex nested objects when simpler works.",
                 "If a tool call fails due to formatting, retry once with a simpler argument shape.",
+                "Copilot has rate limits — minimize unnecessary tool calls. Batch reads, use grep over multiple reads.",
             ],
         )),
         ProviderKind::Gemini => {
             let mut lines = vec![
-                "Be explicit with tool arguments and expected outcomes.",
-                "Read tool errors carefully and adjust before retrying.",
-                "Keep progress updates short and structured.",
+                "Be explicit with tool argument types and expected outcomes. Gemini is strict about schema compliance.",
+                "Read tool errors carefully and adjust before retrying. Don't retry the same failed call unchanged.",
+                "Keep progress updates short and structured. Gemini works well with numbered lists and clear step indicators.",
+                "Prefer grep/glob to discover files before reading them individually — Gemini handles large context well but extra turns are expensive.",
             ];
             if reasoning {
-                lines.push("Use thinking for planning-heavy work, not trivial edits.");
+                lines.push("Use thinking for planning-heavy work and complex multi-step reasoning. For trivial edits, skip thinking and act directly.");
             }
             Some(provider_notes("Google Gemini", &lines))
         }
         ProviderKind::OpenRouter => Some(provider_notes(
             "OpenRouter",
             &[
-                "Backend routing can vary, so rely only on the documented tool contract.",
-                "Keep tool calls conservative, explicit, and schema-accurate.",
+                "Backend routing varies (Anthropic, OpenAI, etc.) — rely only on the documented tool contract.",
+                "Keep tool calls conservative, explicit, and schema-accurate. Some backends are stricter than others.",
                 "If a call fails due to formatting, retry once with a simpler argument shape.",
+                "Monitor token usage — OpenRouter charges per-token. Minimize unnecessary output and tool calls.",
             ],
         )),
         ProviderKind::Ollama => Some(provider_notes(
             "Ollama / local models",
             &[
-                "Use short, concrete instructions and avoid unnecessary prose.",
-                "Prefer one tool call at a time when the next step is uncertain.",
-                "Re-check tool output before continuing; do not assume hidden state.",
+                "Use short, concrete instructions. Local models have smaller context windows — every token counts.",
+                "Prefer one tool call at a time when the next step is uncertain. Chain only when you're confident.",
+                "Re-check tool output before continuing — local models are more likely to hallucinate tool results.",
+                "Keep code edits small and focused. Large multi-file refactors may exceed context limits.",
+                "If tool calling fails, fall back to describing what needs to change and let the user apply it.",
             ],
         )),
     }

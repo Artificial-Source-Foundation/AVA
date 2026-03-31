@@ -300,6 +300,8 @@ async fn install_from_source(info: &UpdateInfo) -> color_eyre::Result<()> {
             "https://github.com/Artificial-Source-Foundation/AVA.git",
             "--tag",
             &tag,
+            "--package",
+            "ava-tui",
             "--bin",
             "ava",
             "--force",

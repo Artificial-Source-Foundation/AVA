@@ -152,24 +152,26 @@ fn model_family_notes(model_lower: &str, reasoning: bool) -> Vec<String> {
             lines.push("Use thinking for planning-heavy work. For trivial edits, skip thinking and act directly.".into());
         }
     } else if is_deepseek_model(model_lower) {
-        // DeepSeek family
-        lines.push("DeepSeek models handle long code well. Read full files when needed rather than partial reads.".into());
+        // DeepSeek V3.2 family — 671B MoE, 128K context, open-weight
+        lines.push("DeepSeek handles long code well. Read full files when needed rather than partial reads.".into());
         lines.push(
             "Keep tool arguments simple and explicit. Avoid deeply nested argument structures."
                 .into(),
         );
         if reasoning {
-            lines.push("DeepSeek reasoning is strong — use it for complex logic. Keep visible reasoning terse.".into());
+            // V3.2 reasoner: must pass reasoning_content back in multi-turn or get 400 errors
+            lines.push("DeepSeek reasoning is olympiad-level strong — use it for complex logic and math. Keep visible reasoning terse.".into());
         }
     } else if is_mercury_model(model_lower) {
-        // Inception Mercury family
-        lines.push("Mercury models are extremely fast. Use this speed for iterative exploration — try, check, adjust.".into());
+        // Inception Mercury 2 — diffusion LLM, ~1000 tok/s, 128K context
+        lines.push("Mercury is extremely fast (~1000 tok/s). Use this speed for iterative exploration — try, check, adjust quickly.".into());
         lines.push("Keep tool arguments simple. If a read returns empty, retry with explicit offset/limit rather than 0.".into());
         lines.push(
-            "Favor many small focused tool calls over fewer large ones — latency is low.".into(),
+            "Favor many small focused tool calls over fewer large ones — latency is near-zero."
+                .into(),
         );
     } else if is_grok_model(model_lower) {
-        // xAI Grok family
+        // xAI Grok 3/4 family — up to 2M context, strong tool calling
         lines.push(
             "Grok models are fast and direct. Match that tone — be concise, skip ceremony.".into(),
         );
@@ -178,31 +180,52 @@ fn model_family_notes(model_lower: &str, reasoning: bool) -> Vec<String> {
                 .into(),
         );
         if reasoning {
-            lines.push("Grok reasoning is strong for code analysis. Use it for debugging and complex logic. Keep visible output terse.".into());
+            lines.push("Grok reasoning is strong for code analysis and debugging. Keep visible output terse.".into());
         }
     } else if is_glm_model(model_lower) {
-        // ZhipuAI GLM family
+        // ZhipuAI GLM-4.7/5/5.1 family — 200K context, Ascend-trained
         lines.push("Keep tool arguments explicit and JSON-compliant. GLM models are strict about schema format.".into());
         lines.push(
             "GLM handles Chinese and English equally well. Match the user's language in responses."
                 .into(),
         );
         lines.push("Prefer sequential tool calls over parallel when the task involves multiple dependent edits.".into());
+        if reasoning {
+            lines.push("GLM reasoning excels at system engineering and long-range agent tasks. Use for complex multi-file work.".into());
+        }
     } else if is_kimi_model(model_lower) {
-        // Kimi (Moonshot) family
+        // Kimi K2/K2.5 — 256K context, 1T MoE, agent swarm capable
         lines.push(
-            "Kimi handles very long contexts well. Don't hesitate to read full files when needed."
+            "Kimi handles very long contexts (256K) well. Don't hesitate to read full files."
                 .into(),
         );
+        lines.push("Kimi excels at sustained multi-step tool use (100+ sequential calls). Plan ambitiously.".into());
         lines.push("Keep tool arguments simple and well-structured. Prefer explicit paths over globs when the target is known.".into());
+        if reasoning {
+            lines.push("Use Kimi's thinking mode for complex analysis. It supports 4 reasoning modes — thinking is the default for hard tasks.".into());
+        }
+    } else if is_minimax_model(model_lower) {
+        // MiniMax M2/M2.5 — 205K context, Lightning Attention, SWE-bench leader
+        lines.push("MiniMax models are strong at multi-file code editing. Batch related edits across files.".into());
+        lines.push("Keep tool arguments explicit. MiniMax handles Rust, Java, Go, TypeScript, Python, C++ well.".into());
+        if reasoning {
+            lines.push("MiniMax reasoning is SWE-bench competitive. Use it for complex refactors and bug fixes.".into());
+        }
+    } else if is_qwen_model(model_lower) {
+        // Alibaba Qwen3/Qwen3-Coder — up to 1M context, agentic coding
+        lines.push("Qwen models support very long contexts (up to 1M). Use this for full-repo analysis when needed.".into());
+        lines.push("Qwen-Coder excels at agentic tool calling and autonomous programming. Chain tool calls confidently.".into());
+        if model_lower.contains("coder") {
+            lines.push(
+                "Qwen-Coder is optimized for code. Favor code output over explanations.".into(),
+            );
+        }
     } else if is_mistral_model(model_lower) {
-        // Mistral family (includes Codestral, Mixtral)
+        // Mistral Large 3 / Codestral 25.01 / Medium 3.1
         lines.push("Keep tool arguments concise. Mistral models work best with clear, direct instructions.".into());
         if model_lower.contains("codestral") {
-            lines.push(
-                "Codestral is optimized for code generation. Favor code output over explanations."
-                    .into(),
-            );
+            // Codestral: 256K context, 22B params, 80+ languages, FIM support
+            lines.push("Codestral is optimized for code generation across 80+ languages. Favor code output over explanations.".into());
         }
         lines.push("Prefer one tool call at a time for complex chains. Parallel calls for independent reads.".into());
     } else if is_local_model(model_lower) {
@@ -253,6 +276,10 @@ fn model_family_label(model_lower: &str, provider_kind: ProviderKind) -> String 
         "GLM".to_string()
     } else if is_kimi_model(model_lower) {
         "Kimi".to_string()
+    } else if is_minimax_model(model_lower) {
+        "MiniMax".to_string()
+    } else if is_qwen_model(model_lower) {
+        "Qwen".to_string()
     } else if is_mistral_model(model_lower) {
         "Mistral".to_string()
     } else {
@@ -287,11 +314,17 @@ fn is_glm_model(m: &str) -> bool {
 fn is_kimi_model(m: &str) -> bool {
     m.contains("kimi") || m.contains("moonshot")
 }
+fn is_minimax_model(m: &str) -> bool {
+    m.contains("minimax") || (m.starts_with("m2") && !m.contains("gemma"))
+}
+fn is_qwen_model(m: &str) -> bool {
+    m.contains("qwen")
+}
 fn is_mistral_model(m: &str) -> bool {
     m.contains("mistral") || m.contains("mixtral") || m.contains("codestral")
 }
 fn is_local_model(m: &str) -> bool {
-    m.contains("llama") || m.contains("phi-") || m.contains("qwen") || m.contains("starcoder")
+    m.contains("llama") || m.contains("phi-") || m.contains("starcoder") || m.contains("gemma")
 }
 
 fn registry_model_for_prompt(

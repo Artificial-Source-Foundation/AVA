@@ -303,6 +303,7 @@ async fn install_from_source(info: &UpdateInfo) -> color_eyre::Result<()> {
             "--bin",
             "ava",
             "--force",
+            "ava-tui",
         ])
         .status()
         .await?;

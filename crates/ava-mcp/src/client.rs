@@ -171,8 +171,7 @@ impl MCPClient {
         );
 
         self.transport.send(&request).await?;
-        let response = self.transport.receive().await?;
-        Self::verify_response_id(id, &response)?;
+        let response = self.receive_response(id).await?;
 
         if let Some(err) = &response.error {
             return Err(AvaError::ToolError(format!(
@@ -225,8 +224,7 @@ impl MCPClient {
         let id = self.next_id();
         let request = JsonRpcMessage::request(id, "tools/list", json!({}));
         self.transport.send(&request).await?;
-        let response = self.transport.receive().await?;
-        Self::verify_response_id(id, &response)?;
+        let response = self.receive_response(id).await?;
 
         if let Some(err) = &response.error {
             return Err(AvaError::ToolError(format!(
@@ -277,8 +275,7 @@ impl MCPClient {
         let id = self.next_id();
         let request = JsonRpcMessage::request(id, "resources/list", json!({}));
         self.transport.send(&request).await?;
-        let response = self.transport.receive().await?;
-        Self::verify_response_id(id, &response)?;
+        let response = self.receive_response(id).await?;
 
         if let Some(err) = &response.error {
             return Err(AvaError::ToolError(format!(
@@ -303,8 +300,7 @@ impl MCPClient {
         let id = self.next_id();
         let request = JsonRpcMessage::request(id, "resources/read", json!({ "uri": uri }));
         self.transport.send(&request).await?;
-        let response = self.transport.receive().await?;
-        Self::verify_response_id(id, &response)?;
+        let response = self.receive_response(id).await?;
 
         if let Some(err) = &response.error {
             return Err(AvaError::ToolError(format!(
@@ -330,8 +326,7 @@ impl MCPClient {
         let id = self.next_id();
         let request = JsonRpcMessage::request(id, "prompts/list", json!({}));
         self.transport.send(&request).await?;
-        let response = self.transport.receive().await?;
-        Self::verify_response_id(id, &response)?;
+        let response = self.receive_response(id).await?;
 
         if let Some(err) = &response.error {
             return Err(AvaError::ToolError(format!(
@@ -366,8 +361,7 @@ impl MCPClient {
             }),
         );
         self.transport.send(&request).await?;
-        let response = self.transport.receive().await?;
-        Self::verify_response_id(id, &response)?;
+        let response = self.receive_response(id).await?;
 
         if let Some(err) = &response.error {
             return Err(AvaError::ToolError(format!(
@@ -397,8 +391,7 @@ impl MCPClient {
         );
 
         self.transport.send(&request).await?;
-        let response = self.transport.receive().await?;
-        Self::verify_response_id(id, &response)?;
+        let response = self.receive_response(id).await?;
 
         if let Some(err) = &response.error {
             return Err(AvaError::ToolError(format!(
@@ -429,18 +422,34 @@ impl MCPClient {
         self.server_capabilities.as_ref()
     }
 
-    /// Verify that the response ID matches the request ID we sent.
-    /// This prevents accepting stale or misrouted responses.
-    fn verify_response_id(expected: u64, response: &JsonRpcMessage) -> Result<()> {
-        let expected_value = Value::Number(expected.into());
-        match &response.id {
-            Some(id) if *id == expected_value => Ok(()),
-            Some(id) => Err(AvaError::ToolError(format!(
-                "MCP response ID mismatch: expected {expected}, got {id}"
-            ))),
-            None => Err(AvaError::ToolError(format!(
-                "MCP response missing ID, expected {expected}"
-            ))),
+    /// Receive the response for a specific request ID, skipping any
+    /// notifications (messages without an ID) that the server may send
+    /// between the request and its response (e.g. progress, log events).
+    async fn receive_response(&mut self, expected_id: u64) -> Result<JsonRpcMessage> {
+        let expected_value = Value::Number(expected_id.into());
+        loop {
+            let msg = self.transport.receive().await?;
+            match &msg.id {
+                Some(id) if *id == expected_value => return Ok(msg),
+                Some(_id) => {
+                    // Response for a different request — skip (shouldn't happen
+                    // in single-threaded usage but be defensive).
+                    tracing::debug!(
+                        server = %self.server_name,
+                        expected = expected_id,
+                        "skipping MCP response with unexpected ID"
+                    );
+                }
+                None => {
+                    // Notification (no ID) — skip silently. MCP servers send
+                    // these for progress updates, log events, etc.
+                    tracing::trace!(
+                        server = %self.server_name,
+                        method = msg.method.as_deref().unwrap_or("?"),
+                        "skipping MCP notification"
+                    );
+                }
+            }
         }
     }
 

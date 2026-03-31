@@ -163,7 +163,8 @@ impl AgentStack {
         let workspace_roots = resolve_workspace_roots(&effective_cwd, &cfg.workspace_roots);
 
         let codebase_index: Arc<RwLock<Option<Arc<CodebaseIndex>>>> = Arc::new(RwLock::new(None));
-        let index_handle = if config.eager_codebase_indexing {
+        let codebase_enabled = cfg.features.enable_codebase_index;
+        let index_handle = if config.eager_codebase_indexing && codebase_enabled {
             let index_clone = codebase_index.clone();
             let project_root = effective_cwd.clone();
             let workspace_roots_for_task = workspace_roots.clone();

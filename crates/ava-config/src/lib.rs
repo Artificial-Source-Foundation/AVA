@@ -158,16 +158,22 @@ pub struct FeaturesConfig {
     /// Set to false to keep audit entries in memory only (lost on app close).
     #[serde(default = "default_true")]
     pub audit_logging: bool,
-    /// When true, write structured JSONL logs per session to `~/.ava/log/{session-id}.jsonl`.
+    /// When true (default), write structured JSONL logs per session to `~/.ava/log/{session-id}.jsonl`.
     /// Each line records turn number, role, tool calls, token usage, and duration.
-    /// Default: false (opt-in).
-    #[serde(default)]
+    /// Log files older than 7 days are automatically deleted on startup.
+    #[serde(default = "default_true")]
     pub session_logging: bool,
     /// When true and `--review` is passed, run a forced code review after the agent edits files.
     /// Normal review is handled by the agent itself via `subagent(agent_type: "review")`.
     /// Default: false (agent decides when to review).
     #[serde(default)]
     pub auto_review: bool,
+    /// When true (default), the codebase is indexed in-memory (BM25 + PageRank)
+    /// on first use, enabling the `codebase_search` tool. The index uses ~5-20 MB
+    /// of RAM depending on project size. Disable for low-memory environments or
+    /// projects where grep/glob are sufficient.
+    #[serde(default = "default_true")]
+    pub enable_codebase_index: bool,
 }
 
 fn default_true() -> bool {
@@ -181,8 +187,9 @@ impl Default for FeaturesConfig {
             enable_lsp: true,
             enable_mcp: true,
             audit_logging: true,
-            session_logging: false,
+            session_logging: true,
             auto_review: false,
+            enable_codebase_index: true,
         }
     }
 }

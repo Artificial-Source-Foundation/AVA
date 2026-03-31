@@ -165,8 +165,13 @@ pub(super) fn check_blocked_patterns(lower: &str, _original: &str) -> Option<Str
         return Some("mkfs will format a filesystem".to_string());
     }
 
-    // Writing to /dev/
-    if lower.contains("> /dev/") || lower.contains(">/dev/") {
+    // Writing to /dev/ (but allow 2>/dev/null and &>/dev/null which are safe stderr/output redirects)
+    if (lower.contains("> /dev/") || lower.contains(">/dev/"))
+        && !lower.contains("2>/dev/null")
+        && !lower.contains("2> /dev/null")
+        && !lower.contains("&>/dev/null")
+        && !lower.contains("&> /dev/null")
+    {
         return Some("Writing to device files is dangerous".to_string());
     }
 

@@ -44,6 +44,7 @@ tokio-util = { version = "0.7", features = ["rt"] }
 [dev-dependencies]
 criterion = "0.5"
 tempfile.workspace = true
+filetime = "0.2"
 ava-hq = { path = "../ava-hq" }
 
 [[bench]]

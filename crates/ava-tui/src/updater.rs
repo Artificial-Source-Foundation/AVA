@@ -285,6 +285,10 @@ pub async fn download_and_replace(info: &UpdateInfo) -> color_eyre::Result<()> {
 }
 
 /// Fallback: build and install from source via `cargo install --git`.
+///
+/// After `cargo install` writes to `~/.cargo/bin/ava`, we copy the binary
+/// to `~/.ava/bin/ava` (the official install location from `install.sh`)
+/// if that directory exists and the running binary lives there.
 async fn install_from_source(info: &UpdateInfo) -> color_eyre::Result<()> {
     eprintln!("  \x1b[2mNo pre-built binary for this platform. Building from source...\x1b[0m");
 
@@ -309,6 +313,32 @@ async fn install_from_source(info: &UpdateInfo) -> color_eyre::Result<()> {
              cargo install --git https://github.com/Artificial-Source-Foundation/AVA.git --tag {tag} --bin ava",
             status.code().unwrap_or(-1)
         ));
+    }
+
+    // cargo install writes to ~/.cargo/bin/ava, but the user may be running
+    // from ~/.ava/bin/ava (installed via install.sh). Copy the new binary
+    // to the current exe location so the update actually takes effect.
+    if let Ok(current_exe) = std::env::current_exe() {
+        let cargo_bin = dirs::home_dir().unwrap_or_default().join(".cargo/bin/ava");
+        if cargo_bin.exists() && current_exe != cargo_bin {
+            if let Err(e) = std::fs::copy(&cargo_bin, &current_exe) {
+                eprintln!(
+                    "  \x1b[33m!\x1b[0m Built to {} but failed to copy to {}: {e}",
+                    cargo_bin.display(),
+                    current_exe.display()
+                );
+                eprintln!(
+                    "  \x1b[2mRun: cp {} {}\x1b[0m",
+                    cargo_bin.display(),
+                    current_exe.display()
+                );
+            } else {
+                eprintln!(
+                    "  \x1b[1;32m\u{2022}\x1b[0m Installed to {}",
+                    current_exe.display()
+                );
+            }
+        }
     }
 
     Ok(())

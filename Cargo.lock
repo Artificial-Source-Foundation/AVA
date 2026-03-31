@@ -296,6 +296,7 @@ dependencies = [
  "chrono",
  "criterion",
  "dirs",
+ "filetime",
  "futures",
  "glob",
  "serde",

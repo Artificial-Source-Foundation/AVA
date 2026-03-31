@@ -1,4 +1,4 @@
-<!-- Last verified: 2026-03-22 (v2.2.6 doc update). Run 'just check' to revalidate. -->
+<!-- Last verified: 2026-03-26 (v2.2.6 doc update). Run 'just check' to revalidate. -->
 
 # AVA Architecture & Conventions (v3)
 
@@ -37,9 +37,31 @@ TAURI_SIGNING_PRIVATE_KEY=$(cat ~/.tauri/ava.key) npm run tauri build
 
 AVA uses a **Rust-first architecture**. All agent, CLI, and backend code is Rust.
 
+### Two Products, One Backend
+
+AVA ships as **two products** sharing one Rust agent runtime:
+
+| | **TUI / CLI / Headless** | **Desktop / Web** |
+|---|---|---|
+| Binary | `ava` (pure Rust) | `ava` Tauri app / `ava serve` |
+| UI | Ratatui + Crossterm | SolidJS + TypeScript |
+| Config | `~/.ava/config.yaml` | localStorage + `config.yaml` via Tauri IPC |
+| Themes | `~/.ava/themes/*.toml` (29 built-in) | CSS variables, accent presets |
+| Keybindings | `~/.ava/keybindings.json` | `src/stores/shortcut-defaults.ts` |
+| Settings count | ~70 fields + 15 keybind actions | ~100+ fields across 16 tabs |
+
+**Configuration strategy (OpenCode-inspired):**
+- **Shared config** (`config.yaml`): providers, models, features, permissions, HQ, voice, MCP, instructions — applies to both products
+- **TUI-only config**: keybindings.json, themes/*.toml, TUI display prefs
+- **Desktop-only config**: appearance (fonts, accent, density, border radius, dark style), notification sounds, sidebar order
+
+Both products read `~/.ava/credentials.json` for provider API keys and `.ava/state.json` for per-project model history.
+
+### Components
+
 - **CLI/TUI**: Pure Rust binary (`crates/ava-tui/`) -- Ratatui + Crossterm + Tokio
 - **Web mode**: `ava serve` -- HTTP API + WebSocket server (axum), serves SolidJS frontend
-- **Agent runtime**: Rust (`crates/ava-agent/`, `ava-llm/`, `ava-tools/`, `ava-praxis/`)
+- **Agent runtime**: Rust (`crates/ava-agent/`, `ava-llm/`, `ava-tools/`, `ava-hq/`)
 - **Desktop frontend**: SolidJS + TypeScript (`src/`) -- calls Rust directly via Tauri IPC
   - Key components: `TitleBar`, `AppShell`, `ActivityBar`, `MainArea`, `SidebarPanel`, `RightPanel`
   - Chat components: `ApprovalDock`, `QuestionDock`, `ToolListDialog`
@@ -48,14 +70,15 @@ AVA uses a **Rust-first architecture**. All agent, CLI, and backend code is Rust
 
 ### Codebase Stats
 
-- **21 Rust crates**, ~40K LOC, 1,895+ tests (0 failures)
-- **21 LLM providers**: Anthropic (with prompt caching), OpenAI, ChatGPT (OAuth), Gemini, Ollama, OpenRouter, Copilot, Inception, Alibaba, Alibaba CN, ZAI, ZhipuAI, Kimi, MiniMax, MiniMax CN, Azure OpenAI, AWS Bedrock, xAI, Mistral, Groq, DeepSeek, Mock
+- **21 Rust crates**, ~40K LOC, 1,962+ tests (0 failures)
+- **22 LLM providers**: Anthropic (with prompt caching), OpenAI, ChatGPT (OAuth), Gemini, Ollama, OpenRouter, Copilot, Inception, Alibaba, Alibaba CN, ZAI, ZhipuAI, Kimi, MiniMax, MiniMax CN, Azure OpenAI, AWS Bedrock, xAI, Mistral, Groq, DeepSeek, Mock
 - **9 default tools**: `read`, `write`, `edit` (15 strategies incl. ellipsis handling, 3-way merge + diff-match-patch), `bash`, `glob`, `grep`, `web_fetch`, `web_search`, `git_read`
 - **Extended tools** (not auto-registered): `apply_patch`, `multiedit`, `ast_ops`, `lsp_ops`, `code_search`, `lint`, `test_runner` — available as plugins
 - **1 agent tool**: `plan` (Plannotator-style inline plan editing via PlanBridge)
 - **Dynamic tools**: MCP servers + TOML custom tools (`~/.ava/tools/`, `.ava/tools/`)
 - **File snapshots**: Shadow git snapshots before file edits, `revert_file` capability for undoing changes
-- **Key capabilities**: Anthropic prompt caching (`cache_control` on system + tools), auto-retry middleware (2x exponential backoff for read-only tools), stream silence timeout (90s configurable per-chunk reset), tiktoken-rs BPE token counting, tool schema pre-validation, persistent audit log (SQLite, opt-out), auto-compaction settings (toggle + threshold slider + compaction model), JSONL session logging (`~/.ava/log/`, opt-in), rich edit error feedback (similar lines + "did you mean?"), SBPL injection hardening, env scrubbing in bash, rm -rf and find -delete blocking, context overflow auto-compact (12 overflow patterns with auto-retry), manual `/compact` summaries with collapsible desktop context cards, conversation repair, symlink escape detection in path guard, shadow git snapshots for file edit backups, incremental message persistence, retry-after header parsing, quota error classification, 100+ security patterns in command classifier, dual compaction visibility
+- **13 model families** with per-model system prompt tuning: Claude (Opus/Sonnet/Haiku), Codex (GPT-5.3), GPT (5.4/o3/o4), Gemini (3.1 Pro/3 Flash), DeepSeek (V3.2/R1), Mercury, Grok (3/4), GLM (4.7/5/5.1), Kimi (K2/K2.5), MiniMax (M2/M2.5), Qwen (3-Coder), Mistral (Large/Codestral), Local (llama/phi/gemma). Provider routing quirks (Copilot rate limits, OpenRouter backend variance) appended separately.
+- **Key capabilities**: Anthropic prompt caching (`cache_control` on system + tools), auto-retry middleware (2x exponential backoff for read-only tools), stream silence timeout (90s configurable per-chunk reset), tiktoken-rs BPE token counting, tool schema pre-validation, persistent audit log (SQLite, opt-out), auto-compaction settings (toggle + threshold slider + compaction model), JSONL session logging (`~/.ava/log/`, on by default, 7-day rotation), rich edit error feedback (similar lines + "did you mean?"), SBPL injection hardening, env scrubbing in bash, rm -rf and find -delete blocking, context overflow auto-compact (12 overflow patterns with auto-retry), manual `/compact` summaries with collapsible desktop context cards, conversation repair, symlink escape detection in path guard, shadow git snapshots for file edit backups, incremental message persistence, retry-after header parsing, quota error classification, 100+ security patterns in command classifier, dual compaction visibility
 
 ### Mid-Stream Messaging
 
@@ -78,9 +101,9 @@ AVA/
 +-- crates/                   # 21 Rust crates (agent stack + TUI + services)
 |   +-- ava-tui/              # CLI/TUI binary (Ratatui) -- THE primary interface
 |   +-- ava-agent/            # Agent execution loop + reflection
-|   +-- ava-llm/              # LLM providers (21 built-in)
+|   +-- ava-llm/              # LLM providers (22 built-in)
 |   +-- ava-tools/            # Tool trait + registry + 9 default tools (extended available as plugins)
-|   +-- ava-praxis/           # Multi-agent orchestration (HQ)
+|   +-- ava-hq/               # Multi-agent orchestration (HQ)
 |   +-- ava-permissions/      # Permission rules + bash command classifier
 |   +-- ava-config/           # Config, credentials, model catalog
 |   +-- ava-context/          # Token tracking + context condensation
@@ -151,14 +174,14 @@ Trust a project: `ava --trust`. Global config (`~/.ava/`) always loads.
 
 - New tools: `crates/ava-tools/src/core/` (implement `Tool` trait)
 - New providers: `crates/ava-llm/src/providers/`
-- New agent features: `crates/ava-agent/` or `crates/ava-praxis/`
+- New agent features: `crates/ava-agent/` or `crates/ava-hq/`
 - TUI features: `crates/ava-tui/`
 - Desktop commands: `src-tauri/src/commands/`
 - Configuration: `crates/ava-config/`
 
 ## HQ (Multi-Agent Orchestration) — v2
 
-HQ is AVA's multi-agent system in `crates/ava-praxis/`. Uses a **Director -> Scouts -> Leads -> Workers** hierarchy with LLM-powered planning. 91 tests (74 unit + 11 integration + 6 doc-tests). 23 source files: `lib`, `director`, `lead`, `worker`, `routing`, `plan`, `prompts`, `scout`, `board`, `events`, `workflow`, `acp`, `acp_handler`, `acp_transport`, `artifact`, `artifact_store`, `conflict`, `decomposition`, `mailbox`, `review`, `spec`, `spec_workflow`, `synthesis`. See [docs/codebase/ava-praxis.md](docs/codebase/ava-praxis.md) for full details.
+HQ is AVA's multi-agent system in `crates/ava-hq/`. Uses a **Director -> Scouts -> Leads -> Workers** hierarchy with LLM-powered planning. See `docs/crate-map.md` for the current crate dependency map and HQ placement in the workspace.
 
 ### Director Intelligence Levels
 
@@ -370,7 +393,7 @@ START=$(date +%s%N) && opencode run "goal" --model openai/gpt-5.4 --format json 
 
 When you complete a significant feature, bug fix, or refactor:
 
-1. **Update `docs/CHANGELOG.md`** — add entry under current version
+1. **Update `CHANGELOG.md`** — add entry under current version
 2. **Update `docs/backlog.md`** — mark completed items, add new ones
 3. **Update this file (`CLAUDE.md`)** if architecture, crate count, tool count, or conventions changed
 4. **Update `docs/crate-map.md`** if crates were added/removed
@@ -404,7 +427,7 @@ Users get auto-update prompts via `tauri-plugin-updater` checking GitHub Release
 1. `CLAUDE.md` (this file) -- architecture, conventions, commands
 2. `AGENTS.md` -- AI agent instructions for working on AVA
 3. `docs/README.md` -- documentation entry point
-4. `docs/CHANGELOG.md` -- version history
+4. `CHANGELOG.md` -- version history
 5. `docs/backlog.md` -- open backlog items
 6. `docs/crate-map.md` -- Rust crate dependency graph
 7. `docs/plugins.md` -- TOML custom tools and MCP server guide

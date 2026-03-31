@@ -230,7 +230,7 @@ pub fn build_system_prompt(
                 "- Follow instruction priority: system and tool rules first, then repo guidance, then the user's request.\n",
             );
             prompt.push_str("- Prefer native tools (read, edit, glob, grep) over bash equivalents — they are faster, sandboxed, and produce structured output.\n");
-            prompt.push_str("- When calling multiple tools with no dependencies between them, make all independent calls in parallel.\n");
+            prompt.push_str("- When calling multiple tools with no dependencies between them, make all independent calls in parallel. Combine turns whenever possible — use grep to find points of interest instead of reading many files individually.\n");
             prompt.push_str("- After a tool fails, adapt before retrying. Do not repeat the same call unchanged without new information.\n");
             if profile == PromptProfile::Standard {
                 prompt.push_str("- Run tests after making changes when a test suite exists.\n");
@@ -267,13 +267,19 @@ pub fn build_system_prompt(
     prompt.push_str("- Package installation commands (pip, npm, cargo add, etc.) run in a restricted sandbox. The .git and .ava directories are read-only. If pip fails with \"externally-managed-environment\", create a virtual environment first (`python -m venv .venv`). For npm, use local installs (not -g).\n\n");
 
     prompt.push_str("### Communication\n");
-    prompt
-        .push_str("- Lead with the action or answer, not the reasoning. Be concise and direct.\n");
+    prompt.push_str("- Minimize output tokens. Be concise while maintaining accuracy. Lead with the action or answer, not reasoning.\n");
+    if profile == PromptProfile::Standard {
+        prompt.push_str("- Aim for fewer than 3 lines of text output (excluding tool use) per response whenever practical.\n");
+    }
     prompt.push_str(
-        "- Give brief, action-oriented progress updates only when helpful; do not narrate hidden reasoning.\n",
+        "- Do not narrate hidden reasoning or give play-by-play of your thought process.\n",
     );
     prompt.push_str("- When referencing code, use `file_path:line_number` format.\n");
-    prompt.push_str("- Avoid filler, time estimates, and unnecessary verbosity.\n\n");
+    prompt.push_str(
+        "- Avoid filler, preamble, postamble, time estimates, and unnecessary verbosity.\n",
+    );
+    prompt.push_str("- Do the work without asking questions when the request is clear. Infer missing details from the codebase. Only ask when genuinely ambiguous.\n");
+    prompt.push_str("- Distinguish directives (requests for action) from inquiries (requests for analysis). For inquiries, research and explain — do NOT modify files unless explicitly asked.\n\n");
 
     if tool_visibility_profile != crate::routing::ToolVisibilityProfile::AnswerOnly
         && tools.iter().any(|tool| tool.name == "subagent")

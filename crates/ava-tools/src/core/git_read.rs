@@ -103,6 +103,10 @@ impl Tool for GitReadTool {
             is_error: exit_code != 0,
         })
     }
+
+    fn is_concurrency_safe(&self, _args: &serde_json::Value) -> bool {
+        true
+    }
 }
 
 fn contains_shell_metacharacters(command: &str) -> bool {

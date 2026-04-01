@@ -46,6 +46,22 @@ pub trait Tool: Send + Sync {
     async fn execute_streaming(&self, args: Value) -> Result<ToolOutput> {
         self.execute(args).await.map(ToolOutput::Complete)
     }
+
+    /// Whether this tool can safely run concurrently with other concurrent-safe tools.
+    ///
+    /// Defaults to `false` (fail-closed). Read-only tools should override to return `true`.
+    /// The `args` parameter allows argument-dependent decisions (e.g. bash with read-only commands).
+    fn is_concurrency_safe(&self, _args: &Value) -> bool {
+        false
+    }
+
+    /// Whether this tool performs destructive/irreversible operations.
+    ///
+    /// Defaults to `false`. Tools that delete files, drop databases, or make
+    /// irreversible changes should override to return `true`.
+    fn is_destructive(&self, _args: &Value) -> bool {
+        false
+    }
 }
 
 /// Middleware that runs before and after tool execution for cross-cutting concerns
@@ -355,6 +371,22 @@ impl ToolRegistry {
     /// Look up the JSON Schema parameters for a registered tool.
     pub fn tool_parameters(&self, name: &str) -> Option<Value> {
         self.tools.get(name).map(|tool| tool.parameters())
+    }
+
+    /// Check whether a named tool is concurrency-safe for the given arguments.
+    pub fn is_concurrency_safe(&self, name: &str, args: &Value) -> bool {
+        self.tools
+            .get(name)
+            .map(|tool| tool.is_concurrency_safe(args))
+            .unwrap_or(false)
+    }
+
+    /// Check whether a named tool is destructive for the given arguments.
+    pub fn is_destructive(&self, name: &str, args: &Value) -> bool {
+        self.tools
+            .get(name)
+            .map(|tool| tool.is_destructive(args))
+            .unwrap_or(false)
     }
 
     /// Execute a tool call and return both the result and an invocation record

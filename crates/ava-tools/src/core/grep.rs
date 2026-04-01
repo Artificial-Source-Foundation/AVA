@@ -189,6 +189,10 @@ impl Tool for GrepTool {
             is_error: false,
         })
     }
+
+    fn is_concurrency_safe(&self, _args: &serde_json::Value) -> bool {
+        true
+    }
 }
 
 fn reserve_match_slot(counter: &AtomicUsize) -> Option<usize> {

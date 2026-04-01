@@ -13,6 +13,7 @@ pub mod output_fallback;
 pub mod path_guard;
 pub mod path_suggest;
 pub mod plan;
+pub mod plan_mode;
 pub mod question;
 pub mod read;
 pub mod read_state;
@@ -23,6 +24,7 @@ pub mod todo;
 pub mod tool_search;
 pub mod web_fetch;
 pub mod web_search;
+pub mod worktree;
 pub mod write;
 
 /// Wrap `value` in POSIX single-quotes, escaping any embedded single-quotes.
@@ -167,6 +169,23 @@ pub fn register_claude_code_tool(
 
 pub fn register_custom_tools(registry: &mut ToolRegistry, dirs: &[std::path::PathBuf]) {
     custom_tool::register_custom_tools(registry, dirs);
+}
+
+/// Register worktree tools (enter/exit) as extended tools.
+pub fn register_worktree_tools(registry: &mut ToolRegistry) {
+    use crate::registry::ToolTier;
+    registry.register_with_tier(worktree::EnterWorktreeTool::new(), ToolTier::Extended);
+    registry.register_with_tier(worktree::ExitWorktreeTool::new(), ToolTier::Extended);
+}
+
+/// Register plan mode tools (enter/exit) as extended tools with a shared flag.
+pub fn register_plan_mode_tools(registry: &mut ToolRegistry, flag: plan_mode::PlanModeFlag) {
+    use crate::registry::ToolTier;
+    registry.register_with_tier(
+        plan_mode::EnterPlanModeTool::new(flag.clone()),
+        ToolTier::Extended,
+    );
+    registry.register_with_tier(plan_mode::ExitPlanModeTool::new(flag), ToolTier::Extended);
 }
 
 pub fn register_custom_tools_with_plugins(

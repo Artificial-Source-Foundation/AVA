@@ -254,6 +254,75 @@ impl Tool for BashTool {
             },
         ))))
     }
+
+    fn is_concurrency_safe(&self, args: &serde_json::Value) -> bool {
+        let command = args
+            .get("command")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("");
+        is_read_only_bash_command(command)
+    }
+}
+
+/// Returns `true` if a bash command appears to be read-only (no side effects).
+///
+/// Used by concurrency declarations to decide whether bash invocations can
+/// run in parallel with other concurrent-safe tools.
+fn is_read_only_bash_command(command: &str) -> bool {
+    const READ_ONLY_PREFIXES: &[&str] = &[
+        "ls",
+        "cat",
+        "head",
+        "tail",
+        "wc",
+        "find",
+        "which",
+        "echo",
+        "pwd",
+        "env",
+        "printenv",
+        "whoami",
+        "hostname",
+        "date",
+        "uname",
+        "file",
+        "stat",
+        "du",
+        "df",
+        "tree",
+        "less",
+        "more",
+        "sort",
+        "uniq",
+        "diff",
+        "md5sum",
+        "sha256sum",
+        "xxd",
+        "od",
+        "git status",
+        "git log",
+        "git diff",
+        "git show",
+        "git blame",
+        "git branch",
+        "git rev-parse",
+        "git describe",
+        "git tag -l",
+        "cargo check",
+        "cargo test",
+        "cargo clippy",
+        "cargo build",
+        "rustc --version",
+        "node --version",
+        "python --version",
+        "npm list",
+        "npm ls",
+    ];
+
+    let trimmed = command.trim();
+    READ_ONLY_PREFIXES
+        .iter()
+        .any(|prefix| trimmed.starts_with(prefix))
 }
 
 /// Commands that look like package installs but are actually safe local

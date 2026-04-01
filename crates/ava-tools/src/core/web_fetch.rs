@@ -425,6 +425,10 @@ impl Tool for WebFetchTool {
             is_error: status >= 400,
         })
     }
+
+    fn is_concurrency_safe(&self, _args: &serde_json::Value) -> bool {
+        true
+    }
 }
 
 #[cfg(test)]

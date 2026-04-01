@@ -158,6 +158,10 @@ impl Tool for WebSearchTool {
             is_error: false,
         })
     }
+
+    fn is_concurrency_safe(&self, _args: &serde_json::Value) -> bool {
+        true
+    }
 }
 
 fn build_duckduckgo_url(query: &str) -> String {

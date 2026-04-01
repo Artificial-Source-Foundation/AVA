@@ -190,7 +190,14 @@ impl AgentStack {
         let provider = if let Some(provider) = &self.injected_provider {
             provider.clone()
         } else {
-            let decision = route_decision.as_ref().expect("route decision exists");
+            // When injected_provider is None, route_decision is always Some (set above).
+            let decision = route_decision.as_ref().ok_or_else(|| {
+                AvaError::ConfigError(
+                    "model route decision missing — this is a bug (injected_provider was None \
+                     but route_decision was not set)"
+                        .to_string(),
+                )
+            })?;
             resolved_provider_name = decision.provider.clone();
             match self
                 .router
@@ -502,6 +509,7 @@ impl AgentStack {
 
         // Populate tool sources for the permission middleware (run-scoped registry).
         {
+            // infallible: RwLock poisoning is recovered by taking the inner value
             let mut sources = run_tool_sources.write().unwrap_or_else(|e| e.into_inner());
             for (def, src) in registry.list_tools_with_source() {
                 sources.insert(def.name, convert_tool_source(&src));

@@ -393,6 +393,7 @@ impl AgentStack {
         // Populate the permission middleware's source map from the fully-built registry
         // so that inspect() receives the correct ToolSource for every tool.
         {
+            // infallible: RwLock poisoning is recovered by taking the inner value
             let mut sources = shared_tool_sources
                 .write()
                 .unwrap_or_else(|e| e.into_inner());
@@ -493,6 +494,7 @@ impl AgentStack {
 
         // Refresh shared tool sources so permission middleware sees MCP tools.
         {
+            // infallible: RwLock poisoning is recovered by taking the inner value
             let mut sources = self
                 .shared_tool_sources
                 .write()
@@ -671,6 +673,7 @@ impl AgentStack {
         *self.mcp.write().await = runtime;
         // Refresh shared_tool_sources so the permission middleware sees new MCP tools.
         {
+            // infallible: RwLock poisoning is recovered by taking the inner value
             let mut sources = self
                 .shared_tool_sources
                 .write()
@@ -733,6 +736,7 @@ impl AgentStack {
         .await;
         // Populate tool sources for the permission middleware.
         {
+            // infallible: RwLock poisoning is recovered by taking the inner value
             let mut sources = reload_sources.write().unwrap_or_else(|e| e.into_inner());
             for (def, src) in registry.list_tools_with_source() {
                 sources.insert(def.name, convert_tool_source(&src));
@@ -757,6 +761,7 @@ impl AgentStack {
     pub async fn check_index_status(&self) {
         // Take the handle only if it has already finished, to avoid blocking.
         let handle = {
+            // infallible: Mutex poisoning is recovered by taking the inner value
             let mut guard = self.index_task.lock().unwrap_or_else(|e| e.into_inner());
             match guard.as_ref() {
                 Some(h) if h.is_finished() => guard.take(),

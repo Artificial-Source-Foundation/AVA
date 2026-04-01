@@ -352,6 +352,10 @@ impl Tool for ReadTool {
             is_error: false,
         })
     }
+
+    fn is_concurrency_safe(&self, _args: &serde_json::Value) -> bool {
+        true
+    }
 }
 
 #[cfg(test)]

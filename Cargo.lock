@@ -402,9 +402,15 @@ dependencies = [
 name = "ava-extensions"
 version = "3.0.1"
 dependencies = [
+ "chrono",
  "dirs-next",
  "libloading",
+ "reqwest",
+ "serde",
+ "serde_json",
  "tempfile",
+ "thiserror 1.0.69",
+ "tokio",
  "tracing",
 ]
 

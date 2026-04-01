@@ -8,6 +8,8 @@
 
 /// Hook primitives and registration for extension lifecycle integration.
 pub mod hook;
+/// HTTP webhook hooks for external integrations.
+pub mod http_hooks;
 /// Extension descriptors and registration manager.
 pub mod manager;
 /// Native extension shared-library loader.
@@ -20,6 +22,7 @@ pub(crate) mod wasm_loader;
 
 /// Hook registration and invocation types.
 pub use hook::{Hook, HookContext, HookPoint, HookRegistry};
+pub use http_hooks::{fire_http_hook, HttpHook, HttpHookConfig, HttpHookError};
 /// Extension descriptors, manager, and error surface.
 pub use manager::{
     Extension, ExtensionDescriptor, ExtensionError, ExtensionManager, NativeExtensionDescriptor,

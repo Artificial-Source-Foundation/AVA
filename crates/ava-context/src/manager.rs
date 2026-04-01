@@ -1,6 +1,7 @@
 use ava_types::{Message, Role, ToolResult};
 
 use crate::condenser::{create_condenser, Condenser, HybridCondenser};
+use crate::content_budget::ContentReplacementBudget;
 use crate::pruner::prune_old_tool_outputs;
 use crate::token_tracker::TokenTracker;
 use crate::types::{CompactionReport, CondenserConfig};
@@ -26,6 +27,10 @@ pub struct ContextManager {
     last_compaction_report: Option<CompactionReport>,
     /// When true, conversation repair should run before the next LLM request.
     needs_repair: bool,
+    /// Content replacement budget — tracks tool output sizes and evicts when over budget.
+    content_budget: ContentReplacementBudget,
+    /// Monotonically increasing turn counter for content budget tracking.
+    turn_counter: usize,
 }
 
 impl ContextManager {
@@ -40,6 +45,8 @@ impl ContextManager {
             compacted_messages: Vec::new(),
             last_compaction_report: None,
             needs_repair: false,
+            content_budget: ContentReplacementBudget::default(),
+            turn_counter: 0,
         }
     }
 
@@ -55,6 +62,8 @@ impl ContextManager {
             compacted_messages: Vec::new(),
             last_compaction_report: None,
             needs_repair: false,
+            content_budget: ContentReplacementBudget::default(),
+            turn_counter: 0,
         }
     }
 
@@ -80,6 +89,13 @@ impl ContextManager {
     }
 
     pub fn add_tool_result(&mut self, result: ToolResult) {
+        self.turn_counter += 1;
+        self.content_budget.record_output(
+            &result.call_id,
+            "tool",
+            &result.content,
+            self.turn_counter,
+        );
         let message =
             Message::new(Role::Tool, result.content.clone()).with_tool_results(vec![result]);
         self.add_message(message);
@@ -127,6 +143,20 @@ impl ContextManager {
     /// Call this before full compaction — if pruning brings usage below the
     /// threshold, the expensive LLM compaction can be skipped entirely.
     pub fn try_prune(&mut self) -> usize {
+        // First pass: content budget eviction (character-based).
+        let budget_evicted = if self.content_budget.is_over_budget() {
+            let evicted = self.content_budget.evict_oldest(&mut self.messages);
+            if evicted > 0 {
+                self.tracker.reset();
+                self.tracker.add_messages(&self.messages);
+                self.needs_repair = true;
+            }
+            evicted
+        } else {
+            0
+        };
+
+        // Second pass: token-based pruning of old tool outputs.
         // Protect the most recent 60% of the token limit.
         let protected = (self.token_limit as f32 * 0.6) as usize;
         let pruned = prune_old_tool_outputs(&mut self.messages, protected);
@@ -135,7 +165,12 @@ impl ContextManager {
             self.tracker.add_messages(&self.messages);
             self.needs_repair = true;
         }
-        pruned
+        budget_evicted + pruned
+    }
+
+    /// Get a reference to the content replacement budget.
+    pub fn content_budget(&self) -> &ContentReplacementBudget {
+        &self.content_budget
     }
 
     /// Synchronous compaction — only works when using a sync Condenser.

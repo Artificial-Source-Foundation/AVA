@@ -1329,6 +1329,8 @@ mod tests {
             post_edit_validation: None,
             stream_timeout_secs: 90,
             prompt_caching: true,
+            headless: false,
+            is_subagent: false,
         }
     }
 

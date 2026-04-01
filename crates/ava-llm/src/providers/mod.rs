@@ -1,4 +1,5 @@
 pub mod common;
+pub mod gateway;
 
 use std::sync::Arc;
 

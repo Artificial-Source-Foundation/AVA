@@ -496,6 +496,8 @@ impl AgentStack {
             auto_compact,
             stream_timeout_secs: LLM_STREAM_TIMEOUT_SECS,
             prompt_caching: true,
+            headless: false,
+            is_subagent: false,
         };
 
         // Populate tool sources for the permission middleware (run-scoped registry).
@@ -952,6 +954,8 @@ impl TaskSpawner for AgentTaskSpawner {
             post_edit_validation: None,
             stream_timeout_secs: LLM_STREAM_TIMEOUT_SECS,
             prompt_caching: true,
+            headless: false,
+            is_subagent: true,
         };
         let mut agent = AgentLoop::new(
             Box::new(SharedProvider::new(provider)),

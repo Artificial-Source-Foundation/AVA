@@ -160,6 +160,14 @@ pub struct AgentConfig {
     /// for providers that support it (e.g., Anthropic `cache_control`).
     #[serde(default = "default_prompt_caching")]
     pub prompt_caching: bool,
+    /// When true, the agent is running in headless/non-interactive mode.
+    /// Affects retry behavior (persistent mode) and other background-friendly defaults.
+    #[serde(default)]
+    pub headless: bool,
+    /// When true, this agent is a sub-agent or background worker.
+    /// Combined with `headless`, determines persistent retry mode.
+    #[serde(default)]
+    pub is_subagent: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -327,6 +335,20 @@ pub enum AgentEvent {
         file_path: Option<String>,
         /// Approximate progress: bytes accumulated so far
         bytes_received: usize,
+    },
+    /// Heartbeat emitted during persistent retry waits >30s (F23).
+    RetryHeartbeat {
+        /// Current retry attempt number.
+        attempt: u32,
+        /// Seconds remaining in the current wait period.
+        wait_secs: u64,
+    },
+    /// The agent switched to a fallback model after consecutive overloads (F24).
+    FallbackModelSwitch {
+        /// The primary model that was overloaded.
+        primary_model: String,
+        /// The fallback model being used.
+        fallback_model: String,
     },
 }
 
@@ -1264,6 +1286,8 @@ mod tests {
             auto_compact: true,
             stream_timeout_secs: LLM_STREAM_TIMEOUT_SECS,
             prompt_caching: true,
+            headless: false,
+            is_subagent: false,
         };
         let llm = crate::tests::mock_llm();
 
@@ -1299,6 +1323,8 @@ mod tests {
             auto_compact: true,
             stream_timeout_secs: LLM_STREAM_TIMEOUT_SECS,
             prompt_caching: true,
+            headless: false,
+            is_subagent: false,
         };
         let llm = crate::tests::mock_llm();
 
@@ -1337,6 +1363,8 @@ mod tests {
             auto_compact: true,
             stream_timeout_secs: LLM_STREAM_TIMEOUT_SECS,
             prompt_caching: true,
+            headless: false,
+            is_subagent: false,
         };
         let llm = crate::tests::mock_llm();
 
@@ -1392,6 +1420,8 @@ mod tests {
             auto_compact: true,
             stream_timeout_secs: LLM_STREAM_TIMEOUT_SECS,
             prompt_caching: true,
+            headless: false,
+            is_subagent: false,
         };
         let llm = crate::tests::mock_llm();
 
@@ -1447,6 +1477,8 @@ mod tests {
             auto_compact: true,
             stream_timeout_secs: LLM_STREAM_TIMEOUT_SECS,
             prompt_caching: true,
+            headless: false,
+            is_subagent: false,
         };
         let llm = crate::tests::mock_llm();
 
@@ -1477,6 +1509,8 @@ mod tests {
             auto_compact: true,
             stream_timeout_secs: LLM_STREAM_TIMEOUT_SECS,
             prompt_caching: true,
+            headless: false,
+            is_subagent: false,
         };
         let llm = crate::tests::mock_llm();
 

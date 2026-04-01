@@ -502,6 +502,21 @@ impl App {
                     self.set_status(format!("{}...", tool_name), StatusLevel::Info);
                 }
             }
+            ava_agent::AgentEvent::RetryHeartbeat { attempt, wait_secs } => {
+                self.set_status(
+                    format!("retrying (attempt {attempt}, waiting {wait_secs}s)..."),
+                    StatusLevel::Warn,
+                );
+            }
+            ava_agent::AgentEvent::FallbackModelSwitch {
+                primary_model,
+                fallback_model,
+            } => {
+                self.set_status(
+                    format!("switched to fallback model: {fallback_model} (primary {primary_model} overloaded)"),
+                    StatusLevel::Warn,
+                );
+            }
             ava_agent::AgentEvent::Error(err) => {
                 info!(error = %err, "TUI received AgentEvent::Error");
                 self.finalize_assistant_stream();

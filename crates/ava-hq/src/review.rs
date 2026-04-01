@@ -481,6 +481,8 @@ pub async fn run_review_agent(
         auto_compact: true,
         stream_timeout_secs: ava_agent::agent_loop::LLM_STREAM_TIMEOUT_SECS,
         prompt_caching: true,
+        headless: true,
+        is_subagent: true,
     };
 
     let context = ContextManager::new(config.token_limit);

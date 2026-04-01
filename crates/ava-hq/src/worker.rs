@@ -116,7 +116,9 @@ pub(crate) async fn run_worker(
             | AgentEvent::SnapshotTaken { .. }
             | AgentEvent::PlanStepComplete { .. }
             | AgentEvent::StreamingEditProgress { .. }
-            | AgentEvent::StreamSilenceWarning { .. } => {}
+            | AgentEvent::StreamSilenceWarning { .. }
+            | AgentEvent::RetryHeartbeat { .. }
+            | AgentEvent::FallbackModelSwitch { .. } => {}
         }
     }
 

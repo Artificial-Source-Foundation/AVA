@@ -18,7 +18,7 @@ use super::response::request_dedup_hash;
 use super::tool_execution::READ_ONLY_TOOLS;
 use super::{AgentEvent, AgentLoop};
 use crate::stuck::StuckDetector;
-use crate::system_prompt::{build_system_prompt, provider_prompt_suffix};
+use crate::system_prompt::{build_system_prompt, provider_prompt_suffix, SystemPromptParts};
 
 use super::response::parse_tool_calls;
 
@@ -112,9 +112,15 @@ impl AgentLoop {
         {
             return;
         }
-        let (static_prefix, is_custom) = if let Some(ref custom) = self.config.custom_system_prompt
-        {
-            (custom.clone(), true)
+        let (mut parts, is_custom) = if let Some(ref custom) = self.config.custom_system_prompt {
+            (
+                SystemPromptParts {
+                    static_prefix: custom.clone(),
+                    dynamic_suffix: String::new(),
+                    cache_boundary: custom.len(),
+                },
+                true,
+            )
         } else {
             let native = self.llm.supports_tools();
             let provider_kind = self.llm.provider_kind();
@@ -131,22 +137,17 @@ impl AgentLoop {
             )
         };
 
-        // F2 — Cache boundary: record where the stable prefix ends.
-        // Everything after this point is dynamic (changes per-session).
-        let cache_boundary = static_prefix.len();
-        let mut system = static_prefix;
-
-        // Append provider-specific instructions (additive — does not replace the base prompt).
+        // Append provider-specific instructions to the dynamic suffix.
         let provider_kind = self.llm.provider_kind();
         if let Some(p_suffix) = provider_prompt_suffix(provider_kind, &self.config.model) {
-            system.push_str("\n\n");
-            system.push_str(&p_suffix);
+            parts.dynamic_suffix.push_str("\n\n");
+            parts.dynamic_suffix.push_str(&p_suffix);
         }
         if let Some(ref suffix) = self.config.system_prompt_suffix {
-            system.push_str("\n\n");
-            system.push_str(suffix);
+            parts.dynamic_suffix.push_str("\n\n");
+            parts.dynamic_suffix.push_str(suffix);
         }
-        // chat.system hook: let plugins inject text into the system prompt.
+        // chat.system hook: let plugins inject text into the dynamic suffix.
         if let Some(ref pm) = self.plugin_manager.clone() {
             let provider_name = format!("{:?}", provider_kind).to_lowercase();
             let injection = pm
@@ -155,15 +156,16 @@ impl AgentLoop {
                 .collect_system_injections(&self.config.model, &provider_name)
                 .await;
             if let Some(text) = injection {
-                system.push_str("\n\n");
-                system.push_str(&text);
+                parts.dynamic_suffix.push_str("\n\n");
+                parts.dynamic_suffix.push_str(&text);
             }
         }
+        let system = parts.full_prompt();
         info!(
             model = %self.config.model,
             prompt_chars = system.len(),
             prompt_tokens = estimate_tokens(&system),
-            cache_boundary,
+            cache_boundary = parts.cache_boundary,
             has_suffix = self.config.system_prompt_suffix.is_some(),
             dynamic_rules = self.enable_dynamic_rules,
             "system prompt prepared"
@@ -171,8 +173,8 @@ impl AgentLoop {
         let mut msg = Message::new(Role::System, system);
         // F2: Store cache boundary offset in metadata so providers can split
         // the prompt into cacheable (static) and non-cacheable (dynamic) parts.
-        if !is_custom && self.config.prompt_caching && cache_boundary > 0 {
-            msg.metadata = serde_json::json!({"cache_boundary": cache_boundary});
+        if !is_custom && self.config.prompt_caching && parts.cache_boundary > 0 {
+            msg.metadata = serde_json::json!({"cache_boundary": parts.cache_boundary});
         }
         self.context.add_message(msg);
     }

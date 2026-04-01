@@ -2,6 +2,36 @@ use ava_config::model_catalog::registry::{registry, RegisteredModel};
 use ava_llm::ProviderKind;
 use ava_types::Tool;
 
+/// Two-tier system prompt split into cacheable static prefix and dynamic suffix.
+///
+/// The static prefix contains identity, tool definitions, coding rules, and delegation
+/// guidance — content that NEVER changes within a session. The dynamic suffix contains
+/// provider-specific tuning, project instructions, plugin instructions, and dynamic rules.
+///
+/// `cache_boundary` is the byte offset where the static prefix ends and the dynamic
+/// suffix begins. Providers that support prompt caching (e.g., Anthropic) should place
+/// `cache_control` on the static prefix block only.
+#[derive(Debug, Clone)]
+pub struct SystemPromptParts {
+    /// Identity, tool definitions, coding rules, delegation guidance — stable within a session.
+    pub static_prefix: String,
+    /// Provider tuning, project instructions, plugin injections — may change between turns.
+    pub dynamic_suffix: String,
+    /// Byte offset where static ends and dynamic begins (equals `static_prefix.len()`).
+    pub cache_boundary: usize,
+}
+
+impl SystemPromptParts {
+    /// Combine both parts into a single system prompt string.
+    pub fn full_prompt(&self) -> String {
+        if self.dynamic_suffix.is_empty() {
+            self.static_prefix.clone()
+        } else {
+            format!("{}{}", self.static_prefix, self.dynamic_suffix)
+        }
+    }
+}
+
 fn model_supports_reasoning_for_prompt(provider_kind: ProviderKind, model_name: &str) -> bool {
     let model_lower = model_name.to_lowercase();
     registry_model_for_prompt(provider_kind, model_name)
@@ -391,46 +421,51 @@ fn select_base_prompt(model_name: &str) -> &'static str {
 /// Uses per-model-family prompt templates (loaded from `prompts/*.txt`) instead
 /// of a generic one-size-fits-all prompt. Tool definitions are appended for
 /// text-only providers; native tool callers get them via the API.
+///
+/// Returns [`SystemPromptParts`] with the prompt split into a cacheable static prefix
+/// and a dynamic suffix. The static prefix contains identity, tool definitions, coding
+/// rules, and delegation guidance. Providers that support caching should mark only
+/// the static prefix with `cache_control`.
 pub fn build_system_prompt(
     tools: &[Tool],
     native_tools: bool,
     _provider_kind: ProviderKind,
     model_name: &str,
     tool_visibility_profile: crate::routing::ToolVisibilityProfile,
-) -> String {
-    let mut prompt = String::with_capacity(4096);
+) -> SystemPromptParts {
+    let mut static_prefix = String::with_capacity(4096);
 
     // Base prompt — model-family specific
-    prompt.push_str(select_base_prompt(model_name));
-    prompt.push('\n');
+    static_prefix.push_str(select_base_prompt(model_name));
+    static_prefix.push('\n');
 
     // Sandbox note (all models)
-    prompt.push_str("\n# Environment\n");
-    prompt.push_str("Package installation commands (pip, npm, cargo add, etc.) run in a restricted sandbox. The .git and .ava directories are read-only. If pip fails with \"externally-managed-environment\", create a virtual environment first (`python -m venv .venv`). For npm, use local installs (not -g).\n");
+    static_prefix.push_str("\n# Environment\n");
+    static_prefix.push_str("Package installation commands (pip, npm, cargo add, etc.) run in a restricted sandbox. The .git and .ava directories are read-only. If pip fails with \"externally-managed-environment\", create a virtual environment first (`python -m venv .venv`). For npm, use local installs (not -g).\n");
 
     // Delegation (when subagent tool is available)
     if tool_visibility_profile != crate::routing::ToolVisibilityProfile::AnswerOnly
         && tools.iter().any(|tool| tool.name == "subagent")
     {
-        prompt.push_str("\n# Delegation\n");
-        prompt.push_str("- Keep small, single-file work in the main thread.\n");
-        prompt.push_str("- Use `subagent` only for self-contained chunks whose result can be summarized back clearly.\n");
-        prompt.push_str("- Prefer `scout` or `explore` for read-only reconnaissance, `plan` for design-only breakdowns, `review` for a final pass, and `worker` or `subagent` for isolated implementation.\n");
-        prompt.push_str("- Use `background: true` when the sub-agent's work is independent. Use foreground when you need the result before proceeding.\n");
-        prompt.push_str("- After significant multi-file edits, spawn a `review` subagent. Skip review for trivial fixes.\n");
+        static_prefix.push_str("\n# Delegation\n");
+        static_prefix.push_str("- Keep small, single-file work in the main thread.\n");
+        static_prefix.push_str("- Use `subagent` only for self-contained chunks whose result can be summarized back clearly.\n");
+        static_prefix.push_str("- Prefer `scout` or `explore` for read-only reconnaissance, `plan` for design-only breakdowns, `review` for a final pass, and `worker` or `subagent` for isolated implementation.\n");
+        static_prefix.push_str("- Use `background: true` when the sub-agent's work is independent. Use foreground when you need the result before proceeding.\n");
+        static_prefix.push_str("- After significant multi-file edits, spawn a `review` subagent. Skip review for trivial fixes.\n");
     }
 
     // Tool definitions (text-only providers embed schemas; native callers use API)
     if native_tools && tool_visibility_profile != crate::routing::ToolVisibilityProfile::AnswerOnly
     {
-        prompt.push_str(
+        static_prefix.push_str(
             "\n# Tool use\nUse the provided native tool/function calling interface for tool interactions.\n",
         );
     } else if !native_tools
         && tool_visibility_profile != crate::routing::ToolVisibilityProfile::AnswerOnly
     {
-        prompt.push_str("\n# Tools\n\n");
-        prompt.push_str(
+        static_prefix.push_str("\n# Tools\n\n");
+        static_prefix.push_str(
             "To call tools, respond with ONLY a JSON object in this exact format:\n\
              ```json\n\
              {\"tool_calls\": [{\"name\": \"tool_name\", \"arguments\": {\"param\": \"value\"}}]}\n\
@@ -439,9 +474,9 @@ pub fn build_system_prompt(
         );
 
         for tool in tools {
-            prompt.push_str(&format!("### {}\n", tool.name));
-            prompt.push_str(&format!("{}\n", tool.description));
-            prompt.push_str(&format!(
+            static_prefix.push_str(&format!("### {}\n", tool.name));
+            static_prefix.push_str(&format!("{}\n", tool.description));
+            static_prefix.push_str(&format!(
                 "Parameters: {}\n\n",
                 serde_json::to_string(&tool.parameters).unwrap_or_else(|_| "{}".to_string())
             ));
@@ -452,14 +487,20 @@ pub fn build_system_prompt(
     if tool_visibility_profile != crate::routing::ToolVisibilityProfile::AnswerOnly
         && !tools.iter().any(|t| t.name == "attempt_completion")
     {
-        prompt.push_str("\n### attempt_completion\n");
-        prompt.push_str(
+        static_prefix.push_str("\n### attempt_completion\n");
+        static_prefix.push_str(
             "Call this when you have completed the task. \
              Parameters: {\"result\": \"description of what you did\"}\n",
         );
     }
 
-    prompt
+    let cache_boundary = static_prefix.len();
+
+    SystemPromptParts {
+        static_prefix,
+        dynamic_suffix: String::new(),
+        cache_boundary,
+    }
 }
 
 #[cfg(test)]
@@ -497,13 +538,14 @@ mod tests {
     #[test]
     fn text_prompt_contains_tool_names_and_schemas() {
         let tools = mock_tools();
-        let prompt = build_system_prompt(
+        let parts = build_system_prompt(
             &tools,
             false,
             ProviderKind::OpenAI,
             "gpt-4.1",
             crate::routing::ToolVisibilityProfile::Full,
         );
+        let prompt = parts.full_prompt();
 
         assert!(prompt.contains("read"));
         assert!(prompt.contains("bash"));
@@ -517,13 +559,14 @@ mod tests {
     #[test]
     fn native_prompt_lists_tools_without_json_envelope() {
         let tools = mock_tools();
-        let prompt = build_system_prompt(
+        let parts = build_system_prompt(
             &tools,
             true,
             ProviderKind::OpenAI,
             "gpt-4.1",
             crate::routing::ToolVisibilityProfile::Full,
         );
+        let prompt = parts.full_prompt();
 
         assert!(prompt.contains("native tool/function calling interface"));
         // Should NOT contain the JSON envelope instructions
@@ -538,13 +581,14 @@ mod tests {
             description: "Signal task completion".to_string(),
             parameters: json!({}),
         }];
-        let prompt = build_system_prompt(
+        let parts = build_system_prompt(
             &tools,
             false,
             ProviderKind::OpenAI,
             "gpt-4.1",
             crate::routing::ToolVisibilityProfile::Full,
         );
+        let prompt = parts.full_prompt();
         // Should only appear once (as part of the tool list, not the fallback section)
         let count = prompt.matches("### attempt_completion").count();
         assert_eq!(count, 1);
@@ -553,13 +597,14 @@ mod tests {
     #[test]
     fn prompt_is_concise() {
         let tools = mock_tools();
-        let prompt = build_system_prompt(
+        let parts = build_system_prompt(
             &tools,
             false,
             ProviderKind::OpenAI,
             "gpt-4.1",
             crate::routing::ToolVisibilityProfile::Full,
         );
+        let prompt = parts.full_prompt();
         // Template-based prompts are larger but still reasonable for 2 tools
         assert!(
             prompt.len() < 6000,
@@ -577,14 +622,16 @@ mod tests {
             ProviderKind::OpenAI,
             "gpt-5.4",
             crate::routing::ToolVisibilityProfile::Full,
-        );
+        )
+        .full_prompt();
         let claude = build_system_prompt(
             &tools,
             true,
             ProviderKind::Anthropic,
             "claude-sonnet-4.6",
             crate::routing::ToolVisibilityProfile::Full,
-        );
+        )
+        .full_prompt();
         // GPT prompt has examples, Claude prompt has structured instructions
         assert!(gpt.contains("examples"));
         assert!(claude.contains("structured instructions"));
@@ -602,7 +649,8 @@ mod tests {
             ProviderKind::Copilot,
             "claude-sonnet-4.6",
             crate::routing::ToolVisibilityProfile::Full,
-        );
+        )
+        .full_prompt();
         // Should get Claude base prompt even through Copilot provider
         assert!(prompt.contains("structured instructions"));
     }
@@ -616,7 +664,8 @@ mod tests {
             ProviderKind::OpenAI,
             "gpt-5.4-mini",
             crate::routing::ToolVisibilityProfile::AnswerOnly,
-        );
+        )
+        .full_prompt();
 
         assert!(!prompt.contains("## Tool use"));
         assert!(!prompt.contains("### attempt_completion"));
@@ -636,10 +685,29 @@ mod tests {
             ProviderKind::OpenAI,
             "gpt-5.4",
             crate::routing::ToolVisibilityProfile::Full,
-        );
+        )
+        .full_prompt();
 
         assert!(prompt.contains("# Delegation"));
         assert!(prompt.contains("scout") && prompt.contains("explore"));
+    }
+
+    #[test]
+    fn system_prompt_parts_cache_boundary_is_correct() {
+        let tools = mock_tools();
+        let parts = build_system_prompt(
+            &tools,
+            true,
+            ProviderKind::Anthropic,
+            "claude-sonnet-4.6",
+            crate::routing::ToolVisibilityProfile::Full,
+        );
+        // cache_boundary equals the static prefix length
+        assert_eq!(parts.cache_boundary, parts.static_prefix.len());
+        // static prefix is not empty
+        assert!(!parts.static_prefix.is_empty());
+        // dynamic suffix starts empty (provider suffix not yet appended)
+        assert!(parts.dynamic_suffix.is_empty());
     }
 
     // ── model-based prompt suffix tests ────────────────────────────────

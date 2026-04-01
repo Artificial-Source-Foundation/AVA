@@ -3,7 +3,7 @@ pub mod overflow;
 pub mod parsing;
 
 pub use message_mapping::*;
-pub use overflow::is_context_overflow;
+pub use overflow::{is_context_overflow, parse_token_gap, TokenGap};
 pub use parsing::*;
 
 use std::time::Duration;

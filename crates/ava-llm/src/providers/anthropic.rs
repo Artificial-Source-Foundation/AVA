@@ -27,7 +27,16 @@ const ADAPTIVE_THINKING_MODELS: &[&str] = &[
     "claude-sonnet-4.6",
 ];
 
-#[derive(Clone)]
+/// Mutable state shared across requests via interior mutability.
+/// Used for sticky header latching (F7) — headers set during a session
+/// persist until explicit session reset.
+#[derive(Debug, Clone, Default)]
+struct LatchedState {
+    /// Headers that were set at least once and should persist across requests.
+    /// Reset only on session reset. Needs per-provider verification during testing.
+    headers: HashMap<String, String>,
+}
+
 pub struct AnthropicProvider {
     pool: Arc<ConnectionPool>,
     provider_label: String,
@@ -40,6 +49,27 @@ pub struct AnthropicProvider {
     circuit_breaker: Option<Arc<CircuitBreaker>>,
     /// Optional plugin manager for `request.headers` hook injection.
     plugin_manager: Option<Arc<tokio::sync::Mutex<PluginManager>>>,
+    /// Sticky latched state — persists headers across requests within a session.
+    latched: std::sync::Mutex<LatchedState>,
+}
+
+impl Clone for AnthropicProvider {
+    fn clone(&self) -> Self {
+        Self {
+            pool: self.pool.clone(),
+            provider_label: self.provider_label.clone(),
+            api_key: self.api_key.clone(),
+            model: self.model.clone(),
+            max_tokens: self.max_tokens,
+            base_url: self.base_url.clone(),
+            third_party: self.third_party,
+            circuit_breaker: self.circuit_breaker.clone(),
+            plugin_manager: self.plugin_manager.clone(),
+            latched: std::sync::Mutex::new(
+                self.latched.lock().map(|s| s.clone()).unwrap_or_default(),
+            ),
+        }
+    }
 }
 
 impl AnthropicProvider {
@@ -58,6 +88,7 @@ impl AnthropicProvider {
             third_party: false,
             circuit_breaker: Some(Arc::new(CircuitBreaker::default_provider())),
             plugin_manager: None,
+            latched: std::sync::Mutex::new(LatchedState::default()),
         }
     }
 
@@ -77,6 +108,7 @@ impl AnthropicProvider {
             third_party: true,
             circuit_breaker: Some(Arc::new(CircuitBreaker::default_provider())),
             plugin_manager: None,
+            latched: std::sync::Mutex::new(LatchedState::default()),
         }
     }
 
@@ -100,7 +132,9 @@ impl AnthropicProvider {
         if self.third_party {
             return request;
         }
-        request.header("anthropic-beta", "interleaved-thinking-2025-05-14")
+        let beta_value = "interleaved-thinking-2025-05-14";
+        self.latch_header("anthropic-beta", beta_value);
+        request.header("anthropic-beta", beta_value)
     }
 
     pub fn with_provider_label(mut self, provider_label: impl Into<String>) -> Self {
@@ -304,6 +338,41 @@ impl AnthropicProvider {
         } else {
             req
         }
+    }
+
+    /// Latch a header: once set, it persists across all subsequent requests
+    /// until `reset_session` is called. Used for beta headers and mode flags
+    /// that should survive even if the condition that set them is no longer active.
+    fn latch_header(&self, key: impl Into<String>, value: impl Into<String>) {
+        if let Ok(mut state) = self.latched.lock() {
+            state.headers.insert(key.into(), value.into());
+        }
+    }
+
+    /// Get a snapshot of all currently latched headers.
+    fn latched_headers(&self) -> HashMap<String, String> {
+        self.latched
+            .lock()
+            .map(|state| state.headers.clone())
+            .unwrap_or_default()
+    }
+
+    /// Reset all latched state. Call on session reset / new session.
+    pub fn reset_session(&self) {
+        if let Ok(mut state) = self.latched.lock() {
+            state.headers.clear();
+        }
+    }
+
+    /// Apply latched headers to a request builder.
+    fn apply_latched_headers(
+        &self,
+        mut request: reqwest::RequestBuilder,
+    ) -> reqwest::RequestBuilder {
+        for (k, v) in self.latched_headers() {
+            request = request.header(&k, &v);
+        }
+        request
     }
 
     async fn client(&self) -> Result<Arc<reqwest::Client>> {
@@ -542,6 +611,7 @@ impl LLMProvider for AnthropicProvider {
         let client = self.client().await?;
         let mut request = self.build_request(&client);
         request = self.apply_beta_headers(request);
+        request = self.apply_latched_headers(request);
         let request = request.json(&body);
         let request = self.with_plugin_headers(request).await;
 
@@ -572,6 +642,7 @@ impl LLMProvider for AnthropicProvider {
         let client = self.client().await?;
         let mut request = self.build_request(&client);
         request = self.apply_beta_headers(request);
+        request = self.apply_latched_headers(request);
         let request = request.json(&body);
         let request = self.with_plugin_headers(request).await;
 
@@ -651,6 +722,7 @@ impl LLMProvider for AnthropicProvider {
         let client = self.client().await?;
         let mut request = self.build_request(&client);
         request = self.apply_beta_headers(request);
+        request = self.apply_latched_headers(request);
         let request = request.json(&body);
         let request = self.with_plugin_headers(request).await;
 
@@ -723,6 +795,7 @@ impl LLMProvider for AnthropicProvider {
         let client = self.client().await?;
         let mut request = self.build_request(&client);
         request = self.apply_beta_headers(request);
+        request = self.apply_latched_headers(request);
         let request = request.json(&body);
         let request = self.with_plugin_headers(request).await;
 
@@ -775,6 +848,10 @@ impl LLMProvider for AnthropicProvider {
             thinking: thinking_content,
         })
     }
+
+    // TODO: Other providers (OpenAI, Gemini, etc.) should implement similar sticky
+    // header latching if they have beta/mode headers that should persist across
+    // requests within a session. Each provider needs verification during testing.
 }
 
 /// Convert a reqwest SSE response into a `Stream<Item = StreamChunk>`.
@@ -1000,6 +1077,31 @@ mod tests {
             json!({"type": "ephemeral"}),
             "single block should still have cache_control"
         );
+    }
+
+    #[test]
+    fn latched_header_persists_after_set() {
+        let provider = AnthropicProvider::new(pool(), "key", "claude-sonnet-4.6");
+        assert!(provider.latched_headers().is_empty());
+
+        provider.latch_header("anthropic-beta", "interleaved-thinking-2025-05-14");
+
+        let headers = provider.latched_headers();
+        assert_eq!(headers.len(), 1);
+        assert_eq!(
+            headers.get("anthropic-beta").unwrap(),
+            "interleaved-thinking-2025-05-14"
+        );
+    }
+
+    #[test]
+    fn session_reset_clears_latched_headers() {
+        let provider = AnthropicProvider::new(pool(), "key", "claude-sonnet-4.6");
+        provider.latch_header("anthropic-beta", "interleaved-thinking-2025-05-14");
+        assert_eq!(provider.latched_headers().len(), 1);
+
+        provider.reset_session();
+        assert!(provider.latched_headers().is_empty());
     }
 
     #[test]

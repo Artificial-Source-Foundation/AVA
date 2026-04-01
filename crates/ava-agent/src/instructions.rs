@@ -31,7 +31,7 @@ const INCLUDABLE_EXTENSIONS: &[&str] = &[
 ];
 
 /// Local override instruction file names (intended to be gitignored).
-const LOCAL_OVERRIDE_FILES: &[&str] = &["AGENTS.local.md", "CLAUDE.local.md"];
+const LOCAL_OVERRIDE_FILES: &[&str] = &["AGENTS.local.md"];
 
 /// Accurate BPE token count using cl100k_base via tiktoken.
 fn estimate_tokens(text: &str) -> usize {
@@ -567,10 +567,10 @@ fn load_from_root_with_extras(
     // These are intended to be gitignored (personal developer overrides).
     if project_trusted {
         for name in LOCAL_OVERRIDE_FILES {
-            // Project root: AGENTS.local.md, CLAUDE.local.md
+            // Project root: AGENTS.local.md
             let path = root.join(name);
             try_load_file_bounded(&path, root, &mut seen, &mut sections);
-            // .ava/ directory: .ava/AGENTS.local.md, .ava/CLAUDE.local.md
+            // .ava/ directory: .ava/AGENTS.local.md
             let ava_path = root.join(".ava").join(name);
             try_load_file_bounded(&ava_path, root, &mut seen, &mut sections);
         }
@@ -1961,7 +1961,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let ava_dir = tmp.path().join(".ava");
         fs::create_dir_all(&ava_dir).unwrap();
-        fs::write(ava_dir.join("CLAUDE.local.md"), "AVA dir local override.").unwrap();
+        fs::write(ava_dir.join("AGENTS.local.md"), "AVA dir local override.").unwrap();
 
         let result = load_from_root(tmp.path(), None);
         assert!(result.is_some());
@@ -1979,17 +1979,6 @@ mod tests {
         let text = result.unwrap();
         assert!(text.contains("Only standard."));
         assert!(!text.contains("local"));
-    }
-
-    #[test]
-    fn test_local_claude_md_loaded() {
-        let tmp = TempDir::new().unwrap();
-        fs::write(tmp.path().join("CLAUDE.local.md"), "Claude local rules.").unwrap();
-
-        let result = load_from_root(tmp.path(), None);
-        assert!(result.is_some());
-        let text = result.unwrap();
-        assert!(text.contains("Claude local rules."));
     }
 
     #[test]

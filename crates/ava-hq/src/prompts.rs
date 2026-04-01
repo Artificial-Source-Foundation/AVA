@@ -1,12 +1,19 @@
 //! System prompts for HQ multi-agent roles.
 //!
-//! Each tier (Director, Lead, Worker) gets a purpose-built system prompt
-//! that defines its responsibilities, communication style, and boundaries.
+//! The canonical prompts now live in [`ava_config::hq_roles`] as part of
+//! [`AgentRoleProfile`] default profiles.  The functions here are thin wrappers
+//! that resolve the default profile and apply template variables, preserving
+//! the existing public API for callers that don't yet use the profile system.
+
+use ava_config::{
+    apply_template_vars, default_role_profiles, ROLE_DIRECTOR, ROLE_JUNIOR_WORKER, ROLE_SCOUT,
+    ROLE_SENIOR_LEAD,
+};
 
 use crate::Domain;
 
 /// Returns a human-readable label for a domain (e.g. "Backend", "QA").
-fn domain_label(domain: &Domain) -> &'static str {
+pub fn domain_label(domain: &Domain) -> &'static str {
     match domain {
         Domain::Frontend => "Frontend",
         Domain::Backend => "Backend",
@@ -18,70 +25,33 @@ fn domain_label(domain: &Domain) -> &'static str {
     }
 }
 
-/// System prompt for the Director agent.
-///
-/// The Director orchestrates leads and workers to accomplish the user's goal.
-/// Kept concise (~200 words) — dynamic context (scout reports, plan state) provides details.
+/// System prompt for the Director agent (AVA).
 pub fn director_system_prompt() -> String {
-    String::from(
-        "You are an autonomous senior engineer leading a development team. \
-        Gather context, plan, delegate, and verify without waiting for additional prompts.\n\
-        \n\
-        For simple tasks (single-file fixes), work directly. For tasks requiring parallel work across \
-        domains, spawn leads. Most tasks need 1-3 leads, not more.\n\
-        \n\
-        Workflow: send scouts to read the codebase, form a plan, assign leads with specific files \
-        (no overlapping assignments), and set execution order — parallel when tasks are independent, \
-        sequential when they depend on each other. Each lead gets its own git worktree.\n\
-        \n\
-        Report state changes concisely: \"Pedro finished the JWT middleware\" is good. \
-        Turn-by-turn narration is not. Relay lead questions to the user clearly and wait for an answer.\n\
-        \n\
-        Before declaring work complete, verify the changes compile and tests pass. \
-        If a worker fails, let the lead handle it first — only escalate to the user when the lead cannot resolve it.\n\
-        \n\
-        Only make changes the user requested. Do not add features, refactor code, or improve things beyond the stated goal.",
-    )
+    let profiles = default_role_profiles();
+    profiles[ROLE_DIRECTOR].system_prompt.clone()
 }
 
-/// System prompt for a Lead agent.
-///
-/// Leads manage workers within their domain, splitting tasks into
-/// worker-sized subtasks and coordinating file access. Kept concise (~150 words).
+/// System prompt for a Lead agent in the given domain.
 pub fn lead_system_prompt(domain: &str) -> String {
-    format!(
-        "You are the {domain} Lead, a domain specialist managing junior workers.\n\
-        \n\
-        Split your assigned task into worker-sized subtasks. Assign specific files to each worker — \
-        no overlapping file assignments. Run workers in parallel when their tasks are independent, \
-        sequentially when one depends on another.\n\
-        \n\
-        Your workers share your git worktree, so coordinate file access carefully.\n\
-        \n\
-        Review each worker's output before reporting to the Director. Fix small issues yourself; \
-        spawn a fix worker for larger ones. Report results, questions, or ideas — not play-by-play.\n\
-        \n\
-        Before reporting completion, verify that workers' changes compile and tests pass. \
-        Only do what was assigned to you — do not expand scope or refactor beyond the task.",
-    )
+    let profiles = default_role_profiles();
+    let profile = apply_template_vars(&profiles[ROLE_SENIOR_LEAD], &[("domain", domain)]);
+    profile.system_prompt
 }
 
 /// System prompt for a Worker agent.
-///
-/// Workers are focused executors that handle a specific subtask
-/// assigned by their Lead. Kept concise (~100 words).
 pub fn worker_system_prompt(name: &str, domain: &str) -> String {
-    format!(
-        "You are {name}, a junior developer on the {domain} team. Complete the specific task your lead assigned.\n\
-        \n\
-        Read file contents before editing — do not speculate about code you have not opened. \
-        Only modify your assigned files. If you intend to call multiple tools and there are no \
-        dependencies between them, make all independent calls in parallel.\n\
-        \n\
-        When finished, report what you changed and any issues you found. \
-        If you are unsure about something, ask your lead, not the user. \
-        Before reporting completion, verify your changes compile.",
-    )
+    let profiles = default_role_profiles();
+    let profile = apply_template_vars(
+        &profiles[ROLE_JUNIOR_WORKER],
+        &[("name", name), ("domain", domain)],
+    );
+    profile.system_prompt
+}
+
+/// System prompt for a Scout agent.
+pub fn scout_system_prompt() -> String {
+    let profiles = default_role_profiles();
+    profiles[ROLE_SCOUT].system_prompt.clone()
 }
 
 /// Convenience: generate a lead system prompt from a [`Domain`].
@@ -99,10 +69,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn director_prompt_not_empty() {
+    fn director_prompt_is_ava() {
         let prompt = director_system_prompt();
         assert!(!prompt.is_empty());
-        assert!(prompt.contains("senior engineer"));
+        assert!(prompt.contains("AVA"));
+        assert!(prompt.contains("operational partner"));
         assert!(prompt.contains("delegate"));
     }
 
@@ -110,7 +81,7 @@ mod tests {
     fn lead_prompt_includes_domain() {
         let prompt = lead_system_prompt("Backend");
         assert!(prompt.contains("Backend Lead"));
-        assert!(prompt.contains("worker-sized subtasks"));
+        assert!(prompt.contains("senior specialist"));
     }
 
     #[test]
@@ -135,6 +106,13 @@ mod tests {
     }
 
     #[test]
+    fn scout_prompt_is_read_only() {
+        let prompt = scout_system_prompt();
+        assert!(prompt.contains("Scout"));
+        assert!(prompt.contains("NOT modify"));
+    }
+
+    #[test]
     fn all_domains_have_labels() {
         let domains = [
             Domain::Frontend,
@@ -148,7 +126,6 @@ mod tests {
         for domain in &domains {
             let label = domain_label(domain);
             assert!(!label.is_empty());
-            // Lead prompt should work for every domain
             let prompt = lead_system_prompt_for_domain(domain);
             assert!(prompt.contains(label));
         }

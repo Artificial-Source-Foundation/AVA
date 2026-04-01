@@ -421,6 +421,7 @@ dependencies = [
  "async-trait",
  "ava-acp",
  "ava-agent",
+ "ava-config",
  "ava-context",
  "ava-llm",
  "ava-platform",

@@ -659,6 +659,7 @@ async fn run_harness_task(
         enabled_leads: vec![],
         lead_prompts: std::collections::HashMap::new(),
         worker_provider: None,
+        role_resolver: None,
     });
 
     // Determine task type based on the benchmark task

@@ -35,6 +35,7 @@ pub mod worker;
 pub mod workflow;
 
 pub mod external_worker;
+pub mod role_tools;
 
 pub use acp::{AcpError, AcpMethod, AcpRequest, AcpResponse};
 pub use acp_handler::AcpHandler;
@@ -57,6 +58,7 @@ pub use prompts::{
     worker_system_prompt, worker_system_prompt_for_domain,
 };
 pub use review::{DiffMode, ReviewContext, ReviewResult, ReviewVerdict, Severity};
+pub use role_tools::{build_registry_for_role, compute_disabled_mcp_servers, ALL_BUILTIN_TOOLS};
 pub use routing::{domain_to_task_type, topological_sort};
 pub use scout::{CodeSnippet, Scout, ScoutReport};
 pub use send_message::SendMessageTool;

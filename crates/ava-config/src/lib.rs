@@ -13,6 +13,7 @@ use uuid::Uuid;
 pub mod agents;
 pub mod credential_commands;
 pub mod credentials;
+pub mod hq_roles;
 pub mod keychain;
 pub mod model_catalog;
 pub mod routing;
@@ -21,6 +22,10 @@ pub mod trust;
 
 pub use agents::{default_agents, AgentOverride, AgentsConfig, ResolvedAgent};
 pub use ava_auth;
+pub use hq_roles::{
+    apply_template_vars, default_role_profiles, load_roles_file, AgentRoleProfile, HqRolesFile,
+    RoleBudget, RoleResolver, ROLE_DIRECTOR, ROLE_JUNIOR_WORKER, ROLE_SCOUT, ROLE_SENIOR_LEAD,
+};
 
 pub(crate) async fn write_file_atomic(path: &Path, content: &str) -> Result<()> {
     if let Some(parent) = path.parent() {
@@ -324,6 +329,10 @@ pub struct HqConfig {
     pub show_costs: bool,
     #[serde(default)]
     pub agent_overrides: Vec<HqAgentOverride>,
+    /// Role profiles for HQ agents.  Keys are role IDs
+    /// (`"director"`, `"senior-lead"`, `"junior-worker"`, `"scout"`, or custom).
+    #[serde(default)]
+    pub roles: std::collections::HashMap<String, AgentRoleProfile>,
 }
 
 fn default_hq_tone_preference() -> String {
@@ -342,6 +351,7 @@ impl Default for HqConfig {
             auto_review: default_hq_auto_review(),
             show_costs: false,
             agent_overrides: vec![],
+            roles: std::collections::HashMap::new(),
         }
     }
 }

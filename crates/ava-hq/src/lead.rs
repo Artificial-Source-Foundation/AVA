@@ -4,10 +4,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use ava_agent::{AgentConfig, AgentLoop};
+use ava_config::AgentRoleProfile;
 use ava_context::ContextManager;
 use ava_llm::provider::{LLMProvider, SharedProvider};
 use ava_platform::StandardPlatform;
-use ava_tools::core::register_core_tools;
 use ava_tools::registry::ToolRegistry;
 use ava_types::{AvaError, Message, Result, Role, Session};
 use futures::future::join_all;
@@ -45,6 +45,10 @@ pub struct Lead {
     worker_names: Vec<String>,
     /// Custom system prompt override (empty = use default from prompts.rs).
     custom_prompt: String,
+    /// Resolved role profile for this lead.
+    role_profile: Option<AgentRoleProfile>,
+    /// Resolved role profile for workers spawned by this lead.
+    worker_role_profile: Option<AgentRoleProfile>,
 }
 
 impl Lead {
@@ -63,6 +67,8 @@ impl Lead {
             platform,
             worker_names: Vec::new(),
             custom_prompt: String::new(),
+            role_profile: None,
+            worker_role_profile: None,
         }
     }
 
@@ -81,6 +87,18 @@ impl Lead {
     /// Set a custom system prompt override for this lead's workers.
     pub fn with_custom_prompt(mut self, prompt: String) -> Self {
         self.custom_prompt = prompt;
+        self
+    }
+
+    /// Set the resolved role profile for this lead.
+    pub fn with_role_profile(mut self, profile: AgentRoleProfile) -> Self {
+        self.role_profile = Some(profile);
+        self
+    }
+
+    /// Set the resolved role profile for workers spawned by this lead.
+    pub fn with_worker_role_profile(mut self, profile: AgentRoleProfile) -> Self {
+        self.worker_role_profile = Some(profile);
         self
     }
 
@@ -392,7 +410,6 @@ impl Lead {
     }
 
     pub(crate) fn build_worker(&self, task: Task, worker_budget: Budget) -> Result<Worker> {
-        // Use the worker-specific provider if configured, otherwise fall back to the lead's provider.
         let effective_provider = self
             .worker_provider
             .as_ref()
@@ -401,28 +418,71 @@ impl Lead {
         let model_name = effective_provider.model_name().to_string();
         let worker_id = Uuid::new_v4();
 
-        // Pick a worker name from the custom pool or fall back to the built-in default
         let idx = self.workers.len();
         let worker_name: String = if self.worker_names.is_empty() {
             worker_name_for_index(idx).to_string()
         } else {
             self.worker_names[idx % self.worker_names.len()].clone()
         };
-        // Use custom lead prompt if set, otherwise use the default domain prompt
-        let system_prompt = if self.custom_prompt.is_empty() {
-            prompts::worker_system_prompt_for_domain(&worker_name, &self.domain)
-        } else {
-            format!(
-                "{}\n\n## Lead Instructions\n{}",
-                prompts::worker_system_prompt_for_domain(&worker_name, &self.domain),
-                self.custom_prompt
-            )
-        };
 
-        let mut registry = ToolRegistry::new();
-        if let Some(platform) = &self.platform {
-            register_core_tools(&mut registry, platform.clone());
-        }
+        // Resolve system prompt from worker role profile or fallback to legacy prompts
+        let (system_prompt, thinking_level, extended_tools) =
+            if let Some(ref profile) = self.worker_role_profile {
+                let resolved = ava_config::apply_template_vars(
+                    profile,
+                    &[
+                        ("name", &worker_name),
+                        ("domain", prompts::domain_label(&self.domain)),
+                    ],
+                );
+                let mut prompt = resolved.system_prompt.clone();
+                if !resolved.system_prompt_suffix.is_empty() {
+                    prompt.push_str("\n\n");
+                    prompt.push_str(&resolved.system_prompt_suffix);
+                }
+                if !self.custom_prompt.is_empty() {
+                    prompt.push_str("\n\n## Lead Instructions\n");
+                    prompt.push_str(&self.custom_prompt);
+                }
+                let thinking = resolved
+                    .thinking_level
+                    .unwrap_or(ava_types::ThinkingLevel::Off);
+                let extended = resolved.extended_tools.unwrap_or(false);
+                (prompt, thinking, extended)
+            } else {
+                let prompt = if self.custom_prompt.is_empty() {
+                    prompts::worker_system_prompt_for_domain(&worker_name, &self.domain)
+                } else {
+                    format!(
+                        "{}\n\n## Lead Instructions\n{}",
+                        prompts::worker_system_prompt_for_domain(&worker_name, &self.domain),
+                        self.custom_prompt
+                    )
+                };
+                (prompt, ava_types::ThinkingLevel::Off, true)
+            };
+
+        // Build tool registry from worker role profile or fallback to all core tools
+        let registry = if let (Some(ref profile), Some(platform)) =
+            (&self.worker_role_profile, &self.platform)
+        {
+            let resolved = ava_config::apply_template_vars(
+                profile,
+                &[
+                    ("name", &worker_name),
+                    ("domain", prompts::domain_label(&self.domain)),
+                ],
+            );
+            let (reg, _backup) =
+                crate::role_tools::build_registry_for_role(&resolved, platform.clone());
+            reg
+        } else {
+            let mut reg = ToolRegistry::new();
+            if let Some(platform) = &self.platform {
+                ava_tools::core::register_core_tools(&mut reg, platform.clone());
+            }
+            reg
+        };
 
         let agent = AgentLoop::new(
             Box::new(SharedProvider::new(effective_provider.clone())),
@@ -440,13 +500,13 @@ impl Lead {
                 thinking_level: if matches!(task.task_type, TaskType::Chat) {
                     ava_types::ThinkingLevel::Medium
                 } else {
-                    ava_types::ThinkingLevel::Off
+                    thinking_level
                 },
                 thinking_budget_tokens: None,
                 system_prompt_suffix: None,
                 project_root: None,
                 enable_dynamic_rules: false,
-                extended_tools: true,
+                extended_tools,
                 plan_mode: false,
                 post_edit_validation: None,
                 auto_compact: true,

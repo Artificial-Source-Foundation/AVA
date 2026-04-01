@@ -185,11 +185,7 @@ Only make changes the user requested. Do not expand scope."
             "grep".to_string(),
             "git".to_string(),
         ],
-        denied_tools: vec![
-            "write".to_string(),
-            "edit".to_string(),
-            "bash".to_string(),
-        ],
+        denied_tools: vec!["write".to_string(), "edit".to_string(), "bash".to_string()],
         extended_tools: Some(false),
         allowed_mcp_servers: vec!["*".to_string()],
         thinking_level: Some(ThinkingLevel::Medium),
@@ -308,11 +304,7 @@ For each important snippet:\n\
 \n\
 Be thorough but concise. Focus on actionable findings."
             .to_string(),
-        allowed_tools: vec![
-            "read".to_string(),
-            "glob".to_string(),
-            "grep".to_string(),
-        ],
+        allowed_tools: vec!["read".to_string(), "glob".to_string(), "grep".to_string()],
         denied_tools: vec![],
         extended_tools: Some(false),
         allowed_mcp_servers: Vec::new(),
@@ -338,8 +330,7 @@ pub fn apply_template_vars(profile: &AgentRoleProfile, vars: &[(&str, &str)]) ->
         result.system_prompt = result.system_prompt.replace(&placeholder, value);
         result.display_name = result.display_name.replace(&placeholder, value);
         if !result.system_prompt_suffix.is_empty() {
-            result.system_prompt_suffix =
-                result.system_prompt_suffix.replace(&placeholder, value);
+            result.system_prompt_suffix = result.system_prompt_suffix.replace(&placeholder, value);
         }
     }
     result
@@ -507,8 +498,12 @@ fn merge_profiles(base: &AgentRoleProfile, overlay: &AgentRoleProfile) -> AgentR
         thinking_level: overlay.thinking_level.or(base.thinking_level),
         budget: match (&base.budget, &overlay.budget) {
             (_, Some(ob)) => Some(RoleBudget {
-                max_turns: ob.max_turns.or(base.budget.as_ref().and_then(|b| b.max_turns)),
-                max_tokens: ob.max_tokens.or(base.budget.as_ref().and_then(|b| b.max_tokens)),
+                max_turns: ob
+                    .max_turns
+                    .or(base.budget.as_ref().and_then(|b| b.max_turns)),
+                max_tokens: ob
+                    .max_tokens
+                    .or(base.budget.as_ref().and_then(|b| b.max_tokens)),
                 max_cost_usd: ob
                     .max_cost_usd
                     .or(base.budget.as_ref().and_then(|b| b.max_cost_usd)),
@@ -534,9 +529,8 @@ pub struct HqRolesFile {
 
 /// Load role profiles from a TOML file. Returns empty map if file doesn't exist.
 pub fn load_roles_file(path: &std::path::Path) -> HashMap<String, AgentRoleProfile> {
-    let content = match std::fs::read_to_string(path) {
-        Ok(c) => c,
-        Err(_) => return HashMap::new(),
+    let Ok(content) = std::fs::read_to_string(path) else {
+        return HashMap::new();
     };
     match toml::from_str::<HqRolesFile>(&content) {
         Ok(mut file) => {

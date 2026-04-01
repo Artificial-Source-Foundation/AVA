@@ -15,6 +15,7 @@ workspace = true
 async-trait.workspace = true
 ava-agent = { path = "../ava-agent" }
 ava-acp = { path = "../ava-acp" }
+ava-config = { path = "../ava-config", default-features = false }
 ava-context = { path = "../ava-context" }
 ava-llm = { path = "../ava-llm" }
 ava-platform = { path = "../ava-platform" }

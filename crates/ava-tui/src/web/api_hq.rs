@@ -711,6 +711,7 @@ async fn build_director(
         enabled_leads,
         lead_prompts,
         worker_provider,
+        role_resolver: None,
     }))
 }
 

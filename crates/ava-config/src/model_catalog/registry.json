@@ -462,6 +462,25 @@
       }
     },
     {
+      "id": "accounts/fireworks/routers/kimi-k2p5-turbo",
+      "provider": "fireworks",
+      "name": "Kimi K2.5 Turbo (Fire Pass)",
+      "aliases": ["kimi-k2p5-turbo", "kimi-k2.5-turbo"],
+      "capabilities": {
+        "tool_call": true,
+        "vision": true,
+        "streaming": true
+      },
+      "limits": {
+        "context_window": 256000,
+        "max_output": 65536
+      },
+      "cost": {
+        "input_per_million": 0.0,
+        "output_per_million": 0.0
+      }
+    },
+    {
       "id": "glm-4.7",
       "provider": "zai-coding-plan",
       "name": "GLM-4.7",

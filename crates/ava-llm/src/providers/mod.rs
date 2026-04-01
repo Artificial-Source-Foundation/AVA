@@ -13,6 +13,7 @@ pub mod anthropic;
 pub mod azure;
 pub mod bedrock;
 pub mod copilot;
+pub mod fireworks;
 pub mod gemini;
 pub mod inception;
 pub mod mock;
@@ -24,6 +25,7 @@ pub use anthropic::AnthropicProvider;
 pub use azure::AzureOpenAIProvider;
 pub use bedrock::BedrockProvider;
 pub use copilot::CopilotProvider;
+pub use fireworks::FireworksProvider;
 pub use gemini::GeminiProvider;
 pub use inception::InceptionProvider;
 pub use mock::MockProvider;
@@ -39,6 +41,7 @@ pub fn is_known_provider(provider_name: &str) -> bool {
             | "chatgpt"
             | "openrouter"
             | "inception"
+            | "fireworks"
             | "xai"
             | "mistral"
             | "groq"
@@ -72,6 +75,7 @@ pub fn base_url_for_provider(provider_name: &str) -> Option<&'static str> {
         "gemini" => Some("https://generativelanguage.googleapis.com"),
         "copilot" => Some("https://api.individual.githubcopilot.com"),
         "inception" => Some("https://api.inceptionlabs.ai"),
+        "fireworks" => Some("https://api.fireworks.ai/inference"),
         "xai" => Some("https://api.x.ai/v1"),
         "mistral" => Some("https://api.mistral.ai/v1"),
         "groq" => Some("https://api.groq.com/openai/v1"),
@@ -261,6 +265,24 @@ pub fn create_provider(
                 )))
             } else {
                 Ok(Box::new(InceptionProvider::new(pool, api_key, model)))
+            }
+        }
+        "fireworks" => {
+            let entry = credential.ok_or_else(|| AvaError::MissingApiKey {
+                provider: "fireworks".to_string(),
+            })?;
+            let api_key = entry
+                .effective_api_key()
+                .ok_or_else(|| AvaError::MissingApiKey {
+                    provider: "fireworks".to_string(),
+                })?
+                .to_string();
+            if let Some(base_url) = entry.base_url {
+                Ok(Box::new(FireworksProvider::with_base_url(
+                    pool, api_key, model, base_url,
+                )))
+            } else {
+                Ok(Box::new(FireworksProvider::new(pool, api_key, model)))
             }
         }
         "gemini" => {
@@ -476,9 +498,9 @@ pub fn create_provider(
             provider: provider_name.to_string(),
             message:
                 "unknown provider. Available: anthropic, openai, chatgpt, openrouter, inception, \
-                      xai, mistral, groq, deepseek, copilot, gemini, ollama, azure, bedrock, \
-                      alibaba, alibaba-cn, zai-coding-plan, zhipuai-coding-plan, kimi-for-coding, \
-                      minimax-coding-plan, minimax-cn-coding-plan"
+                      fireworks, xai, mistral, groq, deepseek, copilot, gemini, ollama, azure, \
+                      bedrock, alibaba, alibaba-cn, zai-coding-plan, zhipuai-coding-plan, \
+                      kimi-for-coding, minimax-coding-plan, minimax-cn-coding-plan"
                     .to_string(),
         }),
     }
@@ -691,6 +713,7 @@ mod tests {
             ("openai", "gpt-4.1"),
             ("openrouter", "anthropic/claude-sonnet-4"),
             ("inception", "mercury-2"),
+            ("fireworks", "kimi-k2p5-turbo"),
             ("xai", "grok-3"),
             ("mistral", "mistral-large"),
             ("groq", "llama-3.3-70b"),
@@ -727,6 +750,7 @@ mod tests {
             "openai",
             "openrouter",
             "inception",
+            "fireworks",
             "xai",
             "mistral",
             "groq",
@@ -859,6 +883,41 @@ mod tests {
         let provider =
             create_provider("inception", "mercury-coder", &creds, default_pool()).unwrap();
         assert_eq!(provider.model_name(), "mercury-coder-small");
+    }
+
+    #[test]
+    fn fireworks_creates_provider_with_correct_model() {
+        let creds = mock_creds_for(&["fireworks"]);
+        let provider =
+            create_provider("fireworks", "kimi-k2p5-turbo", &creds, default_pool()).unwrap();
+        assert_eq!(
+            provider.model_name(),
+            "accounts/fireworks/routers/kimi-k2p5-turbo"
+        );
+        assert!(provider.supports_tools());
+        assert!(!provider.supports_thinking());
+    }
+
+    #[test]
+    fn fireworks_fire_pass_model_is_subscription() {
+        let creds = mock_creds_for(&["fireworks"]);
+        let provider =
+            create_provider("fireworks", "kimi-k2p5-turbo", &creds, default_pool()).unwrap();
+        assert!(provider.capabilities().is_subscription);
+        assert_eq!(provider.estimate_cost(1_000_000, 1_000_000), 0.0);
+    }
+
+    #[test]
+    fn fireworks_regular_model_is_not_subscription() {
+        let creds = mock_creds_for(&["fireworks"]);
+        let provider = create_provider(
+            "fireworks",
+            "accounts/fireworks/models/llama-v3p1-405b-instruct",
+            &creds,
+            default_pool(),
+        )
+        .unwrap();
+        assert!(!provider.capabilities().is_subscription);
     }
 
     #[test]

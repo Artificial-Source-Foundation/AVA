@@ -129,7 +129,7 @@ fn has_pipe_to_shell(cmd: &str) -> bool {
 
 /// Check for patterns that should be BLOCKED (Critical risk).
 /// These are ALWAYS denied, even in auto-approve mode.
-pub(super) fn check_blocked_patterns(lower: &str, _original: &str) -> Option<String> {
+pub(super) fn check_blocked_patterns(lower: &str, original: &str) -> Option<String> {
     // rm with recursive+force flags on a critical path
     {
         let tokens: Vec<&str> = lower.split_ascii_whitespace().collect();
@@ -143,6 +143,11 @@ pub(super) fn check_blocked_patterns(lower: &str, _original: &str) -> Option<Str
                 }
             }
         }
+    }
+
+    // Additional dangerous path detection (includes Windows paths and path normalization)
+    if crate::dangerous_paths::is_dangerous_rm_command(original) {
+        return Some("rm with recursive flag on dangerous system path".to_string());
     }
 
     // sudo
@@ -452,6 +457,203 @@ fn is_cron_injection(lower: &str) -> bool {
         return true;
     }
     false
+}
+
+/// Check for injection and evasion patterns in command strings.
+///
+/// These patterns detect various techniques used to bypass command classification
+/// or inject unintended behavior into shell commands.
+pub(super) fn check_injection_patterns(
+    command: &str,
+    lower: &str,
+) -> Option<CommandClassification> {
+    // 1. JQ RCE: jq with system() call or -f flag loading external filters
+    if lower.contains("jq") && (lower.contains("system(") || lower.contains(" -f ")) {
+        return Some(CommandClassification {
+            risk_level: RiskLevel::High,
+            tags: vec![SafetyTag::ExecuteCommand],
+            warnings: vec![
+                "jq with system() or external filter file — potential code execution".to_string(),
+            ],
+            blocked: false,
+            reason: None,
+        });
+    }
+
+    // 2. Newline injection: embedded literal \n (two chars: backslash + n) in command strings
+    // that could cause shell to interpret multiple lines differently
+    if command.contains("\\n") && !command.contains("\\n\"") && !command.contains("echo ") {
+        // Avoid false positives from echo "...\n" and similar benign uses
+        let suspicious_newline = lower.contains("\\n;")
+            || lower.contains("\\n|")
+            || lower.contains("\\n&")
+            || lower.contains("\\nrm ")
+            || lower.contains("\\ncurl ")
+            || lower.contains("\\nwget ")
+            || lower.contains("\\nsudo ");
+        if suspicious_newline {
+            return Some(CommandClassification {
+                risk_level: RiskLevel::High,
+                tags: vec![SafetyTag::ExecuteCommand],
+                warnings: vec![
+                    "Embedded newline escape with suspicious payload — potential injection"
+                        .to_string(),
+                ],
+                blocked: false,
+                reason: None,
+            });
+        }
+    }
+
+    // 3. Proc environ access: reading process environment variables from procfs
+    if lower.contains("/proc/self/environ") || lower.contains("/proc/*/environ") {
+        return Some(CommandClassification {
+            risk_level: RiskLevel::High,
+            tags: vec![SafetyTag::Privileged],
+            warnings: vec!["Accessing /proc/*/environ can leak environment secrets".to_string()],
+            blocked: false,
+            reason: None,
+        });
+    }
+    // Also catch numeric PID variants like /proc/1/environ
+    if regex::Regex::new(r"/proc/\d+/environ")
+        .ok()
+        .is_some_and(|re| re.is_match(lower))
+    {
+        return Some(CommandClassification {
+            risk_level: RiskLevel::High,
+            tags: vec![SafetyTag::Privileged],
+            warnings: vec!["Accessing /proc/<pid>/environ can leak environment secrets".to_string()],
+            blocked: false,
+            reason: None,
+        });
+    }
+
+    // 4. Comment/quote desync: unmatched quotes followed by # could hide malicious commands
+    {
+        let mut in_single = false;
+        let mut in_double = false;
+        let chars: Vec<char> = command.chars().collect();
+        let mut i = 0;
+        while i < chars.len() {
+            let c = chars[i];
+            if c == '\\' && i + 1 < chars.len() {
+                i += 2;
+                continue;
+            }
+            if c == '\'' && !in_double {
+                in_single = !in_single;
+            } else if c == '"' && !in_single {
+                in_double = !in_double;
+            } else if c == '#' && !in_single && !in_double {
+                // Found unquoted # — check if there were unmatched quotes before it
+                // This is OK, # is just a comment
+            }
+            i += 1;
+        }
+        // If we end with unmatched quotes AND there was a # somewhere, flag it
+        if (in_single || in_double) && command.contains('#') {
+            return Some(CommandClassification {
+                risk_level: RiskLevel::High,
+                tags: vec![SafetyTag::ExecuteCommand],
+                warnings: vec![
+                    "Unmatched quotes with comment character — potential quote/comment desync"
+                        .to_string(),
+                ],
+                blocked: false,
+                reason: None,
+            });
+        }
+    }
+
+    // 5. Backslash-escaped operators outside quotes: \; \| \& can bypass parsing
+    {
+        let mut in_single = false;
+        let mut in_double = false;
+        let chars: Vec<char> = command.chars().collect();
+        let mut i = 0;
+        while i < chars.len() {
+            let c = chars[i];
+            if c == '\'' && !in_double {
+                in_single = !in_single;
+                i += 1;
+                continue;
+            }
+            if c == '"' && !in_single {
+                in_double = !in_double;
+                i += 1;
+                continue;
+            }
+            if c == '\\' && !in_single && i + 1 < chars.len() {
+                let next = chars[i + 1];
+                if matches!(next, ';' | '|' | '&') {
+                    return Some(CommandClassification {
+                        risk_level: RiskLevel::High,
+                        tags: vec![SafetyTag::ExecuteCommand],
+                        warnings: vec![format!(
+                            "Backslash-escaped operator '\\{}' outside quotes — potential parser evasion",
+                            next
+                        )],
+                        blocked: false,
+                        reason: None,
+                    });
+                }
+                i += 2;
+                continue;
+            }
+            i += 1;
+        }
+    }
+
+    // 6. Control characters: bytes 0x00-0x1F (except 0x09 tab, 0x0A newline) or 0x7F
+    for c in command.chars() {
+        let cp = c as u32;
+        if cp == 0x7F || (cp <= 0x1F && cp != 0x09 && cp != 0x0A) {
+            return Some(CommandClassification {
+                risk_level: RiskLevel::High,
+                tags: vec![SafetyTag::ExecuteCommand],
+                warnings: vec![format!(
+                    "Control character U+{:04X} in command — potential injection",
+                    cp
+                )],
+                blocked: false,
+                reason: None,
+            });
+        }
+    }
+
+    // 7. Quoted newlines: actual newline characters inside single or double quotes
+    {
+        let mut in_single = false;
+        let mut in_double = false;
+        let chars: Vec<char> = command.chars().collect();
+        let mut i = 0;
+        while i < chars.len() {
+            let c = chars[i];
+            if c == '\\' && in_double && i + 1 < chars.len() {
+                i += 2;
+                continue;
+            }
+            if c == '\'' && !in_double {
+                in_single = !in_single;
+            } else if c == '"' && !in_single {
+                in_double = !in_double;
+            } else if c == '\n' && (in_single || in_double) {
+                return Some(CommandClassification {
+                    risk_level: RiskLevel::Medium,
+                    tags: vec![SafetyTag::ExecuteCommand],
+                    warnings: vec![
+                        "Newline inside quoted string — may cause unexpected behavior".to_string(),
+                    ],
+                    blocked: false,
+                    reason: None,
+                });
+            }
+            i += 1;
+        }
+    }
+
+    None
 }
 
 /// Check for high-risk patterns that span pipes/chains (whole-command analysis).

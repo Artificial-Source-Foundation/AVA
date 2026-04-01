@@ -11,12 +11,16 @@ use std::path::{Component, Path, PathBuf};
 pub mod audit;
 pub mod audit_store;
 pub mod classifier;
+pub mod dangerous_paths;
+pub mod denial_tracking;
 pub mod glob_rules;
 pub mod injection;
 pub mod inspector;
 pub mod path_safety;
 pub mod persistent;
 pub mod policy;
+pub mod sanitization;
+pub mod ssrf;
 pub mod tags;
 
 use classifier::classify_bash_command;

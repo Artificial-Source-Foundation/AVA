@@ -25,6 +25,8 @@ async-trait.workspace = true
 tokio = { workspace = true, features = ["time"] }
 sqlx.workspace = true
 thiserror.workspace = true
+unicode-normalization = "0.1"
+url = "2"
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt", "time"] }

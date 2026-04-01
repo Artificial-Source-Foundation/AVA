@@ -1,8 +1,10 @@
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
 use ava_types::{AvaError, Result, ToolResult};
+use base64::Engine;
 use futures::future::join_all;
 use serde_json::Value;
 use tokio::sync::Mutex;
@@ -12,6 +14,12 @@ use tracing::{info, warn};
 const MCP_CONNECT_TIMEOUT_SECS: u64 = 30;
 /// Default timeout for an already-connected MCP server request.
 const MCP_REQUEST_TIMEOUT_SECS: u64 = 45;
+
+/// Maximum character count for MCP tool output before truncation (F41).
+pub const MAX_MCP_OUTPUT_CHARS: usize = 100_000;
+
+/// Threshold in seconds for MCP progress logging (F51).
+const MCP_PROGRESS_LOG_INTERVAL_SECS: u64 = 30;
 
 use crate::client::{
     MCPClient, MCPPrompt, MCPPromptResult, MCPResource, MCPResourceContent, MCPTool,
@@ -138,6 +146,9 @@ impl ExtensionManager {
     }
 
     /// Execute a tool call, routing to the correct server.
+    ///
+    /// Includes progress logging for long-running calls (F51), output
+    /// truncation for oversized results (F41), and binary blob detection (F43).
     /// This method takes `&self` and uses interior mutability via client Mutexes.
     pub async fn call_tool(&self, name: &str, arguments: Value) -> Result<ToolResult> {
         let server_name = self
@@ -159,7 +170,8 @@ impl ExtensionManager {
             AvaError::ToolError(format!("MCP server '{server_name}' is not connected"))
         })?;
 
-        let result = Self::call_tool_with_timeout(
+        // F51: Progress logging for long-running tool calls
+        let result = call_tool_with_progress(
             client,
             &server_name,
             name,
@@ -168,12 +180,24 @@ impl ExtensionManager {
         )
         .await?;
 
+        // F43: Check for binary blobs in content array
+        if let Some(blob_result) = detect_and_save_binary_blob(&result, &server_name, name) {
+            return Ok(ToolResult {
+                call_id: format!("mcp-{server_name}-{name}"),
+                content: blob_result,
+                is_error: false,
+            });
+        }
+
         // Parse the MCP result into a ToolResult
         let content = extract_text_content(&result);
         let is_error = result
             .get("isError")
             .and_then(Value::as_bool)
             .unwrap_or(false);
+
+        // F41: Truncate oversized output
+        let content = truncate_mcp_output(&content, &server_name, name);
 
         Ok(ToolResult {
             call_id: format!("mcp-{server_name}-{name}"),
@@ -407,6 +431,11 @@ impl ExtensionManager {
     pub fn tool_count(&self) -> usize {
         self.tools.len()
     }
+
+    /// Get the names of all connected servers.
+    pub fn connected_server_names(&self) -> Vec<String> {
+        self.clients.keys().cloned().collect()
+    }
 }
 
 fn format_timeout(duration: Duration) -> String {
@@ -503,6 +532,242 @@ fn extract_text_content(result: &Value) -> String {
     } else {
         serde_json::to_string(result).unwrap_or_default()
     }
+}
+
+// ---------------------------------------------------------------------------
+// F41: MCP Result Token Validation — truncate oversized output
+// ---------------------------------------------------------------------------
+
+/// Truncate MCP output if it exceeds `MAX_MCP_OUTPUT_CHARS`.
+///
+/// When truncated, the full output is saved to `~/.ava/mcp-output/` and a
+/// notice is appended to the truncated content.
+fn truncate_mcp_output(content: &str, server_name: &str, tool_name: &str) -> String {
+    if content.len() <= MAX_MCP_OUTPUT_CHARS {
+        return content.to_string();
+    }
+
+    let original_len = content.len();
+
+    // Save full output to fallback file
+    if let Some(path) = save_mcp_output_fallback(content, server_name, tool_name) {
+        info!(
+            server = %server_name,
+            tool = %tool_name,
+            original_len,
+            saved_to = %path.display(),
+            "MCP output truncated, full output saved"
+        );
+    }
+
+    let mut truncated = content[..MAX_MCP_OUTPUT_CHARS].to_string();
+    truncated.push_str(&format!(
+        "\n[MCP output truncated — {original_len} chars exceeded {MAX_MCP_OUTPUT_CHARS} limit]"
+    ));
+    truncated
+}
+
+/// Save full MCP output to `~/.ava/mcp-output/{server}-{tool}-{timestamp}.txt`.
+fn save_mcp_output_fallback(content: &str, server_name: &str, tool_name: &str) -> Option<PathBuf> {
+    let dir = mcp_output_dir()?;
+    std::fs::create_dir_all(&dir).ok()?;
+
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+
+    let filename = format!("{server_name}-{tool_name}-{timestamp}.txt");
+    let path = dir.join(filename);
+    std::fs::write(&path, content).ok()?;
+    Some(path)
+}
+
+/// MCP output directory path.
+fn mcp_output_dir() -> Option<PathBuf> {
+    dirs::home_dir().map(|h| h.join(".ava").join("mcp-output"))
+}
+
+// ---------------------------------------------------------------------------
+// F43: Binary Blob Handling
+// ---------------------------------------------------------------------------
+
+/// Detect base64-encoded binary content in MCP tool results and save decoded bytes.
+///
+/// Checks the content array for base64-encoded blobs (either via `mimeType` hints
+/// or by detecting the base64 pattern in text content over 1000 chars).
+/// Returns `Some(message)` if a blob was detected and saved, `None` otherwise.
+fn detect_and_save_binary_blob(
+    result: &Value,
+    server_name: &str,
+    tool_name: &str,
+) -> Option<String> {
+    let content_array = result.get("content").and_then(Value::as_array)?;
+
+    for block in content_array {
+        // Check for explicit blob field (MCP spec: binary content)
+        if let Some(blob_b64) = block.get("blob").and_then(Value::as_str) {
+            let mime_type = block.get("mimeType").and_then(Value::as_str).unwrap_or("");
+            return save_binary_blob(blob_b64, mime_type, server_name, tool_name);
+        }
+
+        // Check for base64 text content with binary MIME type
+        let mime_type = block.get("mimeType").and_then(Value::as_str).unwrap_or("");
+        let is_binary_mime = mime_type.starts_with("image/")
+            || mime_type.starts_with("application/octet")
+            || mime_type == "application/pdf";
+
+        if let Some(text) = block.get("text").and_then(Value::as_str) {
+            if (is_binary_mime || is_likely_base64(text)) && text.len() > 1000 {
+                return save_binary_blob(text, mime_type, server_name, tool_name);
+            }
+        }
+    }
+
+    None
+}
+
+/// Check if a string looks like base64-encoded binary data.
+fn is_likely_base64(s: &str) -> bool {
+    if s.len() < 1000 {
+        return false;
+    }
+    // Base64 strings consist of [A-Za-z0-9+/=] with optional whitespace
+    let trimmed = s.trim();
+    let valid_chars = trimmed
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .all(|c| c.is_ascii_alphanumeric() || c == '+' || c == '/' || c == '=');
+    valid_chars && trimmed.len() > 1000
+}
+
+/// Infer file extension from decoded binary magic bytes.
+fn infer_extension(bytes: &[u8], mime_type: &str) -> &'static str {
+    // Check magic bytes first
+    if bytes.len() >= 4 {
+        if bytes[0..4] == [0x89, 0x50, 0x4E, 0x47] {
+            return "png";
+        }
+        if bytes[0..2] == [0xFF, 0xD8] {
+            return "jpg";
+        }
+        if bytes.starts_with(b"%PDF") {
+            return "pdf";
+        }
+        if bytes.starts_with(b"GIF8") {
+            return "gif";
+        }
+        if bytes[0..4] == [0x50, 0x4B, 0x03, 0x04] {
+            return "zip";
+        }
+    }
+
+    // Fall back to MIME type
+    match mime_type {
+        "image/png" => "png",
+        "image/jpeg" | "image/jpg" => "jpg",
+        "image/gif" => "gif",
+        "application/pdf" => "pdf",
+        "application/zip" => "zip",
+        _ => "bin",
+    }
+}
+
+/// Save decoded binary data and return a message about the saved file.
+fn save_binary_blob(
+    b64_data: &str,
+    mime_type: &str,
+    server_name: &str,
+    _tool_name: &str,
+) -> Option<String> {
+    use base64::engine::general_purpose::STANDARD;
+
+    let clean: String = b64_data.chars().filter(|c| !c.is_whitespace()).collect();
+    let bytes = STANDARD.decode(&clean).ok()?;
+    let ext = infer_extension(&bytes, mime_type);
+    let size = bytes.len();
+
+    let dir = mcp_output_dir()?;
+    std::fs::create_dir_all(&dir).ok()?;
+
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+
+    let filename = format!("{server_name}-{timestamp}.{ext}");
+    let path = dir.join(&filename);
+    std::fs::write(&path, &bytes).ok()?;
+
+    info!(
+        server = %server_name,
+        path = %path.display(),
+        size,
+        "Saved MCP binary blob"
+    );
+
+    Some(format!(
+        "[Binary content saved to {} ({size} bytes)]",
+        path.display()
+    ))
+}
+
+// ---------------------------------------------------------------------------
+// F51: MCP Progress Logging
+// ---------------------------------------------------------------------------
+
+/// Execute an MCP tool call with progress logging for long-running operations.
+///
+/// If the call takes longer than `MCP_PROGRESS_LOG_INTERVAL_SECS`, logs a
+/// progress message every interval until the call completes.
+async fn call_tool_with_progress(
+    client: &Arc<Mutex<MCPClient>>,
+    server_name: &str,
+    tool_name: &str,
+    arguments: Value,
+    timeout_duration: Duration,
+) -> Result<Value> {
+    let server = server_name.to_string();
+    let tool = tool_name.to_string();
+    let start = std::time::Instant::now();
+
+    let call_fut = ExtensionManager::call_tool_with_timeout(
+        client,
+        server_name,
+        tool_name,
+        arguments,
+        timeout_duration,
+    );
+
+    let progress_fut = async {
+        let mut interval =
+            tokio::time::interval(Duration::from_secs(MCP_PROGRESS_LOG_INTERVAL_SECS));
+        // Skip the first immediate tick
+        interval.tick().await;
+        loop {
+            interval.tick().await;
+            let elapsed_secs = start.elapsed().as_secs();
+            log_mcp_progress(&server, &tool, elapsed_secs);
+        }
+    };
+
+    tokio::select! {
+        result = call_fut => result,
+        _ = progress_fut => {
+            // This branch never completes (infinite loop), but required for select!
+            unreachable!()
+        }
+    }
+}
+
+/// Log progress for a long-running MCP tool call.
+pub fn log_mcp_progress(server: &str, tool: &str, elapsed_secs: u64) {
+    info!(
+        server = %server,
+        tool = %tool,
+        elapsed_secs,
+        "MCP tool call still in progress"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -731,5 +996,127 @@ mod tests {
         let result = json!({});
         let text = extract_text_content(&result);
         assert_eq!(text, "{}");
+    }
+
+    // --- F41: MCP Result Token Validation tests ---
+
+    #[test]
+    fn truncate_under_limit_unchanged() {
+        let content = "Hello, world!";
+        let result = truncate_mcp_output(content, "test-server", "test-tool");
+        assert_eq!(result, content);
+    }
+
+    #[test]
+    fn truncate_over_limit_adds_notice() {
+        let content = "x".repeat(MAX_MCP_OUTPUT_CHARS + 500);
+        let result = truncate_mcp_output(&content, "test-server", "test-tool");
+
+        assert!(result.len() < content.len());
+        assert!(result.contains("[MCP output truncated"));
+        assert!(result.contains(&format!("{}", MAX_MCP_OUTPUT_CHARS + 500)));
+        assert!(result.contains(&format!("{MAX_MCP_OUTPUT_CHARS}")));
+        // First part should be preserved
+        assert!(result.starts_with(&"x".repeat(100)));
+    }
+
+    #[test]
+    fn truncate_exact_limit_unchanged() {
+        let content = "y".repeat(MAX_MCP_OUTPUT_CHARS);
+        let result = truncate_mcp_output(&content, "server", "tool");
+        assert_eq!(result, content);
+    }
+
+    // --- F43: Binary Blob Handling tests ---
+
+    #[test]
+    fn detect_base64_png_blob() {
+        // Create a fake PNG: magic bytes + padding
+        let mut png_data = vec![0x89u8, 0x50, 0x4E, 0x47]; // PNG magic
+        png_data.extend(vec![0u8; 1000]); // padding to make it substantial
+        let b64 = base64::engine::general_purpose::STANDARD.encode(&png_data);
+
+        let result = json!({
+            "content": [{
+                "type": "image",
+                "blob": b64,
+                "mimeType": "image/png"
+            }]
+        });
+
+        let msg = detect_and_save_binary_blob(&result, "test-server", "screenshot");
+        assert!(msg.is_some());
+        let msg = msg.unwrap();
+        assert!(msg.contains("Binary content saved to"));
+        assert!(msg.contains("bytes"));
+        assert!(msg.contains(".png"));
+    }
+
+    #[test]
+    fn detect_base64_text_passthrough() {
+        // Short base64-like text should NOT be detected as binary
+        let result = json!({
+            "content": [{
+                "type": "text",
+                "text": "SGVsbG8gV29ybGQ="  // "Hello World" in base64
+            }]
+        });
+
+        let msg = detect_and_save_binary_blob(&result, "server", "tool");
+        assert!(msg.is_none());
+    }
+
+    #[test]
+    fn non_binary_content_passthrough() {
+        let result = json!({
+            "content": [{
+                "type": "text",
+                "text": "This is just regular text output from the MCP tool"
+            }]
+        });
+
+        let msg = detect_and_save_binary_blob(&result, "server", "tool");
+        assert!(msg.is_none());
+    }
+
+    #[test]
+    fn infer_extension_from_magic_bytes() {
+        assert_eq!(infer_extension(&[0x89, 0x50, 0x4E, 0x47], ""), "png");
+        assert_eq!(infer_extension(&[0xFF, 0xD8, 0x00, 0x00], ""), "jpg");
+        assert_eq!(infer_extension(b"%PDF-1.4", ""), "pdf");
+        assert_eq!(infer_extension(&[0x47, 0x49, 0x46, 0x38], ""), "gif"); // GIF8
+        assert_eq!(infer_extension(&[0x00, 0x00, 0x00, 0x00], ""), "bin");
+    }
+
+    #[test]
+    fn infer_extension_from_mime_type() {
+        assert_eq!(infer_extension(&[], "image/png"), "png");
+        assert_eq!(infer_extension(&[], "image/jpeg"), "jpg");
+        assert_eq!(infer_extension(&[], "application/pdf"), "pdf");
+        assert_eq!(infer_extension(&[], "application/octet-stream"), "bin");
+    }
+
+    #[test]
+    fn is_likely_base64_detection() {
+        // Short string: not base64
+        assert!(!is_likely_base64("SGVsbG8="));
+
+        // Long valid base64
+        let long_b64 = "A".repeat(2000);
+        assert!(is_likely_base64(&long_b64));
+
+        // Long string with non-base64 chars
+        let non_b64 = "Hello World! ".repeat(200);
+        assert!(!is_likely_base64(&non_b64));
+    }
+
+    // --- F51: MCP Progress Logging test ---
+
+    #[test]
+    fn log_mcp_progress_formats_correctly() {
+        // Just verify the function exists and can be called (tracing output
+        // is captured by test infrastructure, not asserted on directly)
+        log_mcp_progress("test-server", "slow-tool", 60);
+        log_mcp_progress("test-server", "slow-tool", 90);
     }
 }

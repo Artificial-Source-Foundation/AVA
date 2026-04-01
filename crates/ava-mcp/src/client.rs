@@ -1,10 +1,97 @@
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Instant;
 
 use ava_types::{AvaError, Result, Tool, ToolCall};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use tracing::warn;
 
 use crate::transport::{JsonRpcMessage, MCPTransport};
+
+// ---------------------------------------------------------------------------
+// Connection health tracking (F40)
+// ---------------------------------------------------------------------------
+
+/// Terminal error patterns that indicate the connection is broken and
+/// a reconnect should be attempted.
+const TERMINAL_ERROR_PATTERNS: &[&str] = &[
+    "connection reset",
+    "timed out",
+    "broken pipe",
+    "connection refused",
+    "host unreachable",
+];
+
+/// Number of consecutive terminal errors before triggering reconnect.
+const RECONNECT_THRESHOLD: u32 = 3;
+
+/// Connection health tracker for an MCP client.
+#[derive(Debug)]
+pub struct ConnectionHealth {
+    consecutive_errors: u32,
+    last_error_time: Option<Instant>,
+}
+
+impl ConnectionHealth {
+    pub fn new() -> Self {
+        Self {
+            consecutive_errors: 0,
+            last_error_time: None,
+        }
+    }
+
+    /// Record an error and return `true` if a reconnect is needed.
+    ///
+    /// Only terminal errors (connection reset, timeout, broken pipe, etc.)
+    /// count toward the reconnect threshold. Non-terminal errors (e.g.,
+    /// application-level errors) are ignored.
+    pub fn record_error(&mut self, error: &str) -> bool {
+        let lower = error.to_lowercase();
+        let is_terminal = TERMINAL_ERROR_PATTERNS
+            .iter()
+            .any(|pattern| lower.contains(pattern));
+
+        if !is_terminal {
+            return false;
+        }
+
+        self.consecutive_errors += 1;
+        self.last_error_time = Some(Instant::now());
+
+        let needs_reconnect = self.consecutive_errors >= RECONNECT_THRESHOLD;
+        if needs_reconnect {
+            warn!(
+                consecutive_errors = self.consecutive_errors,
+                error = %error,
+                "MCP connection needs reconnect after {} consecutive terminal errors",
+                self.consecutive_errors
+            );
+        }
+        needs_reconnect
+    }
+
+    /// Record a successful operation, resetting the error counter.
+    pub fn record_success(&mut self) {
+        self.consecutive_errors = 0;
+        self.last_error_time = None;
+    }
+
+    /// Current number of consecutive terminal errors.
+    pub fn consecutive_errors(&self) -> u32 {
+        self.consecutive_errors
+    }
+
+    /// Time of the last recorded terminal error, if any.
+    pub fn last_error_time(&self) -> Option<Instant> {
+        self.last_error_time
+    }
+}
+
+impl Default for ConnectionHealth {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Server capabilities returned by the MCP server on initialize
@@ -139,6 +226,7 @@ pub struct MCPClient {
     server_capabilities: Option<ServerCapabilities>,
     request_id: AtomicU64,
     server_name: String,
+    health: ConnectionHealth,
 }
 
 impl MCPClient {
@@ -149,7 +237,23 @@ impl MCPClient {
             server_capabilities: None,
             request_id: AtomicU64::new(1),
             server_name: server_name.to_string(),
+            health: ConnectionHealth::new(),
         }
+    }
+
+    /// Access the connection health tracker.
+    pub fn health(&self) -> &ConnectionHealth {
+        &self.health
+    }
+
+    /// Record an MCP error and return `true` if reconnect is needed.
+    pub fn record_mcp_error(&mut self, error: &str) -> bool {
+        self.health.record_error(error)
+    }
+
+    /// Record a successful MCP operation.
+    pub fn record_mcp_success(&mut self) {
+        self.health.record_success();
     }
 
     /// Send the MCP `initialize` handshake and return server capabilities.
@@ -655,5 +759,79 @@ mod tests {
         let call = tool_call_from_request("id-1", &params).unwrap();
         assert_eq!(call.name, "foo");
         assert_eq!(call.arguments, json!({"bar": 1}));
+    }
+
+    // --- F40: Connection health tracking tests ---
+
+    #[test]
+    fn connection_health_three_errors_triggers_reconnect() {
+        let mut health = ConnectionHealth::new();
+        assert!(!health.record_error("connection reset by peer"));
+        assert_eq!(health.consecutive_errors(), 1);
+        assert!(!health.record_error("connection reset"));
+        assert_eq!(health.consecutive_errors(), 2);
+        assert!(health.record_error("connection reset"));
+        assert_eq!(health.consecutive_errors(), 3);
+        assert!(health.last_error_time().is_some());
+    }
+
+    #[test]
+    fn connection_health_success_resets_counter() {
+        let mut health = ConnectionHealth::new();
+        health.record_error("timed out");
+        health.record_error("broken pipe");
+        assert_eq!(health.consecutive_errors(), 2);
+
+        health.record_success();
+        assert_eq!(health.consecutive_errors(), 0);
+        assert!(health.last_error_time().is_none());
+
+        // Should need 3 more errors now
+        assert!(!health.record_error("timed out"));
+        assert!(!health.record_error("timed out"));
+        assert!(health.record_error("timed out"));
+    }
+
+    #[test]
+    fn connection_health_non_terminal_errors_ignored() {
+        let mut health = ConnectionHealth::new();
+        assert!(!health.record_error("invalid JSON response"));
+        assert!(!health.record_error("tool not found"));
+        assert!(!health.record_error("permission denied"));
+        assert!(!health.record_error("rate limited"));
+        assert_eq!(health.consecutive_errors(), 0);
+    }
+
+    #[test]
+    fn connection_health_terminal_patterns() {
+        let mut health = ConnectionHealth::new();
+
+        // Each pattern should count
+        for pattern in &[
+            "connection reset",
+            "timed out",
+            "broken pipe",
+            "connection refused",
+            "host unreachable",
+        ] {
+            let mut h = ConnectionHealth::new();
+            assert!(!h.record_error(pattern));
+            assert_eq!(h.consecutive_errors(), 1);
+        }
+
+        // Case insensitive
+        assert!(!health.record_error("Connection Reset"));
+        assert_eq!(health.consecutive_errors(), 1);
+    }
+
+    #[test]
+    fn connection_health_mixed_errors() {
+        let mut health = ConnectionHealth::new();
+        assert!(!health.record_error("connection reset"));
+        assert!(!health.record_error("invalid JSON")); // non-terminal, should NOT reset
+        assert!(!health.record_error("broken pipe"));
+        // 2 consecutive terminal errors, non-terminal didn't reset
+        assert_eq!(health.consecutive_errors(), 2);
+        assert!(health.record_error("timed out")); // 3rd terminal → reconnect
     }
 }

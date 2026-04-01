@@ -365,6 +365,15 @@ pub(super) async fn run_single_agent(cli: CliArgs, goal: &str) -> Result<()> {
                 } => {
                     serde_json::json!({"type": "mcp_tools_changed", "server_name": server_name, "tool_count": tool_count})
                 }
+                AgentEvent::RetryHeartbeat { attempt, wait_secs } => {
+                    serde_json::json!({"type": "retry_heartbeat", "attempt": attempt, "wait_secs": wait_secs})
+                }
+                AgentEvent::FallbackModelSwitch {
+                    ref primary_model,
+                    ref fallback_model,
+                } => {
+                    serde_json::json!({"type": "fallback_model_switch", "primary_model": primary_model, "fallback_model": fallback_model})
+                }
                 AgentEvent::Checkpoint(_)
                 | AgentEvent::SnapshotTaken { .. }
                 | AgentEvent::PlanStepComplete { .. }
@@ -465,6 +474,12 @@ pub(super) async fn run_single_agent(cli: CliArgs, goal: &str) -> Result<()> {
                     }
                     eprintln!("[error: {e}]");
                     break;
+                }
+                AgentEvent::RetryHeartbeat { attempt, wait_secs } => {
+                    eprintln!("[retry heartbeat: attempt {attempt}, waiting {wait_secs}s]");
+                }
+                AgentEvent::FallbackModelSwitch { ref primary_model, ref fallback_model } => {
+                    eprintln!("[fallback: switching from {primary_model} to {fallback_model}]");
                 }
                 AgentEvent::Checkpoint(_)
                 | AgentEvent::SnapshotTaken { .. }

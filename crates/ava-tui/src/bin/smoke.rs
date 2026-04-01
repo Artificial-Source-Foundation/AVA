@@ -69,7 +69,9 @@ async fn main() -> Result<()> {
             | AgentEvent::ContextCompacted { .. }
             | AgentEvent::SnapshotTaken { .. }
             | AgentEvent::PlanStepComplete { .. }
-            | AgentEvent::StreamingEditProgress { .. } => {}
+            | AgentEvent::StreamingEditProgress { .. }
+            | AgentEvent::RetryHeartbeat { .. }
+            | AgentEvent::FallbackModelSwitch { .. } => {}
             AgentEvent::Error(e) => {
                 eprintln!("[error: {e}]");
                 break;

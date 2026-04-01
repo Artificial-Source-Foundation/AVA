@@ -434,6 +434,8 @@ mod tests {
             auto_compact: true,
             stream_timeout_secs: crate::agent_loop::LLM_STREAM_TIMEOUT_SECS,
             prompt_caching: true,
+            headless: false,
+            is_subagent: false,
         }
     }
 

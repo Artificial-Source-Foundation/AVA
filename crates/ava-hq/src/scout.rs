@@ -159,6 +159,8 @@ impl Scout {
             auto_compact: true,
             stream_timeout_secs: ava_agent::agent_loop::LLM_STREAM_TIMEOUT_SECS,
             prompt_caching: true,
+            headless: true,
+            is_subagent: true,
         };
 
         let mut agent = AgentLoop::new(

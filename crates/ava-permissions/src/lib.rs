@@ -16,6 +16,8 @@ pub mod inspector;
 pub mod path_safety;
 pub mod persistent;
 pub mod policy;
+pub mod secret_scanner;
+pub mod shadowed_rules;
 pub mod tags;
 
 use classifier::classify_bash_command;

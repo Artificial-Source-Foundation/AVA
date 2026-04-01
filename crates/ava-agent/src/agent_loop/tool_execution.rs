@@ -73,6 +73,12 @@ fn estimate_tokens(text: &str) -> usize {
     ava_context::count_tokens_default(text)
 }
 
+/// Tools whose output may contain external/untrusted content that should be
+/// scanned for leaked secrets before being sent to the LLM.
+fn is_untrusted_tool_output(name: &str) -> bool {
+    matches!(name, "bash" | "web_fetch" | "web_search") || name.starts_with("mcp_")
+}
+
 /// Tools that are safe to execute concurrently (no side effects).
 pub const READ_ONLY_TOOLS: &[&str] = &[
     "read",
@@ -532,6 +538,21 @@ impl AgentLoop {
                     }),
                 )
                 .await;
+            }
+        }
+
+        // --- Secret scanning for untrusted tool output ---
+        // Scan output from tools that may surface external content to prevent
+        // secrets from leaking into the LLM context.
+        if is_untrusted_tool_output(&tool_call.name) {
+            let scan = ava_permissions::secret_scanner::scan_for_secrets(&result.content);
+            if scan.has_secrets {
+                warn!(
+                    tool = %tool_call.name,
+                    finding_count = scan.findings.len(),
+                    "secrets detected in tool output — redacting"
+                );
+                result.content = ava_permissions::secret_scanner::redact_secrets(&result.content);
             }
         }
 

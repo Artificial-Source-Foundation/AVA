@@ -46,6 +46,13 @@ pub trait Tool: Send + Sync {
     async fn execute_streaming(&self, args: Value) -> Result<ToolOutput> {
         self.execute(args).await.map(ToolOutput::Complete)
     }
+
+    /// Backfill derived or default fields into the arguments before execution.
+    ///
+    /// Called by `ToolRegistry::execute()` before permission checks. Must be
+    /// idempotent — calling twice on the same input must produce the same result.
+    /// The default implementation is a no-op.
+    fn backfill_input(&self, _args: &mut Value) {}
 }
 
 /// Middleware that runs before and after tool execution for cross-cutting concerns
@@ -190,7 +197,12 @@ impl ToolRegistry {
     }
 
     #[instrument(skip(self), fields(tool = %tool_call.name))]
-    pub async fn execute(&self, tool_call: ToolCall) -> Result<ToolResult> {
+    pub async fn execute(&self, mut tool_call: ToolCall) -> Result<ToolResult> {
+        // Backfill derived/default fields before permission checks
+        if let Some(tool) = self.tools.get(&tool_call.name) {
+            tool.backfill_input(&mut tool_call.arguments);
+        }
+
         for middleware in &self.middleware {
             middleware.before(&tool_call).await?;
         }
@@ -578,5 +590,102 @@ mod tests {
         assert!(result.is_error);
         assert_eq!(result.content, "file not found");
         assert_eq!(*calls.lock().unwrap(), 2);
+    }
+
+    /// A tool that backfills a derived "cwd_resolved" field from "cwd".
+    struct BackfillTool;
+
+    #[async_trait]
+    impl Tool for BackfillTool {
+        fn name(&self) -> &str {
+            "backfill_test"
+        }
+
+        fn description(&self) -> &str {
+            "Tool with backfill"
+        }
+
+        fn parameters(&self) -> Value {
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "cwd": { "type": "string" },
+                    "cwd_resolved": { "type": "string" }
+                }
+            })
+        }
+
+        fn backfill_input(&self, args: &mut Value) {
+            if let Some(cwd) = args.get("cwd").and_then(|v| v.as_str()).map(String::from) {
+                if args.get("cwd_resolved").is_none() {
+                    args.as_object_mut().unwrap().insert(
+                        "cwd_resolved".to_string(),
+                        Value::String(format!("/abs/{cwd}")),
+                    );
+                }
+            }
+        }
+
+        async fn execute(&self, args: Value) -> Result<ToolResult> {
+            let resolved = args
+                .get("cwd_resolved")
+                .and_then(|v| v.as_str())
+                .unwrap_or("none")
+                .to_string();
+            Ok(ToolResult {
+                call_id: String::new(),
+                content: resolved,
+                is_error: false,
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn backfill_adds_derived_field() {
+        let mut registry = ToolRegistry::new();
+        registry.register(BackfillTool);
+
+        let result = registry
+            .execute(ToolCall {
+                id: "call-bf-1".to_string(),
+                name: "backfill_test".to_string(),
+                arguments: serde_json::json!({ "cwd": "src" }),
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(result.content, "/abs/src");
+    }
+
+    #[tokio::test]
+    async fn backfill_is_idempotent() {
+        let tool = BackfillTool;
+        let mut args = serde_json::json!({ "cwd": "src" });
+
+        tool.backfill_input(&mut args);
+        let first = args.clone();
+
+        tool.backfill_input(&mut args);
+        assert_eq!(args, first, "backfill must be idempotent");
+    }
+
+    #[tokio::test]
+    async fn tool_without_backfill_unchanged() {
+        let mut registry = ToolRegistry::new();
+        let (tool, _calls) = SequencedTool::new("read", vec![]);
+        registry.register(tool);
+
+        let args = serde_json::json!({ "path": "/tmp/test" });
+        let result = registry
+            .execute(ToolCall {
+                id: "call-noop".to_string(),
+                name: "read".to_string(),
+                arguments: args.clone(),
+            })
+            .await
+            .unwrap();
+
+        // SequencedTool has default no-op backfill — should execute fine
+        assert_eq!(result.content, "ok");
     }
 }

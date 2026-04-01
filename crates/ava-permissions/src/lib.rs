@@ -20,6 +20,8 @@ pub mod path_safety;
 pub mod persistent;
 pub mod policy;
 pub mod sanitization;
+pub mod secret_scanner;
+pub mod shadowed_rules;
 pub mod ssrf;
 pub mod tags;
 

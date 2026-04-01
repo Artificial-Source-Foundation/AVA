@@ -578,6 +578,7 @@ dependencies = [
  "ava-plugin",
  "ava-sandbox",
  "ava-types",
+ "base64",
  "chrono",
  "diffy",
  "dirs",

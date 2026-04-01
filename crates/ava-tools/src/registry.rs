@@ -46,6 +46,19 @@ pub trait Tool: Send + Sync {
     async fn execute_streaming(&self, args: Value) -> Result<ToolOutput> {
         self.execute(args).await.map(ToolOutput::Complete)
     }
+
+    /// Keywords that help fuzzy-match this tool when the user searches by
+    /// intent rather than exact name. Empty by default.
+    fn search_hint(&self) -> &str {
+        ""
+    }
+
+    /// Human-readable one-liner describing what the tool is doing right now,
+    /// derived from the supplied arguments. Used for activity indicators in the
+    /// TUI and desktop UI. Returns `None` when the args lack the key fields.
+    fn activity_description(&self, _args: &Value) -> Option<String> {
+        None
+    }
 }
 
 /// Middleware that runs before and after tool execution for cross-cutting concerns
@@ -88,6 +101,23 @@ impl std::fmt::Display for ToolSource {
             Self::MCP { server } => write!(f, "mcp:{server}"),
             Self::Custom { path } => write!(f, "custom:{path}"),
         }
+    }
+}
+
+/// Maximum length for tool descriptions sent to the LLM. Longer descriptions
+/// are truncated with a `... [truncated]` suffix.
+pub const MAX_TOOL_DESCRIPTION_LENGTH: usize = 2048;
+
+/// Truncate a description to [`MAX_TOOL_DESCRIPTION_LENGTH`], appending
+/// `... [truncated]` when the original exceeds the limit.
+pub fn truncated_description(desc: &str) -> String {
+    if desc.len() <= MAX_TOOL_DESCRIPTION_LENGTH {
+        desc.to_string()
+    } else {
+        let suffix = "... [truncated]";
+        let mut truncated = desc[..MAX_TOOL_DESCRIPTION_LENGTH - suffix.len()].to_string();
+        truncated.push_str(suffix);
+        truncated
     }
 }
 
@@ -285,6 +315,8 @@ impl ToolRegistry {
 
     /// List only tools matching the given tiers. Used to control which tool
     /// definitions are sent to the LLM in the system prompt.
+    ///
+    /// Descriptions exceeding [`MAX_TOOL_DESCRIPTION_LENGTH`] are truncated.
     pub fn list_tools_for_tiers(&self, tiers: &[ToolTier]) -> Vec<ToolDefinition> {
         let mut tools: Vec<ToolDefinition> = self
             .tools
@@ -299,7 +331,7 @@ impl ToolRegistry {
             })
             .map(|tool| ToolDefinition {
                 name: tool.name().to_string(),
-                description: tool.description().to_string(),
+                description: truncated_description(tool.description()),
                 parameters: tool.parameters(),
             })
             .collect();
@@ -355,6 +387,69 @@ impl ToolRegistry {
     /// Look up the JSON Schema parameters for a registered tool.
     pub fn tool_parameters(&self, name: &str) -> Option<Value> {
         self.tools.get(name).map(|tool| tool.parameters())
+    }
+
+    /// Get the activity description for a tool invocation.
+    pub fn activity_description(&self, name: &str, args: &Value) -> Option<String> {
+        self.tools.get(name)?.activity_description(args)
+    }
+
+    /// Search tools by query, matching against name, description, and search
+    /// hints. Hint matches are ranked higher than description-only matches.
+    /// Returns tool definitions sorted by relevance (hint > name > description).
+    pub fn search_tools(&self, query: &str) -> Vec<ToolDefinition> {
+        let query_lower = query.to_lowercase();
+        let query_words: Vec<&str> = query_lower.split_whitespace().collect();
+
+        let mut scored: Vec<(i32, ToolDefinition)> = self
+            .tools
+            .values()
+            .filter_map(|tool| {
+                let name = tool.name().to_lowercase();
+                let desc = tool.description().to_lowercase();
+                let hint = tool.search_hint().to_lowercase();
+
+                let mut score: i32 = 0;
+
+                // Exact name match — highest priority
+                if name == query_lower {
+                    score += 100;
+                }
+                // Name contains query
+                if name.contains(&query_lower) {
+                    score += 50;
+                }
+
+                // Check each query word against hint and description
+                for word in &query_words {
+                    if hint.contains(word) {
+                        score += 30; // hint match — high priority
+                    }
+                    if name.contains(word) {
+                        score += 20;
+                    }
+                    if desc.contains(word) {
+                        score += 10;
+                    }
+                }
+
+                if score > 0 {
+                    Some((
+                        score,
+                        ToolDefinition {
+                            name: tool.name().to_string(),
+                            description: tool.description().to_string(),
+                            parameters: tool.parameters(),
+                        },
+                    ))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        scored.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.name.cmp(&b.1.name)));
+        scored.into_iter().map(|(_, def)| def).collect()
     }
 
     /// Execute a tool call and return both the result and an invocation record
@@ -535,5 +630,150 @@ mod tests {
         assert!(result.is_error);
         assert_eq!(result.content, "file not found");
         assert_eq!(*calls.lock().unwrap(), 2);
+    }
+
+    // --- F42: truncated_description tests ---
+
+    #[test]
+    fn short_description_unchanged() {
+        let desc = "A short description";
+        assert_eq!(truncated_description(desc), desc);
+    }
+
+    #[test]
+    fn long_description_truncated() {
+        let desc = "x".repeat(3000);
+        let result = truncated_description(&desc);
+        assert!(result.len() <= MAX_TOOL_DESCRIPTION_LENGTH);
+        assert!(result.ends_with("... [truncated]"));
+    }
+
+    #[test]
+    fn exact_limit_description_unchanged() {
+        let desc = "y".repeat(MAX_TOOL_DESCRIPTION_LENGTH);
+        assert_eq!(truncated_description(&desc), desc);
+    }
+
+    // --- F15: search_tools tests ---
+
+    struct HintedTool {
+        tool_name: &'static str,
+        hint: &'static str,
+    }
+
+    #[async_trait]
+    impl Tool for HintedTool {
+        fn name(&self) -> &str {
+            self.tool_name
+        }
+        fn description(&self) -> &str {
+            "A test tool"
+        }
+        fn parameters(&self) -> Value {
+            serde_json::json!({"type": "object"})
+        }
+        async fn execute(&self, _args: Value) -> Result<ToolResult> {
+            Ok(ToolResult {
+                call_id: String::new(),
+                content: "ok".into(),
+                is_error: false,
+            })
+        }
+        fn search_hint(&self) -> &str {
+            self.hint
+        }
+        fn activity_description(&self, args: &Value) -> Option<String> {
+            args.get("path")
+                .and_then(Value::as_str)
+                .map(|p| format!("Testing {p}"))
+        }
+    }
+
+    #[test]
+    fn search_tools_by_name() {
+        let mut registry = ToolRegistry::new();
+        registry.register(HintedTool {
+            tool_name: "my_tool",
+            hint: "something",
+        });
+        let results = registry.search_tools("my_tool");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].name, "my_tool");
+    }
+
+    #[test]
+    fn search_tools_by_hint() {
+        let mut registry = ToolRegistry::new();
+        registry.register(HintedTool {
+            tool_name: "alpha",
+            hint: "banana cherry",
+        });
+        registry.register(HintedTool {
+            tool_name: "beta",
+            hint: "date elderberry",
+        });
+        let results = registry.search_tools("cherry");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].name, "alpha");
+    }
+
+    #[test]
+    fn search_tools_hint_higher_priority() {
+        let mut registry = ToolRegistry::new();
+        registry.register(HintedTool {
+            tool_name: "tool_a",
+            hint: "special keyword",
+        });
+        registry.register(HintedTool {
+            tool_name: "tool_b",
+            hint: "",
+        });
+        // Both have "test" in description, but only tool_a has "special" in hint
+        let results = registry.search_tools("special");
+        assert!(!results.is_empty());
+        assert_eq!(results[0].name, "tool_a");
+    }
+
+    #[test]
+    fn search_tools_no_match() {
+        let mut registry = ToolRegistry::new();
+        registry.register(HintedTool {
+            tool_name: "foo",
+            hint: "bar",
+        });
+        let results = registry.search_tools("xyzzy");
+        assert!(results.is_empty());
+    }
+
+    // --- F55: activity_description tests ---
+
+    #[test]
+    fn activity_description_with_args() {
+        let mut registry = ToolRegistry::new();
+        registry.register(HintedTool {
+            tool_name: "test_tool",
+            hint: "",
+        });
+        let desc =
+            registry.activity_description("test_tool", &serde_json::json!({"path": "src/main.rs"}));
+        assert_eq!(desc, Some("Testing src/main.rs".to_string()));
+    }
+
+    #[test]
+    fn activity_description_missing_args() {
+        let mut registry = ToolRegistry::new();
+        registry.register(HintedTool {
+            tool_name: "test_tool",
+            hint: "",
+        });
+        let desc = registry.activity_description("test_tool", &serde_json::json!({}));
+        assert_eq!(desc, None);
+    }
+
+    #[test]
+    fn activity_description_unknown_tool() {
+        let registry = ToolRegistry::new();
+        let desc = registry.activity_description("nonexistent", &serde_json::json!({}));
+        assert_eq!(desc, None);
     }
 }

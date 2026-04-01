@@ -44,6 +44,15 @@ impl Tool for GlobTool {
         })
     }
 
+    fn search_hint(&self) -> &str {
+        "find files pattern directory match"
+    }
+
+    fn activity_description(&self, args: &Value) -> Option<String> {
+        let pattern = args.get("pattern").and_then(Value::as_str)?;
+        Some(format!("Searching for {pattern}"))
+    }
+
     async fn execute(&self, args: Value) -> ava_types::Result<ToolResult> {
         let pattern = args.get("pattern").and_then(Value::as_str).ok_or_else(|| {
             AvaError::ValidationError("missing required field: pattern".to_string())

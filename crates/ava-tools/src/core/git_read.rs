@@ -38,6 +38,16 @@ impl Tool for GitReadTool {
         "Run read-only git commands (status, log, diff, show, blame, etc.)"
     }
 
+    fn search_hint(&self) -> &str {
+        "git status log diff branch commit"
+    }
+
+    fn activity_description(&self, args: &serde_json::Value) -> Option<String> {
+        let cmd = args.get("command").and_then(serde_json::Value::as_str)?;
+        let subcommand = cmd.split_whitespace().next().unwrap_or(cmd);
+        Some(format!("Reading git {subcommand}"))
+    }
+
     fn parameters(&self) -> Value {
         json!({
             "type": "object",

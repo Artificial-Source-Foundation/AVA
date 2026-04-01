@@ -64,6 +64,18 @@ impl Tool for WriteTool {
         })
     }
 
+    fn search_hint(&self) -> &str {
+        "create write new file content"
+    }
+
+    fn activity_description(&self, args: &Value) -> Option<String> {
+        let path = args
+            .get("file_path")
+            .or_else(|| args.get("path"))
+            .and_then(Value::as_str)?;
+        Some(format!("Writing {path}"))
+    }
+
     async fn execute(&self, args: Value) -> ava_types::Result<ToolResult> {
         let path = args
             .get("path")

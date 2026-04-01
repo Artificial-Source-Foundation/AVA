@@ -7,6 +7,8 @@
 
 pub mod agent_loop;
 pub(crate) mod budget;
+pub mod cache_sharing;
+pub mod dream;
 pub mod error_hints;
 pub mod instruction_resolver;
 pub mod instructions;

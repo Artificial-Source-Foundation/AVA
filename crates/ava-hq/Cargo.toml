@@ -20,6 +20,8 @@ ava-llm = { path = "../ava-llm" }
 ava-platform = { path = "../ava-platform" }
 ava-tools = { path = "../ava-tools" }
 ava-types = { path = "../ava-types" }
+chrono.workspace = true
+fs2 = "0.4"
 regex = "1"
 futures.workspace = true
 serde.workspace = true

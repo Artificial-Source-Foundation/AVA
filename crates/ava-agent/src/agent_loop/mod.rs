@@ -1,6 +1,7 @@
 mod completion;
 mod repetition;
 mod response;
+pub mod sidechain;
 mod steering;
 mod tool_execution;
 

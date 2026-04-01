@@ -57,6 +57,15 @@ impl Tool for WebSearchTool {
         })
     }
 
+    fn search_hint(&self) -> &str {
+        "search web internet query"
+    }
+
+    fn activity_description(&self, args: &Value) -> Option<String> {
+        let query = args.get("query").and_then(Value::as_str)?;
+        Some(format!("Searching web for '{query}'"))
+    }
+
     async fn execute(&self, args: Value) -> ava_types::Result<ToolResult> {
         let query = args
             .get("query")

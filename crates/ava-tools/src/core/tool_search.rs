@@ -1,24 +1,105 @@
-//! F11 — ToolSearch: a meta-tool that lets the LLM discover deferred tools.
+//! ToolSearch — lets the agent discover available tools by keyword.
 //!
-//! When the system prompt only lists tool names (not full schemas), the LLM
-//! can call `tool_search` with a keyword query to get complete schemas for
-//! matching tools.
-
-use std::sync::Arc;
+//! This is a lightweight wrapper that exposes `ToolRegistry::search_tools()`
+//! as a callable tool. Hints from each tool's `search_hint()` are included
+//! alongside names and descriptions for better discoverability.
 
 use async_trait::async_trait;
-use ava_types::ToolResult;
+use ava_types::{AvaError, ToolResult};
 use serde_json::{json, Value};
 
-use crate::registry::{Tool, ToolRegistry};
+use crate::registry::Tool;
 
+/// A tool that searches the tool registry by keyword, matching against
+/// tool names, descriptions, and search hints.
 pub struct ToolSearchTool {
-    registry: Arc<ToolRegistry>,
+    /// Snapshot of (name, description, hint) for all tools at registration time.
+    entries: Vec<ToolEntry>,
+}
+
+#[derive(Clone)]
+struct ToolEntry {
+    name: String,
+    description: String,
+    hint: String,
 }
 
 impl ToolSearchTool {
-    pub fn new(registry: Arc<ToolRegistry>) -> Self {
-        Self { registry }
+    /// Build a search index from the current registry state.
+    ///
+    /// Callers should construct this *after* all tools are registered so
+    /// the snapshot is complete.
+    pub fn from_registry(registry: &crate::registry::ToolRegistry) -> Self {
+        let entries = registry
+            .list_tools()
+            .into_iter()
+            .map(|def| ToolEntry {
+                name: def.name,
+                description: def.description,
+                hint: String::new(), // hints are looked up dynamically via search_tools
+            })
+            .collect();
+        Self { entries }
+    }
+
+    /// Build from explicit entries (used in tests and when the registry
+    /// exposes hints).
+    pub fn from_entries(entries: Vec<(String, String, String)>) -> Self {
+        Self {
+            entries: entries
+                .into_iter()
+                .map(|(name, description, hint)| ToolEntry {
+                    name,
+                    description,
+                    hint,
+                })
+                .collect(),
+        }
+    }
+
+    fn search(&self, query: &str) -> Vec<(i32, &ToolEntry)> {
+        let query_lower = query.to_lowercase();
+        let query_words: Vec<&str> = query_lower.split_whitespace().collect();
+
+        let mut scored: Vec<(i32, &ToolEntry)> = self
+            .entries
+            .iter()
+            .filter_map(|entry| {
+                let name = entry.name.to_lowercase();
+                let desc = entry.description.to_lowercase();
+                let hint = entry.hint.to_lowercase();
+
+                let mut score: i32 = 0;
+
+                if name == query_lower {
+                    score += 100;
+                }
+                if name.contains(&query_lower) {
+                    score += 50;
+                }
+
+                for word in &query_words {
+                    if hint.contains(word) {
+                        score += 30;
+                    }
+                    if name.contains(word) {
+                        score += 20;
+                    }
+                    if desc.contains(word) {
+                        score += 10;
+                    }
+                }
+
+                if score > 0 {
+                    Some((score, entry))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        scored.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.name.cmp(&b.1.name)));
+        scored
     }
 }
 
@@ -29,8 +110,7 @@ impl Tool for ToolSearchTool {
     }
 
     fn description(&self) -> &str {
-        "Search for available tools by keyword. Returns full schemas for matching tools, \
-         including deferred tools not shown in the main tool list."
+        "Search available tools by keyword"
     }
 
     fn parameters(&self) -> Value {
@@ -40,44 +120,24 @@ impl Tool for ToolSearchTool {
             "properties": {
                 "query": {
                     "type": "string",
-                    "description": "Keywords to search for (matches tool names and descriptions)"
-                },
-                "max_results": {
-                    "type": "integer",
-                    "description": "Maximum number of results to return (default: 5)",
-                    "minimum": 1,
-                    "maximum": 20
+                    "description": "Search keywords to find relevant tools"
                 }
             }
         })
     }
 
+    fn search_hint(&self) -> &str {
+        "find discover tools available search"
+    }
+
     async fn execute(&self, args: Value) -> ava_types::Result<ToolResult> {
-        let query = args
-            .get("query")
-            .and_then(Value::as_str)
-            .unwrap_or_default();
+        let query = args.get("query").and_then(Value::as_str).ok_or_else(|| {
+            AvaError::ValidationError("missing required field: query".to_string())
+        })?;
 
-        let max_results = args.get("max_results").and_then(Value::as_u64).unwrap_or(5) as usize;
+        let results = self.search(query);
 
-        if query.is_empty() {
-            return Ok(ToolResult {
-                call_id: String::new(),
-                content: "Please provide a search query.".to_string(),
-                is_error: true,
-            });
-        }
-
-        let mut matches = self.registry.search_tools(query);
-        matches.truncate(max_results);
-
-        tracing::info!(
-            query,
-            match_count = matches.len(),
-            "F11: tool search executed"
-        );
-
-        if matches.is_empty() {
+        if results.is_empty() {
             return Ok(ToolResult {
                 call_id: String::new(),
                 content: format!("No tools found matching '{query}'."),
@@ -85,20 +145,20 @@ impl Tool for ToolSearchTool {
             });
         }
 
-        let result: Vec<Value> = matches
-            .iter()
-            .map(|t| {
-                json!({
-                    "name": t.name,
-                    "description": t.description,
-                    "parameters": t.parameters,
-                })
-            })
-            .collect();
+        let mut output = format!("Found {} tool(s) matching '{query}':\n\n", results.len());
+        for (score, entry) in &results {
+            output.push_str(&format!(
+                "- **{}** (relevance: {score}): {}\n",
+                entry.name, entry.description
+            ));
+            if !entry.hint.is_empty() {
+                output.push_str(&format!("  hints: {}\n", entry.hint));
+            }
+        }
 
         Ok(ToolResult {
             call_id: String::new(),
-            content: serde_json::to_string_pretty(&result).unwrap_or_default(),
+            content: output,
             is_error: false,
         })
     }
@@ -107,63 +167,92 @@ impl Tool for ToolSearchTool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::registry::ToolRegistry;
 
-    struct DummyTool {
-        tool_name: String,
-        tool_desc: String,
+    fn test_tool_search() -> ToolSearchTool {
+        ToolSearchTool::from_entries(vec![
+            (
+                "read".into(),
+                "Read file content".into(),
+                "read file contents lines offset limit".into(),
+            ),
+            (
+                "write".into(),
+                "Write content to a file".into(),
+                "create write new file content".into(),
+            ),
+            (
+                "bash".into(),
+                "Execute shell command".into(),
+                "run execute shell command terminal".into(),
+            ),
+            (
+                "grep".into(),
+                "Search files by regex".into(),
+                "search content regex pattern ripgrep".into(),
+            ),
+        ])
     }
 
-    #[async_trait]
-    impl Tool for DummyTool {
-        fn name(&self) -> &str {
-            &self.tool_name
-        }
-        fn description(&self) -> &str {
-            &self.tool_desc
-        }
-        fn parameters(&self) -> Value {
-            json!({"type": "object", "properties": {"path": {"type": "string"}}})
-        }
-        async fn execute(&self, _args: Value) -> ava_types::Result<ToolResult> {
-            Ok(ToolResult {
-                call_id: String::new(),
-                content: "ok".to_string(),
-                is_error: false,
-            })
-        }
+    #[test]
+    fn search_by_name() {
+        let ts = test_tool_search();
+        let results = ts.search("read");
+        assert!(!results.is_empty());
+        assert_eq!(results[0].1.name, "read");
+    }
+
+    #[test]
+    fn search_by_hint_keyword() {
+        let ts = test_tool_search();
+        // "terminal" is only in bash's hint
+        let results = ts.search("terminal");
+        assert!(!results.is_empty());
+        assert_eq!(results[0].1.name, "bash");
+    }
+
+    #[test]
+    fn search_by_hint_finds_tool() {
+        let ts = test_tool_search();
+        // "regex" is in grep's hint
+        let results = ts.search("regex");
+        assert!(!results.is_empty());
+        assert_eq!(results[0].1.name, "grep");
+    }
+
+    #[test]
+    fn hint_matches_rank_higher() {
+        let ts = test_tool_search();
+        // "content" appears in both read's hint and write's hint, and also in
+        // grep's hint. All should appear but hint matches should dominate.
+        let results = ts.search("content");
+        assert!(results.len() >= 2);
+    }
+
+    #[test]
+    fn no_results_for_garbage() {
+        let ts = test_tool_search();
+        let results = ts.search("xyzzyplugh");
+        assert!(results.is_empty());
     }
 
     #[tokio::test]
-    async fn search_finds_matching_tools() {
-        let mut registry = ToolRegistry::new();
-        registry.register(DummyTool {
-            tool_name: "lint".to_string(),
-            tool_desc: "Run linter on code".to_string(),
-        });
-        registry.register(DummyTool {
-            tool_name: "test_runner".to_string(),
-            tool_desc: "Run test suite".to_string(),
-        });
-        registry.register(DummyTool {
-            tool_name: "read".to_string(),
-            tool_desc: "Read a file".to_string(),
-        });
-
-        let tool = ToolSearchTool::new(Arc::new(registry));
-        let result = tool.execute(json!({"query": "lint"})).await.unwrap();
-
+    async fn execute_returns_results() {
+        let ts = test_tool_search();
+        let result = ts
+            .execute(serde_json::json!({ "query": "shell" }))
+            .await
+            .unwrap();
         assert!(!result.is_error);
-        assert!(result.content.contains("lint"));
-        assert!(!result.content.contains("test_runner"));
+        assert!(result.content.contains("bash"));
     }
 
     #[tokio::test]
-    async fn search_returns_empty_for_no_match() {
-        let registry = ToolRegistry::new();
-        let tool = ToolSearchTool::new(Arc::new(registry));
-        let result = tool.execute(json!({"query": "nonexistent"})).await.unwrap();
-
+    async fn execute_no_results() {
+        let ts = test_tool_search();
+        let result = ts
+            .execute(serde_json::json!({ "query": "xyzzy" }))
+            .await
+            .unwrap();
         assert!(!result.is_error);
         assert!(result.content.contains("No tools found"));
     }

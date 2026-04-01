@@ -95,6 +95,20 @@ impl Tool for BashTool {
         })
     }
 
+    fn search_hint(&self) -> &str {
+        "run execute shell command terminal"
+    }
+
+    fn activity_description(&self, args: &Value) -> Option<String> {
+        let cmd = args.get("command").and_then(Value::as_str)?;
+        let truncated: String = cmd.chars().take(60).collect();
+        if truncated.len() < cmd.len() {
+            Some(format!("Running: {truncated}..."))
+        } else {
+            Some(format!("Running: {truncated}"))
+        }
+    }
+
     async fn execute(&self, args: Value) -> ava_types::Result<ToolResult> {
         let command = args
             .get("command")

@@ -306,6 +306,20 @@ impl Tool for WebFetchTool {
         })
     }
 
+    fn search_hint(&self) -> &str {
+        "fetch download webpage URL HTTP"
+    }
+
+    fn activity_description(&self, args: &Value) -> Option<String> {
+        let url = args.get("url").and_then(Value::as_str)?;
+        let truncated: String = url.chars().take(60).collect();
+        if truncated.len() < url.len() {
+            Some(format!("Fetching {truncated}..."))
+        } else {
+            Some(format!("Fetching {truncated}"))
+        }
+    }
+
     async fn execute(&self, args: Value) -> ava_types::Result<ToolResult> {
         let url = args
             .get("url")

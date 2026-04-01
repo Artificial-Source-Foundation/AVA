@@ -1,9 +1,10 @@
 use ava_types::{Message, Role, ToolResult};
 
 use crate::condenser::{create_condenser, Condenser, HybridCondenser};
-use crate::pruner::{compact_old_edit_results, dedup_tool_results, prune_old_tool_outputs};
+use crate::content_budget::ContentReplacementBudget;
+use crate::pruner::prune_old_tool_outputs;
 use crate::token_tracker::TokenTracker;
-use crate::types::{CompactionCircuitBreaker, CompactionReport, CondenserConfig};
+use crate::types::{CompactionReport, CondenserConfig};
 use crate::Result;
 
 enum CondenserKind {
@@ -26,11 +27,10 @@ pub struct ContextManager {
     last_compaction_report: Option<CompactionReport>,
     /// When true, conversation repair should run before the next LLM request.
     needs_repair: bool,
-    /// F15 — Compaction circuit breaker: prevents repeated failed compaction attempts.
-    compaction_breaker: CompactionCircuitBreaker,
-    /// F3 — Optional session memory summary for use as a compaction shortcut.
-    /// When set, `compact_async` will use this instead of calling the LLM.
-    session_memory_summary: Option<String>,
+    /// Content replacement budget — tracks tool output sizes and evicts when over budget.
+    content_budget: ContentReplacementBudget,
+    /// Monotonically increasing turn counter for content budget tracking.
+    turn_counter: usize,
 }
 
 impl ContextManager {
@@ -45,8 +45,8 @@ impl ContextManager {
             compacted_messages: Vec::new(),
             last_compaction_report: None,
             needs_repair: false,
-            compaction_breaker: CompactionCircuitBreaker::new(),
-            session_memory_summary: None,
+            content_budget: ContentReplacementBudget::default(),
+            turn_counter: 0,
         }
     }
 
@@ -62,18 +62,9 @@ impl ContextManager {
             compacted_messages: Vec::new(),
             last_compaction_report: None,
             needs_repair: false,
-            compaction_breaker: CompactionCircuitBreaker::new(),
-            session_memory_summary: None,
+            content_budget: ContentReplacementBudget::default(),
+            turn_counter: 0,
         }
-    }
-
-    /// F3 — Set a session memory summary to use as a compaction shortcut.
-    ///
-    /// When set, the next `compact_async` call will use this summary instead
-    /// of calling the LLM for compaction. The summary is consumed (cleared)
-    /// after use.
-    pub fn set_session_memory_summary(&mut self, summary: String) {
-        self.session_memory_summary = Some(summary);
     }
 
     /// Load initial conversation history into the context.
@@ -98,6 +89,13 @@ impl ContextManager {
     }
 
     pub fn add_tool_result(&mut self, result: ToolResult) {
+        self.turn_counter += 1;
+        self.content_budget.record_output(
+            &result.call_id,
+            "tool",
+            &result.content,
+            self.turn_counter,
+        );
         let message =
             Message::new(Role::Tool, result.content.clone()).with_tool_results(vec![result]);
         self.add_message(message);
@@ -145,25 +143,34 @@ impl ContextManager {
     /// Call this before full compaction — if pruning brings usage below the
     /// threshold, the expensive LLM compaction can be skipped entirely.
     pub fn try_prune(&mut self) -> usize {
-        // F4 — Smart pruning: dedup → edit cache → age-based (in order).
-        let mut total_pruned = 0;
+        // First pass: content budget eviction (character-based).
+        let budget_evicted = if self.content_budget.is_over_budget() {
+            let evicted = self.content_budget.evict_oldest(&mut self.messages);
+            if evicted > 0 {
+                self.tracker.reset();
+                self.tracker.add_messages(&self.messages);
+                self.needs_repair = true;
+            }
+            evicted
+        } else {
+            0
+        };
 
-        // Pass 1: Dedup identical (tool_name, args) pairs, keep only latest.
-        total_pruned += dedup_tool_results(&mut self.messages);
-
-        // Pass 2: Compact old successful edit results (older than 2 turns).
-        total_pruned += compact_old_edit_results(&mut self.messages);
-
-        // Pass 3: Age-based pruning — protect the most recent 60% of token limit.
+        // Second pass: token-based pruning of old tool outputs.
+        // Protect the most recent 60% of the token limit.
         let protected = (self.token_limit as f32 * 0.6) as usize;
-        total_pruned += prune_old_tool_outputs(&mut self.messages, protected);
-
-        if total_pruned > 0 {
+        let pruned = prune_old_tool_outputs(&mut self.messages, protected);
+        if pruned > 0 {
             self.tracker.reset();
             self.tracker.add_messages(&self.messages);
             self.needs_repair = true;
         }
-        total_pruned
+        budget_evicted + pruned
+    }
+
+    /// Get a reference to the content replacement budget.
+    pub fn content_budget(&self) -> &ContentReplacementBudget {
+        &self.content_budget
     }
 
     /// Synchronous compaction — only works when using a sync Condenser.
@@ -222,121 +229,29 @@ impl ContextManager {
 
     /// Async compaction — uses the hybrid condenser pipeline.
     /// Stores the compaction summary for iterative use in subsequent compactions.
-    ///
-    /// F15 — Circuit Breaker: If compaction has failed 3+ times consecutively,
-    /// falls back to the cheap SlidingWindowStrategy instead of attempting
-    /// another expensive LLM-based compaction.
     pub async fn compact_async(&mut self) -> Result<()> {
         let before_tokens = self.token_count();
         let before_messages = self.messages.len();
-
-        // F15: Check circuit breaker — fall back to sliding window if tripped.
-        if !self.compaction_breaker.allow_compaction() {
-            tracing::info!("compaction circuit breaker is open — using sliding window fallback");
-            use crate::strategies::{CondensationStrategy, SlidingWindowStrategy};
-            let original = self.messages.clone();
-            let target = (self.token_limit as f32 * 0.75) as usize;
-            let condensed = SlidingWindowStrategy.condense(&self.messages, target)?;
-            let compacted = crate::condenser::mark_compacted_messages_pub(&original, &condensed);
-            self.compacted_messages.extend(compacted);
-            self.messages = condensed;
-            self.tracker.reset();
-            self.tracker.add_messages(&self.messages);
-            self.last_compaction_report = Some(CompactionReport {
-                tokens_before: before_tokens,
-                tokens_after: self.token_count(),
-                tokens_saved: before_tokens.saturating_sub(self.token_count()),
-                messages_before: before_messages,
-                messages_after: self.messages.len(),
-                strategy: "sliding_window_circuit_breaker".to_string(),
-                summary: self.last_summary.clone(),
-            });
-            self.needs_repair = true;
-            return Ok(());
-        }
-
-        // F3 — Session memory shortcut: if a memory summary is available,
-        // use it directly instead of calling the LLM for compaction.
-        if let Some(memory_summary) = self.session_memory_summary.take() {
-            tracing::info!(
-                summary_len = memory_summary.len(),
-                "F3: using session memory summary for compaction (skipping LLM call)"
-            );
-            // Keep system messages and the most recent messages, replace middle with summary.
-            let system_msgs: Vec<Message> = self
-                .messages
-                .iter()
-                .filter(|m| m.role == Role::System)
-                .cloned()
-                .collect();
-            let recent_count = 4.min(self.messages.len());
-            let recent: Vec<Message> = self.messages[self.messages.len() - recent_count..].to_vec();
-
-            let compacted = self.messages.clone();
-            let summary_msg = Message::new(
-                Role::System,
-                format!("[Summary from session memory]\n{memory_summary}"),
-            );
-
-            let mut new_messages = system_msgs;
-            new_messages.push(summary_msg);
-            new_messages.extend(recent);
-
-            self.compacted_messages
-                .extend(compacted.into_iter().map(|mut m| {
-                    m.agent_visible = false;
-                    m
-                }));
-            self.messages = new_messages;
-            self.tracker.reset();
-            self.tracker.add_messages(&self.messages);
-            self.last_summary = Some(memory_summary);
-            self.last_compaction_report = Some(CompactionReport {
-                tokens_before: before_tokens,
-                tokens_after: self.token_count(),
-                tokens_saved: before_tokens.saturating_sub(self.token_count()),
-                messages_before: before_messages,
-                messages_after: self.messages.len(),
-                strategy: "session_memory".to_string(),
-                summary: self.last_summary.clone(),
-            });
-            self.compaction_breaker.record_success();
-            self.needs_repair = true;
-            return Ok(());
-        }
-
         // Feed previous summary into the hybrid condenser's summarization strategy
         if let CondenserKind::Hybrid(condenser) = &mut self.condenser {
             condenser.set_previous_summary(self.last_summary.clone());
         }
 
         let strategy = match &mut self.condenser {
-            CondenserKind::Sync(condenser) => match condenser.condense(&self.messages) {
-                Ok(condensed) => {
-                    self.compaction_breaker.record_success();
-                    let strategy = condensed.strategy.clone();
-                    self.compacted_messages.extend(condensed.compacted_messages);
-                    self.messages = condensed.messages;
-                    strategy
-                }
-                Err(e) => {
-                    self.compaction_breaker.record_failure();
-                    return Err(e);
-                }
-            },
-            CondenserKind::Hybrid(condenser) => match condenser.condense(&self.messages).await {
-                Ok(condensed) => {
-                    self.compaction_breaker.record_success();
-                    let strategy = condensed.strategy.clone();
-                    self.compacted_messages.extend(condensed.compacted_messages);
-                    self.messages = condensed.messages;
-                    strategy
-                }
-                Err(e) => {
-                    self.compaction_breaker.record_failure();
-                    return Err(e);
-                }
-            },
+            CondenserKind::Sync(condenser) => {
+                let condensed = condenser.condense(&self.messages)?;
+                let strategy = condensed.strategy.clone();
+                self.compacted_messages.extend(condensed.compacted_messages);
+                self.messages = condensed.messages;
+                strategy
+            }
+            CondenserKind::Hybrid(condenser) => {
+                let condensed = condenser.condense(&self.messages).await?;
+                let strategy = condensed.strategy.clone();
+                self.compacted_messages.extend(condensed.compacted_messages);
+                self.messages = condensed.messages;
+                strategy
+            }
         };
 
         // Extract the latest summary from system messages (the compaction summary

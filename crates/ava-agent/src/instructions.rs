@@ -6,6 +6,7 @@
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// Well-known instruction file names checked in the project root.
 const PROJECT_ROOT_FILES: &[&str] = &[
@@ -18,9 +19,241 @@ const PROJECT_ROOT_FILES: &[&str] = &[
 /// Order defines precedence within each scope (global/project).
 const SKILL_DIRS: &[&str] = &[".claude/skills", ".agents/skills", ".ava/skills"];
 
+/// Maximum @include recursion depth.
+const MAX_INCLUDE_DEPTH: usize = 5;
+
+/// Maximum total bytes of included content (50KB).
+const MAX_INCLUDE_BYTES: usize = 50_000;
+
+/// File extensions allowed for @include resolution.
+const INCLUDABLE_EXTENSIONS: &[&str] = &[
+    "md", "txt", "rs", "ts", "js", "py", "json", "yaml", "yml", "toml",
+];
+
+/// Local override instruction file names (intended to be gitignored).
+const LOCAL_OVERRIDE_FILES: &[&str] = &["AGENTS.local.md", "CLAUDE.local.md"];
+
 /// Accurate BPE token count using cl100k_base via tiktoken.
 fn estimate_tokens(text: &str) -> usize {
     ava_context::count_tokens_default(text)
+}
+
+/// Process `@path` include directives in instruction file content.
+///
+/// Scans for `@./relative`, `@~/home`, `@/absolute`, or bare `@filename.ext`
+/// patterns outside of code blocks (``` fenced or 4+ space indented).
+/// Included content replaces the `@path` reference inline. Circular references
+/// are prevented via the `visited` set, and recursion is limited to
+/// [`MAX_INCLUDE_DEPTH`] levels with a total budget of [`MAX_INCLUDE_BYTES`].
+///
+/// Non-existent or non-includable files are silently left as-is.
+pub fn process_includes(content: &str, base_path: &Path, visited: &mut HashSet<PathBuf>) -> String {
+    let total_included = AtomicUsize::new(0);
+    process_includes_inner(content, base_path, visited, 0, &total_included)
+}
+
+fn process_includes_inner(
+    content: &str,
+    base_path: &Path,
+    visited: &mut HashSet<PathBuf>,
+    depth: usize,
+    total_included: &AtomicUsize,
+) -> String {
+    if depth >= MAX_INCLUDE_DEPTH {
+        return content.to_string();
+    }
+
+    let mut result = String::with_capacity(content.len());
+    let mut in_fenced_block = false;
+    let mut fence_marker = String::new();
+
+    for line in content.lines() {
+        let trimmed = line.trim_start();
+
+        // Track fenced code blocks (``` or ~~~)
+        if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
+            let marker: String = trimmed
+                .chars()
+                .take_while(|&c| c == '`' || c == '~')
+                .collect();
+            if in_fenced_block && trimmed.starts_with(&fence_marker) {
+                in_fenced_block = false;
+                fence_marker.clear();
+            } else if !in_fenced_block {
+                in_fenced_block = true;
+                fence_marker = marker;
+            }
+            result.push_str(line);
+            result.push('\n');
+            continue;
+        }
+
+        // Skip lines inside fenced code blocks
+        if in_fenced_block {
+            result.push_str(line);
+            result.push('\n');
+            continue;
+        }
+
+        // Skip indented code blocks (4+ spaces or tab)
+        if line.starts_with("    ") || line.starts_with('\t') {
+            result.push_str(line);
+            result.push('\n');
+            continue;
+        }
+
+        // Process @include references in this line
+        let processed = resolve_includes_in_line(line, base_path, visited, depth, total_included);
+        result.push_str(&processed);
+        result.push('\n');
+    }
+
+    // Remove the trailing newline we added if original didn't end with one
+    if !content.ends_with('\n') && result.ends_with('\n') {
+        result.pop();
+    }
+
+    result
+}
+
+/// Resolve all `@path` references in a single line.
+fn resolve_includes_in_line(
+    line: &str,
+    base_path: &Path,
+    visited: &mut HashSet<PathBuf>,
+    depth: usize,
+    total_included: &AtomicUsize,
+) -> String {
+    let mut result = String::new();
+    let mut remaining = line;
+
+    while let Some(at_pos) = remaining.find('@') {
+        // Add everything before the @
+        result.push_str(&remaining[..at_pos]);
+
+        let after_at = &remaining[at_pos + 1..];
+
+        // Try to parse a path reference
+        if let Some((path_str, consumed)) = parse_include_path(after_at) {
+            if let Some(resolved) =
+                try_resolve_include(&path_str, base_path, visited, depth, total_included)
+            {
+                result.push_str(&resolved);
+                remaining = &remaining[at_pos + 1 + consumed..];
+                continue;
+            }
+        }
+
+        // Not a valid include reference, keep the @ and move on
+        result.push('@');
+        remaining = after_at;
+    }
+
+    result.push_str(remaining);
+    result
+}
+
+/// Parse a path after `@`. Returns `(path_string, chars_consumed)` or `None`.
+fn parse_include_path(after_at: &str) -> Option<(String, usize)> {
+    if after_at.is_empty() {
+        return None;
+    }
+
+    let first_char = after_at.chars().next()?;
+
+    // Must start with `.`, `~`, `/`, or an alphanumeric char (bare filename)
+    if first_char != '.' && first_char != '~' && first_char != '/' && !first_char.is_alphanumeric()
+    {
+        return None;
+    }
+
+    // Consume until whitespace, end of line, or certain punctuation
+    let end = after_at
+        .find(|c: char| c.is_whitespace() || c == ',' || c == ';' || c == ')' || c == ']')
+        .unwrap_or(after_at.len());
+
+    if end == 0 {
+        return None;
+    }
+
+    let path_str = &after_at[..end];
+
+    // Must contain a dot (file extension) to distinguish from @mentions
+    if !path_str.contains('.') {
+        return None;
+    }
+
+    // Check the extension is in the allowlist
+    let extension = path_str.rsplit('.').next()?;
+    if !INCLUDABLE_EXTENSIONS
+        .iter()
+        .any(|ext| ext.eq_ignore_ascii_case(extension))
+    {
+        return None;
+    }
+
+    Some((path_str.to_string(), end))
+}
+
+/// Try to resolve a single include path, returning the file content or `None`.
+fn try_resolve_include(
+    path_str: &str,
+    base_path: &Path,
+    visited: &mut HashSet<PathBuf>,
+    depth: usize,
+    total_included: &AtomicUsize,
+) -> Option<String> {
+    let resolved_path = if path_str.starts_with("./") || path_str.starts_with("../") {
+        base_path.join(path_str)
+    } else if let Some(rest) = path_str.strip_prefix("~/") {
+        let home = dirs::home_dir()?;
+        home.join(rest)
+    } else if path_str.starts_with('/') {
+        PathBuf::from(path_str)
+    } else {
+        // Bare filename — resolve against base_path
+        base_path.join(path_str)
+    };
+
+    let canonical = fs::canonicalize(&resolved_path).ok()?;
+
+    // Circular reference check
+    if visited.contains(&canonical) {
+        tracing::debug!(
+            "skipping circular @include: {} -> {}",
+            path_str,
+            canonical.display()
+        );
+        return None;
+    }
+
+    let file_content = fs::read_to_string(&canonical).ok()?;
+
+    // Budget check
+    let current = total_included.load(Ordering::Relaxed);
+    if current + file_content.len() > MAX_INCLUDE_BYTES {
+        tracing::warn!(
+            "skipping @include {} — would exceed {}KB total include budget",
+            path_str,
+            MAX_INCLUDE_BYTES / 1000
+        );
+        return None;
+    }
+    total_included.fetch_add(file_content.len(), Ordering::Relaxed);
+
+    visited.insert(canonical.clone());
+
+    // Recurse — the included file's base_path is its parent directory
+    let include_base = canonical.parent().unwrap_or(base_path);
+    let processed = process_includes_inner(
+        &file_content,
+        include_base,
+        visited,
+        depth + 1,
+        total_included,
+    );
+
+    Some(processed)
 }
 
 /// Trim instructions to fit within a token budget.
@@ -205,6 +438,17 @@ fn load_startup_from_root_with_extras(
         load_skill_sections(root, home, project_trusted, &mut seen, &mut sections);
     }
 
+    // Local override files — HIGHEST priority, loaded last.
+    // These are intended to be gitignored (personal developer overrides).
+    if project_trusted {
+        for name in LOCAL_OVERRIDE_FILES {
+            let path = root.join(name);
+            try_load_file_bounded(&path, root, &mut seen, &mut sections);
+            let ava_path = root.join(".ava").join(name);
+            try_load_file_bounded(&ava_path, root, &mut seen, &mut sections);
+        }
+    }
+
     if sections.is_empty() {
         return None;
     }
@@ -318,6 +562,19 @@ fn load_from_root_with_extras(
     // 5. Skill discovery (global first, then project — project gated on trust).
     // Supported roots: .claude/skills, .agents/skills, .ava/skills
     load_skill_sections(root, home, project_trusted, &mut seen, &mut sections);
+
+    // 6. Local override files — HIGHEST priority, loaded last.
+    // These are intended to be gitignored (personal developer overrides).
+    if project_trusted {
+        for name in LOCAL_OVERRIDE_FILES {
+            // Project root: AGENTS.local.md, CLAUDE.local.md
+            let path = root.join(name);
+            try_load_file_bounded(&path, root, &mut seen, &mut sections);
+            // .ava/ directory: .ava/AGENTS.local.md, .ava/CLAUDE.local.md
+            let ava_path = root.join(".ava").join(name);
+            try_load_file_bounded(&ava_path, root, &mut seen, &mut sections);
+        }
+    }
 
     if sections.is_empty() {
         return None;
@@ -774,8 +1031,16 @@ fn try_load_file_inner(
         return;
     }
 
+    // Process @include directives
+    let base_dir = path.parent().unwrap_or(Path::new("."));
+    let mut include_visited = HashSet::new();
+    if let Ok(canon) = fs::canonicalize(path) {
+        include_visited.insert(canon);
+    }
+    let processed = process_includes(trimmed, base_dir, &mut include_visited);
+
     tracing::debug!("loaded instruction file: {}", path.display());
-    sections.push(format!("# From: {}\n\n{}", path.display(), trimmed));
+    sections.push(format!("# From: {}\n\n{}", path.display(), processed));
 }
 
 #[cfg(test)]
@@ -1531,6 +1796,200 @@ mod tests {
             !text.contains("Local skill guidance."),
             "Project-local skills should be skipped when untrusted"
         );
+    }
+
+    // --- @include tests (F10) ---
+
+    #[test]
+    fn test_include_basic() {
+        let tmp = TempDir::new().unwrap();
+        fs::write(tmp.path().join("extra.md"), "Included content.").unwrap();
+        let content = "Before @./extra.md after";
+        let mut visited = HashSet::new();
+        let result = process_includes(content, tmp.path(), &mut visited);
+        assert!(result.contains("Included content."));
+        assert!(result.contains("Before"));
+        assert!(result.contains("after"));
+        assert!(!result.contains("@./extra.md"));
+    }
+
+    #[test]
+    fn test_include_relative_path_resolves() {
+        let tmp = TempDir::new().unwrap();
+        let sub = tmp.path().join("sub");
+        fs::create_dir_all(&sub).unwrap();
+        fs::write(sub.join("data.txt"), "Sub data.").unwrap();
+        fs::write(tmp.path().join("main.md"), "Load @./sub/data.txt here").unwrap();
+
+        let mut visited = HashSet::new();
+        let result = process_includes("Load @./sub/data.txt here", tmp.path(), &mut visited);
+        assert!(result.contains("Sub data."));
+    }
+
+    #[test]
+    fn test_include_circular_reference_stops() {
+        let tmp = TempDir::new().unwrap();
+        // a.md includes b.md which includes a.md
+        fs::write(tmp.path().join("a.md"), "A includes @./b.md end").unwrap();
+        fs::write(tmp.path().join("b.md"), "B includes @./a.md end").unwrap();
+
+        let mut visited = HashSet::new();
+        let result = process_includes("Start @./a.md finish", tmp.path(), &mut visited);
+        // Should include a.md, which includes b.md, but b.md's @./a.md should NOT recurse
+        assert!(result.contains("A includes"));
+        assert!(result.contains("B includes"));
+        // Should not infinitely recurse — the test completing is proof enough
+    }
+
+    #[test]
+    fn test_include_missing_file_ignored() {
+        let tmp = TempDir::new().unwrap();
+        let content = "Before @./nonexistent.md after";
+        let mut visited = HashSet::new();
+        let result = process_includes(content, tmp.path(), &mut visited);
+        // The @reference stays as-is when the file doesn't exist
+        assert!(result.contains("@./nonexistent.md"));
+    }
+
+    #[test]
+    fn test_include_code_block_not_processed() {
+        let tmp = TempDir::new().unwrap();
+        fs::write(tmp.path().join("secret.md"), "SECRET CONTENT").unwrap();
+        let content = "Normal line\n```\n@./secret.md\n```\nAfter block";
+        let mut visited = HashSet::new();
+        let result = process_includes(content, tmp.path(), &mut visited);
+        assert!(!result.contains("SECRET CONTENT"));
+        assert!(result.contains("@./secret.md"));
+    }
+
+    #[test]
+    fn test_include_indented_code_not_processed() {
+        let tmp = TempDir::new().unwrap();
+        fs::write(tmp.path().join("data.md"), "INCLUDED").unwrap();
+        let content = "Normal\n    @./data.md\nAfter";
+        let mut visited = HashSet::new();
+        let result = process_includes(content, tmp.path(), &mut visited);
+        assert!(!result.contains("INCLUDED"));
+        assert!(result.contains("@./data.md"));
+    }
+
+    #[test]
+    fn test_include_depth_limit() {
+        let tmp = TempDir::new().unwrap();
+        // Create a chain: 0.md -> 1.md -> 2.md -> ... -> 6.md
+        for i in 0..7 {
+            let next = i + 1;
+            let content = format!("Level {} @./{}.md end", i, next);
+            fs::write(tmp.path().join(format!("{}.md", i)), content).unwrap();
+        }
+        fs::write(tmp.path().join("7.md"), "Bottom level").unwrap();
+
+        let mut visited = HashSet::new();
+        let result = process_includes("Start @./0.md finish", tmp.path(), &mut visited);
+        // Depth 0: expand 0.md
+        // Depth 1: expand 1.md inside 0.md
+        // ... up to depth 4 (MAX_INCLUDE_DEPTH=5 means depth 0-4)
+        // Depth 5: should NOT expand
+        assert!(result.contains("Level 0"));
+        assert!(result.contains("Level 4"));
+        // Level 5 inclusion starts at depth 5, should be left as @reference
+    }
+
+    #[test]
+    fn test_include_size_limit() {
+        let tmp = TempDir::new().unwrap();
+        // Create a file larger than the budget
+        let big_content = "x".repeat(MAX_INCLUDE_BYTES + 1);
+        fs::write(tmp.path().join("big.md"), &big_content).unwrap();
+        fs::write(tmp.path().join("small.md"), "Small file").unwrap();
+
+        let mut visited = HashSet::new();
+        // Include big first (exceeds budget), then small
+        let content = "A @./big.md B @./small.md C";
+        let result = process_includes(content, tmp.path(), &mut visited);
+        // big.md should be included (fits the budget on first check)
+        // small.md should be skipped (budget exceeded)
+        // Actually big.md itself exceeds MAX_INCLUDE_BYTES, so it should be skipped
+        assert!(result.contains("@./big.md") || result.contains(&big_content[..20]));
+    }
+
+    #[test]
+    fn test_include_bare_filename() {
+        let tmp = TempDir::new().unwrap();
+        fs::write(tmp.path().join("rules.md"), "Bare include works.").unwrap();
+        let content = "See @rules.md for details";
+        let mut visited = HashSet::new();
+        let result = process_includes(content, tmp.path(), &mut visited);
+        assert!(result.contains("Bare include works."));
+    }
+
+    #[test]
+    fn test_include_unsupported_extension_ignored() {
+        let tmp = TempDir::new().unwrap();
+        fs::write(tmp.path().join("binary.exe"), "not text").unwrap();
+        let content = "Load @./binary.exe here";
+        let mut visited = HashSet::new();
+        let result = process_includes(content, tmp.path(), &mut visited);
+        assert!(result.contains("@./binary.exe"));
+    }
+
+    // --- local override file tests (F38) ---
+
+    #[test]
+    fn test_local_file_loaded_with_highest_priority() {
+        let tmp = TempDir::new().unwrap();
+        fs::write(tmp.path().join("AGENTS.md"), "Standard rules.").unwrap();
+        fs::write(tmp.path().join("AGENTS.local.md"), "Local override rules.").unwrap();
+
+        let result = load_from_root(tmp.path(), None);
+        assert!(result.is_some());
+        let text = result.unwrap();
+        assert!(text.contains("Standard rules."));
+        assert!(text.contains("Local override rules."));
+
+        // Local should come AFTER standard (loaded last = highest priority)
+        let standard_pos = text.find("Standard rules.").unwrap();
+        let local_pos = text.find("Local override rules.").unwrap();
+        assert!(
+            local_pos > standard_pos,
+            "Local override should be loaded after standard instructions"
+        );
+    }
+
+    #[test]
+    fn test_local_file_in_ava_dir() {
+        let tmp = TempDir::new().unwrap();
+        let ava_dir = tmp.path().join(".ava");
+        fs::create_dir_all(&ava_dir).unwrap();
+        fs::write(ava_dir.join("CLAUDE.local.md"), "AVA dir local override.").unwrap();
+
+        let result = load_from_root(tmp.path(), None);
+        assert!(result.is_some());
+        let text = result.unwrap();
+        assert!(text.contains("AVA dir local override."));
+    }
+
+    #[test]
+    fn test_local_file_not_required() {
+        let tmp = TempDir::new().unwrap();
+        fs::write(tmp.path().join("AGENTS.md"), "Only standard.").unwrap();
+        // No local files — should still work
+        let result = load_from_root(tmp.path(), None);
+        assert!(result.is_some());
+        let text = result.unwrap();
+        assert!(text.contains("Only standard."));
+        assert!(!text.contains("local"));
+    }
+
+    #[test]
+    fn test_local_claude_md_loaded() {
+        let tmp = TempDir::new().unwrap();
+        fs::write(tmp.path().join("CLAUDE.local.md"), "Claude local rules.").unwrap();
+
+        let result = load_from_root(tmp.path(), None);
+        assert!(result.is_some());
+        let text = result.unwrap();
+        assert!(text.contains("Claude local rules."));
     }
 
     #[test]

@@ -1,6 +1,7 @@
 //! AVA Context - token tracking and condensation orchestration.
 
 pub mod condenser;
+pub mod content_budget;
 pub mod error;
 pub mod focus;
 pub mod manager;
@@ -14,6 +15,7 @@ pub use condenser::{
     create_condenser, create_hybrid_condenser, create_hybrid_condenser_with_relevance, Condenser,
     HybridCondenser,
 };
+pub use content_budget::{ContentEntry, ContentReplacementBudget};
 pub use error::{ContextError, Result};
 pub use focus::{AccessKind, FocusChain, FocusEntry};
 pub use manager::ContextManager;

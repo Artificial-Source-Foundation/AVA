@@ -1,3 +1,5 @@
+pub mod attachment_state;
+pub mod cache_diagnostics;
 mod completion;
 mod repetition;
 mod response;
@@ -92,6 +94,10 @@ pub struct AgentLoop {
     cached_hooked_tool_defs: std::sync::Mutex<Option<Vec<ava_types::Tool>>>,
     /// Visible tool subset for the current goal.
     tool_visibility_profile: crate::routing::ToolVisibilityProfile,
+    /// Attachment delta tracker — only injects changed MCP/skills/memories per turn.
+    /// Wired into context injection by callers via `compute_attachment_delta`.
+    #[allow(dead_code)]
+    pub attachment_state: attachment_state::AttachmentState,
 }
 
 /// Configuration for a single agent loop run — turn limits, cost caps, and model identity.
@@ -347,6 +353,7 @@ impl AgentLoop {
             cached_tool_defs: std::sync::Mutex::new(None),
             cached_hooked_tool_defs: std::sync::Mutex::new(None),
             tool_visibility_profile: crate::routing::ToolVisibilityProfile::Full,
+            attachment_state: attachment_state::AttachmentState::new(),
         }
     }
 
@@ -637,10 +644,21 @@ impl AgentLoop {
             {
                 Ok(result) => result,
                 Err(error) if ava_llm::providers::common::is_context_overflow(&error) => {
-                    // Context overflow detected — auto-compact and retry once.
+                    // Context overflow detected — parse token gap for compaction guidance.
+                    let token_gap = ava_llm::providers::common::parse_token_gap(&error.to_string());
+                    if let Some(ref gap) = token_gap {
+                        debug!(
+                            actual = gap.actual_tokens,
+                            max = gap.max_tokens,
+                            gap = gap.gap,
+                            gap_ratio = format!("{:.1}%", gap.gap_ratio() * 100.0),
+                            "parsed token gap from overflow error"
+                        );
+                    }
                     warn!(
                         error = %error,
                         tokens = self.context.token_count(),
+                        token_gap = ?token_gap,
                         "context overflow from provider, attempting auto-compaction"
                     );
                     Self::emit(

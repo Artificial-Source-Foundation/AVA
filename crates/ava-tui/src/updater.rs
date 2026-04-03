@@ -4,10 +4,11 @@
 //! Update checks are cached (once per 24h) to avoid API rate limits.
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::path::PathBuf;
 
-const GITHUB_API_URL: &str =
-    "https://api.github.com/repos/Artificial-Source-Foundation/AVA/releases/latest";
+const GITHUB_REPO: &str = "ASF-GROUP/AVA";
+const GITHUB_API_URL: &str = "https://api.github.com/repos/ASF-GROUP/AVA/releases/latest";
 const CHECK_INTERVAL_SECS: u64 = 86400; // 24 hours
 
 /// Info about an available update.
@@ -16,6 +17,7 @@ pub struct UpdateInfo {
     pub current_version: String,
     pub latest_version: String,
     pub download_url: String,
+    pub checksum_url: Option<String>,
     pub changelog: String,
     pub published_at: String,
 }
@@ -120,6 +122,12 @@ pub async fn check_for_update() -> color_eyre::Result<Option<UpdateInfo>> {
         .find(|a| a.name == asset_name)
         .map(|a| a.browser_download_url.clone())
         .unwrap_or_default();
+    let checksum_name = format!("{asset_name}.sha256");
+    let checksum_url = release
+        .assets
+        .iter()
+        .find(|a| a.name == checksum_name)
+        .map(|a| a.browser_download_url.clone());
 
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -148,9 +156,18 @@ pub async fn check_for_update() -> color_eyre::Result<Option<UpdateInfo>> {
         current_version: current,
         latest_version: latest,
         download_url,
+        checksum_url,
         changelog: release.body.unwrap_or_default(),
         published_at: release.published_at.unwrap_or_default(),
     }))
+}
+
+fn parse_expected_checksum(contents: &str) -> Option<&str> {
+    contents.split_whitespace().next().filter(|s| !s.is_empty())
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    format!("{:x}", Sha256::digest(bytes))
 }
 
 /// Render a changelog string with ANSI colors for terminal output.
@@ -213,6 +230,12 @@ fn render_changelog(changelog: &str) -> String {
 pub async fn download_and_replace(info: &UpdateInfo) -> color_eyre::Result<()> {
     use std::io::Write;
 
+    if cfg!(windows) {
+        return Err(color_eyre::eyre::eyre!(
+            "Self-update is not yet supported on Windows. Download the latest installer from https://github.com/{GITHUB_REPO}/releases/latest"
+        ));
+    }
+
     if info.download_url.is_empty() {
         return install_from_source(info).await;
     }
@@ -235,6 +258,29 @@ pub async fn download_and_replace(info: &UpdateInfo) -> color_eyre::Result<()> {
     let bytes = response.bytes().await?;
     let size_mb = bytes.len() as f64 / 1_048_576.0;
     eprintln!("\r\x1b[2K  \x1b[1;32m\u{2022}\x1b[0m Downloaded {size_mb:.1} MB");
+
+    let checksum_url = info.checksum_url.as_ref().ok_or_else(|| {
+        color_eyre::eyre::eyre!(
+            "Release checksum is missing for this update. Refusing to install without integrity metadata."
+        )
+    })?;
+    let checksum = client.get(checksum_url).send().await?;
+    if !checksum.status().is_success() {
+        return Err(color_eyre::eyre::eyre!(
+            "Failed to download release checksum: HTTP {}",
+            checksum.status()
+        ));
+    }
+    let checksum_text = checksum.text().await?;
+    let expected = parse_expected_checksum(&checksum_text).ok_or_else(|| {
+        color_eyre::eyre::eyre!("Release checksum file did not contain a valid sha256 digest")
+    })?;
+    let actual = sha256_hex(&bytes);
+    if actual != expected {
+        return Err(color_eyre::eyre::eyre!(
+            "Checksum mismatch for downloaded update (expected {expected}, got {actual})"
+        ));
+    }
 
     // Extract tarball
     let decoder = flate2::read::GzDecoder::new(&bytes[..]);
@@ -274,7 +320,11 @@ pub async fn download_and_replace(info: &UpdateInfo) -> color_eyre::Result<()> {
     let backup_path = current_exe.with_extension("old");
     let _ = std::fs::remove_file(&backup_path);
     std::fs::rename(&current_exe, &backup_path)?;
-    std::fs::rename(&temp_path, &current_exe)?;
+    if let Err(err) = std::fs::rename(&temp_path, &current_exe) {
+        let _ = std::fs::rename(&backup_path, &current_exe);
+        let _ = std::fs::remove_file(&temp_path);
+        return Err(err.into());
+    }
     let _ = std::fs::remove_file(&backup_path);
 
     eprintln!(
@@ -293,17 +343,10 @@ async fn install_from_source(info: &UpdateInfo) -> color_eyre::Result<()> {
     eprintln!("  \x1b[2mNo pre-built binary for this platform. Building from source...\x1b[0m");
 
     let tag = format!("v{}", info.latest_version);
+    let repo_url = format!("https://github.com/{GITHUB_REPO}.git");
     let status = tokio::process::Command::new("cargo")
         .args([
-            "install",
-            "--git",
-            "https://github.com/Artificial-Source-Foundation/AVA.git",
-            "--tag",
-            &tag,
-            "--bin",
-            "ava",
-            "--force",
-            "ava-tui",
+            "install", "--git", &repo_url, "--tag", &tag, "--bin", "ava", "--force", "ava-tui",
         ])
         .status()
         .await?;
@@ -311,7 +354,7 @@ async fn install_from_source(info: &UpdateInfo) -> color_eyre::Result<()> {
     if !status.success() {
         return Err(color_eyre::eyre::eyre!(
             "cargo install failed (exit {}). Install manually:\n  \
-             cargo install --git https://github.com/Artificial-Source-Foundation/AVA.git --tag {tag} --bin ava",
+             cargo install --git https://github.com/{GITHUB_REPO}.git --tag {tag} --bin ava",
             status.code().unwrap_or(-1)
         ));
     }
@@ -377,11 +420,32 @@ pub async fn run_update_command() -> color_eyre::Result<()> {
         Err(e) => {
             eprintln!("  \x1b[1;31m\u{2717}\x1b[0m Failed to check for updates: {e}");
             eprintln!(
-                "  \x1b[2mDownload manually: https://github.com/Artificial-Source-Foundation/AVA/releases/latest\x1b[0m\n"
+                "  \x1b[2mDownload manually: https://github.com/{GITHUB_REPO}/releases/latest\x1b[0m\n"
             );
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{parse_expected_checksum, sha256_hex};
+
+    #[test]
+    fn parses_checksum_file_first_token() {
+        assert_eq!(
+            parse_expected_checksum("abc123  ava-x86_64-unknown-linux-gnu.tar.gz\n"),
+            Some("abc123")
+        );
+    }
+
+    #[test]
+    fn sha256_hex_matches_known_value() {
+        assert_eq!(
+            sha256_hex(b"hello"),
+            "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+        );
+    }
 }
 
 /// Background check that returns a message if an update is available.

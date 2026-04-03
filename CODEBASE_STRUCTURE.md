@@ -14,7 +14,7 @@
 
 ## Rust Workspace
 
-AVA currently ships with 21 Rust crates:
+AVA currently ships with 22 Rust crates:
 
 - `ava-tui` — CLI/TUI binary, headless mode, and web server entrypoints
 - `ava-agent` — agent loop, routing, tool execution, prompts, and stack runtime
@@ -36,6 +36,7 @@ AVA currently ships with 21 Rust crates:
 - `ava-plugin` — plugin discovery and runtime
 - `ava-extensions` — extension loading and hooks
 - `ava-acp` — external agent integration via ACP
+- `ava-lsp` — on-demand LSP runtime scaffolding
 - `ava-validator` — validation pipeline
 
 ## Documentation Map

@@ -32,7 +32,7 @@ AVA is a Rust-first AI coding assistant (CLI/TUI + Tauri desktop) with a 21-crat
 
 ## Key Counts
 
-- 21 Rust crates in the root workspace (`src-tauri/` remains outside the workspace)
+- 22 Rust crates in the root workspace (`src-tauri/` remains outside the workspace)
 - 9 default tools: `read`, `write`, `edit`, `bash`, `glob`, `grep`, `web_fetch`, `web_search`, `git_read`
 - Additional tools load separately at runtime (for example `subagent`, `todo_*`, `question`, `plan`, MCP, and TOML custom tools)
 

@@ -32,6 +32,7 @@ Then:
 ```bash
 ava --version
 ava --connect openrouter
+ava auth test openrouter
 ```
 
 ### Desktop app
@@ -71,8 +72,11 @@ More install paths, including source installer and Linux troubleshooting notes:
 
 ```bash
 ava --connect openrouter   # interactive setup
-# or manually: ~/.ava/credentials.json
+ava auth list              # verify configured providers
+ava auth test openrouter   # verify the selected provider works
 ```
+
+Common provider IDs: `openrouter`, `openai`, `anthropic`, `gemini`, `copilot`, `ollama`
 
 **Run:**
 

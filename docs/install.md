@@ -24,12 +24,16 @@ What this does:
 - downloads the latest released `ava` CLI binary
 - installs it to `~/.ava/bin/ava`
 - adds `~/.ava/bin` to your shell `PATH` when possible
+- verifies the release checksum before installing
+
+If you are installing from a private AVA fork, use the authenticated `gh` CLI so the installer can fetch release metadata and assets without exposing a token in process arguments.
 
 Then restart your shell and run:
 
 ```sh
 ava --version
 ava --connect openrouter
+ava auth test openrouter
 ```
 
 Supported by the installer today:
@@ -47,6 +51,8 @@ For Windows today, use one of these paths:
 
 1. download the desktop `.msi` or `.exe` from GitHub Releases
 2. build the CLI from source with Rust
+
+For updates on Windows, download the latest installer again from Releases rather than relying on `ava update`.
 
 ## 2. Desktop App Downloads
 
@@ -68,7 +74,7 @@ Recommended choices:
 - macOS: `.dmg`
 - Windows: `.msi` for normal install, `.exe` if that is what the release provides for your flow
 
-After installing the desktop app, launch AVA and connect a provider from the onboarding flow or with credentials under `~/.ava/credentials.json`.
+After installing the desktop app, launch AVA and connect a provider from the onboarding flow. If you skip onboarding, you can still use `ava --connect openrouter` in a terminal or add credentials under `~/.ava/credentials.json`.
 
 ## 3. Build From Source
 
@@ -157,7 +163,31 @@ After installing AVA, connect a provider:
 
 ```bash
 ava --connect openrouter
+ava auth list
+ava auth test openrouter
 ```
+
+You can also use the explicit auth subcommand:
+
+```bash
+ava auth login openrouter
+```
+
+Common provider IDs:
+
+- `openrouter`
+- `openai`
+- `anthropic`
+- `google`
+- `copilot`
+- `ollama`
+
+Notes:
+
+- `ava --connect <provider>` and `ava auth login <provider>` both launch the same provider-auth flow.
+- In the TUI, you can also run `ava` and use `/connect`.
+- `ava auth list` shows which providers are configured.
+- `ava auth test <provider>` verifies that the configured provider actually works.
 
 Then try:
 

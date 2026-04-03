@@ -70,7 +70,7 @@ Both products read `~/.ava/credentials.json` for provider API keys and `.ava/sta
 
 ### Codebase Stats
 
-- **21 Rust crates**, ~40K LOC, 1,962+ tests (0 failures)
+- **22 Rust crates**, ~40K LOC, 1,962+ tests (0 failures)
 - **22 LLM providers**: Anthropic (with prompt caching), OpenAI, ChatGPT (OAuth), Gemini, Ollama, OpenRouter, Copilot, Inception, Alibaba, Alibaba CN, ZAI, ZhipuAI, Kimi, MiniMax, MiniMax CN, Azure OpenAI, AWS Bedrock, xAI, Mistral, Groq, DeepSeek, Mock
 - **9 default tools**: `read`, `write`, `edit` (15 strategies incl. ellipsis handling, 3-way merge + diff-match-patch), `bash`, `glob`, `grep`, `web_fetch`, `web_search`, `git_read`
 - **Extended tools** (not auto-registered): `apply_patch`, `multiedit`, `ast_ops`, `lsp_ops`, `code_search`, `lint`, `test_runner` — available as plugins
@@ -98,7 +98,7 @@ Commands: `/later` (add post-complete message), `/queue` (view/manage pending me
 
 ```text
 AVA/
-+-- crates/                   # 21 Rust crates (agent stack + TUI + services)
++-- crates/                   # 22 Rust crates (agent stack + TUI + services)
 |   +-- ava-tui/              # CLI/TUI binary (Ratatui) -- THE primary interface
 |   +-- ava-agent/            # Agent execution loop + reflection
 |   +-- ava-llm/              # LLM providers (22 built-in)
@@ -117,6 +117,7 @@ AVA/
 |   +-- ava-sandbox/          # Command sandboxing (bwrap/sandbox-exec)
 |   +-- ava-acp/              # Agent Client Protocol (external agent integration)
 |   +-- ava-extensions/       # Extension system (hooks, native/WASM)
+|   +-- ava-lsp/              # On-demand LSP runtime scaffolding
 |   +-- ava-db/               # SQLite connection pool
 |   +-- ava-types/            # Shared types
 |   +-- ava-validator/        # Validation pipeline

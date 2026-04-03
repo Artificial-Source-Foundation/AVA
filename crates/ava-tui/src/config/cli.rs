@@ -7,7 +7,7 @@ use tracing::debug;
     version,
     about = "AI coding assistant for terminal, browser, and desktop",
     long_about = "AVA is an AI coding assistant that can run as an interactive TUI, a headless CLI agent, a browser-backed web server, or a desktop app backend.",
-    after_help = "Examples:\n  ava\n      Open the terminal UI\n\n  ava \"fix the failing test\"\n      Run one task headlessly\n\n  ava --provider openrouter --model anthropic/claude-sonnet-4 \"review this crate\"\n      Run with an explicit provider and model\n\n  ava serve --port 8080\n      Start the browser/web server\n\n  ava auth login openrouter\n      Connect a provider\n\n  ava review --staged\n      Review staged git changes",
+    after_help = "Examples:\n  ava\n      Open the terminal UI\n\n  ava \"fix the failing test\"\n      Run one task headlessly\n\n  ava --provider openrouter --model anthropic/claude-sonnet-4 \"review this crate\"\n      Run with an explicit provider and model\n\n  ava --connect openrouter\n      Connect a provider interactively\n\n  ava serve --port 8080\n      Start the browser/web server\n\n  ava auth login openrouter\n      Connect a provider\n\n  ava review --staged\n      Review staged git changes",
     next_line_help = true
 )]
 pub struct CliArgs {
@@ -34,6 +34,11 @@ pub struct CliArgs {
     #[arg(long)]
     #[arg(help_heading = "Model Selection")]
     pub provider: Option<String>,
+
+    /// Connect a provider interactively and exit
+    #[arg(long, value_name = "PROVIDER")]
+    #[arg(help_heading = "Project Setup")]
+    pub connect: Option<String>,
 
     /// Maximum agent turns (0 = unlimited)
     #[arg(long, default_value_t = 0)]
@@ -263,6 +268,7 @@ mod tests {
             session: None,
             model: None,
             provider: None,
+            connect: None,
             max_turns: 3,
             max_budget_usd: 0.0,
             auto_approve: false,
@@ -644,7 +650,15 @@ impl CliArgs {
 
 /// Error message shown when no provider is configured anywhere.
 pub const NO_PROVIDER_ERROR: &str = "\
-No provider configured. Set defaults in ~/.ava/config.yaml or use --provider/--model flags.
+No provider configured.
+
+Quickest fix:
+  ava --connect openrouter
+
+Or use the auth subcommand directly:
+  ava auth login openrouter
+
+Or set defaults in ~/.ava/config.yaml or use --provider/--model flags.
 
 Example ~/.ava/config.yaml:
   llm:

@@ -5,7 +5,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use ava_agent::message_queue::MessageQueue;
 use ava_agent::stack::{AgentStack, AgentStackConfig};
-use ava_config::{Config, CredentialStore, ProviderCredential, RoutingMode};
+use ava_config::{Config, CredentialStore, ProviderCredential, RoutingMode, RoutingTarget};
 use ava_llm::provider::LLMProvider;
 use ava_llm::providers::mock::MockProvider;
 use ava_llm::RouteSource;
@@ -51,6 +51,10 @@ fn write_routing_config(dir: &tempfile::TempDir) {
     config.llm.provider = "anthropic".to_string();
     config.llm.model = "claude-sonnet-4.6".to_string();
     config.llm.routing.mode = RoutingMode::Conservative;
+    config.llm.routing.targets.cheap = RoutingTarget {
+        provider: Some("openai".to_string()),
+        model: Some("gpt-5-mini".to_string()),
+    };
     std::fs::write(
         dir.path().join("config.yaml"),
         serde_json::to_string(&config).unwrap(),
@@ -220,7 +224,7 @@ async fn agent_stack_resolve_model_route_prefers_cheap_model_when_enabled() {
         .await
         .expect("route resolution should succeed");
 
-    assert_eq!(decision.source, RouteSource::PolicyAuto);
+    assert_eq!(decision.source, RouteSource::PolicyTarget);
     assert_eq!(decision.provider, "openai");
     assert_eq!(decision.display_model, "gpt-5-mini");
 }

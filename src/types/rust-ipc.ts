@@ -551,6 +551,30 @@ export interface AgentToolInfo {
   source: string
 }
 
+export type LspRuntimeState = 'disabled' | 'idle' | 'starting' | 'ready' | 'error' | 'unavailable'
+
+export interface LspDiagnosticSummary {
+  errors: number
+  warnings: number
+  info: number
+}
+
+export interface LspServerSnapshot {
+  name: string
+  state: LspRuntimeState
+  active: boolean
+  diagnostics: LspDiagnosticSummary
+  lastError?: string | null
+}
+
+export interface LspStatusSnapshot {
+  enabled: boolean
+  mode: string
+  activeServerCount: number
+  summary: LspDiagnosticSummary
+  servers: LspServerSnapshot[]
+}
+
 export interface McpServerInfo {
   name: string
   toolCount: number

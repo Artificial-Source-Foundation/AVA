@@ -28,6 +28,7 @@ import type {
   GitToolResult,
   InstalledPluginInfo,
   JsonValue,
+  LspStatusSnapshot,
   McpReloadResult,
   McpServerInfo,
   MessageQueueState,
@@ -271,6 +272,7 @@ export const rustBackend = {
   getConfig: (): Promise<JsonValue> => invokeCommand('get_config'),
 
   listAgentTools: (): Promise<AgentToolInfo[]> => invokeCommand('list_agent_tools'),
+  getLspStatus: (): Promise<LspStatusSnapshot> => invokeCommand('get_lsp_status'),
 
   listMcpServers: (): Promise<McpServerInfo[]> => invokeCommand('list_mcp_servers'),
   reloadMcpServers: (): Promise<McpReloadResult> => invokeCommand('reload_mcp_servers'),

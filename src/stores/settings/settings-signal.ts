@@ -58,6 +58,15 @@ const { settings, setSettingsRaw } = createRoot(() => {
             },
           }
         }
+        if (category === 'lsp') {
+          return {
+            ...prev,
+            lsp: {
+              ...prev.lsp,
+              enabled: (patch.enabled as boolean) ?? prev.lsp.enabled,
+            },
+          }
+        }
         // Unknown categories (extension-specific) — ignore
         return prev
       })
@@ -81,6 +90,7 @@ export type SubObjectKey =
   | 'behavior'
   | 'notifications'
   | 'git'
+  | 'lsp'
   | 'team'
 
 /** Generic sub-object updater: patches a nested key then persists */

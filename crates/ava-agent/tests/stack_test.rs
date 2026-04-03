@@ -604,6 +604,21 @@ instructions: []
     assert_eq!(configs[0].budget_tokens, Some(12_345));
 }
 
+#[tokio::test]
+async fn stack_registers_lsp_tools_by_default() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let (stack, _question_rx, _approval_rx, _plan_rx) = AgentStack::new(AgentStackConfig {
+        data_dir: dir.path().to_path_buf(),
+        ..Default::default()
+    })
+    .await
+    .expect("stack init should succeed");
+
+    let tools = stack.tools.read().await.tool_names();
+    assert!(tools.iter().any(|tool| tool == "diagnostics"));
+    assert!(tools.iter().any(|tool| tool == "lsp_ops"));
+}
+
 #[async_trait]
 impl LLMProvider for UsageProvider {
     async fn generate(&self, _messages: &[Message]) -> Result<String> {

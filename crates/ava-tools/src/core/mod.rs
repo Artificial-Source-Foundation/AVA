@@ -1,6 +1,7 @@
 pub mod bash;
 pub mod claude_code;
 pub mod custom_tool;
+pub mod diagnostics;
 pub mod edit;
 pub mod file_backup;
 pub mod file_snapshot;
@@ -8,6 +9,7 @@ pub mod git_read;
 pub mod glob;
 pub mod grep;
 pub mod hashline;
+pub mod lsp_ops;
 pub mod output_fallback;
 pub mod path_guard;
 pub mod path_suggest;
@@ -71,7 +73,7 @@ pub fn register_default_tools(
     registry: &mut ToolRegistry,
     platform: Arc<dyn Platform>,
 ) -> file_backup::FileBackupSession {
-    register_default_tools_with_plugins(registry, platform, None)
+    register_default_tools_with_plugins_and_lsp(registry, platform, None, None)
 }
 
 /// Like [`register_default_tools`] but also wires the `shell.env` plugin hook
@@ -86,6 +88,15 @@ pub fn register_default_tools_with_plugins(
     platform: Arc<dyn Platform>,
     plugin_manager: Option<Arc<tokio::sync::Mutex<PluginManager>>>,
 ) -> file_backup::FileBackupSession {
+    register_default_tools_with_plugins_and_lsp(registry, platform, plugin_manager, None)
+}
+
+pub fn register_default_tools_with_plugins_and_lsp(
+    registry: &mut ToolRegistry,
+    platform: Arc<dyn Platform>,
+    plugin_manager: Option<Arc<tokio::sync::Mutex<PluginManager>>>,
+    lsp_manager: Option<Arc<ava_lsp::LspManager>>,
+) -> file_backup::FileBackupSession {
     let hashline_cache = hashline::new_cache();
     let backup_session = file_backup::new_backup_session();
     // Core 6: file I/O + search + shell
@@ -95,11 +106,13 @@ pub fn register_default_tools_with_plugins(
     ));
     registry.register(write::WriteTool::with_backup_session(
         platform.clone(),
+        lsp_manager.clone(),
         backup_session.clone(),
     ));
     registry.register(edit::EditTool::with_backup_session(
         platform.clone(),
         hashline_cache,
+        lsp_manager.clone(),
         backup_session.clone(),
     ));
     let bash_tool = if let Some(pm) = plugin_manager {
@@ -114,6 +127,13 @@ pub fn register_default_tools_with_plugins(
     registry.register(web_fetch::WebFetchTool::new());
     registry.register(web_search::WebSearchTool::new());
     registry.register(git_read::GitReadTool::new());
+    registry.register(diagnostics::DiagnosticsTool::new(
+        platform.clone(),
+        lsp_manager.clone(),
+    ));
+    if let Some(manager) = lsp_manager {
+        registry.register(lsp_ops::LspOpsTool::new(manager));
+    }
     backup_session
 }
 

@@ -19,7 +19,7 @@ use tracing::{info, warn};
 
 use ava_permissions::inspector::InspectionContext;
 use ava_plugin::PluginManager;
-use ava_tools::core::register_default_tools_with_plugins;
+use ava_tools::core::register_default_tools_with_plugins_and_lsp;
 
 pub(crate) struct ExtensionManagerCaller {
     pub(crate) manager: ExtensionManager,
@@ -181,6 +181,7 @@ pub(crate) fn resolve_workspace_roots(
 
 pub(crate) fn build_tool_registry_with_plugins(
     platform: Arc<dyn Platform>,
+    lsp_manager: Option<Arc<ava_lsp::LspManager>>,
     permission_inspector: Arc<dyn PermissionInspector>,
     permission_context: Arc<RwLock<InspectionContext>>,
     approval_bridge: ApprovalBridge,
@@ -191,8 +192,12 @@ pub(crate) fn build_tool_registry_with_plugins(
     ava_tools::core::file_backup::FileBackupSession,
 ) {
     let mut registry = ToolRegistry::new();
-    let backup_session =
-        register_default_tools_with_plugins(&mut registry, platform, plugin_manager.clone());
+    let backup_session = register_default_tools_with_plugins_and_lsp(
+        &mut registry,
+        platform,
+        plugin_manager.clone(),
+        lsp_manager,
+    );
     let middleware = PermissionMiddleware::new(
         permission_inspector,
         permission_context,

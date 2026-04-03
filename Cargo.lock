@@ -285,6 +285,7 @@ dependencies = [
  "ava-context",
  "ava-hq",
  "ava-llm",
+ "ava-lsp",
  "ava-mcp",
  "ava-memory",
  "ava-permissions",
@@ -468,6 +469,7 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "tracing",
+ "url",
 ]
 
 [[package]]
@@ -589,6 +591,7 @@ dependencies = [
  "async-trait",
  "ava-codebase",
  "ava-config",
+ "ava-lsp",
  "ava-permissions",
  "ava-platform",
  "ava-plugin",
@@ -634,6 +637,7 @@ dependencies = [
  "ava-db",
  "ava-hq",
  "ava-llm",
+ "ava-lsp",
  "ava-memory",
  "ava-permissions",
  "ava-platform",

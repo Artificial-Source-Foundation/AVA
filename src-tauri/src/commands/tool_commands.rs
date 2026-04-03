@@ -29,3 +29,9 @@ pub async fn list_agent_tools(
         })
         .collect())
 }
+
+#[tauri::command]
+pub async fn get_lsp_status(bridge: State<'_, DesktopBridge>) -> Result<serde_json::Value, String> {
+    let snapshot = bridge.stack.lsp_snapshot().await;
+    serde_json::to_value(snapshot).map_err(|e| e.to_string())
+}

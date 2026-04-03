@@ -72,8 +72,8 @@ Both products read `~/.ava/credentials.json` for provider API keys and `.ava/sta
 
 - **22 Rust crates**, ~40K LOC, 1,962+ tests (0 failures)
 - **22 LLM providers**: Anthropic (with prompt caching), OpenAI, ChatGPT (OAuth), Gemini, Ollama, OpenRouter, Copilot, Inception, Alibaba, Alibaba CN, ZAI, ZhipuAI, Kimi, MiniMax, MiniMax CN, Azure OpenAI, AWS Bedrock, xAI, Mistral, Groq, DeepSeek, Mock
-- **9 default tools**: `read`, `write`, `edit` (15 strategies incl. ellipsis handling, 3-way merge + diff-match-patch), `bash`, `glob`, `grep`, `web_fetch`, `web_search`, `git_read`
-- **Extended tools** (not auto-registered): `apply_patch`, `multiedit`, `ast_ops`, `lsp_ops`, `code_search`, `lint`, `test_runner` — available as plugins
+- **11 default tools**: `read`, `write`, `edit` (15 strategies incl. ellipsis handling, 3-way merge + diff-match-patch), `bash`, `glob`, `grep`, `web_fetch`, `web_search`, `git_read`, `diagnostics`, `lsp_ops`
+- **Extended tools** (not auto-registered): `apply_patch`, `multiedit`, `ast_ops`, `code_search`, `lint`, `test_runner` — available as plugins
 - **1 agent tool**: `plan` (Plannotator-style inline plan editing via PlanBridge)
 - **Dynamic tools**: MCP servers + TOML custom tools (`~/.ava/tools/`, `.ava/tools/`)
 - **File snapshots**: Shadow git snapshots before file edits, `revert_file` capability for undoing changes
@@ -102,7 +102,7 @@ AVA/
 |   +-- ava-tui/              # CLI/TUI binary (Ratatui) -- THE primary interface
 |   +-- ava-agent/            # Agent execution loop + reflection
 |   +-- ava-llm/              # LLM providers (22 built-in)
-|   +-- ava-tools/            # Tool trait + registry + 9 default tools (extended available as plugins)
+|   +-- ava-tools/            # Tool trait + registry + 11 default tools (extended available as plugins)
 |   +-- ava-hq/               # Multi-agent orchestration (HQ)
 |   +-- ava-permissions/      # Permission rules + bash command classifier
 |   +-- ava-config/           # Config, credentials, model catalog
@@ -117,7 +117,7 @@ AVA/
 |   +-- ava-sandbox/          # Command sandboxing (bwrap/sandbox-exec)
 |   +-- ava-acp/              # Agent Client Protocol (external agent integration)
 |   +-- ava-extensions/       # Extension system (hooks, native/WASM)
-|   +-- ava-lsp/              # On-demand LSP runtime scaffolding
+|   +-- ava-lsp/              # On-demand LSP runtime and diagnostics/navigation client
 |   +-- ava-db/               # SQLite connection pool
 |   +-- ava-types/            # Shared types
 |   +-- ava-validator/        # Validation pipeline
@@ -135,7 +135,7 @@ New capabilities should ship as Extended (available as plugins), MCP, or custom 
 | Tier | Count | Tools |
 |------|------:|-------|
 | Default | 9 | read, write, edit, bash, glob, grep, web_fetch, web_search, git_read |
-| Extended (plugin) | 7 | apply_patch, multiedit, ast_ops, lsp_ops, code_search, lint, test_runner |
+| Extended (plugin) | 6 | apply_patch, multiedit, ast_ops, code_search, lint, test_runner |
 | Agent | 1 | plan (HQ plan tool with PlanBridge for agent-to-TUI communication) |
 
 Extended tools are **not auto-registered**; they must be explicitly loaded via plugin/MCP configuration. Additional helpers (todo_read/write, question, task, codebase_search, memory/session tools) are always available when initialized. Dynamic MCP tools and TOML custom tools load at runtime from `~/.ava/tools/`, `.ava/tools/`, `~/.ava/mcp.json`, `.ava/mcp.json`. File edits create shadow git snapshots enabling `revert_file` capability.

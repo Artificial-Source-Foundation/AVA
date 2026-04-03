@@ -6,7 +6,7 @@
  */
 
 import { createMemo, createSignal } from 'solid-js'
-import { installReplaceableWindowListener } from '../lib/replaceable-window-listener'
+import { rustBackend } from '../services/rust-bridge'
 
 export interface DiagnosticSummary {
   errors: number
@@ -14,10 +14,23 @@ export interface DiagnosticSummary {
   info: number
 }
 
+export interface LspStatusSummary {
+  enabled: boolean
+  mode: string
+  activeServerCount: number
+  state: string
+}
+
 const [diagnostics, setDiagnosticsRaw] = createSignal<DiagnosticSummary>({
   errors: 0,
   warnings: 0,
   info: 0,
+})
+const [lspStatus, setLspStatus] = createSignal<LspStatusSummary>({
+  enabled: false,
+  mode: 'off',
+  activeServerCount: 0,
+  state: 'disabled',
 })
 
 export function updateDiagnostics(summary: DiagnosticSummary) {
@@ -28,22 +41,47 @@ export const hasDiagnostics = createMemo(
   () => diagnostics().errors > 0 || diagnostics().warnings > 0
 )
 
+export const hasActiveLsp = createMemo(
+  () =>
+    lspStatus().enabled && (lspStatus().activeServerCount > 0 || lspStatus().state === 'starting')
+)
+
 export function useDiagnostics() {
   return {
     diagnostics,
     hasDiagnostics,
+    lspStatus,
+    hasActiveLsp,
     updateDiagnostics,
   }
 }
 
-// Listen for diagnostic events from the LSP extension
 if (typeof window !== 'undefined') {
-  installReplaceableWindowListener('diagnostics:ava', (target) => {
-    const listener = ((e: CustomEvent<DiagnosticSummary>) => {
-      updateDiagnostics(e.detail)
-    }) as EventListener
+  const refresh = async () => {
+    try {
+      const snapshot = await rustBackend.getLspStatus()
+      updateDiagnostics(snapshot.summary)
+      const state = snapshot.enabled
+        ? (snapshot.servers.find((server) => server.active)?.state ?? 'idle')
+        : 'disabled'
+      setLspStatus({
+        enabled: snapshot.enabled,
+        mode: snapshot.mode,
+        activeServerCount: snapshot.activeServerCount,
+        state,
+      })
+    } catch {
+      setLspStatus({
+        enabled: false,
+        mode: 'off',
+        activeServerCount: 0,
+        state: 'disabled',
+      })
+    }
+  }
 
-    target.addEventListener('ava:diagnostics', listener)
-    return () => target.removeEventListener('ava:diagnostics', listener)
-  })
+  void refresh()
+  window.setInterval(() => {
+    void refresh()
+  }, 3000)
 }

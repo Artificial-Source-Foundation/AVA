@@ -427,27 +427,6 @@ pub async fn run_update_command() -> color_eyre::Result<()> {
     Ok(())
 }
 
-#[cfg(test)]
-mod tests {
-    use super::{parse_expected_checksum, sha256_hex};
-
-    #[test]
-    fn parses_checksum_file_first_token() {
-        assert_eq!(
-            parse_expected_checksum("abc123  ava-x86_64-unknown-linux-gnu.tar.gz\n"),
-            Some("abc123")
-        );
-    }
-
-    #[test]
-    fn sha256_hex_matches_known_value() {
-        assert_eq!(
-            sha256_hex(b"hello"),
-            "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
-        );
-    }
-}
-
 /// Background check that returns a message if an update is available.
 /// Used by the startup check (once per 24h).
 pub async fn check_and_notify() -> Option<String> {
@@ -479,5 +458,26 @@ pub async fn check_and_notify() -> Option<String> {
             info.latest_version, info.current_version
         )),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{parse_expected_checksum, sha256_hex};
+
+    #[test]
+    fn parses_checksum_file_first_token() {
+        assert_eq!(
+            parse_expected_checksum("abc123  ava-x86_64-unknown-linux-gnu.tar.gz\n"),
+            Some("abc123")
+        );
+    }
+
+    #[test]
+    fn sha256_hex_matches_known_value() {
+        assert_eq!(
+            sha256_hex(b"hello"),
+            "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+        );
     }
 }

@@ -45,7 +45,7 @@ export interface StatusBarProps {
 export const StatusBar: Component<StatusBarProps> = (props) => {
   const sessionStore = useSession()
   const { settings } = useSettings()
-  const { diagnostics, hasDiagnostics } = useDiagnostics()
+  const { diagnostics, hasDiagnostics, hasActiveLsp, lspStatus } = useDiagnostics()
   const agent = useAgent()
   const notify = useNotification()
   const [isCompacting, setIsCompacting] = createSignal(false)
@@ -204,6 +204,16 @@ export const StatusBar: Component<StatusBarProps> = (props) => {
                 {diagnostics().warnings}
               </span>
             </Show>
+          </span>
+        </Show>
+
+        <Show when={hasActiveLsp()}>
+          <span class="text-[var(--text-muted)]">&middot;</span>
+          <span
+            class="text-[var(--accent)]"
+            title={`LSP ${lspStatus().state} (${lspStatus().activeServerCount} active server${lspStatus().activeServerCount === 1 ? '' : 's'})`}
+          >
+            LSP {lspStatus().state === 'starting' ? 'starting' : 'active'}
           </span>
         </Show>
       </Show>

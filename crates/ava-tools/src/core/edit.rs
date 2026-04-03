@@ -17,16 +17,26 @@ pub struct EditTool {
     engine: EditEngine,
     hashline_cache: HashlineCache,
     snapshotter: GhostSnapshotter,
+    lsp_manager: Option<Arc<ava_lsp::LspManager>>,
     backup_session: FileBackupSession,
 }
 
 impl EditTool {
     pub fn new(platform: Arc<dyn Platform>, hashline_cache: HashlineCache) -> Self {
+        Self::new_with_lsp(platform, hashline_cache, None)
+    }
+
+    pub fn new_with_lsp(
+        platform: Arc<dyn Platform>,
+        hashline_cache: HashlineCache,
+        lsp_manager: Option<Arc<ava_lsp::LspManager>>,
+    ) -> Self {
         Self {
             platform,
             engine: EditEngine::new(),
             hashline_cache,
             snapshotter: GhostSnapshotter::new(),
+            lsp_manager,
             backup_session: crate::core::file_backup::new_backup_session(),
         }
     }
@@ -35,6 +45,7 @@ impl EditTool {
     pub fn with_backup_session(
         platform: Arc<dyn Platform>,
         hashline_cache: HashlineCache,
+        lsp_manager: Option<Arc<ava_lsp::LspManager>>,
         backup_session: FileBackupSession,
     ) -> Self {
         Self {
@@ -42,6 +53,7 @@ impl EditTool {
             engine: EditEngine::new(),
             hashline_cache,
             snapshotter: GhostSnapshotter::new(),
+            lsp_manager,
             backup_session,
         }
     }
@@ -164,6 +176,20 @@ impl Tool for EditTool {
         if !diff_text.is_empty() {
             content.push_str("\n\n");
             content.push_str(&diff_text);
+        }
+        if let Some(lsp_manager) = &self.lsp_manager {
+            match lsp_manager.notify_file_changed(&file_path).await {
+                Ok(summary) if summary.errors > 0 || summary.warnings > 0 => {
+                    content.push_str(&format!(
+                        "\n\nLSP diagnostics: {} errors, {} warnings",
+                        summary.errors, summary.warnings
+                    ));
+                }
+                Ok(_) => {}
+                Err(err) => {
+                    tracing::debug!(path = %path, error = %err, "LSP edit refresh skipped");
+                }
+            }
         }
         Ok(ToolResult {
             call_id: String::new(),

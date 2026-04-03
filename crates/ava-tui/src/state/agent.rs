@@ -145,6 +145,9 @@ pub struct AgentState {
     pub context_window: Option<usize>,
     pub mcp_server_count: usize,
     pub mcp_tool_count: usize,
+    pub lsp_active_servers: usize,
+    pub lsp_state: String,
+    pub lsp_summary: ava_lsp::DiagnosticSummary,
     pub tool_start: Option<Instant>,
     /// Workflow phase: (current_index, total_count, phase_name)
     pub workflow_phase: Option<(usize, usize, String)>,
@@ -231,6 +234,7 @@ impl AgentState {
         let mcp_tool_count = stack.mcp_tool_count().await;
 
         let context_window = lookup_context_window(&provider_name, &model_name);
+        let lsp_snapshot = stack.lsp_snapshot().await;
 
         // Load recent models from per-project state
         let recent_models = {
@@ -255,6 +259,14 @@ impl AgentState {
                 context_window,
                 mcp_server_count,
                 mcp_tool_count,
+                lsp_active_servers: lsp_snapshot.active_server_count,
+                lsp_state: lsp_snapshot
+                    .servers
+                    .iter()
+                    .find(|server| server.active)
+                    .map(|server| format!("{:?}", server.state).to_lowercase())
+                    .unwrap_or_else(|| "idle".to_string()),
+                lsp_summary: lsp_snapshot.summary.clone(),
                 tool_start: None,
                 workflow_phase: None,
                 workflow_iteration: None,
@@ -281,6 +293,21 @@ impl AgentState {
 
     pub(crate) fn stack_handle(&self) -> Option<Arc<AgentStack>> {
         self.stack.as_ref().map(Arc::clone)
+    }
+
+    pub fn apply_lsp_snapshot(&mut self, snapshot: ava_lsp::LspSnapshot) {
+        self.lsp_active_servers = snapshot.active_server_count;
+        self.lsp_state = if !snapshot.enabled {
+            "disabled".to_string()
+        } else {
+            snapshot
+                .servers
+                .iter()
+                .find(|server| server.active)
+                .map(|server| format!("{:?}", server.state).to_lowercase())
+                .unwrap_or_else(|| "idle".to_string())
+        };
+        self.lsp_summary = snapshot.summary;
     }
 
     /// Get the shared todo state from the agent stack (if initialized).
@@ -660,6 +687,9 @@ impl AgentState {
             context_window: lookup_context_window(provider, model),
             mcp_server_count: 0,
             mcp_tool_count: 0,
+            lsp_active_servers: 0,
+            lsp_state: "disabled".to_string(),
+            lsp_summary: ava_lsp::DiagnosticSummary::default(),
             tool_start: None,
             workflow_phase: None,
             workflow_iteration: None,

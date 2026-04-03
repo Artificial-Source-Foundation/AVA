@@ -93,6 +93,20 @@ impl App {
                         }
                     }
                 }
+                if self.state.messages.spinner_tick.is_multiple_of(30) {
+                    if let Some(stack) = self.state.agent.stack_handle() {
+                        let tx = app_tx.clone();
+                        tokio::spawn(async move {
+                            let result = Ok(stack.lsp_snapshot().await);
+                            let _ = tx.send(AppEvent::LspStatusLoaded(result));
+                        });
+                    }
+                }
+            }
+            AppEvent::LspStatusLoaded(result) => {
+                if let Ok(snapshot) = result {
+                    self.state.agent.apply_lsp_snapshot(snapshot);
+                }
             }
             AppEvent::AgentRunEvent { run_id, event } => {
                 self.route_agent_event(run_id, event, app_tx, agent_tx);

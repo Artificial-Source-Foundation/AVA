@@ -13,11 +13,15 @@ const DEFAULT_TIMEOUT_MS: u64 = 120_000;
 
 pub struct DiagnosticsTool {
     platform: Arc<dyn Platform>,
+    lsp_manager: Option<Arc<ava_lsp::LspManager>>,
 }
 
 impl DiagnosticsTool {
-    pub fn new(platform: Arc<dyn Platform>) -> Self {
-        Self { platform }
+    pub fn new(platform: Arc<dyn Platform>, lsp_manager: Option<Arc<ava_lsp::LspManager>>) -> Self {
+        Self {
+            platform,
+            lsp_manager,
+        }
     }
 }
 
@@ -43,6 +47,26 @@ impl Tool for DiagnosticsTool {
     async fn execute(&self, args: Value) -> ava_types::Result<ToolResult> {
         let scope_path = args.get("path").and_then(Value::as_str);
 
+        if let (Some(lsp_manager), Some(path)) = (&self.lsp_manager, scope_path) {
+            let path_buf = std::path::PathBuf::from(path);
+            match lsp_manager.diagnostics(&path_buf).await {
+                Ok(diagnostics) => {
+                    let result_json = json!({ "diagnostics": diagnostics });
+                    return Ok(ToolResult {
+                        call_id: String::new(),
+                        content: result_json.to_string(),
+                        is_error: result_json["diagnostics"]
+                            .as_array()
+                            .map(|items| !items.is_empty())
+                            .unwrap_or(false),
+                    });
+                }
+                Err(err) => {
+                    tracing::debug!(tool = "diagnostics", path, error = %err, "LSP diagnostics unavailable, falling back");
+                }
+            }
+        }
+
         tracing::debug!(tool = "diagnostics", path = ?scope_path, "executing diagnostics tool");
 
         let command = detect_diagnostics_command(&*self.platform, scope_path).await?;
@@ -54,6 +78,7 @@ impl Tool for DiagnosticsTool {
                     timeout: Some(Duration::from_millis(DEFAULT_TIMEOUT_MS)),
                     working_dir: None,
                     env_vars: Vec::new(),
+                    ..Default::default()
                 },
             )
             .await?;

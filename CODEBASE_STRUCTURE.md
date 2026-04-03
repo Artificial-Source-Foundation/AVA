@@ -20,7 +20,7 @@ AVA currently ships with 22 Rust crates:
 - `ava-agent` — agent loop, routing, tool execution, prompts, and stack runtime
 - `ava-hq` — HQ multi-agent orchestration
 - `ava-llm` — model provider implementations and routing
-- `ava-tools` — built-in tool registry and execution middleware
+- `ava-tools` — built-in tool registry, execution middleware, and agent-facing LSP tools
 - `ava-config` — config, credentials, model catalog, trust, and routing settings
 - `ava-session` — session persistence and diff tracking
 - `ava-memory` — persistent memory storage
@@ -36,7 +36,7 @@ AVA currently ships with 22 Rust crates:
 - `ava-plugin` — plugin discovery and runtime
 - `ava-extensions` — extension loading and hooks
 - `ava-acp` — external agent integration via ACP
-- `ava-lsp` — on-demand LSP runtime scaffolding
+- `ava-lsp` — on-demand LSP runtime, diagnostics cache, and JSON-RPC client lifecycle
 - `ava-validator` — validation pipeline
 
 ## Documentation Map

@@ -364,7 +364,7 @@ dependencies = [
 
 [[package]]
 name = "ava-acp"
-version = "2.2.7"
+version = "3.0.1"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -381,7 +381,7 @@ dependencies = [
 
 [[package]]
 name = "ava-agent"
-version = "2.0.0"
+version = "3.0.1"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -390,6 +390,7 @@ dependencies = [
  "ava-config",
  "ava-context",
  "ava-llm",
+ "ava-lsp",
  "ava-mcp",
  "ava-memory",
  "ava-permissions",
@@ -415,7 +416,7 @@ dependencies = [
 
 [[package]]
 name = "ava-auth"
-version = "2.2.7"
+version = "3.0.1"
 dependencies = [
  "base64 0.22.1",
  "open",
@@ -433,7 +434,7 @@ dependencies = [
 
 [[package]]
 name = "ava-codebase"
-version = "2.0.0"
+version = "3.0.1"
 dependencies = [
  "petgraph",
  "regex",
@@ -445,7 +446,7 @@ dependencies = [
 
 [[package]]
 name = "ava-config"
-version = "2.0.0"
+version = "3.0.1"
 dependencies = [
  "aes-gcm",
  "ava-auth",
@@ -469,7 +470,7 @@ dependencies = [
 
 [[package]]
 name = "ava-context"
-version = "2.0.0"
+version = "3.0.1"
 dependencies = [
  "async-trait",
  "ava-types",
@@ -482,7 +483,7 @@ dependencies = [
 
 [[package]]
 name = "ava-db"
-version = "2.0.0"
+version = "3.0.1"
 dependencies = [
  "ava-types",
  "chrono",
@@ -496,7 +497,7 @@ dependencies = [
 
 [[package]]
 name = "ava-extensions"
-version = "2.0.0"
+version = "3.0.1"
 dependencies = [
  "dirs-next",
  "libloading 0.8.9",
@@ -505,7 +506,7 @@ dependencies = [
 
 [[package]]
 name = "ava-hq"
-version = "2.2.7"
+version = "3.0.1"
 dependencies = [
  "async-trait",
  "ava-acp",
@@ -527,7 +528,7 @@ dependencies = [
 
 [[package]]
 name = "ava-llm"
-version = "2.2.7"
+version = "3.0.1"
 dependencies = [
  "async-trait",
  "ava-auth",
@@ -549,8 +550,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "ava-lsp"
+version = "3.0.1"
+dependencies = [
+ "ava-config",
+ "ava-types",
+ "futures",
+ "lsp-types",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+ "url",
+]
+
+[[package]]
 name = "ava-mcp"
-version = "2.2.7"
+version = "3.0.1"
 dependencies = [
  "async-trait",
  "ava-tools",
@@ -574,7 +591,7 @@ dependencies = [
 
 [[package]]
 name = "ava-memory"
-version = "2.0.0"
+version = "3.0.1"
 dependencies = [
  "rusqlite",
  "tracing",
@@ -582,7 +599,7 @@ dependencies = [
 
 [[package]]
 name = "ava-permissions"
-version = "2.0.0"
+version = "3.0.1"
 dependencies = [
  "async-trait",
  "chrono",
@@ -601,7 +618,7 @@ dependencies = [
 
 [[package]]
 name = "ava-platform"
-version = "2.0.0"
+version = "3.0.1"
 dependencies = [
  "async-trait",
  "ava-types",
@@ -616,7 +633,7 @@ dependencies = [
 
 [[package]]
 name = "ava-plugin"
-version = "2.1.0"
+version = "3.0.1"
 dependencies = [
  "async-trait",
  "ava-types",
@@ -632,7 +649,7 @@ dependencies = [
 
 [[package]]
 name = "ava-sandbox"
-version = "2.0.0"
+version = "3.0.1"
 dependencies = [
  "serde",
  "thiserror 1.0.69",
@@ -642,7 +659,7 @@ dependencies = [
 
 [[package]]
 name = "ava-session"
-version = "2.2.7"
+version = "3.0.1"
 dependencies = [
  "ava-types",
  "chrono",
@@ -655,12 +672,13 @@ dependencies = [
 
 [[package]]
 name = "ava-tools"
-version = "2.0.0"
+version = "3.0.1"
 dependencies = [
  "async-stream",
  "async-trait",
  "ava-codebase",
  "ava-config",
+ "ava-lsp",
  "ava-permissions",
  "ava-platform",
  "ava-plugin",
@@ -692,7 +710,7 @@ dependencies = [
 
 [[package]]
 name = "ava-types"
-version = "2.0.0"
+version = "3.0.1"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -705,7 +723,7 @@ dependencies = [
 
 [[package]]
 name = "ava-validator"
-version = "2.0.0"
+version = "3.0.1"
 dependencies = [
  "tracing",
 ]
@@ -1734,6 +1752,15 @@ checksum = "b375d6465b98090a5f25b1c7703f3859783755aa9a80433b36e0379a3ec2f369"
 dependencies = [
  "crc32fast",
  "miniz_oxide",
+]
+
+[[package]]
+name = "fluent-uri"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "17c704e9dbe1ddd863da1e6ff3567795087b1eb201ce80d8fa81162e1516500d"
+dependencies = [
+ "bitflags 1.3.2",
 ]
 
 [[package]]
@@ -3040,6 +3067,19 @@ name = "lru-slab"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "112b39cec0b298b6c1999fee3e31427f74f676e4cb9879ed1a121b43661a4154"
+
+[[package]]
+name = "lsp-types"
+version = "0.97.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "53353550a17c04ac46c585feb189c2db82154fc84b79c7a66c96c2c644f66071"
+dependencies = [
+ "bitflags 1.3.2",
+ "fluent-uri",
+ "serde",
+ "serde_json",
+ "serde_repr",
+]
 
 [[package]]
 name = "lz4_flex"

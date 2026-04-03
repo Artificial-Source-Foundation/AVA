@@ -29,6 +29,7 @@ tracing.workspace = true
 uuid.workspace = true
 ava-types = { path = "../ava-types" }
 ava-config = { path = "../ava-config" }
+ava-lsp = { path = "../ava-lsp" }
 ava-platform = { path = "../ava-platform" }
 ava-sandbox = { path = "../ava-sandbox" }
 ava-permissions = { path = "../ava-permissions" }

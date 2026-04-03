@@ -62,7 +62,12 @@ pub async fn update_llm_config(
         .await
         .map_err(|e| e.to_string())?;
 
-    bridge.stack.config.save().await.map_err(|e| e.to_string())?;
+    bridge
+        .stack
+        .config
+        .save()
+        .await
+        .map_err(|e| e.to_string())?;
 
     let cfg = bridge.stack.config.get().await;
     serde_json::to_value(&cfg.llm).map_err(|e| e.to_string())
@@ -111,7 +116,12 @@ pub async fn update_feature_flags(
         .await
         .map_err(|e| e.to_string())?;
 
-    bridge.stack.config.save().await.map_err(|e| e.to_string())?;
+    bridge
+        .stack
+        .config
+        .save()
+        .await
+        .map_err(|e| e.to_string())?;
 
     let cfg = bridge.stack.config.get().await;
     serde_json::to_value(&cfg.features).map_err(|e| e.to_string())

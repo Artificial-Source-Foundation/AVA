@@ -14,7 +14,7 @@ import { ToggleRow } from '../ui/ToggleRow'
 import { SettingsCard } from './SettingsCard'
 
 export const GeneralSection: Component = () => {
-  const { settings, updateUI, updateGit, exportSettings, importSettings } = useSettings()
+  const { settings, updateUI, updateGit, updateLsp, exportSettings, importSettings } = useSettings()
 
   return (
     <div class="flex flex-col" style={{ gap: '24px' }}>
@@ -60,6 +60,12 @@ export const GeneralSection: Component = () => {
           description="Display token usage in the status bar"
           checked={!!settings().ui.showTokenCount}
           onChange={() => updateUI({ showTokenCount: !settings().ui.showTokenCount })}
+        />
+        <ToggleRow
+          label="Enable LSP assistance"
+          description="Allow on-demand code intelligence and live diagnostics"
+          checked={!!settings().lsp.enabled}
+          onChange={(v) => updateLsp({ enabled: v })}
         />
       </SettingsCard>
 

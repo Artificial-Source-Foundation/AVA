@@ -2,6 +2,15 @@
 
 All notable changes to AVA are documented in this file.
 
+## [Unreleased]
+
+### Added
+- **Adaptive LSP runtime** — AVA now ships an on-demand `ava-lsp` runtime with idle shutdown, per-language server selection, shared diagnostics caching, and agent-facing `diagnostics` plus `lsp_ops` tools for definition, references, hover, and symbols.
+- **LSP status surfaces** — Desktop now polls real backend LSP status instead of waiting for external events, and the TUI status bar now shows live LSP state plus error/warning counts when available.
+
+### Changed
+- **Write/edit post-change validation** — file mutations now notify the LSP runtime when available so agents get cheap follow-up diagnostics without keeping every language server hot all the time.
+
 ## [3.0.0] — 2026-03-30
 
 AVA v3 — the complete rewrite. Pure Rust backend, 21 crates, 21 LLM providers,

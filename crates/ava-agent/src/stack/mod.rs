@@ -16,6 +16,7 @@ use ava_config::AgentsConfig;
 use ava_config::ConfigManager;
 use ava_llm::provider::LLMProvider;
 use ava_llm::ModelRouter;
+use ava_lsp::LspManager;
 use ava_mcp::config::{load_merged_mcp_config_with_scope, McpServerScope};
 use ava_memory::MemorySystem;
 use ava_permissions::inspector::{DefaultInspector, InspectionContext, PermissionInspector};
@@ -53,6 +54,7 @@ pub struct AgentStack {
     pub config: ConfigManager,
     pub platform: Arc<dyn Platform>,
     pub codebase_index: Arc<RwLock<Option<Arc<CodebaseIndex>>>>,
+    pub lsp: Arc<LspManager>,
     provider_override: RwLock<Option<String>>,
     model_override: RwLock<Option<String>>,
     routing_locked: RwLock<bool>,
@@ -368,9 +370,16 @@ impl AgentStack {
         ));
 
         // Wire plugin manager into the bash tool via `shell.env` hook.
+        let lsp = Arc::new(LspManager::new(
+            effective_cwd.clone(),
+            cfg.lsp.clone(),
+            cfg.features.enable_lsp,
+        ));
+
         let (mut registry, shared_tool_sources, file_backup_session) =
             build_tool_registry_with_plugins(
                 platform.clone(),
+                Some(Arc::clone(&lsp)),
                 Arc::clone(&permission_inspector),
                 Arc::clone(&permission_context),
                 approval_bridge.clone(),
@@ -412,6 +421,7 @@ impl AgentStack {
                 config: config_mgr,
                 platform,
                 codebase_index,
+                lsp,
                 provider_override: RwLock::new(config.provider),
                 model_override: RwLock::new(config.model),
                 routing_locked: RwLock::new(routing_locked),
@@ -523,6 +533,10 @@ impl AgentStack {
 
     pub async fn mcp_tool_count(&self) -> usize {
         self.mcp.read().await.as_ref().map_or(0, |r| r.tool_count)
+    }
+
+    pub async fn lsp_snapshot(&self) -> ava_lsp::LspSnapshot {
+        self.lsp.snapshot().await
     }
 
     pub async fn mcp_server_info(&self) -> Vec<MCPServerInfo> {
@@ -706,6 +720,7 @@ impl AgentStack {
     pub async fn reload_tools(&self) -> Result<usize> {
         let (mut registry, reload_sources, _backup_session) = build_tool_registry_with_plugins(
             self.platform.clone(),
+            Some(Arc::clone(&self.lsp)),
             Arc::clone(&self.permission_inspector),
             Arc::clone(&self.permission_context),
             self.approval_bridge.clone(),

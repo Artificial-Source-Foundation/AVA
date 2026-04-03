@@ -50,5 +50,7 @@ AVA currently ships with 22 Rust crates:
 | `docs/releasing.md` | release flow |
 | `docs/troubleshooting/` | platform-specific fixes |
 | `CHANGELOG.md` | release history |
+| `CONTRIBUTING.md` | human contributor workflow guide |
+| `CONTRIBUTIONS.md` | compatibility pointer to `CONTRIBUTING.md` |
 | `CLAUDE.md` | architecture and contributor conventions |
 | `AGENTS.md` | AI coding agent instructions |

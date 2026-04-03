@@ -163,7 +163,10 @@ ava serve                    # web browser UI
 just check    # fmt + clippy + test (all-in-one)
 ```
 
-See [CLAUDE.md](CLAUDE.md) for architecture details and development workflows.
+See:
+
+- [CONTRIBUTING.md](CONTRIBUTING.md) — contributor setup, checks, PR expectations
+- [CLAUDE.md](CLAUDE.md) — architecture details and contributor conventions
 
 ## License
 

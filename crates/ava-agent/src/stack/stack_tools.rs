@@ -19,7 +19,7 @@ use tracing::{info, warn};
 
 use ava_permissions::inspector::InspectionContext;
 use ava_plugin::PluginManager;
-use ava_tools::core::register_default_tools_with_plugins_and_lsp;
+use ava_tools::core::{register_default_tools_with_plugins_and_lsp, register_lsp_tools};
 
 pub(crate) struct ExtensionManagerCaller {
     pub(crate) manager: ExtensionManager,
@@ -194,10 +194,11 @@ pub(crate) fn build_tool_registry_with_plugins(
     let mut registry = ToolRegistry::new();
     let backup_session = register_default_tools_with_plugins_and_lsp(
         &mut registry,
-        platform,
+        platform.clone(),
         plugin_manager.clone(),
-        lsp_manager,
+        lsp_manager.clone(),
     );
+    register_lsp_tools(&mut registry, platform, lsp_manager);
     let middleware = PermissionMiddleware::new(
         permission_inspector,
         permission_context,

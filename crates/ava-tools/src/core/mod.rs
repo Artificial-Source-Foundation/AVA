@@ -127,14 +127,21 @@ pub fn register_default_tools_with_plugins_and_lsp(
     registry.register(web_fetch::WebFetchTool::new());
     registry.register(web_search::WebSearchTool::new());
     registry.register(git_read::GitReadTool::new());
+    backup_session
+}
+
+pub fn register_lsp_tools(
+    registry: &mut ToolRegistry,
+    platform: Arc<dyn Platform>,
+    lsp_manager: Option<Arc<ava_lsp::LspManager>>,
+) {
     registry.register(diagnostics::DiagnosticsTool::new(
-        platform.clone(),
+        platform,
         lsp_manager.clone(),
     ));
     if let Some(manager) = lsp_manager {
         registry.register(lsp_ops::LspOpsTool::new(manager));
     }
-    backup_session
 }
 
 /// Register all core tools. Backwards-compatible alias for `register_default_tools`.

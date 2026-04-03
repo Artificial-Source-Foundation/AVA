@@ -552,8 +552,13 @@ mod tests {
 
     #[tokio::test]
     async fn save_reload_roundtrip() {
+        let _guard = lock_env();
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("credentials.json");
+        let prior_ava_openrouter = std::env::var("AVA_OPENROUTER_API_KEY").ok();
+        let prior_openrouter = std::env::var("OPENROUTER_API_KEY").ok();
+        std::env::remove_var("AVA_OPENROUTER_API_KEY");
+        std::env::remove_var("OPENROUTER_API_KEY");
 
         let mut store = CredentialStore::default();
         store.set(
@@ -579,6 +584,15 @@ mod tests {
             credential.base_url.as_deref(),
             Some("https://openrouter.ai/api")
         );
+
+        match prior_ava_openrouter {
+            Some(value) => std::env::set_var("AVA_OPENROUTER_API_KEY", value),
+            None => std::env::remove_var("AVA_OPENROUTER_API_KEY"),
+        }
+        match prior_openrouter {
+            Some(value) => std::env::set_var("OPENROUTER_API_KEY", value),
+            None => std::env::remove_var("OPENROUTER_API_KEY"),
+        }
     }
 
     #[test]

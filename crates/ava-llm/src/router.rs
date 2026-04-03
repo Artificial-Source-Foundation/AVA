@@ -604,6 +604,15 @@ fn normalize_display_model(provider: &str, model: &str) -> String {
 mod tests {
     use super::*;
     use ava_config::{ProviderCredential, RoutingMode, RoutingTargets};
+    use std::sync::Mutex;
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    fn lock_env() -> std::sync::MutexGuard<'static, ()> {
+        ENV_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
 
     fn store_with(providers: &[&str]) -> CredentialStore {
         let mut store = CredentialStore::default();
@@ -628,6 +637,12 @@ mod tests {
 
     #[tokio::test]
     async fn router_prefers_cheapest_candidate_for_cheap_profile() {
+        let _guard = lock_env();
+        let prior_ava_openrouter = std::env::var("AVA_OPENROUTER_API_KEY").ok();
+        let prior_openrouter = std::env::var("OPENROUTER_API_KEY").ok();
+        std::env::remove_var("AVA_OPENROUTER_API_KEY");
+        std::env::remove_var("OPENROUTER_API_KEY");
+
         let router = ModelRouter::new(store_with(&["anthropic", "openai"]));
         let decision = router
             .decide_route(
@@ -645,6 +660,15 @@ mod tests {
         assert_eq!(decision.source, RouteSource::PolicyAuto);
         assert_eq!(decision.provider, "openai");
         assert_eq!(decision.display_model, "gpt-5-mini");
+
+        match prior_ava_openrouter {
+            Some(value) => std::env::set_var("AVA_OPENROUTER_API_KEY", value),
+            None => std::env::remove_var("AVA_OPENROUTER_API_KEY"),
+        }
+        match prior_openrouter {
+            Some(value) => std::env::set_var("OPENROUTER_API_KEY", value),
+            None => std::env::remove_var("OPENROUTER_API_KEY"),
+        }
     }
 
     #[tokio::test]

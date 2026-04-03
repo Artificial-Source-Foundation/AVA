@@ -63,10 +63,12 @@ export interface MessageListAdapter {
 // No-op helpers for read-only mode
 // ============================================================================
 
-// biome-ignore lint/suspicious/noExplicitAny: intentional noop cast
-const noop = (() => {}) as (...args: any[]) => any
-// biome-ignore lint/suspicious/noExplicitAny: intentional noop cast
-const noopAsync = ((..._args: any[]) => Promise.resolve(0 as any)) as (...args: any[]) => any
+const noop = () => {}
+const noopRollback = async (_id: string): Promise<void> => {}
+const noopWithId = (_id: string) => {}
+const noopAsyncWithId = async (_id: string): Promise<void> => {}
+const noopRevertFiles = async (_id: string): Promise<number> => 0
+const noopSaveEdit = async (_content: string): Promise<void> => {}
 
 // ============================================================================
 // Component
@@ -142,9 +144,9 @@ export const MessageList: Component<{ adapter?: MessageListAdapter }> = (props) 
   const actions = useMessageActions({
     messages: effectiveMessages,
     lastMessageId: data.lastMessageId,
-    rollbackToMessage: isReadOnly ? noop : rollbackToMessage,
-    branchAtMessage: isReadOnly ? noopAsync : branchAtMessage,
-    revertFilesAfter: isReadOnly ? noopAsync : revertFilesAfter,
+    rollbackToMessage: isReadOnly ? noopRollback : rollbackToMessage,
+    branchAtMessage: isReadOnly ? noopAsyncWithId : branchAtMessage,
+    revertFilesAfter: isReadOnly ? noopRevertFiles : revertFilesAfter,
     notifySuccess,
   })
 
@@ -250,13 +252,15 @@ export const MessageList: Component<{ adapter?: MessageListAdapter }> = (props) 
         streamingThinkingSegments: isLive() ? effectiveThinkingSegments() : undefined,
         onStartEdit: isReadOnly ? noop : () => startEditing(msg().id),
         onCancelEdit: isReadOnly ? noop : stopEditing,
-        onSaveEdit: isReadOnly ? noopAsync : (content: string) => editAndResend(msg().id, content),
+        onSaveEdit: isReadOnly
+          ? noopSaveEdit
+          : (content: string) => editAndResend(msg().id, content),
         onRetry: isReadOnly ? noop : () => retryMessage(msg().id),
         onRegenerate: isReadOnly ? noop : () => regenerateResponse(msg().id),
         onDelete: isReadOnly ? noop : () => actions.handleDeleteRequest(msg().id),
         onBranch: isReadOnly ? noop : () => actions.handleBranch(msg().id),
         onRewind: isReadOnly ? noop : () => actions.setRewindTarget(msg().id),
-        onRestoreCheckpoint: isReadOnly ? noop : rollbackToCheckpoint,
+        onRestoreCheckpoint: isReadOnly ? noopWithId : rollbackToCheckpoint,
       }
     },
     bottomContent: (

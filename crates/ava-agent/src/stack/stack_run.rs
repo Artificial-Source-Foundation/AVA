@@ -19,8 +19,8 @@ use ava_session::SessionManager;
 use ava_tools::core::task::{TaskResult, TaskSpawner};
 use ava_tools::core::{
     file_backup::new_backup_session, register_custom_tools_with_plugins,
-    register_default_tools_with_plugins_and_lsp, register_plan_tool, register_question_tool,
-    register_task_tool, register_todo_tools,
+    register_default_tools_with_plugins_and_lsp, register_lsp_tools, register_plan_tool,
+    register_question_tool, register_task_tool, register_todo_tools,
 };
 use ava_tools::mcp_bridge::MCPBridgeTool;
 use ava_tools::permission_middleware::{convert_tool_source, SharedToolSources};
@@ -909,6 +909,11 @@ impl TaskSpawner for AgentTaskSpawner {
             &mut registry,
             self.platform.clone(),
             None,
+            Some(Arc::clone(&self.lsp)),
+        );
+        register_lsp_tools(
+            &mut registry,
+            self.platform.clone(),
             Some(Arc::clone(&self.lsp)),
         );
         apply_subagent_runtime_profile(&mut registry, runtime_profile);

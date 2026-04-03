@@ -72,7 +72,8 @@ Both products read `~/.ava/credentials.json` for provider API keys and `.ava/sta
 
 - **22 Rust crates**, ~40K LOC, 1,962+ tests (0 failures)
 - **22 LLM providers**: Anthropic (with prompt caching), OpenAI, ChatGPT (OAuth), Gemini, Ollama, OpenRouter, Copilot, Inception, Alibaba, Alibaba CN, ZAI, ZhipuAI, Kimi, MiniMax, MiniMax CN, Azure OpenAI, AWS Bedrock, xAI, Mistral, Groq, DeepSeek, Mock
-- **11 default tools**: `read`, `write`, `edit` (15 strategies incl. ellipsis handling, 3-way merge + diff-match-patch), `bash`, `glob`, `grep`, `web_fetch`, `web_search`, `git_read`, `diagnostics`, `lsp_ops`
+- **9 default tools**: `read`, `write`, `edit` (15 strategies incl. ellipsis handling, 3-way merge + diff-match-patch), `bash`, `glob`, `grep`, `web_fetch`, `web_search`, `git_read`
+- **Built-in agent extras**: `diagnostics`, `lsp_ops` (registered by the agent stack when available, without expanding the default tier)
 - **Extended tools** (not auto-registered): `apply_patch`, `multiedit`, `ast_ops`, `code_search`, `lint`, `test_runner` — available as plugins
 - **1 agent tool**: `plan` (Plannotator-style inline plan editing via PlanBridge)
 - **Dynamic tools**: MCP servers + TOML custom tools (`~/.ava/tools/`, `.ava/tools/`)
@@ -102,7 +103,7 @@ AVA/
 |   +-- ava-tui/              # CLI/TUI binary (Ratatui) -- THE primary interface
 |   +-- ava-agent/            # Agent execution loop + reflection
 |   +-- ava-llm/              # LLM providers (22 built-in)
-|   +-- ava-tools/            # Tool trait + registry + 11 default tools (extended available as plugins)
+|   +-- ava-tools/            # Tool trait + registry + 9 default tools (extended available as plugins)
 |   +-- ava-hq/               # Multi-agent orchestration (HQ)
 |   +-- ava-permissions/      # Permission rules + bash command classifier
 |   +-- ava-config/           # Config, credentials, model catalog

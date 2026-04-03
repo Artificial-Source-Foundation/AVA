@@ -282,7 +282,7 @@ function syncLlmConfigToYaml(s: AppSettings): void {
 function syncFeatureFlagsToYaml(s: AppSettings): void {
   invoke('update_feature_flags', {
     enableGit: s.git.enabled,
-    enableLsp: null,
+    enableLsp: s.lsp.enabled,
     enableMcp: s.mcpServers.length > 0,
     auditLogging: null,
     sessionLogging: null,
@@ -308,6 +308,7 @@ interface CoreLlmConfig {
 /** Shape of the `features` section returned by `get_feature_flags` */
 interface CoreFeatureFlags {
   enable_git?: boolean
+  enable_lsp?: boolean
   enable_mcp?: boolean
 }
 
@@ -363,6 +364,10 @@ export async function loadSharedSettingsFromCore(
       const flags = flagsResult.value
       if (flags.enable_git != null) {
         patch.git = { enabled: flags.enable_git } as AppSettings['git']
+        changed = true
+      }
+      if (flags.enable_lsp != null) {
+        patch.lsp = { enabled: flags.enable_lsp } as AppSettings['lsp']
         changed = true
       }
     }

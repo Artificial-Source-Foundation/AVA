@@ -23,6 +23,7 @@ ava-acp = { path = "../ava-acp" }
 ava-codebase = { path = "../ava-codebase" }
 ava-context = { path = "../ava-context" }
 ava-config = { path = "../ava-config" }
+ava-lsp = { path = "../ava-lsp" }
 ava-llm = { path = "../ava-llm" }
 ava-memory = { path = "../ava-memory" }
 ava-permissions = { path = "../ava-permissions" }

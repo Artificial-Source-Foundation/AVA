@@ -15,6 +15,7 @@ import {
   DEFAULT_BEHAVIOR,
   DEFAULT_GENERATION,
   DEFAULT_GIT,
+  DEFAULT_LSP,
   DEFAULT_NOTIFICATIONS,
   DEFAULT_SETTINGS,
   DEFAULT_TEAM,
@@ -106,6 +107,7 @@ export function mergeWithDefaults(parsed: Partial<AppSettings>): AppSettings {
     behavior: { ...DEFAULT_BEHAVIOR, ...parsed.behavior },
     notifications: { ...DEFAULT_NOTIFICATIONS, ...parsed.notifications },
     git: { ...DEFAULT_GIT, ...parsed.git },
+    lsp: { ...DEFAULT_LSP, ...parsed.lsp },
     team: { ...DEFAULT_TEAM, ...parsed.team },
   }
 }

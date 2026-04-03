@@ -88,6 +88,7 @@ pub enum AppEvent {
         task_id: usize,
         result: Result<(), String>,
     },
+    LspStatusLoaded(Result<ava_lsp::LspSnapshot, String>),
     TokenUsage(TokenUsage),
     ModelSelectorLoaded(Result<ModelSelectorState, String>),
     ModelSwitchFinished(ModelSwitchResult),
@@ -159,6 +160,9 @@ impl std::fmt::Debug for AppEvent {
                 .field("task_id", task_id)
                 .field("result", result)
                 .finish(),
+            Self::LspStatusLoaded(result) => {
+                f.debug_tuple("LspStatusLoaded").field(result).finish()
+            }
             Self::TokenUsage(u) => f.debug_tuple("TokenUsage").field(u).finish(),
             Self::ModelSelectorLoaded(r) => f.debug_tuple("ModelSelectorLoaded").field(r).finish(),
             Self::ModelSwitchFinished(r) => f.debug_tuple("ModelSwitchFinished").field(r).finish(),

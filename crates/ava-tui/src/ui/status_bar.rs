@@ -372,6 +372,36 @@ pub fn render_context_bar(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
         ));
     }
 
+    if state.agent.show_lsp_suggestions
+        && (state.agent.lsp_active_servers > 0
+            || state.agent.lsp_summary.errors > 0
+            || state.agent.lsp_summary.warnings > 0)
+    {
+        if !right_spans.is_empty() {
+            right_spans.push(Span::raw(ITEM_GAP));
+        }
+        right_spans.push(Span::styled(
+            format!(
+                "LSP {} E{} W{}",
+                state.agent.lsp_state,
+                state.agent.lsp_summary.errors,
+                state.agent.lsp_summary.warnings
+            ),
+            Style::default().fg(state.theme.accent),
+        ));
+    }
+    if state.agent.show_lsp_suggestions {
+        if let Some(warning) = &state.agent.lsp_warning {
+            if !right_spans.is_empty() {
+                right_spans.push(Span::raw(ITEM_GAP));
+            }
+            right_spans.push(Span::styled(
+                warning.clone(),
+                Style::default().fg(state.theme.warning),
+            ));
+        }
+    }
+
     // Model badge
     if !right_spans.is_empty() {
         right_spans.push(Span::raw(ITEM_GAP));

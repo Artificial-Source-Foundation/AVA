@@ -1,0 +1,28 @@
+[package]
+name = "ava-lsp"
+description = "On-demand LSP runtime for AVA"
+version = "3.0.1"
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+ava-config = { path = "../ava-config" }
+ava-types = { path = "../ava-types" }
+futures.workspace = true
+lsp-types.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+dirs = "5"
+url = "2"
+
+[dev-dependencies]
+tempfile.workspace = true

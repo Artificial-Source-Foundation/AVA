@@ -13,6 +13,7 @@ import type {
   BehaviorSettings,
   GenerationSettings,
   GitSettings,
+  LspSettings,
   NotificationSettings,
   TeamConfig,
   UISettings,
@@ -94,6 +95,11 @@ export const DEFAULT_GIT: GitSettings = {
   commitPrefix: '[ava]',
 }
 
+export const DEFAULT_LSP: LspSettings = {
+  enabled: true,
+  showInstallSuggestions: true,
+}
+
 export const DEFAULT_TEAM: TeamConfig = {
   enabled: false,
   defaultDirectorModel: '',
@@ -140,6 +146,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   behavior: { ...DEFAULT_BEHAVIOR },
   notifications: { ...DEFAULT_NOTIFICATIONS },
   git: { ...DEFAULT_GIT },
+  lsp: { ...DEFAULT_LSP },
   permissionMode: 'ask',
   mcpServers: [],
   modelAliases: {},

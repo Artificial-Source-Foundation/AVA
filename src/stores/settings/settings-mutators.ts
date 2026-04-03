@@ -398,6 +398,10 @@ export function updateGit(patch: Partial<AppSettings['git']>): void {
   updateSubKey('git', patch)
 }
 
+export function updateLsp(patch: Partial<AppSettings['lsp']>): void {
+  updateSubKey('lsp', patch)
+}
+
 export function updateTeam(patch: Partial<AppSettings['team']>): void {
   updateSubKey('team', patch)
 }

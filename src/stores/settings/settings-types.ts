@@ -134,6 +134,11 @@ export interface GitSettings {
   commitPrefix: string // Commit message prefix, default '[ava]'
 }
 
+export interface LspSettings {
+  enabled: boolean
+  showInstallSuggestions: boolean
+}
+
 export interface ToolApprovalRule {
   tool: string // tool name or glob: 'bash', 'write_*', '*'
   action: 'allow' | 'ask' | 'deny'
@@ -209,6 +214,7 @@ export interface AppSettings {
   behavior: BehaviorSettings
   notifications: NotificationSettings
   git: GitSettings
+  lsp: LspSettings
   permissionMode: PermissionMode
   mcpServers: MCPServerConfig[]
   modelAliases: Record<string, string>

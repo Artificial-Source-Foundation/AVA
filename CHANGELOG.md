@@ -2,6 +2,17 @@
 
 All notable changes to AVA are documented in this file.
 
+## [Unreleased]
+
+### Added
+- **Adaptive LSP runtime** — AVA now ships an on-demand `ava-lsp` runtime with idle shutdown, per-language server selection, shared diagnostics caching, and agent-facing `diagnostics` plus `lsp_ops` tools for definition, references, hover, and symbols.
+- **LSP status surfaces** — Desktop now polls real backend LSP status instead of waiting for external events, and the TUI status bar now shows live LSP state plus error/warning counts when available.
+- **Framework-aware LSP installer flow** — AVA now detects common Rust, TypeScript, Python, Go, and Java project frameworks, suggests the right local language tools, can install supported LSP profiles from Desktop, and searches common user-local binary paths automatically in both CLI and Desktop launches.
+
+### Changed
+- **Write/edit post-change validation** — file mutations now notify the LSP runtime when available so agents get cheap follow-up diagnostics without keeping every language server hot all the time.
+- **LSP fallback behavior** — Rust diagnostics now fall back to compiler checks when servers return no file diagnostics, and workspace symbol lookups fall back gracefully when a language server omits global symbol search.
+
 ## [3.0.0] — 2026-03-30
 
 AVA v3 — the complete rewrite. Pure Rust backend, 21 crates, 21 LLM providers,
@@ -79,6 +90,17 @@ macOS-luxury SolidJS desktop, and a web serve mode with 65+ REST endpoints.
 - **Deleted `packages/` directory entirely.** The TypeScript desktop layer (`packages/core-v2/`, `packages/extensions/`, `packages/core/`, `packages/platform-node/`, `packages/platform-tauri/`) has been removed. The desktop app now calls Rust crates directly via Tauri IPC commands (`src-tauri/src/commands/`), eliminating the `dispatchCompute` bridge pattern and all Node.js runtime dependencies from the desktop path.
 
 ### Changed
+- The workspace resolves cleanly again with a minimal `ava-lsp` library target in place, and the docs now reflect the current 22-crate workspace while that on-demand LSP runtime remains scaffolded.
+- The first-time user path is more coherent end-to-end: AVA now supports a real `ava --connect <provider>` shortcut, install docs/scripts consistently point at working provider-connect flows, source-install guidance no longer references stale version/branch/uninstall details, `install.sh` respects custom install directories when editing shell PATHs and no longer exposes GitHub auth tokens via command-line arguments, and `ava update` now verifies release checksums and rolls back cleanly if binary replacement fails.
+- `ava update` and `install.sh` now target the canonical `ASF-GROUP/AVA` GitHub repo path instead of the older org/repo URL, reducing reliance on redirects during update/install flows.
+- `docs/backlog.md` was restructured into a more operational format with `Now`, `Next`, `Recently Completed`, and `Earlier Major Waves` so active work is easier to scan than the older mixed backlog/changelog style.
+- `docs/plugins.md` was rewritten into a fuller extensions guide that now covers MCP servers, custom tools, custom slash commands, skills/instructions, trust gating, and the current power-plugin hook surface instead of only the narrower old tools/MCP framing.
+- CLI help now has a consistent product-style pass across the full command surface: top-level help is grouped and example-driven, and all exposed subcommands across auth, plugin, HQ, review, serve, and update now include clearer copy and practical usage examples.
+- CLI help got a second polish pass: the noisiest top-level flag descriptions were shortened and `ava auth --help`, `ava hq --help`, and `ava serve --help` now include clearer copy plus practical examples.
+- CLI help output is easier to scan: `ava --help` now groups flags by purpose, includes practical examples for common entry points, and review-mode help includes example invocations instead of only raw option listings.
+- Installation docs are much clearer: README now points users at quick CLI install, desktop downloads, source builds, and dev setup, while `docs/install.md` provides copy-paste commands plus platform-specific notes and current installer gaps.
+- Docs references were cleaned up across `docs/README.md`, `CLAUDE.md`, `AGENTS.md`, `README.md`, `CODEBASE_STRUCTURE.md`, and `.github/CONTRIBUTING.md` so the live docs index now matches the current repo layout after the docs-tree reduction.
+- Docs navigation was reorganized into a clearer lightweight structure: `docs/README.md` now points at the current live set, `docs/troubleshooting/README.md` indexes troubleshooting notes, HQ docs now separate shipped behavior from longer-term direction, and remaining desktop docs use `pnpm`-era commands.
 - HQ plan persistence/execution is more faithful and robust: replanning an epic now replaces its generated issue set instead of duplicating stale tasks, persisted HQ plan tasks now carry dependency and budget metadata through approval into runtime execution, HQ status reports now return real worker counts from persisted state, runtime issue matching no longer silently swallows database lookup failures during worker event ingestion, invalid intra-phase dependencies are now blocked before execution, and first-run HQ memory bootstrap now has a reusable `.ava/HQ/` generator shared across desktop onboarding, web/API, and the headless `ava hq init` CLI path.
 - HQ's simplified product shell is now live in the desktop/frontend path: the old multi-screen HQ navigation was collapsed into Director Chat, Overview, Team Office, and HQ-native Plan Review surfaces, the shared sidebar now carries mission/team/metrics state across all views, Director Chat shows real HQ summary/status/memory cards above the normal AVA chat stream, and the Team Office inspector now lets users inspect live worker state without dropping into the old agent-detail flow.
 - HQ planning is more usable across desktop and browser mode: complex plans now persist real Board-of-Directors consensus onto the stored plan and render it in Plan Review, browser/web HQ now exposes epic/plan create-review endpoints needed for Playwright-driven plan flows, replans preserve issue comments by remapping them to replacement issues with matching titles, and both desktop/web planning now fall back to a deterministic one-task plan when model planning stalls or fails instead of hanging indefinitely.

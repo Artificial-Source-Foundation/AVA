@@ -9,7 +9,14 @@
  */
 
 import { AlertCircle, AlertTriangle, Archive, Loader2, MessageSquare } from 'lucide-solid'
-import { type Accessor, type Component, createMemo, createSignal, Show } from 'solid-js'
+import {
+  type Accessor,
+  type Component,
+  createEffect,
+  createMemo,
+  createSignal,
+  Show,
+} from 'solid-js'
 import { useNotification } from '../../../contexts/notification'
 import { useAgent } from '../../../hooks/useAgent'
 import { useElapsedTimer } from '../../../hooks/useElapsedTimer'
@@ -19,6 +26,7 @@ import {
   applyCompactionResult,
   requestConversationCompaction,
 } from '../../../services/context-compaction'
+import { rustBackend } from '../../../services/rust-bridge'
 import { useDiagnostics } from '../../../stores/diagnostics'
 import { useSession } from '../../../stores/session'
 import { useSettings } from '../../../stores/settings'
@@ -45,12 +53,46 @@ export interface StatusBarProps {
 export const StatusBar: Component<StatusBarProps> = (props) => {
   const sessionStore = useSession()
   const { settings } = useSettings()
-  const { diagnostics, hasDiagnostics } = useDiagnostics()
+  const { diagnostics, hasDiagnostics, hasActiveLsp, lspStatus } = useDiagnostics()
   const agent = useAgent()
   const notify = useNotification()
   const [isCompacting, setIsCompacting] = createSignal(false)
+  const [seenLspSuggestionKey, setSeenLspSuggestionKey] = createSignal<string | null>(null)
 
   const { contextUsage, sessionTokenStats, messages } = sessionStore
+
+  createEffect(() => {
+    const suggestion = lspStatus().suggestions[0]
+    if (!settings().lsp.showInstallSuggestions) return
+    if (!suggestion || suggestion.key === seenLspSuggestionKey()) return
+    setSeenLspSuggestionKey(suggestion.key)
+    notify.toast({
+      variant: 'warning',
+      title: suggestion.title,
+      message: suggestion.message,
+      duration: 0,
+      action: suggestion.installProfile
+        ? {
+            label: 'Install',
+            onClick: async () => {
+              const result = await rustBackend.installLspProfile(suggestion.installProfile!)
+              notify.toast({
+                variant: result.success ? 'success' : 'error',
+                title: result.success ? 'LSP installed' : 'LSP install failed',
+                message: result.message,
+              })
+            },
+          }
+        : suggestion.installCommand
+          ? {
+              label: 'Copy install',
+              onClick: () => {
+                void navigator.clipboard?.writeText(suggestion.installCommand ?? '')
+              },
+            }
+          : undefined,
+    })
+  })
 
   // Elapsed time during streaming
   const elapsedSec = useElapsedTimer(() => agent.streamingStartedAt())
@@ -204,6 +246,23 @@ export const StatusBar: Component<StatusBarProps> = (props) => {
                 {diagnostics().warnings}
               </span>
             </Show>
+          </span>
+        </Show>
+
+        <Show when={hasActiveLsp()}>
+          <span class="text-[var(--text-muted)]">&middot;</span>
+          <span
+            class="text-[var(--accent)]"
+            title={`LSP ${lspStatus().state} (${lspStatus().activeServerCount} active server${lspStatus().activeServerCount === 1 ? '' : 's'})`}
+          >
+            LSP {lspStatus().state === 'starting' ? 'starting' : 'active'}
+          </span>
+        </Show>
+
+        <Show when={settings().lsp.showInstallSuggestions && lspStatus().suggestions.length > 0}>
+          <span class="text-[var(--text-muted)]">&middot;</span>
+          <span class="text-[var(--warning)]" title={lspStatus().suggestions[0]?.message}>
+            Install {lspStatus().suggestions[0]?.server} LSP
           </span>
         </Show>
       </Show>

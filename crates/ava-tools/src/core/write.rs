@@ -20,13 +20,22 @@ fn compute_unified_diff(old: &str, new: &str, path: &str) -> String {
 
 pub struct WriteTool {
     platform: Arc<dyn Platform>,
+    lsp_manager: Option<Arc<ava_lsp::LspManager>>,
     backup_session: FileBackupSession,
 }
 
 impl WriteTool {
     pub fn new(platform: Arc<dyn Platform>) -> Self {
+        Self::new_with_lsp(platform, None)
+    }
+
+    pub fn new_with_lsp(
+        platform: Arc<dyn Platform>,
+        lsp_manager: Option<Arc<ava_lsp::LspManager>>,
+    ) -> Self {
         Self {
             platform,
+            lsp_manager,
             backup_session: crate::core::file_backup::new_backup_session(),
         }
     }
@@ -34,10 +43,12 @@ impl WriteTool {
     /// Create a `WriteTool` with a shared backup session for crash-safe undo.
     pub fn with_backup_session(
         platform: Arc<dyn Platform>,
+        lsp_manager: Option<Arc<ava_lsp::LspManager>>,
         backup_session: FileBackupSession,
     ) -> Self {
         Self {
             platform,
+            lsp_manager,
             backup_session,
         }
     }
@@ -106,6 +117,21 @@ impl Tool for WriteTool {
             if !diff.is_empty() {
                 result_content.push_str("\n\n");
                 result_content.push_str(&diff);
+            }
+        }
+
+        if let Some(lsp_manager) = &self.lsp_manager {
+            match lsp_manager.notify_file_changed(&file_path).await {
+                Ok(summary) if summary.errors > 0 || summary.warnings > 0 => {
+                    result_content.push_str(&format!(
+                        "\n\nLSP diagnostics: {} errors, {} warnings",
+                        summary.errors, summary.warnings
+                    ));
+                }
+                Ok(_) => {}
+                Err(err) => {
+                    tracing::debug!(path = %path, error = %err, "LSP write refresh skipped");
+                }
             }
         }
 

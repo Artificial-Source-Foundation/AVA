@@ -176,6 +176,119 @@ pub struct FeaturesConfig {
     pub enable_codebase_index: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum LspMode {
+    Off,
+    #[default]
+    OnDemand,
+    AlwaysOn,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LspServerConfig {
+    pub name: String,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    pub command: String,
+    #[serde(default)]
+    pub args: Vec<String>,
+    #[serde(default)]
+    pub file_extensions: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LspConfig {
+    #[serde(default)]
+    pub mode: LspMode,
+    #[serde(default = "default_lsp_idle_timeout_secs")]
+    pub idle_timeout_secs: u64,
+    #[serde(default = "default_lsp_diagnostics_wait_ms")]
+    pub diagnostics_wait_ms: u64,
+    #[serde(default = "default_lsp_max_active_servers")]
+    pub max_active_servers: usize,
+    #[serde(default = "default_lsp_max_open_files")]
+    pub max_open_files_per_server: usize,
+    #[serde(default = "default_lsp_servers")]
+    pub servers: Vec<LspServerConfig>,
+}
+
+fn default_lsp_idle_timeout_secs() -> u64 {
+    300
+}
+
+fn default_lsp_diagnostics_wait_ms() -> u64 {
+    1200
+}
+
+fn default_lsp_max_active_servers() -> usize {
+    2
+}
+
+fn default_lsp_max_open_files() -> usize {
+    8
+}
+
+fn default_lsp_servers() -> Vec<LspServerConfig> {
+    vec![
+        LspServerConfig {
+            name: "rust".to_string(),
+            enabled: true,
+            command: "rust-analyzer".to_string(),
+            args: vec![],
+            file_extensions: vec!["rs".to_string()],
+        },
+        LspServerConfig {
+            name: "typescript".to_string(),
+            enabled: true,
+            command: "typescript-language-server".to_string(),
+            args: vec!["--stdio".to_string()],
+            file_extensions: vec![
+                "ts".to_string(),
+                "tsx".to_string(),
+                "js".to_string(),
+                "jsx".to_string(),
+                "mjs".to_string(),
+                "cjs".to_string(),
+            ],
+        },
+        LspServerConfig {
+            name: "python".to_string(),
+            enabled: true,
+            command: "pylsp".to_string(),
+            args: vec![],
+            file_extensions: vec!["py".to_string()],
+        },
+        LspServerConfig {
+            name: "go".to_string(),
+            enabled: true,
+            command: "gopls".to_string(),
+            args: vec![],
+            file_extensions: vec!["go".to_string()],
+        },
+        LspServerConfig {
+            name: "java".to_string(),
+            enabled: true,
+            command: "jdtls".to_string(),
+            args: vec![],
+            file_extensions: vec!["java".to_string()],
+        },
+    ]
+}
+
+impl Default for LspConfig {
+    fn default() -> Self {
+        Self {
+            mode: LspMode::OnDemand,
+            idle_timeout_secs: default_lsp_idle_timeout_secs(),
+            diagnostics_wait_ms: default_lsp_diagnostics_wait_ms(),
+            max_active_servers: default_lsp_max_active_servers(),
+            max_open_files_per_server: default_lsp_max_open_files(),
+            servers: default_lsp_servers(),
+        }
+    }
+}
+
 fn default_true() -> bool {
     true
 }
@@ -353,6 +466,8 @@ pub struct Config {
     pub editor: EditorConfig,
     pub ui: UiConfig,
     pub features: FeaturesConfig,
+    #[serde(default)]
+    pub lsp: LspConfig,
     #[serde(default)]
     pub fallback: Option<FallbackConfig>,
     #[serde(default)]

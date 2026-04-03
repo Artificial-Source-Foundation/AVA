@@ -16,10 +16,8 @@ set -euo pipefail
 #   ~/.local/share/applications/ava.desktop         (desktop entry, desktop only)
 #   ~/.local/share/icons/hicolor/128x128/apps/ava.png (icon, desktop only)
 #
-# To uninstall: ./uninstall.sh
+# To uninstall: ./scripts/uninstall.sh
 # ============================================================================
-
-VERSION="1.0.0"
 
 # Colors
 RED='\033[0;31m'
@@ -39,6 +37,8 @@ print_dry() { echo -e "${DIM}[dry-run]${NC} $1"; }
 print_info() { echo -e "  ${DIM}$1${NC}"; }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+VERSION="${AVA_VERSION:-$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$SCRIPT_DIR/package.json" | head -1)}"
+VERSION="${VERSION:-unknown}"
 
 # Default options
 DRY_RUN=false
@@ -86,7 +86,7 @@ ${BOLD}SUPPORTED DISTROS:${NC}
     openSUSE (zypper)
 
 ${BOLD}TO UNINSTALL:${NC}
-    ./uninstall.sh
+    ./scripts/uninstall.sh
 
 EOF
 }
@@ -177,7 +177,7 @@ fi
 # ============================================================================
 if [[ "$NON_INTERACTIVE" == "false" ]]; then
     echo -e "${DIM}  Note: Building from source takes 5-10 minutes on first run.${NC}"
-    echo -e "${DIM}  For a quick install, use: curl -fsSL https://raw.githubusercontent.com/ASF-GROUP/AVA/main/install.sh | sh${NC}"
+    echo -e "${DIM}  For a quick install, use: curl -fsSL https://raw.githubusercontent.com/ASF-GROUP/AVA/master/install.sh | sh${NC}"
     echo ""
     echo -e "${BOLD}What would you like to install?${NC}"
     echo ""
@@ -450,8 +450,11 @@ if [[ "$INSTALL_DESKTOP" == "true" ]]; then
             fi
         done || true
 
-        RELEASE_DIR="$SCRIPT_DIR/target/release"
+        RELEASE_DIR="$SCRIPT_DIR/src-tauri/target/release"
         BINARY_NAME="ava"
+        if [[ ! -f "$RELEASE_DIR/$BINARY_NAME" ]]; then
+            RELEASE_DIR="$SCRIPT_DIR/target/release"
+        fi
         # Tauri may name the binary differently
         if [[ ! -f "$RELEASE_DIR/$BINARY_NAME" ]]; then
             for name in AVA ava; do
@@ -560,7 +563,8 @@ fi
 echo ""
 if [[ "$DRY_RUN" == "false" ]]; then
     echo -e "  ${DIM}Get started:${NC}"
-    echo -e "    ${DIM}1. Connect a provider: ava auth add${NC}"
+    echo -e "    ${DIM}1. Connect a provider: ava --connect openrouter${NC}"
+    echo -e "    ${DIM}   Or: ava auth login openrouter${NC}"
     echo -e "    ${DIM}2. Launch: ava${NC}"
 fi
 
@@ -568,6 +572,6 @@ echo ""
 if [[ "$DRY_RUN" == "true" ]]; then
     echo "Run without --dry-run to actually install."
 else
-    echo "To uninstall: ./uninstall.sh"
+    echo "To uninstall: ./scripts/uninstall.sh"
 fi
 echo ""

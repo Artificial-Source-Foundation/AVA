@@ -2,146 +2,192 @@ use clap::{Parser, Subcommand, ValueEnum};
 use tracing::debug;
 
 #[derive(Debug, Clone, Parser)]
-#[command(name = "ava", about = "AVA - AI coding assistant")]
+#[command(
+    name = "ava",
+    version,
+    about = "AI coding assistant for terminal, browser, and desktop",
+    long_about = "AVA is an AI coding assistant that can run as an interactive TUI, a headless CLI agent, a browser-backed web server, or a desktop app backend.",
+    after_help = "Examples:\n  ava\n      Open the terminal UI\n\n  ava \"fix the failing test\"\n      Run one task headlessly\n\n  ava --provider openrouter --model anthropic/claude-sonnet-4 \"review this crate\"\n      Run with an explicit provider and model\n\n  ava --connect openrouter\n      Connect a provider interactively\n\n  ava serve --port 8080\n      Start the browser/web server\n\n  ava auth login openrouter\n      Connect a provider\n\n  ava review --staged\n      Review staged git changes",
+    next_line_help = true
+)]
 pub struct CliArgs {
     /// Goal to execute immediately
+    #[arg(value_name = "GOAL")]
     pub goal: Option<String>,
 
     /// Resume last session
     #[arg(short = 'c', long = "continue")]
+    #[arg(help_heading = "Session")]
     pub resume: bool,
 
     /// Resume a specific session id
     #[arg(long)]
+    #[arg(help_heading = "Session")]
     pub session: Option<String>,
 
     /// Model to use
     #[arg(long, short)]
+    #[arg(help_heading = "Model Selection")]
     pub model: Option<String>,
 
     /// Provider to use
     #[arg(long)]
+    #[arg(help_heading = "Model Selection")]
     pub provider: Option<String>,
+
+    /// Connect a provider interactively and exit
+    #[arg(long, value_name = "PROVIDER")]
+    #[arg(help_heading = "Project Setup")]
+    pub connect: Option<String>,
 
     /// Maximum agent turns (0 = unlimited)
     #[arg(long, default_value_t = 0)]
+    #[arg(help_heading = "Execution")]
     pub max_turns: usize,
 
     /// Maximum budget in USD (0 = unlimited)
     #[arg(long, default_value_t = 0.0)]
+    #[arg(help_heading = "Execution")]
     pub max_budget_usd: f64,
 
     /// Auto-approve all tools (except Critical)
     #[arg(long, alias = "yolo")]
+    #[arg(help_heading = "Automation")]
     pub auto_approve: bool,
 
     /// Theme name
     #[arg(long, default_value = "default")]
+    #[arg(help_heading = "Interactive UI")]
     pub theme: String,
 
     /// Increase log verbosity. Use -v for info, -vv for debug, -vvv for trace.
     #[arg(long, short = 'v', action = clap::ArgAction::Count)]
+    #[arg(help_heading = "Debugging")]
     pub verbose: u8,
 
     /// Force headless mode (no TUI)
     #[arg(long)]
+    #[arg(help_heading = "Execution Modes")]
     pub headless: bool,
 
     /// Reduce startup overhead by skipping project instructions and eager codebase indexing
     #[arg(long)]
+    #[arg(help_heading = "Execution")]
     pub fast: bool,
 
     /// Output JSON events (for scripting/piping)
     #[arg(long)]
+    #[arg(help_heading = "Execution Modes")]
     pub json: bool,
 
-    /// Watch files and trigger on `ava:` comment directives
+    /// Watch files for `ava:` comment directives
     #[arg(long)]
+    #[arg(help_heading = "Automation")]
     pub watch: bool,
 
-    /// Additional paths to watch (repeatable, defaults to current directory)
+    /// Additional watch paths (repeatable)
     #[arg(long = "watch-path")]
+    #[arg(help_heading = "Automation")]
     pub watch_path: Vec<String>,
 
-    /// Trust the current project (allows loading all project-local config: .ava/mcp.json, .ava/hooks/, .ava/tools/, .ava/commands/, .ava/agents.toml, .ava/skills/, AGENTS.md, .ava/rules/)
+    /// Trust the current project and enable local AVA config/plugins
     #[arg(long)]
+    #[arg(help_heading = "Project Setup")]
     pub trust: bool,
 
     /// Thinking/reasoning effort level: off, low, medium, high, xhigh
     #[arg(long, default_value = "off")]
+    #[arg(help_heading = "Execution")]
     pub thinking: String,
 
     /// Disable automatic update checks on startup
     #[arg(long)]
+    #[arg(help_heading = "Project Setup")]
     pub no_update_check: bool,
 
     /// Run as ACP (Agent Client Protocol) server on stdio for IDE integration
     #[arg(long)]
+    #[arg(help_heading = "Execution Modes")]
     pub acp_server: bool,
 
     /// Attach image files to the prompt (repeatable). Supported: png, jpg, jpeg, gif, webp
     #[arg(long)]
+    #[arg(help_heading = "Input")]
     pub image: Vec<String>,
 
-    /// Force a code review pass after the agent completes (for CI pipelines).
-    /// Without this flag, the agent decides when to self-review via subagent.
+    /// Force a review pass after the agent completes
     #[arg(long)]
+    #[arg(help_heading = "Automation")]
     pub review: bool,
 
     /// Enable continuous voice input (requires --features voice)
     #[arg(long)]
+    #[arg(help_heading = "Input")]
     pub voice: bool,
 
     /// Run model benchmarks instead of normal operation
     #[arg(long)]
+    #[arg(help_heading = "Benchmarks")]
     pub benchmark: bool,
 
     /// Models to benchmark in "provider:model,provider:model" format
     #[arg(long)]
+    #[arg(help_heading = "Benchmarks")]
     pub models: Option<String>,
 
     /// LLM judge models for benchmark evaluation in "provider:model,provider:model" format
     #[arg(long)]
+    #[arg(help_heading = "Benchmarks")]
     pub judges: Option<String>,
 
     /// Benchmark suite filter: speed, standard, frontier, all (default: all)
     #[arg(long, default_value = "all")]
+    #[arg(help_heading = "Benchmarks")]
     pub suite: String,
 
     /// Benchmark language filter: rust, python, js, go (comma-separated, default: all)
     #[arg(long)]
+    #[arg(help_heading = "Benchmarks")]
     pub language: Option<String>,
 
     /// Benchmark task filter: comma-separated task names or substrings
     #[arg(long)]
+    #[arg(help_heading = "Benchmarks")]
     pub task_filter: Option<String>,
 
     /// Run harnessed-pair benchmark (SOTA director + fast worker)
     #[arg(long)]
+    #[arg(help_heading = "Benchmarks")]
     pub harness: bool,
 
     /// Director model spec for harness benchmark (e.g. "openrouter:anthropic/claude-opus-4.6")
     #[arg(long)]
+    #[arg(help_heading = "Benchmarks")]
     pub director: Option<String>,
 
     /// Worker model spec for harness benchmark (e.g. "inception:mercury-2")
     #[arg(long)]
+    #[arg(help_heading = "Benchmarks")]
     pub worker: Option<String>,
 
     /// Import Aider Polyglot benchmark tasks from a local repo path
     #[arg(long)]
+    #[arg(help_heading = "Benchmarks")]
     pub import_polyglot: Option<String>,
 
-    /// Follow-up messages to run after the main task completes (Tier 2, repeatable)
+    /// Follow-up messages to run after the main task completes
     #[arg(long = "follow-up")]
+    #[arg(help_heading = "Automation")]
     pub follow_up: Vec<String>,
 
-    /// Post-complete messages to run after everything (Tier 3, auto-assigns groups)
+    /// Post-complete messages to run after everything else
     #[arg(long)]
+    #[arg(help_heading = "Automation")]
     pub later: Vec<String>,
 
-    /// Post-complete messages with explicit group numbers: --later-group 1 "review code"
+    /// Post-complete message with an explicit group number
     #[arg(long = "later-group", num_args = 2, value_names = ["GROUP", "MESSAGE"])]
+    #[arg(help_heading = "Automation")]
     pub later_group: Vec<String>,
 
     #[command(subcommand)]
@@ -222,6 +268,7 @@ mod tests {
             session: None,
             model: None,
             provider: None,
+            connect: None,
             max_turns: 3,
             max_budget_usd: 0.0,
             auto_approve: false,
@@ -291,10 +338,14 @@ mod tests {
 }
 
 #[derive(Debug, Clone, Subcommand)]
+#[command(
+    about = "Top-level AVA commands",
+    after_help = "Examples:\n  ava auth login openrouter\n  ava plugin list\n  ava hq init\n  ava serve --port 8080"
+)]
 pub enum Command {
     /// Review code changes using an LLM agent
     Review(ReviewArgs),
-    /// Manage provider authentication (OAuth, API keys)
+    /// Manage provider authentication
     Auth {
         #[command(subcommand)]
         action: AuthCommand,
@@ -304,17 +355,22 @@ pub enum Command {
         #[command(subcommand)]
         action: PluginCommand,
     },
-    /// HQ setup and headless utilities
+    /// HQ setup and utilities
     Hq {
         #[command(subcommand)]
         action: HqCommand,
     },
     /// Check for and install updates
+    #[command(after_help = "Example:\n  ava update")]
     Update,
     /// Check for and install updates (alias)
     #[command(name = "self-update")]
+    #[command(after_help = "Example:\n  ava self-update")]
     SelfUpdate,
-    /// Start the AVA web server (HTTP API + WebSocket for agent events)
+    /// Start the AVA web server for browser mode
+    #[command(
+        after_help = "Examples:\n  ava serve\n  ava serve --port 3000\n  ava serve --host 127.0.0.1 --port 8080"
+    )]
     Serve {
         /// Port to listen on
         #[arg(long, default_value_t = 8080)]
@@ -326,8 +382,16 @@ pub enum Command {
 }
 
 #[derive(Debug, Clone, Subcommand)]
+#[command(
+    about = "HQ setup and utilities",
+    long_about = "Initialize and manage HQ project state for AVA's Director-led multi-agent mode.",
+    after_help = "Examples:\n  ava hq init\n  ava hq init --force\n  ava hq init --director-model openrouter:anthropic/claude-opus-4.1"
+)]
 pub enum HqCommand {
     /// Initialize `.ava/HQ/` memory for the current project
+    #[command(
+        after_help = "Examples:\n  ava hq init\n  ava hq init --force\n  ava hq init --director-model openrouter:anthropic/claude-opus-4.1"
+    )]
     Init {
         /// Preferred Director model to record in HQ memory
         #[arg(long)]
@@ -339,25 +403,38 @@ pub enum HqCommand {
 }
 
 #[derive(Debug, Clone, Subcommand)]
+#[command(
+    about = "Manage power plugins",
+    after_help = "Examples:\n  ava plugin list\n  ava plugin add ./my-plugin\n  ava plugin add @scope/ava-plugin\n  ava plugin init my-plugin --lang typescript"
+)]
 pub enum PluginCommand {
     /// List installed plugins
+    #[command(after_help = "Example:\n  ava plugin list")]
     List,
     /// Install a plugin from a local path or npm package
+    #[command(
+        after_help = "Examples:\n  ava plugin add ./my-plugin\n  ava plugin add @scope/ava-plugin"
+    )]
     Add {
         /// Local path to plugin directory, or npm package name
         source: String,
     },
     /// Remove an installed plugin
+    #[command(after_help = "Example:\n  ava plugin remove my-plugin")]
     Remove {
         /// Plugin name
         name: String,
     },
     /// Show details for an installed plugin
+    #[command(after_help = "Example:\n  ava plugin info my-plugin")]
     Info {
         /// Plugin name
         name: String,
     },
     /// Scaffold a new plugin project
+    #[command(
+        after_help = "Examples:\n  ava plugin init my-plugin\n  ava plugin init my-plugin --lang python"
+    )]
     Init {
         /// Plugin name
         name: String,
@@ -368,20 +445,31 @@ pub enum PluginCommand {
 }
 
 #[derive(Debug, Clone, Subcommand)]
+#[command(
+    about = "Manage provider authentication",
+    long_about = "Log in to providers, remove credentials, list configured providers, or test a provider connection.",
+    after_help = "Examples:\n  ava auth login openrouter\n  ava auth logout openai\n  ava auth list\n  ava auth test copilot"
+)]
 pub enum AuthCommand {
     /// Sign in to a provider (opens browser for OAuth, prompts for API key)
+    #[command(
+        after_help = "Examples:\n  ava auth login openrouter\n  ava auth login openai\n  ava auth login copilot"
+    )]
     Login {
         /// Provider ID (e.g., openai, copilot, anthropic)
         provider: String,
     },
     /// Remove credentials for a provider
+    #[command(after_help = "Examples:\n  ava auth logout openai\n  ava auth logout openrouter")]
     Logout {
         /// Provider ID
         provider: String,
     },
     /// List all configured providers with status
+    #[command(after_help = "Example:\n  ava auth list")]
     List,
     /// Test connection to a provider
+    #[command(after_help = "Examples:\n  ava auth test openrouter\n  ava auth test anthropic")]
     Test {
         /// Provider ID
         provider: String,
@@ -389,44 +477,58 @@ pub enum AuthCommand {
 }
 
 #[derive(Debug, Clone, Parser)]
+#[command(
+    about = "Review code changes with AVA's review agent",
+    after_help = "Examples:\n  ava review --staged\n  ava review --diff main..HEAD\n  ava review --commit abc123 --format markdown"
+)]
 pub struct ReviewArgs {
     /// Review staged changes (git diff --staged)
+    #[arg(help_heading = "Review Scope")]
     #[arg(long)]
     pub staged: bool,
 
     /// Review a diff range (e.g. "main..HEAD", "abc123..def456")
+    #[arg(help_heading = "Review Scope")]
     #[arg(long)]
     pub diff: Option<String>,
 
     /// Review a specific commit
+    #[arg(help_heading = "Review Scope")]
     #[arg(long)]
     pub commit: Option<String>,
 
     /// Review working directory changes (unstaged)
+    #[arg(help_heading = "Review Scope")]
     #[arg(long)]
     pub working: bool,
 
     /// Output format
+    #[arg(help_heading = "Review Output")]
     #[arg(long, value_enum, default_value = "text")]
     pub format: ReviewFormat,
 
     /// Focus area for the review
+    #[arg(help_heading = "Review Output")]
     #[arg(long, default_value = "all")]
     pub focus: String,
 
     /// Fail (exit 1) when issues at or above this severity are found
+    #[arg(help_heading = "Review Output")]
     #[arg(long, value_enum, default_value = "critical")]
     pub fail_on: FailOnSeverity,
 
     /// LLM provider to use
+    #[arg(help_heading = "Model Selection")]
     #[arg(long)]
     pub provider: Option<String>,
 
     /// LLM model to use
+    #[arg(help_heading = "Model Selection")]
     #[arg(long, short)]
     pub model: Option<String>,
 
     /// Maximum agent turns
+    #[arg(help_heading = "Execution")]
     #[arg(long, default_value_t = 10)]
     pub max_turns: usize,
 }
@@ -548,7 +650,15 @@ impl CliArgs {
 
 /// Error message shown when no provider is configured anywhere.
 pub const NO_PROVIDER_ERROR: &str = "\
-No provider configured. Set defaults in ~/.ava/config.yaml or use --provider/--model flags.
+No provider configured.
+
+Quickest fix:
+  ava --connect openrouter
+
+Or use the auth subcommand directly:
+  ava auth login openrouter
+
+Or set defaults in ~/.ava/config.yaml or use --provider/--model flags.
 
 Example ~/.ava/config.yaml:
   llm:

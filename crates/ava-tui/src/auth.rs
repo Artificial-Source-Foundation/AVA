@@ -20,16 +20,17 @@ pub async fn run_auth(cmd: AuthCommand) -> Result<()> {
 }
 
 async fn auth_login(provider_id: &str) -> Result<()> {
-    let info = ava_auth::provider_info(provider_id).ok_or_else(|| {
-        color_eyre::eyre::eyre!(
+    let Some(info) = ava_auth::provider_info(provider_id) else {
+        eprintln!(
             "Unknown provider: {provider_id}\nAvailable: {}",
             ava_auth::all_providers()
                 .iter()
                 .map(|p| p.id)
                 .collect::<Vec<_>>()
                 .join(", ")
-        )
-    })?;
+        );
+        std::process::exit(1);
+    };
 
     println!("Signing in to {}...", info.name);
 
@@ -142,10 +143,7 @@ async fn auth_login(provider_id: &str) -> Result<()> {
             // Prompt for API key
             print!("Enter API key for {}: ", info.name);
             io::stdout().flush()?;
-
-            let mut api_key = String::new();
-            io::stdin().read_line(&mut api_key)?;
-            let api_key = api_key.trim().to_string();
+            let api_key = rpassword::read_password()?.trim().to_string();
 
             if api_key.is_empty() {
                 eprintln!("API key cannot be empty");

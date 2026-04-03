@@ -2,7 +2,7 @@ use ava_tui::app::App;
 use ava_tui::auth::run_auth;
 #[cfg(feature = "benchmark")]
 use ava_tui::benchmark;
-use ava_tui::config::cli::{CliArgs, Command};
+use ava_tui::config::cli::{AuthCommand, CliArgs, Command};
 use ava_tui::headless::run_headless;
 use ava_tui::hq_cli::run_hq_command;
 use ava_tui::plugin_commands::run_plugin;
@@ -21,6 +21,7 @@ async fn main() -> Result<()> {
     let cli = CliArgs::parse();
 
     let is_benchmark = cfg!(feature = "benchmark") && (cli.benchmark || cli.harness);
+    let explicit_update = matches!(cli.command, Some(Command::Update | Command::SelfUpdate));
     let is_tui = cli.command.is_none()
         && !cli.headless
         && !cli.json
@@ -41,7 +42,7 @@ async fn main() -> Result<()> {
     }
 
     // Background update check (non-blocking, once per 24h)
-    if !cli.no_update_check {
+    if !cli.no_update_check && !explicit_update {
         tokio::spawn(async {
             if let Some(msg) = ava_tui::updater::check_and_notify().await {
                 eprintln!("{msg}");
@@ -54,6 +55,10 @@ async fn main() -> Result<()> {
         return ava_acp::server::run_acp_server()
             .await
             .map_err(|e| color_eyre::eyre::eyre!("{e}"));
+    }
+
+    if let Some(provider) = cli.connect.clone() {
+        return run_auth(AuthCommand::Login { provider }).await;
     }
 
     // Subcommand routing

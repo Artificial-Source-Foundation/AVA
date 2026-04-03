@@ -16,10 +16,10 @@ use ava_llm::provider::{LLMProvider, SharedProvider};
 use ava_llm::{ModelRouter, RouteDecision, RouteSource};
 use ava_platform::Platform;
 use ava_session::SessionManager;
-use ava_tools::core::register_core_tools;
 use ava_tools::core::task::{TaskResult, TaskSpawner};
 use ava_tools::core::{
-    file_backup::new_backup_session, register_custom_tools_with_plugins, register_plan_tool,
+    file_backup::new_backup_session, register_custom_tools_with_plugins,
+    register_default_tools_with_plugins_and_lsp, register_lsp_tools, register_plan_tool,
     register_question_tool, register_task_tool, register_todo_tools,
 };
 use ava_tools::mcp_bridge::MCPBridgeTool;
@@ -408,6 +408,7 @@ impl AgentStack {
             let (mut registry, run_tool_sources, run_backup_session) =
                 build_tool_registry_with_plugins(
                     self.platform.clone(),
+                    Some(Arc::clone(&self.lsp)),
                     Arc::clone(&self.permission_inspector),
                     Arc::clone(&self.permission_context),
                     self.approval_bridge.clone(),
@@ -430,6 +431,7 @@ impl AgentStack {
                 let spawner: Arc<dyn TaskSpawner> = Arc::new(AgentTaskSpawner {
                     provider: provider.clone(),
                     platform: self.platform.clone(),
+                    lsp: Arc::clone(&self.lsp),
                     model_name: provider.model_name().to_string(),
                     max_turns: turns_limit,
                     agents_config: self.agents_config.clone(),
@@ -801,6 +803,7 @@ enum SubAgentRuntimeProfile {
 struct AgentTaskSpawner {
     provider: Arc<dyn LLMProvider>,
     platform: Arc<dyn Platform>,
+    lsp: Arc<ava_lsp::LspManager>,
     model_name: String,
     max_turns: usize,
     agents_config: AgentsConfig,
@@ -902,7 +905,17 @@ impl TaskSpawner for AgentTaskSpawner {
         );
         let runtime_profile = subagent_runtime_profile(agent_type);
         let mut registry = ToolRegistry::new();
-        register_core_tools(&mut registry, self.platform.clone());
+        let _ = register_default_tools_with_plugins_and_lsp(
+            &mut registry,
+            self.platform.clone(),
+            None,
+            Some(Arc::clone(&self.lsp)),
+        );
+        register_lsp_tools(
+            &mut registry,
+            self.platform.clone(),
+            Some(Arc::clone(&self.lsp)),
+        );
         apply_subagent_runtime_profile(&mut registry, runtime_profile);
         registry.unregister("todo_write");
         registry.unregister("todo_read");
@@ -1117,6 +1130,11 @@ impl TaskSpawner for AgentTaskSpawner {
             let spawner = AgentTaskSpawner {
                 provider,
                 platform,
+                lsp: Arc::new(ava_lsp::LspManager::new(
+                    std::env::current_dir().unwrap_or_default(),
+                    ava_config::LspConfig::default(),
+                    false,
+                )),
                 model_name,
                 max_turns,
                 agents_config,

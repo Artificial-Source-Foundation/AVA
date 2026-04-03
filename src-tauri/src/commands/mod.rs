@@ -82,6 +82,6 @@ pub use provider_commands::{discover_cli_agents, list_providers};
 pub use session_commands::{
     create_session, delete_session, list_sessions, load_session, rename_session, search_sessions,
 };
-pub use tool_commands::list_agent_tools;
+pub use tool_commands::{get_lsp_status, install_lsp_profile, list_agent_tools};
 pub use updater_commands::{check_desktop_update, install_desktop_update};
 pub use usage_commands::get_subscription_usage;

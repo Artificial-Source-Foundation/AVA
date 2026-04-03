@@ -7,6 +7,7 @@
  */
 
 import { isTauri } from '@tauri-apps/api/core'
+import type { IResizeEvent } from '@xterm/xterm'
 import { type Component, onCleanup, onMount } from 'solid-js'
 import {
   cleanupPty,
@@ -100,7 +101,7 @@ export const XTerminal: Component = () => {
     fitAddon.fit()
 
     // Pass through app shortcuts
-    terminal.attachCustomKeyEventHandler((event) => {
+    terminal.attachCustomKeyEventHandler((event: KeyboardEvent) => {
       if (event.ctrlKey || event.metaKey) {
         let key = event.key.toLowerCase()
         // Ctrl remaps some letters to control-char names (Ctrl+M → "Enter", etc.)
@@ -124,7 +125,7 @@ export const XTerminal: Component = () => {
           cwd: cwd && cwd !== '~' ? cwd : undefined,
         },
         // onOutput: PTY → terminal
-        (data) => {
+        (data: string) => {
           terminal.write(data)
         },
         // onExit
@@ -145,14 +146,14 @@ export const XTerminal: Component = () => {
     }
 
     // terminal → PTY (keystrokes)
-    const dataDisposable = terminal.onData((data) => {
+    const dataDisposable = terminal.onData((data: string) => {
       if (ptySession) {
         void writePty(ptySession.id, data)
       }
     })
 
     // Terminal resize → PTY resize
-    const resizeDisposable = terminal.onResize(({ cols, rows }) => {
+    const resizeDisposable = terminal.onResize(({ cols, rows }: IResizeEvent) => {
       if (ptySession) {
         void resizePty(ptySession.id, cols, rows)
       }

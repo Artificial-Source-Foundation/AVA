@@ -34,6 +34,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 ava-acp = { path = "../ava-acp" }
 ava-agent = { path = "../ava-agent" }
+ava-lsp = { path = "../ava-lsp" }
 ava-hq = { path = "../ava-hq" }
 ava-llm = { path = "../ava-llm" }
 ava-tools = { path = "../ava-tools" }
@@ -69,6 +70,8 @@ unicode-width = "0.2"
 tempfile = "3"
 flate2 = "1"
 tar = "0.4"
+sha2 = "0.10"
+rpassword = "7"
 arboard = "3"
 base64 = "0.22"
 png = "0.18"

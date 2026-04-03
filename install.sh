@@ -4,9 +4,7 @@
 #
 # Installs the `ava` CLI binary to ~/.ava/bin/ and adds it to PATH.
 #
-# For private repos, either:
-#   1. Have `gh` CLI authenticated (recommended)
-#   2. Set GITHUB_TOKEN to a PAT with repo scope
+# For private repos, have `gh` CLI installed and authenticated.
 #
 # Set AVA_INSTALL_DIR to override the installation directory:
 #   AVA_INSTALL_DIR=/usr/local/bin ... | sh
@@ -15,7 +13,7 @@ set -eu
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
-REPO="Artificial-Source-Foundation/AVA"
+REPO="ASF-GROUP/AVA"
 INSTALL_DIR="${AVA_INSTALL_DIR:-${HOME}/.ava/bin}"
 TMP_DIR=""
 
@@ -78,17 +76,6 @@ get_target() {
 
 # ── GitHub helpers ────────────────────────────────────────────────────────────
 
-# Get a usable auth token (from env or gh CLI)
-get_auth_token() {
-    if [ -n "${GITHUB_TOKEN:-}" ]; then
-        echo "${GITHUB_TOKEN}"
-    elif [ -n "${GH_TOKEN:-}" ]; then
-        echo "${GH_TOKEN}"
-    elif command -v gh >/dev/null 2>&1; then
-        gh auth token 2>/dev/null || true
-    fi
-}
-
 get_latest_tag() {
     # Try gh CLI first (handles auth automatically)
     if command -v gh >/dev/null 2>&1; then
@@ -99,15 +86,9 @@ get_latest_tag() {
         fi
     fi
 
-    # Fallback: GitHub API with optional auth
+    # Fallback: GitHub API for public repos
     _api_url="https://api.github.com/repos/${REPO}/releases/latest"
-    _token=$(get_auth_token)
-
-    if [ -n "${_token}" ]; then
-        _response=$(curl -fsSL -H "Authorization: token ${_token}" "${_api_url}" 2>/dev/null) || true
-    else
-        _response=$(curl -fsSL "${_api_url}" 2>/dev/null) || true
-    fi
+    _response=$(curl -fsSL "${_api_url}" 2>/dev/null) || true
 
     if [ -n "${_response:-}" ]; then
         _tag=$(echo "${_response}" | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
@@ -145,13 +126,7 @@ download_asset() {
 
     # Fallback: direct curl download (public repos only)
     _url="https://github.com/${REPO}/releases/download/${_tag}/${_asset_name}"
-    _token=$(get_auth_token)
-
-    if [ -n "${_token}" ]; then
-        curl -fsSL -H "Authorization: token ${_token}" -o "${_dest}" "${_url}" 2>/dev/null && return 0
-    else
-        curl -fsSL -o "${_dest}" "${_url}" 2>/dev/null && return 0
-    fi
+    curl -fsSL -o "${_dest}" "${_url}" 2>/dev/null && return 0
 
     return 1
 }
@@ -163,8 +138,7 @@ verify_checksum() {
     _checksum_file="$2"
 
     if [ ! -f "${_checksum_file}" ]; then
-        warn "No checksum file found; skipping verification."
-        return 0
+        die "No checksum file found for this release asset. Refusing to install without integrity metadata."
     fi
 
     _expected=$(awk '{print $1}' "${_checksum_file}")
@@ -174,8 +148,7 @@ verify_checksum() {
     elif command -v shasum >/dev/null 2>&1; then
         _actual=$(shasum -a 256 "${_file}" | awk '{print $1}')
     else
-        warn "No sha256sum or shasum found; skipping checksum verification."
-        return 0
+        die "No sha256 verifier found (need sha256sum or shasum). Refusing to install without integrity verification."
     fi
 
     if [ "${_expected}" != "${_actual}" ]; then
@@ -191,7 +164,7 @@ The download may be corrupted. Please try again."
 # ── Add to PATH ──────────────────────────────────────────────────────────────
 
 add_to_path() {
-    _path_line='export PATH="$HOME/.ava/bin:$PATH"'
+    _path_line="export PATH=\"${INSTALL_DIR}:\$PATH\""
     _marker="# AVA"
 
     for _rcfile in "${HOME}/.bashrc" "${HOME}/.zshrc" "${HOME}/.bash_profile" "${HOME}/.profile"; do
@@ -206,7 +179,7 @@ add_to_path() {
     _fish_config="${HOME}/.config/fish/config.fish"
     if [ -f "${_fish_config}" ]; then
         if ! grep -q "ava/bin" "${_fish_config}" 2>/dev/null; then
-            printf '\n# AVA\nfish_add_path "$HOME/.ava/bin"\n' >> "${_fish_config}"
+            printf '\n# AVA\nfish_add_path "%s"\n' "${INSTALL_DIR}" >> "${_fish_config}"
             ok "Added to PATH in config.fish"
         fi
     fi
@@ -247,7 +220,7 @@ Build from source: cargo build --release --bin ava"
     if download_asset "${_archive}.sha256" "${TMP_DIR}/${_archive}.sha256" "${_tag}" 2>/dev/null; then
         verify_checksum "${TMP_DIR}/${_archive}" "${TMP_DIR}/${_archive}.sha256"
     else
-        warn "No checksum file available; skipping verification."
+        die "Failed to download ${_archive}.sha256 for release ${_tag}. Refusing to install without integrity metadata."
     fi
 
     # Extract
@@ -294,7 +267,7 @@ Build from source: cargo build --release --bin ava"
     printf '    \033[1mava "your goal" --headless\033[0m              # Headless mode\n'
     printf '    \033[1mava --help\033[0m                              # All options\n'
     printf '\n'
-    printf '  First time? Run \033[1mava\033[0m and use \033[1m/connect\033[0m to add your API key.\n'
+    printf '  First time? Run \033[1mava --connect openrouter\033[0m or open \033[1mava\033[0m and use \033[1m/connect\033[0m.\n'
     printf '  Docs: https://github.com/%s\n\n' "${REPO}"
 }
 

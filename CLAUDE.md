@@ -1,4 +1,4 @@
-<!-- Last verified: 2026-03-26 (v2.2.6 doc update). Run 'just check' to revalidate. -->
+<!-- Last verified: 2026-04-02. Run 'just check' to revalidate. -->
 
 # AVA Architecture & Conventions (v3)
 
@@ -21,16 +21,16 @@ cargo run --bin ava -- --help   # see all flags
 cargo run --bin ava -- serve --port 8080  # web browser mode
 
 # Desktop app (SolidJS + Tauri)
-npm run tauri dev
-npm run lint
-npm run format:check
+pnpm tauri dev
+pnpm lint
+pnpm format:check
 npx tsc --noEmit
 ```
 
-Release verification: `just check && npm run tauri build`
+Release verification: `just check && pnpm tauri build`
 
 # Desktop release (signed build + publish)
-TAURI_SIGNING_PRIVATE_KEY=$(cat ~/.tauri/ava.key) npm run tauri build
+TAURI_SIGNING_PRIVATE_KEY=$(cat ~/.tauri/ava.key) pnpm tauri build
 # Then: gh release create v{VERSION} ... (see docs/releasing.md)
 
 ## Architecture
@@ -181,7 +181,7 @@ Trust a project: `ava --trust`. Global config (`~/.ava/`) always loads.
 
 ## HQ (Multi-Agent Orchestration) — v2
 
-HQ is AVA's multi-agent system in `crates/ava-hq/`. Uses a **Director -> Scouts -> Leads -> Workers** hierarchy with LLM-powered planning. See `docs/crate-map.md` for the current crate dependency map and HQ placement in the workspace.
+HQ is AVA's multi-agent system in `crates/ava-hq/`. Uses a **Director -> Scouts -> Leads -> Workers** hierarchy with LLM-powered planning. See `CODEBASE_STRUCTURE.md` and the Project Structure section in this file for the current workspace map.
 
 ### Director Intelligence Levels
 
@@ -396,7 +396,7 @@ When you complete a significant feature, bug fix, or refactor:
 1. **Update `CHANGELOG.md`** — add entry under current version
 2. **Update `docs/backlog.md`** — mark completed items, add new ones
 3. **Update this file (`CLAUDE.md`)** if architecture, crate count, tool count, or conventions changed
-4. **Update `docs/crate-map.md`** if crates were added/removed
+4. **Update `CODEBASE_STRUCTURE.md`** if the top-level repo structure or crate inventory changed materially
 5. **Run `just check`** (or `cargo test --workspace && cargo clippy --workspace`) before committing
 
 Do NOT let docs drift from code. Every PR-worthy change should include doc updates.
@@ -408,7 +408,7 @@ Full guide: `docs/releasing.md`.
 
 ```bash
 # Build signed release
-TAURI_SIGNING_PRIVATE_KEY=$(cat ~/.tauri/ava.key) npm run tauri build
+TAURI_SIGNING_PRIVATE_KEY=$(cat ~/.tauri/ava.key) pnpm tauri build
 
 # Publish (uploads bundles + updater manifest)
 VERSION=$(grep '"version"' src-tauri/tauri.conf.json | head -1 | grep -oP '[\d.]+')
@@ -429,8 +429,8 @@ Users get auto-update prompts via `tauri-plugin-updater` checking GitHub Release
 3. `docs/README.md` -- documentation entry point
 4. `CHANGELOG.md` -- version history
 5. `docs/backlog.md` -- open backlog items
-6. `docs/crate-map.md` -- Rust crate dependency graph
+6. `CODEBASE_STRUCTURE.md` -- lightweight repo map
 7. `docs/plugins.md` -- TOML custom tools and MCP server guide
-8. `docs/releasing.md` -- desktop release & auto-update guide
-9. `docs/troubleshooting/` -- platform-specific fixes
-10. `docs/reference-code/` -- competitor source code (12 repos)
+8. `docs/hq/README.md` -- HQ architecture and UX notes
+9. `docs/releasing.md` -- desktop release & auto-update guide
+10. `docs/troubleshooting/` -- platform-specific fixes

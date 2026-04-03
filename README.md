@@ -17,14 +17,57 @@ gets the job done. One binary. No runtime dependencies.
 
 ## Get started
 
-**Install from source:**
+Choose the path that fits what you want:
+
+### Quick CLI install
+
+Linux/macOS:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/ASF-GROUP/AVA/master/install.sh | sh
+```
+
+Then:
 
 ```bash
-git clone https://github.com/ASF-GROUP/AVA.git && cd AVA
+ava --version
+ava --connect openrouter
+```
+
+### Desktop app
+
+Download the latest release for your platform:
+
+`https://github.com/ASF-GROUP/AVA/releases/latest`
+
+Available artifact types documented in this repo:
+
+- Linux: `.deb`, `.rpm`, `.AppImage`
+- macOS: `.dmg`, `.app`
+- Windows: `.msi`, `.exe`
+
+### Build from source
+
+```bash
+git clone https://github.com/ASF-GROUP/AVA.git
+cd AVA
 cargo install --path crates/ava-tui
 ```
 
-**Add your API key:**
+### Developer setup
+
+```bash
+git clone https://github.com/ASF-GROUP/AVA.git
+cd AVA
+pnpm install
+pnpm tauri dev
+```
+
+More install paths, including source installer and Linux troubleshooting notes:
+
+- [docs/install.md](docs/install.md)
+
+**Connect a provider:**
 
 ```bash
 ava --connect openrouter   # interactive setup
@@ -41,7 +84,7 @@ ava serve                    # web browser UI
 
 ## Features
 
-- **21 LLM providers** — Anthropic, OpenAI, Gemini, Ollama, OpenRouter, Copilot, Inception, Alibaba, Azure OpenAI, AWS Bedrock, xAI, Mistral, Groq, DeepSeek, and more
+- **22 LLM providers** — Anthropic, OpenAI, Gemini, Ollama, OpenRouter, Copilot, Inception, Alibaba, Azure OpenAI, AWS Bedrock, xAI, Mistral, Groq, DeepSeek, and more
 - **9 built-in tools** — read, write, edit, bash, glob, grep, web_fetch, web_search, git_read
 - **Multi-agent mode** — a Director assembles Leads and Workers to tackle complex tasks
 - **MCP support** — connect any MCP server for extra tools
@@ -103,9 +146,12 @@ ava serve                    # web browser UI
 
 ## Documentation
 
-- [Full docs](docs/) — architecture, crate map, plugin guide
-- [CLAUDE.md](CLAUDE.md) — contributor conventions and project structure
-- [Changelog](docs/development/CHANGELOG.md)
+- [docs/](docs/) — docs index, backlog, HQ docs, plugins, release notes, troubleshooting
+- [docs/install.md](docs/install.md) — install AVA: binaries, desktop downloads, source, and dev setup
+- [CLAUDE.md](CLAUDE.md) — architecture and contributor conventions
+- [AGENTS.md](AGENTS.md) — AI coding agent instructions for this repo
+- [CHANGELOG.md](CHANGELOG.md) — release history
+- [CODEBASE_STRUCTURE.md](CODEBASE_STRUCTURE.md) — lightweight repo map
 
 ## Contributing
 

@@ -1,6 +1,6 @@
 # Tauri Linux Toolchain Checklist
 
-Use this checklist before running `npm run tauri dev` on Linux.
+Use this checklist before running `pnpm tauri dev` on Linux.
 
 ## 1) Verify compiler and linker
 
@@ -47,8 +47,8 @@ If you want to force GCC 14 locally, update those fields to `gcc-14`.
 ## 5) Smoke validation
 
 ```bash
-npm run verify:mvp
-npm run tauri dev
+pnpm verify:mvp
+pnpm tauri dev
 ```
 
 Success criteria:

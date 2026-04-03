@@ -24,10 +24,10 @@ If you lose the private key, you must generate a new keypair and update the pubk
 
 ```bash
 # 1. Ensure everything passes
-just check && npx tsc --noEmit
+just check && pnpm typecheck
 
 # 2. Build signed release bundle
-TAURI_SIGNING_PRIVATE_KEY=$(cat ~/.tauri/ava.key) npm run tauri build
+TAURI_SIGNING_PRIVATE_KEY=$(cat ~/.tauri/ava.key) pnpm tauri build
 ```
 
 Build outputs are in `src-tauri/target/release/bundle/`:

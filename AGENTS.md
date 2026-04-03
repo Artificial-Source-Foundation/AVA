@@ -1,4 +1,4 @@
-<!-- Last verified: 2026-03-26 -->
+<!-- Last verified: 2026-04-02 -->
 # AI Coding Agent Instructions (v3)
 
 > Instructions for AI assistants working on AVA. This file is auto-injected into the AVA agent's system prompt.
@@ -25,7 +25,7 @@ Read first: `CLAUDE.md`
 AVA is a Rust-first AI coding assistant (CLI/TUI + Tauri desktop) with a 21-crate Rust workspace.
 
 - **CLI/TUI**: `crates/ava-tui/` (Ratatui + Crossterm + Tokio)
-- **Agent runtime**: `crates/ava-agent/`, `ava-llm/`, `ava-tools/`, `ava-praxis/`
+- **Agent runtime**: `crates/ava-agent/`, `ava-llm/`, `ava-tools/`, `ava-hq/`
 - **Desktop**: Tauri 2 -- SolidJS frontend calls Rust via Tauri IPC (`src-tauri/src/commands/`)
 
 **All new features MUST be Rust.** No TypeScript backend logic.
@@ -40,7 +40,7 @@ AVA is a Rust-first AI coding assistant (CLI/TUI + Tauri desktop) with a 21-crat
 
 - New tools: `crates/ava-tools/src/core/` (implement `Tool` trait)
 - New providers: `crates/ava-llm/src/providers/`
-- New agent features: `crates/ava-agent/` or `crates/ava-praxis/`
+- New agent features: `crates/ava-agent/` or `crates/ava-hq/`
 - External agent integration: `crates/ava-acp/` (Agent Client Protocol)
 - TUI features: `crates/ava-tui/`
 - Desktop commands: `src-tauri/src/commands/`
@@ -97,7 +97,7 @@ pnpm lint && pnpm format:check && pnpm typecheck
 1. **Update `CHANGELOG.md`** — add entry under current version section
 2. **Update `docs/backlog.md`** — check off completed items
 3. **Update `CLAUDE.md`** if crate count, tool count, or architecture changed
-4. **Update `docs/crate-map.md`** if crates were added or removed
+4. **Update `CODEBASE_STRUCTURE.md`** if the top-level repo structure or crate inventory changed materially
 5. **Run `just check`** before committing
 
 Docs must always reflect the current codebase. Never let them drift.
@@ -116,9 +116,8 @@ Docs must always reflect the current codebase. Never let them drift.
 1. `CLAUDE.md` — primary architecture reference
 2. `AGENTS.md` — this file
 3. `docs/README.md` — documentation entry point
-4. `docs/plugins.md` — TOML custom tools and MCP guide
-5. `docs/crate-map.md` — crate dependency map
-6. `docs/architecture/plugin-system.md` — power plugin design
+4. `CODEBASE_STRUCTURE.md` — lightweight repo map
+5. `docs/plugins.md` — TOML custom tools and MCP guide
+6. `docs/hq/README.md` — HQ architecture and UX notes
 7. `CHANGELOG.md` — version history
 8. `docs/backlog.md` — current backlog
-9. `docs/ideas/` — archived feature designs (reference only)

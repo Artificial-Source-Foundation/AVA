@@ -1,9 +1,11 @@
+<!-- Last verified: 2026-04-02 -->
+
 # AVA HQ -- Director Mode
 
 > Crate: `ava-hq`
 > Desktop bridge: `src-tauri/src/commands/hq_commands.rs`
 > Frontend shell: `src/components/hq/`
-> Status: active implementation; simplified 4-view shell is live, deeper orchestration/memory behavior still evolving
+> Status: active implementation; the simplified 4-view shell, shared chat reuse, persisted HQ runtime, and browser HQ routes are live; deeper orchestration/memory behavior is still evolving
 
 ## What HQ is
 
@@ -35,6 +37,23 @@ director chat, settings). The target product direction discussed for HQ goes fur
 - a simplified 4-view UI instead of many separate management screens
 
 When updating HQ, prefer this direction over the older "many management screens" concept.
+
+## Current shipped behavior
+
+The current repo state supports the following HQ behavior today:
+
+- HQ uses the simplified 4-view shell: Director Chat, Overview, Team Office, and Plan Review.
+- Director Chat reuses the normal AVA chat presentation via shared chat primitives rather than a separate chat stack.
+- HQ has its own shared sidebar shell with a `Back to Chat` escape hatch, and the normal chat session sidebar collapses while HQ is active.
+- HQ settings live in a dedicated desktop settings category.
+- Browser/web mode exposes real `/api/hq/*` endpoints so Playwright and browser-mode flows can exercise HQ without Tauri-only mocks.
+- HQ runtime state is persisted through SQLite-backed commands for epics, issues, comments, plans, agents, activity, director chat, and HQ settings.
+
+Still in motion:
+
+- the long-term shape of `.ava/HQ/` memory and first-run onboarding
+- how much worker-level control should be exposed during active runs
+- some naming and polish cleanup around older Team/Org Chart-era paths
 
 ## Core UX model
 
@@ -139,6 +158,8 @@ This reuses the existing Plannotator-style plan experience.
 ## Shared shell expectations
 
 All HQ views share one sidebar shell.
+
+Current desktop behavior: when HQ is active, the normal chat session sidebar is collapsed and the HQ shell becomes the primary navigation surface.
 
 The sidebar should include:
 
@@ -344,6 +365,8 @@ instead of inventing a separate desktop-only setup path.
 
 Browser/web mode now also has first-class HQ routes for creating epics and loading/approving/
 rejecting plans, so Playwright and headless browser testing can exercise real HQ flows.
+
+Current settings integration: desktop exposes HQ as a dedicated settings category rather than a duplicate Team settings tab.
 
 Current browser-mode status: the web path now reliably supports create-initiative -> plan creation
 -> Plan Review -> approve/revise loops. The store prefers the newest relevant epic/plan when HQ

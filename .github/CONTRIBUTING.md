@@ -47,7 +47,7 @@ just run                # interactive TUI
 
 # Desktop (SolidJS + Tauri)
 pnpm install
-pnpm run tauri dev
+pnpm tauri dev
 
 # Quick smoke test
 cargo run --bin ava -- "Reply with SMOKE_OK" --headless --provider openai --model gpt-5.4 --max-turns 3
@@ -56,7 +56,7 @@ cargo run --bin ava -- "Reply with SMOKE_OK" --headless --provider openai --mode
 ## Release Checklist
 
 1. Update `Cargo.toml` version
-2. Update `docs/development/CHANGELOG.md`
+2. Update `CHANGELOG.md`
 3. PR from `release/vX.Y.Z` into `master`
 4. After merge, tag: `git tag vX.Y.Z && git push --tags`
 5. Release workflow builds CLI (5 platforms) + Desktop (4 platforms)

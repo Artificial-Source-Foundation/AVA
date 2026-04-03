@@ -48,6 +48,15 @@ pub(crate) fn parse_diagnostics_array(items: Vec<Value>, file_path: &Path) -> Ve
         .collect()
 }
 
+pub(crate) fn parse_diagnostic_report(value: &Value, file_path: &Path) -> Vec<LspDiagnostic> {
+    value
+        .get("items")
+        .and_then(Value::as_array)
+        .cloned()
+        .map(|items| parse_diagnostics_array(items, file_path))
+        .unwrap_or_default()
+}
+
 pub(crate) fn parse_locations(result: &Value) -> Vec<LspLocation> {
     match result {
         Value::Array(items) => items.iter().filter_map(parse_location_value).collect(),

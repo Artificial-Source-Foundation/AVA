@@ -7,6 +7,7 @@
 
 import { createMemo, createSignal } from 'solid-js'
 import { rustBackend } from '../services/rust-bridge'
+import type { LspSuggestion } from '../types/rust-ipc'
 
 export interface DiagnosticSummary {
   errors: number
@@ -19,6 +20,7 @@ export interface LspStatusSummary {
   mode: string
   activeServerCount: number
   state: string
+  suggestions: LspSuggestion[]
 }
 
 const [diagnostics, setDiagnosticsRaw] = createSignal<DiagnosticSummary>({
@@ -31,6 +33,7 @@ const [lspStatus, setLspStatus] = createSignal<LspStatusSummary>({
   mode: 'off',
   activeServerCount: 0,
   state: 'disabled',
+  suggestions: [],
 })
 
 export function updateDiagnostics(summary: DiagnosticSummary) {
@@ -69,6 +72,7 @@ if (typeof window !== 'undefined') {
         mode: snapshot.mode,
         activeServerCount: snapshot.activeServerCount,
         state,
+        suggestions: snapshot.suggestions,
       })
     } catch {
       setLspStatus({
@@ -76,6 +80,7 @@ if (typeof window !== 'undefined') {
         mode: 'off',
         activeServerCount: 0,
         state: 'disabled',
+        suggestions: [],
       })
     }
   }

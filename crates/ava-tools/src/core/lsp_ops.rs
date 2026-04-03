@@ -79,7 +79,15 @@ impl Tool for LspOpsTool {
                     .get("query")
                     .and_then(Value::as_str)
                     .unwrap_or_default();
-                json!({ "symbols": self.manager.workspace_symbols(query).await.map_err(to_tool_error)? })
+                let mut symbols = self
+                    .manager
+                    .workspace_symbols(query)
+                    .await
+                    .map_err(to_tool_error)?;
+                if symbols.is_empty() {
+                    symbols = plain_workspace_symbol_fallback(query);
+                }
+                json!({ "symbols": symbols })
             }
             other => {
                 return Err(AvaError::ValidationError(format!(
@@ -120,4 +128,69 @@ fn parse_cursor_args(args: &Value) -> ava_types::Result<(PathBuf, u32, u32)> {
 
 fn to_tool_error(error: ava_lsp::LspError) -> AvaError {
     AvaError::ToolError(error.to_string())
+}
+
+fn plain_workspace_symbol_fallback(query: &str) -> Vec<ava_lsp::SymbolInfo> {
+    let Ok(root) = std::env::current_dir() else {
+        return Vec::new();
+    };
+    let query_lower = query.to_lowercase();
+    let mut matches = Vec::new();
+    collect_symbol_matches(&root, &query_lower, &mut matches, 50);
+    matches
+}
+
+fn collect_symbol_matches(
+    dir: &std::path::Path,
+    query_lower: &str,
+    out: &mut Vec<ava_lsp::SymbolInfo>,
+    limit: usize,
+) {
+    if out.len() >= limit {
+        return;
+    }
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        if out.len() >= limit {
+            break;
+        }
+        let path = entry.path();
+        if path.is_dir() {
+            let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+                continue;
+            };
+            if matches!(name, ".git" | "node_modules" | "target" | ".ava" | "dist") {
+                continue;
+            }
+            collect_symbol_matches(&path, query_lower, out, limit);
+            continue;
+        }
+        let Ok(content) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        for (idx, line) in content.lines().enumerate() {
+            let lowered = line.to_lowercase();
+            if !lowered.contains(query_lower) {
+                continue;
+            }
+            let column = lowered.find(query_lower).unwrap_or(0) as u32 + 1;
+            out.push(ava_lsp::SymbolInfo {
+                name: query_lower.to_string(),
+                kind: "symbol".to_string(),
+                detail: Some("text fallback".to_string()),
+                location: Some(ava_lsp::LspLocation {
+                    file: path.display().to_string(),
+                    line: idx as u32 + 1,
+                    column,
+                    end_line: idx as u32 + 1,
+                    end_column: column + query_lower.len() as u32,
+                }),
+            });
+            if out.len() >= limit {
+                break;
+            }
+        }
+    }
 }

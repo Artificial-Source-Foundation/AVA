@@ -35,3 +35,12 @@ pub async fn get_lsp_status(bridge: State<'_, DesktopBridge>) -> Result<serde_js
     let snapshot = bridge.stack.lsp_snapshot().await;
     serde_json::to_value(snapshot).map_err(|e| e.to_string())
 }
+
+#[tauri::command]
+pub async fn install_lsp_profile(
+    bridge: State<'_, DesktopBridge>,
+    profile: String,
+) -> Result<serde_json::Value, String> {
+    let result = bridge.stack.install_lsp_profile(&profile).await?;
+    serde_json::to_value(result).map_err(|e| e.to_string())
+}

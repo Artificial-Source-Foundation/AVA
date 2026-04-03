@@ -21,6 +21,7 @@ serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
+dirs = "5"
 url = "2"
 
 [dev-dependencies]

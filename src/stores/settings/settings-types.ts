@@ -136,6 +136,7 @@ export interface GitSettings {
 
 export interface LspSettings {
   enabled: boolean
+  showInstallSuggestions: boolean
 }
 
 export interface ToolApprovalRule {

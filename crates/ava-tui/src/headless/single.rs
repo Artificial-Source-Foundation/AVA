@@ -103,6 +103,7 @@ Help — Available Commands\n\
 \n\
 /model [provider/model]  — show or switch model (alias: /models)\n\
 /think [show|hide]       — toggle thinking block visibility\n\
+/lsp [show|hide]         — toggle LSP suggestion visibility\n\
 /theme [name]            — cycle or switch theme (default/dracula/nord)\n\
 /permissions [list]      — toggle level or list glob rules\n\
 /connect [provider]      — add provider credentials\n\

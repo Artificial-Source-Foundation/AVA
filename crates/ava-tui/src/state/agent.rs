@@ -148,6 +148,7 @@ pub struct AgentState {
     pub lsp_active_servers: usize,
     pub lsp_state: String,
     pub lsp_summary: ava_lsp::DiagnosticSummary,
+    pub lsp_warning: Option<String>,
     pub tool_start: Option<Instant>,
     /// Workflow phase: (current_index, total_count, phase_name)
     pub workflow_phase: Option<(usize, usize, String)>,
@@ -159,6 +160,8 @@ pub struct AgentState {
     pub thinking_level: ThinkingLevel,
     /// Whether thinking blocks are shown in the UI (toggled via `/think`).
     pub show_thinking: bool,
+    /// Whether missing-LSP suggestions are shown in the UI (toggled via `/lsp`).
+    pub show_lsp_suggestions: bool,
     /// Sub-agents spawned by the task tool.
     pub sub_agents: Vec<SubAgentInfo>,
     cancel: Option<CancellationToken>,
@@ -267,12 +270,17 @@ impl AgentState {
                     .map(|server| format!("{:?}", server.state).to_lowercase())
                     .unwrap_or_else(|| "idle".to_string()),
                 lsp_summary: lsp_snapshot.summary.clone(),
+                lsp_warning: lsp_snapshot
+                    .suggestions
+                    .first()
+                    .map(|item| item.title.clone()),
                 tool_start: None,
                 workflow_phase: None,
                 workflow_iteration: None,
                 recent_models,
                 thinking_level: ThinkingLevel::Off,
                 show_thinking: true,
+                show_lsp_suggestions: true,
                 sub_agents: Vec::new(),
                 cancel: None,
                 task: None,
@@ -308,6 +316,7 @@ impl AgentState {
                 .unwrap_or_else(|| "idle".to_string())
         };
         self.lsp_summary = snapshot.summary;
+        self.lsp_warning = snapshot.suggestions.first().map(|item| item.title.clone());
     }
 
     /// Get the shared todo state from the agent stack (if initialized).
@@ -690,12 +699,14 @@ impl AgentState {
             lsp_active_servers: 0,
             lsp_state: "disabled".to_string(),
             lsp_summary: ava_lsp::DiagnosticSummary::default(),
+            lsp_warning: None,
             tool_start: None,
             workflow_phase: None,
             workflow_iteration: None,
             recent_models: Vec::new(),
             thinking_level: ThinkingLevel::Off,
             show_thinking: true,
+            show_lsp_suggestions: true,
             sub_agents: Vec::new(),
             cancel: None,
             task: None,

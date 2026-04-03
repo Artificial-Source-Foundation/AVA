@@ -461,6 +461,7 @@ version = "3.0.1"
 dependencies = [
  "ava-config",
  "ava-types",
+ "dirs",
  "futures",
  "lsp-types",
  "serde",

@@ -539,6 +539,16 @@ impl AgentStack {
         self.lsp.snapshot().await
     }
 
+    pub async fn install_lsp_profile(
+        &self,
+        profile: &str,
+    ) -> std::result::Result<ava_lsp::LspInstallResult, String> {
+        self.lsp
+            .install_profile(profile)
+            .await
+            .map_err(|err| err.to_string())
+    }
+
     pub async fn mcp_server_info(&self) -> Vec<MCPServerInfo> {
         let guard = self.mcp.read().await;
         let Some(runtime) = guard.as_ref() else {

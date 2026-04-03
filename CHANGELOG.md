@@ -7,9 +7,11 @@ All notable changes to AVA are documented in this file.
 ### Added
 - **Adaptive LSP runtime** — AVA now ships an on-demand `ava-lsp` runtime with idle shutdown, per-language server selection, shared diagnostics caching, and agent-facing `diagnostics` plus `lsp_ops` tools for definition, references, hover, and symbols.
 - **LSP status surfaces** — Desktop now polls real backend LSP status instead of waiting for external events, and the TUI status bar now shows live LSP state plus error/warning counts when available.
+- **Framework-aware LSP installer flow** — AVA now detects common Rust, TypeScript, Python, Go, and Java project frameworks, suggests the right local language tools, can install supported LSP profiles from Desktop, and searches common user-local binary paths automatically in both CLI and Desktop launches.
 
 ### Changed
 - **Write/edit post-change validation** — file mutations now notify the LSP runtime when available so agents get cheap follow-up diagnostics without keeping every language server hot all the time.
+- **LSP fallback behavior** — Rust diagnostics now fall back to compiler checks when servers return no file diagnostics, and workspace symbol lookups fall back gracefully when a language server omits global symbol search.
 
 ## [3.0.0] — 2026-03-30
 

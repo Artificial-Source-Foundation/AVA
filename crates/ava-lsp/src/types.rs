@@ -41,6 +41,7 @@ pub enum RuntimeState {
 }
 
 #[derive(Debug, Clone, Serialize, Default)]
+#[serde(rename_all = "camelCase")]
 pub struct DiagnosticSummary {
     pub errors: usize,
     pub warnings: usize,
@@ -78,22 +79,50 @@ pub struct SymbolInfo {
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ServerSnapshot {
     pub name: String,
     pub state: RuntimeState,
     pub active: bool,
+    pub relevant: bool,
     pub diagnostics: DiagnosticSummary,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_error: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LspSuggestion {
+    pub server: String,
+    pub title: String,
+    pub message: String,
+    #[serde(default)]
+    pub frameworks: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub install_profile: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub install_command: Option<String>,
+    pub key: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LspInstallResult {
+    pub profile: String,
+    pub command: String,
+    pub success: bool,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct LspSnapshot {
     pub enabled: bool,
     pub mode: String,
     pub active_server_count: usize,
     pub summary: DiagnosticSummary,
     pub servers: Vec<ServerSnapshot>,
+    pub suggestions: Vec<LspSuggestion>,
 }
 
 pub(crate) struct ServerConnection {

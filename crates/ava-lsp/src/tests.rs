@@ -159,4 +159,53 @@ async fn manager_handles_fake_server_diagnostics_and_definition() {
     assert!(snapshot.enabled);
     assert_eq!(snapshot.summary.errors, 1);
     assert_eq!(snapshot.active_server_count, 1);
+    assert!(snapshot.suggestions.is_empty());
+}
+
+#[tokio::test]
+async fn snapshot_suggests_install_when_relevant_server_is_missing() {
+    let temp = tempdir().expect("tempdir");
+    let workspace = temp.path().join("workspace");
+    fs::create_dir_all(&workspace).expect("workspace");
+    fs::write(
+        workspace.join("Cargo.toml"),
+        "[package]\nname='demo'\nversion='0.1.0'\n",
+    )
+    .expect("cargo manifest");
+
+    let manager = LspManager::new(
+        workspace,
+        LspConfig {
+            mode: LspMode::OnDemand,
+            idle_timeout_secs: 60,
+            diagnostics_wait_ms: 500,
+            max_active_servers: 1,
+            max_open_files_per_server: 4,
+            servers: vec![LspServerConfig {
+                name: "rust".to_string(),
+                enabled: true,
+                command: "definitely-missing-lsp-command".to_string(),
+                args: vec![],
+                file_extensions: vec!["rs".to_string()],
+            }],
+        },
+        true,
+    );
+
+    let snapshot = manager.snapshot().await;
+    assert_eq!(snapshot.suggestions.len(), 1);
+    assert_eq!(snapshot.suggestions[0].server, "rust");
+    assert!(snapshot.suggestions[0].message.contains("not installed"));
+}
+
+#[tokio::test]
+#[ignore = "installs local dependencies and is intended for manual verification"]
+async fn install_typescript_profile_succeeds() {
+    let temp = tempdir().expect("tempdir");
+    let manager = LspManager::new(temp.path().to_path_buf(), LspConfig::default(), true);
+    let result = manager
+        .install_profile("typescript")
+        .await
+        .expect("install profile should run");
+    assert!(result.success, "{}", result.message);
 }

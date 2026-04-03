@@ -97,6 +97,7 @@ export const DEFAULT_GIT: GitSettings = {
 
 export const DEFAULT_LSP: LspSettings = {
   enabled: true,
+  showInstallSuggestions: true,
 }
 
 export const DEFAULT_TEAM: TeamConfig = {

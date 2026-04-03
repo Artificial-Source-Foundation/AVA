@@ -563,8 +563,26 @@ export interface LspServerSnapshot {
   name: string
   state: LspRuntimeState
   active: boolean
+  relevant: boolean
   diagnostics: LspDiagnosticSummary
   lastError?: string | null
+}
+
+export interface LspSuggestion {
+  server: string
+  title: string
+  message: string
+  frameworks: string[]
+  installProfile?: string | null
+  installCommand?: string | null
+  key: string
+}
+
+export interface LspInstallResult {
+  profile: string
+  command: string
+  success: boolean
+  message: string
 }
 
 export interface LspStatusSnapshot {
@@ -573,6 +591,7 @@ export interface LspStatusSnapshot {
   activeServerCount: number
   summary: LspDiagnosticSummary
   servers: LspServerSnapshot[]
+  suggestions: LspSuggestion[]
 }
 
 export interface McpServerInfo {

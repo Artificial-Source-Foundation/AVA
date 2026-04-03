@@ -64,6 +64,8 @@ const { settings, setSettingsRaw } = createRoot(() => {
             lsp: {
               ...prev.lsp,
               enabled: (patch.enabled as boolean) ?? prev.lsp.enabled,
+              showInstallSuggestions:
+                (patch.showInstallSuggestions as boolean) ?? prev.lsp.showInstallSuggestions,
             },
           }
         }

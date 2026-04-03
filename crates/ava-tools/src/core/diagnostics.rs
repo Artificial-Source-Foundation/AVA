@@ -50,7 +50,7 @@ impl Tool for DiagnosticsTool {
         if let (Some(lsp_manager), Some(path)) = (&self.lsp_manager, scope_path) {
             let path_buf = std::path::PathBuf::from(path);
             match lsp_manager.diagnostics(&path_buf).await {
-                Ok(diagnostics) => {
+                Ok(diagnostics) if !diagnostics.is_empty() => {
                     let result_json = json!({ "diagnostics": diagnostics });
                     return Ok(ToolResult {
                         call_id: String::new(),
@@ -60,6 +60,13 @@ impl Tool for DiagnosticsTool {
                             .map(|items| !items.is_empty())
                             .unwrap_or(false),
                     });
+                }
+                Ok(_) => {
+                    tracing::debug!(
+                        tool = "diagnostics",
+                        path,
+                        "LSP diagnostics were empty, falling back to compiler diagnostics"
+                    );
                 }
                 Err(err) => {
                     tracing::debug!(tool = "diagnostics", path, error = %err, "LSP diagnostics unavailable, falling back");

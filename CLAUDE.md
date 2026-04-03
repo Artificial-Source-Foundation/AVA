@@ -118,7 +118,7 @@ AVA/
 |   +-- ava-sandbox/          # Command sandboxing (bwrap/sandbox-exec)
 |   +-- ava-acp/              # Agent Client Protocol (external agent integration)
 |   +-- ava-extensions/       # Extension system (hooks, native/WASM)
-|   +-- ava-lsp/              # On-demand LSP runtime and diagnostics/navigation client
+|   +-- ava-lsp/              # On-demand LSP runtime, diagnostics/navigation client, and install/discovery flow
 |   +-- ava-db/               # SQLite connection pool
 |   +-- ava-types/            # Shared types
 |   +-- ava-validator/        # Validation pipeline

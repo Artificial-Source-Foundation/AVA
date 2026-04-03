@@ -366,6 +366,41 @@ impl App {
                     None
                 }
             },
+            "/lsp" => match arg {
+                Some("show" | "on") => {
+                    self.state.agent.show_lsp_suggestions = true;
+                    self.state.toast.push("LSP suggestions visible");
+                    None
+                }
+                Some("hide" | "off") => {
+                    self.state.agent.show_lsp_suggestions = false;
+                    self.state.toast.push("LSP suggestions hidden");
+                    None
+                }
+                Some("status") => {
+                    let label = if self.state.agent.show_lsp_suggestions {
+                        "visible"
+                    } else {
+                        "hidden"
+                    };
+                    Some((MessageKind::System, format!("LSP suggestions are {label}")))
+                }
+                Some(_) => Some((
+                    MessageKind::Error,
+                    "Usage: /lsp [show|on|hide|off|status] — toggle LSP suggestion visibility"
+                        .to_string(),
+                )),
+                None => {
+                    self.state.agent.show_lsp_suggestions = !self.state.agent.show_lsp_suggestions;
+                    let label = if self.state.agent.show_lsp_suggestions {
+                        "visible"
+                    } else {
+                        "hidden"
+                    };
+                    self.state.toast.push(format!("LSP suggestions {label}"));
+                    None
+                }
+            },
             "/sessions" => {
                 self.execute_command_action(Action::SessionList, app_tx.clone());
                 None
@@ -572,6 +607,7 @@ impl App {
                 let help = "\
 /model [provider/model]  \u{2014} show or switch model (alias: /models)
 /think [show|hide]       \u{2014} toggle thinking block visibility
+/lsp [show|hide]         \u{2014} toggle LSP suggestion visibility
 /theme [name]            \u{2014} cycle or switch theme (default/dracula/nord)
 /permissions [list]      \u{2014} toggle level or list glob rules
 /connect [provider]      \u{2014} add provider credentials

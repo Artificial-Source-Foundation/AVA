@@ -8,6 +8,9 @@
 
 import { Database, Download, GitBranch, Monitor, Upload } from 'lucide-solid'
 import { type Component, Show } from 'solid-js'
+import { useNotification } from '../../contexts/notification'
+import { rustBackend } from '../../services/rust-bridge'
+import { useDiagnostics } from '../../stores/diagnostics'
 import { useSettings } from '../../stores/settings'
 import { Toggle } from '../ui/Toggle'
 import { ToggleRow } from '../ui/ToggleRow'
@@ -15,6 +18,8 @@ import { SettingsCard } from './SettingsCard'
 
 export const GeneralSection: Component = () => {
   const { settings, updateUI, updateGit, updateLsp, exportSettings, importSettings } = useSettings()
+  const { lspStatus } = useDiagnostics()
+  const notify = useNotification()
 
   return (
     <div class="flex flex-col" style={{ gap: '24px' }}>
@@ -67,6 +72,88 @@ export const GeneralSection: Component = () => {
           checked={!!settings().lsp.enabled}
           onChange={(v) => updateLsp({ enabled: v })}
         />
+        <ToggleRow
+          label="Suggest missing LSP installs"
+          description="Show install prompts when a project needs language tools that are missing"
+          checked={!!settings().lsp.showInstallSuggestions}
+          onChange={(v) => updateLsp({ showInstallSuggestions: v })}
+        />
+        <Show when={lspStatus().suggestions.length > 0}>
+          <div class="flex flex-col" style={{ gap: '12px', width: '100%' }}>
+            {lspStatus().suggestions.map((suggestion) => (
+              <div
+                class="flex items-center justify-between"
+                style={{
+                  width: '100%',
+                  padding: '10px 12px',
+                  border: '1px solid #ffffff0a',
+                  'border-radius': '10px',
+                  background: '#111114',
+                }}
+              >
+                <div style={{ display: 'flex', 'flex-direction': 'column', gap: '4px' }}>
+                  <span
+                    style={{
+                      'font-family': 'Geist, sans-serif',
+                      'font-size': '13px',
+                      color: '#F5F5F7',
+                    }}
+                  >
+                    {suggestion.title}
+                  </span>
+                  <span
+                    style={{
+                      'font-family': 'Geist, sans-serif',
+                      'font-size': '12px',
+                      color: '#8E8E93',
+                    }}
+                  >
+                    {suggestion.frameworks.length > 0
+                      ? `${suggestion.frameworks.join(', ')} project`
+                      : suggestion.server}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (suggestion.installProfile) {
+                      const result = await rustBackend.installLspProfile(suggestion.installProfile)
+                      notify.toast({
+                        variant: result.success ? 'success' : 'error',
+                        title: result.success ? 'LSP installed' : 'LSP install failed',
+                        message: result.message,
+                      })
+                      return
+                    }
+                    if (suggestion.installCommand) {
+                      await navigator.clipboard?.writeText(suggestion.installCommand)
+                      notify.toast({
+                        variant: 'success',
+                        title: 'Install command copied',
+                        message: suggestion.installCommand,
+                      })
+                    }
+                  }}
+                  class="flex items-center transition-colors"
+                  style={{
+                    gap: '6px',
+                    'border-radius': '8px',
+                    border: '1px solid #ffffff0a',
+                    height: '32px',
+                    padding: '0 14px',
+                    color: '#C8C8CC',
+                    'font-family': 'Geist, sans-serif',
+                    'font-size': '13px',
+                    background: 'transparent',
+                    cursor: 'pointer',
+                  }}
+                >
+                  {suggestion.installProfile ? 'Install' : 'Copy install'}
+                </button>
+              </div>
+            ))}
+          </div>
+        </Show>
       </SettingsCard>
 
       {/* Git Card */}

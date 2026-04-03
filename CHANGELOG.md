@@ -79,6 +79,7 @@ macOS-luxury SolidJS desktop, and a web serve mode with 65+ REST endpoints.
 - **Deleted `packages/` directory entirely.** The TypeScript desktop layer (`packages/core-v2/`, `packages/extensions/`, `packages/core/`, `packages/platform-node/`, `packages/platform-tauri/`) has been removed. The desktop app now calls Rust crates directly via Tauri IPC commands (`src-tauri/src/commands/`), eliminating the `dispatchCompute` bridge pattern and all Node.js runtime dependencies from the desktop path.
 
 ### Changed
+- `docs/backlog.md` was restructured into a more operational format with `Now`, `Next`, `Recently Completed`, and `Earlier Major Waves` so active work is easier to scan than the older mixed backlog/changelog style.
 - `docs/plugins.md` was rewritten into a fuller extensions guide that now covers MCP servers, custom tools, custom slash commands, skills/instructions, trust gating, and the current power-plugin hook surface instead of only the narrower old tools/MCP framing.
 - CLI help now has a consistent product-style pass across the full command surface: top-level help is grouped and example-driven, and all exposed subcommands across auth, plugin, HQ, review, serve, and update now include clearer copy and practical usage examples.
 - CLI help got a second polish pass: the noisiest top-level flag descriptions were shortened and `ava auth --help`, `ava hq --help`, and `ava serve --help` now include clearer copy plus practical examples.

@@ -8,6 +8,17 @@ use tokio::process::Command;
 
 use crate::git::GitToolError;
 
+const GIT_ENV_VARS_TO_CLEAR: &[&str] = &[
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_COMMON_DIR",
+    "GIT_INDEX_FILE",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_PREFIX",
+    "GIT_CEILING_DIRECTORIES",
+];
+
 pub const GHOST_SNAPSHOT_PREFIX: &str = "refs/ava/snapshots";
 
 static SNAPSHOT_SEQUENCE: AtomicU64 = AtomicU64::new(1);
@@ -263,7 +274,11 @@ async fn repo_root(path: &Path) -> Result<Option<PathBuf>, GitToolError> {
 }
 
 async fn write_blob(repo_root: &Path, content: &str) -> Result<String, GitToolError> {
-    let mut child = Command::new("git")
+    let mut command = Command::new("git");
+    for key in GIT_ENV_VARS_TO_CLEAR {
+        command.env_remove(key);
+    }
+    let mut child = command
         .arg("-C")
         .arg(repo_root)
         .arg("hash-object")
@@ -324,10 +339,7 @@ async fn write_blob(repo_root: &Path, content: &str) -> Result<String, GitToolEr
 }
 
 async fn run_git(repo_root: &Path, args: &[&str]) -> Result<String, GitToolError> {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(repo_root)
-        .args(args)
+    let output = run_git_command(repo_root, args)
         .output()
         .await
         .map_err(|source| GitToolError::ExecutionFailed {
@@ -349,6 +361,15 @@ async fn run_git(repo_root: &Path, args: &[&str]) -> Result<String, GitToolError
     }
 
     Ok(stdout)
+}
+
+pub(crate) fn run_git_command<'a>(repo_root: &'a Path, args: &[&'a str]) -> Command {
+    let mut command = Command::new("git");
+    for key in GIT_ENV_VARS_TO_CLEAR {
+        command.env_remove(key);
+    }
+    command.arg("-C").arg(repo_root).args(args);
+    command
 }
 
 fn sanitize_path(path: &Path) -> String {

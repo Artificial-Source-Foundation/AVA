@@ -576,10 +576,19 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
+    fn test_git_command() -> Command {
+        let mut command = Command::new("git");
+        command.env_clear();
+        command.envs(super::super::bash::filtered_env());
+        command.env("GIT_TERMINAL_PROMPT", "0");
+        command.env("GIT_PAGER", "cat");
+        command
+    }
+
     /// Helper: create a temporary git repo for testing.
     async fn setup_test_repo() -> TempDir {
         let tmp = TempDir::new().unwrap();
-        let output = Command::new("git")
+        let output = test_git_command()
             .arg("init")
             .arg("--initial-branch=main")
             .arg(tmp.path())
@@ -589,14 +598,14 @@ mod tests {
         assert!(output.status.success(), "git init failed in test setup");
 
         // Configure user for the test repo
-        Command::new("git")
+        test_git_command()
             .arg("-C")
             .arg(tmp.path())
             .args(["config", "user.name", "test"])
             .output()
             .await
             .unwrap();
-        Command::new("git")
+        test_git_command()
             .arg("-C")
             .arg(tmp.path())
             .args(["config", "user.email", "test@test.local"])
@@ -608,14 +617,14 @@ mod tests {
         tokio::fs::write(tmp.path().join(".gitkeep"), "")
             .await
             .unwrap();
-        Command::new("git")
+        test_git_command()
             .arg("-C")
             .arg(tmp.path())
             .args(["add", "."])
             .output()
             .await
             .unwrap();
-        Command::new("git")
+        test_git_command()
             .arg("-C")
             .arg(tmp.path())
             .args(["commit", "-m", "init"])

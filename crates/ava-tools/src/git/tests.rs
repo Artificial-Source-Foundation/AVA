@@ -1,6 +1,6 @@
-use std::path::Path;
 use std::process::Command;
 
+use std::path::Path;
 use tempfile::tempdir;
 
 use super::{GhostSnapshotter, GitAction, GitTool, GitToolError, GHOST_SNAPSHOT_PREFIX};
@@ -133,7 +133,20 @@ async fn ghost_snapshotter_uses_unique_refs_for_rapid_snapshots() {
 }
 
 fn run_git(repo: &Path, args: &[&str]) {
-    let output = Command::new("git")
+    let mut command = Command::new("git");
+    for key in [
+        "GIT_DIR",
+        "GIT_WORK_TREE",
+        "GIT_COMMON_DIR",
+        "GIT_INDEX_FILE",
+        "GIT_OBJECT_DIRECTORY",
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+        "GIT_PREFIX",
+        "GIT_CEILING_DIRECTORIES",
+    ] {
+        command.env_remove(key);
+    }
+    let output = command
         .arg("-C")
         .arg(repo)
         .args(args)

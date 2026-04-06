@@ -45,8 +45,6 @@ pub struct Lead {
     worker_names: Vec<String>,
     /// Custom system prompt override (empty = use default from prompts.rs).
     custom_prompt: String,
-    /// Resolved role profile for this lead.
-    role_profile: Option<AgentRoleProfile>,
     /// Resolved role profile for workers spawned by this lead.
     worker_role_profile: Option<AgentRoleProfile>,
 }
@@ -67,7 +65,6 @@ impl Lead {
             platform,
             worker_names: Vec::new(),
             custom_prompt: String::new(),
-            role_profile: None,
             worker_role_profile: None,
         }
     }
@@ -87,12 +84,6 @@ impl Lead {
     /// Set a custom system prompt override for this lead's workers.
     pub fn with_custom_prompt(mut self, prompt: String) -> Self {
         self.custom_prompt = prompt;
-        self
-    }
-
-    /// Set the resolved role profile for this lead.
-    pub fn with_role_profile(mut self, profile: AgentRoleProfile) -> Self {
-        self.role_profile = Some(profile);
         self
     }
 

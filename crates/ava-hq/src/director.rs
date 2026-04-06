@@ -17,7 +17,6 @@ use crate::board;
 use crate::events::HqEvent;
 use crate::lead::Lead;
 use crate::plan::{ExecutionGroup, HqPlan, HqTask, PlannerConfig, TaskComplexity};
-use crate::prompts::domain_label;
 use crate::routing::derive_board_name;
 use crate::scout;
 use crate::worker::{run_worker, Worker};
@@ -107,12 +106,7 @@ impl Director {
                     .cloned()
                     .unwrap_or_default();
 
-                // Resolve role profiles for this lead and its workers
-                let label = domain_label(&domain);
-                let lead_profile = ava_config::apply_template_vars(
-                    &resolver.resolve(ava_config::ROLE_SENIOR_LEAD),
-                    &[("domain", label)],
-                );
+                // Resolve role profiles for this lead's workers.
                 let worker_profile = resolver.resolve(ava_config::ROLE_JUNIOR_WORKER);
 
                 let mut lead = Lead::new(
@@ -123,7 +117,6 @@ impl Director {
                 )
                 .with_worker_names(worker_names.clone())
                 .with_custom_prompt(custom_prompt)
-                .with_role_profile(lead_profile)
                 .with_worker_role_profile(worker_profile);
                 if let Some(ref wp) = config.worker_provider {
                     lead = lead.with_worker_provider(wp.clone());

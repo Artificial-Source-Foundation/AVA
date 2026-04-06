@@ -2,6 +2,11 @@
 
 All notable changes to AVA are documented in this file.
 
+## [Unreleased]
+
+### Added
+- Added configurable HQ role profiles so director, lead, scout, and worker orchestration can derive prompts, tool access, MCP access, and budget defaults from config-backed role definitions.
+
 ## [3.0.0] — 2026-03-30
 
 AVA v3 — the complete rewrite. Pure Rust backend, 21 crates, 21 LLM providers,

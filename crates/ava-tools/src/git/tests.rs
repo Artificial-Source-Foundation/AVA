@@ -75,7 +75,20 @@ async fn ghost_snapshotter_creates_hidden_blob_ref() {
 
     assert!(snapshot.ref_name.starts_with(GHOST_SNAPSHOT_PREFIX));
 
-    let blob = Command::new("git")
+    let mut command = Command::new("git");
+    for key in [
+        "GIT_DIR",
+        "GIT_WORK_TREE",
+        "GIT_COMMON_DIR",
+        "GIT_INDEX_FILE",
+        "GIT_OBJECT_DIRECTORY",
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+        "GIT_PREFIX",
+        "GIT_CEILING_DIRECTORIES",
+    ] {
+        command.env_remove(key);
+    }
+    let blob = command
         .arg("-C")
         .arg(temp.path())
         .args(["cat-file", "-p", snapshot.ref_name.as_str()])

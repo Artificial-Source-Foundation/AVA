@@ -200,7 +200,7 @@ mod tests {
 
     #[test]
     fn detects_aws_temporary_key() {
-        let result = scan_for_secrets("ASIATEMPORARYKEYEXAM");
+        let result = scan_for_secrets("ASIAZZZZZZZZZZZZZZZZ");
         assert!(result.has_secrets);
         assert_eq!(result.findings[0].pattern_name, "aws_temporary_key");
     }

@@ -8,14 +8,32 @@
 mod agent_quality_tasks;
 #[path = "benchmark_tasks/agentic_tasks.rs"]
 mod agentic_tasks;
+#[path = "benchmark_tasks/large_project_tasks.rs"]
+mod large_project_tasks;
+#[path = "benchmark_tasks/lsp_smoke_tasks.rs"]
+mod lsp_smoke_tasks;
+#[path = "benchmark_tasks/maintenance_tasks.rs"]
+mod maintenance_tasks;
+#[path = "benchmark_tasks/mcp_integration_tasks.rs"]
+mod mcp_integration_tasks;
 #[path = "benchmark_tasks/multi_language_tasks.rs"]
 mod multi_language_tasks;
 #[path = "benchmark_tasks/normal_coding_tasks.rs"]
 mod normal_coding_tasks;
+#[path = "benchmark_tasks/product_smoke_tasks.rs"]
+mod product_smoke_tasks;
 #[path = "benchmark_tasks/security_and_test_tasks.rs"]
 mod security_and_test_tasks;
+#[path = "benchmark_tasks/small_coding_tasks.rs"]
+mod small_coding_tasks;
 #[path = "benchmark_tasks/speed_tasks.rs"]
 mod speed_tasks;
+#[path = "benchmark_tasks/stress_coding_tasks.rs"]
+mod stress_coding_tasks;
+#[path = "benchmark_tasks/test_heavy_tasks.rs"]
+mod test_heavy_tasks;
+#[path = "benchmark_tasks/tool_recovery_tasks.rs"]
+mod tool_recovery_tasks;
 #[path = "benchmark_tasks/tool_reliability_tasks.rs"]
 mod tool_reliability_tasks;
 
@@ -115,6 +133,24 @@ pub enum TaskCategory {
     ToolReliability,
     /// Representative coding tasks for general implementation quality.
     NormalCoding,
+    /// Compact but realistic coding tasks from scratch.
+    SmallCoding,
+    /// Longer coding tasks with higher tool/recovery pressure.
+    StressCoding,
+    /// Project-scale tasks that span multiple files.
+    LargeProject,
+    /// Tasks centered on creating/fixing tests alongside code.
+    TestHeavy,
+    /// Refactor/migration/cleanup tasks with regression sensitivity.
+    Maintenance,
+    /// Tool-use tasks that intentionally require recovery from failures.
+    ToolRecovery,
+    /// Product-surface smoke journeys (TUI/Desktop/Web/session/permissions).
+    ProductSmoke,
+    /// MCP integration and multi-server interoperability tasks.
+    McpIntegration,
+    /// LSP-adjacent presence and language project smoke tasks.
+    LspSmoke,
 }
 
 impl std::fmt::Display for TaskCategory {
@@ -134,6 +170,15 @@ impl std::fmt::Display for TaskCategory {
             Self::TestGeneration => write!(f, "test_generation"),
             Self::ToolReliability => write!(f, "tool_reliability"),
             Self::NormalCoding => write!(f, "normal_coding"),
+            Self::SmallCoding => write!(f, "small_coding"),
+            Self::StressCoding => write!(f, "stress_coding"),
+            Self::LargeProject => write!(f, "large_project"),
+            Self::TestHeavy => write!(f, "test_heavy"),
+            Self::Maintenance => write!(f, "maintenance"),
+            Self::ToolRecovery => write!(f, "tool_recovery"),
+            Self::ProductSmoke => write!(f, "product_smoke"),
+            Self::McpIntegration => write!(f, "mcp_integration"),
+            Self::LspSmoke => write!(f, "lsp_smoke"),
         }
     }
 }
@@ -151,8 +196,17 @@ impl TaskCategory {
             | Self::MultiLang
             | Self::Security
             | Self::ToolReliability
-            | Self::NormalCoding => BenchmarkSuite::Standard,
-            Self::MultiStep => BenchmarkSuite::Frontier,
+            | Self::NormalCoding
+            | Self::SmallCoding => BenchmarkSuite::Standard,
+            Self::MultiStep
+            | Self::StressCoding
+            | Self::LargeProject
+            | Self::TestHeavy
+            | Self::Maintenance
+            | Self::ToolRecovery
+            | Self::ProductSmoke
+            | Self::McpIntegration
+            | Self::LspSmoke => BenchmarkSuite::Frontier,
             Self::TestGeneration => BenchmarkSuite::Speed,
         }
     }
@@ -217,11 +271,15 @@ mod task_filter_tests {
     use super::*;
 
     fn task(name: &'static str) -> BenchmarkTask {
+        task_with_category(name, TaskCategory::Simple)
+    }
+
+    fn task_with_category(name: &'static str, category: TaskCategory) -> BenchmarkTask {
         BenchmarkTask {
             name,
             prompt: String::new(),
             expected_patterns: vec![],
-            category: TaskCategory::Simple,
+            category,
             needs_tools: false,
             test_harness: None,
             expected_min_tools: None,
@@ -251,6 +309,35 @@ mod task_filter_tests {
         let filtered = filter_tasks_by_name(tasks.clone(), Some("  "));
 
         assert_eq!(filtered.len(), tasks.len());
+    }
+
+    #[test]
+    fn speed_suite_excludes_new_standard_and_frontier_categories() {
+        let tasks = vec![
+            task_with_category("speed_baseline", TaskCategory::Simple),
+            task_with_category("small_coding_stub", TaskCategory::SmallCoding),
+            task_with_category("stress_coding_stub", TaskCategory::StressCoding),
+        ];
+
+        let filtered = filter_tasks_by_suite(tasks, BenchmarkSuite::Speed);
+        let names: Vec<_> = filtered.into_iter().map(|task| task.name).collect();
+
+        assert_eq!(names, vec!["speed_baseline"]);
+    }
+
+    #[test]
+    fn standard_suite_includes_small_coding_but_excludes_frontier_scaffolding() {
+        let tasks = vec![
+            task_with_category("speed_baseline", TaskCategory::Simple),
+            task_with_category("small_coding_stub", TaskCategory::SmallCoding),
+            task_with_category("large_project_stub", TaskCategory::LargeProject),
+            task_with_category("mcp_integration_stub", TaskCategory::McpIntegration),
+        ];
+
+        let filtered = filter_tasks_by_suite(tasks, BenchmarkSuite::Standard);
+        let names: Vec<_> = filtered.into_iter().map(|task| task.name).collect();
+
+        assert_eq!(names, vec!["speed_baseline", "small_coding_stub"]);
     }
 }
 
@@ -433,12 +520,30 @@ pub use agent_quality_tasks::agent_quality_tasks;
 #[allow(unused_imports)]
 pub use agentic_tasks::agentic_tasks;
 #[allow(unused_imports)]
+pub use large_project_tasks::large_project_tasks;
+#[allow(unused_imports)]
+pub use lsp_smoke_tasks::lsp_smoke_tasks;
+#[allow(unused_imports)]
+pub use maintenance_tasks::maintenance_tasks;
+#[allow(unused_imports)]
+pub use mcp_integration_tasks::mcp_integration_tasks;
+#[allow(unused_imports)]
 pub use multi_language_tasks::{go_tasks, python_tasks, typescript_tasks};
 #[allow(unused_imports)]
 pub use normal_coding_tasks::normal_coding_tasks;
 #[allow(unused_imports)]
+pub use product_smoke_tasks::product_smoke_tasks;
+#[allow(unused_imports)]
 pub use security_and_test_tasks::{security_tasks, test_generation_tasks};
 #[allow(unused_imports)]
+pub use small_coding_tasks::small_coding_tasks;
+#[allow(unused_imports)]
 pub use speed_tasks::{advanced_rust_tasks, default_tasks};
+#[allow(unused_imports)]
+pub use stress_coding_tasks::stress_coding_tasks;
+#[allow(unused_imports)]
+pub use test_heavy_tasks::test_heavy_tasks;
+#[allow(unused_imports)]
+pub use tool_recovery_tasks::tool_recovery_tasks;
 #[allow(unused_imports)]
 pub use tool_reliability_tasks::tool_reliability_tasks;

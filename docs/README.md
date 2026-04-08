@@ -2,7 +2,7 @@
 title: "Docs"
 description: "Entry point for AVA's documentation, organized by audience and purpose."
 order: 1
-updated: "2026-04-08"
+updated: "2026-04-09"
 ---
 
 # AVA Docs
@@ -15,11 +15,12 @@ AVA's documentation is organized by purpose so the repo is easier to navigate fo
 2. [AGENTS.md](../AGENTS.md) - source of truth for repo workflow, architecture, and coding conventions
 3. [Project roadmap](project/roadmap.md) - current product direction and locked decisions
 4. [Project backlog](project/backlog.md) - active work and execution priorities
-5. [Changelog](../CHANGELOG.md) - shipped changes and release history
+5. [AVA 3.3.1 eval plan](project/ava-3.3.1-evals.md) - upcoming core validation and benchmark expansion plan
+6. [Changelog](../CHANGELOG.md) - shipped changes and release history
 
 ## Sections
 
-1. [project/](project/) - roadmap and active backlog
+1. [project/](project/) - roadmap, active backlog, and eval planning
 2. [architecture/](architecture/) - crate map and architecture checklists
 3. [extend/](extend/) - plugins, MCP, custom tools, and instruction surfaces
 4. [reference/](reference/) - providers, commands, credentials, and other stable reference material

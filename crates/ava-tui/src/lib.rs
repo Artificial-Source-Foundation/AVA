@@ -12,6 +12,8 @@ pub mod auth;
 #[cfg(feature = "benchmark")]
 pub mod benchmark;
 #[cfg(feature = "benchmark")]
+pub mod benchmark_compare;
+#[cfg(feature = "benchmark")]
 pub mod benchmark_harness;
 #[cfg(feature = "benchmark")]
 pub mod benchmark_import;

@@ -111,13 +111,40 @@ mod tests {
         },
         BenchmarkTask {
             name: "normal_coding_json_merge",
-            prompt: "Write a Rust function `merge_non_null(base: &mut serde_json::Value, patch: &serde_json::Value)` that recursively merges JSON objects but only overwrites fields when the patch value is not null. Arrays and scalars should be replaced wholesale. Only output the Rust code.".to_string(),
-            expected_patterns: vec![r"serde_json::Value", r"Object|as_object", r"null"],
+            prompt: "Write a Rust function `merge_non_null(base: &mut JsonValue, patch: &JsonValue)` that recursively merges JSON-like objects but skips overwriting fields when the patch value is `JsonValue::Null`. Arrays and scalars should be replaced wholesale. Assume `JsonValue` is available with object/map support. Only output the Rust code.".to_string(),
+            expected_patterns: vec![r"fn\s+merge_non_null", r"JsonValue", r"Object|BTreeMap", r"Null"],
             category: TaskCategory::NormalCoding,
             needs_tools: false,
             test_harness: Some(TestHarness {
                 test_code: r#"
-use serde_json::json;
+use std::collections::BTreeMap;
+
+#[derive(Debug, Clone, PartialEq)]
+enum JsonValue {
+    Null,
+    Bool(bool),
+    Number(i64),
+    String(String),
+    Array(Vec<JsonValue>),
+    Object(BTreeMap<String, JsonValue>),
+}
+
+fn obj<const N: usize>(entries: [(&str, JsonValue); N]) -> JsonValue {
+    JsonValue::Object(
+        entries
+            .into_iter()
+            .map(|(k, v)| (k.to_string(), v))
+            .collect(),
+    )
+}
+
+fn strv(value: &str) -> JsonValue {
+    JsonValue::String(value.to_string())
+}
+
+fn arr(values: Vec<JsonValue>) -> JsonValue {
+    JsonValue::Array(values)
+}
 
 #[cfg(test)]
 mod tests {
@@ -125,18 +152,36 @@ mod tests {
 
     #[test]
     fn merges_nested_objects_without_null_overwrite() {
-        let mut base = json!({"user": {"name": "Ada", "email": "ada@example.com"}});
-        let patch = json!({"user": {"email": null, "name": "Grace"}});
+        let mut base = obj([(
+            "user",
+            obj([
+                ("name", strv("Ada")),
+                ("email", strv("ada@example.com")),
+            ]),
+        )]);
+        let patch = obj([(
+            "user",
+            obj([("email", JsonValue::Null), ("name", strv("Grace"))]),
+        )]);
         merge_non_null(&mut base, &patch);
-        assert_eq!(base, json!({"user": {"name": "Grace", "email": "ada@example.com"}}));
+        assert_eq!(
+            base,
+            obj([(
+                "user",
+                obj([
+                    ("name", strv("Grace")),
+                    ("email", strv("ada@example.com")),
+                ])
+            )])
+        );
     }
 
     #[test]
     fn replaces_arrays_wholesale() {
-        let mut base = json!({"roles": ["reader"]});
-        let patch = json!({"roles": ["writer", "admin"]});
+        let mut base = obj([("roles", arr(vec![strv("reader")]))]);
+        let patch = obj([("roles", arr(vec![strv("writer"), strv("admin")]))]);
         merge_non_null(&mut base, &patch);
-        assert_eq!(base, json!({"roles": ["writer", "admin"]}));
+        assert_eq!(base, obj([("roles", arr(vec![strv("writer"), strv("admin")]))]));
     }
 }
 "#,

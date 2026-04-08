@@ -132,6 +132,18 @@ pub struct CliArgs {
     #[arg(long)]
     pub import_polyglot: Option<String>,
 
+    /// Compare an AVA benchmark JSON report against an OpenCode report (path to AVA report)
+    #[arg(long)]
+    pub benchmark_compare_ava_report: Option<String>,
+
+    /// Compare an AVA benchmark JSON report against an OpenCode report (path to OpenCode report)
+    #[arg(long)]
+    pub benchmark_compare_opencode_report: Option<String>,
+
+    /// Optional output path for comparison JSON artifact
+    #[arg(long)]
+    pub benchmark_compare_output: Option<String>,
+
     /// Follow-up messages to run after the main task completes (Tier 2, repeatable)
     #[arg(long = "follow-up")]
     pub follow_up: Vec<String>,
@@ -249,6 +261,9 @@ mod tests {
             director: None,
             worker: None,
             import_polyglot: None,
+            benchmark_compare_ava_report: None,
+            benchmark_compare_opencode_report: None,
+            benchmark_compare_output: None,
             follow_up: Vec::new(),
             later: Vec::new(),
             later_group: Vec::new(),

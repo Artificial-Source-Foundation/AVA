@@ -79,6 +79,34 @@ async fn main() -> Result<()> {
     // Benchmark modes (only available with --features benchmark)
     #[cfg(feature = "benchmark")]
     {
+        if cli.benchmark_compare_ava_report.is_some()
+            || cli.benchmark_compare_opencode_report.is_some()
+        {
+            let ava_report = cli.benchmark_compare_ava_report.as_deref().ok_or_else(|| {
+                color_eyre::eyre::eyre!(
+                    "Missing --benchmark-compare-ava-report. Provide both report paths."
+                )
+            })?;
+            let opencode_report = cli
+                .benchmark_compare_opencode_report
+                .as_deref()
+                .ok_or_else(|| {
+                    color_eyre::eyre::eyre!(
+                        "Missing --benchmark-compare-opencode-report. Provide both report paths."
+                    )
+                })?;
+
+            ava_tui::benchmark_compare::run_ava_vs_opencode_comparison(
+                std::path::Path::new(ava_report),
+                std::path::Path::new(opencode_report),
+                cli.benchmark_compare_output
+                    .as_deref()
+                    .map(std::path::Path::new),
+            )
+            .await?;
+            return Ok(());
+        }
+
         // Harnessed-pair benchmark mode
         if cli.harness {
             let director_str = cli.director.as_deref().ok_or_else(|| {
@@ -161,6 +189,18 @@ async fn main() -> Result<()> {
             )
             .await?;
             return Ok(());
+        }
+    }
+
+    #[cfg(not(feature = "benchmark"))]
+    {
+        if cli.benchmark_compare_ava_report.is_some()
+            || cli.benchmark_compare_opencode_report.is_some()
+            || cli.benchmark_compare_output.is_some()
+        {
+            eprintln!("Benchmark comparison requires the 'benchmark' feature. Rebuild with:");
+            eprintln!("  cargo build -p ava-tui --features benchmark");
+            std::process::exit(1);
         }
     }
 

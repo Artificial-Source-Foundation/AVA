@@ -34,8 +34,10 @@ use crate::benchmark_support::{
 };
 use crate::benchmark_tasks::{
     advanced_rust_tasks, agent_quality_tasks, agentic_tasks, default_tasks, filter_tasks_by_name,
-    filter_tasks_by_suite, go_tasks, multi_file_tasks, normal_coding_tasks, python_tasks,
-    security_tasks, test_generation_tasks, tool_reliability_tasks, typescript_tasks,
+    filter_tasks_by_suite, go_tasks, large_project_tasks, lsp_smoke_tasks, maintenance_tasks,
+    mcp_integration_tasks, multi_file_tasks, normal_coding_tasks, product_smoke_tasks,
+    python_tasks, security_tasks, small_coding_tasks, stress_coding_tasks, test_generation_tasks,
+    test_heavy_tasks, tool_recovery_tasks, tool_reliability_tasks, typescript_tasks,
     BenchmarkSuite, BenchmarkTask,
 };
 use crate::headless::spawn_auto_approve_requests;
@@ -197,6 +199,15 @@ pub async fn run_harness(
     all_tasks.extend(multi_file_tasks(&workspace_dir));
     all_tasks.extend(tool_reliability_tasks(&workspace_dir));
     all_tasks.extend(normal_coding_tasks(&workspace_dir));
+    all_tasks.extend(small_coding_tasks(&workspace_dir));
+    all_tasks.extend(stress_coding_tasks(&workspace_dir));
+    all_tasks.extend(large_project_tasks(&workspace_dir));
+    all_tasks.extend(test_heavy_tasks(&workspace_dir));
+    all_tasks.extend(maintenance_tasks(&workspace_dir));
+    all_tasks.extend(tool_recovery_tasks(&workspace_dir));
+    all_tasks.extend(product_smoke_tasks(&workspace_dir));
+    all_tasks.extend(mcp_integration_tasks(&workspace_dir));
+    all_tasks.extend(lsp_smoke_tasks(&workspace_dir));
     all_tasks = filter_tasks_by_suite(all_tasks, suite);
     all_tasks = filter_tasks_by_name(all_tasks, task_filter);
 

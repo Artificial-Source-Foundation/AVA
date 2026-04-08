@@ -103,6 +103,7 @@ impl FileSystem for LocalFileSystem {
         tokio::fs::metadata(path)
             .await
             .map(|m| m.is_dir())
+            // infallible: metadata failure (e.g. ENOENT) means "not a directory"
             .unwrap_or(false)
     }
 

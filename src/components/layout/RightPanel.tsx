@@ -87,8 +87,7 @@ function extractFileChanges(messages: Message[]): FileChange[] {
 }
 
 // ============================================================================
-// Section: Activity (removed — only populated in HQ mode; solo mode shows
-// tool activity inline in message bubbles instead)
+// Section: Activity (removed — activity now shows inline in message bubbles instead)
 // ============================================================================
 // ============================================================================
 // Section: Changes

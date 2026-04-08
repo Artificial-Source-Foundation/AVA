@@ -1,0 +1,3 @@
+- DeepSeek handles long code well. Read full files when needed rather than partial reads.
+- Keep tool arguments simple and explicit. Avoid deeply nested argument structures.
+- Note: chat mode has an 8K output limit. Keep individual edits focused.

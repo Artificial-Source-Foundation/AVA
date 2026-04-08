@@ -4,7 +4,6 @@
  */
 
 export { type AgentEventSignals, createAgentEventHandler } from './agent-events'
-export { createTeamBridge } from './agent-team-bridge'
 export {
   addToolActivity,
   updateToolActivity,

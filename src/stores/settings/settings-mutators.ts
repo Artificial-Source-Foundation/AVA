@@ -12,8 +12,8 @@ import {
 } from '../../config/defaults/provider-defaults'
 import { log } from '../../lib/logger'
 import { logInfo, logWarn } from '../../services/logger'
+import { getModelsDevModels } from '../../services/providers/curated-model-catalog'
 import { enrichWithCatalog, fetchModels } from '../../services/providers/model-fetcher'
-import { getModelsDevModels } from '../../services/providers/models-dev-catalog'
 import type { LLMProvider } from '../../types/llm'
 import { applyAppearanceToDOM } from './settings-appearance'
 import { saveSettings, syncProviderCredentials } from './settings-persistence'
@@ -71,7 +71,7 @@ export function autoFetchModels(id: string): void {
   const provider = settings().providers.find((p) => p.id === id)
   fetchModels(id as LLMProvider, { apiKey: credential, baseUrl: provider?.baseUrl })
     .then((rawFetched) => {
-      // Enrich with models.dev catalog (fills pricing, context windows, capabilities)
+      // Enrich with the backend-owned curated catalog (fills pricing, context windows, capabilities)
       const fetched = enrichWithCatalog(id as LLMProvider, rawFetched)
       if (fetched.length === 0) return
       const current = settings().providers.find((p) => p.id === id)
@@ -134,7 +134,7 @@ export function refreshAllProviderModels(): void {
       autoFetchModels(provider.id)
     }
   }
-  // CLI agents are discovered at startup via AgentStack for HQ delegation only.
+  // CLI agents are discovered at startup via AgentStack for subagent delegation.
   // They are not shown in the provider/model selector UI.
 }
 
@@ -181,9 +181,9 @@ export async function refreshCLIAgents(): Promise<void> {
 }
 
 /**
- * Populate provider model lists from the models.dev catalog.
+ * Populate provider model lists from the backend-owned curated catalog.
  * Called after syncModelsCatalog() on startup. For each provider, merges
- * models.dev models into the existing list (adds missing, doesn't remove existing).
+ * catalog models into the existing list (adds missing, doesn't remove existing).
  * Returns the number of providers that received new models.
  */
 export function populateModelsFromCatalog(): number {
@@ -197,6 +197,7 @@ export function populateModelsFromCatalog(): number {
     // Build set of existing model IDs
     const existingIds = new Set(p.models.map((m) => m.id))
     const newModels = catalogModels.filter((m) => !existingIds.has(m.id))
+    let enrichedExistingChanged = false
 
     // Also enrich existing models that lack capabilities or pricing
     const enrichedExisting = p.models.map((existing) => {
@@ -205,18 +206,24 @@ export function populateModelsFromCatalog(): number {
       const patched = { ...existing }
       if (catalogMatch.capabilities?.length) {
         const merged = new Set([...(patched.capabilities ?? []), ...catalogMatch.capabilities])
-        patched.capabilities = [...merged]
+        const mergedCapabilities = [...merged]
+        if ((patched.capabilities ?? []).join('|') !== mergedCapabilities.join('|')) {
+          patched.capabilities = mergedCapabilities
+          enrichedExistingChanged = true
+        }
       }
       if (!patched.pricing && catalogMatch.pricing) {
         patched.pricing = catalogMatch.pricing
+        enrichedExistingChanged = true
       }
       if (patched.contextWindow <= 4096 && catalogMatch.contextWindow > 4096) {
         patched.contextWindow = catalogMatch.contextWindow
+        enrichedExistingChanged = true
       }
       return patched
     })
 
-    if (newModels.length === 0 && enrichedExisting === p.models) return p
+    if (newModels.length === 0 && !enrichedExistingChanged) return p
 
     enrichedCount++
     const mergedModels = [...enrichedExisting, ...newModels]
@@ -234,7 +241,7 @@ export function populateModelsFromCatalog(): number {
 
   if (enrichedCount > 0) {
     updateSettings({ providers: updatedProviders })
-    logInfo('settings', `Populated models from models.dev for ${enrichedCount} providers`)
+    logInfo('settings', `Populated models from curated catalog for ${enrichedCount} providers`)
   }
 
   return enrichedCount
@@ -331,15 +338,17 @@ export function exportAgents(agentIds?: string[]): string {
     : settings().agents.filter((a) => a.isCustom)
   // Strip icon (Component) — not serializable
   const serializable = agents.map(({ icon: _icon, ...rest }) => rest)
-  return JSON.stringify({ hq_agents: serializable, version: 1 }, null, 2)
+  return JSON.stringify({ agents: serializable, version: 2 }, null, 2)
 }
 
 export function importAgents(json: string): { imported: number; skipped: number } {
   const data = JSON.parse(json) as {
+    agents?: Array<Omit<AgentPreset, 'icon'>>
     hq_agents?: Array<Omit<AgentPreset, 'icon'>>
     version?: number
   }
-  if (!data.hq_agents || !Array.isArray(data.hq_agents)) {
+  const importedAgents = data.agents ?? data.hq_agents
+  if (!importedAgents || !Array.isArray(importedAgents)) {
     throw new Error('Invalid agent export format')
   }
 
@@ -347,7 +356,7 @@ export function importAgents(json: string): { imported: number; skipped: number 
   let imported = 0
   let skipped = 0
 
-  for (const raw of data.hq_agents) {
+  for (const raw of importedAgents) {
     if (existingIds.has(raw.id)) {
       skipped++
       continue
@@ -396,12 +405,4 @@ export function updateNotifications(patch: Partial<AppSettings['notifications']>
 
 export function updateGit(patch: Partial<AppSettings['git']>): void {
   updateSubKey('git', patch)
-}
-
-export function updateTeam(patch: Partial<AppSettings['team']>): void {
-  updateSubKey('team', patch)
-}
-
-export function updateAgentBackend(backend: AppSettings['agentBackend']): void {
-  updateSettings({ agentBackend: backend })
 }

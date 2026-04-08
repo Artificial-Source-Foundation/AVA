@@ -11,7 +11,7 @@
  * Usage:
  *   import { log, initFrontendLogger, disposeFrontendLogger } from '../lib/logger'
  *   await initFrontendLogger()
- *   log.info('app', 'Initialized', { version: '2.0.0' })
+ *   log.info('app', 'Initialized', { version: '3.3.0' })
  */
 
 import { type FlushWriter, LogBuffer, type LogBufferEntry } from './log-buffer'

@@ -4,10 +4,10 @@
 
 | Version | Supported          |
 |---------|--------------------|
-| 2.1.x   | Yes                |
-| < 2.1   | No                 |
+| 3.3.x   | Yes                |
+| < 3.3   | No                 |
 
-Only the latest release in the 2.1.x series receives security updates.
+Only the latest release in the 3.3.x series receives security updates.
 
 ## Reporting a Vulnerability
 
@@ -60,4 +60,4 @@ AVA includes several layers of security for agent-driven tool execution:
 
 ## Credential Storage
 
-AVA stores API keys in `~/.ava/credentials.json`. This file should be readable only by the owning user (`chmod 600`). AVA does not transmit credentials to any party other than the configured LLM provider endpoints.
+AVA supports user-local plaintext credential files for compatibility, but keychain/encrypted or environment-variable paths are preferred when available. If `~/.ava/credentials.json` is used, it should be readable only by the owning user (`chmod 600`). AVA does not transmit credentials to any party other than the configured LLM provider endpoints.

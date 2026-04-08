@@ -1,0 +1,1 @@
+- Grok reasoning is strong for code analysis and debugging. Keep visible output terse.

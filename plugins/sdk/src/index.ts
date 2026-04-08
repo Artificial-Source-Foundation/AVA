@@ -19,10 +19,68 @@ export interface PluginContext {
   tools: string[]
 }
 
+export interface PluginCommandSpec {
+  name: string
+  description?: string
+}
+
+export interface PluginRouteSpec {
+  path: string
+  method: string
+  description?: string
+}
+
+export interface PluginEventSpec {
+  name: string
+  description?: string
+}
+
+export interface PluginMountSpec {
+  id: string
+  location: string
+  label: string
+  description?: string
+}
+
+export interface PluginAppCapabilities {
+  commands?: PluginCommandSpec[]
+  routes?: PluginRouteSpec[]
+  events?: PluginEventSpec[]
+  mounts?: PluginMountSpec[]
+}
+
+export interface PluginAppEvent {
+  event: string
+  payload?: unknown
+}
+
+export interface PluginAppResponse {
+  result?: unknown
+  emittedEvents?: PluginAppEvent[]
+}
+
 export type HookHandler = (
   ctx: PluginContext,
   params: Record<string, unknown>
 ) => Promise<Record<string, unknown> | undefined>
+
+export type AppCommandHandler = (ctx: PluginContext, payload: unknown) => Promise<PluginAppResponse>
+
+export type AppRouteHandler = (
+  ctx: PluginContext,
+  request: {
+    method: string
+    path: string
+    query: Record<string, unknown>
+    body?: unknown
+  }
+) => Promise<PluginAppResponse>
+
+export interface PluginAppHandlers {
+  capabilities?: PluginAppCapabilities
+  commands?: Record<string, AppCommandHandler>
+  routes?: Record<string, AppRouteHandler>
+}
 
 // -- Typed params/result shapes for the 4 new hooks --
 
@@ -281,7 +339,7 @@ function sendError(
  *
  * @param hooks - Map of hook names to async handler functions.
  */
-export function createPlugin(hooks: PluginHooks): void {
+export function createPlugin(hooks: PluginHooks, app: PluginAppHandlers = {}): void {
   const context: PluginContext = {
     project: { directory: '', name: '' },
     config: {},
@@ -289,6 +347,10 @@ export function createPlugin(hooks: PluginHooks): void {
   }
 
   let buffer = Buffer.alloc(0)
+  let shouldShutdown = false
+  const routeHandlers = Object.fromEntries(
+    Object.entries(app.routes ?? {}).map(([key, handler]) => [key.toUpperCase(), handler])
+  ) as Record<string, AppRouteHandler>
 
   // Queue for sequential async message processing
   let processing = Promise.resolve()
@@ -313,13 +375,60 @@ export function createPlugin(hooks: PluginHooks): void {
         context.tools = p.tools as string[]
       }
 
-      sendResult(id ?? null, { hooks: Object.keys(hooks) })
+      sendResult(id ?? null, {
+        hooks: Object.keys(hooks),
+        app: app.capabilities ?? {},
+      })
       return
     }
 
     // -- shutdown --
     if (method === 'shutdown') {
-      process.exit(0)
+      shouldShutdown = true
+      return
+    }
+
+    if (method === 'app.command') {
+      const p = (params ?? {}) as Record<string, unknown>
+      const command = typeof p.command === 'string' ? p.command : ''
+      const handler = command ? app.commands?.[command] : undefined
+      if (!handler) {
+        sendError(id ?? null, -32601, `unknown app command '${command}'`)
+        return
+      }
+
+      try {
+        const result = await handler(context, p.payload)
+        sendResult(id ?? null, result ?? { result: null, emittedEvents: [] })
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err)
+        sendError(id ?? null, -32000, message)
+      }
+      return
+    }
+
+    if (method === 'app.route') {
+      const p = (params ?? {}) as Record<string, unknown>
+      const routeKey = `${String(p.method ?? '').toUpperCase()} ${String(p.path ?? '')}`
+      const handler = routeHandlers[routeKey]
+      if (!handler) {
+        sendError(id ?? null, -32601, `unknown app route '${routeKey}'`)
+        return
+      }
+
+      try {
+        const result = await handler(context, {
+          method: String(p.method ?? ''),
+          path: String(p.path ?? ''),
+          query: (p.query as Record<string, unknown>) ?? {},
+          body: p.body,
+        })
+        sendResult(id ?? null, result ?? { result: null, emittedEvents: [] })
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err)
+        sendError(id ?? null, -32000, message)
+      }
+      return
     }
 
     // -- hook/* dispatch --
@@ -384,7 +493,11 @@ export function createPlugin(hooks: PluginHooks): void {
       try {
         const msg = JSON.parse(bodyText) as JsonRpcRequest
         // Chain messages sequentially so async handlers complete in order
-        processing = processing.then(() => handleMessage(msg))
+        processing = processing
+          .then(() => handleMessage(msg))
+          .then(() => {
+            if (shouldShutdown) process.exit(0)
+          })
       } catch {
         // Ignore unparseable messages
       }

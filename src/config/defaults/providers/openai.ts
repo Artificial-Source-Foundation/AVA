@@ -15,7 +15,7 @@ export const openai: LLMProviderConfig = {
   enabled: false,
   status: 'disconnected',
   defaultModel: 'gpt-5.2',
-  // Offline fallback — models.dev catalog provides the full list when online
+  // Offline fallback — the curated backend catalog provides the fuller list at runtime
   models: [
     {
       id: 'gpt-5.2',
@@ -26,10 +26,29 @@ export const openai: LLMProviderConfig = {
       capabilities: ['vision', 'tools', 'reasoning'],
     },
     {
+      id: 'gpt-5.2-pro',
+      name: 'GPT-5.2 Pro',
+      contextWindow: 200000,
+      capabilities: ['vision', 'tools', 'reasoning'],
+    },
+    {
+      id: 'gpt-5.2-codex',
+      name: 'GPT-5.2 Codex',
+      contextWindow: 200000,
+      capabilities: ['tools', 'reasoning'],
+    },
+    {
       id: 'gpt-5-mini',
       name: 'GPT-5 Mini',
       contextWindow: 400000,
       pricing: { input: 0.25, output: 2 },
+      capabilities: ['vision', 'tools', 'reasoning'],
+    },
+    {
+      id: 'gpt-5.3',
+      name: 'GPT-5.3',
+      contextWindow: 200000,
+      pricing: { input: 1.75, output: 14 },
       capabilities: ['vision', 'tools', 'reasoning'],
     },
     {
@@ -42,30 +61,29 @@ export const openai: LLMProviderConfig = {
     {
       id: 'gpt-5.4-mini',
       name: 'GPT-5.4 Mini',
-      contextWindow: 1048576,
-      pricing: { input: 0.4, output: 1.6 },
+      contextWindow: 400000,
+      pricing: { input: 0.75, output: 4.5 },
+      capabilities: ['vision', 'tools', 'reasoning'],
+    },
+    {
+      id: 'gpt-5.4-nano',
+      name: 'GPT-5.4 Nano',
+      contextWindow: 400000,
+      pricing: { input: 0.2, output: 1.25 },
       capabilities: ['vision', 'tools', 'reasoning'],
     },
     {
       id: 'gpt-5.3-codex',
       name: 'GPT-5.3 Codex',
-      contextWindow: 400000,
-      pricing: { input: 1.75, output: 14 },
-      capabilities: ['vision', 'tools', 'reasoning'],
-    },
-    {
-      id: 'o4-mini',
-      name: 'o4 Mini',
       contextWindow: 200000,
-      pricing: { input: 1.1, output: 4.4 },
-      capabilities: ['vision', 'tools', 'reasoning'],
+      pricing: { input: 1.75, output: 14 },
+      capabilities: ['tools', 'reasoning'],
     },
     {
-      id: 'gpt-4.1',
-      name: 'GPT-4.1',
-      contextWindow: 1047576,
-      pricing: { input: 2, output: 8 },
-      capabilities: ['vision', 'tools'],
+      id: 'gpt-5.3-codex-spark',
+      name: 'GPT-5.3 Codex Spark',
+      contextWindow: 200000,
+      capabilities: ['tools', 'reasoning'],
     },
   ],
 }

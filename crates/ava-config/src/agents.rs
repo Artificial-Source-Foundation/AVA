@@ -305,25 +305,6 @@ pub fn default_agents() -> HashMap<String, AgentOverride> {
         },
     );
 
-    // HQ multi-agent role templates.
-    // No default model values — users override via agents.toml:
-    //   [agents.director]
-    //   model = "anthropic/claude-opus-4"
-    //   [agents.scout]
-    //   model = "anthropic/claude-haiku-4.5"
-    agents.insert(
-        "director".into(),
-        AgentOverride {
-            prompt: Some(
-                "You are the Director of a multi-agent team. Analyze task complexity, \
-                 create plans, and coordinate domain-specific leads to deliver results."
-                    .into(),
-            ),
-            max_turns: Some(30),
-            ..Default::default()
-        },
-    );
-
     agents.insert(
         "scout".into(),
         AgentOverride {
@@ -341,50 +322,11 @@ pub fn default_agents() -> HashMap<String, AgentOverride> {
         "worker".into(),
         AgentOverride {
             prompt: Some(
-                "You are an HQ worker. Execute the assigned coding task \
+                "You are a focused worker agent. Execute the assigned coding task \
                  efficiently using available tools. Focus on correctness and completeness."
                     .into(),
             ),
             max_turns: Some(15),
-            ..Default::default()
-        },
-    );
-
-    agents.insert(
-        "frontend-lead".into(),
-        AgentOverride {
-            prompt: Some(
-                "You are the Frontend Lead. Coordinate frontend development tasks \
-                 including UI components, styling, and client-side logic."
-                    .into(),
-            ),
-            max_turns: Some(20),
-            ..Default::default()
-        },
-    );
-
-    agents.insert(
-        "backend-lead".into(),
-        AgentOverride {
-            prompt: Some(
-                "You are the Backend Lead. Coordinate backend development tasks \
-                 including APIs, data models, and server-side logic."
-                    .into(),
-            ),
-            max_turns: Some(20),
-            ..Default::default()
-        },
-    );
-
-    agents.insert(
-        "qa-lead".into(),
-        AgentOverride {
-            prompt: Some(
-                "You are the QA Lead. Coordinate testing, code review, and quality \
-                 assurance tasks. Ensure correctness and catch regressions."
-                    .into(),
-            ),
-            max_turns: Some(20),
             ..Default::default()
         },
     );
@@ -747,6 +689,8 @@ model = "anthropic/claude-sonnet-4"
         assert!(templates.contains_key("explore"));
         assert!(templates.contains_key("review"));
         assert!(templates.contains_key("task"));
+        assert!(templates.contains_key("scout"));
+        assert!(templates.contains_key("worker"));
 
         let plan = &templates["plan"];
         assert_eq!(plan.max_turns, Some(10));
@@ -883,6 +827,8 @@ max_turns = 5
         assert!(agents.contains(&"explore".to_string()));
         assert!(agents.contains(&"review".to_string()));
         assert!(agents.contains(&"task".to_string()));
+        assert!(agents.contains(&"scout".to_string()));
+        assert!(agents.contains(&"worker".to_string()));
         assert!(agents.contains(&"custom-agent".to_string()));
     }
 }

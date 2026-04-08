@@ -1,8 +1,6 @@
 import { type Accessor, createEffect, createMemo, createSignal, on, onCleanup } from 'solid-js'
-import { useChatMode } from '../../../contexts/chat-mode'
 import { useNotification } from '../../../contexts/notification'
 import { useAgent } from '../../../hooks/useAgent'
-import { useChat } from '../../../hooks/useChat'
 import { useElapsedTimer } from '../../../hooks/useElapsedTimer'
 import { generateMessageId } from '../../../lib/ids'
 import type { CommandEntry } from '../../../services/command-resolver'
@@ -54,7 +52,6 @@ export interface InputState extends ModelState {
   onTextareaInput: (v: string) => void
   setTextareaRef: (el: HTMLTextAreaElement) => void
   focusTextarea: () => void
-  chat: ReturnType<typeof useChat>
   agent: ReturnType<typeof useAgent>
   sessionStore: ReturnType<typeof useSession>
   settingsStore: ReturnType<typeof useSettings>
@@ -76,14 +73,11 @@ export function useInputState(): InputState {
   const [escapeHint, setEscapeHint] = createSignal(false)
 
   const attachments = createAttachmentState()
-  const chat = useChat()
   const agent = useAgent()
   const notify = useNotification()
   const sessionStore = useSession()
   const layout = useLayout()
 
-  // ── Chat mode context (director mode overrides) ────────────────────────
-  const chatMode = useChatMode()
   const { selectedModel, messages } = sessionStore
   const settingsStore = useSettings()
   const { settings } = settingsStore
@@ -102,9 +96,7 @@ export function useInputState(): InputState {
       .map((m) => m.content)
       .reverse()
   )
-  const isProcessing = createMemo(
-    () => chatMode?.isStreaming() ?? (chat.isStreaming() || agent.isRunning())
-  )
+  const isProcessing = createMemo(() => agent.isRunning())
   // Input is NOT disabled during processing -- mid-stream messaging allows
   // users to type while the agent runs (Enter = queue, Ctrl+Enter = interrupt)
   const inputDisabled = createMemo(() => false)
@@ -114,14 +106,12 @@ export function useInputState(): InputState {
       attachments.pendingPastes().length > 0 ||
       attachments.pendingImages().length > 0
   )
-  const placeholder = createMemo(
-    () =>
-      chatMode?.placeholder?.() ??
-      (isProcessing()
-        ? 'Type a message...'
-        : agent.isPlanMode()
-          ? 'Plan your approach...'
-          : 'Ask anything...')
+  const placeholder = createMemo(() =>
+    isProcessing()
+      ? 'Type a message...'
+      : agent.isPlanMode()
+        ? 'Plan your approach...'
+        : 'Ask anything...'
   )
 
   // Auto-resize textarea
@@ -139,16 +129,14 @@ export function useInputState(): InputState {
   }
 
   // Elapsed timer during streaming
-  const elapsedSecondsFromTimer = useElapsedTimer(
-    () => chatMode?.streamStartedAt?.() ?? chat.streamingStartedAt()
-  )
+  const elapsedSecondsFromTimer = useElapsedTimer(() => agent.streamingStartedAt())
 
   // Clear queue on session change
   createEffect(
     on(
       () => sessionStore.currentSession()?.id,
       () => {
-        chat.clearQueue()
+        agent.clearQueue()
         queueMicrotask(() => {
           if (!textareaRef || document.activeElement === textareaRef) return
           textareaRef.focus()
@@ -204,8 +192,7 @@ export function useInputState(): InputState {
     const hasImages = attachments.pendingImages().length > 0
     if ((!message && !hasPastes && !hasImages) || submitting) return
 
-    // Handle local slash commands (skip session-specific ones in director mode)
-    const parsed = chatMode ? null : parseSlashCommand(message)
+    const parsed = parseSlashCommand(message)
     if (parsed) {
       if (parsed.name === 'compact') {
         if (isProcessing()) {
@@ -238,7 +225,7 @@ export function useInputState(): InputState {
         return
       }
       if (parsed.name === 'queue') {
-        const queue = chat.messageQueue()
+        const queue = agent.messageQueue()
         const sessionId = sessionStore.currentSession()?.id ?? ''
         const queueText =
           queue.length === 0
@@ -295,11 +282,21 @@ export function useInputState(): InputState {
       }
       if (parsed.name === 'theme') {
         layout.openSettings()
+        queueMicrotask(() => {
+          window.dispatchEvent(
+            new CustomEvent('ava:settings-tab', { detail: { tab: 'appearance' } })
+          )
+        })
         clearInput()
         return
       }
       if (parsed.name === 'permissions') {
         layout.openSettings()
+        queueMicrotask(() => {
+          window.dispatchEvent(
+            new CustomEvent('ava:settings-tab', { detail: { tab: 'permissions-trust' } })
+          )
+        })
         clearInput()
         return
       }
@@ -411,21 +408,6 @@ export function useInputState(): InputState {
       }
     }
 
-    // ── Director mode: delegate send to context handler ───────────────
-    if (chatMode?.sendMessage) {
-      submitting = true
-      setSendCount((c) => c + 1)
-      setInput('')
-      setHistoryIndex(-1)
-      if (textareaRef) textareaRef.style.height = 'auto'
-      try {
-        await chatMode.sendMessage(message)
-      } finally {
-        submitting = false
-      }
-      return
-    }
-
     // Mid-stream messaging: queue for next turn when agent is running (Enter)
     if (isProcessing()) {
       setInput('')
@@ -451,7 +433,6 @@ export function useInputState(): InputState {
     setInput('')
     setHistoryIndex(-1)
     if (textareaRef) textareaRef.style.height = 'auto'
-    chat.clearError()
     agent.clearError()
     const { files, pastes } = attachments.clearAll()
     try {
@@ -653,8 +634,7 @@ export function useInputState(): InputState {
   }
 
   const handleCancel = (): void => {
-    if (chatMode?.cancelStream) chatMode.cancelStream()
-    else agent.cancel()
+    agent.cancel()
   }
 
   // Menu-driven mid-stream send helpers (for context menu on send button)
@@ -758,7 +738,6 @@ export function useInputState(): InputState {
     onTextareaInput,
     setTextareaRef,
     focusTextarea,
-    chat,
     agent,
     sessionStore,
     settingsStore,

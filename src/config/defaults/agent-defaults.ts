@@ -3,7 +3,6 @@
  *
  * Canonical types and default presets for AI agents.
  * Shared by the settings store and the AgentsTab UI.
- * HQ agent presets live in hq-presets.ts.
  */
 
 import { Code, FileText, GitBranch, Terminal, Zap } from 'lucide-solid'
@@ -19,8 +18,6 @@ export { AGENT_ICONS } from './agent-icons'
 
 export type IconComponent = Component<{ class?: string }>
 
-export type AgentTier = 'commander' | 'lead' | 'worker'
-
 export interface AgentPreset {
   id: string
   name: string
@@ -32,11 +29,9 @@ export interface AgentPreset {
   model?: string
   isCustom?: boolean
   type?: 'coding' | 'git' | 'terminal' | 'docs' | 'fast' | 'custom'
-  /** HQ tier — commander, lead, or worker */
-  tier?: AgentTier
   /** Concrete tool names this agent can use */
   tools?: string[]
-  /** Agent IDs this agent can delegate to (leads + commander) */
+  /** Agent IDs this agent can delegate to */
   delegates?: string[]
   /** Per-agent provider override */
   provider?: string
@@ -112,9 +107,4 @@ export const legacyAgentPresets: AgentPreset[] = [
 // Combined defaults (re-exported for consumers)
 // ============================================================================
 
-// HQ presets (the 14 built-in HQ agents)
-import { hqAgentPresets } from './hq-presets'
-
-export { hqAgentPresets } from './hq-presets'
-
-export const defaultAgentPresets: AgentPreset[] = [...hqAgentPresets, ...legacyAgentPresets]
+export const defaultAgentPresets: AgentPreset[] = [...legacyAgentPresets]

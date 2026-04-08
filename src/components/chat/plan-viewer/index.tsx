@@ -124,15 +124,10 @@ export const PlanOverlay: Component = () => {
         closePlan()
         return
       }
-      // Cmd/Ctrl+Shift+Enter = Execute with HQ
-      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && e.shiftKey) {
-        e.preventDefault()
-        handleApprove('hq')
-      }
       // Cmd/Ctrl+Enter = Execute plan
       if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !e.shiftKey) {
         e.preventDefault()
-        handleApprove('code')
+        handleApprove()
       }
       // Cmd/Ctrl+C when nothing selected = Copy plan
       if (e.key === 'c' && (e.metaKey || e.ctrlKey) && !window.getSelection()?.toString()) {
@@ -226,11 +221,11 @@ export const PlanOverlay: Component = () => {
     return parts.join('\n')
   }
 
-  const handleApprove = (mode: 'code' | 'hq'): void => {
+  const handleApprove = (): void => {
     const plan = activePlan()
     if (!plan) return
     agent.resolvePlan('approved', plan, undefined, collectStepComments())
-    executePlan(mode)
+    executePlan()
   }
 
   const handleReject = (): void => {
@@ -358,7 +353,7 @@ export const PlanOverlay: Component = () => {
             hasDiff={hasDiff()}
             showDiff={showDiff()}
             onBack={() => closePlan()}
-            onApprove={() => handleApprove('code')}
+            onApprove={handleApprove}
             onSendFeedback={handleReject}
             onCopy={handleCopy}
             onDownload={handleDownload}

@@ -11,10 +11,7 @@ use crate::pool::ConnectionPool;
 use crate::provider::LLMProvider;
 
 pub mod anthropic;
-pub mod azure;
-pub mod bedrock;
 pub mod copilot;
-pub mod fireworks;
 pub mod gemini;
 pub mod inception;
 pub mod mock;
@@ -23,72 +20,76 @@ pub mod openai;
 pub mod openrouter;
 
 pub use anthropic::AnthropicProvider;
-pub use azure::AzureOpenAIProvider;
-pub use bedrock::BedrockProvider;
-pub use copilot::CopilotProvider;
-pub use fireworks::FireworksProvider;
 pub use gemini::GeminiProvider;
-pub use inception::InceptionProvider;
-pub use mock::MockProvider;
 pub use ollama::OllamaProvider;
 pub use openai::OpenAIProvider;
-pub use openrouter::OpenRouterProvider;
+
+use self::copilot::CopilotProvider;
+use self::inception::InceptionProvider;
+use self::openrouter::OpenRouterProvider;
+
+// Keep select providers constructible internally without promoting their
+// concrete types as top-level core exports from this module.
+
+fn normalize_provider_alias(provider_name: &str) -> String {
+    match provider_name.to_ascii_lowercase().as_str() {
+        "chatgpt" => "openai".to_string(),
+        "google" => "gemini".to_string(),
+        "alibaba-cn" => "alibaba".to_string(),
+        "zhipuai-coding-plan" | "zai-coding-plan" => "zai".to_string(),
+        "kimi-for-coding" => "kimi".to_string(),
+        "minimax-coding-plan" | "minimax-cn-coding-plan" => "minimax".to_string(),
+        other => other.to_string(),
+    }
+}
+
+fn default_anthropic_compat_base_url(provider_name: &str, normalized: &str) -> &'static str {
+    match provider_name.to_ascii_lowercase().as_str() {
+        "alibaba-cn" => "https://coding.dashscope.aliyuncs.com/apps/anthropic/v1",
+        _ => match normalized {
+            "alibaba" => "https://coding-intl.dashscope.aliyuncs.com/apps/anthropic/v1",
+            "kimi" => "https://api.kimi.com/coding/v1",
+            "minimax" => "https://api.minimax.io/anthropic/v1",
+            _ => unreachable!(),
+        },
+    }
+}
 
 pub fn is_known_provider(provider_name: &str) -> bool {
     matches!(
-        provider_name.to_ascii_lowercase().as_str(),
+        normalize_provider_alias(provider_name).as_str(),
         "anthropic"
             | "openai"
-            | "chatgpt"
             | "openrouter"
             | "inception"
-            | "fireworks"
-            | "xai"
-            | "mistral"
-            | "groq"
-            | "deepseek"
             | "gemini"
             | "copilot"
             | "ollama"
-            | "azure"
-            | "bedrock"
             | "alibaba"
-            | "alibaba-cn"
-            | "zai-coding-plan"
-            | "zhipuai-coding-plan"
-            | "kimi-for-coding"
-            | "minimax-coding-plan"
-            | "minimax-cn-coding-plan"
+            | "zai"
+            | "kimi"
+            | "minimax"
     )
 }
 
 /// Return the default base URL for a known provider name.
-///
-/// Providers with deployment- or region-specific endpoints (for example Azure
-/// OpenAI and Bedrock) are recognized by [`is_known_provider`] but return
-/// `None` here because their base URLs must come from user credentials.
 pub fn base_url_for_provider(provider_name: &str) -> Option<&'static str> {
-    match provider_name.to_ascii_lowercase().as_str() {
+    if provider_name.eq_ignore_ascii_case("alibaba-cn") {
+        return Some("https://coding.dashscope.aliyuncs.com/apps/anthropic/v1");
+    }
+
+    match normalize_provider_alias(provider_name).as_str() {
         "anthropic" => Some("https://api.anthropic.com"),
         "openai" => Some("https://api.openai.com"),
-        "chatgpt" => Some("https://chatgpt.com/backend-api/codex"),
         "openrouter" => Some("https://openrouter.ai/api"),
         "gemini" => Some("https://generativelanguage.googleapis.com"),
         "copilot" => Some("https://api.individual.githubcopilot.com"),
         "inception" => Some("https://api.inceptionlabs.ai"),
-        "fireworks" => Some("https://api.fireworks.ai/inference"),
-        "xai" => Some("https://api.x.ai/v1"),
-        "mistral" => Some("https://api.mistral.ai/v1"),
-        "groq" => Some("https://api.groq.com/openai/v1"),
-        "deepseek" => Some("https://api.deepseek.com/v1"),
         "ollama" => Some("http://localhost:11434"),
         "alibaba" => Some("https://coding-intl.dashscope.aliyuncs.com/apps/anthropic/v1"),
-        "alibaba-cn" => Some("https://coding.dashscope.aliyuncs.com/apps/anthropic/v1"),
-        "zai-coding-plan" => Some("https://api.z.ai/api/coding/paas/v4"),
-        "zhipuai-coding-plan" => Some("https://open.bigmodel.cn/api/coding/paas/v4"),
-        "kimi-for-coding" => Some("https://api.kimi.com/coding/v1"),
-        "minimax-coding-plan" => Some("https://api.minimax.io/anthropic/v1"),
-        "minimax-cn-coding-plan" => Some("https://api.minimaxi.com/anthropic/v1"),
+        "zai" => Some("https://api.z.ai/api/coding/paas/v4"),
+        "kimi" => Some("https://api.kimi.com/coding/v1"),
+        "minimax" => Some("https://api.minimax.io/anthropic/v1"),
         _ => None,
     }
 }
@@ -112,7 +113,7 @@ fn openai_oauth_account_id(entry: &ava_config::ProviderCredential) -> Option<Str
 /// Before falling through to the credential store, callers should check whether any
 /// plugin provides auth for this provider via the plugin manager:
 ///
-/// ```rust,ignore
+/// ```text
 /// // TODO: Wire this into AgentStack or the provider creation call site.
 /// // The PluginManager is async and lives on the AgentStack, so the hook
 /// // needs to run before this synchronous function is called.
@@ -144,10 +145,10 @@ pub fn create_provider(
         )));
     }
 
-    // Normalize provider name to lowercase for matching. This handles cases where
-    // the UI or config sends "ChatGPT" instead of "chatgpt", "OpenAI" instead of
-    // "openai", etc. Credential lookup tries original name first, then normalized.
-    let normalized = provider_name.to_ascii_lowercase();
+    // Normalize provider names and legacy aliases (chatgpt->openai,
+    // alibaba-cn->alibaba, etc.). Credential lookup tries original name first,
+    // then canonical normalized key.
+    let normalized = normalize_provider_alias(provider_name);
     let credential = credentials.get(provider_name).or_else(|| {
         if normalized != provider_name {
             credentials.get(&normalized)
@@ -268,25 +269,7 @@ pub fn create_provider(
                 Ok(Box::new(InceptionProvider::new(pool, api_key, model)))
             }
         }
-        "fireworks" => {
-            let entry = credential.ok_or_else(|| AvaError::MissingApiKey {
-                provider: "fireworks".to_string(),
-            })?;
-            let api_key = entry
-                .effective_api_key()
-                .ok_or_else(|| AvaError::MissingApiKey {
-                    provider: "fireworks".to_string(),
-                })?
-                .to_string();
-            if let Some(base_url) = entry.base_url {
-                Ok(Box::new(FireworksProvider::with_base_url(
-                    pool, api_key, model, base_url,
-                )))
-            } else {
-                Ok(Box::new(FireworksProvider::new(pool, api_key, model)))
-            }
-        }
-        "gemini" => {
+        "gemini" | "google" => {
             let entry = credential.ok_or_else(|| AvaError::MissingApiKey {
                 provider: "gemini".to_string(),
             })?;
@@ -321,127 +304,8 @@ pub fn create_provider(
                 .unwrap_or_else(|| "http://localhost:11434".to_string());
             Ok(Box::new(OllamaProvider::new(pool, base_url, model)))
         }
-        "azure" => {
-            let entry = credential.ok_or_else(|| AvaError::MissingApiKey {
-                provider: "azure".to_string(),
-            })?;
-            let api_key = entry
-                .effective_api_key()
-                .ok_or_else(|| AvaError::MissingApiKey {
-                    provider: "azure".to_string(),
-                })?
-                .to_string();
-            let base_url = entry.base_url.clone().ok_or_else(|| {
-                AvaError::ConfigError(
-                    "Azure OpenAI requires providers.azure.base_url in ~/.ava/credentials.json"
-                        .to_string(),
-                )
-            })?;
-            let deployment = entry.org_id.clone().unwrap_or_else(|| model.to_string());
-            Ok(Box::new(AzureOpenAIProvider::new(
-                pool, api_key, model, base_url, deployment,
-            )))
-        }
-        "bedrock" => {
-            let entry = credential.ok_or_else(|| AvaError::MissingApiKey {
-                provider: "bedrock".to_string(),
-            })?;
-            let access_key_id = entry
-                .effective_api_key()
-                .ok_or_else(|| AvaError::MissingApiKey {
-                    provider: "bedrock".to_string(),
-                })?
-                .to_string();
-            let secret_access_key = entry.oauth_token.clone().ok_or_else(|| {
-                AvaError::ConfigError(
-                    "Bedrock requires providers.bedrock.oauth_token to store the AWS secret access key"
-                        .to_string(),
-                )
-            })?;
-            let region = entry
-                .org_id
-                .clone()
-                .unwrap_or_else(|| "us-east-1".to_string());
-            if let Some(base_url) = entry.base_url.clone() {
-                Ok(Box::new(BedrockProvider::with_base_url(
-                    pool,
-                    access_key_id,
-                    secret_access_key,
-                    region,
-                    model,
-                    base_url,
-                )))
-            } else {
-                Ok(Box::new(BedrockProvider::new(
-                    pool,
-                    access_key_id,
-                    secret_access_key,
-                    region,
-                    model,
-                )))
-            }
-        }
-        // OpenAI-compatible providers (xAI Grok, Mistral, Groq, DeepSeek)
-        "xai" | "mistral" | "groq" | "deepseek" => {
-            let entry = credential.ok_or_else(|| AvaError::MissingApiKey {
-                provider: normalized.to_string(),
-            })?;
-            let api_key = entry
-                .effective_api_key()
-                .ok_or_else(|| AvaError::MissingApiKey {
-                    provider: normalized.to_string(),
-                })?
-                .to_string();
-            let default_url = match normalized.as_str() {
-                "xai" => "https://api.x.ai/v1",
-                "mistral" => "https://api.mistral.ai/v1",
-                "groq" => "https://api.groq.com/openai/v1",
-                "deepseek" => "https://api.deepseek.com/v1",
-                _ => unreachable!(),
-            };
-            let base_url = entry.base_url.as_deref().unwrap_or(default_url);
-            Ok(Box::new(
-                OpenAIProvider::with_base_url(pool, api_key, model, base_url)
-                    .with_provider_label(normalized.clone()),
-            ))
-        }
-        // ChatGPT — explicit provider alias for the Responses API.
-        // Users can also configure OAuth under the "openai" provider name
-        // (auto-detected from OAuth-only credentials).
-        "chatgpt" => {
-            let entry = credential.ok_or_else(|| AvaError::MissingApiKey {
-                provider: "chatgpt".to_string(),
-            })?;
-            let oauth_token = entry
-                .oauth_token
-                .as_deref()
-                .or_else(|| {
-                    let key = entry.api_key.trim();
-                    if key.is_empty() {
-                        None
-                    } else {
-                        Some(key)
-                    }
-                })
-                .ok_or_else(|| AvaError::MissingApiKey {
-                    provider: "chatgpt (not connected — configure OAuth or set token)".to_string(),
-                })?
-                .to_string();
-            let base_url = entry
-                .base_url
-                .clone()
-                .unwrap_or_else(|| "https://chatgpt.com/backend-api/codex".to_string());
-            let account_id = openai_oauth_account_id(&entry);
-            Ok(Box::new(
-                OpenAIProvider::with_base_url(pool, oauth_token, model, base_url)
-                    .with_responses_api(true)
-                    .with_subscription(true)
-                    .with_provider_label("chatgpt")
-                    .with_chatgpt_account_id(account_id),
-            ))
-        }
         // OpenAI-compatible coding plan providers
-        "zai-coding-plan" | "zhipuai-coding-plan" => {
+        "zai" => {
             let entry = credential.ok_or_else(|| AvaError::MissingApiKey {
                 provider: provider_name.to_string(),
             })?;
@@ -451,16 +315,9 @@ pub fn create_provider(
                     provider: provider_name.to_string(),
                 })?
                 .to_string();
-            let default_url = match normalized.as_str() {
-                "zai-coding-plan" => "https://api.z.ai/api/coding/paas/v4",
-                "zhipuai-coding-plan" => "https://open.bigmodel.cn/api/coding/paas/v4",
-                _ => unreachable!(),
-            };
+            let default_url = "https://api.z.ai/api/coding/paas/v4";
             let base_url = entry.base_url.as_deref().unwrap_or(default_url);
-            let thinking_format = match normalized.as_str() {
-                "zai-coding-plan" | "zhipuai-coding-plan" => openai::ThinkingFormat::Zhipu,
-                _ => unreachable!(),
-            };
+            let thinking_format = openai::ThinkingFormat::Zhipu;
             Ok(Box::new(
                 OpenAIProvider::with_base_url(pool, api_key, model, base_url)
                     .with_thinking_format(thinking_format)
@@ -468,11 +325,7 @@ pub fn create_provider(
             ))
         }
         // Anthropic-compatible coding plan providers
-        "alibaba"
-        | "alibaba-cn"
-        | "kimi-for-coding"
-        | "minimax-coding-plan"
-        | "minimax-cn-coding-plan" => {
+        "alibaba" | "kimi" | "minimax" => {
             let entry = credential.ok_or_else(|| AvaError::MissingApiKey {
                 provider: provider_name.to_string(),
             })?;
@@ -481,14 +334,7 @@ pub fn create_provider(
                 .ok_or_else(|| AvaError::MissingApiKey {
                     provider: provider_name.to_string(),
                 })?;
-            let default_url = match normalized.as_str() {
-                "alibaba" => "https://coding-intl.dashscope.aliyuncs.com/apps/anthropic/v1",
-                "alibaba-cn" => "https://coding.dashscope.aliyuncs.com/apps/anthropic/v1",
-                "kimi-for-coding" => "https://api.kimi.com/coding/v1",
-                "minimax-coding-plan" => "https://api.minimax.io/anthropic/v1",
-                "minimax-cn-coding-plan" => "https://api.minimaxi.com/anthropic/v1",
-                _ => unreachable!(),
-            };
+            let default_url = default_anthropic_compat_base_url(provider_name, normalized.as_str());
             let base_url = entry.base_url.as_deref().unwrap_or(default_url);
             Ok(Box::new(
                 AnthropicProvider::with_base_url(pool, api_key, model, base_url)
@@ -498,10 +344,8 @@ pub fn create_provider(
         _ => Err(AvaError::ProviderError {
             provider: provider_name.to_string(),
             message:
-                "unknown provider. Available: anthropic, openai, chatgpt, openrouter, inception, \
-                      fireworks, xai, mistral, groq, deepseek, copilot, gemini, ollama, azure, \
-                      bedrock, alibaba, alibaba-cn, zai-coding-plan, zhipuai-coding-plan, \
-                      kimi-for-coding, minimax-coding-plan, minimax-cn-coding-plan"
+                "unknown provider. Available core providers: anthropic, openai, gemini, ollama, \
+                      openrouter, copilot, inception, alibaba, zai, kimi, minimax"
                     .to_string(),
         }),
     }
@@ -525,14 +369,9 @@ pub fn create_provider_with_plugins(
     // Downcast to AnthropicProvider to attach the plugin manager.
     // For providers that don't yet support the hook, the manager is not attached —
     // it can be added for each provider following the same pattern.
-    let normalized = provider_name.to_ascii_lowercase();
+    let normalized = normalize_provider_alias(provider_name);
     match normalized.as_str() {
-        "anthropic"
-        | "alibaba"
-        | "alibaba-cn"
-        | "kimi-for-coding"
-        | "minimax-coding-plan"
-        | "minimax-cn-coding-plan" => {
+        "anthropic" | "alibaba" | "kimi" | "minimax" => {
             // Re-create the Anthropic provider with the plugin manager attached.
             // We must re-call the constructor because Box<dyn LLMProvider> doesn't
             // give us back the concrete type.
@@ -547,14 +386,8 @@ pub fn create_provider_with_plugins(
                 let api_key = entry.effective_api_key().unwrap_or_default().to_string();
                 let is_third_party = normalized != "anthropic";
                 if is_third_party {
-                    let default_url = match normalized.as_str() {
-                        "alibaba" => "https://coding-intl.dashscope.aliyuncs.com/apps/anthropic/v1",
-                        "alibaba-cn" => "https://coding.dashscope.aliyuncs.com/apps/anthropic/v1",
-                        "kimi-for-coding" => "https://api.kimi.com/coding/v1",
-                        "minimax-coding-plan" => "https://api.minimax.io/anthropic/v1",
-                        "minimax-cn-coding-plan" => "https://api.minimaxi.com/anthropic/v1",
-                        _ => unreachable!(),
-                    };
+                    let default_url =
+                        default_anthropic_compat_base_url(provider_name, normalized.as_str());
                     let base_url = entry.base_url.as_deref().unwrap_or(default_url);
                     let new_pool = pool;
                     return Ok(Box::new(
@@ -631,14 +464,34 @@ mod tests {
         );
         assert_eq!(
             base_url_for_provider("ChatGPT"),
-            Some("https://chatgpt.com/backend-api/codex")
+            Some("https://api.openai.com")
         );
     }
 
     #[test]
-    fn is_known_provider_includes_dynamic_endpoint_providers() {
-        assert!(is_known_provider("azure"));
-        assert!(is_known_provider("bedrock"));
+    fn alibaba_cn_uses_china_region_base_url() {
+        assert_eq!(
+            base_url_for_provider("alibaba-cn"),
+            Some("https://coding.dashscope.aliyuncs.com/apps/anthropic/v1")
+        );
+    }
+
+    #[test]
+    fn removed_long_tail_providers_are_not_known() {
+        for provider in [
+            "azure",
+            "bedrock",
+            "xai",
+            "mistral",
+            "groq",
+            "deepseek",
+            "fireworks",
+        ] {
+            assert!(
+                !is_known_provider(provider),
+                "{provider} should not be known"
+            );
+        }
     }
 
     #[test]
@@ -712,20 +565,19 @@ mod tests {
         let providers_and_models = [
             ("anthropic", "claude-sonnet-4"),
             ("openai", "gpt-4.1"),
+            ("chatgpt", "gpt-4.1"),
             ("openrouter", "anthropic/claude-sonnet-4"),
             ("inception", "mercury-2"),
-            ("fireworks", "kimi-k2p5-turbo"),
-            ("xai", "grok-3"),
-            ("mistral", "mistral-large"),
-            ("groq", "llama-3.3-70b"),
-            ("deepseek", "deepseek-chat"),
             ("gemini", "gemini-2.5-pro"),
+            ("google", "gemini-2.5-pro"),
             ("ollama", "llama3.3"),
             ("alibaba", "qwen3.5-plus"),
             ("alibaba-cn", "qwen3.5-plus"),
-            ("zai-coding-plan", "glm-4.7"),
+            ("zai", "glm-4.7"),
             ("zhipuai-coding-plan", "glm-4.7"),
+            ("kimi", "k2p5"),
             ("kimi-for-coding", "k2p5"),
+            ("minimax", "MiniMax-M2"),
             ("minimax-coding-plan", "MiniMax-M2"),
             ("minimax-cn-coding-plan", "MiniMax-M2"),
         ];
@@ -749,21 +601,20 @@ mod tests {
         let expected = [
             "anthropic",
             "openai",
+            "chatgpt",
             "openrouter",
             "inception",
-            "fireworks",
-            "xai",
-            "mistral",
-            "groq",
-            "deepseek",
             "gemini",
+            "google",
             "copilot",
             "ollama",
             "alibaba",
             "alibaba-cn",
-            "zai-coding-plan",
+            "zai",
             "zhipuai-coding-plan",
+            "kimi",
             "kimi-for-coding",
+            "minimax",
             "minimax-coding-plan",
             "minimax-cn-coding-plan",
         ];
@@ -785,26 +636,24 @@ mod tests {
 
     #[test]
     fn zai_creates_openai_provider_with_correct_model() {
-        let creds = mock_creds_for(&["zai-coding-plan"]);
-        let provider =
-            create_provider("zai-coding-plan", "glm-4.7", &creds, default_pool()).unwrap();
+        let creds = mock_creds_for(&["zai"]);
+        let provider = create_provider("zai", "glm-4.7", &creds, default_pool()).unwrap();
         assert_eq!(provider.model_name(), "glm-4.7");
         assert!(provider.supports_tools());
     }
 
     #[test]
     fn kimi_creates_anthropic_compatible_provider() {
-        let creds = mock_creds_for(&["kimi-for-coding"]);
-        let provider = create_provider("kimi-for-coding", "k2p5", &creds, default_pool()).unwrap();
+        let creds = mock_creds_for(&["kimi"]);
+        let provider = create_provider("kimi", "k2p5", &creds, default_pool()).unwrap();
         assert_eq!(provider.model_name(), "k2p5");
         assert!(provider.supports_tools());
     }
 
     #[test]
     fn minimax_creates_anthropic_compatible_provider() {
-        let creds = mock_creds_for(&["minimax-coding-plan"]);
-        let provider =
-            create_provider("minimax-coding-plan", "MiniMax-M2", &creds, default_pool()).unwrap();
+        let creds = mock_creds_for(&["minimax"]);
+        let provider = create_provider("minimax", "MiniMax-M2", &creds, default_pool()).unwrap();
         assert_eq!(provider.model_name(), "MiniMax-M2");
         assert!(provider.supports_tools());
     }
@@ -887,71 +736,22 @@ mod tests {
     }
 
     #[test]
-    fn fireworks_creates_provider_with_correct_model() {
-        let creds = mock_creds_for(&["fireworks"]);
-        let provider =
-            create_provider("fireworks", "kimi-k2p5-turbo", &creds, default_pool()).unwrap();
-        assert_eq!(
-            provider.model_name(),
-            "accounts/fireworks/routers/kimi-k2p5-turbo"
-        );
-        assert!(provider.supports_tools());
-        assert!(!provider.supports_thinking());
-    }
-
-    #[test]
-    fn fireworks_fire_pass_model_is_subscription() {
-        let creds = mock_creds_for(&["fireworks"]);
-        let provider =
-            create_provider("fireworks", "kimi-k2p5-turbo", &creds, default_pool()).unwrap();
-        assert!(provider.capabilities().is_subscription);
-        assert_eq!(provider.estimate_cost(1_000_000, 1_000_000), 0.0);
-    }
-
-    #[test]
-    fn fireworks_regular_model_is_not_subscription() {
-        let creds = mock_creds_for(&["fireworks"]);
-        let provider = create_provider(
+    fn removed_long_tail_provider_errors_are_clear() {
+        for provider in [
             "fireworks",
-            "accounts/fireworks/models/llama-v3p1-405b-instruct",
-            &creds,
-            default_pool(),
-        )
-        .unwrap();
-        assert!(!provider.capabilities().is_subscription);
-    }
-
-    #[test]
-    fn xai_creates_openai_compatible_provider() {
-        let creds = mock_creds_for(&["xai"]);
-        let provider = create_provider("xai", "grok-3", &creds, default_pool()).unwrap();
-        assert_eq!(provider.model_name(), "grok-3");
-        assert!(provider.supports_tools());
-    }
-
-    #[test]
-    fn mistral_creates_openai_compatible_provider() {
-        let creds = mock_creds_for(&["mistral"]);
-        let provider = create_provider("mistral", "mistral-large", &creds, default_pool()).unwrap();
-        assert_eq!(provider.model_name(), "mistral-large");
-        assert!(provider.supports_tools());
-    }
-
-    #[test]
-    fn groq_creates_openai_compatible_provider() {
-        let creds = mock_creds_for(&["groq"]);
-        let provider = create_provider("groq", "llama-3.3-70b", &creds, default_pool()).unwrap();
-        assert_eq!(provider.model_name(), "llama-3.3-70b");
-        assert!(provider.supports_tools());
-    }
-
-    #[test]
-    fn deepseek_creates_openai_compatible_provider() {
-        let creds = mock_creds_for(&["deepseek"]);
-        let provider =
-            create_provider("deepseek", "deepseek-chat", &creds, default_pool()).unwrap();
-        assert_eq!(provider.model_name(), "deepseek-chat");
-        assert!(provider.supports_tools());
+            "xai",
+            "mistral",
+            "groq",
+            "deepseek",
+            "azure",
+            "bedrock",
+        ] {
+            let creds = mock_creds_for(&[provider]);
+            let err = create_provider(provider, "model", &creds, default_pool())
+                .err()
+                .expect("long-tail provider should not be routable");
+            assert!(err.to_string().contains("unknown provider"));
+        }
     }
 
     #[test]

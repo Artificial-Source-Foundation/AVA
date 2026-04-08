@@ -17,6 +17,16 @@ pub(crate) async fn run_tier3_validation(
         return validate_delegated_config_bugfix(temp_dir, harness.test_count).await;
     }
 
+    if [
+        "tool_reliability_timeout",
+        "tool_reliability_log_filter",
+        "tool_reliability_normalize",
+    ]
+    .contains(&task_name)
+    {
+        return validate_standalone_rust_test_dir(temp_dir, task_name, harness.test_count).await;
+    }
+
     let filename = match task_name {
         "bugfix_off_by_one" => "binary_search.rs",
         "bugfix_lifetime" => "lifetime_fix.rs",
@@ -127,6 +137,33 @@ async fn validate_delegated_config_bugfix(
     expected_test_count: usize,
 ) -> (Option<bool>, Option<usize>, Option<usize>, Option<String>) {
     let tests_path = temp_dir.join("delegated_config_bugfix").join("tests.rs");
+    let temp_dir = match tempfile::tempdir() {
+        Ok(d) => d,
+        Err(e) => {
+            return (
+                Some(false),
+                None,
+                None,
+                Some(format!("Failed to create temp dir: {}", e)),
+            );
+        }
+    };
+    let test_binary = temp_dir.path().join("bench_test");
+    compile_and_test_rust_entry(&tests_path, &test_binary, expected_test_count).await
+}
+
+async fn validate_standalone_rust_test_dir(
+    temp_dir: &Path,
+    task_name: &str,
+    expected_test_count: usize,
+) -> (Option<bool>, Option<usize>, Option<usize>, Option<String>) {
+    let dir = temp_dir.join(match task_name {
+        "tool_reliability_timeout" => "tool_reliability_timeout",
+        "tool_reliability_log_filter" => "tool_reliability_log_filter",
+        "tool_reliability_normalize" => "tool_reliability_normalize",
+        _ => unreachable!("validated by caller"),
+    });
+    let tests_path = dir.join("tests.rs");
     let temp_dir = match tempfile::tempdir() {
         Ok(d) => d,
         Err(e) => {

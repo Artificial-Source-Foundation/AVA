@@ -1,8 +1,8 @@
 [package]
 name = "ava"
-version = "2.0.0"
-description = "A Tauri App"
-authors = ["you"]
+version = "3.3.0"
+description = "Practical AI coding agent desktop app"
+authors = ["ASF Group"]
 edition = "2021"
 default-run = "ava"
 
@@ -43,10 +43,10 @@ ava-tools = { path = "../crates/ava-tools" }
 ava-db = { path = "../crates/ava-db" }
 ava-memory = { path = "../crates/ava-memory" }
 ava-permissions = { path = "../crates/ava-permissions" }
+ava-plugin = { path = "../crates/ava-plugin" }
 ava-extensions = { path = "../crates/ava-extensions" }
 ava-validator = { path = "../crates/ava-validator" }
 ava-agent = { path = "../crates/ava-agent" }
-ava-hq = { path = "../crates/ava-hq" }
 ava-llm = { path = "../crates/ava-llm" }
 ava-mcp = { path = "../crates/ava-mcp" }
 ava-session = { path = "../crates/ava-session" }

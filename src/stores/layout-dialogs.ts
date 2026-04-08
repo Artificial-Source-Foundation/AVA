@@ -110,17 +110,25 @@ export { expandedEditorOpen, setExpandedEditorOpen }
 // Right Panel Tab
 // ============================================================================
 
-export type RightPanelTab =
-  | 'activity'
-  | 'files'
-  | 'review'
-  | 'trajectory'
-  | 'team'
-  | 'todos'
-  | 'changes'
+export type RightPanelTab = 'activity' | 'files' | 'review' | 'trajectory' | 'todos' | 'changes'
+
+const RIGHT_PANEL_TABS: readonly RightPanelTab[] = [
+  'activity',
+  'files',
+  'review',
+  'trajectory',
+  'todos',
+  'changes',
+]
+
+function normalizeRightPanelTab(raw: string | null): RightPanelTab {
+  // Legacy/de-cored values (for example "team") should not re-surface in core UI.
+  if (!raw) return 'changes'
+  return RIGHT_PANEL_TABS.includes(raw as RightPanelTab) ? (raw as RightPanelTab) : 'changes'
+}
 
 const [rightPanelTab, setRightPanelTabRaw] = createSignal<RightPanelTab>(
-  loadString('ava-right-panel-tab', 'activity') as RightPanelTab
+  normalizeRightPanelTab(loadString('ava-right-panel-tab', 'changes'))
 )
 
 /** Switch right panel tab. Caller must ensure panel is visible. */

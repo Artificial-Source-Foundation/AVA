@@ -29,13 +29,13 @@ use crate::oauth::McpOAuthManager;
 use crate::transport::{HttpTransport, HttpTransportConfig, StdioTransport};
 
 // ---------------------------------------------------------------------------
-// ExtensionManager — connects to MCP servers and aggregates their tools
+// McpManager — connects to MCP servers and aggregates their tools
 // ---------------------------------------------------------------------------
 
 /// F13 — Debounce window for batching `list_changed` notifications.
 const LIST_CHANGED_DEBOUNCE_MS: u64 = 500;
 
-pub struct ExtensionManager {
+pub struct McpManager {
     /// MCP clients keyed by server name, each behind a Mutex for interior mutability.
     clients: HashMap<String, Arc<Mutex<MCPClient>>>,
     /// All discovered tools, each tagged with the server name that owns it.
@@ -46,8 +46,8 @@ pub struct ExtensionManager {
     debounce_start: Option<std::time::Instant>,
 }
 
-impl ExtensionManager {
-    /// Create a new extension manager (does not connect yet).
+impl McpManager {
+    /// Create a new MCP manager (does not connect yet).
     pub fn new() -> Self {
         Self {
             clients: HashMap::new(),
@@ -446,7 +446,7 @@ fn format_timeout(duration: Duration) -> String {
     }
 }
 
-impl Default for ExtensionManager {
+impl Default for McpManager {
     fn default() -> Self {
         Self::new()
     }
@@ -459,7 +459,7 @@ impl Default for ExtensionManager {
 /// Connect to a single MCP server and return the client + discovered tools.
 ///
 /// This is a free function (not `&mut self`) so it can run in parallel for
-/// multiple servers without requiring exclusive access to `ExtensionManager`.
+/// multiple servers without requiring exclusive access to `McpManager`.
 async fn connect_server_standalone(config: &MCPServerConfig) -> Result<(MCPClient, Vec<MCPTool>)> {
     let transport: Box<dyn crate::transport::MCPTransport> = match &config.transport {
         TransportType::Stdio { command, args, env } => {
@@ -731,7 +731,7 @@ async fn call_tool_with_progress(
     let tool = tool_name.to_string();
     let start = std::time::Instant::now();
 
-    let call_fut = ExtensionManager::call_tool_with_timeout(
+    let call_fut = McpManager::call_tool_with_timeout(
         client,
         server_name,
         tool_name,
@@ -847,7 +847,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn extension_manager_with_mock_server() {
+    async fn mcp_manager_with_mock_server() {
         let (client_transport, server_transport) = InMemoryTransport::pair();
 
         let tools = vec![
@@ -865,7 +865,7 @@ mod tests {
 
         let server_handle = tokio::spawn(run_mock_server(server_transport, tools));
 
-        let mut manager = ExtensionManager::new();
+        let mut manager = McpManager::new();
 
         // Manually connect using the in-memory transport
         let mut client = MCPClient::new(Box::new(client_transport), "mock-server");
@@ -950,7 +950,7 @@ mod tests {
         client.initialize().await.unwrap();
         let mcp_tools = client.list_tools().await.unwrap();
 
-        let mut manager = ExtensionManager::new();
+        let mut manager = McpManager::new();
         for tool in &mcp_tools {
             manager
                 .tools
@@ -960,7 +960,7 @@ mod tests {
             .clients
             .insert("mock-server".to_string(), Arc::new(Mutex::new(client)));
 
-        let err = ExtensionManager::call_tool_with_timeout(
+        let err = McpManager::call_tool_with_timeout(
             manager.clients.get("mock-server").unwrap(),
             "mock-server",
             "slow_tool",

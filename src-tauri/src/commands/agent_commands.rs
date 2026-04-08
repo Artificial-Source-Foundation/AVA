@@ -120,13 +120,12 @@ async fn run_agent_inner(
                         match tokio::fs::read_to_string(path).await {
                             Ok(content) => {
                                 let mut hist = edit_history.write().await;
-                                if hist.len() >= 100 {
+                                if hist.len() >= crate::bridge::MAX_EDIT_HISTORY {
                                     hist.pop_front();
                                 }
                                 hist.push_back(crate::bridge::FileEditRecord {
                                     file_path: path.to_string(),
                                     previous_content: content,
-                                    timestamp: chrono::Utc::now(),
                                 });
                             }
                             Err(e) => {
@@ -322,22 +321,6 @@ async fn run_agent_inner(
 
     info!(goal = %goal, "run_agent_inner: starting agent");
 
-    // Debug: write to file so we can trace desktop issues
-    let _ = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open("/tmp/ava-debug/rust-agent.log")
-        .and_then(|mut f| {
-            use std::io::Write;
-            writeln!(
-                f,
-                "[{}] run_agent_inner: goal={}, max_turns={}",
-                chrono::Utc::now(),
-                goal,
-                max_turns
-            )
-        });
-
     let result = bridge
         .stack
         .run(
@@ -361,26 +344,15 @@ async fn run_agent_inner(
     // Clean up
     bridge.clear_message_tx().await;
     *bridge.running.write().await = false;
-
-    // Debug log result
-    let _ = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open("/tmp/ava-debug/rust-agent.log")
-        .and_then(|mut f| {
-            use std::io::Write;
-            match &result {
-                Ok(r) => writeln!(
-                    f,
-                    "[{}] run_agent_inner: success={}, turns={}, session={}",
-                    chrono::Utc::now(),
-                    r.success,
-                    r.turns,
-                    r.session.id
-                ),
-                Err(e) => writeln!(f, "[{}] run_agent_inner: ERROR={}", chrono::Utc::now(), e),
-            }
-        });
+    match &result {
+        Ok(run) => info!(
+            success = run.success,
+            turns = run.turns,
+            session_id = %run.session.id,
+            "run_agent_inner: agent completed"
+        ),
+        Err(error) => tracing::warn!(error = %error, "run_agent_inner: agent failed"),
+    }
 
     match result {
         Ok(run_result) => {
@@ -587,13 +559,13 @@ pub async fn resolve_question(
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[allow(dead_code)] // Fields deserialized from frontend, used in future plan editing
 pub struct ResolvePlanArgs {
     pub response: String,
     #[serde(default)]
     pub modified_plan: Option<serde_json::Value>,
     #[serde(default)]
     pub feedback: Option<String>,
+    #[allow(dead_code)] // Deserialized from the frontend; not yet consumed in Rust plan handling.
     #[serde(default)]
     pub step_comments: Option<std::collections::HashMap<String, String>>,
 }

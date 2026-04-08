@@ -766,7 +766,7 @@ mod tests {
             protocol: AgentProtocol::CodexJsonl,
             headless_args: vec![
                 "-c".into(),
-                "stale=0; for arg in \"$@\"; do if [ \"$arg\" = \"resume\" ]; then stale=1; fi; done; if [ \"$stale\" = \"1\" ]; then echo '{\"type\":\"error\",\"message\":\"unknown session\"}'; else echo '{\"type\":\"thread.started\",\"thread_id\":\"fresh-thread\"}'; echo '{\"type\":\"turn.completed\",\"summary\":\"done\"}'; fi".into(),
+                "IFS= read -r _ || true; stale=0; for arg in \"$@\"; do if [ \"$arg\" = \"resume\" ]; then stale=1; fi; done; if [ \"$stale\" = \"1\" ]; then echo '{\"type\":\"error\",\"message\":\"unknown session\"}'; else echo '{\"type\":\"thread.started\",\"thread_id\":\"fresh-thread\"}'; echo '{\"type\":\"turn.completed\",\"summary\":\"done\"}'; fi".into(),
                 "sh".into(),
             ],
             trailing_args: vec![],

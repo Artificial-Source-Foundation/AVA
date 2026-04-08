@@ -5,7 +5,7 @@
 
 import { type Accessor, createSignal, onCleanup } from 'solid-js'
 
-/** Minimal event subscription via DOM CustomEvents (replaces @ava/core-v2/extensions onEvent) */
+/** Minimal event subscription via shared DOM CustomEvents. */
 function onEvent(eventName: string, handler: (data: unknown) => void): { dispose: () => void } {
   const listener = (e: Event) => {
     handler((e as CustomEvent).detail)

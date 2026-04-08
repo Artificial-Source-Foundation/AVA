@@ -14,7 +14,6 @@ import type {
   GenerationSettings,
   GitSettings,
   NotificationSettings,
-  TeamConfig,
   UISettings,
 } from './settings-types'
 
@@ -61,7 +60,6 @@ export const DEFAULT_GENERATION: GenerationSettings = {
   reasoningEffort: 'off',
   autoCompact: true,
   compactionThreshold: 80,
-  delegationEnabled: false,
 }
 
 export const DEFAULT_AGENT_LIMITS: AgentLimitSettings = {
@@ -94,37 +92,6 @@ export const DEFAULT_GIT: GitSettings = {
   commitPrefix: '[ava]',
 }
 
-export const DEFAULT_TEAM: TeamConfig = {
-  enabled: false,
-  defaultDirectorModel: '',
-  defaultLeadModel: '',
-  defaultWorkerModel: '',
-  defaultScoutModel: '',
-  workerNames: [
-    'Pedro',
-    'Sofia',
-    'Luna',
-    'Kai',
-    'Mira',
-    'Rio',
-    'Ash',
-    'Nico',
-    'Ivy',
-    'Juno',
-    'Zara',
-    'Leo',
-  ],
-  leads: [
-    { domain: 'backend', enabled: true, model: '', customPrompt: '', maxWorkers: 3 },
-    { domain: 'frontend', enabled: true, model: '', customPrompt: '', maxWorkers: 3 },
-    { domain: 'qa', enabled: true, model: '', customPrompt: '', maxWorkers: 2 },
-    { domain: 'research', enabled: true, model: '', customPrompt: '', maxWorkers: 2 },
-    { domain: 'devops', enabled: false, model: '', customPrompt: '', maxWorkers: 2 },
-    { domain: 'debug', enabled: false, model: '', customPrompt: '', maxWorkers: 2 },
-    { domain: 'fullstack', enabled: true, model: '', customPrompt: '', maxWorkers: 3 },
-  ],
-}
-
 export const DEFAULT_SETTINGS: AppSettings = {
   onboardingComplete: false,
   theme: 'glass',
@@ -150,6 +117,4 @@ export const DEFAULT_SETTINGS: AppSettings = {
   customRules: [],
   hiddenBuiltInSkills: [],
   trustedFolders: { allowed: [], denied: [] },
-  agentBackend: 'core-v2',
-  team: { ...DEFAULT_TEAM },
 }

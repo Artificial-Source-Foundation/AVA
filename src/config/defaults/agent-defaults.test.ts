@@ -5,7 +5,6 @@ import {
   legacyAgentPresets,
   resolveAgentIcon,
 } from './agent-defaults'
-import { hqAgentPresets } from './hq-presets'
 
 // ============================================================================
 // AGENT_ICONS registry
@@ -77,85 +76,6 @@ describe('resolveAgentIcon', () => {
 })
 
 // ============================================================================
-// HQ agent presets
-// ============================================================================
-
-describe('hqAgentPresets', () => {
-  it('contains 14 presets', () => {
-    expect(hqAgentPresets.length).toBe(14)
-  })
-
-  it('all presets have unique IDs', () => {
-    const ids = hqAgentPresets.map((p) => p.id)
-    expect(new Set(ids).size).toBe(ids.length)
-  })
-
-  it('all presets are enabled by default', () => {
-    for (const preset of hqAgentPresets) {
-      expect(preset.enabled).toBe(true)
-    }
-  })
-
-  it('has exactly 1 commander', () => {
-    const commanders = hqAgentPresets.filter((p) => p.tier === 'commander')
-    expect(commanders.length).toBe(1)
-    expect(commanders[0].id).toBe('commander')
-  })
-
-  it('has 4 leads', () => {
-    const leads = hqAgentPresets.filter((p) => p.tier === 'lead')
-    expect(leads.length).toBe(4)
-  })
-
-  it('has 9 workers', () => {
-    const workers = hqAgentPresets.filter((p) => p.tier === 'worker')
-    expect(workers.length).toBe(9)
-  })
-
-  it('commander delegates only to leads and planner/architect', () => {
-    const commander = hqAgentPresets.find((p) => p.id === 'commander')!
-    expect(commander.delegates).toBeDefined()
-    // All delegates should be either leads or the planner/architect workers
-    const leadIds = hqAgentPresets.filter((p) => p.tier === 'lead').map((p) => p.id)
-    const specialWorkers = ['planner', 'architect']
-    for (const delegateId of commander.delegates!) {
-      expect([...leadIds, ...specialWorkers]).toContain(delegateId)
-    }
-  })
-
-  it('leads delegate to workers', () => {
-    const leads = hqAgentPresets.filter((p) => p.tier === 'lead')
-    const workerIds = hqAgentPresets.filter((p) => p.tier === 'worker').map((p) => p.id)
-    for (const lead of leads) {
-      expect(lead.delegates).toBeDefined()
-      for (const delegateId of lead.delegates!) {
-        expect(workerIds).toContain(delegateId)
-      }
-    }
-  })
-
-  it('workers do not have delegates', () => {
-    const workers = hqAgentPresets.filter((p) => p.tier === 'worker')
-    for (const worker of workers) {
-      expect(worker.delegates).toBeUndefined()
-    }
-  })
-
-  it('all presets have a domain', () => {
-    for (const preset of hqAgentPresets) {
-      expect(preset.domain).toBeDefined()
-      expect(typeof preset.domain).toBe('string')
-    }
-  })
-
-  it('all presets have non-empty capabilities', () => {
-    for (const preset of hqAgentPresets) {
-      expect(preset.capabilities.length).toBeGreaterThan(0)
-    }
-  })
-})
-
-// ============================================================================
 // Legacy agent presets
 // ============================================================================
 
@@ -186,8 +106,8 @@ describe('legacyAgentPresets', () => {
 // ============================================================================
 
 describe('defaultAgentPresets', () => {
-  it('combines hq and legacy presets', () => {
-    expect(defaultAgentPresets.length).toBe(hqAgentPresets.length + legacyAgentPresets.length)
+  it('contains only the core legacy presets', () => {
+    expect(defaultAgentPresets.length).toBe(legacyAgentPresets.length)
   })
 
   it('all IDs are unique across combined set', () => {
@@ -195,12 +115,8 @@ describe('defaultAgentPresets', () => {
     expect(new Set(ids).size).toBe(ids.length)
   })
 
-  it('hq presets come first', () => {
-    // First item should be the commander
-    expect(defaultAgentPresets[0].id).toBe('commander')
-    // Last items should be legacy
-    const lastFive = defaultAgentPresets.slice(-5)
-    expect(lastFive.map((p) => p.id)).toEqual(legacyAgentPresets.map((p) => p.id))
+  it('matches the legacy preset order exactly', () => {
+    expect(defaultAgentPresets.map((p) => p.id)).toEqual(legacyAgentPresets.map((p) => p.id))
   })
 
   it('each preset has required fields', () => {

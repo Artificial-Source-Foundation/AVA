@@ -62,15 +62,12 @@ describe('isOAuthSupported', () => {
   it('returns false for unsupported providers', () => {
     for (const p of [
       'anthropic',
-      'google',
-      'xai',
-      'mistral',
-      'groq',
-      'deepseek',
-      'cohere',
-      'together',
+      'gemini',
+      'openrouter',
+      'inception',
+      'alibaba',
       'kimi',
-      'glm',
+      'minimax',
       'ollama',
     ] as LLMProvider[]) {
       expect(isOAuthSupported(p)).toBe(false)
@@ -96,7 +93,7 @@ describe('getOAuthConfig', () => {
 
   it('returns null for unsupported providers', () => {
     expect(getOAuthConfig('ollama')).toBeNull()
-    expect(getOAuthConfig('groq')).toBeNull()
+    expect(getOAuthConfig('anthropic')).toBeNull()
   })
 })
 

@@ -63,3 +63,25 @@ export interface PluginState {
   sourceUrl?: string
   scope?: PluginScope
 }
+
+export interface PluginAppEvent {
+  event: string
+  payload: unknown
+}
+
+export interface PluginMountSpec {
+  id: string
+  location: string
+  label: string
+  description?: string
+}
+
+export interface PluginMountRegistration {
+  plugin: string
+  mount: PluginMountSpec
+}
+
+export interface PluginHostInvokeResult {
+  result: unknown
+  emittedEvents: PluginAppEvent[]
+}

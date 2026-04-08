@@ -2,6 +2,7 @@ use crate::app::{AppState, ModalType, ViewMode};
 use crate::state::agent::AgentActivity;
 use crate::state::messages::spinner_frame;
 use crate::state::voice::VoicePhase;
+use crate::ui::layout::content_margin;
 use crate::widgets::safe_render::{clamp_line, to_static_line};
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
@@ -52,18 +53,6 @@ impl StatusMessage {
     }
 }
 
-// --- Token formatting ---
-
-fn format_tokens(n: usize) -> String {
-    if n >= 1_000_000 {
-        format!("{:.1}M", n as f64 / 1_000_000.0)
-    } else if n >= 1_000 {
-        format!("{:.1}K", n as f64 / 1_000.0)
-    } else {
-        n.to_string()
-    }
-}
-
 fn format_elapsed(secs: u64) -> String {
     if secs >= 3600 {
         format!(
@@ -84,22 +73,41 @@ const H_PAD: &str = "  ";
 /// Design: gap between hint items 16px → 2 chars
 const ITEM_GAP: &str = "  ";
 
+fn inset_area(area: Rect) -> Rect {
+    let margin = content_margin(area.width);
+    Rect {
+        x: area.x.saturating_add(margin),
+        y: area.y,
+        width: area.width.saturating_sub(margin * 2),
+        height: area.height,
+    }
+}
+
+pub fn should_render_context_bar(state: &AppState) -> bool {
+    state.active_modal.is_some()
+        || matches!(
+            state.view_mode,
+            ViewMode::SubAgent { .. } | ViewMode::BackgroundTask { .. }
+        )
+}
+
 // --- Top bar ---
-// Design: height=36, bg=#131720, padding=[0,20], justify=space_between
-// Left: AVA (bold blue) │ session_id (muted)
-// Right: permission mode badge
+// Design: quiet one-line shell identity.
 
 pub fn render_top(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
-    // Defensive: ensure every cell in this area is explicitly painted.
+    let area = inset_area(area);
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
     frame.render_widget(ratatui::widgets::Clear, area);
-    let sep = Span::styled(" \u{2502} ", Style::default().fg(state.theme.text_dimmed));
+    let sep = Span::styled("  ", Style::default());
 
     let mut left_spans = vec![
         Span::raw(H_PAD),
         Span::styled(
             "AVA",
             Style::default()
-                .fg(state.theme.primary)
+                .fg(state.theme.text)
                 .add_modifier(Modifier::BOLD),
         ),
     ];
@@ -114,7 +122,7 @@ pub fn render_top(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
             &short_id
         };
         left_spans.push(Span::styled(
-            display.to_string(),
+            format!("[{display}]"),
             Style::default().fg(state.theme.text_muted),
         ));
     }
@@ -143,17 +151,6 @@ pub fn render_top(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
             ));
         }
         VoicePhase::Idle => {}
-    }
-
-    // Status message (TTL)
-    if let Some(ref msg) = state.status_message {
-        let color = match msg.level {
-            StatusLevel::Info => state.theme.text_muted,
-            StatusLevel::Warn => state.theme.warning,
-            StatusLevel::Error => state.theme.error,
-        };
-        left_spans.push(sep);
-        left_spans.push(Span::styled(&msg.text, Style::default().fg(color)));
     }
 
     // BTW branch indicator
@@ -186,35 +183,35 @@ pub fn render_top(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
         }
     }
 
+    let mut right_spans: Vec<Span<'_>> = Vec::new();
+
     // Calculate widths and fill remaining space
     let left_width: usize = left_spans
         .iter()
         .map(|s| crate::text_utils::span_display_width(s))
         .sum();
-    let gap = (area.width as usize).saturating_sub(left_width + H_PAD.len());
+    let right_width: usize = right_spans
+        .iter()
+        .map(|s| crate::text_utils::span_display_width(s))
+        .sum::<usize>()
+        + H_PAD.len();
+    let gap = (area.width as usize).saturating_sub(left_width + right_width);
 
+    let mut all_spans = left_spans;
     if gap > 0 {
-        left_spans.push(Span::raw(" ".repeat(gap)));
+        all_spans.push(Span::raw(" ".repeat(gap)));
     }
-    left_spans.push(Span::raw(H_PAD));
+    all_spans.append(&mut right_spans);
+    all_spans.push(Span::raw(H_PAD));
 
     // Clamp the final line to the area width
-    let final_line = clamp_line(to_static_line(Line::from(left_spans)), area.width as usize);
+    let final_line = clamp_line(to_static_line(Line::from(all_spans)), area.width as usize);
 
-    // Fill bg first, then render text centered vertically
+    // Render a single quiet row with no explicit separator.
     let bg = ratatui::widgets::Block::default().style(Style::default().bg(state.theme.bg_surface));
     frame.render_widget(bg, area);
-
-    // Center single line vertically in the 2-row area
-    let text_y = area.y + (area.height.saturating_sub(1)) / 2;
-    let text_area = Rect {
-        x: area.x,
-        y: text_y,
-        width: area.width,
-        height: 1,
-    };
     let widget = Paragraph::new(final_line);
-    frame.render_widget(widget, text_area);
+    frame.render_widget(widget, area);
 }
 
 // --- Context bar (below composer) ---
@@ -223,7 +220,10 @@ pub fn render_top(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
 // Right: tokens + cost + model badge (gap=16)
 
 pub fn render_context_bar(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
-    // Defensive: ensure every cell in this area is explicitly painted.
+    let area = inset_area(area);
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
     frame.render_widget(ratatui::widgets::Clear, area);
     let spinner_tick = state.messages.spinner_tick;
 
@@ -247,7 +247,7 @@ pub fn render_context_bar(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
         };
         render_hints(&mut left_spans, &hints, state);
     } else if state.agent.is_running {
-        // Spinner + activity + interrupt hint
+        // Spinner + activity + a single interrupt cue
         let (activity, style) = if let AgentActivity::ExecutingTool(ref name) = state.agent.activity
         {
             let elapsed_str = state
@@ -291,7 +291,7 @@ pub fn render_context_bar(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
         // Workflow phase
         if let Some((idx, count, name)) = &state.agent.workflow_phase {
             left_spans.push(Span::styled(
-                format!("{ITEM_GAP}Phase {}/{}: {}", idx + 1, count, name),
+                format!("{ITEM_GAP}{}/{} {}", idx + 1, count, name),
                 Style::default().fg(state.theme.text_muted),
             ));
         }
@@ -301,22 +301,14 @@ pub fn render_context_bar(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
         if queue_count > 0 {
             left_spans.push(Span::raw(ITEM_GAP));
             left_spans.push(Span::styled(
-                format!("[{queue_count} queued]"),
-                Style::default()
-                    .fg(state.theme.accent)
-                    .add_modifier(Modifier::BOLD),
+                format!("{queue_count} queued"),
+                Style::default().fg(state.theme.text_muted),
             ));
         }
 
         left_spans.push(Span::raw(ITEM_GAP));
         left_spans.push(Span::styled(
-            "esc",
-            Style::default()
-                .fg(state.theme.text_muted)
-                .add_modifier(Modifier::BOLD),
-        ));
-        left_spans.push(Span::styled(
-            " interrupt",
+            "esc interrupt",
             Style::default().fg(state.theme.text_dimmed),
         ));
     } else if matches!(
@@ -324,77 +316,17 @@ pub fn render_context_bar(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
         ViewMode::SubAgent { .. } | ViewMode::BackgroundTask { .. }
     ) {
         // Sub-agent or background task view hints
-        let hints: &[(&str, &str)] = &[("Esc", "back to main"), ("PgUp/PgDn", "scroll")];
+        let hints: &[(&str, &str)] = &[("Esc", "back")];
         render_hints(&mut left_spans, hints, state);
     } else {
-        // Idle hints
-        let hints: &[(&str, &str)] = &[
-            ("/", "commands"),
-            ("Ctrl+M", "model"),
-            ("Ctrl+K", "palette"),
-        ];
-        render_hints(&mut left_spans, hints, state);
+        return;
     }
 
-    // Right side: tokens, cost, model badge
-    let mut right_spans: Vec<Span<'static>> = Vec::new();
-
-    // Context window usage: used/max
-    let used_tokens = state.agent.tokens_used.input + state.agent.tokens_used.output;
-    let token_text = {
-        let used = format_tokens(used_tokens);
-        if let Some(ctx) = state.agent.context_window {
-            let pct = if ctx > 0 {
-                (used_tokens as f64 / ctx as f64 * 100.0).round() as usize
-            } else {
-                0
-            };
-            format!("{used}/{} ({pct}%)", format_tokens(ctx))
-        } else {
-            used
-        }
-    };
-    if used_tokens > 0 {
-        right_spans.push(Span::styled(
-            token_text,
-            Style::default().fg(state.theme.text_dimmed),
-        ));
-    }
-
-    // Cost
-    if state.agent.cost > 0.0 {
-        if !right_spans.is_empty() {
-            right_spans.push(Span::raw(ITEM_GAP));
-        }
-        right_spans.push(Span::styled(
-            format!("${:.2}", state.agent.cost),
-            Style::default().fg(state.theme.text_muted),
-        ));
-    }
-
-    // Model badge
-    if !right_spans.is_empty() {
-        right_spans.push(Span::raw(ITEM_GAP));
-    }
-    right_spans.push(Span::styled(
-        state.agent.model_name.clone(),
-        Style::default()
-            .fg(state.theme.primary)
-            .add_modifier(Modifier::BOLD),
-    ));
-
-    // Thinking badge: show level for models that support it, just "thinking" for native thinkers
-    if state.agent.thinking_level != ava_types::ThinkingLevel::Off
-        && state.agent.model_supports_thinking()
-    {
-        right_spans.push(Span::raw(" "));
-        let badge = if state.agent.model_supports_thinking_levels() {
-            format!("thinking:{}", state.agent.thinking_level.label())
-        } else {
-            "thinking".to_string()
-        };
-        right_spans.push(Span::styled(badge, Style::default().fg(state.theme.accent)));
-    }
+    // Right side: keep the running/status strip light.
+    let right_spans: Vec<Span<'static>> = vec![Span::styled(
+        state.agent.activity.to_string(),
+        Style::default().fg(state.theme.text_dimmed),
+    )];
 
     // Fill gap between left and right
     let left_width: usize = left_spans
@@ -418,20 +350,11 @@ pub fn render_context_bar(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
     // Clamp the final line to the area width
     let final_line = clamp_line(Line::from(all_spans), area.width as usize);
 
-    // Fill bg first, then render text centered vertically
+    // Single quiet footer row with no extra rule.
     let bg = Block::default().style(Style::default().bg(state.theme.bg_surface));
     frame.render_widget(bg, area);
-
-    // Pin text to bottom row — padding row sits between composer and text
-    let text_y = area.y + area.height.saturating_sub(1);
-    let text_area = Rect {
-        x: area.x,
-        y: text_y,
-        width: area.width,
-        height: 1,
-    };
     let widget = Paragraph::new(final_line);
-    frame.render_widget(widget, text_area);
+    frame.render_widget(widget, area);
 }
 
 /// Render a list of (key, description) hint pairs with consistent styling.

@@ -1,5 +1,5 @@
 /**
- * Skills Settings Tab — AI section
+ * Skills Settings Tab — Tools section
  *
  * Dedicated tab for managing context-aware instruction modules (skills).
  * Skills are markdown files with instructions that get injected into the
@@ -16,6 +16,7 @@ import { type Component, createMemo, createSignal, For, Show } from 'solid-js'
 import { useSettings } from '../../../stores/settings'
 import type { CustomSkill } from '../../../stores/settings/settings-types'
 import { SETTINGS_CARD_GAP } from '../settings-constants'
+import { RulesAndCommandsContent } from './SkillsTab'
 import { SkillForm } from './skills-tab-card'
 import { BUILT_IN_SKILLS } from './skills-tab-data'
 
@@ -630,6 +631,8 @@ export const SkillsSettingsTab: Component = () => {
           </p>
         </div>
       </div>
+
+      <RulesAndCommandsContent />
     </div>
   )
 }

@@ -203,5 +203,3 @@ export interface Workflow {
 export * from './plugin'
 // Project types
 export * from './project'
-// Team types
-export * from './team'

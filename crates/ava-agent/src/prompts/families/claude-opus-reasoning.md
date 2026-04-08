@@ -1,0 +1,1 @@
+- Use adaptive thinking for genuinely hard tasks (architecture, complex refactors). For simple edits, keep thinking minimal.

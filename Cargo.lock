@@ -257,15 +257,18 @@ checksum = "c08606f8c3cbf4ce6ec8e28fb0014a2c086708fe954eaa885384a6165172e7e8"
 
 [[package]]
 name = "ava-acp"
-version = "3.0.1"
+version = "3.3.0"
 dependencies = [
  "async-stream",
  "async-trait",
  "ava-llm",
  "ava-types",
  "futures",
+ "hex",
+ "reqwest",
  "serde",
  "serde_json",
+ "sha2",
  "tempfile",
  "tokio",
  "tokio-stream",
@@ -275,7 +278,7 @@ dependencies = [
 
 [[package]]
 name = "ava-agent"
-version = "3.0.1"
+version = "3.3.0"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -283,7 +286,6 @@ dependencies = [
  "ava-codebase",
  "ava-config",
  "ava-context",
- "ava-hq",
  "ava-llm",
  "ava-mcp",
  "ava-memory",
@@ -313,7 +315,7 @@ dependencies = [
 
 [[package]]
 name = "ava-auth"
-version = "3.0.1"
+version = "3.3.0"
 dependencies = [
  "base64",
  "open",
@@ -332,7 +334,7 @@ dependencies = [
 
 [[package]]
 name = "ava-codebase"
-version = "3.0.1"
+version = "3.3.0"
 dependencies = [
  "petgraph",
  "regex",
@@ -345,7 +347,7 @@ dependencies = [
 
 [[package]]
 name = "ava-config"
-version = "3.0.1"
+version = "3.3.0"
 dependencies = [
  "aes-gcm",
  "ava-auth",
@@ -355,7 +357,6 @@ dependencies = [
  "keyring",
  "pbkdf2",
  "rand 0.8.5",
- "reqwest",
  "rpassword",
  "serde",
  "serde_json",
@@ -370,7 +371,7 @@ dependencies = [
 
 [[package]]
 name = "ava-context"
-version = "3.0.1"
+version = "3.3.0"
 dependencies = [
  "async-trait",
  "ava-types",
@@ -385,7 +386,7 @@ dependencies = [
 
 [[package]]
 name = "ava-db"
-version = "3.0.1"
+version = "3.3.0"
 dependencies = [
  "ava-types",
  "chrono",
@@ -400,7 +401,7 @@ dependencies = [
 
 [[package]]
 name = "ava-extensions"
-version = "3.0.1"
+version = "3.3.0"
 dependencies = [
  "chrono",
  "dirs-next",
@@ -416,7 +417,7 @@ dependencies = [
 
 [[package]]
 name = "ava-hq"
-version = "3.0.1"
+version = "3.3.0"
 dependencies = [
  "async-trait",
  "ava-acp",
@@ -424,24 +425,25 @@ dependencies = [
  "ava-context",
  "ava-llm",
  "ava-platform",
+ "ava-review",
  "ava-tools",
  "ava-types",
  "chrono",
  "fs2",
  "futures",
- "regex",
  "serde",
  "serde_json",
  "tempfile",
  "tokio",
  "tokio-util",
+ "toml",
  "tracing",
  "uuid",
 ]
 
 [[package]]
 name = "ava-llm"
-version = "3.0.1"
+version = "3.3.0"
 dependencies = [
  "async-trait",
  "ava-auth",
@@ -464,7 +466,7 @@ dependencies = [
 
 [[package]]
 name = "ava-mcp"
-version = "3.0.1"
+version = "3.3.0"
 dependencies = [
  "async-trait",
  "ava-tools",
@@ -489,7 +491,7 @@ dependencies = [
 
 [[package]]
 name = "ava-memory"
-version = "3.0.1"
+version = "3.3.0"
 dependencies = [
  "rusqlite",
  "tempfile",
@@ -498,7 +500,7 @@ dependencies = [
 
 [[package]]
 name = "ava-permissions"
-version = "3.0.1"
+version = "3.3.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -520,7 +522,7 @@ dependencies = [
 
 [[package]]
 name = "ava-platform"
-version = "3.0.1"
+version = "3.3.0"
 dependencies = [
  "async-trait",
  "ava-types",
@@ -536,7 +538,7 @@ dependencies = [
 
 [[package]]
 name = "ava-plugin"
-version = "3.0.1"
+version = "3.3.0"
 dependencies = [
  "async-trait",
  "ava-types",
@@ -552,8 +554,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "ava-review"
+version = "3.3.0"
+dependencies = [
+ "ava-agent",
+ "ava-context",
+ "ava-llm",
+ "ava-platform",
+ "ava-tools",
+ "ava-types",
+ "futures",
+ "regex",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "ava-sandbox"
-version = "3.0.1"
+version = "3.3.0"
 dependencies = [
  "serde",
  "thiserror 1.0.69",
@@ -563,7 +583,7 @@ dependencies = [
 
 [[package]]
 name = "ava-session"
-version = "3.0.1"
+version = "3.3.0"
 dependencies = [
  "ava-types",
  "chrono",
@@ -577,7 +597,7 @@ dependencies = [
 
 [[package]]
 name = "ava-tools"
-version = "3.0.1"
+version = "3.3.0"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -616,7 +636,7 @@ dependencies = [
 
 [[package]]
 name = "ava-tui"
-version = "3.0.1"
+version = "3.3.0"
 dependencies = [
  "arboard",
  "async-trait",
@@ -633,6 +653,7 @@ dependencies = [
  "ava-permissions",
  "ava-platform",
  "ava-plugin",
+ "ava-review",
  "ava-session",
  "ava-tools",
  "ava-types",
@@ -660,6 +681,7 @@ dependencies = [
  "serde_yaml",
  "similar",
  "syntect",
+ "sysinfo",
  "tar",
  "tempfile",
  "time",
@@ -678,7 +700,7 @@ dependencies = [
 
 [[package]]
 name = "ava-types"
-version = "3.0.1"
+version = "3.3.0"
 dependencies = [
  "base64",
  "chrono",
@@ -692,7 +714,7 @@ dependencies = [
 
 [[package]]
 name = "ava-validator"
-version = "3.0.1"
+version = "3.3.0"
 dependencies = [
  "criterion",
  "tracing",
@@ -1250,7 +1272,7 @@ dependencies = [
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
- "windows",
+ "windows 0.54.0",
 ]
 
 [[package]]
@@ -2796,9 +2818,9 @@ dependencies = [
 
 [[package]]
 name = "libsqlite3-sys"
-version = "0.28.0"
+version = "0.30.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0c10584274047cb335c23d3e61bcef8e323adae7c5c8c760540f73610177fc3f"
+checksum = "2e99fb7a497b1e3339bc746195567ed8d3e24945ecd636e3619d20b9de9e9149"
 dependencies = [
  "cc",
  "pkg-config",
@@ -2861,9 +2883,9 @@ checksum = "112b39cec0b298b6c1999fee3e31427f74f676e4cb9879ed1a121b43661a4154"
 
 [[package]]
 name = "lz4_flex"
-version = "0.11.5"
+version = "0.11.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "08ab2867e3eeeca90e844d1940eab391c9dc5228783db2ed999acbc0a9ed375a"
+checksum = "373f5eceeeab7925e0c1098212f2fbc4d416adec9d35051a6ab251e824c1854a"
 
 [[package]]
 name = "mach2"
@@ -3052,6 +3074,15 @@ dependencies = [
  "mio 0.8.11",
  "walkdir",
  "windows-sys 0.48.0",
+]
+
+[[package]]
+name = "ntapi"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c3b335231dfd352ffb0f8017f3b6027a4917f7df785ea2143d8af2adc66980ae"
+dependencies = [
+ "winapi",
 ]
 
 [[package]]
@@ -3981,9 +4012,9 @@ dependencies = [
 
 [[package]]
 name = "rusqlite"
-version = "0.31.0"
+version = "0.32.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b838eba278d213a8beaf485bd313fd580ca4505a00d5871caeb1457c55322cae"
+checksum = "7753b721174eb8ff87a9a0e799e2d7bc3749323e773db92e0984debb00019d6e"
 dependencies = [
  "bitflags 2.11.0",
  "fallible-iterator",
@@ -4073,9 +4104,9 @@ dependencies = [
 
 [[package]]
 name = "rustls-webpki"
-version = "0.103.9"
+version = "0.103.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d7df23109aa6c1567d1c575b9952556388da57401e4ace1d15f79eedad0d8f53"
+checksum = "df33b2b81ac578cabaf06b89b0631153a3f416b0a886e8a7a1707fb51abbd1ef"
 dependencies = [
  "ring",
  "rustls-pki-types",
@@ -4368,9 +4399,9 @@ dependencies = [
 
 [[package]]
 name = "sqlx"
-version = "0.8.0"
+version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "27144619c6e5802f1380337a209d2ac1c431002dd74c6e60aebff3c506dc4f0c"
+checksum = "fcfa89bea9500db4a0d038513d7a060566bfc51d46d1c014847049a45cce85e8"
 dependencies = [
  "sqlx-core",
  "sqlx-macros",
@@ -4381,9 +4412,9 @@ dependencies = [
 
 [[package]]
 name = "sqlx-core"
-version = "0.8.0"
+version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a999083c1af5b5d6c071d34a708a19ba3e02106ad82ef7bbd69f5e48266b613b"
+checksum = "d06e2f2bd861719b1f3f0c7dbe1d80c30bf59e76cf019f07d9014ed7eefb8e08"
 dependencies = [
  "atoi",
  "byteorder",
@@ -4422,9 +4453,9 @@ dependencies = [
 
 [[package]]
 name = "sqlx-macros"
-version = "0.8.0"
+version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a23217eb7d86c584b8cbe0337b9eacf12ab76fe7673c513141ec42565698bb88"
+checksum = "2f998a9defdbd48ed005a89362bd40dd2117502f15294f61c8d47034107dbbdc"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4435,9 +4466,9 @@ dependencies = [
 
 [[package]]
 name = "sqlx-macros-core"
-version = "0.8.0"
+version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1a099220ae541c5db479c6424bdf1b200987934033c2584f79a0e1693601e776"
+checksum = "3d100558134176a2629d46cec0c8891ba0be8910f7896abfdb75ef4ab6f4e7ce"
 dependencies = [
  "dotenvy",
  "either",
@@ -4461,9 +4492,9 @@ dependencies = [
 
 [[package]]
 name = "sqlx-mysql"
-version = "0.8.0"
+version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5afe4c38a9b417b6a9a5eeffe7235d0a106716495536e7727d1c7f4b1ff3eba6"
+checksum = "936cac0ab331b14cb3921c62156d913e4c15b74fb6ec0f3146bd4ef6e4fb3c12"
 dependencies = [
  "atoi",
  "base64",
@@ -4505,9 +4536,9 @@ dependencies = [
 
 [[package]]
 name = "sqlx-postgres"
-version = "0.8.0"
+version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b1dbb157e65f10dbe01f729339c06d239120221c9ad9fa0ba8408c4cc18ecf21"
+checksum = "9734dbce698c67ecf67c442f768a5e90a49b2a4d61a9f1d59f73874bd4cf0710"
 dependencies = [
  "atoi",
  "base64",
@@ -4545,9 +4576,9 @@ dependencies = [
 
 [[package]]
 name = "sqlx-sqlite"
-version = "0.8.0"
+version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9b2cdd83c008a622d94499c0006d8ee5f821f36c89b7d625c900e5dc30b5c5ee"
+checksum = "a75b419c3c1b1697833dd927bdc4c6545a620bc1bbafabd44e1efbe9afcd337e"
 dependencies = [
  "atoi",
  "chrono",
@@ -4675,6 +4706,21 @@ dependencies = [
  "thiserror 2.0.18",
  "walkdir",
  "yaml-rust",
+]
+
+[[package]]
+name = "sysinfo"
+version = "0.30.13"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0a5b4ddaee55fb2bea2bf0e5000747e5f5c0de765e5a5ff87f4cd106439f4bb3"
+dependencies = [
+ "cfg-if",
+ "core-foundation-sys",
+ "libc",
+ "ntapi",
+ "once_cell",
+ "rayon",
+ "windows 0.52.0",
 ]
 
 [[package]]
@@ -5779,11 +5825,30 @@ checksum = "712e227841d057c1ee1cd2fb22fa7e5a5461ae8e48fa2ca79ec42cfc1931183f"
 
 [[package]]
 name = "windows"
+version = "0.52.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e48a53791691ab099e5e2ad123536d0fff50652600abaf43bbf952894110d0be"
+dependencies = [
+ "windows-core 0.52.0",
+ "windows-targets 0.52.6",
+]
+
+[[package]]
+name = "windows"
 version = "0.54.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9252e5725dbed82865af151df558e754e4a3c2c30818359eb17465f1346a1b49"
 dependencies = [
  "windows-core 0.54.0",
+ "windows-targets 0.52.6",
+]
+
+[[package]]
+name = "windows-core"
+version = "0.52.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "33ab640c8d7e35bf8ba19b884ba838ceb4fba93a4e8c65a9059d08afcfc683d9"
+dependencies = [
  "windows-targets 0.52.6",
 ]
 

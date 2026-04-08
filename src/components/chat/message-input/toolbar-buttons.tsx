@@ -3,12 +3,11 @@
  *
  * Strip sub-components:
  * - ReasoningDropdown — brain icon + effort level, cycles Off→Low→Med→High
- * - DelegationToggle — users icon, toggles team delegation on/off
  * - PlanActSlider — Cline-style animated two-segment slider
  * - PermissionBadge — styled pill cycling through permission modes
  */
 
-import { Brain, Shield, ShieldAlert, ShieldOff, Users } from 'lucide-solid'
+import { Brain, Shield, ShieldAlert, ShieldOff } from 'lucide-solid'
 import type { Accessor, Component } from 'solid-js'
 import type { PermissionMode } from '../../../stores/settings'
 import type { ReasoningEffort } from '../../../stores/settings/settings-types'
@@ -46,11 +45,7 @@ const PROVIDER_EFFORTS: Record<string, ReasoningEffort[]> = {
   openrouter: ['low', 'medium', 'high'],
   google: ['low', 'medium', 'high'],
   copilot: ['low', 'medium', 'high', 'xhigh'],
-  groq: ['none', 'low', 'medium', 'high'],
-  xai: ['low', 'medium', 'high'],
-  deepseek: ['low', 'medium', 'high'],
   together: ['low', 'medium', 'high'],
-  mistral: ['low', 'medium', 'high'],
   cohere: ['low', 'medium', 'high'],
   ollama: ['low', 'medium', 'high'],
   glm: ['low', 'medium', 'high'],
@@ -134,37 +129,6 @@ export function cycleReasoningEffort(
   if (idx === -1) return cycle[1] ?? 'low'
   return cycle[(idx + 1) % cycle.length]!
 }
-
-// ---------------------------------------------------------------------------
-// DelegationToggle
-// ---------------------------------------------------------------------------
-
-export interface DelegationToggleProps {
-  enabled: Accessor<boolean>
-  onToggle: () => void
-}
-
-export const DelegationToggle: Component<DelegationToggleProps> = (props) => (
-  <button
-    type="button"
-    onClick={() => props.onToggle()}
-    class={`
-      flex items-center gap-1 px-1.5 py-1
-      text-[var(--text-xs)] font-medium rounded-[var(--radius-md)]
-      transition-colors duration-200
-      ${
-        props.enabled()
-          ? 'text-[var(--accent)] bg-[var(--accent-subtle)]'
-          : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] bg-transparent hover:bg-[var(--surface-raised)]'
-      }
-    `}
-    title={props.enabled() ? 'Team delegation on' : 'Enable team delegation'}
-    aria-label={props.enabled() ? 'Team delegation on' : 'Enable team delegation'}
-  >
-    <Users class="w-3.5 h-3.5" />
-    <span>{props.enabled() ? 'Team' : 'Solo'}</span>
-  </button>
-)
 
 // ---------------------------------------------------------------------------
 // PlanActSlider

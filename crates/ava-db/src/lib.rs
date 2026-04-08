@@ -11,7 +11,6 @@ use std::str::FromStr;
 
 pub mod models;
 
-pub use models::hq::HqRepository;
 pub use models::message::MessageRepository;
 pub use models::session::SessionRepository;
 pub use models::{MessageRecord, SessionRecord};

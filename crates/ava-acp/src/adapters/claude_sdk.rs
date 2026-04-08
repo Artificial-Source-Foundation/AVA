@@ -8,9 +8,11 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use ava_types::Result;
+use futures::StreamExt;
 use tokio::sync::Mutex;
-use tracing::debug;
+use tracing::{debug, warn};
 
+use crate::claude;
 use crate::protocol::AgentQuery;
 use crate::stdio::{StdioConfig, StdioProcess};
 use crate::transport::{AgentMessageStream, AgentTransport};
@@ -18,6 +20,7 @@ use crate::transport::{AgentMessageStream, AgentTransport};
 use super::config::{AgentConfig, NESTING_GUARD_ENV_VARS};
 
 /// Adapter for the Anthropic Agent SDK (Claude Code CLI).
+#[derive(Clone)]
 pub struct ClaudeSdkAdapter {
     config: AgentConfig,
     process: Arc<Mutex<Option<Arc<StdioProcess>>>>,
@@ -105,28 +108,98 @@ impl ClaudeSdkAdapter {
 #[async_trait]
 impl AgentTransport for ClaudeSdkAdapter {
     async fn query(&self, query: AgentQuery) -> Result<AgentMessageStream> {
-        let args = self.build_args(&query);
-        let cwd = query.working_directory.clone();
+        let adapter = self.clone();
+        let stream_query = query.clone();
 
-        let stdio_config = StdioConfig {
-            binary: self.config.binary.clone(),
-            args,
-            env: HashMap::new(),
-            env_remove: NESTING_GUARD_ENV_VARS
-                .iter()
-                .map(|s| s.to_string())
-                .collect(),
-            cwd,
-            name: self.config.name.clone(),
+        let stream = async_stream::stream! {
+            let mut refreshed_auth = false;
+
+            'attempt: loop {
+                let args = adapter.build_args(&stream_query);
+                let cwd = stream_query.working_directory.clone();
+
+                let stdio_config = StdioConfig {
+                    binary: adapter.config.binary.clone(),
+                    args,
+                    env: HashMap::new(),
+                    env_remove: NESTING_GUARD_ENV_VARS
+                        .iter()
+                        .map(|s| s.to_string())
+                        .collect(),
+                    cwd,
+                    name: adapter.config.name.clone(),
+                };
+
+                let process = match StdioProcess::spawn(&stdio_config) {
+                    Ok(process) => Arc::new(process),
+                    Err(error) => {
+                        yield crate::protocol::AgentMessage::Error { message: error.to_string(), code: None };
+                        break;
+                    }
+                };
+                let attempt_stream = match process.message_stream().await {
+                    Ok(stream) => stream,
+                    Err(error) => {
+                        yield crate::protocol::AgentMessage::Error { message: error.to_string(), code: None };
+                        break;
+                    }
+                };
+                let mut attempt_stream = Box::pin(attempt_stream);
+
+                *adapter.process.lock().await = Some(Arc::clone(&process));
+
+                let mut buffered = Vec::new();
+                let mut retry_after_refresh = false;
+                let mut yielded_output = false;
+
+                while let Some(message) = attempt_stream.next().await {
+                    if !yielded_output {
+                        let should_retry = matches!(&message, crate::protocol::AgentMessage::Error { message, .. } if !refreshed_auth && claude::is_auth_expiry_error(message));
+
+                        if should_retry {
+                            match claude::refresh_oauth_token().await {
+                                Ok(true) => {
+                                    refreshed_auth = true;
+                                    retry_after_refresh = true;
+                                    process.kill().await;
+                                    break;
+                                }
+                                Ok(false) => {}
+                                Err(error) => {
+                                    warn!(%error, "Claude OAuth refresh failed, yielding original auth error");
+                                }
+                            }
+                        }
+
+                        buffered.push(message.clone());
+                        if matches!(message, crate::protocol::AgentMessage::Assistant { .. } | crate::protocol::AgentMessage::Result { .. } | crate::protocol::AgentMessage::Error { .. }) {
+                            yielded_output = true;
+                            for buffered_message in buffered.drain(..) {
+                                yield buffered_message;
+                            }
+                        }
+                    } else {
+                        yield message;
+                    }
+                }
+
+                let mut guard = adapter.process.lock().await;
+                if guard.as_ref().is_some_and(|active| Arc::ptr_eq(active, &process)) {
+                    *guard = None;
+                }
+                drop(guard);
+
+                if retry_after_refresh {
+                    continue 'attempt;
+                }
+
+                for buffered_message in buffered.drain(..) {
+                    yield buffered_message;
+                }
+                break;
+            }
         };
 
-        let process = Arc::new(StdioProcess::spawn(&stdio_config)?);
-        let stream = process.message_stream().await?;
-
-        // Store process for interrupt/cancel
-        *self.process.lock().await = Some(Arc::clone(&process));
-
-        // The stream from StdioProcess already parses AgentMessage from NDJSON
         Ok(Box::pin(stream))
     }
 

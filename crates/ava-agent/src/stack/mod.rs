@@ -46,6 +46,7 @@ use stack_tools::{
 const CONFIG_HOOK_TIMEOUT_MS: u64 = 150;
 
 pub struct AgentStack {
+    data_dir: PathBuf,
     pub router: Arc<ModelRouter>,
     pub tools: Arc<RwLock<ToolRegistry>>,
     pub session_manager: Arc<SessionManager>,
@@ -58,8 +59,6 @@ pub struct AgentStack {
     routing_locked: RwLock<bool>,
     max_turns: usize,
     max_budget_usd: f64,
-    #[allow(dead_code)] // Field retained for future use; accessor removed as dead code
-    yolo: bool,
     injected_provider: Option<Arc<dyn LLMProvider>>,
     mcp: Arc<RwLock<Option<MCPRuntime>>>,
     /// Session-scoped set of disabled MCP server names.
@@ -139,6 +138,7 @@ impl AgentStack {
             .await
             .map_err(|e| AvaError::IoError(e.to_string()))?;
 
+        let data_dir = config.data_dir.clone();
         let db_path = config.data_dir.join("data.db");
         let config_path = config.data_dir.join("config.yaml");
         let credentials_path = config.data_dir.join("credentials.json");
@@ -406,6 +406,7 @@ impl AgentStack {
 
         Ok((
             Self {
+                data_dir,
                 router,
                 tools,
                 session_manager,
@@ -418,7 +419,6 @@ impl AgentStack {
                 routing_locked: RwLock::new(routing_locked),
                 max_turns: config.max_turns,
                 max_budget_usd: config.max_budget_usd,
-                yolo: config.yolo,
                 injected_provider: config.injected_provider,
                 mcp: Arc::new(RwLock::new(mcp_runtime)),
                 disabled_mcp_servers: RwLock::new(std::collections::HashSet::new()),
@@ -1054,17 +1054,38 @@ mod tests {
     }
 
     #[test]
-    fn parse_model_spec_azure_provider() {
-        let (provider, model) = parse_model_spec("azure/gpt-4o");
-        assert_eq!(provider, "azure");
+    fn parse_model_spec_openai_provider() {
+        let (provider, model) = parse_model_spec("openai/gpt-4o");
+        assert_eq!(provider, "openai");
         assert_eq!(model, "gpt-4o");
     }
 
     #[test]
-    fn parse_model_spec_bedrock_provider() {
-        let (provider, model) = parse_model_spec("bedrock/anthropic.claude-sonnet-4-v1:0");
-        assert_eq!(provider, "bedrock");
-        assert_eq!(model, "anthropic.claude-sonnet-4-v1:0");
+    fn parse_model_spec_inception_provider() {
+        let (provider, model) = parse_model_spec("inception/mercury-coder-small");
+        assert_eq!(provider, "inception");
+        assert_eq!(model, "mercury-coder-small");
+    }
+
+    #[test]
+    fn parse_model_spec_minimax_provider() {
+        let (provider, model) = parse_model_spec("minimax/MiniMax-M2");
+        assert_eq!(provider, "minimax");
+        assert_eq!(model, "MiniMax-M2");
+    }
+
+    #[test]
+    fn parse_model_spec_zai_provider() {
+        let (provider, model) = parse_model_spec("zai/glm-4.7");
+        assert_eq!(provider, "zai");
+        assert_eq!(model, "glm-4.7");
+    }
+
+    #[test]
+    fn parse_model_spec_alibaba_provider() {
+        let (provider, model) = parse_model_spec("alibaba/qwen3.5-plus");
+        assert_eq!(provider, "alibaba");
+        assert_eq!(model, "qwen3.5-plus");
     }
 
     #[test]

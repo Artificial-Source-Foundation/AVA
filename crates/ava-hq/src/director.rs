@@ -267,7 +267,7 @@ impl Director {
 
     /// Dispatch scouts to investigate multiple queries in parallel.
     ///
-    /// Each query spawns one [`Scout`] with read-only tools.  All scouts run
+    /// Each query spawns one [`scout::Scout`] with read-only tools. All scouts run
     /// concurrently and their reports are collected.  Events are emitted via
     /// `event_tx` for progress tracking.
     ///
@@ -335,7 +335,7 @@ impl Director {
 
     /// Convene the Board of Directors for multi-model consensus.
     ///
-    /// Creates a [`Board`] from the configured `board_providers`, assigning each
+    /// Creates a [`board::Board`] from the configured `board_providers`, assigning each
     /// a rotating personality (Analytical, Pragmatic, Creative).  The board
     /// members evaluate the goal and scout reports in parallel and vote on the
     /// approach.
@@ -578,25 +578,6 @@ impl Director {
         }
 
         Ok(combined)
-    }
-
-    /// Delegate a task to a specific domain with a specific budget.
-    #[allow(dead_code)]
-    fn delegate_to_domain(
-        &mut self,
-        task: Task,
-        domain: &Domain,
-        task_budget: &Budget,
-    ) -> Result<Worker> {
-        let Some(lead) = self.leads.iter_mut().find(|lead| &lead.domain == domain) else {
-            return Err(AvaError::NotFound(format!(
-                "no lead found for domain {domain:?}"
-            )));
-        };
-
-        let worker = lead.spawn_worker_with_budget(task, task_budget)?;
-        lead.workers.push(worker.clone());
-        Ok(worker)
     }
 
     /// Produce a single-task fallback plan using the static `pick_domain()` logic.

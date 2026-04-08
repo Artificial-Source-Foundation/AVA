@@ -1,0 +1,1 @@
+- Think briefly, then act. Do not over-plan in visible output.

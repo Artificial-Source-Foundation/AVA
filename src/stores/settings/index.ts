@@ -20,7 +20,6 @@ import {
   removeAutoApprovedTool,
   removeMcpServer,
   updateAgent,
-  updateAgentBackend,
   updateAgentLimits,
   updateAppearance,
   updateBehavior,
@@ -29,7 +28,6 @@ import {
   updateMcpServer,
   updateNotifications,
   updateProvider,
-  updateTeam,
   updateUI,
 } from './settings-mutators'
 import {
@@ -49,7 +47,6 @@ export { syncProviderCredentials } from './settings-persistence'
 // Re-exports — keep existing import paths stable
 export type {
   AccentColor,
-  AgentBackend,
   AgentLimitSettings,
   AppearanceSettings,
   AppLogLevel,
@@ -57,20 +54,17 @@ export type {
   BehaviorSettings,
   BorderRadius,
   CodeTheme,
-  CustomMicroagent,
   CustomSkill,
   DarkStyle,
   FontSize,
   GenerationSettings,
   GitSettings,
-  LeadConfig,
   MCPServerConfig,
   MonoFont,
   NotificationSettings,
   PermissionMode,
   SansFont,
   SendKey,
-  TeamConfig,
   ToolApprovalRule,
   ToolResponseStyle,
   UIDensity,
@@ -216,7 +210,5 @@ export function useSettings() {
     addMcpServer,
     removeMcpServer,
     updateMcpServer,
-    updateAgentBackend,
-    updateTeam,
   }
 }

@@ -16,7 +16,7 @@ pub fn spinner_frame(tick: usize) -> &'static str {
 /// Compact single-character spinner for inline use in chat (tool activity,
 /// sub-agent indicators, streaming indicators).  Produces a smooth rotating
 /// arc that takes up only 1 column.
-pub const INLINE_SPINNER_FRAMES: &[&str] = &["◜", "◠", "◝", "◞", "◡", "◟"];
+pub const INLINE_SPINNER_FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
 pub fn inline_spinner_frame(tick: usize) -> &'static str {
     INLINE_SPINNER_FRAMES[(tick / SPINNER_FRAME_DIVISOR) % INLINE_SPINNER_FRAMES.len()]

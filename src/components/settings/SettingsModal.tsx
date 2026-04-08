@@ -13,6 +13,7 @@ import type { LLMProvider } from '../../types/llm'
 import { AddMCPServerDialog } from '../dialogs/AddMCPServerDialog'
 import { KeybindingEditModal } from './settings-keybinding-edit-modal'
 import type { SettingsTab } from './settings-modal-config'
+import { tabGroups } from './settings-modal-config'
 import { SettingsModalContent } from './settings-modal-content'
 import { SettingsModalHeader } from './settings-modal-header'
 import { SettingsModalSidebar } from './settings-modal-sidebar'
@@ -31,6 +32,9 @@ export const SettingsModal: Component = () => {
   const [addMcpDialogOpen, setAddMcpDialogOpen] = createSignal(false)
   const [backendMcpServers, setBackendMcpServers] = createSignal<MCPServer[] | null>(null)
   let contentScrollRef: HTMLDivElement | undefined
+  const validTabs = new Set<SettingsTab>(
+    tabGroups.flatMap((group) => group.tabs.map((tab) => tab.id))
+  )
 
   /** Map backend status strings to MCPServer.status union. */
   function mapMcpStatus(backendStatus: string | undefined, enabled: boolean): MCPServer['status'] {
@@ -174,8 +178,19 @@ export const SettingsModal: Component = () => {
       if (event.key === 'Escape') closeSettings()
     }
 
+    const onSettingsTab = (event: Event) => {
+      const tab = (event as CustomEvent<{ tab?: SettingsTab }>).detail?.tab
+      if (tab && validTabs.has(tab)) {
+        setActiveTab(tab)
+      }
+    }
+
     window.addEventListener('keydown', onEscape)
-    onCleanup(() => window.removeEventListener('keydown', onEscape))
+    window.addEventListener('ava:settings-tab', onSettingsTab)
+    onCleanup(() => {
+      window.removeEventListener('keydown', onEscape)
+      window.removeEventListener('ava:settings-tab', onSettingsTab)
+    })
   })
 
   createEffect(() => {

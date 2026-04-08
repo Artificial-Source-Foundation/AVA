@@ -15,12 +15,8 @@ export const MODEL_PAIRS: Record<string, string> = {
   'claude-opus-4-6': 'claude-haiku-4-5',
   'claude-sonnet-4-6': 'claude-haiku-4-5',
   'gpt-5.4': 'gpt-5.4-mini',
-  'gpt-5.3-codex': 'gpt-4.1-mini',
-  'gpt-4.1': 'gpt-4.1-mini',
-  'o4-mini': 'gpt-4.1-mini',
+  'gpt-5.3-codex': 'gpt-5.4-mini',
   'gemini-2.5-pro': 'gemini-2.5-flash',
-  'deepseek-chat': 'deepseek-chat',
-  'deepseek-reasoner': 'deepseek-chat',
 }
 
 /** Well-known cheap/fast models for the secondary model dropdown */
@@ -28,10 +24,8 @@ export const WEAK_MODEL_OPTIONS = [
   { value: '', label: 'Same as primary (no separate model)' },
   { value: 'claude-haiku-4-5', label: 'Claude Haiku 4.5' },
   { value: 'gpt-5.4-mini', label: 'GPT-5.4 Mini' },
-  { value: 'gpt-4.1-mini', label: 'GPT-4.1 Mini' },
+  { value: 'gpt-5-mini', label: 'GPT-5 Mini' },
   { value: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash' },
-  { value: 'deepseek-chat', label: 'DeepSeek Chat' },
-  { value: 'mistral-small-latest', label: 'Mistral Small' },
 ]
 
 /** Editor model presets — mid-tier models good for file edits (faster than architect) */
@@ -40,10 +34,8 @@ export const EDITOR_MODEL_OPTIONS = [
   { value: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6' },
   { value: 'claude-haiku-4-5', label: 'Claude Haiku 4.5' },
   { value: 'gpt-5.4-mini', label: 'GPT-5.4 Mini' },
-  { value: 'gpt-4.1', label: 'GPT-4.1' },
+  { value: 'gpt-5-mini', label: 'GPT-5 Mini' },
   { value: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash' },
-  { value: 'deepseek-chat', label: 'DeepSeek Chat' },
-  { value: 'mistral-small-latest', label: 'Mistral Small' },
 ]
 
 /** Auto-suggest editor model based on primary (architect) model */
@@ -51,11 +43,8 @@ export const EDITOR_PAIRS: Record<string, string> = {
   'claude-opus-4-6': 'claude-sonnet-4-6',
   'claude-sonnet-4-6': 'claude-haiku-4-5',
   'gpt-5.4': 'gpt-5.4-mini',
-  'gpt-5.3-codex': 'gpt-4.1-mini',
-  'gpt-4.1': 'gpt-4.1-mini',
-  'o4-mini': 'gpt-4.1-mini',
+  'gpt-5.3-codex': 'gpt-5-mini',
   'gemini-2.5-pro': 'gemini-2.5-flash',
-  'deepseek-reasoner': 'deepseek-chat',
 }
 
 // ============================================================================

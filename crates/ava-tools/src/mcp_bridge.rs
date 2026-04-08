@@ -6,7 +6,7 @@ use serde_json::Value;
 
 use crate::registry::Tool;
 
-/// Trait for calling MCP tools — abstracts the ExtensionManager so ava-tools
+/// Trait for calling MCP tools — abstracts the MCP manager so ava-tools
 /// doesn't depend on ava-mcp directly.
 #[async_trait]
 pub trait MCPToolCaller: Send + Sync {

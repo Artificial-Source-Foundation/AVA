@@ -10,7 +10,7 @@ use crate::widgets::slash_menu::render_slash_menu;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph};
+use ratatui::widgets::{Block, Clear, Paragraph};
 use ratatui::Frame;
 
 pub mod layout;
@@ -40,18 +40,22 @@ pub fn render(frame: &mut Frame<'_>, state: &mut AppState) {
     } else if plan_approval_active {
         crate::widgets::plan_approval::PLAN_APPROVAL_DOCK_HEIGHT
     } else {
-        layout::composer_height(&state.input.buffer, area.width, area.height)
+        layout::composer_height(
+            &state.input.buffer,
+            area.width,
+            area.height,
+            state.input.attachments.len(),
+            state.pending_image_count,
+            state.input.queue_display.items.len(),
+        )
     };
-    let split = build_layout(area, state.show_sidebar, composer_h);
+    let show_context_bar = status_bar::should_render_context_bar(state);
+    let split = build_layout(area, state.show_sidebar, composer_h, show_context_bar);
 
     // ── LAYER 1: Section-level Clear + bg fill ──────────────────────
     // Each section gets its own Clear before rendering.  This is the
     // second line of defense — even if the nuclear clear somehow
     // missed a cell, the section clear will catch it.
-
-    // Top bar
-    frame.render_widget(Clear, split.top_bar);
-    status_bar::render_top(frame, split.top_bar, state);
 
     // Messages — clear the FULL-WIDTH area (including margins) first,
     // then render into the inset area.  This guarantees margin columns
@@ -103,7 +107,14 @@ pub fn render(frame: &mut Frame<'_>, state: &mut AppState) {
 
     // Context bar
     frame.render_widget(Clear, split.context_bar);
-    status_bar::render_context_bar(frame, split.context_bar, state);
+    if show_context_bar {
+        status_bar::render_context_bar(frame, split.context_bar, state);
+    } else {
+        frame.render_widget(
+            Block::default().style(Style::default().bg(state.theme.bg_deep)),
+            split.context_bar,
+        );
+    }
 
     if let Some(sidebar_area) = split.sidebar {
         frame.render_widget(Clear, sidebar_area);
@@ -112,6 +123,8 @@ pub fn render(frame: &mut Frame<'_>, state: &mut AppState) {
             sidebar_area,
         );
         sidebar::render_sidebar(frame, sidebar_area, state);
+    } else {
+        state.sidebar_click_targets.clear();
     }
 
     // Render inline slash menu or mention picker above the composer (not a modal)
@@ -148,25 +161,21 @@ fn render_toasts(frame: &mut Frame<'_>, area: Rect, state: &mut AppState) {
             ToastKind::Success => "\u{2713} ",
             ToastKind::Info => "\u{2139} ",
         };
-        // Width: border(1) + pad(1) + icon + message + pad(1) + border(1)
+        // Width: horizontal padding + icon + message.
         let inner_width = display_width(icon) as u16 + display_width(&toast.message) as u16;
-        let width = (inner_width + 4).clamp(14, 44); // +4 for borders + padding
-        let height: u16 = 3; // border + content + border
+        let width = (inner_width + 4).clamp(14, 44);
+        let height: u16 = 1;
         let y = 1 + (i as u16 * (height + 1));
         if y + height > area.height {
             break;
         }
         let x = area.width.saturating_sub(width + 1);
         let rect = Rect::new(x, y, width, height);
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(theme.border))
-            .style(Style::default().bg(theme.bg_surface));
-        // Clamp toast content to the inner width (width minus 2 for borders)
+        let block = Block::default().style(Style::default().bg(theme.bg_surface));
         let inner_w = rect.width.saturating_sub(2) as usize;
         let toast_line = clamp_line(
             Line::from(Span::styled(
-                format!("{icon}{}", toast.message),
+                format!(" {icon}{}", toast.message),
                 Style::default().fg(theme.text_muted).bg(theme.bg_surface),
             )),
             inner_w,
@@ -196,13 +205,15 @@ fn render_modal(frame: &mut Frame<'_>, state: &mut AppState, modal: ModalType) {
     let backdrop = Block::default().style(Style::default().bg(state.theme.bg));
     frame.render_widget(backdrop, area);
 
-    // Clear background and add elevated bg with border
+    // Clear background and add elevated bg without explicit borders.
     frame.render_widget(Clear, popup_area);
-    let bg = Block::default()
-        .style(Style::default().bg(state.theme.bg_elevated))
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(state.theme.border));
-    let inner = bg.inner(popup_area);
+    let bg = Block::default().style(Style::default().bg(state.theme.bg_elevated));
+    let inner = Rect::new(
+        popup_area.x + 2,
+        popup_area.y + 1,
+        popup_area.width.saturating_sub(4),
+        popup_area.height.saturating_sub(2),
+    );
     frame.render_widget(bg, popup_area);
 
     match modal {
@@ -494,23 +505,26 @@ fn render_question_modal(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
 
     let Some(ref q) = state.question else { return };
 
-    let title = "Agent Question";
-    let block = Block::default()
-        .title(title)
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(state.theme.accent));
-    let inner_w = area.width.saturating_sub(2) as usize; // borders
+    let block = Block::default().style(Style::default().bg(state.theme.bg_elevated));
+    let inner_w = area.width.saturating_sub(2) as usize;
 
-    let mut lines: Vec<Line<'_>> = Vec::new();
-
-    // Question text — clamped
-    lines.push(Line::from(Span::styled(
-        truncate_str(&q.question, inner_w),
-        Style::default()
-            .fg(state.theme.text)
-            .add_modifier(Modifier::BOLD),
-    )));
-    lines.push(Line::from(""));
+    let mut lines: Vec<Line<'_>> = vec![
+        Line::from(Span::styled(
+            truncate_str("Agent Question", inner_w),
+            Style::default()
+                .fg(state.theme.text)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+        // Question text — clamped
+        Line::from(Span::styled(
+            truncate_str(&q.question, inner_w),
+            Style::default()
+                .fg(state.theme.text)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+    ];
 
     if q.options.is_empty() {
         // Free-text input
@@ -570,10 +584,7 @@ fn render_copy_picker(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
         return;
     };
 
-    let block = Block::default()
-        .title(" Copy Code Block ")
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(state.theme.border));
+    let block = Block::default().style(Style::default().bg(state.theme.bg_elevated));
     let inner_w = area.width.saturating_sub(2) as usize;
 
     let mut lines: Vec<Line<'_>> = Vec::new();

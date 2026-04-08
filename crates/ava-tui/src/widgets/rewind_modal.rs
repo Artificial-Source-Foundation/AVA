@@ -7,7 +7,7 @@ use crate::widgets::safe_render::truncate_str;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Paragraph};
+use ratatui::widgets::{Block, Paragraph};
 use ratatui::Frame;
 
 pub fn render_rewind_modal(frame: &mut Frame<'_>, area: Rect, rewind: &RewindState, theme: &Theme) {
@@ -146,10 +146,7 @@ pub fn render_rewind_modal(frame: &mut Frame<'_>, area: Rect, rewind: &RewindSta
         Style::default().fg(theme.text_muted),
     )));
 
-    let block = Block::default()
-        .title(" Rewind ")
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(theme.accent));
+    let block = Block::default().style(Style::default().bg(theme.bg_elevated));
     let paragraph = Paragraph::new(lines).block(block);
     frame.render_widget(paragraph, area);
 }

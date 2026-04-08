@@ -286,6 +286,129 @@ mod tests {
         assert!(parse_anthropic_delta_payload(&payload).is_none());
     }
 
+    // ── parse_anthropic_stream_chunk ──
+
+    #[test]
+    fn parse_anthropic_stream_chunk_text_delta() {
+        let payload = json!({
+            "type": "content_block_delta",
+            "delta": {"type": "text_delta", "text": "Hello world"}
+        });
+        let chunk = parse_anthropic_stream_chunk(&payload).unwrap();
+        assert_eq!(chunk.text_content(), Some("Hello world"));
+        assert!(chunk.thinking.is_none());
+        assert!(chunk.tool_call.is_none());
+    }
+
+    #[test]
+    fn parse_anthropic_stream_chunk_thinking_delta() {
+        let payload = json!({
+            "type": "content_block_delta",
+            "delta": {"type": "thinking_delta", "thinking": "Let me reason..."}
+        });
+        let chunk = parse_anthropic_stream_chunk(&payload).unwrap();
+        assert_eq!(chunk.thinking.as_deref(), Some("Let me reason..."));
+        assert!(chunk.content.is_none());
+    }
+
+    #[test]
+    fn parse_anthropic_stream_chunk_input_json_delta() {
+        let payload = json!({
+            "type": "content_block_delta",
+            "index": 1,
+            "delta": {"type": "input_json_delta", "partial_json": "{\"path\":"}
+        });
+        let chunk = parse_anthropic_stream_chunk(&payload).unwrap();
+        let tc = chunk.tool_call.unwrap();
+        assert_eq!(tc.index, 1);
+        assert_eq!(tc.arguments_delta.as_deref(), Some("{\"path\":"));
+        assert!(tc.id.is_none());
+        assert!(tc.name.is_none());
+    }
+
+    #[test]
+    fn parse_anthropic_stream_chunk_content_block_start_tool_use() {
+        let payload = json!({
+            "type": "content_block_start",
+            "index": 2,
+            "content_block": {"type": "tool_use", "id": "toolu_abc", "name": "read"}
+        });
+        let chunk = parse_anthropic_stream_chunk(&payload).unwrap();
+        let tc = chunk.tool_call.unwrap();
+        assert_eq!(tc.index, 2);
+        assert_eq!(tc.id.as_deref(), Some("toolu_abc"));
+        assert_eq!(tc.name.as_deref(), Some("read"));
+        assert!(tc.arguments_delta.is_none());
+    }
+
+    #[test]
+    fn parse_anthropic_stream_chunk_content_block_start_text_returns_none() {
+        let payload = json!({
+            "type": "content_block_start",
+            "index": 0,
+            "content_block": {"type": "text", "text": ""}
+        });
+        assert!(parse_anthropic_stream_chunk(&payload).is_none());
+    }
+
+    #[test]
+    fn parse_anthropic_stream_chunk_message_delta_with_usage() {
+        let payload = json!({
+            "type": "message_delta",
+            "usage": {"output_tokens": 42}
+        });
+        let chunk = parse_anthropic_stream_chunk(&payload).unwrap();
+        assert!(chunk.done);
+        let usage = chunk.usage.unwrap();
+        assert_eq!(usage.output_tokens, 42);
+        assert_eq!(usage.input_tokens, 0);
+    }
+
+    #[test]
+    fn parse_anthropic_stream_chunk_message_delta_without_usage_returns_none() {
+        let payload = json!({
+            "type": "message_delta",
+            "delta": {"stop_reason": "end_turn"}
+        });
+        assert!(parse_anthropic_stream_chunk(&payload).is_none());
+    }
+
+    #[test]
+    fn parse_anthropic_stream_chunk_message_start_with_cache_usage() {
+        let payload = json!({
+            "type": "message_start",
+            "message": {
+                "usage": {
+                    "input_tokens": 100,
+                    "cache_read_input_tokens": 50,
+                    "cache_creation_input_tokens": 25
+                }
+            }
+        });
+        let chunk = parse_anthropic_stream_chunk(&payload).unwrap();
+        let usage = chunk.usage.unwrap();
+        assert_eq!(usage.input_tokens, 100);
+        assert_eq!(usage.cache_read_tokens, 50);
+        assert_eq!(usage.cache_creation_tokens, 25);
+        assert_eq!(usage.output_tokens, 0);
+        assert!(!chunk.done);
+    }
+
+    #[test]
+    fn parse_anthropic_stream_chunk_unknown_event_type_returns_none() {
+        let payload = json!({"type": "ping"});
+        assert!(parse_anthropic_stream_chunk(&payload).is_none());
+    }
+
+    #[test]
+    fn parse_anthropic_stream_chunk_unknown_delta_type_returns_none() {
+        let payload = json!({
+            "type": "content_block_delta",
+            "delta": {"type": "citations_delta", "citation": {"cited_text": "foo"}}
+        });
+        assert!(parse_anthropic_stream_chunk(&payload).is_none());
+    }
+
     // ── tools_to_anthropic_format ──
 
     #[test]
@@ -304,6 +427,26 @@ mod tests {
     #[test]
     fn tools_to_anthropic_empty() {
         assert!(tools_to_anthropic_format(&[]).is_empty());
+    }
+
+    #[test]
+    fn tools_to_anthropic_cached_marks_only_last_tool() {
+        let tools = vec![
+            Tool {
+                name: "read".to_string(),
+                description: "Read a file".to_string(),
+                parameters: json!({"type": "object"}),
+            },
+            Tool {
+                name: "write".to_string(),
+                description: "Write a file".to_string(),
+                parameters: json!({"type": "object"}),
+            },
+        ];
+
+        let formatted = tools_to_anthropic_format_cached(&tools, true);
+        assert!(formatted[0].get("cache_control").is_none());
+        assert_eq!(formatted[1]["cache_control"]["type"], "ephemeral");
     }
 
     // ── parse_anthropic_tool_calls ──

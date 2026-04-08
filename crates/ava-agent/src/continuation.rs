@@ -187,8 +187,10 @@ mod tests {
     fn highly_similar_content_counts_as_repetition() {
         let mut tracker = ContinuationTracker::new();
         // Only minor differences (changing a word or two)
-        let base = "I am going to read the file and then edit the contents to fix the bug in the function";
-        let similar = "I am going to read the file and then edit the contents to fix the bug in the method";
+        let base =
+            "I am going to read the file and then edit the contents to fix the bug in the function";
+        let similar =
+            "I am going to read the file and then edit the contents to fix the bug in the method";
 
         assert!(!tracker.observe(base));
         assert!(!tracker.observe(similar));

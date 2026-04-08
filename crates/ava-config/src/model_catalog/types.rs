@@ -1,15 +1,13 @@
 //! Core types for the model catalog.
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::SystemTime;
 
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
-use super::{fallback_catalog, REFRESH_INTERVAL};
+use super::fallback_catalog;
 
 /// A single model from the catalog.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -18,7 +16,7 @@ pub struct CatalogModel {
     pub id: String,
     /// Human-readable name (e.g., "Claude Sonnet 4.6", "GPT-5.1 Codex")
     pub name: String,
-    /// Provider ID from models.dev (e.g., "anthropic", "openai", "google")
+    /// Provider ID used by the curated AVA catalog (e.g., "anthropic", "openai", "google")
     pub provider_id: String,
     /// Whether this model supports tool/function calling
     pub tool_call: bool,
@@ -44,7 +42,7 @@ impl CatalogModel {
         }
     }
 
-    /// Map models.dev provider ID to AVA's internal provider name.
+    /// Map catalog provider ID to AVA's internal provider name.
     pub fn ava_provider(&self) -> &str {
         match self.provider_id.as_str() {
             "google" => "gemini",
@@ -54,7 +52,7 @@ impl CatalogModel {
 
     /// Return the model ID suitable for the given AVA provider.
     /// For OpenRouter, returns "provider/id" format.
-    /// For direct providers, maps models.dev IDs to API-expected IDs.
+    /// For direct providers, maps curated catalog IDs to API-expected IDs.
     pub fn api_model_id(&self, ava_provider: &str) -> String {
         match ava_provider {
             "openrouter" => format!("{}/{}", self.provider_id, self.id),
@@ -104,9 +102,7 @@ impl ModelCatalog {
     }
 
     /// Merge fallback models into this catalog for any whitelisted models
-    /// that are missing from the dynamic API data. This ensures models that
-    /// exist (e.g., on models.dev website or OpenAI) but aren't yet in the
-    /// API JSON still appear in the selector.
+    /// that are missing from the primary curated set.
     pub fn merge_fallback(&mut self) {
         let fallback = fallback_catalog();
         for (provider_id, fallback_models) in &fallback.providers {
@@ -121,7 +117,7 @@ impl ModelCatalog {
 
     /// Get models for a specific provider (using AVA's provider names).
     pub fn models_for(&self, ava_provider: &str) -> &[CatalogModel] {
-        // Map AVA provider name to models.dev provider name
+        // Map AVA provider name to catalog provider name
         let dev_provider = match ava_provider {
             "gemini" => "google",
             other => other,
@@ -135,47 +131,6 @@ impl ModelCatalog {
     /// All models across all providers.
     pub fn all_models(&self) -> Vec<&CatalogModel> {
         self.providers.values().flat_map(|v| v.iter()).collect()
-    }
-
-    /// Whether the catalog needs a refresh.
-    pub fn needs_refresh(&self) -> bool {
-        if self.fetched_at == 0 {
-            return true;
-        }
-        let now = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-        now.saturating_sub(self.fetched_at) > REFRESH_INTERVAL.as_secs()
-    }
-
-    /// Load from local cache file.
-    pub async fn load_cached(path: &Path) -> Result<Self, String> {
-        let content = tokio::fs::read_to_string(path)
-            .await
-            .map_err(|e| format!("Failed to read cache: {e}"))?;
-        serde_json::from_str(&content).map_err(|e| format!("Failed to parse cache: {e}"))
-    }
-
-    /// Save to local cache file.
-    pub async fn save_cache(&self, path: &Path) -> Result<(), String> {
-        if let Some(parent) = path.parent() {
-            tokio::fs::create_dir_all(parent)
-                .await
-                .map_err(|e| format!("Failed to create cache dir: {e}"))?;
-        }
-        let content =
-            serde_json::to_string(self).map_err(|e| format!("Failed to serialize catalog: {e}"))?;
-        tokio::fs::write(path, content)
-            .await
-            .map_err(|e| format!("Failed to write cache: {e}"))
-    }
-
-    /// Default cache path: ~/.ava/cache/models.json
-    pub fn default_cache_path() -> Result<PathBuf, String> {
-        let home =
-            dirs::home_dir().ok_or_else(|| "Could not resolve home directory".to_string())?;
-        Ok(home.join(".ava").join("cache").join("models.json"))
     }
 }
 
@@ -197,62 +152,10 @@ impl Default for CatalogState {
 }
 
 impl CatalogState {
-    /// Load catalog: try cache, then fetch in background, fallback to hardcoded.
-    ///
-    /// Startup order:
-    /// 1. Try loading from disk cache (`~/.ava/cache/models.json`)
-    /// 2. If cache is stale (>24h) or missing, fetch from models.dev in background
-    /// 3. If fetch fails, use cache even if stale
-    /// 4. If no cache at all, use the minimal hardcoded fallback
-    ///
-    /// The fetch is always async and non-blocking -- it never delays startup.
+    /// Load the repo-owned catalog.
     pub async fn load() -> Self {
         let state = Self::default();
-
-        // Try loading from cache
-        let mut have_cache = false;
-        if let Ok(cache_path) = ModelCatalog::default_cache_path() {
-            if let Ok(cached) = ModelCatalog::load_cached(&cache_path).await {
-                let needs_refresh = cached.needs_refresh();
-                *state.inner.write().await = cached;
-                have_cache = true;
-
-                if !needs_refresh {
-                    tracing::debug!("Model catalog loaded from cache (fresh)");
-                    return state;
-                }
-                tracing::debug!(
-                    "Model catalog loaded from cache (stale, will refresh in background)"
-                );
-            }
-        }
-
-        // If no cache at all, start with fallback immediately so we don't block
-        if !have_cache {
-            tracing::debug!("No model catalog cache found, using hardcoded fallback");
-            *state.inner.write().await = fallback_catalog();
-        }
-
-        // Fetch fresh data in the background (non-blocking)
-        let bg_state = state.clone();
-        tokio::spawn(async move {
-            match ModelCatalog::fetch().await {
-                Ok(catalog) => {
-                    if let Ok(cache_path) = ModelCatalog::default_cache_path() {
-                        if let Err(e) = catalog.save_cache(&cache_path).await {
-                            tracing::warn!("Failed to save model catalog cache: {e}");
-                        }
-                    }
-                    *bg_state.inner.write().await = catalog;
-                    tracing::debug!("Model catalog fetched from models.dev (background)");
-                }
-                Err(e) => {
-                    tracing::warn!("Failed to fetch model catalog from models.dev: {e}");
-                    // Keep whatever we have (stale cache or fallback)
-                }
-            }
-        });
-
+        *state.inner.write().await = fallback_catalog();
         state
     }
 
@@ -261,35 +164,9 @@ impl CatalogState {
         self.inner.read().await.clone()
     }
 
-    /// Refresh in the background (non-blocking).
-    ///
-    /// The spawned task checks `shutdown` before each refresh cycle and exits
-    /// when `stop_background_refresh()` is called.
+    /// Background refresh is intentionally disabled for the repo-owned catalog.
     pub fn spawn_background_refresh(&self) {
-        let state = self.clone();
-        let shutdown = Arc::clone(&self.shutdown);
-        tokio::spawn(async move {
-            loop {
-                tokio::time::sleep(REFRESH_INTERVAL).await;
-                if shutdown.load(Ordering::Relaxed) {
-                    tracing::debug!("Background model catalog refresh shutting down");
-                    break;
-                }
-                tracing::debug!("Refreshing model catalog...");
-                match ModelCatalog::fetch().await {
-                    Ok(catalog) => {
-                        if let Ok(cache_path) = ModelCatalog::default_cache_path() {
-                            let _ = catalog.save_cache(&cache_path).await;
-                        }
-                        *state.inner.write().await = catalog;
-                        tracing::debug!("Model catalog refreshed");
-                    }
-                    Err(e) => {
-                        tracing::warn!("Background model catalog refresh failed: {e}");
-                    }
-                }
-            }
-        });
+        let _ = &self.shutdown;
     }
 
     /// Signal the background refresh task to stop.

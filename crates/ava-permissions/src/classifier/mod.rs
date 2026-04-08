@@ -171,26 +171,6 @@ fn classify_parsed_command(cmd: &parser::ParsedCommand) -> CommandClassification
     CommandClassification::low()
 }
 
-/// Classify a single command string (legacy API, kept for compatibility).
-#[allow(dead_code)]
-fn classify_single_command(command: &str) -> CommandClassification {
-    let lower = command.to_ascii_lowercase();
-
-    if let Some(reason) = check_blocked_patterns(&lower, command) {
-        return CommandClassification::blocked(reason);
-    }
-
-    let words =
-        extract_words_treesitter(command).unwrap_or_else(|| extract_words_heuristic(command));
-    let first_word = words.first().map(|s| s.as_str()).unwrap_or("");
-
-    if let Some(result) = check_high_risk_patterns(first_word, &lower, &words) {
-        return result;
-    }
-
-    CommandClassification::low()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

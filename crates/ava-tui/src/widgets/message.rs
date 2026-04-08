@@ -251,11 +251,21 @@ pub fn render_action_group(
         .copied()
         .filter(|msg| matches!(msg.kind, MessageKind::ToolCall))
         .collect();
+    let non_task_calls: Vec<&UiMessage> = tool_calls
+        .iter()
+        .copied()
+        .filter(|msg| msg.content.split_whitespace().next().unwrap_or("") != "task")
+        .collect();
     let tool_results: Vec<&UiMessage> = messages
         .iter()
         .copied()
         .filter(|msg| matches!(msg.kind, MessageKind::ToolResult))
         .collect();
+
+    if !tool_calls.is_empty() && non_task_calls.is_empty() {
+        return Vec::new();
+    }
+
     let active = messages
         .last()
         .is_some_and(|msg| matches!(msg.kind, MessageKind::ToolCall));
@@ -269,12 +279,12 @@ pub fn render_action_group(
 
     if has_cancelled {
         // Interrupted: show dimmed summary — truncate to width so it cannot bleed
-        let summary = tool_activity_summary(&tool_calls);
-        let max_summary = width.saturating_sub(2 + 14) as usize; // 2 = "● ", 14 = " [interrupted]"
+        let summary = tool_activity_summary(&non_task_calls);
+        let max_summary = width.saturating_sub(16) as usize;
         let summary = crate::text_utils::truncate_display(&summary, max_summary);
         let interrupted_line = clamp_line(
             Line::from(vec![
-                Span::styled("\u{25cf} ".to_string(), dim),
+                Span::styled("◌ ".to_string(), dim),
                 Span::styled(summary, dim),
                 Span::styled(" [interrupted]".to_string(), dim),
             ]),
@@ -291,7 +301,7 @@ pub fn render_action_group(
 
     if active {
         // Currently running: show the current tool activity with spinner
-        let current_call = tool_calls.last();
+        let current_call = non_task_calls.last();
         let activity = current_call
             .map(|c| tool_activity_line(&c.content, true))
             .unwrap_or_else(|| "Running...".to_string());
@@ -302,7 +312,7 @@ pub fn render_action_group(
         let icon = format!("{} ", inline_spinner_frame(spinner_tick));
         let mut lines = vec![Line::from(vec![
             Span::styled(icon, Style::default().fg(theme.accent)),
-            Span::styled(activity, Style::default().fg(theme.text_muted)),
+            Span::styled(activity, Style::default().fg(theme.text)),
         ])];
 
         // Show file/detail hint for the current tool below the activity line
@@ -329,35 +339,31 @@ pub fn render_action_group(
     }
 
     // Completed: show summary line — truncate to width so it cannot bleed
-    let summary = tool_activity_summary(&tool_calls);
-    let dim = Style::default()
-        .fg(theme.text_dimmed)
-        .add_modifier(Modifier::DIM);
+    let summary = tool_activity_summary(&non_task_calls);
+    let dim = Style::default().fg(theme.text_dimmed);
 
     if expanded {
         // Expanded header with ▼ indicator
-        let prefix = "\u{25cf} \u{25bc} ";
+        let prefix = "▾ ";
         let summary = crate::text_utils::truncate_display(
             &summary,
             width.saturating_sub(crate::text_utils::display_width(prefix) as u16) as usize,
         );
         let mut lines = vec![Line::from(vec![
-            Span::styled("\u{25cf} ", dim),
-            Span::styled("\u{25bc} ", dim), // ▼
+            Span::styled("▾ ", dim),
             Span::styled(summary, dim),
         ])];
-        render_expanded_details(&tool_calls, &tool_results, theme, width, &mut lines);
+        render_expanded_details(&non_task_calls, &tool_results, theme, width, &mut lines);
         lines
     } else {
         // Collapsed header with ▶ indicator
-        let prefix = "\u{25cf} \u{25b6} ";
+        let prefix = "▸ ";
         let summary = crate::text_utils::truncate_display(
             &summary,
             width.saturating_sub(crate::text_utils::display_width(prefix) as u16) as usize,
         );
         vec![Line::from(vec![
-            Span::styled("\u{25cf} ", dim),
-            Span::styled("\u{25b6} ", dim), // ▶
+            Span::styled("▸ ", dim),
             Span::styled(summary, dim),
         ])]
     }

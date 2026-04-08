@@ -73,6 +73,8 @@ const COMMAND_TO_ENDPOINT: Record<string, { path: string; method: 'GET' | 'POST'
 
   // Plugins
   list_installed_plugins: { path: '/api/plugins', method: 'GET' },
+  list_plugin_mounts: { path: '/api/plugins/mounts', method: 'GET' },
+  plugin_host_invoke: { path: '/api/plugins/{plugin}/commands/{command}', method: 'POST' },
 
   // Permissions
   get_permission_level: { path: '/api/permissions', method: 'GET' },
@@ -84,23 +86,6 @@ const COMMAND_TO_ENDPOINT: Record<string, { path: string; method: 'GET' | 'POST'
 
   // Health
   health: { path: '/api/health', method: 'GET' },
-
-  // HQ
-  create_epic: { path: '/api/hq/epics', method: 'POST' },
-  get_plan: { path: '/api/hq/plans/{epic_id}', method: 'GET' },
-  approve_plan: { path: '/api/hq/plans/{plan_id}/approve', method: 'POST' },
-  reject_plan: { path: '/api/hq/plans/{plan_id}/reject', method: 'POST' },
-  list_epics: { path: '/api/hq/epics', method: 'GET' },
-  list_issues: { path: '/api/hq/issues', method: 'GET' },
-  get_agents: { path: '/api/hq/agents', method: 'GET' },
-  get_agent: { path: '/api/hq/agents/{id}', method: 'GET' },
-  get_activity_feed: { path: '/api/hq/activity', method: 'GET' },
-  get_dashboard_metrics: { path: '/api/hq/metrics', method: 'GET' },
-  get_director_chat: { path: '/api/hq/director-chat', method: 'GET' },
-  send_director_message: { path: '/api/hq/director-chat', method: 'POST' },
-  get_hq_settings: { path: '/api/hq/settings', method: 'GET' },
-  update_hq_settings: { path: '/api/hq/settings', method: 'POST' },
-  bootstrap_hq_workspace: { path: '/api/hq/bootstrap', method: 'POST' },
 }
 
 function unwrapInvokeArgs(args?: Record<string, unknown>): Record<string, unknown> | undefined {
@@ -129,6 +114,10 @@ function snakeToCamelCase(key: string): string {
   return key.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase())
 }
 
+function toSnakeCaseKey(key: string): string {
+  return key.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`)
+}
+
 /**
  * Invoke a backend command over HTTP. This mirrors the signature of Tauri's
  * `invoke<T>(cmd, args?)` so call sites can switch transparently.
@@ -147,6 +136,7 @@ export async function apiInvoke<T>(cmd: string, args?: Record<string, unknown>):
       if (val !== undefined && val !== null) {
         pathParamKeys.add(key)
         pathParamKeys.add(snakeToCamelCase(key))
+        pathParamKeys.add(toSnakeCaseKey(key))
         return encodeURIComponent(String(val))
       }
       return `{${key}}`

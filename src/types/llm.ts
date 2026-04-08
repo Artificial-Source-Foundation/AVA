@@ -7,23 +7,49 @@
 // Provider Types
 // ============================================================================
 
-/** Supported LLM providers */
-export type LLMProvider =
-  | 'openrouter'
+/** Canonical core providers for AVA 3.3 */
+export type CoreLLMProvider =
   | 'anthropic'
   | 'openai'
-  | 'google'
+  | 'gemini'
+  | 'ollama'
+  | 'openrouter'
   | 'copilot'
+  | 'inception'
+  | 'alibaba'
+  | 'zai'
+  | 'kimi'
+  | 'minimax'
+
+/**
+ * Backward-compatible provider aliases / long-tail IDs that may still appear
+ * in stored settings or older configs.
+ */
+export type LegacyLLMProvider =
+  | 'chatgpt'
+  | 'google'
+  | 'alibaba-cn'
+  | 'zhipuai-coding-plan'
+  | 'zai-coding-plan'
+  | 'kimi-for-coding'
+  | 'minimax-coding-plan'
+  | 'minimax-cn-coding-plan'
+  | 'azure'
+  | 'bedrock'
   | 'xai'
   | 'mistral'
   | 'groq'
   | 'deepseek'
+  | 'mock'
   | 'cohere'
   | 'together'
   | 'glm'
-  | 'kimi'
-  | 'ollama'
-  | 'alibaba'
+
+/** Supported core LLM providers */
+export type LLMProvider = CoreLLMProvider
+
+/** Provider IDs that may still appear in compatibility or normalization paths. */
+export type AnyLLMProvider = LLMProvider | LegacyLLMProvider
 
 /** Authentication methods */
 export type AuthMethod = 'api-key' | 'oauth' | 'gateway'

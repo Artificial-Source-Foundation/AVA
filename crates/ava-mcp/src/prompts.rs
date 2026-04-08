@@ -10,7 +10,7 @@ use ava_types::{AvaError, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::client::{MCPPrompt, MCPPromptArgument, MCPPromptContent};
-use crate::manager::ExtensionManager;
+use crate::manager::McpManager;
 
 // ---------------------------------------------------------------------------
 // McpPromptCommand — prompt template exposed as a command
@@ -69,14 +69,14 @@ impl McpPromptCommand {
 }
 
 // ---------------------------------------------------------------------------
-// Discovery & execution via ExtensionManager
+// Discovery & execution via McpManager
 // ---------------------------------------------------------------------------
 
 /// Discover all prompt commands from connected MCP servers.
 ///
 /// Queries each connected server that advertises prompt support and returns
 /// a list of `McpPromptCommand` structs ready for wiring into the command system.
-pub async fn get_mcp_prompt_commands(manager: &ExtensionManager) -> Vec<McpPromptCommand> {
+pub async fn get_mcp_prompt_commands(manager: &McpManager) -> Vec<McpPromptCommand> {
     let mut commands = Vec::new();
 
     for server_name in manager.connected_server_names() {
@@ -104,7 +104,7 @@ pub async fn get_mcp_prompt_commands(manager: &ExtensionManager) -> Vec<McpPromp
 /// Calls `prompts/get` on the server with the provided arguments and
 /// concatenates the resulting message texts into a single string.
 pub async fn execute_mcp_prompt(
-    manager: &ExtensionManager,
+    manager: &McpManager,
     server: &str,
     prompt: &str,
     args: HashMap<String, String>,
@@ -202,7 +202,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_mcp_prompt_commands_empty_manager() {
-        let manager = ExtensionManager::new();
+        let manager = McpManager::new();
         let commands = get_mcp_prompt_commands(&manager).await;
         assert!(commands.is_empty());
     }

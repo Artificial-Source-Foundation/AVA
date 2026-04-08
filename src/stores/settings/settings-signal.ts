@@ -20,7 +20,7 @@ const { settings, setSettingsRaw } = createRoot(() => {
   initial.agents = hydrateAgents(initial.agents)
   const [settings, setSettingsRaw] = createSignal<AppSettings>(initial)
 
-  // Listen for settings changes from core-v2 extensions (bidirectional sync)
+  // Listen for settings changes from the shared DOM bridge.
   installReplaceableWindowListener('settings-signal:core-settings', (target) => {
     const listener = ((e: CustomEvent) => {
       const { category, value } = e.detail as { category: string; value: unknown }
@@ -81,7 +81,6 @@ export type SubObjectKey =
   | 'behavior'
   | 'notifications'
   | 'git'
-  | 'team'
 
 /** Generic sub-object updater: patches a nested key then persists */
 export function updateSubKey<K extends SubObjectKey>(key: K, patch: Partial<AppSettings[K]>): void {

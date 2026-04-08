@@ -9,11 +9,13 @@
 //! Replaces the old `ava-cli-providers` crate with a proper protocol-based approach.
 
 pub mod adapters;
+pub mod claude;
 pub mod factory;
 pub mod mapper;
 pub mod protocol;
 pub mod provider;
 pub mod server;
+mod session_store;
 pub mod stdio;
 pub mod transport;
 
@@ -28,6 +30,7 @@ pub struct DiscoveredAgent {
     pub name: String,
     pub binary: String,
     pub version: String,
+    pub auth: Option<claude::ClaudeAuthStatus>,
 }
 
 /// Discover CLI agents installed on the system PATH.
@@ -46,28 +49,36 @@ pub async fn discover_cli_agents() -> Vec<DiscoveredAgent> {
             continue;
         }
         handles.push(tokio::spawn(async move {
-            let binary = &config.version_command[0];
-            let args = &config.version_command[1..];
-            let output = tokio::time::timeout(
-                std::time::Duration::from_secs(5),
-                Command::new(binary).args(args).output(),
-            )
-            .await
-            .ok()?
-            .ok()?;
+            tokio::time::timeout(std::time::Duration::from_secs(5), async move {
+                let binary = &config.version_command[0];
+                let args = &config.version_command[1..];
+                let output = Command::new(binary).args(args).output().await.ok()?;
 
-            if !output.status.success() {
-                return None;
-            }
+                if !output.status.success() {
+                    return None;
+                }
 
-            let raw = String::from_utf8_lossy(&output.stdout);
-            let version = extract_version(&raw).unwrap_or_else(|| "unknown".into());
+                let raw = String::from_utf8_lossy(&output.stdout);
+                let version = extract_version(&raw).unwrap_or_else(|| "unknown".into());
 
-            Some(DiscoveredAgent {
-                name: config.name,
-                binary: config.binary,
-                version,
+                let is_claude_code = config.name == "claude-code";
+                let name = config.name.clone();
+                let binary = config.binary.clone();
+
+                Some(DiscoveredAgent {
+                    name,
+                    binary,
+                    version,
+                    auth: if is_claude_code {
+                        crate::claude::get_cached_auth_status().await
+                    } else {
+                        None
+                    },
+                })
             })
+            .await
+            .ok()
+            .flatten()
         }));
     }
 

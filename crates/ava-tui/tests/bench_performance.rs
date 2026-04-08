@@ -11,7 +11,7 @@ use std::time::Instant;
 use ava_agent::stack::{AgentStack, AgentStackConfig};
 use ava_codebase::indexer::index_project;
 use ava_context::{create_condenser, create_hybrid_condenser, CondenserConfig};
-use ava_llm::providers::MockProvider;
+use ava_llm::providers::mock::MockProvider;
 use ava_llm::ConnectionPool;
 use ava_platform::StandardPlatform;
 use ava_session::SessionManager;

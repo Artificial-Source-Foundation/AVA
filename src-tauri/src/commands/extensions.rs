@@ -2,6 +2,11 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+// Desktop-only extension registration commands.
+//
+// These commands operate on `ava-extensions` descriptors and hook metadata.
+// They are intentionally separate from MCP server management in `ava-mcp`.
+
 use ava_extensions::{
     Extension, ExtensionDescriptor, ExtensionManager, Hook, HookPoint, NativeExtensionDescriptor,
     WasmExtensionDescriptor,

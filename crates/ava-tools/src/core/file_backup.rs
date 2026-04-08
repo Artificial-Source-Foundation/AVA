@@ -14,8 +14,8 @@ use tokio::sync::RwLock;
 
 /// Shared session identifier for file backups.
 ///
-/// Constructed once during tool registration and later populated via
-/// [`set_session_id`](FileBackupSession::write) when the agent run begins.
+/// Constructed once during tool registration and later populated by writing the
+/// session ID into the shared lock when the agent run begins.
 pub type FileBackupSession = Arc<RwLock<Option<String>>>;
 
 /// Create a new, empty backup session handle.

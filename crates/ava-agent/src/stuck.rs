@@ -14,6 +14,68 @@ pub enum StuckAction {
     NeedsJudge(String),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DoomLoopAction {
+    Nudge,
+    NudgeTwiceThenStop,
+    StopImmediately,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ScenarioClass {
+    TextSimilarity = 0,
+    ToolRepeat = 1,
+    ErrorLoop = 2,
+    AlternatingPattern = 3,
+    HighErrorRate = 4,
+    Stall = 5,
+}
+
+#[derive(Debug, Clone)]
+pub struct DoomLoopPolicy {
+    pub on_text_similarity: DoomLoopAction,
+    pub on_tool_repeat: DoomLoopAction,
+    pub on_error_loop: DoomLoopAction,
+    pub on_alternating_pattern: DoomLoopAction,
+    pub on_high_error_rate: DoomLoopAction,
+    pub on_stall: DoomLoopAction,
+}
+
+impl DoomLoopPolicy {
+    pub fn relaxed() -> Self {
+        Self {
+            on_text_similarity: DoomLoopAction::Nudge,
+            on_tool_repeat: DoomLoopAction::Nudge,
+            on_error_loop: DoomLoopAction::Nudge,
+            on_alternating_pattern: DoomLoopAction::Nudge,
+            on_high_error_rate: DoomLoopAction::Nudge,
+            on_stall: DoomLoopAction::Nudge,
+        }
+    }
+
+    pub fn aggressive() -> Self {
+        Self {
+            on_text_similarity: DoomLoopAction::NudgeTwiceThenStop,
+            on_tool_repeat: DoomLoopAction::NudgeTwiceThenStop,
+            on_error_loop: DoomLoopAction::NudgeTwiceThenStop,
+            on_alternating_pattern: DoomLoopAction::NudgeTwiceThenStop,
+            on_high_error_rate: DoomLoopAction::NudgeTwiceThenStop,
+            on_stall: DoomLoopAction::NudgeTwiceThenStop,
+        }
+    }
+
+    fn for_scenario(&self, scenario: ScenarioClass) -> DoomLoopAction {
+        match scenario {
+            ScenarioClass::TextSimilarity => self.on_text_similarity,
+            ScenarioClass::ToolRepeat => self.on_tool_repeat,
+            ScenarioClass::ErrorLoop => self.on_error_loop,
+            ScenarioClass::AlternatingPattern => self.on_alternating_pattern,
+            ScenarioClass::HighErrorRate => self.on_high_error_rate,
+            ScenarioClass::Stall => self.on_stall,
+        }
+    }
+}
+
 /// Thresholds for loop detection, adjusted per model tier.
 #[derive(Debug, Clone)]
 pub struct LoopThresholds {
@@ -33,6 +95,8 @@ pub struct LoopThresholds {
     pub enable_llm_judge: bool,
     /// Minimum turns before LLM-as-judge can fire.
     pub llm_judge_min_turns: usize,
+    /// Action policy for nudge-capable loop scenarios.
+    pub policy: DoomLoopPolicy,
 }
 
 impl LoopThresholds {
@@ -47,6 +111,7 @@ impl LoopThresholds {
             stall_turn_count: 3,
             enable_llm_judge: true,
             llm_judge_min_turns: 4,
+            policy: DoomLoopPolicy::aggressive(),
         }
     }
 
@@ -61,6 +126,7 @@ impl LoopThresholds {
             stall_turn_count: 5,
             enable_llm_judge: false,
             llm_judge_min_turns: 8,
+            policy: DoomLoopPolicy::relaxed(),
         }
     }
 
@@ -136,6 +202,8 @@ pub struct StuckDetector {
     /// Cooldown counter after an InjectMessage: skip this many checks to avoid
     /// cascading nudge → acknowledgment → nudge loops.
     inject_cooldown: usize,
+    /// Tracks whether a scenario has already nudged once and should now stop.
+    nudge_counts: [u8; 6],
 }
 
 impl StuckDetector {
@@ -157,6 +225,50 @@ impl StuckDetector {
             llm_judge_concern: 0,
             llm_judge_fired: false,
             inject_cooldown: 0,
+            nudge_counts: [0; 6],
+        }
+    }
+
+    fn resolve_action(&mut self, scenario: ScenarioClass, msg: String) -> StuckAction {
+        match self.thresholds.policy.for_scenario(scenario) {
+            DoomLoopAction::Nudge => StuckAction::InjectMessage(msg),
+            DoomLoopAction::StopImmediately => StuckAction::Stop(msg),
+            DoomLoopAction::NudgeTwiceThenStop => {
+                let slot = &mut self.nudge_counts[scenario as usize];
+                *slot += 1;
+                if *slot > 2 {
+                    StuckAction::Stop(msg)
+                } else {
+                    StuckAction::InjectMessage(msg)
+                }
+            }
+        }
+    }
+
+    fn observe_recovery(&mut self, tool_results: &[ToolResult]) {
+        let had_non_error_result = tool_results.iter().any(|result| !result.is_error);
+        if had_non_error_result {
+            self.nudge_counts[ScenarioClass::ToolRepeat as usize] = 0;
+            self.nudge_counts[ScenarioClass::ErrorLoop as usize] = 0;
+            self.nudge_counts[ScenarioClass::AlternatingPattern as usize] = 0;
+            self.nudge_counts[ScenarioClass::HighErrorRate as usize] = 0;
+        }
+    }
+
+    fn resolve_action_with_cooldown(
+        &mut self,
+        scenario: ScenarioClass,
+        msg: String,
+        cooldown_active: bool,
+    ) -> StuckAction {
+        let action = self.resolve_action(scenario, msg);
+        if cooldown_active {
+            match action {
+                StuckAction::InjectMessage(_) => StuckAction::Continue,
+                other => other,
+            }
+        } else {
+            action
         }
     }
 
@@ -177,10 +289,10 @@ impl StuckDetector {
 
     /// Build a summary of recent responses for the LLM judge.
     fn build_judge_context(&self) -> String {
-        let responses: Vec<&str> = self
+        let responses: Vec<String> = self
             .last_responses
             .iter()
-            .map(|s| if s.len() > 200 { &s[..200] } else { s.as_str() })
+            .map(|s| s.chars().take(200).collect::<String>())
             .collect();
         format!(
             "Recent {} responses (truncated):\n{}",
@@ -215,13 +327,6 @@ impl StuckDetector {
 
         self.turn_count += 1;
 
-        // After an InjectMessage, skip checks for a few turns so the model
-        // can recover without cascading nudge → acknowledgment → nudge loops.
-        if self.inject_cooldown > 0 {
-            self.inject_cooldown -= 1;
-            return StuckAction::Continue;
-        }
-
         // Update cost estimate
         let turn_cost = if let Some(usage) = usage {
             let conservative_input_tokens = usage
@@ -234,7 +339,7 @@ impl StuckDetector {
         };
         self.estimated_cost += turn_cost;
 
-        // 1. Empty response detection
+        // 1. Empty response detection must still work during cooldown.
         if response_text.trim().is_empty() && tool_calls.is_empty() {
             self.empty_count += 1;
             if self.empty_count >= self.thresholds.empty_response_count {
@@ -247,7 +352,24 @@ impl StuckDetector {
         }
         self.empty_count = 0;
 
-        // 2. Layer 2: Content similarity detection
+        // 2. Cost threshold must still work during cooldown.
+        if self.estimated_cost > config.max_cost_usd {
+            return StuckAction::Stop(format!(
+                "Stopping: estimated cost ${:.2} exceeds limit ${:.2}",
+                self.estimated_cost, config.max_cost_usd
+            ));
+        }
+
+        // During cooldown we still observe patterns, but suppress additional
+        // nudge-style actions so state can progress toward an eventual stop.
+        let cooldown_active = if self.inject_cooldown > 0 {
+            self.inject_cooldown -= 1;
+            true
+        } else {
+            false
+        };
+
+        // 3. Layer 2: Content similarity detection
         let trimmed = response_text.trim().to_string();
         if !trimmed.is_empty() {
             self.last_responses.push(trimmed);
@@ -271,15 +393,17 @@ impl StuckDetector {
                 });
                 if all_similar {
                     self.llm_judge_concern = self.llm_judge_concern.saturating_add(2);
-                    return StuckAction::InjectMessage(
+                    return self.resolve_action_with_cooldown(
+                        ScenarioClass::TextSimilarity,
                         "Your recent responses are very similar. Try a substantially different approach."
                             .to_string(),
+                        cooldown_active,
                     );
                 }
             }
         }
 
-        // 3. Layer 1: Tool call loop detection
+        // 4. Layer 1: Tool call loop detection
         if tool_calls.len() == 1 {
             let call = &tool_calls[0];
             let sig = (call.name.clone(), call.arguments.to_string());
@@ -292,40 +416,38 @@ impl StuckDetector {
             if self.last_tool_calls.len() >= self.thresholds.tool_repeat_count {
                 self.last_tool_calls.clear();
                 self.llm_judge_concern = self.llm_judge_concern.saturating_add(1);
-                return StuckAction::InjectMessage(
+                return self.resolve_action_with_cooldown(
+                    ScenarioClass::ToolRepeat,
                     "You're repeating the same action. Try a different approach.".to_string(),
+                    cooldown_active,
                 );
             }
         } else {
             self.last_tool_calls.clear();
         }
 
-        // 4. Error loop detection
+        // 5. Error loop detection
         let all_errors = !tool_results.is_empty() && tool_results.iter().all(|r| r.is_error);
         if all_errors {
             self.consecutive_errors += 1;
             if self.consecutive_errors >= self.thresholds.error_loop_count {
                 self.consecutive_errors = 0;
                 self.llm_judge_concern = self.llm_judge_concern.saturating_add(1);
-                return StuckAction::InjectMessage(
+                return self.resolve_action_with_cooldown(
+                    ScenarioClass::ErrorLoop,
                     "Multiple tool errors detected. Reconsider your approach.".to_string(),
+                    cooldown_active,
                 );
             }
         } else if !tool_results.is_empty() {
             self.consecutive_errors = 0;
         }
 
-        // 5. Cost threshold
-        if self.estimated_cost > config.max_cost_usd {
-            return StuckAction::Stop(format!(
-                "Stopping: estimated cost ${:.2} exceeds limit ${:.2}",
-                self.estimated_cost, config.max_cost_usd
-            ));
-        }
-
         // 6. Alternating tool pattern (from ToolMonitor)
         if let Some(pattern) = self.tool_monitor.detect_repetition() {
-            self.llm_judge_concern = self.llm_judge_concern.saturating_add(1);
+            if !cooldown_active {
+                self.llm_judge_concern = self.llm_judge_concern.saturating_add(1);
+            }
             let msg = match pattern.pattern_type {
                 ava_tools::monitor::RepetitionType::ExactRepeat => {
                     format!(
@@ -346,13 +468,19 @@ impl StuckDetector {
                     )
                 }
             };
-            return StuckAction::InjectMessage(msg);
+            return self.resolve_action_with_cooldown(
+                ScenarioClass::AlternatingPattern,
+                msg,
+                cooldown_active,
+            );
         }
 
         // 7. High error rate (>50% of last 10 calls)
         if self.tool_monitor.len() >= 10 && self.tool_monitor.recent_error_rate(10) > 0.5 {
-            return StuckAction::InjectMessage(
+            return self.resolve_action_with_cooldown(
+                ScenarioClass::HighErrorRate,
                 "High error rate detected in recent tool calls. Step back and reconsider your approach.".to_string(),
+                cooldown_active,
             );
         }
 
@@ -361,8 +489,10 @@ impl StuckDetector {
             self.turns_without_tools_or_completion += 1;
             if self.turns_without_tools_or_completion >= self.thresholds.stall_turn_count {
                 self.turns_without_tools_or_completion = 0;
-                return StuckAction::InjectMessage(
+                return self.resolve_action_with_cooldown(
+                    ScenarioClass::Stall,
                     "Are you making progress? If stuck, try a different approach.".to_string(),
+                    cooldown_active,
                 );
             }
         } else {
@@ -380,6 +510,7 @@ impl StuckDetector {
             return StuckAction::NeedsJudge(summary);
         }
 
+        self.observe_recovery(tool_results);
         StuckAction::Continue
     }
 
@@ -395,11 +526,18 @@ impl StuckDetector {
         llm: &dyn LLMProvider,
     ) -> StuckAction {
         let action = self.check(response_text, tool_calls, tool_results, usage, config, llm);
-        if matches!(action, StuckAction::InjectMessage(_)) {
+        if matches!(
+            action,
+            StuckAction::InjectMessage(_) | StuckAction::NeedsJudge(_)
+        ) {
             // Skip the next 3 checks so the model can recover without re-triggering
             self.inject_cooldown = 3;
         }
         action
+    }
+
+    pub fn start_inject_cooldown(&mut self) {
+        self.inject_cooldown = 3;
     }
 }
 
@@ -699,7 +837,7 @@ mod tests {
     }
 
     #[test]
-    fn aggressive_tool_loop_fires_on_second() {
+    fn aggressive_tool_loop_nudges_twice_then_stops() {
         let mut detector = StuckDetector::with_thresholds(LoopThresholds::aggressive());
         let config = make_config(10.0, true);
         let llm = mock_llm();
@@ -730,6 +868,279 @@ mod tests {
             llm.as_ref(),
         );
         assert!(matches!(action, StuckAction::InjectMessage(_)));
+
+        let action = detector.check(
+            "r2",
+            std::slice::from_ref(&call),
+            &[],
+            None,
+            &config,
+            llm.as_ref(),
+        );
+        assert!(matches!(action, StuckAction::Continue));
+
+        let action = detector.check(
+            "r3",
+            std::slice::from_ref(&call),
+            &[],
+            None,
+            &config,
+            llm.as_ref(),
+        );
+        assert!(matches!(action, StuckAction::InjectMessage(_)));
+
+        let action = detector.check(
+            "r4",
+            std::slice::from_ref(&call),
+            &[],
+            None,
+            &config,
+            llm.as_ref(),
+        );
+        assert!(matches!(action, StuckAction::Continue));
+
+        let action = detector.check(
+            "r5",
+            std::slice::from_ref(&call),
+            &[],
+            None,
+            &config,
+            llm.as_ref(),
+        );
+        assert!(matches!(action, StuckAction::Stop(_)));
+    }
+
+    #[test]
+    fn relaxed_tool_loop_keeps_nudging() {
+        let mut detector = StuckDetector::with_thresholds(LoopThresholds::relaxed());
+        let config = make_config(10.0, true);
+        let llm = mock_llm();
+
+        let call = ToolCall {
+            id: "1".to_string(),
+            name: "read".to_string(),
+            arguments: serde_json::json!({"path": "/tmp/test"}),
+        };
+
+        for idx in 0..2 {
+            let action = detector.check(
+                &format!("r{idx}"),
+                std::slice::from_ref(&call),
+                &[],
+                None,
+                &config,
+                llm.as_ref(),
+            );
+            assert!(matches!(action, StuckAction::Continue));
+        }
+
+        let action = detector.check(
+            "r2",
+            std::slice::from_ref(&call),
+            &[],
+            None,
+            &config,
+            llm.as_ref(),
+        );
+        assert!(matches!(action, StuckAction::InjectMessage(_)));
+
+        let action = detector.check(
+            "r3",
+            std::slice::from_ref(&call),
+            &[],
+            None,
+            &config,
+            llm.as_ref(),
+        );
+        assert!(matches!(action, StuckAction::Continue));
+    }
+
+    #[test]
+    fn aggressive_tool_loop_escalates_under_check_with_cooldown() {
+        let mut detector = StuckDetector::with_thresholds(LoopThresholds::aggressive());
+        let config = make_config(10.0, true);
+        let llm = mock_llm();
+
+        let call = ToolCall {
+            id: "1".to_string(),
+            name: "read".to_string(),
+            arguments: serde_json::json!({"path": "/tmp/test"}),
+        };
+
+        let mut actions = Vec::new();
+        let mut cooldowns = Vec::new();
+        for idx in 0..6 {
+            let action = detector.check_with_cooldown(
+                &format!("r{idx}"),
+                std::slice::from_ref(&call),
+                &[],
+                None,
+                &config,
+                llm.as_ref(),
+            );
+            actions.push(action);
+            cooldowns.push(detector.inject_cooldown);
+        }
+
+        assert!(matches!(actions[0], StuckAction::Continue));
+        assert!(matches!(actions[1], StuckAction::InjectMessage(_)));
+        assert!(matches!(actions[2], StuckAction::Continue));
+        assert!(matches!(actions[3], StuckAction::Continue));
+        assert!(matches!(actions[4], StuckAction::Continue));
+        assert!(matches!(actions[5], StuckAction::Stop(_)));
+
+        assert_eq!(cooldowns, vec![0, 3, 2, 1, 0, 0]);
+    }
+
+    #[test]
+    fn successful_tool_result_only_resets_tool_scenario_nudges() {
+        let mut detector = StuckDetector::with_thresholds(LoopThresholds {
+            text_repeat_count: 2,
+            text_similarity_threshold: 0.8,
+            stall_turn_count: 100,
+            enable_llm_judge: false,
+            ..LoopThresholds::aggressive()
+        });
+        let config = make_config(10.0, true);
+        let llm = mock_llm();
+
+        // First text-similarity nudge (count = 1).
+        let action = detector.check(
+            "Alpha task: inspect parser branch for null handling",
+            &[],
+            &[],
+            None,
+            &config,
+            llm.as_ref(),
+        );
+        assert!(matches!(action, StuckAction::Continue));
+        let action = detector.check(
+            "Alpha task: inspect parser branch for null-handling",
+            &[],
+            &[],
+            None,
+            &config,
+            llm.as_ref(),
+        );
+        assert!(matches!(action, StuckAction::InjectMessage(_)));
+
+        // Productive tool turn should not reset non-tool scenario counts.
+        let ok_result = ToolResult {
+            call_id: "ok-1".to_string(),
+            content: "done".to_string(),
+            is_error: false,
+        };
+        let action = detector.check(
+            "Executed tool successfully",
+            &[],
+            &[ok_result],
+            None,
+            &config,
+            llm.as_ref(),
+        );
+        assert!(matches!(action, StuckAction::Continue));
+        detector.last_responses.clear();
+
+        // Second text-similarity nudge (count = 2 if not reset).
+        let action = detector.check(
+            "Beta task: run migration dry-run against staging schema",
+            &[],
+            &[],
+            None,
+            &config,
+            llm.as_ref(),
+        );
+        assert!(matches!(action, StuckAction::Continue));
+        let action = detector.check(
+            "Beta task: run migration dry run against staging schema",
+            &[],
+            &[],
+            None,
+            &config,
+            llm.as_ref(),
+        );
+        assert!(matches!(action, StuckAction::InjectMessage(_)));
+        detector.last_responses.clear();
+
+        // Third detection should now stop (NudgeTwiceThenStop path reached).
+        let action = detector.check(
+            "Gamma task: re-index vector cache before final verification",
+            &[],
+            &[],
+            None,
+            &config,
+            llm.as_ref(),
+        );
+        assert!(matches!(action, StuckAction::Continue));
+        let action = detector.check(
+            "Gamma task: re index vector cache before final verification",
+            &[],
+            &[],
+            None,
+            &config,
+            llm.as_ref(),
+        );
+        assert!(matches!(action, StuckAction::Stop(_)));
+    }
+
+    #[test]
+    fn alternating_pattern_does_not_build_judge_concern_during_cooldown() {
+        let mut detector = StuckDetector::with_thresholds(LoopThresholds {
+            enable_llm_judge: true,
+            llm_judge_min_turns: 99,
+            ..LoopThresholds::aggressive()
+        });
+        let config = make_config(10.0, true);
+        let llm = mock_llm();
+
+        use ava_tools::monitor::{hash_arguments, ToolExecution};
+        use std::time::{Duration, Instant};
+
+        for i in 0..3 {
+            detector.tool_monitor_mut().record(ToolExecution {
+                tool_name: "read".to_string(),
+                arguments_hash: hash_arguments(&serde_json::json!({"i": i})),
+                success: true,
+                duration: Duration::from_millis(1),
+                timestamp: Instant::now(),
+            });
+            detector.tool_monitor_mut().record(ToolExecution {
+                tool_name: "write".to_string(),
+                arguments_hash: hash_arguments(&serde_json::json!({"i": i})),
+                success: true,
+                duration: Duration::from_millis(1),
+                timestamp: Instant::now(),
+            });
+        }
+
+        let action = detector.check_with_cooldown("turn 1", &[], &[], None, &config, llm.as_ref());
+        assert!(matches!(action, StuckAction::InjectMessage(_)));
+        let concern_after_first = detector.llm_judge_concern;
+        assert_eq!(concern_after_first, 1);
+        assert_eq!(detector.inject_cooldown, 3);
+
+        let action = detector.check_with_cooldown("turn 2", &[], &[], None, &config, llm.as_ref());
+        assert!(matches!(action, StuckAction::Continue));
+        assert_eq!(detector.llm_judge_concern, concern_after_first);
+        assert_eq!(detector.inject_cooldown, 2);
+    }
+
+    #[test]
+    fn needs_judge_sets_cooldown_in_check_with_cooldown() {
+        let mut detector = StuckDetector::with_thresholds(LoopThresholds {
+            enable_llm_judge: true,
+            llm_judge_min_turns: 1,
+            ..LoopThresholds::aggressive()
+        });
+        detector.llm_judge_concern = 3;
+        detector.turn_count = 3;
+
+        let config = make_config(10.0, true);
+        let llm = mock_llm();
+        let action = detector.check_with_cooldown("test", &[], &[], None, &config, llm.as_ref());
+
+        assert!(matches!(action, StuckAction::NeedsJudge(_)));
+        assert_eq!(detector.inject_cooldown, 3);
     }
 
     // ── Layer 2: Similarity detection ──────────────────────────────────────

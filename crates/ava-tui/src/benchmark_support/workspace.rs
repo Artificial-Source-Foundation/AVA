@@ -259,6 +259,94 @@ fn client_uses_configured_timeout() {
                 .await
                 .map_err(|e| eyre!("Failed to write tests.rs: {}", e))?;
         }
+        "tool_reliability_timeout" => {
+            let dir = temp_dir.join("tool_reliability_timeout");
+            tokio::fs::create_dir_all(&dir)
+                .await
+                .map_err(|e| eyre!("Failed to create dir {}: {}", dir.display(), e))?;
+            tokio::fs::write(dir.join("config.rs"), setup_code)
+                .await
+                .map_err(|e| eyre!("Failed to write config.rs: {}", e))?;
+            let tests_code = r#"mod config;
+
+use config::AppConfig;
+
+#[test]
+fn default_timeout_is_updated() {
+    assert_eq!(AppConfig::default().timeout_seconds, 30);
+}
+
+#[test]
+fn retry_limit_is_unchanged() {
+    assert_eq!(AppConfig::default().retry_limit, 2);
+}
+"#;
+            tokio::fs::write(dir.join("tests.rs"), tests_code)
+                .await
+                .map_err(|e| eyre!("Failed to write tests.rs: {}", e))?;
+        }
+        "tool_reliability_log_filter" => {
+            let dir = temp_dir.join("tool_reliability_log_filter");
+            tokio::fs::create_dir_all(&dir)
+                .await
+                .map_err(|e| eyre!("Failed to create dir {}: {}", dir.display(), e))?;
+            tokio::fs::write(dir.join("logger.rs"), setup_code)
+                .await
+                .map_err(|e| eyre!("Failed to write logger.rs: {}", e))?;
+            let tests_code = r#"mod logger;
+
+use logger::should_log;
+
+#[test]
+fn keeps_error_logs_when_not_verbose() {
+    assert!(should_log("error", false));
+}
+
+#[test]
+fn keeps_warn_logs_when_not_verbose() {
+    assert!(should_log("warn", false));
+}
+
+#[test]
+fn keeps_all_logs_when_verbose() {
+    assert!(should_log("info", true));
+}
+"#;
+            tokio::fs::write(dir.join("tests.rs"), tests_code)
+                .await
+                .map_err(|e| eyre!("Failed to write tests.rs: {}", e))?;
+        }
+        "tool_reliability_normalize" => {
+            let dir = temp_dir.join("tool_reliability_normalize");
+            tokio::fs::create_dir_all(&dir)
+                .await
+                .map_err(|e| eyre!("Failed to create dir {}: {}", dir.display(), e))?;
+            tokio::fs::write(dir.join("normalize.rs"), setup_code)
+                .await
+                .map_err(|e| eyre!("Failed to write normalize.rs: {}", e))?;
+            let tests_code = r#"mod normalize;
+
+use normalize::normalize_user_id;
+
+#[test]
+fn trims_outer_whitespace() {
+    assert_eq!(normalize_user_id("  Alice  "), "alice");
+}
+
+#[test]
+fn collapses_internal_spaces_to_single_dashes() {
+    assert_eq!(normalize_user_id("Alice Smith"), "alice-smith");
+}
+
+#[test]
+fn strips_duplicate_dashes() {
+    assert_eq!(normalize_user_id("Alice   Smith"), "alice-smith");
+}
+"#;
+            tokio::fs::write(dir.join("tests.rs"), tests_code)
+                .await
+                .map_err(|e| eyre!("Failed to write tests.rs: {}", e))?;
+        }
         _ => return Ok(()),
     }
 

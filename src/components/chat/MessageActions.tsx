@@ -4,7 +4,7 @@
  * Hover actions: copy, edit (user), regenerate (assistant), delete/rollback.
  * Premium floating toolbar with smooth transitions.
  *
- * When readOnly is set (e.g. HQ Director mode), only Copy is shown.
+ * When readOnly is set, only Copy is shown.
  */
 
 import { Check, Copy, GitFork, Pencil, RefreshCw, Trash2, Undo2 } from 'lucide-solid'
@@ -87,7 +87,7 @@ export const MessageActions: Component<MessageActionsProps> = (props) => {
    * entirely.  We also call `stopPropagation` + `preventDefault` so the
    * event never reaches other document-level listeners.
    */
-  const wrap = (fn: () => void) => (e: MouseEvent) => {
+  const runAction = (e: MouseEvent, fn: () => void) => {
     e.stopPropagation()
     e.preventDefault()
     fn()
@@ -131,7 +131,7 @@ export const MessageActions: Component<MessageActionsProps> = (props) => {
         <Show when={props.message.role === 'user'}>
           <button
             type="button"
-            on:click={wrap(() => props.onEdit())}
+            on:click={(e: MouseEvent) => runAction(e, props.onEdit)}
             disabled={props.isLoading}
             class={btnClass}
             title="Edit message"
@@ -145,7 +145,7 @@ export const MessageActions: Component<MessageActionsProps> = (props) => {
         <Show when={props.message.role === 'assistant' && !props.message.error}>
           <button
             type="button"
-            on:click={wrap(() => props.onRegenerate())}
+            on:click={(e: MouseEvent) => runAction(e, props.onRegenerate)}
             disabled={props.isLoading}
             class={btnClass}
             title="Regenerate response"
@@ -158,7 +158,7 @@ export const MessageActions: Component<MessageActionsProps> = (props) => {
         {/* Branch button — all messages */}
         <button
           type="button"
-          on:click={wrap(() => props.onBranch())}
+          on:click={(e: MouseEvent) => runAction(e, props.onBranch)}
           disabled={props.isLoading}
           class={btnClass}
           title="Branch conversation here"
@@ -171,7 +171,7 @@ export const MessageActions: Component<MessageActionsProps> = (props) => {
         <Show when={!props.isLastMessage}>
           <button
             type="button"
-            on:click={wrap(() => props.onRewind())}
+            on:click={(e: MouseEvent) => runAction(e, props.onRewind)}
             disabled={props.isLoading}
             class={btnClass}
             title="Rewind to here"
@@ -184,7 +184,7 @@ export const MessageActions: Component<MessageActionsProps> = (props) => {
         {/* Delete / Rollback button — all messages */}
         <button
           type="button"
-          on:click={wrap(() => props.onDelete())}
+          on:click={(e: MouseEvent) => runAction(e, props.onDelete)}
           disabled={props.isLoading}
           class={`${btnClass} hover:text-[var(--error)]`}
           title={props.isLastMessage ? 'Delete message' : 'Delete message and rollback'}

@@ -17,7 +17,6 @@ import { deriveSessionTitle } from '../lib/title-utils'
 import { decodeCompactionModel } from '../services/context-compaction'
 import { getCoreBudget } from '../services/core-bridge'
 import { registerBackendSessionId } from '../services/db-web-fallback'
-import { rustBackend } from '../services/rust-bridge'
 import type { Message } from '../types'
 import type { ToolActivity } from './agent'
 import type { QueuedMessage } from './chat/types'
@@ -32,9 +31,6 @@ export interface RunDeps {
   rustAgent: ReturnType<typeof import('./use-rust-agent').useRustAgent>
   session: ReturnType<typeof import('../stores/session').useSession>
   settingsRef: ReturnType<typeof import('../stores/settings').useSettings>
-
-  // Team mode
-  isTeamMode: () => boolean
 
   // Signals
   isPlanMode: Accessor<boolean>
@@ -58,7 +54,6 @@ export function createAgentRun(deps: RunDeps) {
     rustAgent,
     session,
     settingsRef,
-    isTeamMode,
     isPlanMode,
     setCurrentThought,
     setDoomLoopDetected,
@@ -167,39 +162,6 @@ export function createAgentRun(deps: RunDeps) {
         thinkingLevel,
         reasoningEffort,
       })
-
-      // Team mode: route to HQ Director instead of solo agent
-      if (isTeamMode()) {
-        log.info('agent', 'Team mode — routing to HQ Director', {
-          goal: goal.slice(0, 120),
-        })
-        try {
-          const teamCfg = settingsRef.settings().team
-          const teamConfigPayload: import('../types/rust-ipc').TeamConfigPayload = {
-            defaultDirectorModel: teamCfg.defaultDirectorModel,
-            defaultLeadModel: teamCfg.defaultLeadModel,
-            defaultWorkerModel: teamCfg.defaultWorkerModel,
-            defaultScoutModel: teamCfg.defaultScoutModel,
-            workerNames: teamCfg.workerNames,
-            leads: teamCfg.leads.map((l) => ({
-              domain: l.domain,
-              enabled: l.enabled,
-              model: l.model,
-              maxWorkers: l.maxWorkers,
-              customPrompt: l.customPrompt,
-            })),
-          }
-          await rustBackend.startHq(goal, undefined, teamConfigPayload)
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err)
-          log.error('agent', 'HQ failed', { error: msg })
-          session.updateMessage(assistantMsgId, {
-            content: '',
-            error: { type: 'unknown', message: msg, timestamp: Date.now() },
-          })
-        }
-        return null
-      }
 
       const compactionModel = decodeCompactionModel(
         settingsRef.settings().generation.compactionModel

@@ -8,7 +8,7 @@
 
 import { invoke } from '@tauri-apps/api/core'
 
-/** Stub types replacing @ava/core-v2/logger */
+/** Lightweight frontend logger entry types. */
 type CoreLogLevel = 'debug' | 'info' | 'warn' | 'error'
 interface CoreLogEntry {
   level: CoreLogLevel
@@ -18,7 +18,7 @@ interface CoreLogEntry {
   fields?: Record<string, unknown>
 }
 
-/** No-op logger configuration (core-v2 logger no longer used) */
+/** No-op logger configuration retained for local frontend compatibility. */
 function configureLogger(_opts: {
   level?: CoreLogLevel
   callback?: (entry: CoreLogEntry) => void
@@ -57,7 +57,7 @@ interface LoggerInitMeta {
   version?: string
   platform?: string
   runtime?: string
-  extensions?: number
+  plugins?: number
   tools?: number
 }
 
@@ -167,15 +167,15 @@ export async function initLogger(meta: LoggerInitMeta = {}): Promise<void> {
     // Write startup marker
     const separator = '='.repeat(80)
     const startedAt = new Date().toISOString()
-    const version = meta.version ?? 'v2.0.0'
+    const version = meta.version ?? 'v3.3.0'
     const platform = meta.platform ?? 'unknown'
     const runtime = meta.runtime ?? 'tauri'
-    const extensions = meta.extensions ?? 0
+    const plugins = meta.plugins ?? 0
     const tools = meta.tools ?? 0
     buffer.push(separator)
     buffer.push(`${version} started at ${startedAt}`)
     buffer.push(
-      `Platform: ${platform} | Runtime: ${runtime} | Extensions: ${extensions} | Tools: ${tools}`
+      `Platform: ${platform} | Runtime: ${runtime} | Plugins: ${plugins} | Tools: ${tools}`
     )
     buffer.push(separator)
     pushEntry('info', 'app:logger', 'Logger initialized', { log_file: logFilePath })

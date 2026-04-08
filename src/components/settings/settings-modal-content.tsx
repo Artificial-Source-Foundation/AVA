@@ -1,20 +1,15 @@
 import { type Component, Show } from 'solid-js'
 import type { AppSettings } from '../../stores/settings'
-import { AboutSection } from './settings-about-section'
 import { GeneralSection } from './settings-general-section'
 import type { SettingsTab } from './settings-modal-config'
-import { AgentsTab } from './tabs/AgentsTab'
+import { AdvancedTab } from './tabs/AdvancedTab'
 import { AppearanceTab } from './tabs/AppearanceTab'
-import { BehaviorTab } from './tabs/BehaviorTab'
-import { DeveloperTab } from './tabs/DeveloperTab'
-import { HqTab } from './tabs/HqTab'
-import { type Keybinding, KeybindingsTab } from './tabs/KeybindingsTab'
+import type { Keybinding } from './tabs/KeybindingsTab'
 import { LLMTab } from './tabs/LLMTab'
 import { type MCPServer, MCPServersTab } from './tabs/MCPServersTab'
 import { PermissionsAndTrustTab } from './tabs/PermissionsAndTrustTab'
 import { PluginsTab } from './tabs/PluginsTab'
 import { ProvidersTab } from './tabs/providers/providers-tab'
-import { SkillsAndCommandsTab } from './tabs/SkillsAndCommandsTab'
 import { SkillsSettingsTab } from './tabs/SkillsSettingsTab'
 import { UsageTab } from './tabs/UsageTab'
 
@@ -39,20 +34,16 @@ export const SettingsModalContent: Component<SettingsModalContentProps> = (props
   const renderTab = (tab: SettingsTab) => {
     switch (tab) {
       case 'general':
-        return <GeneralSection />
-      case 'appearance':
-        return <AppearanceTab />
-      case 'behavior':
-        return <BehaviorTab />
-      case 'shortcuts':
         return (
-          <KeybindingsTab
+          <GeneralSection
             keybindings={props.keybindings()}
-            onEdit={props.onEditKeybinding}
-            onReset={props.onResetKeybinding}
-            onResetAll={props.onResetAllKeybindings}
+            onEditKeybinding={props.onEditKeybinding}
+            onResetKeybinding={props.onResetKeybinding}
+            onResetAllKeybindings={props.onResetAllKeybindings}
           />
         )
+      case 'appearance':
+        return <AppearanceTab />
       case 'providers':
         return (
           <ProvidersTab
@@ -81,10 +72,8 @@ export const SettingsModalContent: Component<SettingsModalContentProps> = (props
         return <UsageTab />
       case 'permissions-trust':
         return <PermissionsAndTrustTab />
-      case 'agents':
-        return <AgentsTab />
-      case 'hq':
-        return <HqTab />
+      case 'advanced':
+        return <AdvancedTab />
       case 'llm':
         return <LLMTab />
       case 'mcp':
@@ -101,12 +90,6 @@ export const SettingsModalContent: Component<SettingsModalContentProps> = (props
         return <PluginsTab />
       case 'skills':
         return <SkillsSettingsTab />
-      case 'skills-commands':
-        return <SkillsAndCommandsTab />
-      case 'developer':
-        return <DeveloperTab />
-      case 'about':
-        return <AboutSection />
     }
   }
 

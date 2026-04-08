@@ -86,6 +86,4 @@ export interface AgentSignals {
 /** Mutable refs for abort controller and executor instance */
 export interface AgentRefs {
   abortRef: { current: AbortController | null }
-  /** @deprecated Executor is now in the Rust backend */
-  executorRef: { current: unknown | null }
 }

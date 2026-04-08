@@ -34,7 +34,8 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 ava-acp = { path = "../ava-acp" }
 ava-agent = { path = "../ava-agent" }
-ava-hq = { path = "../ava-hq" }
+ava-hq = { path = "../ava-hq", optional = true }
+ava-review = { path = "../ava-review" }
 ava-llm = { path = "../ava-llm" }
 ava-tools = { path = "../ava-tools" }
 ava-session = { path = "../ava-session" }
@@ -73,12 +74,13 @@ arboard = "3"
 base64 = "0.22"
 png = "0.18"
 notify = "6"
+sysinfo = "0.30"
 axum = { version = "0.8", features = ["ws"], optional = true }
 tower-http = { version = "0.6", features = ["cors", "fs", "trace"], optional = true }
 
 [features]
 default = []
-benchmark = []
+benchmark = ["dep:ava-hq"]
 web = ["dep:axum", "dep:tower-http", "dep:async-trait"]
 voice = ["dep:cpal", "dep:hound", "dep:async-trait"]
 local-whisper = ["voice", "dep:whisper-rs"]

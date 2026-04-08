@@ -5,7 +5,7 @@ use ava_permissions::tags::RiskLevel;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Paragraph};
+use ratatui::widgets::{Block, Paragraph};
 use ratatui::Frame;
 
 /// Fixed height for the approval dock panel (replaces composer when active).
@@ -29,6 +29,16 @@ fn risk_label(level: RiskLevel) -> &'static str {
         RiskLevel::High => "HIGH",
         RiskLevel::Critical => "CRITICAL",
     }
+}
+
+fn key_pill(key: &str, theme: &Theme) -> Span<'static> {
+    Span::styled(
+        format!(" {key} "),
+        Style::default()
+            .fg(theme.bg_elevated)
+            .bg(theme.text_muted)
+            .add_modifier(Modifier::BOLD),
+    )
 }
 
 /// Extract a one-line command summary from the JSON arguments.
@@ -75,9 +85,9 @@ fn command_summary(call: &ava_types::ToolCall, max_width: usize) -> String {
 /// Render the tool approval as a bottom dock bar (OpenCode-style).
 ///
 /// Layout (4-5 rows inside a bordered block):
-///   Line 1: △ Permission required                    [MEDIUM]
+///   Line 1: △ Permission required                    `[MEDIUM]`
 ///   Line 2:   {tool_name}: {command_summary}
-///   Line 3: [a] Approve  [s] Allow session  [r] Reject  [Esc]
+///   Line 3: `[a]` Approve  `[s]` Allow session  `[r]` Reject  `[Esc]`
 ///     — or stage-specific content (rejection reason input, etc.)
 pub fn render_tool_approval(
     frame: &mut Frame<'_>,
@@ -86,11 +96,7 @@ pub fn render_tool_approval(
     permission: &PermissionState,
     theme: &Theme,
 ) {
-    // Bordered block with elevated background
-    let block = Block::default()
-        .style(Style::default().bg(theme.bg_elevated))
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(theme.border));
+    let block = Block::default().style(Style::default().bg(theme.bg_elevated));
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
@@ -105,14 +111,9 @@ pub fn render_tool_approval(
 
     // --- Line 1: header with risk badge ---
     let mut header_spans: Vec<Span<'_>> = vec![
+        Span::styled("\u{25B3} ", Style::default().fg(theme.text_muted)),
         Span::styled(
-            "\u{25B3} ",
-            Style::default()
-                .fg(theme.warning)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(
-            "Permission required",
+            "permission required",
             Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
         ),
     ];
@@ -120,7 +121,7 @@ pub fn render_tool_approval(
     // Right-aligned risk badge
     if let Some(info) = &request.inspection {
         let label = risk_label(info.risk_level);
-        let badge = format!("[{label}]");
+        let badge = format!(" {} ", label.to_lowercase());
         let left_len: usize = header_spans
             .iter()
             .map(|s| crate::text_utils::display_width(s.content.as_ref()))
@@ -158,7 +159,7 @@ pub fn render_tool_approval(
 
     let detail_line = Line::from(Span::styled(
         detail_display,
-        Style::default().fg(theme.accent),
+        Style::default().fg(theme.text_muted),
     ));
     if inner.height > 1 {
         frame.render_widget(
@@ -197,52 +198,27 @@ pub fn render_tool_approval(
             ApprovalStage::ActionSelect => {
                 let line = clamp_line(
                     Line::from(vec![
-                        Span::styled(
-                            "[a]".to_string(),
-                            Style::default()
-                                .fg(theme.primary)
-                                .add_modifier(Modifier::BOLD),
-                        ),
+                        key_pill("a", theme),
                         Span::styled(
                             " Approve  ".to_string(),
                             Style::default().fg(theme.text_dimmed),
                         ),
-                        Span::styled(
-                            "[s]".to_string(),
-                            Style::default()
-                                .fg(theme.text_muted)
-                                .add_modifier(Modifier::BOLD),
-                        ),
+                        key_pill("s", theme),
                         Span::styled(
                             " Allow session  ".to_string(),
                             Style::default().fg(theme.text_dimmed),
                         ),
-                        Span::styled(
-                            "[r]".to_string(),
-                            Style::default()
-                                .fg(theme.error)
-                                .add_modifier(Modifier::BOLD),
-                        ),
+                        key_pill("r", theme),
                         Span::styled(
                             " Reject  ".to_string(),
                             Style::default().fg(theme.text_dimmed),
                         ),
-                        Span::styled(
-                            "[y]".to_string(),
-                            Style::default()
-                                .fg(theme.text_muted)
-                                .add_modifier(Modifier::BOLD),
-                        ),
+                        key_pill("y", theme),
                         Span::styled(
                             " Auto-approve  ".to_string(),
                             Style::default().fg(theme.text_dimmed),
                         ),
-                        Span::styled(
-                            "[Esc]".to_string(),
-                            Style::default()
-                                .fg(theme.text_muted)
-                                .add_modifier(Modifier::BOLD),
-                        ),
+                        key_pill("esc", theme),
                         Span::styled(
                             " Cancel".to_string(),
                             Style::default().fg(theme.text_dimmed),

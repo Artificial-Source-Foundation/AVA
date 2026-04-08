@@ -12,7 +12,7 @@ export const ModelAliasesSection: Component = () => {
   return (
     <div>
       <p class="text-[var(--settings-text-description)] text-[var(--text-muted)] mb-2">
-        Create short names for model IDs (e.g. "fast" → "openai/gpt-4o-mini")
+        Create short names for model IDs (e.g. "fast" → "openai/gpt-5-mini")
       </p>
       <div class="space-y-1.5">
         <For each={Object.entries(settings().modelAliases)}>

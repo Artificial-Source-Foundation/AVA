@@ -1,4 +1,5 @@
 use crate::state::agent::TokenUsage;
+use crate::state::lsp::LspSidebarEntry;
 use crate::state::messages::MessageKind;
 use crate::ui::status_bar::StatusLevel;
 use crate::widgets::model_selector::ModelSelectorState;
@@ -93,6 +94,7 @@ pub enum AppEvent {
     ModelSwitchFinished(ModelSwitchResult),
     ToolListLoaded(Result<Vec<ToolListItem>, String>),
     McpServersLoaded(Result<Vec<MCPServerInfo>, String>),
+    LspEntriesLoaded(Result<Vec<LspSidebarEntry>, String>),
     CommandMessage(CommandMessageResult),
     SessionListLoaded(Result<Vec<Session>, String>),
     SessionLoaded(Result<SessionLoadResult, String>),
@@ -164,6 +166,7 @@ impl std::fmt::Debug for AppEvent {
             Self::ModelSwitchFinished(r) => f.debug_tuple("ModelSwitchFinished").field(r).finish(),
             Self::ToolListLoaded(r) => f.debug_tuple("ToolListLoaded").field(r).finish(),
             Self::McpServersLoaded(r) => f.debug_tuple("McpServersLoaded").field(r).finish(),
+            Self::LspEntriesLoaded(r) => f.debug_tuple("LspEntriesLoaded").field(r).finish(),
             Self::CommandMessage(r) => f.debug_tuple("CommandMessage").field(r).finish(),
             Self::SessionListLoaded(r) => f.debug_tuple("SessionListLoaded").field(r).finish(),
             Self::SessionLoaded(r) => f.debug_tuple("SessionLoaded").field(r).finish(),

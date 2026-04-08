@@ -25,10 +25,7 @@ export const AgentsTabList: Component<AgentsTabListProps> = (props) => {
     const q = props.searchQuery.toLowerCase()
     if (!q) return props.agents
     return props.agents.filter(
-      (a) =>
-        a.name.toLowerCase().includes(q) ||
-        a.description.toLowerCase().includes(q) ||
-        a.tier?.toLowerCase().includes(q)
+      (a) => a.name.toLowerCase().includes(q) || a.description.toLowerCase().includes(q)
     )
   })
 

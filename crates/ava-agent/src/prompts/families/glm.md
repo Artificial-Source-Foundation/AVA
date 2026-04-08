@@ -1,0 +1,3 @@
+- Keep tool arguments explicit and JSON-compliant. GLM models are strict about schema format.
+- GLM handles Chinese and English equally well. Match the user's language in responses.
+- Prefer sequential tool calls over parallel when the task involves multiple dependent edits.

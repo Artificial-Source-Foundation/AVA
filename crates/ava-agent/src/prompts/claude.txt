@@ -55,5 +55,5 @@ Fixed — added zero check in `divide()` that raises ValueError. The edit tool c
 
 user: what's in the docs folder?
 assistant: [globs docs/**/*]
-6 files: README.md, backlog.md, crate-map.md, CHANGELOG.md, hq/README.md, releasing.md.
+Active docs include README.md, ava-3.3-plan.md, backlog.md, architecture/crate-map.md, architecture/plugin-boundary.md, plugins.md, and contributing/releasing.md. Historical material lives under archive/ and hq/.
 </examples>

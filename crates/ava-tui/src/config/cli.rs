@@ -304,11 +304,6 @@ pub enum Command {
         #[command(subcommand)]
         action: PluginCommand,
     },
-    /// HQ setup and headless utilities
-    Hq {
-        #[command(subcommand)]
-        action: HqCommand,
-    },
     /// Check for and install updates
     Update,
     /// Check for and install updates (alias)
@@ -322,19 +317,6 @@ pub enum Command {
         /// Host/IP to bind to
         #[arg(long, default_value = "0.0.0.0")]
         host: String,
-    },
-}
-
-#[derive(Debug, Clone, Subcommand)]
-pub enum HqCommand {
-    /// Initialize `.ava/HQ/` memory for the current project
-    Init {
-        /// Preferred Director model to record in HQ memory
-        #[arg(long)]
-        director_model: Option<String>,
-        /// Overwrite existing HQ memory files
-        #[arg(long)]
-        force: bool,
     },
 }
 
@@ -447,12 +429,12 @@ pub enum FailOnSeverity {
 }
 
 impl FailOnSeverity {
-    pub fn to_severity(self) -> ava_hq::Severity {
+    pub fn to_severity(self) -> ava_review::Severity {
         match self {
-            Self::Critical => ava_hq::Severity::Critical,
-            Self::Warning => ava_hq::Severity::Warning,
-            Self::Suggestion => ava_hq::Severity::Suggestion,
-            Self::Any => ava_hq::Severity::Nitpick,
+            Self::Critical => ava_review::Severity::Critical,
+            Self::Warning => ava_review::Severity::Warning,
+            Self::Suggestion => ava_review::Severity::Suggestion,
+            Self::Any => ava_review::Severity::Nitpick,
         }
     }
 }

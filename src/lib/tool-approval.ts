@@ -1,6 +1,6 @@
 /**
  * Shared tool approval logic
- * Used by both useChat and useAgent hooks
+ * Used by the useAgent hook
  */
 
 import { createSignal } from 'solid-js'

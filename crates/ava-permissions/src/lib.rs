@@ -237,3 +237,183 @@ fn looks_like_path(value: &str) -> bool {
         || value.starts_with("../")
         || value.contains('/')
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn glob_matches_exact_literal() {
+        assert!(glob_matches("bash", "bash"));
+        assert!(!glob_matches("bash", "grep"));
+    }
+
+    #[test]
+    fn glob_matches_star_and_question_mark() {
+        assert!(glob_matches("b*", "bash"));
+        assert!(glob_matches("ba?h", "bash"));
+        assert!(!glob_matches("ba?h", "baash"));
+    }
+
+    #[test]
+    fn most_restrictive_prefers_safer_action() {
+        assert_eq!(
+            most_restrictive(Action::Allow, Action::Allow),
+            Action::Allow
+        );
+        assert_eq!(most_restrictive(Action::Ask, Action::Ask), Action::Ask);
+        assert_eq!(most_restrictive(Action::Allow, Action::Ask), Action::Ask);
+        assert_eq!(most_restrictive(Action::Allow, Action::Deny), Action::Deny);
+        assert_eq!(most_restrictive(Action::Ask, Action::Allow), Action::Ask);
+        assert_eq!(most_restrictive(Action::Deny, Action::Ask), Action::Deny);
+        assert_eq!(most_restrictive(Action::Deny, Action::Deny), Action::Deny);
+        assert_eq!(most_restrictive(Action::Ask, Action::Deny), Action::Deny);
+        assert_eq!(most_restrictive(Action::Deny, Action::Allow), Action::Deny);
+    }
+
+    #[test]
+    fn looks_like_path_catches_common_path_forms() {
+        assert!(looks_like_path("/tmp/file.txt"));
+        assert!(looks_like_path("./src/lib.rs"));
+        assert!(looks_like_path("../README.md"));
+        assert!(looks_like_path("nested/file.txt"));
+        assert!(!looks_like_path("README.md"));
+        assert!(!looks_like_path(""));
+    }
+
+    #[test]
+    fn normalize_with_base_resolves_relative_segments() {
+        let base = Path::new("/workspace/project");
+        assert_eq!(
+            normalize_with_base("./src/../README.md", base),
+            PathBuf::from("/workspace/project/README.md")
+        );
+        assert_eq!(
+            normalize_with_base("/tmp/../var/log", base),
+            PathBuf::from("/var/log")
+        );
+    }
+
+    #[test]
+    fn dynamic_check_denies_bash_blocked_commands() {
+        let system = PermissionSystem::load("/workspace/project", vec![]);
+        let result = system.dynamic_check("bash", &["rm -rf /"]).unwrap();
+        assert_eq!(result, Some(Action::Deny));
+    }
+
+    #[test]
+    fn dynamic_check_rejects_null_byte_arguments() {
+        let system = PermissionSystem::load("/workspace/project", vec![]);
+        assert!(system.dynamic_check("read", &["bad\0path"]).is_err());
+        assert_eq!(system.evaluate("read", &["bad\0path"]), Action::Deny);
+    }
+
+    #[test]
+    fn dynamic_check_asks_for_web_tools_and_workspace_escape() {
+        let system = PermissionSystem::load("/workspace/project", vec![]);
+        assert_eq!(
+            system
+                .dynamic_check("web_fetch", &["https://example.com"])
+                .unwrap(),
+            Some(Action::Ask)
+        );
+        assert_eq!(
+            system.dynamic_check("read", &["../secrets.txt"]).unwrap(),
+            Some(Action::Ask)
+        );
+    }
+
+    #[test]
+    fn evaluate_respects_first_matching_static_rule() {
+        let system = PermissionSystem::load(
+            "/workspace/project",
+            vec![
+                Rule {
+                    tool: Pattern::Glob("read*".to_string()),
+                    args: Pattern::Any,
+                    action: Action::Allow,
+                },
+                Rule {
+                    tool: Pattern::Glob("read".to_string()),
+                    args: Pattern::Any,
+                    action: Action::Deny,
+                },
+            ],
+        );
+
+        assert_eq!(system.evaluate("read", &["README.md"]), Action::Allow);
+    }
+
+    #[test]
+    fn evaluate_combines_static_allow_with_dynamic_ask() {
+        let system = PermissionSystem::load(
+            "/workspace/project",
+            vec![Rule {
+                tool: Pattern::Glob("web_fetch".to_string()),
+                args: Pattern::Any,
+                action: Action::Allow,
+            }],
+        );
+
+        assert_eq!(
+            system.evaluate("web_fetch", &["https://example.com"]),
+            Action::Ask
+        );
+    }
+
+    #[test]
+    fn evaluate_path_pattern_matches_normalized_relative_paths() {
+        let system = PermissionSystem::load(
+            "/workspace/project",
+            vec![Rule {
+                tool: Pattern::Glob("read".to_string()),
+                args: Pattern::Path("src/lib.rs".to_string()),
+                action: Action::Allow,
+            }],
+        );
+
+        assert_eq!(
+            system.evaluate("read", &["./src/../src/lib.rs"]),
+            Action::Allow
+        );
+        assert_eq!(system.evaluate("read", &["./src/main.rs"]), Action::Ask);
+    }
+
+    #[test]
+    fn evaluate_regex_rule_matches_argument() {
+        let system = PermissionSystem::load(
+            "/workspace/project",
+            vec![Rule {
+                tool: Pattern::Glob("bash".to_string()),
+                args: Pattern::Regex("git status|git diff".to_string()),
+                action: Action::Allow,
+            }],
+        );
+
+        assert_eq!(system.evaluate("bash", &["git status"]), Action::Allow);
+        // Regex matching is substring-based because pattern_matches uses Regex::is_match.
+        assert_eq!(
+            system.evaluate("bash", &["git status --short"]),
+            Action::Allow
+        );
+        assert_eq!(
+            system.evaluate("bash", &["please run git diff now"]),
+            Action::Allow
+        );
+        assert_eq!(system.evaluate("bash", &["rm -rf /"]), Action::Deny);
+    }
+
+    #[test]
+    fn evaluate_invalid_regex_fails_closed_to_deny() {
+        let system = PermissionSystem::load(
+            "/workspace/project",
+            vec![Rule {
+                tool: Pattern::Regex("[invalid".to_string()),
+                args: Pattern::Any,
+                action: Action::Allow,
+            }],
+        );
+
+        assert_eq!(system.evaluate("read", &["README.md"]), Action::Deny);
+    }
+}

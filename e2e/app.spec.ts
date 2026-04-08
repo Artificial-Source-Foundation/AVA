@@ -207,15 +207,17 @@ test.describe('Settings Modal', () => {
     await expect(page.locator('button:has-text("Back to Chat")')).toBeVisible({ timeout: 3000 })
   })
 
-  test('has sidebar with DESKTOP, AI, EXTENSIONS, SECURITY tab groups', async ({ page }) => {
+  test('has sidebar with current settings groups', async ({ page }) => {
     await page.locator('button[aria-label="Settings"]').click()
     await expect(page.locator('button:has-text("Back to Chat")')).toBeVisible({ timeout: 3000 })
 
     const sidebar = page.locator('nav')
-    await expect(sidebar.locator('text=DESKTOP')).toBeVisible()
-    await expect(sidebar.locator('text=AI')).toBeVisible()
-    await expect(sidebar.locator('text=EXTENSIONS')).toBeVisible()
-    await expect(sidebar.locator('text=SECURITY')).toBeVisible()
+    await expect(sidebar.locator('text=General')).toBeVisible()
+    await expect(sidebar.locator('text=Models')).toBeVisible()
+    await expect(sidebar.locator('text=Tools')).toBeVisible()
+    await expect(sidebar.locator('text=Permissions')).toBeVisible()
+    await expect(sidebar.locator('text=Appearance')).toBeVisible()
+    await expect(sidebar.locator('text=Advanced')).toBeVisible()
   })
 
   test('General tab is visible in sidebar', async ({ page }) => {
@@ -238,11 +240,11 @@ test.describe('Settings Modal', () => {
     await expect(settingsModal.locator('text=Color Mode').first()).toBeVisible({ timeout: 3000 })
   })
 
-  test('can navigate to Behavior tab and see content', async ({ page }) => {
+  test('can navigate to General tab and see behavior content', async ({ page }) => {
     await page.locator('button[aria-label="Settings"]').click()
     await expect(page.locator('button:has-text("Back to Chat")')).toBeVisible({ timeout: 3000 })
 
-    await page.locator('nav button:has-text("Behavior")').click()
+    await page.locator('nav button:has-text("General")').click()
     await page.waitForTimeout(300)
 
     // Behavior tab should show behavior-related settings
@@ -283,22 +285,24 @@ test.describe('Settings Modal', () => {
     await expect(page.locator('button:has-text("Back to Chat")')).not.toBeVisible()
   })
 
-  test('About tab is visible at bottom of sidebar', async ({ page }) => {
+  test('Advanced tab is visible in sidebar', async ({ page }) => {
     await page.locator('button[aria-label="Settings"]').click()
     await expect(page.locator('button:has-text("Back to Chat")')).toBeVisible({ timeout: 3000 })
 
-    await expect(page.locator('nav button:has-text("About")')).toBeVisible()
+    await expect(page.locator('nav button:has-text("Advanced")')).toBeVisible()
   })
 
-  test('all Desktop group tabs are present', async ({ page }) => {
+  test('all current top-level settings tabs are present', async ({ page }) => {
     await page.locator('button[aria-label="Settings"]').click()
     await expect(page.locator('button:has-text("Back to Chat")')).toBeVisible({ timeout: 3000 })
 
     const nav = page.locator('nav')
     await expect(nav.locator('button:has-text("General")')).toBeVisible()
     await expect(nav.locator('button:has-text("Appearance")')).toBeVisible()
-    await expect(nav.locator('button:has-text("Behavior")')).toBeVisible()
-    await expect(nav.locator('button:has-text("Shortcuts")')).toBeVisible()
+    await expect(nav.locator('button:has-text("Providers")')).toBeVisible()
+    await expect(nav.locator('button:has-text("Skills & Rules")')).toBeVisible()
+    await expect(nav.locator('button:has-text("Permissions & Trust")')).toBeVisible()
+    await expect(nav.locator('button:has-text("Advanced")')).toBeVisible()
   })
 })
 

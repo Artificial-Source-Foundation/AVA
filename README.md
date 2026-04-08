@@ -2,118 +2,113 @@
 
 # AVA
 
-**Your AI dev team in one app.**
+**A practical AI coding agent for terminal, desktop, and web.**
 
 [![Rust](https://img.shields.io/badge/Rust-100%25-dea584?style=flat-square&logo=rust)](https://www.rust-lang.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow?style=flat-square)](LICENSE)
 
-AVA is an AI coding agent that lives in your terminal, your browser, and your desktop.
-Give it a task in plain English — it reads your code, makes changes, runs commands, and
-gets the job done. One binary. No runtime dependencies.
+AVA reads code, edits files, runs commands, and helps you finish software work without leaving your repo.
 
-<img src="docs/screenshots/main-chat.png" width="700" alt="AVA TUI screenshot" />
+It is designed to sit between OpenCode and PI Code: focused by default, extensible when needed.
+
+<img src="docs/screenshots/main-chat.png" width="700" alt="AVA screenshot" />
 
 </div>
 
-## Get started
+## Get Started
 
-**Install from source:**
+Install from source:
 
 ```bash
 git clone https://github.com/ASF-GROUP/AVA.git && cd AVA
 cargo install --path crates/ava-tui
 ```
 
-**Add your API key:**
+Add credentials:
 
 ```bash
-ava --connect openrouter   # interactive setup
-# or manually: ~/.ava/credentials.json
+ava --connect openrouter
 ```
 
-**Run:**
+Security note:
+
+1. Prefer AVA's connect flow, environment variables, or keychain-backed credential storage.
+2. Avoid manually editing `~/.ava/credentials.json` unless you intentionally want plaintext local storage.
+
+Run AVA:
 
 ```bash
-ava                          # terminal UI
-ava "fix the login bug"      # headless mode
-ava serve                    # web browser UI
+ava                          # TUI
+ava "fix the login bug"      # headless
+ava serve                    # web mode
 ```
 
-## Features
+## Core AVA
 
-- **21 LLM providers** — Anthropic, OpenAI, Gemini, Ollama, OpenRouter, Copilot, Inception, Alibaba, Azure OpenAI, AWS Bedrock, xAI, Mistral, Groq, DeepSeek, and more
-- **9 built-in tools** — read, write, edit, bash, glob, grep, web_fetch, web_search, git_read
-- **Multi-agent mode** — a Director assembles Leads and Workers to tackle complex tasks
-- **MCP support** — connect any MCP server for extra tools
-- **Plugin system** — extend with TOML tools, JSON-RPC plugins, or custom hooks
-- **Mid-stream messaging** — queue, interrupt, or schedule tasks while the agent works
-- **Session persistence** — pick up where you left off, with crash recovery and incremental saves
-- **File snapshots** — shadow git snapshots before edits, revert any file change
-- **Context overflow auto-compact** — automatic conversation compaction when context limit is hit
-- **100+ security patterns** — command classification, symlink escape detection, env scrubbing
-- **29 themes** — or bring your own via TOML
-- **Runs everywhere** — TUI, desktop app (Tauri), or web browser
+- Solo-first coding agent
+- 9 default built-in tools: `read`, `write`, `edit`, `bash`, `glob`, `grep`, `web_fetch`, `web_search`, `git_read`
+- Works in TUI, desktop, and web
+- MCP support
+- Commands and Skills support
+- Stable plugin architecture for optional advanced capability
+- Session persistence and safety features for real repo work
 
-## Providers
+## Official Providers
 
-| Provider | Auth | Models |
-|----------|------|--------|
-| Anthropic | API key | Claude 4, Sonnet, Haiku |
-| OpenAI | OAuth or API key | GPT-5.4, o3, o4-mini |
-| Google Gemini | OAuth or API key | Gemini 2.5 Pro, Flash |
-| Ollama | Local (no key) | Llama, Mistral, etc. |
-| OpenRouter | API key | 100+ models |
-| GitHub Copilot | GitHub OAuth | GPT-5.4 |
-| Inception | API key | Mercury 2 |
-| Azure OpenAI | API key | GPT-5.4, o3 |
-| AWS Bedrock | IAM credentials | Claude, Llama |
-| xAI | API key | Grok-3 |
-| Mistral | API key | Mistral Large |
-| Groq | API key | Llama 3.3 70B |
-| DeepSeek | API key | DeepSeek Chat |
-| Alibaba | API key | Qwen 3.5 Plus |
-| ZAI / ZhipuAI | API key | GLM-4.7 |
-| Kimi | API key | K2P5 |
-| MiniMax | API key | MiniMax-M2 |
+AVA 3.3 supports a smaller set of officially supported providers that are actively tested and tuned:
 
-## Keyboard shortcuts
+1. Anthropic
+2. OpenAI
+3. Google Gemini
+4. Ollama
+5. OpenRouter
+6. GitHub Copilot
+7. Inception
+8. Alibaba
+9. ZAI / ZhipuAI
+10. Kimi
+11. MiniMax
 
-| Shortcut | Action |
-|----------|--------|
-| `Enter` | Send message / queue while agent runs |
-| `Ctrl+Enter` | Interrupt & send (while agent running) |
-| `Alt+Enter` | Queue post-complete message |
-| `Double-Escape` | Cancel agent |
-| `Ctrl+L` | Session picker |
-| `Ctrl+M` | Switch model |
-| `Ctrl+Y` | Copy last response |
-| `Ctrl+?` | Show all shortcuts |
+Provider variants should appear as routing or region options inside a provider, not as separate providers.
+
+## Customization
+
+Default visible customization is centered on:
+
+1. MCPs
+2. Commands
+3. Skills
+
+Plugins are a core part of AVA's identity, but plugin-owned UI and settings should only appear when installed.
 
 ## Configuration
 
-```
+```text
 ~/.ava/
 ├── credentials.json     # API keys
-├── config.yaml          # Settings
+├── config.yaml          # core settings
 ├── mcp.json             # MCP servers
-├── tools/               # Custom TOML tools
-├── themes/              # Custom themes
-└── AGENTS.md            # Global instructions
+├── tools/               # custom tool definitions
+├── themes/              # custom themes
+└── AGENTS.md            # global instructions
 ```
 
 ## Documentation
 
-- [Full docs](docs/) — architecture, crate map, plugin guide
-- [CLAUDE.md](CLAUDE.md) — contributor conventions and project structure
-- [Changelog](docs/development/CHANGELOG.md)
+1. [docs/README.md](docs/README.md) - documentation index by section and audience
+2. [AGENTS.md](AGENTS.md) - source of truth for repo workflow, conventions, and architecture
+3. [docs/project/roadmap.md](docs/project/roadmap.md) - current product direction
+4. [docs/project/backlog.md](docs/project/backlog.md) - active work and priorities
+5. [docs/architecture/crate-map.md](docs/architecture/crate-map.md) - current crate and dependency map
+6. [docs/extend/README.md](docs/extend/README.md) - extension and customization overview
+7. [docs/reference/credential-storage.md](docs/reference/credential-storage.md) - credential storage and security guidance
+8. [CLAUDE.md](CLAUDE.md) - compatibility entrypoint pointing back to the active docs
 
 ## Contributing
 
 ```bash
-just check    # fmt + clippy + test (all-in-one)
+just check
 ```
-
-See [CLAUDE.md](CLAUDE.md) for architecture details and development workflows.
 
 ## License
 

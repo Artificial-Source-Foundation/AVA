@@ -7,7 +7,6 @@
 
 import { Layers, PanelRight, Paperclip, Shield } from 'lucide-solid'
 import { type Accessor, type Component, Show } from 'solid-js'
-import { useChatMode } from '../../../contexts/chat-mode'
 import type { useAgent } from '../../../hooks/useAgent'
 import { useLayout } from '../../../stores/layout'
 import { useSandbox } from '../../../stores/sandbox'
@@ -47,7 +46,6 @@ export interface ToolbarStripProps {
   currentModelDisplay: Accessor<string>
   modelSupportsReasoning: Accessor<boolean>
   handleCycleReasoning: () => void
-  toggleDelegation: () => void
 
   // Input
   isProcessing: Accessor<boolean>
@@ -62,7 +60,6 @@ export interface ToolbarStripProps {
 // ---------------------------------------------------------------------------
 
 export const ToolbarStrip: Component<ToolbarStripProps> = (props) => {
-  const chatMode = useChatMode()
   const { settings, cyclePermissionMode } = useSettings()
   const { openModelBrowser } = useLayout()
   const sandbox = useSandbox()
@@ -184,9 +181,6 @@ export const ToolbarStrip: Component<ToolbarStripProps> = (props) => {
             onCycle={props.handleCycleReasoning}
             available={props.modelSupportsReasoning}
           />
-
-          {/* Mode-specific toolbar extras (e.g. HQ Director badge) */}
-          <Show when={chatMode?.toolbarExtra}>{(extra) => <>{extra()()}</>}</Show>
         </>
       }
     />

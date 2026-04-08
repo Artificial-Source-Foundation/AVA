@@ -22,7 +22,7 @@ import { expect, type Page, test } from '@playwright/test'
 // ---------------------------------------------------------------------------
 
 /** URL of the AVA web server when running `ava serve`. Overridable via env. */
-const AVA_WEB_URL = process.env['AVA_WEB_URL'] ?? 'http://localhost:8080'
+const AVA_WEB_URL = process.env.AVA_WEB_URL ?? 'http://localhost:8080'
 
 /** Health endpoint exposed by `ava serve`. */
 const AVA_HEALTH_URL = `${AVA_WEB_URL}/api/health`
@@ -66,7 +66,7 @@ async function bypassOnboarding(page: Page): Promise<void> {
   await page.addInitScript(() => {
     const raw = localStorage.getItem('ava_settings')
     const settings = raw ? (JSON.parse(raw) as Record<string, unknown>) : {}
-    settings['onboardingComplete'] = true
+    settings.onboardingComplete = true
     localStorage.setItem('ava_settings', JSON.stringify(settings))
     // Suppress "What's New" changelog dialog
     localStorage.setItem('ava-last-seen-version', '0.1.0')
@@ -420,37 +420,39 @@ test.describe('5. Settings Modal', () => {
     await expect(page.locator('button:has-text("Back to Chat")')).toBeVisible({ timeout: 5000 })
   })
 
-  test('settings sidebar renders all tab groups', async ({ page }) => {
+  test('settings sidebar renders all current tab groups', async ({ page }) => {
     await page.locator('button[aria-label="Settings"]').click()
     await expect(page.locator('button:has-text("Back to Chat")')).toBeVisible({ timeout: 5000 })
 
     const nav = page.locator('nav')
-    // Tab groups: DESKTOP, AI, EXTENSIONS, SECURITY
-    await expect(nav.locator('text=DESKTOP')).toBeVisible()
-    await expect(nav.locator('text=AI')).toBeVisible()
-    await expect(nav.locator('text=EXTENSIONS')).toBeVisible()
-    await expect(nav.locator('text=SECURITY')).toBeVisible()
+    await expect(nav.locator('text=General')).toBeVisible()
+    await expect(nav.locator('text=Models')).toBeVisible()
+    await expect(nav.locator('text=Tools')).toBeVisible()
+    await expect(nav.locator('text=Permissions')).toBeVisible()
+    await expect(nav.locator('text=Appearance')).toBeVisible()
+    await expect(nav.locator('text=Advanced')).toBeVisible()
   })
 
-  test('all Desktop group tabs render in sidebar', async ({ page }) => {
+  test('core top-level settings tabs render in sidebar', async ({ page }) => {
     await page.locator('button[aria-label="Settings"]').click()
     await expect(page.locator('button:has-text("Back to Chat")')).toBeVisible({ timeout: 5000 })
 
     const nav = page.locator('nav')
     await expect(nav.locator('button:has-text("General")')).toBeVisible()
     await expect(nav.locator('button:has-text("Appearance")')).toBeVisible()
-    await expect(nav.locator('button:has-text("Behavior")')).toBeVisible()
-    await expect(nav.locator('button:has-text("Shortcuts")')).toBeVisible()
+    await expect(nav.locator('button:has-text("Providers")')).toBeVisible()
+    await expect(nav.locator('button:has-text("Advanced")')).toBeVisible()
   })
 
-  test('all AI group tabs render in sidebar', async ({ page }) => {
+  test('tools and models tabs render in sidebar', async ({ page }) => {
     await page.locator('button[aria-label="Settings"]').click()
     await expect(page.locator('button:has-text("Back to Chat")')).toBeVisible({ timeout: 5000 })
 
     const nav = page.locator('nav')
     await expect(nav.locator('button:has-text("Providers")')).toBeVisible()
-    await expect(nav.locator('button:has-text("Agents")')).toBeVisible()
     await expect(nav.locator('button:has-text("Generation")')).toBeVisible()
+    await expect(nav.locator('button:has-text("Skills & Rules")')).toBeVisible()
+    await expect(nav.locator('button:has-text("Plugins")')).toBeVisible()
   })
 
   test('can switch to Appearance tab and see Color Mode option', async ({ page }) => {
@@ -464,11 +466,11 @@ test.describe('5. Settings Modal', () => {
     await expect(modal.locator('text=Color Mode').first()).toBeVisible({ timeout: 3000 })
   })
 
-  test('can switch to Behavior tab and see Send key setting', async ({ page }) => {
+  test('can switch to General tab and see Send key setting', async ({ page }) => {
     await page.locator('button[aria-label="Settings"]').click()
     await expect(page.locator('button:has-text("Back to Chat")')).toBeVisible({ timeout: 5000 })
 
-    await page.locator('nav button:has-text("Behavior")').click()
+    await page.locator('nav button:has-text("General")').click()
     await page.waitForTimeout(300)
 
     const modal = page.locator('.fixed.inset-0.z-50')
@@ -507,15 +509,15 @@ test.describe('5. Settings Modal', () => {
     await expect(page.locator('button:has-text("Back to Chat")')).not.toBeVisible()
   })
 
-  test('About tab is present in settings sidebar', async ({ page }) => {
+  test('Advanced tab is present in settings sidebar', async ({ page }) => {
     await page.locator('button[aria-label="Settings"]').click()
     await expect(page.locator('button:has-text("Back to Chat")')).toBeVisible({ timeout: 5000 })
 
-    await expect(page.locator('nav button:has-text("About")')).toBeVisible()
+    await expect(page.locator('nav button:has-text("Advanced")')).toBeVisible()
   })
 
   test('settings change persists in localStorage', async ({ page }) => {
-    // Open settings, navigate to Behavior, and verify state is stored
+    // Open settings and verify state is stored
     await page.locator('button[aria-label="Settings"]').click()
     await expect(page.locator('button:has-text("Back to Chat")')).toBeVisible({ timeout: 5000 })
 
@@ -616,9 +618,9 @@ test.describe('6. Model Selector', () => {
     const model = (await res.json()) as Record<string, unknown>
     // Response should have at least one identifier field
     const hasIdentifier =
-      typeof model['id'] === 'string' ||
-      typeof model['name'] === 'string' ||
-      typeof model['model'] === 'string'
+      typeof model.id === 'string' ||
+      typeof model.name === 'string' ||
+      typeof model.model === 'string'
     expect(hasIdentifier).toBe(true)
   })
 })
@@ -806,8 +808,8 @@ test.describe('9. WebSocket & Backend API (backend required)', () => {
     expect(res.ok).toBe(true)
 
     const session = (await res.json()) as Record<string, unknown>
-    expect(typeof session['id']).toBe('string')
-    expect((session['id'] as string).length).toBeGreaterThan(0)
+    expect(typeof session.id).toBe('string')
+    expect((session.id as string).length).toBeGreaterThan(0)
   })
 
   test('POST /api/sessions/create then GET /api/sessions/{id} round-trips correctly', async ({
@@ -822,14 +824,14 @@ test.describe('9. WebSocket & Backend API (backend required)', () => {
       body: JSON.stringify({ title: 'E2E Round-Trip Session' }),
     })
     const created = (await createRes.json()) as Record<string, unknown>
-    const sessionId = created['id'] as string
+    const sessionId = created.id as string
 
     // Fetch it back
     const getRes = await fetch(`${AVA_WEB_URL}/api/sessions/${sessionId}`)
     expect(getRes.ok).toBe(true)
 
     const session = (await getRes.json()) as Record<string, unknown>
-    expect(session['id']).toBe(sessionId)
+    expect(session.id).toBe(sessionId)
   })
 
   test('DELETE /api/sessions/{id} removes the session', async ({ page: _page }) => {
@@ -842,7 +844,7 @@ test.describe('9. WebSocket & Backend API (backend required)', () => {
       body: JSON.stringify({ title: 'E2E Delete Test' }),
     })
     const created = (await createRes.json()) as Record<string, unknown>
-    const sessionId = created['id'] as string
+    const sessionId = created.id as string
 
     // Delete it
     const delRes = await fetch(`${AVA_WEB_URL}/api/sessions/${sessionId}`, {

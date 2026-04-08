@@ -37,7 +37,7 @@ fn model_supports_reasoning_for_prompt(provider_kind: ProviderKind, model_name: 
     registry_model_for_prompt(provider_kind, model_name)
         .map(|model| model.capabilities.reasoning)
         .unwrap_or_else(|| match provider_kind {
-            ProviderKind::Anthropic | ProviderKind::Bedrock => {
+            ProviderKind::Anthropic => {
                 model_lower.contains("claude-opus-4.6")
                     || model_lower.contains("claude-sonnet-4.6")
                     || model_lower.contains("claude-opus-4-6")
@@ -45,7 +45,7 @@ fn model_supports_reasoning_for_prompt(provider_kind: ProviderKind, model_name: 
                     || model_lower.contains("k2p5")
                     || model_lower.contains("kimi-k2.5")
             }
-            ProviderKind::OpenAI | ProviderKind::AzureOpenAI | ProviderKind::Inception => {
+            ProviderKind::OpenAI | ProviderKind::Inception => {
                 model_lower.starts_with("o3")
                     || model_lower.starts_with("o4")
                     || model_lower.contains("gpt-5")
@@ -74,6 +74,17 @@ fn provider_notes(title: &str, lines: &[&str]) -> String {
         suffix.push('\n');
     }
     suffix
+}
+
+fn prompt_note_lines(contents: &str) -> Vec<String> {
+    contents
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .filter_map(|line| line.strip_prefix('-').map(str::trim))
+        .filter(|line| !line.is_empty())
+        .map(ToString::to_string)
+        .collect()
 }
 
 /// Return model-aware instructions to append to the base system prompt.
@@ -110,156 +121,73 @@ fn model_family_notes(model_lower: &str, reasoning: bool) -> Vec<String> {
     let mut lines = Vec::new();
 
     if is_claude_model(model_lower) {
-        // Claude Opus 4.6 / Sonnet 4.6 / Haiku 4.5 — up to 1M context
-        lines
-            .push("Follow structured instructions closely and keep pre-tool prose minimal.".into());
-        lines.push(
-            "Prefer one decisive tool/action at a time unless safe parallel work is obvious."
-                .into(),
-        );
-        lines.push(
-            "After a tool failure, briefly explain the new plan instead of retrying blindly."
-                .into(),
-        );
-        lines.push("When given large contexts, prioritize the most recent instructions and tool results over older history.".into());
+        lines.extend(prompt_note_lines(PROMPT_NOTES_FAMILY_CLAUDE));
         if reasoning {
             if model_lower.contains("opus") {
-                lines.push("Use adaptive thinking for genuinely hard tasks (architecture, complex refactors). For simple edits, keep thinking minimal.".into());
+                lines.extend(prompt_note_lines(PROMPT_NOTES_FAMILY_CLAUDE_OPUS_REASONING));
             } else {
-                lines.push("Use extended thinking for hard tasks only. For simple edits, think briefly and act.".into());
+                lines.extend(prompt_note_lines(PROMPT_NOTES_FAMILY_CLAUDE_REASONING));
             }
         }
     } else if is_codex_model(model_lower) {
-        // GPT-5.3 Codex — 400K context, code-optimized, Responses API preferred
-        lines.push(
-            "Codex is optimized for code. Favor code output over prose. Minimize explanations."
-                .into(),
-        );
-        lines.push("Maximize parallel tool calls — never read files one-by-one unless logically unavoidable.".into());
-        lines.push("Keep preambles to 1 sentence + 1-2 sentence plan before tool calls. Update every 1-3 steps.".into());
-        lines.push(
-            "Keep visible output brief — 1-2 sentences at milestones, not play-by-play.".into(),
-        );
+        lines.extend(prompt_note_lines(PROMPT_NOTES_FAMILY_CODEX));
         if reasoning {
-            lines.push("Use medium reasoning for interactive coding, high/xhigh only for the hardest tasks.".into());
+            lines.extend(prompt_note_lines(PROMPT_NOTES_FAMILY_CODEX_REASONING));
         }
     } else if is_gpt_model(model_lower) {
-        // GPT-5.4 / o3 / o4 — up to 1M context, general purpose
-        lines.push("Use function calling for all tool interactions. Make arguments explicit and schema-accurate.".into());
-        lines.push("Prefer parallel function calls when operations are independent — this is a core strength.".into());
-        lines.push("Keep visible text updates brief — function calls do the work, text is for status only.".into());
+        lines.extend(prompt_note_lines(PROMPT_NOTES_FAMILY_GPT));
         if reasoning {
-            lines.push(
-                "Reasoning happens internally. Keep visible output to 1-2 sentence summaries."
-                    .into(),
-            );
+            lines.extend(prompt_note_lines(PROMPT_NOTES_FAMILY_GPT_REASONING));
         } else {
-            lines.push("Think briefly, then act. Don't over-plan in visible output.".into());
+            lines.extend(prompt_note_lines(PROMPT_NOTES_FAMILY_GPT_FAST));
         }
     } else if is_gemini_model(model_lower) {
-        // Gemini 3.1 Pro / 3 Flash / 2.5 — up to 1M context
-        lines.push(
-            "Be explicit with tool argument types — Gemini is strict about schema compliance."
-                .into(),
-        );
-        lines.push("Prefer grep/glob to discover files before reading individually. Extra turns are more expensive than larger reads.".into());
-        lines.push(
-            "Keep progress updates short and structured. Use numbered lists for multi-step plans."
-                .into(),
-        );
+        lines.extend(prompt_note_lines(PROMPT_NOTES_FAMILY_GEMINI));
         if model_lower.contains("flash") {
-            lines.push("Flash is optimized for speed. Keep tool chains short and focused.".into());
+            lines.extend(prompt_note_lines(PROMPT_NOTES_FAMILY_GEMINI_FLASH));
         }
         if reasoning {
-            lines.push("Use thinking for planning-heavy work. For trivial edits, skip thinking and act directly.".into());
+            lines.extend(prompt_note_lines(PROMPT_NOTES_FAMILY_GEMINI_REASONING));
         }
     } else if is_deepseek_model(model_lower) {
-        // DeepSeek V3.2 — 671B MoE, 128K context, open-weight
-        lines.push("DeepSeek handles long code well. Read full files when needed rather than partial reads.".into());
-        lines.push(
-            "Keep tool arguments simple and explicit. Avoid deeply nested argument structures."
-                .into(),
-        );
-        lines.push("Note: chat mode has an 8K output limit. Keep individual edits focused.".into());
+        lines.extend(prompt_note_lines(PROMPT_NOTES_FAMILY_DEEPSEEK));
         if reasoning {
-            lines.push("DeepSeek reasoning is olympiad-level strong — use it for complex logic and math. Keep visible reasoning terse.".into());
+            lines.extend(prompt_note_lines(PROMPT_NOTES_FAMILY_DEEPSEEK_REASONING));
         }
     } else if is_mercury_model(model_lower) {
-        // Inception Mercury 2 — diffusion LLM, ~1000 tok/s, 128K context
-        lines.push("Mercury is extremely fast (~1000 tok/s). Use this speed for iterative exploration — try, check, adjust quickly.".into());
-        lines.push("Keep tool arguments simple. If a read returns empty, retry with explicit offset/limit rather than 0.".into());
-        lines.push(
-            "Favor many small focused tool calls over fewer large ones — latency is near-zero."
-                .into(),
-        );
+        lines.extend(prompt_note_lines(PROMPT_NOTES_FAMILY_MERCURY));
     } else if is_grok_model(model_lower) {
-        // xAI Grok 3/4 family — up to 2M context, strong tool calling
-        lines.push(
-            "Grok models are fast and direct. Match that tone — be concise, skip ceremony.".into(),
-        );
-        lines.push(
-            "Prefer parallel tool calls when possible. Grok handles concurrent operations well."
-                .into(),
-        );
+        lines.extend(prompt_note_lines(PROMPT_NOTES_FAMILY_GROK));
         if reasoning {
-            lines.push("Grok reasoning is strong for code analysis and debugging. Keep visible output terse.".into());
+            lines.extend(prompt_note_lines(PROMPT_NOTES_FAMILY_GROK_REASONING));
         }
     } else if is_glm_model(model_lower) {
-        // ZhipuAI GLM-4.7/5/5.1 family — 200K context, Ascend-trained
-        lines.push("Keep tool arguments explicit and JSON-compliant. GLM models are strict about schema format.".into());
-        lines.push(
-            "GLM handles Chinese and English equally well. Match the user's language in responses."
-                .into(),
-        );
-        lines.push("Prefer sequential tool calls over parallel when the task involves multiple dependent edits.".into());
+        lines.extend(prompt_note_lines(PROMPT_NOTES_FAMILY_GLM));
         if reasoning {
-            lines.push("GLM reasoning excels at system engineering and long-range agent tasks. Use for complex multi-file work.".into());
+            lines.extend(prompt_note_lines(PROMPT_NOTES_FAMILY_GLM_REASONING));
         }
     } else if is_kimi_model(model_lower) {
-        // Kimi K2/K2.5 — 256K context, 1T MoE, agent swarm capable
-        lines.push(
-            "Kimi handles very long contexts (256K) well. Don't hesitate to read full files."
-                .into(),
-        );
-        lines.push("Kimi excels at sustained multi-step tool use (100+ sequential calls). Plan ambitiously.".into());
-        lines.push("Keep tool arguments simple and well-structured. Prefer explicit paths over globs when the target is known.".into());
+        lines.extend(prompt_note_lines(PROMPT_NOTES_FAMILY_KIMI));
         if reasoning {
-            lines.push("Use Kimi's thinking mode for complex analysis. It supports 4 reasoning modes — thinking is the default for hard tasks.".into());
+            lines.extend(prompt_note_lines(PROMPT_NOTES_FAMILY_KIMI_REASONING));
         }
     } else if is_minimax_model(model_lower) {
-        // MiniMax M2/M2.5 — 205K context, Lightning Attention, SWE-bench leader
-        lines.push("MiniMax models are strong at multi-file code editing. Batch related edits across files.".into());
-        lines.push("Keep tool arguments explicit. MiniMax handles Rust, Java, Go, TypeScript, Python, C++ well.".into());
+        lines.extend(prompt_note_lines(PROMPT_NOTES_FAMILY_MINIMAX));
         if reasoning {
-            lines.push("MiniMax reasoning is SWE-bench competitive. Use it for complex refactors and bug fixes.".into());
+            lines.extend(prompt_note_lines(PROMPT_NOTES_FAMILY_MINIMAX_REASONING));
         }
     } else if is_qwen_model(model_lower) {
-        // Alibaba Qwen3/Qwen3-Coder — up to 1M context, agentic coding
-        lines.push("Qwen models support very long contexts (up to 1M). Use this for full-repo analysis when needed.".into());
-        lines.push("Qwen-Coder excels at agentic tool calling and autonomous programming. Chain tool calls confidently.".into());
+        lines.extend(prompt_note_lines(PROMPT_NOTES_FAMILY_QWEN));
         if model_lower.contains("coder") {
-            lines.push(
-                "Qwen-Coder is optimized for code. Favor code output over explanations.".into(),
-            );
+            lines.extend(prompt_note_lines(PROMPT_NOTES_FAMILY_QWEN_CODER));
         }
     } else if is_mistral_model(model_lower) {
-        // Mistral Large 3 / Codestral 25.01 / Medium 3.1
-        lines.push("Keep tool arguments concise. Mistral models work best with clear, direct instructions.".into());
+        lines.extend(prompt_note_lines(PROMPT_NOTES_FAMILY_MISTRAL));
         if model_lower.contains("codestral") {
-            // Codestral: 256K context, 22B params, 80+ languages, FIM support
-            lines.push("Codestral is optimized for code generation across 80+ languages. Favor code output over explanations.".into());
+            lines.extend(prompt_note_lines(PROMPT_NOTES_FAMILY_MISTRAL_CODESTRAL));
         }
-        lines.push("Prefer one tool call at a time for complex chains. Parallel calls for independent reads.".into());
     } else if is_local_model(model_lower) {
-        // Local / small models (Ollama, llama, etc.)
-        lines.push("Use short, concrete instructions. Local models have smaller context windows — every token counts.".into());
-        lines.push("Prefer one tool call at a time when the next step is uncertain.".into());
-        lines.push("Re-check tool output before continuing — local models are more likely to hallucinate tool results.".into());
-        lines.push("Keep code edits small and focused. Large multi-file refactors may exceed context limits.".into());
-        lines.push(
-            "If tool calling fails, describe what needs to change and let the user apply it."
-                .into(),
-        );
+        lines.extend(prompt_note_lines(PROMPT_NOTES_FAMILY_LOCAL));
     }
 
     lines
@@ -268,15 +196,9 @@ fn model_family_notes(model_lower: &str, reasoning: bool) -> Vec<String> {
 /// Provider-level routing quirks — only for transport/proxy behavior, not model behavior.
 fn provider_routing_notes(provider_kind: ProviderKind) -> Vec<String> {
     match provider_kind {
-        ProviderKind::Copilot => vec![
-            "Copilot has rate limits — minimize unnecessary tool calls. Batch reads when possible.".into(),
-        ],
-        ProviderKind::OpenRouter => vec![
-            "OpenRouter routes to different backends. Keep tool calls schema-accurate — some backends are stricter.".into(),
-        ],
-        ProviderKind::Ollama => vec![
-            "Running locally via Ollama. No network latency but limited by local hardware.".into(),
-        ],
+        ProviderKind::Copilot => prompt_note_lines(PROMPT_NOTES_PROVIDER_COPILOT),
+        ProviderKind::OpenRouter => prompt_note_lines(PROMPT_NOTES_PROVIDER_OPENROUTER),
+        ProviderKind::Ollama => prompt_note_lines(PROMPT_NOTES_PROVIDER_OLLAMA),
         _ => vec![],
     }
 }
@@ -312,7 +234,7 @@ fn model_family_label(model_lower: &str, provider_kind: ProviderKind) -> String 
 }
 
 fn is_claude_model(m: &str) -> bool {
-    m.contains("claude") || m.contains("haiku") || m.contains("sonnet") || m.contains("opus")
+    m.contains("claude")
 }
 fn is_gpt_model(m: &str) -> bool {
     // GPT family but NOT Codex (Codex has its own tuning)
@@ -341,7 +263,7 @@ fn is_kimi_model(m: &str) -> bool {
     m.contains("kimi") || m.contains("moonshot")
 }
 fn is_minimax_model(m: &str) -> bool {
-    m.contains("minimax") || (m.starts_with("m2") && !m.contains("gemma"))
+    m.contains("minimax")
 }
 fn is_qwen_model(m: &str) -> bool {
     m.contains("qwen")
@@ -368,10 +290,8 @@ fn registry_model_for_prompt(
     }
 
     let provider_hint = match provider_kind {
-        ProviderKind::Anthropic | ProviderKind::Bedrock => Some("anthropic"),
-        ProviderKind::OpenAI | ProviderKind::AzureOpenAI | ProviderKind::Inception => {
-            Some("openai")
-        }
+        ProviderKind::Anthropic => Some("anthropic"),
+        ProviderKind::OpenAI | ProviderKind::Inception => Some("openai"),
         ProviderKind::Copilot => None,
         ProviderKind::Gemini => Some("google"),
         _ => None,
@@ -401,6 +321,43 @@ const PROMPT_GPT: &str = include_str!("prompts/gpt.txt");
 const PROMPT_CLAUDE: &str = include_str!("prompts/claude.txt");
 const PROMPT_GEMINI: &str = include_str!("prompts/gemini.txt");
 const PROMPT_DEFAULT: &str = include_str!("prompts/default.txt");
+const PROMPT_NOTES_FAMILY_CLAUDE: &str = include_str!("prompts/families/claude.md");
+const PROMPT_NOTES_FAMILY_CLAUDE_REASONING: &str =
+    include_str!("prompts/families/claude-reasoning.md");
+const PROMPT_NOTES_FAMILY_CLAUDE_OPUS_REASONING: &str =
+    include_str!("prompts/families/claude-opus-reasoning.md");
+const PROMPT_NOTES_FAMILY_CODEX: &str = include_str!("prompts/families/codex.md");
+const PROMPT_NOTES_FAMILY_CODEX_REASONING: &str =
+    include_str!("prompts/families/codex-reasoning.md");
+const PROMPT_NOTES_FAMILY_GPT: &str = include_str!("prompts/families/gpt.md");
+const PROMPT_NOTES_FAMILY_GPT_REASONING: &str = include_str!("prompts/families/gpt-reasoning.md");
+const PROMPT_NOTES_FAMILY_GPT_FAST: &str = include_str!("prompts/families/gpt-fast.md");
+const PROMPT_NOTES_FAMILY_GEMINI: &str = include_str!("prompts/families/gemini.md");
+const PROMPT_NOTES_FAMILY_GEMINI_FLASH: &str = include_str!("prompts/families/gemini-flash.md");
+const PROMPT_NOTES_FAMILY_GEMINI_REASONING: &str =
+    include_str!("prompts/families/gemini-reasoning.md");
+const PROMPT_NOTES_FAMILY_DEEPSEEK: &str = include_str!("prompts/families/deepseek.md");
+const PROMPT_NOTES_FAMILY_DEEPSEEK_REASONING: &str =
+    include_str!("prompts/families/deepseek-reasoning.md");
+const PROMPT_NOTES_FAMILY_MERCURY: &str = include_str!("prompts/families/mercury.md");
+const PROMPT_NOTES_FAMILY_GROK: &str = include_str!("prompts/families/grok.md");
+const PROMPT_NOTES_FAMILY_GROK_REASONING: &str = include_str!("prompts/families/grok-reasoning.md");
+const PROMPT_NOTES_FAMILY_GLM: &str = include_str!("prompts/families/glm.md");
+const PROMPT_NOTES_FAMILY_GLM_REASONING: &str = include_str!("prompts/families/glm-reasoning.md");
+const PROMPT_NOTES_FAMILY_KIMI: &str = include_str!("prompts/families/kimi.md");
+const PROMPT_NOTES_FAMILY_KIMI_REASONING: &str = include_str!("prompts/families/kimi-reasoning.md");
+const PROMPT_NOTES_FAMILY_MINIMAX: &str = include_str!("prompts/families/minimax.md");
+const PROMPT_NOTES_FAMILY_MINIMAX_REASONING: &str =
+    include_str!("prompts/families/minimax-reasoning.md");
+const PROMPT_NOTES_FAMILY_QWEN: &str = include_str!("prompts/families/qwen.md");
+const PROMPT_NOTES_FAMILY_QWEN_CODER: &str = include_str!("prompts/families/qwen-coder.md");
+const PROMPT_NOTES_FAMILY_MISTRAL: &str = include_str!("prompts/families/mistral.md");
+const PROMPT_NOTES_FAMILY_MISTRAL_CODESTRAL: &str =
+    include_str!("prompts/families/mistral-codestral.md");
+const PROMPT_NOTES_FAMILY_LOCAL: &str = include_str!("prompts/families/local.md");
+const PROMPT_NOTES_PROVIDER_COPILOT: &str = include_str!("prompts/providers/copilot.md");
+const PROMPT_NOTES_PROVIDER_OPENROUTER: &str = include_str!("prompts/providers/openrouter.md");
+const PROMPT_NOTES_PROVIDER_OLLAMA: &str = include_str!("prompts/providers/ollama.md");
 
 /// Select the base prompt template for the given model.
 fn select_base_prompt(model_name: &str) -> &'static str {
@@ -450,7 +407,7 @@ pub fn build_system_prompt(
         static_prefix.push_str("\n# Delegation\n");
         static_prefix.push_str("- Keep small, single-file work in the main thread.\n");
         static_prefix.push_str("- Use `subagent` only for self-contained chunks whose result can be summarized back clearly.\n");
-        static_prefix.push_str("- Prefer `scout` or `explore` for read-only reconnaissance, `plan` for design-only breakdowns, `review` for a final pass, and `worker` or `subagent` for isolated implementation.\n");
+        static_prefix.push_str("- Prefer `scout` or `explore` for read-only reconnaissance, `plan` for design-only breakdowns, `review` for a final pass, and `worker` or `task` for isolated implementation.\n");
         static_prefix.push_str("- Use `background: true` when the sub-agent's work is independent. Use foreground when you need the result before proceeding.\n");
         static_prefix.push_str("- After significant multi-file edits, spawn a `review` subagent. Skip review for trivial fixes.\n");
     }
@@ -785,14 +742,14 @@ mod tests {
 
     #[test]
     fn same_model_same_tuning_across_providers() {
-        // GPT-5.4 should get GPT tuning whether from OpenAI, Copilot, or Azure
+        // GPT-5.4 should get GPT tuning whether from OpenAI, Copilot, or Inception
         let openai = provider_prompt_suffix(ProviderKind::OpenAI, "gpt-5.4").unwrap();
         let copilot = provider_prompt_suffix(ProviderKind::Copilot, "gpt-5.4").unwrap();
-        let azure = provider_prompt_suffix(ProviderKind::AzureOpenAI, "gpt-5.4").unwrap();
+        let inception = provider_prompt_suffix(ProviderKind::Inception, "gpt-5.4").unwrap();
         // All should contain GPT-specific tuning
         assert!(openai.contains("function call"));
         assert!(copilot.contains("function call"));
-        assert!(azure.contains("function call"));
+        assert!(inception.contains("function call"));
     }
 
     #[test]
@@ -802,6 +759,20 @@ mod tests {
         // Should have Claude model tuning AND Copilot routing note
         assert!(text.contains("Claude"));
         assert!(text.contains("Copilot") || text.contains("rate limit"));
+    }
+
+    #[test]
+    fn bare_sonnet_name_does_not_get_claude_tuning() {
+        let suffix = provider_prompt_suffix(ProviderKind::OpenRouter, "sonnet-local-7b");
+        let text = suffix.unwrap();
+        assert!(!text.contains("Claude"));
+        assert!(!text.contains("structured instructions"));
+    }
+
+    #[test]
+    fn bare_m2_prefix_does_not_get_minimax_tuning() {
+        let suffix = provider_prompt_suffix(ProviderKind::OpenAI, "m2-ultra-custom");
+        assert!(suffix.is_none());
     }
 
     #[test]

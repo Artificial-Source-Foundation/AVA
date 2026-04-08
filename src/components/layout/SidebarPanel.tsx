@@ -6,14 +6,11 @@
  *   2. New Chat button: Full-width blue-tinted row
  *   3. Project Switcher: Folder + project name + git branch badge + chevrons
  *   4. Thread List: Clean list, no section headers
- *   5. HQ Card: Purple-tinted bottom card
  */
 
 import {
   Archive,
   ArchiveRestore,
-  ArrowRight,
-  Building2,
   LayoutDashboard,
   MessageSquare,
   Plus,
@@ -21,7 +18,6 @@ import {
   Settings,
 } from 'lucide-solid'
 import { type Component, createMemo, createSignal, For, Show } from 'solid-js'
-import { useHq } from '../../stores/hq'
 import { useLayout } from '../../stores/layout'
 import { useSession } from '../../stores/session'
 import { ProjectDropdown } from '../sidebar/sessions/ProjectDropdown'
@@ -61,7 +57,6 @@ export const SidebarPanel: Component = () => {
     toggleDashboard,
     closeDashboard,
   } = useLayout()
-  const { hqMode, toggleHqMode } = useHq()
   const [contextMenu, setContextMenu] = createSignal<ContextMenuState | null>(null)
   const [renameRequest, setRenameRequest] = createSignal<{ id: string; seq: number } | null>(null)
   const [showSearch, setShowSearch] = createSignal(false)
@@ -378,47 +373,6 @@ export const SidebarPanel: Component = () => {
           </Show>
         </div>
       </PanelErrorBoundary>
-
-      {/* 5. HQ Card — bottom, pinned */}
-      <div class="flex-shrink-0">
-        <button
-          type="button"
-          onClick={toggleHqMode}
-          class="flex w-full items-center justify-between transition-colors hover:bg-[var(--alpha-white-8)]"
-          style={{
-            padding: '10px 14px',
-            background: hqMode()
-              ? 'color-mix(in srgb, var(--system-purple) 12%, transparent)'
-              : 'color-mix(in srgb, var(--system-purple) 8%, transparent)',
-            'border-top': '1px solid color-mix(in srgb, var(--system-purple) 20%, transparent)',
-          }}
-          title={hqMode() ? 'Switch to Chat' : 'Open HQ'}
-          aria-label="Toggle HQ mode"
-        >
-          <div class="flex items-center gap-2 min-w-0 text-left">
-            <Building2 class="w-4 h-4 flex-shrink-0" style={{ color: 'var(--system-purple)' }} />
-            <div class="flex flex-col min-w-0" style={{ gap: '1px' }}>
-              <span class="leading-tight text-[13px] font-semibold text-[var(--text-primary)]">
-                HQ
-              </span>
-              <span
-                class="leading-tight truncate"
-                style={{
-                  'font-size': '10px',
-                  color: 'var(--system-purple)',
-                  'font-family': "var(--font-ui-mono, 'Geist Mono', ui-monospace, monospace)",
-                }}
-              >
-                2 agents active
-              </span>
-            </div>
-          </div>
-          <ArrowRight
-            class="flex-shrink-0"
-            style={{ width: '14px', height: '14px', color: 'var(--system-purple)' }}
-          />
-        </button>
-      </div>
 
       {/* Context Menu */}
       <Show when={contextMenu()}>

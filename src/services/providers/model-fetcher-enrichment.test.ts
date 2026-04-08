@@ -1,55 +1,47 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { _resetCatalogCache, syncModelsCatalog } from './curated-model-catalog'
 import type { FetchedModel } from './model-fetcher'
 import { enrichWithCatalog } from './model-fetcher'
-import { _resetCatalogCache, syncModelsCatalog } from './models-dev-catalog'
 
-const MOCK_CATALOG = {
-  xai: {
-    id: 'xai',
-    name: 'xAI',
-    models: {
-      'grok-4-1-fast-reasoning': {
-        id: 'grok-4-1-fast-reasoning',
-        name: 'Grok 4.1 Fast (Reasoning)',
-        attachment: true,
-        reasoning: true,
-        tool_call: true,
-        cost: { input: 0.2, output: 0.5 },
-        limit: { context: 2000000, output: 32768 },
-      },
-      'grok-code-fast-1': {
-        id: 'grok-code-fast-1',
-        name: 'Grok Code Fast',
-        attachment: false,
-        reasoning: true,
-        tool_call: true,
-        cost: { input: 0.2, output: 1.5 },
-        limit: { context: 256000, output: 16384 },
-      },
-    },
+const mockListModels = vi.fn()
+
+vi.mock('../rust-bridge', () => ({
+  rustBackend: {
+    listModels: () => mockListModels(),
   },
-}
-
-// Mock localStorage
-const store = new Map<string, string>()
-const mockLocalStorage = {
-  getItem: (key: string) => store.get(key) ?? null,
-  setItem: (key: string, value: string) => store.set(key, value),
-  removeItem: (key: string) => store.delete(key),
-} as unknown as Storage
+}))
 
 describe('enrichWithCatalog', () => {
   beforeEach(async () => {
-    store.clear()
     _resetCatalogCache()
-    vi.stubGlobal('localStorage', mockLocalStorage)
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue({
-        ok: true,
-        json: () => Promise.resolve(MOCK_CATALOG),
-      })
-    )
+    mockListModels.mockResolvedValue([
+      {
+        id: 'grok-4-1-fast-reasoning',
+        provider: 'xai',
+        name: 'Grok 4.1 Fast (Reasoning)',
+        toolCall: true,
+        vision: true,
+        reasoning: true,
+        capabilities: ['tools', 'vision', 'reasoning'],
+        contextWindow: 2000000,
+        maxOutput: 32768,
+        costInput: 0.2,
+        costOutput: 0.5,
+      },
+      {
+        id: 'grok-code-fast-1',
+        provider: 'xai',
+        name: 'Grok Code Fast',
+        toolCall: true,
+        vision: false,
+        reasoning: true,
+        capabilities: ['tools', 'reasoning'],
+        contextWindow: 256000,
+        maxOutput: 16384,
+        costInput: 0.2,
+        costOutput: 1.5,
+      },
+    ])
     await syncModelsCatalog()
   })
 

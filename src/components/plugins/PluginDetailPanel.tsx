@@ -1,9 +1,10 @@
-import { type Component, Show } from 'solid-js'
-import type { PluginCatalogItem, PluginState } from '../../types/plugin'
+import { type Component, For, Show } from 'solid-js'
+import type { PluginCatalogItem, PluginMountRegistration, PluginState } from '../../types/plugin'
 
 interface PluginDetailPanelProps {
   plugin: PluginCatalogItem | null
   state: PluginState | null
+  mounts?: PluginMountRegistration[]
 }
 
 export const PluginDetailPanel: Component<PluginDetailPanelProps> = (props) => {
@@ -48,6 +49,37 @@ export const PluginDetailPanel: Component<PluginDetailPanelProps> = (props) => {
                   : 'Not installed'}
               </span>
             </p>
+            <Show when={(props.mounts?.length ?? 0) > 0}>
+              <div class="pt-1.5 border-t border-[var(--border-subtle)]">
+                <p class="text-[10px] uppercase tracking-wide text-[var(--text-muted)] mb-1.5">
+                  Exposed UI Mounts
+                </p>
+                <div class="space-y-1.5">
+                  <For each={props.mounts ?? []}>
+                    {(entry) => (
+                      <div class="rounded-[var(--radius-sm)] border border-[var(--border-subtle)] px-2 py-1.5">
+                        <div class="flex items-center justify-between gap-2">
+                          <span class="text-[11px] text-[var(--text-primary)]">
+                            {entry.mount.label}
+                          </span>
+                          <span class="text-[10px] text-[var(--text-muted)] uppercase">
+                            {entry.mount.location}
+                          </span>
+                        </div>
+                        <Show when={entry.mount.description}>
+                          <p class="text-[10px] text-[var(--text-secondary)] mt-1">
+                            {entry.mount.description}
+                          </p>
+                        </Show>
+                        <p class="text-[10px] text-[var(--text-muted)] mt-1">
+                          id: {entry.mount.id}
+                        </p>
+                      </div>
+                    )}
+                  </For>
+                </div>
+              </div>
+            </Show>
           </div>
         )}
       </Show>

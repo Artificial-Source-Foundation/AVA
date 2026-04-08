@@ -1,6 +1,5 @@
 import { ArrowLeft, Search, X } from 'lucide-solid'
 import { type Accessor, type Component, createEffect, createMemo, For, Show } from 'solid-js'
-import { useSettings } from '../../stores/settings'
 import {
   type SettingsSearchEntry,
   type SettingsTab,
@@ -18,19 +17,9 @@ interface SettingsModalSidebarProps {
 }
 
 export const SettingsModalSidebar: Component<SettingsModalSidebarProps> = (props) => {
-  const { settings } = useSettings()
-
   const filteredGroups = createMemo((): TabGroup[] => {
     const q = props.search().toLowerCase().trim()
-    const devMode = settings().devMode ?? false
-
-    const base = tabGroups.map((group) => ({
-      ...group,
-      tabs: group.tabs.filter((tab) => {
-        if (tab.id === 'developer' && !devMode) return false
-        return true
-      }),
-    }))
+    const base = tabGroups
 
     if (!q) return base.filter((group) => group.tabs.length > 0)
 

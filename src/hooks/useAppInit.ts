@@ -21,7 +21,7 @@ import {
   setLogDirectory,
 } from '../services/dev-console'
 import { getLogDirectory, initLogger, logError, logInfo, setLogLevel } from '../services/logger'
-import { syncModelsCatalog } from '../services/providers/models-dev-catalog'
+import { syncModelsCatalog } from '../services/providers/curated-model-catalog'
 import { rustBackend } from '../services/rust-bridge'
 import { initSettingsFS } from '../services/settings-fs'
 import { type ScheduledWorkflow, startScheduler } from '../services/workflow-scheduler'
@@ -40,7 +40,7 @@ import {
 import { useWorkflows } from '../stores/workflows'
 
 const SPLASH_MIN_MS = 800
-const BUILT_IN_EXTENSION_COUNT = 20
+const BUILT_IN_PLUGIN_COUNT = 20
 const BUILT_IN_TOOL_COUNT = 39
 
 export interface AppInitResult {
@@ -97,10 +97,10 @@ export async function runAppInit(
 
     setSplashStatus('Starting logger...')
     await initLogger({
-      version: 'AVA v2.0.0',
+      version: 'AVA v3.3.0',
       platform: navigator.platform?.toLowerCase() ?? 'unknown',
       runtime: 'tauri',
-      extensions: BUILT_IN_EXTENSION_COUNT,
+      plugins: BUILT_IN_PLUGIN_COUNT,
       tools: BUILT_IN_TOOL_COUNT,
     })
     await initFrontendLogger()
@@ -108,7 +108,7 @@ export async function runAppInit(
     if (logDir) setLogDirectory(logDir)
     logInfo('App', 'Initializing AVA...')
     log.info('app', 'App initialization started', {
-      version: 'AVA v2.0.0',
+      version: 'AVA v3.3.0',
       platform: navigator.platform,
       runtime: 'tauri',
     })
@@ -126,14 +126,13 @@ export async function runAppInit(
     syncAllApiKeys()
     await detectEnvApiKeys()
 
-    // Models.dev is the PRIMARY source for model metadata (pricing, context
-    // windows, capabilities). The compiled-in Rust registry is a fallback
-    // only used when the catalog fetch fails or returns nothing.
+    // The backend-owned curated catalog is the primary source for model
+    // metadata (pricing, context windows, capabilities).
     const catalog = await syncModelsCatalog().catch(() => null)
     const catalogPopulated = catalog ? populateModelsFromCatalog() : 0
 
-    // Fall back to compiled-in Rust backend models only if models.dev
-    // returned nothing (network failure with empty cache).
+    // Fall back to direct backend model hydration only if the shared catalog
+    // helper did not populate anything.
     if (catalogPopulated === 0) {
       try {
         const backendModels = await rustBackend.listModels()
@@ -282,7 +281,7 @@ async function runWebInit(
     log.info('app', 'Backend health check passed')
 
     setSplashStatus('Loading models...')
-    // Models.dev is primary source; compiled-in registry is fallback
+    // The backend-owned curated catalog is the primary source.
     const catalog = await syncModelsCatalog().catch(() => null)
     const catalogPopulated = catalog ? populateModelsFromCatalog() : 0
 

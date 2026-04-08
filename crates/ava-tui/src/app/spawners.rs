@@ -7,7 +7,7 @@ impl App {
         let current_model = self.state.agent.model_name.clone();
         let current_provider = self.state.agent.provider_name.clone();
         // CLI agents (Gemini CLI, Claude Code, etc.) are not shown in the model
-        // selector — they're only available as HQ/delegation worker targets.
+        // selector — they're only available as delegation worker targets.
         let app_tx_for_load = app_tx.clone();
         let load = async move {
             let credentials = ava_config::CredentialStore::load_default()
@@ -94,6 +94,20 @@ impl App {
         tokio::spawn(async move {
             let servers = stack.mcp_server_info().await;
             let _ = app_tx.send(AppEvent::McpServersLoaded(Ok(servers)));
+        });
+    }
+
+    pub(crate) fn spawn_lsp_sidebar_refresh(&self, app_tx: mpsc::UnboundedSender<AppEvent>) {
+        let workspace = std::env::current_dir().unwrap_or_default();
+        let previous = self.state.lsp_entries.clone();
+        tokio::spawn(async move {
+            let result = tokio::task::spawn_blocking(move || {
+                crate::state::lsp::refresh_lsp_entries(&workspace, &previous)
+            })
+            .await
+            .map_err(|err| err.to_string());
+
+            let _ = app_tx.send(AppEvent::LspEntriesLoaded(result));
         });
     }
 
@@ -256,7 +270,7 @@ impl App {
 
     /// Spawn a code review on working directory changes. Results appear as chat messages.
     pub(crate) fn spawn_review_pass(&mut self, app_tx: mpsc::UnboundedSender<AppEvent>) {
-        use ava_hq::review::{
+        use ava_review::{
             build_review_system_prompt, collect_diff, format_text, parse_review_output,
             run_review_agent, DiffMode, Severity,
         };

@@ -44,7 +44,7 @@ fn estimate_tokens(text: &str) -> usize {
 /// patterns outside of code blocks (``` fenced or 4+ space indented).
 /// Included content replaces the `@path` reference inline. Circular references
 /// are prevented via the `visited` set, and recursion is limited to
-/// [`MAX_INCLUDE_DEPTH`] levels with a total budget of [`MAX_INCLUDE_BYTES`].
+/// `MAX_INCLUDE_DEPTH` levels with a total budget of `MAX_INCLUDE_BYTES`.
 ///
 /// Non-existent or non-includable files are silently left as-is.
 pub fn process_includes(content: &str, base_path: &Path, visited: &mut HashSet<PathBuf>) -> String {

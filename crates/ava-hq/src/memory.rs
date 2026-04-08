@@ -205,7 +205,7 @@ async fn scan_project(project_root: &Path) -> Result<ProjectScan> {
         "package.json",
         "src-tauri/Cargo.toml",
         "docs/README.md",
-        "docs/backlog.md",
+        "docs/project/backlog.md",
         "CHANGELOG.md",
     ];
     let important_paths = important_candidates

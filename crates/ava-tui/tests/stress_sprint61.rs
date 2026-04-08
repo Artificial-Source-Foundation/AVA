@@ -211,7 +211,7 @@ mod f4_pruning {
         }
 
         for i in 0..5 {
-            messages.push(Message::new(Role::Assistant, &format!("turn {i}")));
+            messages.push(Message::new(Role::Assistant, format!("turn {i}")));
         }
 
         let deduped = dedup_tool_results(&mut messages);

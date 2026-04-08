@@ -108,6 +108,42 @@ Place your plugin directory (containing `plugin.toml`) in either:
 
 AVA discovers and loads plugins automatically on startup.
 
+## App host seams
+
+Plugins can also expose namespaced app capabilities through the host seam.
+
+Supported v1 capability types:
+
+1. commands
+2. routes
+3. events
+4. mounts
+
+Example:
+
+```typescript
+createPlugin(
+  {},
+  {
+    capabilities: {
+      commands: [{ name: 'demo.ping', description: 'Ping the plugin' }],
+      routes: [{ path: '/status', method: 'GET', description: 'Plugin status' }],
+      events: [{ name: 'demo.updated', description: 'Plugin update event' }],
+      mounts: [{ id: 'demo.settings', location: 'settings.section', label: 'Demo' }],
+    },
+    commands: {
+      'demo.ping': async () => ({
+        result: { ok: true },
+        emittedEvents: [{ event: 'demo.updated', payload: { ok: true } }],
+      }),
+    },
+    routes: {
+      'GET /status': async () => ({ result: { status: 'ok' } }),
+    },
+  }
+)
+```
+
 ## Protocol
 
 Plugins communicate via JSON-RPC 2.0 over stdio with Content-Length framing (the same wire format used by LSP and MCP):

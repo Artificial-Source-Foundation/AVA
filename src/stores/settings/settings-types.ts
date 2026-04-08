@@ -101,7 +101,6 @@ export interface GenerationSettings {
   reasoningEffort: ReasoningEffort // Reasoning intensity: off, low, medium, high
   autoCompact: boolean // Automatically compact conversation when context reaches threshold
   compactionThreshold: number // 50–95, default 80
-  delegationEnabled: boolean // Enable team delegation (HQ hierarchy)
 }
 
 export interface AgentLimitSettings {
@@ -165,33 +164,9 @@ export interface CustomRule {
   enabled: boolean
 }
 
-/** @deprecated Use CustomSkill instead */
-export type CustomMicroagent = CustomSkill
-
 export interface TrustedFoldersSettings {
   allowed: string[]
   denied: string[]
-}
-
-/** Which backend stack to use for the agent loop */
-export type AgentBackend = 'core' | 'core-v2'
-
-export interface LeadConfig {
-  domain: string
-  enabled: boolean
-  model: string
-  customPrompt: string
-  maxWorkers: number
-}
-
-export interface TeamConfig {
-  enabled: boolean
-  defaultDirectorModel: string
-  defaultLeadModel: string
-  defaultWorkerModel: string
-  defaultScoutModel: string
-  workerNames: string[]
-  leads: LeadConfig[]
 }
 
 export interface AppSettings {
@@ -219,8 +194,4 @@ export interface AppSettings {
   customRules: CustomRule[]
   hiddenBuiltInSkills: string[]
   trustedFolders: TrustedFoldersSettings
-  /** Which backend stack powers the agent loop (default: 'core-v2') */
-  agentBackend: AgentBackend
-  /** Team (HQ) multi-agent configuration */
-  team: TeamConfig
 }

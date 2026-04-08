@@ -3,11 +3,11 @@
  *
  * POPULAR label + 4-column grid of square cards (90px height).
  * Connected state: green circle-check + accent border + green text.
- * MORE label + second row with Copilot, OpenRouter, Ollama, "16 more".
+ * MORE label + second row with additional providers.
  * Nav: Back <- | dots | Skip + Continue button.
  */
 
-import { CheckCircle, Eye, EyeOff, MoreHorizontal, Server } from 'lucide-solid'
+import { CheckCircle, Eye, EyeOff, Server } from 'lucide-solid'
 import { type Component, createSignal, For, Show } from 'solid-js'
 import {
   isOAuthSupported,
@@ -17,6 +17,7 @@ import {
 } from '../../../services/auth/oauth'
 import type { LLMProvider } from '../../../types/llm'
 import {
+  AlibabaCloudLogo,
   AnthropicLogo,
   CopilotLogo,
   GoogleLogo,
@@ -60,24 +61,13 @@ const POPULAR_PROVIDERS: ProviderDef[] = [
     ],
   },
   {
-    id: 'chatgpt',
-    name: 'ChatGPT',
-    authText: 'OAuth \u00B7 Pro/Plus sub',
-    color: '#10A37F',
-    logo: OpenAILogo,
-    authOptions: [{ label: 'OAuth', type: 'oauth' }],
-  },
-  {
-    id: 'google',
+    id: 'gemini',
     name: 'Gemini',
     authText: 'API Key',
     color: '#4285F4',
     logo: GoogleLogo,
     authOptions: [{ label: 'API Key', type: 'apikey' }],
   },
-]
-
-const MORE_PROVIDERS: ProviderDef[] = [
   {
     id: 'copilot',
     name: 'Copilot',
@@ -86,6 +76,9 @@ const MORE_PROVIDERS: ProviderDef[] = [
     logo: CopilotLogo,
     authOptions: [{ label: 'OAuth', type: 'oauth' }],
   },
+]
+
+const MORE_PROVIDERS: ProviderDef[] = [
   {
     id: 'openrouter',
     name: 'OpenRouter',
@@ -101,6 +94,22 @@ const MORE_PROVIDERS: ProviderDef[] = [
     color: '#0F172A',
     logo: OllamaLogo,
     authOptions: [{ label: 'Configure', type: 'configure' }],
+  },
+  {
+    id: 'inception',
+    name: 'Inception',
+    authText: 'API Key',
+    color: '#FF6B35',
+    logo: null,
+    authOptions: [{ label: 'API Key', type: 'apikey' }],
+  },
+  {
+    id: 'alibaba',
+    name: 'Alibaba',
+    authText: 'API Key',
+    color: '#FF6A00',
+    logo: AlibabaCloudLogo,
+    authOptions: [{ label: 'API Key', type: 'apikey' }],
   },
 ]
 
@@ -298,7 +307,7 @@ export const ProviderStep: Component<ProviderStepProps> = (props) => {
         More
       </p>
 
-      {/* Second row: 4 columns (3 providers + "16 more") */}
+      {/* Second row: additional providers */}
       <div class="w-full grid grid-cols-4 gap-2 mb-10">
         <For each={MORE_PROVIDERS}>
           {(provider) => (
@@ -318,19 +327,6 @@ export const ProviderStep: Component<ProviderStepProps> = (props) => {
             />
           )}
         </For>
-
-        {/* "16 more" card */}
-        <div
-          class="flex flex-col items-center justify-center rounded-xl"
-          style={{
-            background: 'var(--surface)',
-            border: '1px solid var(--border-subtle)',
-            height: '90px',
-          }}
-        >
-          <MoreHorizontal class="w-5 h-5 text-[var(--text-muted)] mb-1" />
-          <span class="text-[10px] text-[var(--text-muted)]">16 more</span>
-        </div>
       </div>
 
       {/* Navigation: Back <- | (dots in parent) | Skip + Continue */}

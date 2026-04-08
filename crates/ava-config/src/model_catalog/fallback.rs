@@ -4,10 +4,9 @@ use std::collections::HashMap;
 
 use super::types::{CatalogModel, ModelCatalog};
 
-/// Curated coding-focused models per model provider prefix.
-/// The prefix (e.g., "anthropic") matches the model ID prefix in models.dev
-/// (e.g., "anthropic/claude-sonnet-4.6"). Only whitelisted models with
-/// `tool_call: true` are shown. Update this list when new flagship models launch.
+/// Curated coding-focused models per provider.
+/// Update this list when new flagship models launch or when the supported core set changes.
+#[cfg(test)]
 pub(crate) const CURATED_MODELS: &[(&str, &[&str])] = &[
     (
         "anthropic",
@@ -116,9 +115,9 @@ pub(crate) const CURATED_MODELS: &[(&str, &[&str])] = &[
 
 /// Hardcoded fallback models for when fetch + cache both fail.
 ///
-/// Combines the compiled-in model registry (for paid models with pricing data)
+/// Combines the compiled-in registry (for models with owned metadata)
 /// with hardcoded entries for subscription/coding-plan providers that are not
-/// on models.dev.
+/// carried in `registry.json` yet.
 pub fn fallback_catalog() -> ModelCatalog {
     let reg = super::registry::registry();
     let mut providers: HashMap<String, Vec<CatalogModel>> = HashMap::new();
@@ -207,11 +206,12 @@ fn add_subscription_models(providers: &mut HashMap<String, Vec<CatalogModel>>) {
         ],
     );
 
-    // OpenAI models not in the minimal registry (appear in CURATED_MODELS for models.dev)
+    // OpenAI models not yet represented in the compiled registry.
     add_models(
         providers,
         "openai",
         &[
+            ("gpt-5.3", "GPT-5.3", 200_000, Some(100_000)),
             (
                 "gpt-5.3-codex-spark",
                 "GPT-5.3 Codex Spark",

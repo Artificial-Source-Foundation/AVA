@@ -38,8 +38,12 @@ pub struct FileEditRecord {
 pub enum WebEvent {
     /// A regular agent event from the backend loop.
     Agent(ava_agent::agent_loop::AgentEvent),
-    /// An HQ event from the Director/worker pipeline.
-    Hq(ava_hq::HqEvent),
+    /// A plugin-owned event emitted through the plugin host seam.
+    Plugin {
+        plugin: String,
+        event: String,
+        payload: Value,
+    },
     /// An interactive approval request.
     ApprovalRequest {
         id: String,
@@ -126,10 +130,7 @@ impl WebState {
     pub async fn init(data_dir: PathBuf) -> Result<Self> {
         let db = ava_db::Database::create_at(data_dir.join("ava.db")).await?;
         db.run_migrations().await?;
-        let config = AgentStackConfig {
-            data_dir,
-            ..Default::default()
-        };
+        let config = AgentStackConfig::for_web(data_dir);
 
         let (stack, question_rx, approval_rx, plan_rx) = AgentStack::new(config).await?;
 

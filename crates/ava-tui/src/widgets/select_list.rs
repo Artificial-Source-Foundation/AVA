@@ -2,9 +2,9 @@ use crossterm::event::{KeyCode, KeyEvent};
 use nucleo::pattern::{CaseMatching, Normalization, Pattern};
 use nucleo::Matcher;
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Paragraph};
+use ratatui::widgets::{Block, Paragraph};
 use ratatui::Frame;
 
 use crate::state::theme::Theme;
@@ -113,15 +113,7 @@ impl<T: Clone> SelectListState<T> {
         if count == 0 {
             return;
         }
-        if n > self.selected {
-            // Wrap to end
-            self.selected = count - (n - self.selected) % count;
-            if self.selected >= count {
-                self.selected = count - 1;
-            }
-        } else {
-            self.selected -= n;
-        }
+        self.selected = (self.selected + count - (n % count)) % count;
     }
 
     /// Jump to first item.
@@ -438,10 +430,10 @@ pub fn render_select_list<T: Clone>(
 ) {
     use ratatui::layout::{Constraint, Direction, Layout};
 
-    // Layout: header (3 lines) | search (3 lines) | items (flex) | footer (2 lines)
-    let header_height = 3u16;
-    let search_height = 3u16;
-    let footer_height = if config.keybinds.is_empty() { 0u16 } else { 2 };
+    // Layout: compact header | compact search | items | compact footer.
+    let header_height = 2u16;
+    let search_height = 2u16;
+    let footer_height = if config.keybinds.is_empty() { 0u16 } else { 1 };
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -462,33 +454,32 @@ pub fn render_select_list<T: Clone>(
     let inner_width = content_area.width as usize;
     let filtered = state.filtered();
 
-    // --- Header bar: bg_surface background, title left, [Esc] right ---
+    // --- Header bar: quiet surface, title left, Esc right ---
     {
         // Fill header background
         let header_bg = Block::default().style(Style::default().bg(theme.bg_surface));
         frame.render_widget(header_bg, header_area);
 
         let title_text = vec![Span::styled(
-            format!(" {}", config.title),
+            format!("  {}", config.title),
             Style::default()
                 .fg(theme.text)
                 .bg(theme.bg_surface)
                 .add_modifier(Modifier::BOLD),
         )];
         let esc_text = vec![Span::styled(
-            "[Esc] ",
+            "Esc ",
             Style::default().fg(theme.text_dimmed).bg(theme.bg_surface),
         )];
 
-        // Title on line 1 (vertically centered in 3-line header)
-        let title_line = Rect::new(header_area.x, header_area.y + 1, header_area.width / 2, 1);
+        let title_line = Rect::new(header_area.x, header_area.y, header_area.width / 2, 1);
         frame.render_widget(
             Paragraph::new(Line::from(title_text)).style(Style::default().bg(theme.bg_surface)),
             title_line,
         );
         let esc_line = Rect::new(
             header_area.x + header_area.width / 2,
-            header_area.y + 1,
+            header_area.y,
             header_area.width / 2,
             1,
         );
@@ -500,21 +491,16 @@ pub fn render_select_list<T: Clone>(
         );
     }
 
-    // --- Search input: bg_deep fill with border_subtle ---
+    // --- Search input: no explicit border, just a surface shift ---
     {
         let search_inner = Rect::new(
-            search_area.x + 1,
-            search_area.y + 1,
-            search_area.width.saturating_sub(2),
+            search_area.x + 2,
+            search_area.y,
+            search_area.width.saturating_sub(4),
             1,
         );
-
-        // Draw a bordered search box with bg_deep
-        let search_block = Block::default()
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(theme.border_subtle))
-            .style(Style::default().bg(theme.bg_deep));
-        frame.render_widget(search_block, search_area);
+        let search_bg = Block::default().style(Style::default().bg(theme.bg_deep));
+        frame.render_widget(search_bg, search_area);
 
         let search_display = if state.query.is_empty() {
             config.search_placeholder.clone()
@@ -534,7 +520,7 @@ pub fn render_select_list<T: Clone>(
 
         let search_line = Line::from(vec![
             Span::styled(
-                " \u{1F50D} ",
+                "  / ",
                 Style::default().fg(theme.text_dimmed).bg(theme.bg_deep),
             ),
             Span::styled(
@@ -561,14 +547,11 @@ pub fn render_select_list<T: Clone>(
                 if last_section.is_some() {
                     lines.push(Line::from(""));
                 }
-                // Section header: uppercase, bold, text_dimmed (#505A6B)
-                let section_upper = section.to_uppercase();
+                let section_upper = section.to_lowercase();
                 lines.push(clamp_line(
                     Line::from(vec![Span::styled(
                         format!("  {section_upper}"),
-                        Style::default()
-                            .fg(theme.text_dimmed)
-                            .add_modifier(Modifier::BOLD),
+                        Style::default().fg(theme.text_dimmed),
                     )]),
                     inner_width,
                 ));
@@ -579,22 +562,15 @@ pub fn render_select_list<T: Clone>(
         let is_selected = idx == state.selected;
         let is_hovered = state.hovered == Some(idx) && !is_selected;
 
-        // Selected: accent-primary bg with dark text; hovered: subtle surface bg; unselected: transparent
-        let bg = if is_selected {
-            theme.primary
-        } else if is_hovered {
+        // Selected: subtle monochrome surface; hovered: slightly raised surface.
+        let bg = if is_selected || is_hovered {
             theme.bg_surface
         } else {
             theme.bg_elevated
         };
-        let fg = if is_selected {
-            Color::Rgb(11, 14, 20) // dark text on accent bg
-        } else {
-            theme.text
-        };
-        // Detail text on selected row: ~0.7 opacity dark on primary blue
+        let fg = theme.text;
         let fg_detail = if is_selected {
-            Color::Rgb(31, 57, 88) // #1F3958 — 0.7 opacity #0B0E14 on #4D9EF6
+            theme.text_muted
         } else {
             theme.text_dimmed
         };
@@ -604,23 +580,13 @@ pub fn render_select_list<T: Clone>(
         // Left padding + status prefix
         match &item.status {
             Some(ItemStatus::Active) => {
-                spans.push(Span::styled(
-                    " \u{25CF} ",
-                    Style::default()
-                        .fg(if is_selected { fg } else { theme.accent })
-                        .bg(bg),
-                ));
+                spans.push(Span::styled("  ", Style::default().bg(bg)));
             }
             Some(ItemStatus::Connected(_)) => {
-                spans.push(Span::styled(
-                    " \u{2713} ",
-                    Style::default()
-                        .fg(if is_selected { fg } else { theme.success })
-                        .bg(bg),
-                ));
+                spans.push(Span::styled("  ", Style::default().bg(bg)));
             }
             _ => {
-                spans.push(Span::styled("   ", Style::default().bg(bg)));
+                spans.push(Span::styled("  ", Style::default().bg(bg)));
             }
         }
 
@@ -656,7 +622,11 @@ pub fn render_select_list<T: Clone>(
 
             let detail_style = match &item.status {
                 Some(ItemStatus::Connected(_)) => Style::default()
-                    .fg(if is_selected { fg_detail } else { theme.accent })
+                    .fg(if is_selected {
+                        fg_detail
+                    } else {
+                        theme.text_muted
+                    })
                     .bg(bg),
                 Some(ItemStatus::Info(_)) => Style::default()
                     .fg(if is_selected {
@@ -724,15 +694,15 @@ pub fn render_select_list<T: Clone>(
         }
         let footer_line = clamp_line(Line::from(footer_spans), inner_width);
         let footer = Paragraph::new(footer_line).style(Style::default().bg(theme.bg_surface));
-        let footer_text_area = Rect::new(footer_area.x, footer_area.y + 1, footer_area.width, 1);
+        let footer_text_area = Rect::new(footer_area.x, footer_area.y, footer_area.width, 1);
         frame.render_widget(footer, footer_text_area);
     }
 }
 
 /// Compute the viewport height for the item list area within a modal.
-/// Subtracts header (3 lines), search (3 lines), and footer (2 lines) from the modal inner height.
+/// Subtracts compact header/search/footer rows from the modal inner height.
 pub fn list_viewport_height(modal_inner_height: usize) -> usize {
-    modal_inner_height.saturating_sub(8)
+    modal_inner_height.saturating_sub(5)
 }
 
 #[cfg(test)]
@@ -790,6 +760,18 @@ mod tests {
         assert_eq!(state.selected, 2); // wraps to end
         state.move_up(1);
         assert_eq!(state.selected, 1);
+    }
+
+    #[test]
+    fn move_up_full_cycle_keeps_selection() {
+        let mut state = SelectListState::new(make_flat_items(&["a", "b", "c", "d", "e"]));
+        state.selected = 0;
+        state.move_up(5);
+        assert_eq!(state.selected, 0);
+
+        state.selected = 1;
+        state.move_up(6);
+        assert_eq!(state.selected, 0);
     }
 
     #[test]

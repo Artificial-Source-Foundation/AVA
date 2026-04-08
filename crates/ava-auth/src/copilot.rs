@@ -1,7 +1,7 @@
 //! Copilot-specific token exchange and management.
 //!
 //! Flow: GitHub OAuth access_token → GET api.github.com/copilot_internal/v2/token
-//!     → { token, expires_at, endpoints: { api: "https://api.individual.githubcopilot.com" } }
+//!     → { token, expires_at, endpoints: { api: "<https://api.individual.githubcopilot.com>" } }
 
 use serde::Deserialize;
 use url::Url;

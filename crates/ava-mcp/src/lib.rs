@@ -30,7 +30,7 @@ pub use client::{
 pub use config::{
     load_mcp_config, load_merged_mcp_config, MCPServerConfig, McpOAuthConfig, TransportType,
 };
-pub use manager::{ExtensionManager, MAX_MCP_OUTPUT_CHARS};
+pub use manager::{McpManager, MAX_MCP_OUTPUT_CHARS};
 pub use oauth::{load_stored_tokens, store_tokens, McpOAuthManager, McpTokens};
 pub use prompts::{execute_mcp_prompt, get_mcp_prompt_commands, McpPromptArg, McpPromptCommand};
 pub use server::AVAMCPServer;

@@ -1,0 +1,1 @@
+- Flash is optimized for speed. Keep tool chains short and focused.

@@ -1,6 +1,6 @@
 [package]
 name = "ava-plugin"
-version = "3.0.1"
+version = "3.3.0"
 edition.workspace = true
 authors.workspace = true
 license.workspace = true

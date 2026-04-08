@@ -19,9 +19,9 @@ const BACKLOG_MIN_INTERVAL: Duration = Duration::from_millis(8);
 /// # Adaptive flushing
 ///
 /// Under normal streaming the buffer respects the configured frame interval
-/// (e.g. 16 ms at 60 fps). When pending content exceeds [`BACKLOG_THRESHOLD`]
+/// (e.g. 16 ms at 60 fps). When pending content exceeds `BACKLOG_THRESHOLD`
 /// bytes the interval is shortened proportionally — the larger the backlog,
-/// the more aggressively we flush — bottoming out at [`BACKLOG_MIN_INTERVAL`].
+/// the more aggressively we flush — bottoming out at `BACKLOG_MIN_INTERVAL`.
 /// This lets the UI catch up during token bursts while preserving the smooth
 /// cadence during steady-state streaming.
 pub struct TokenBuffer {

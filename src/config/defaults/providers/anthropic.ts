@@ -15,7 +15,7 @@ export const anthropic: LLMProviderConfig = {
   enabled: true,
   status: 'disconnected',
   defaultModel: 'claude-sonnet-4-6',
-  // Offline fallback — models.dev catalog provides the full list when online
+  // Offline fallback — the curated backend catalog provides the fuller list at runtime
   models: [
     {
       id: 'claude-opus-4-6',

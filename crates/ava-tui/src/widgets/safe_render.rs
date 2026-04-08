@@ -19,7 +19,14 @@ pub fn to_static_line(line: Line<'_>) -> Line<'static> {
         .into_iter()
         .map(|s| Span::styled(s.content.to_string(), s.style))
         .collect();
-    Line::from(spans)
+    let mut static_line = Line::from(spans);
+    static_line.alignment = line.alignment;
+    static_line
+}
+
+/// Convert a list of borrowed lines into owned lines while preserving alignment.
+pub fn to_static_lines(lines: Vec<Line<'_>>) -> Vec<Line<'static>> {
+    lines.into_iter().map(to_static_line).collect()
 }
 
 /// Clamp a `Line` to fit within `max_width` display columns.
@@ -57,7 +64,49 @@ pub fn clamp_line(line: Line<'static>, max_width: usize) -> Line<'static> {
         }
     }
 
-    Line::from(clamped)
+    let mut result = Line::from(clamped);
+    result.alignment = line.alignment;
+    result
+}
+
+/// Hard-clamp a line to fit within `max_width` display columns with no ellipsis.
+///
+/// This is useful in scroll regions where preserving strict geometry matters more
+/// than indicating truncation.
+pub fn hard_clamp_line(line: Line<'static>, max_width: usize) -> Line<'static> {
+    let total: usize = line
+        .spans
+        .iter()
+        .map(|s| display_width(s.content.as_ref()))
+        .sum();
+    if total <= max_width {
+        return line;
+    }
+
+    let alignment = line.alignment;
+    let mut remaining = max_width;
+    let mut clamped_spans: Vec<Span<'static>> = Vec::with_capacity(line.spans.len());
+
+    for span in line.spans {
+        if remaining == 0 {
+            break;
+        }
+        let span_w = display_width(span.content.as_ref());
+        if span_w <= remaining {
+            remaining -= span_w;
+            clamped_spans.push(span);
+        } else {
+            let truncated = truncate_str(&span.content, remaining);
+            if !truncated.is_empty() {
+                clamped_spans.push(Span::styled(truncated, span.style));
+            }
+            break;
+        }
+    }
+
+    let mut result = Line::from(clamped_spans);
+    result.alignment = alignment;
+    result
 }
 
 /// Truncate a string to fit within `max_width` display columns.
@@ -279,5 +328,21 @@ mod tests {
             .map(|s| display_width(s.content.as_ref()))
             .sum();
         assert!(total <= 4);
+    }
+
+    #[test]
+    fn hard_clamp_line_preserves_alignment() {
+        let mut line = Line::from(vec![Span::raw("hello world")]);
+        line.alignment = Some(ratatui::layout::Alignment::Center);
+
+        let result = hard_clamp_line(to_static_line(line), 5);
+
+        assert_eq!(result.alignment, Some(ratatui::layout::Alignment::Center));
+        let total: usize = result
+            .spans
+            .iter()
+            .map(|s| display_width(s.content.as_ref()))
+            .sum();
+        assert!(total <= 5);
     }
 }

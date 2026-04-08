@@ -32,6 +32,134 @@ pub struct AgentStackConfig {
     pub discover_cli_agents: bool,
 }
 
+impl AgentStackConfig {
+    pub fn for_tui(
+        data_dir: PathBuf,
+        provider: Option<String>,
+        model: Option<String>,
+        max_turns: usize,
+        max_budget_usd: f64,
+        yolo: bool,
+        fast: bool,
+    ) -> Self {
+        Self {
+            data_dir,
+            provider,
+            model,
+            max_turns,
+            max_budget_usd,
+            yolo,
+            include_project_instructions: !fast,
+            eager_codebase_indexing: false,
+            discover_cli_agents: false,
+            ..Self::default()
+        }
+    }
+
+    pub fn for_headless(
+        data_dir: PathBuf,
+        provider: Option<String>,
+        model: Option<String>,
+        max_turns: usize,
+        max_budget_usd: f64,
+        yolo: bool,
+        include_project_instructions: bool,
+        eager_codebase_indexing: bool,
+    ) -> Self {
+        Self {
+            data_dir,
+            provider,
+            model,
+            max_turns,
+            max_budget_usd,
+            yolo,
+            include_project_instructions,
+            eager_codebase_indexing,
+            discover_cli_agents: false,
+            ..Self::default()
+        }
+    }
+
+    pub fn for_review(
+        data_dir: PathBuf,
+        provider: Option<String>,
+        model: Option<String>,
+        max_turns: usize,
+    ) -> Self {
+        Self {
+            data_dir,
+            provider,
+            model,
+            max_turns,
+            yolo: true,
+            include_project_instructions: false,
+            eager_codebase_indexing: false,
+            discover_cli_agents: false,
+            ..Self::default()
+        }
+    }
+
+    pub fn for_benchmark(
+        data_dir: PathBuf,
+        provider: String,
+        model: String,
+        max_turns: usize,
+        working_dir: PathBuf,
+    ) -> Self {
+        Self {
+            data_dir,
+            provider: Some(provider),
+            model: Some(model),
+            max_turns,
+            yolo: true,
+            working_dir: Some(working_dir),
+            include_project_instructions: false,
+            eager_codebase_indexing: false,
+            discover_cli_agents: false,
+            ..Self::default()
+        }
+    }
+
+    pub fn for_web(data_dir: PathBuf) -> Self {
+        Self {
+            data_dir,
+            discover_cli_agents: false,
+            ..Self::default()
+        }
+    }
+
+    pub fn for_desktop(data_dir: PathBuf) -> Self {
+        Self {
+            data_dir,
+            discover_cli_agents: false,
+            ..Self::default()
+        }
+    }
+
+    pub fn for_background_isolation(
+        data_dir: PathBuf,
+        provider: Option<String>,
+        model: Option<String>,
+        max_turns: usize,
+        max_budget_usd: f64,
+        working_dir: PathBuf,
+    ) -> Self {
+        Self {
+            data_dir,
+            provider,
+            model,
+            max_turns,
+            max_budget_usd,
+            yolo: false,
+            working_dir: Some(working_dir),
+            include_project_instructions: true,
+            eager_codebase_indexing: true,
+            discover_cli_agents: true,
+            ..Self::default()
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct AgentRunResult {
     pub success: bool,
@@ -56,5 +184,67 @@ impl Default for AgentStackConfig {
             eager_codebase_indexing: true,
             discover_cli_agents: true,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AgentStackConfig;
+    use std::path::PathBuf;
+
+    #[test]
+    fn tui_preset_disables_expensive_startup_work() {
+        let cfg =
+            AgentStackConfig::for_tui(PathBuf::from("/tmp/ava"), None, None, 10, 5.0, false, false);
+        assert!(!cfg.eager_codebase_indexing);
+        assert!(!cfg.discover_cli_agents);
+        assert!(cfg.include_project_instructions);
+    }
+
+    #[test]
+    fn headless_preset_disables_cli_agent_discovery() {
+        let cfg = AgentStackConfig::for_headless(
+            PathBuf::from("/tmp/ava"),
+            None,
+            None,
+            10,
+            5.0,
+            true,
+            false,
+            false,
+        );
+        assert!(!cfg.discover_cli_agents);
+        assert!(!cfg.include_project_instructions);
+        assert!(!cfg.eager_codebase_indexing);
+    }
+
+    #[test]
+    fn review_preset_is_lean_and_yolo() {
+        let cfg = AgentStackConfig::for_review(
+            PathBuf::from("/tmp/ava"),
+            Some("openai".to_string()),
+            Some("gpt-5".to_string()),
+            5,
+        );
+        assert!(cfg.yolo);
+        assert!(!cfg.include_project_instructions);
+        assert!(!cfg.eager_codebase_indexing);
+        assert!(!cfg.discover_cli_agents);
+    }
+
+    #[test]
+    fn benchmark_preset_is_lean_and_scoped() {
+        let cfg = AgentStackConfig::for_benchmark(
+            PathBuf::from("/tmp/ava"),
+            "openai".to_string(),
+            "gpt-5".to_string(),
+            3,
+            PathBuf::from("/tmp/worktree"),
+        );
+        assert!(cfg.yolo);
+        assert_eq!(cfg.working_dir, Some(PathBuf::from("/tmp/worktree")));
+        assert!(!cfg.include_project_instructions);
+        assert!(!cfg.eager_codebase_indexing);
+        assert!(!cfg.discover_cli_agents);
     }
 }

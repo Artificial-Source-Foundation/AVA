@@ -19,7 +19,6 @@ import { applyCompactionResult } from '../services/context-compaction'
 import { getCoreBudget } from '../services/core-bridge'
 import { useSession } from '../stores/session'
 import { useSettings } from '../stores/settings'
-import { useTeam } from '../stores/team'
 import type {
   ApprovalRequestEvent,
   PlanCreatedEvent,
@@ -27,7 +26,6 @@ import type {
   QuestionRequestEvent,
 } from '../types/rust-ipc'
 import type { AgentState, ApprovalRequest, ToolActivity } from './agent'
-import { createTeamBridge } from './agent/agent-team-bridge'
 import type { QueuedMessage } from './chat/types'
 import { useRustAgent } from './use-rust-agent'
 import { createAgentActions } from './useAgentActions'
@@ -72,11 +70,6 @@ function createAgentStore() {
   const rustAgent = useRustAgent()
   const settingsRef = useSettings()
   const session = useSession()
-  const teamStore = useTeam()
-
-  // ── Team bridge ─────────────────────────────────────────────────────
-  const isTeamMode = () => settingsRef.settings().generation.delegationEnabled
-  const teamBridge = createTeamBridge(teamStore, isTeamMode)
 
   // ── Frontend-only signals ───────────────────────────────────────────
   const [isPlanMode, setIsPlanMode] = createSignal(false)
@@ -103,73 +96,8 @@ function createAgentStore() {
   // ── Streaming state (offsets + derived signals) ─────────────────────
   const streamingState = createAgentStreaming(rustAgent)
 
-  // ── Forward agent events to team bridge + handle UI events ──────────
+  // ── Forward agent events into UI signals ─────────────────────────────
   let lastEventIdx = 0
-
-  /**
-   * Map HQ IPC events (from Rust) to the team bridge's AgentEvent format.
-   * Returns null for events that have no team bridge mapping.
-   */
-  function mapHqToTeamEvent(
-    event: import('../types/rust-ipc').AgentEvent
-  ): import('./agent/agent-events').AgentEvent | null {
-    switch (event.type) {
-      case 'hq_worker_started':
-        return {
-          type: 'delegation:start',
-          agentId: 'hq-director',
-          childAgentId: event.worker_id,
-          workerName: event.lead,
-          task: event.task,
-          tier: 'worker',
-        }
-      case 'hq_worker_completed':
-        return {
-          type: 'delegation:complete',
-          agentId: 'hq-director',
-          childAgentId: event.worker_id,
-          workerName: '',
-          success: event.success,
-          output: `Completed in ${event.turns} turns`,
-          durationMs: 0,
-        }
-      case 'hq_worker_failed':
-        return {
-          type: 'delegation:complete',
-          agentId: 'hq-director',
-          childAgentId: event.worker_id,
-          workerName: '',
-          success: false,
-          output: event.error,
-          durationMs: 0,
-        }
-      case 'hq_worker_token':
-        return {
-          type: 'thought',
-          agentId: event.worker_id,
-          content: event.token,
-        }
-      case 'hq_worker_progress':
-        return {
-          type: 'turn:start',
-          agentId: event.worker_id,
-          turn: event.turn,
-        }
-      case 'hq_all_complete':
-        return {
-          type: 'agent:finish',
-          agentId: 'hq-director',
-          result: {
-            success: event.failed === 0,
-            turns: 0,
-            tokensUsed: { input: 0, output: 0 },
-            output: `${event.succeeded}/${event.total_workers} workers succeeded`,
-          },
-        }
-      default:
-        return null
-    }
-  }
 
   createEffect(
     on(rustAgent.events, (allEvents) => {
@@ -179,22 +107,6 @@ function createAgentStore() {
       }
       for (let i = lastEventIdx; i < allEvents.length; i++) {
         const event = allEvents[i]!
-
-        // ── Team bridge: forward HQ events ─────────────────────
-        const hqMapped = mapHqToTeamEvent(event)
-        if (hqMapped) {
-          // Ensure the director agent exists before forwarding child events
-          if (hqMapped.type === 'delegation:start' && !teamStore.teamMembers().has('hq-director')) {
-            teamBridge.bridgeToTeam({
-              type: 'agent:start',
-              agentId: 'hq-director',
-              goal: 'Multi-agent coordination',
-            })
-          }
-          teamBridge.bridgeToTeam(hqMapped)
-        } else {
-          teamBridge.bridgeToTeam(event as import('./agent/agent-events').AgentEvent)
-        }
 
         // ── UI signals: approval / question / thinking / tokens ────
         if (event.type === 'tool_call') {
@@ -334,7 +246,6 @@ function createAgentStore() {
     rustAgent,
     session,
     settingsRef,
-    isTeamMode,
     isPlanMode,
     setCurrentThought,
     setDoomLoopDetected,
@@ -414,8 +325,5 @@ function createAgentStore() {
     resolvePlan: actions.resolvePlan,
     clearError: actions.clearError,
     getState: actions.getState,
-    stopAgent: (memberId: string) => teamBridge.stopAgent(memberId),
-    sendTeamMessage: (memberId: string, message: string) =>
-      teamBridge.sendMessage(memberId, message),
   }
 }

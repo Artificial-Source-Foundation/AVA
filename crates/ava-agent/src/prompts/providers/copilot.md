@@ -1,0 +1,1 @@
+- Copilot has rate limits. Minimize unnecessary tool calls and batch reads when possible.

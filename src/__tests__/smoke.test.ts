@@ -157,31 +157,6 @@ describe('Plugin version checking', () => {
 })
 
 // ============================================================================
-// Agent presets validation
-// ============================================================================
-
-describe('Agent presets', () => {
-  it('Explorer preset has correct shape', () => {
-    // Validates the Explorer preset definition without importing heavy UI components.
-    // The actual module import triggers lucide-solid which requires DOM + SolidJS runtime.
-    const explorer = {
-      id: 'explorer',
-      name: 'Explorer',
-      description: 'Read-only codebase exploration and analysis',
-      tier: 'worker',
-      tools: ['read_file', 'glob', 'grep', 'ls', 'websearch', 'webfetch'],
-      domain: 'fullstack',
-    }
-    expect(explorer.id).toBe('explorer')
-    expect(explorer.name).toBe('Explorer')
-    expect(explorer.tier).toBe('worker')
-    expect(explorer.tools).toContain('read_file')
-    expect(explorer.tools).toContain('websearch')
-    expect(explorer.domain).toBe('fullstack')
-  })
-})
-
-// ============================================================================
 // DesktopSessionStorage interface compliance
 // ============================================================================
 

@@ -10,10 +10,14 @@ mod agent_quality_tasks;
 mod agentic_tasks;
 #[path = "benchmark_tasks/multi_language_tasks.rs"]
 mod multi_language_tasks;
+#[path = "benchmark_tasks/normal_coding_tasks.rs"]
+mod normal_coding_tasks;
 #[path = "benchmark_tasks/security_and_test_tasks.rs"]
 mod security_and_test_tasks;
 #[path = "benchmark_tasks/speed_tasks.rs"]
 mod speed_tasks;
+#[path = "benchmark_tasks/tool_reliability_tasks.rs"]
+mod tool_reliability_tasks;
 
 /// Benchmark suite tiers — controls which tasks are included.
 ///
@@ -107,6 +111,10 @@ pub enum TaskCategory {
     Security,
     /// Generating tests for given code.
     TestGeneration,
+    /// Scripted headless tasks focused on tool execution reliability.
+    ToolReliability,
+    /// Representative coding tasks for general implementation quality.
+    NormalCoding,
 }
 
 impl std::fmt::Display for TaskCategory {
@@ -124,6 +132,8 @@ impl std::fmt::Display for TaskCategory {
             Self::MultiLang => write!(f, "multi_lang"),
             Self::Security => write!(f, "security"),
             Self::TestGeneration => write!(f, "test_generation"),
+            Self::ToolReliability => write!(f, "tool_reliability"),
+            Self::NormalCoding => write!(f, "normal_coding"),
         }
     }
 }
@@ -139,7 +149,9 @@ impl TaskCategory {
             | Self::ConstraintFollowing
             | Self::SelfCorrection
             | Self::MultiLang
-            | Self::Security => BenchmarkSuite::Standard,
+            | Self::Security
+            | Self::ToolReliability
+            | Self::NormalCoding => BenchmarkSuite::Standard,
             Self::MultiStep => BenchmarkSuite::Frontier,
             Self::TestGeneration => BenchmarkSuite::Speed,
         }
@@ -423,6 +435,10 @@ pub use agentic_tasks::agentic_tasks;
 #[allow(unused_imports)]
 pub use multi_language_tasks::{go_tasks, python_tasks, typescript_tasks};
 #[allow(unused_imports)]
+pub use normal_coding_tasks::normal_coding_tasks;
+#[allow(unused_imports)]
 pub use security_and_test_tasks::{security_tasks, test_generation_tasks};
 #[allow(unused_imports)]
 pub use speed_tasks::{advanced_rust_tasks, default_tasks};
+#[allow(unused_imports)]
+pub use tool_reliability_tasks::tool_reliability_tasks;

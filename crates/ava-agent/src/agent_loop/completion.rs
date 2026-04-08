@@ -14,11 +14,11 @@ use tokio::sync::mpsc;
 use tracing::{debug, info, trace, warn};
 
 use super::response;
-use super::response::request_dedup_hash;
 use super::tool_execution::READ_ONLY_TOOLS;
 use super::{AgentEvent, AgentLoop};
 use crate::stuck::StuckDetector;
 use crate::system_prompt::{build_system_prompt, provider_prompt_suffix, SystemPromptParts};
+use crate::trace::RunEventKind;
 
 use super::response::parse_tool_calls;
 
@@ -148,7 +148,7 @@ impl AgentLoop {
             parts.dynamic_suffix.push_str(suffix);
         }
         // chat.system hook: let plugins inject text into the dynamic suffix.
-        if let Some(ref pm) = self.plugin_manager.clone() {
+        if let Some(pm) = self.plugin_manager.as_ref() {
             let provider_name = format!("{:?}", provider_kind).to_lowercase();
             let injection = pm
                 .lock()
@@ -189,20 +189,8 @@ impl AgentLoop {
     ) -> ava_types::Result<(String, Vec<ToolCall>, Option<TokenUsage>)> {
         let native_tools = self.llm.supports_tools();
 
-        // Dedup guard — hash last message content + message count so context growth
-        // (new tool results) breaks the dedup even if the last message content is
-        // identical (e.g. same compile error).
-        let dedup_hash = request_dedup_hash(self.context.get_messages());
-        if let (Some(prev_hash), Some(prev_time)) = (self.last_request_hash, self.last_request_time)
-        {
-            if dedup_hash == prev_hash && prev_time.elapsed().as_secs() < 2 {
-                warn!("Skipping duplicate request (same content within 2s)");
-                return Ok((String::new(), vec![], None));
-            }
-        }
-
         // chat.params hook: allow plugins to modify per-call LLM parameters.
-        if let Some(ref pm) = self.plugin_manager.clone() {
+        if let Some(pm) = self.plugin_manager.as_ref() {
             let mut pm = pm.lock().await;
             if pm.has_hook_subscribers(ava_plugin::HookEvent::ChatParams) {
                 let params = serde_json::json!({
@@ -226,34 +214,29 @@ impl AgentLoop {
             }
         }
 
-        // Repair conversation history before sending to LLM — fix orphaned tool
-        // results, empty assistant messages, consecutive user messages, and duplicates
-        // that would cause cryptic API errors.
-        if self.context.needs_repair() {
-            let mut msgs = self.context.get_messages().to_vec();
-            let before = msgs.len();
-            ava_types::repair_conversation(&mut msgs);
-            if msgs.len() != before {
-                debug!(
-                    before,
-                    after = msgs.len(),
-                    removed = before - msgs.len(),
-                    "repaired conversation history before LLM call"
-                );
-                self.context.replace_messages(msgs);
-            } else {
-                // `repair_conversation` only removes invalid messages today, so an
-                // unchanged length means there was nothing to fix.
-                self.context.clear_needs_repair();
-            }
+        let prepared = self.prepare_llm_request();
+        let dedup_hash = prepared.dedup_hash;
+        if let Some(empty) = self.check_dedup_guard(dedup_hash) {
+            return Ok(empty);
         }
 
         let streaming = event_tx.is_some();
+        let llm_started_at = Instant::now();
+        let prepared_token_count: usize = prepared
+            .messages
+            .iter()
+            .map(|message| ava_context::count_tokens_default(&message.content))
+            .sum();
+        self.append_run_trace(RunEventKind::LlmRequest {
+            model: self.config.model.clone(),
+            token_count: prepared_token_count,
+        });
 
         let result = if streaming {
-            self.generate_turn_streaming(native_tools, event_tx).await
+            self.generate_turn_streaming(native_tools, prepared.messages, event_tx)
+                .await
         } else {
-            self.generate_turn_non_streaming().await
+            self.generate_turn_non_streaming(prepared).await
         };
 
         // Set dedup hash on success with non-empty response
@@ -263,6 +246,17 @@ impl AgentLoop {
                 self.last_request_time = Some(Instant::now());
             }
         }
+        if let Ok((_, _, usage)) = &result {
+            let (tokens_in, tokens_out) = usage
+                .as_ref()
+                .map(|u| (u.input_tokens, u.output_tokens))
+                .unwrap_or_default();
+            self.append_run_trace(RunEventKind::LlmResponse {
+                tokens_in,
+                tokens_out,
+                duration_ms: llm_started_at.elapsed().as_millis() as u64,
+            });
+        }
 
         result
     }
@@ -271,17 +265,9 @@ impl AgentLoop {
     ///
     /// Returns the (possibly modified) message list. If no plugins subscribe or the
     /// hook returns unchanged content, the original context messages are returned as-is.
-    async fn apply_messages_transform(&mut self) -> Vec<Message> {
-        let Some(ref pm) = self.plugin_manager.clone() else {
-            let mut msgs: Vec<Message> = self
-                .context
-                .get_messages()
-                .iter()
-                .filter(|m| m.agent_visible)
-                .cloned()
-                .collect();
-            ensure_tool_call_consistency(&mut msgs);
-            return msgs;
+    async fn apply_messages_transform(&mut self, messages: Vec<Message>) -> Vec<Message> {
+        let Some(pm) = self.plugin_manager.as_ref() else {
+            return messages;
         };
 
         if !pm
@@ -289,27 +275,13 @@ impl AgentLoop {
             .await
             .has_hook_subscribers(ava_plugin::HookEvent::ChatMessagesTransform)
         {
-            let mut msgs: Vec<Message> = self
-                .context
-                .get_messages()
-                .iter()
-                .filter(|m| m.agent_visible)
-                .cloned()
-                .collect();
-            ensure_tool_call_consistency(&mut msgs);
-            return msgs;
+            return messages;
         }
 
         // Only send agent-visible messages to the LLM. Compacted messages
         // (agent_visible=false) are preserved for UI display but excluded
         // from the context window.
-        let messages: Vec<Message> = self
-            .context
-            .get_messages()
-            .iter()
-            .filter(|m| m.agent_visible)
-            .cloned()
-            .collect();
+        let messages: Vec<Message> = messages;
 
         // Serialize messages to JSON for the hook.
         let json_messages: Vec<serde_json::Value> = messages
@@ -382,6 +354,7 @@ impl AgentLoop {
     async fn generate_turn_streaming(
         &mut self,
         native_tools: bool,
+        prepared_messages: Vec<Message>,
         event_tx: &Option<mpsc::UnboundedSender<AgentEvent>>,
     ) -> ava_types::Result<(String, Vec<ToolCall>, Option<TokenUsage>)> {
         info!(
@@ -393,7 +366,7 @@ impl AgentLoop {
         );
 
         // --- chat.messages.transform hook (request/response) ---
-        let messages = self.apply_messages_transform().await;
+        let messages = self.apply_messages_transform(prepared_messages).await;
         let provider_request_start = Instant::now();
 
         let stream_result = if native_tools {
@@ -727,8 +700,10 @@ impl AgentLoop {
     /// Non-streaming LLM call (used by headless mode).
     async fn generate_turn_non_streaming(
         &mut self,
+        prepared: super::response::PreparedRequest,
     ) -> ava_types::Result<(String, Vec<ToolCall>, Option<TokenUsage>)> {
-        self.generate_response_with_thinking().await
+        self.generate_response_with_thinking_prepared(prepared)
+            .await
     }
 
     /// Check if the turn limit has been reached. If so, force a summary and return `true`.

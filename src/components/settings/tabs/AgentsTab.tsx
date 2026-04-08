@@ -34,7 +34,6 @@ export const AgentsTab: Component = () => {
         enabled: true,
         capabilities: [],
         isCustom: true,
-        tier: 'worker' as const,
         tools: [],
       }
     }

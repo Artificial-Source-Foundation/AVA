@@ -17,6 +17,7 @@ use crate::instructions::{
     contextual_instructions_for_file_once, matching_rule_instructions_for_file,
 };
 use crate::stuck::StuckDetector;
+use crate::trace::RunEventKind;
 
 const MAX_TOOL_RESULT_BYTES: usize = 50_000;
 const MAX_CONCURRENT_READ_ONLY_TOOLS: usize = 8;
@@ -428,6 +429,11 @@ impl AgentLoop {
             duration,
             timestamp: start,
         };
+        self.append_run_trace(RunEventKind::ToolInvoked {
+            tool: tool_call.name.clone(),
+            duration_ms: duration.as_millis() as u64,
+            success: !tool_failed,
+        });
         truncate_tool_result(&mut result);
 
         // F12 — Injection scanning: check untrusted tool results for prompt injection.
@@ -1258,7 +1264,7 @@ mod tests {
 
     use async_trait::async_trait;
     use ava_context::ContextManager;
-    use ava_llm::providers::MockProvider;
+    use ava_llm::providers::mock::MockProvider;
     use ava_tools::registry::{Tool as ToolTrait, ToolRegistry};
     use ava_types::ThinkingLevel;
 

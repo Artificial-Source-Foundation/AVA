@@ -68,7 +68,7 @@ impl StreamingDiffTracker {
     ///
     /// # Note
     /// This performs blocking I/O. Call from a `spawn_blocking` context or use
-    /// [`snapshot_before_edit_async`] when inside an async task.
+    /// [`Self::snapshot_before_edit_async`] when inside an async task.
     #[deprecated(
         since = "0.0.0",
         note = "Use `snapshot_before_edit_async` in async contexts to avoid blocking the executor"
@@ -88,7 +88,7 @@ impl StreamingDiffTracker {
         DiffEvent::EditStarted { file: canonical }
     }
 
-    /// Async version of [`snapshot_before_edit`]: offloads file I/O to a blocking thread.
+    /// Async version of [`Self::snapshot_before_edit`]: offloads file I/O to a blocking thread.
     pub async fn snapshot_before_edit_async(&mut self, path: &Path) -> DiffEvent {
         let path_owned = path.to_path_buf();
         let content = tokio::task::spawn_blocking(move || {
@@ -117,7 +117,7 @@ impl StreamingDiffTracker {
     ///
     /// # Note
     /// This performs blocking I/O. Call from a `spawn_blocking` context or use
-    /// [`record_edit_complete_async`] when inside an async task.
+    /// [`Self::record_edit_complete_async`] when inside an async task.
     #[deprecated(
         since = "0.0.0",
         note = "Use `record_edit_complete_async` in async contexts to avoid blocking the executor"
@@ -147,7 +147,7 @@ impl StreamingDiffTracker {
         })
     }
 
-    /// Async version of [`record_edit_complete`]: offloads file I/O to a blocking thread.
+    /// Async version of [`Self::record_edit_complete`]: offloads file I/O to a blocking thread.
     pub async fn record_edit_complete_async(&mut self, path: &Path) -> Option<DiffEvent> {
         let canonical = normalize_path(path);
         let pending = self.pending_edits.get_mut(&canonical)?;

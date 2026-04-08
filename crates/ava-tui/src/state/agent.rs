@@ -205,25 +205,15 @@ impl AgentState {
         let provider_name = provider.clone().unwrap_or_else(|| "default".to_string());
         let model_name = model.clone().unwrap_or_else(|| "default".to_string());
 
-        let config = AgentStackConfig {
+        let config = AgentStackConfig::for_tui(
             data_dir,
             provider,
             model,
             max_turns,
             max_budget_usd,
             yolo,
-            include_project_instructions: !fast,
-            // Always defer codebase indexing — it runs as a background task
-            // inside AgentStack::new but blocks on tantivy segment flushes
-            // (2s+ on large repos). The index is populated lazily on first
-            // codebase_search tool call if not ready by then.
-            eager_codebase_indexing: false,
-            // Defer CLI agent discovery (claude/codex/aider --version) — it
-            // spawns 5+ subprocesses and takes ~1.5s. The model selector
-            // triggers discovery lazily when opened.
-            discover_cli_agents: false,
-            ..AgentStackConfig::default()
-        };
+            fast,
+        );
         let (agent_stack, question_rx, approval_rx, plan_rx) = AgentStack::new(config).await?;
         let stack = Arc::new(agent_stack);
 

@@ -1,6 +1,7 @@
 pub mod attachment_state;
 pub mod cache_diagnostics;
 mod completion;
+mod context_recovery;
 mod repetition;
 mod response;
 pub mod sidechain;
@@ -26,6 +27,7 @@ use tracing::{debug, instrument, warn};
 use crate::llm_trait::LLMProvider;
 use crate::message_queue::MessageQueue;
 use crate::stuck::{StuckAction, StuckDetector};
+use crate::trace::{append_trace_event, RunEvent, RunEventKind};
 
 use repetition::RepetitionDetector;
 
@@ -102,6 +104,8 @@ pub struct AgentLoop {
     /// Wired into context injection by callers via `compute_attachment_delta`.
     #[allow(dead_code)]
     pub attachment_state: attachment_state::AttachmentState,
+    trace_data_dir: Option<std::path::PathBuf>,
+    trace_run_id: Option<String>,
 }
 
 /// Configuration for a single agent loop run — turn limits, cost caps, and model identity.
@@ -387,7 +391,14 @@ impl AgentLoop {
             tool_visibility_profile: crate::routing::ToolVisibilityProfile::Full,
             pre_dispatched_results: std::collections::HashMap::new(),
             attachment_state: attachment_state::AttachmentState::new(),
+            trace_data_dir: None,
+            trace_run_id: None,
         }
+    }
+
+    pub fn with_trace_data_dir(mut self, data_dir: std::path::PathBuf) -> Self {
+        self.trace_data_dir = Some(data_dir);
+        self
     }
 
     /// Set a pre-assigned session ID. The resulting session will use this ID
@@ -554,6 +565,23 @@ impl AgentLoop {
         }
     }
 
+    fn append_run_trace(&self, kind: RunEventKind) {
+        let (Some(data_dir), Some(run_id)) =
+            (self.trace_data_dir.as_ref(), self.trace_run_id.as_ref())
+        else {
+            return;
+        };
+
+        append_trace_event(
+            data_dir,
+            &RunEvent {
+                timestamp: std::time::SystemTime::now(),
+                run_id: run_id.clone(),
+                kind,
+            },
+        );
+    }
+
     /// Unified agent execution engine. Both `run()` (headless) and `run_streaming()`
     /// delegate to this method. When `event_tx` is `Some`, streaming events (Token,
     /// Thinking, ToolCall, ToolResult, Progress, Complete, etc.) are emitted. When
@@ -563,11 +591,17 @@ impl AgentLoop {
         goal: &str,
         event_tx: Option<mpsc::UnboundedSender<AgentEvent>>,
     ) -> ava_types::Result<Session> {
+        let run_started_at = Instant::now();
         let mut session = if let Some(id) = self.session_id {
             Session::new().with_id(id)
         } else {
             Session::new()
         };
+        self.trace_run_id = Some(session.id.to_string());
+        self.append_run_trace(RunEventKind::RunStarted {
+            goal: goal.to_string(),
+            model: self.config.model.clone(),
+        });
         let loop_thresholds = crate::stuck::LoopThresholds::for_provider_model(
             &self.config.provider,
             &self.config.model,
@@ -653,6 +687,7 @@ impl AgentLoop {
             }
 
             turn += 1;
+            self.append_run_trace(RunEventKind::TurnStarted { turn });
             Self::emit(&event_tx, AgentEvent::Progress(format!("turn {turn}")));
 
             // --- Fire AgentBefore plugin hook ---
@@ -671,117 +706,8 @@ impl AgentLoop {
             }
 
             // --- Generate LLM response (with context overflow recovery) ---
-            let (response_text, tool_calls, usage) = match self
-                .generate_turn_response(&event_tx)
-                .await
-            {
-                Ok(result) => result,
-                Err(error) if ava_llm::providers::common::is_context_overflow(&error) => {
-                    // Context overflow detected — parse token gap for compaction guidance.
-                    let token_gap = ava_llm::providers::common::parse_token_gap(&error.to_string());
-                    if let Some(ref gap) = token_gap {
-                        debug!(
-                            actual = gap.actual_tokens,
-                            max = gap.max_tokens,
-                            gap = gap.gap,
-                            gap_ratio = format!("{:.1}%", gap.gap_ratio() * 100.0),
-                            "parsed token gap from overflow error"
-                        );
-                    }
-                    warn!(
-                        error = %error,
-                        tokens = self.context.token_count(),
-                        token_gap = ?token_gap,
-                        "context overflow from provider, attempting auto-compaction"
-                    );
-                    Self::emit(
-                        &event_tx,
-                        AgentEvent::Progress(
-                            "context overflow detected, compacting...".to_string(),
-                        ),
-                    );
-
-                    // Try lightweight pruning first
-                    let pruned = self.context.try_prune();
-                    if pruned > 0 {
-                        Self::emit(
-                            &event_tx,
-                            AgentEvent::Progress(format!("pruned {pruned} old tool output(s)")),
-                        );
-                    }
-
-                    // Full async compaction
-                    if let Err(compact_err) = self.context.compact_async().await {
-                        warn!(error = %compact_err, "compaction failed during overflow recovery");
-                        let err_event = AgentEvent::Error(error.to_string());
-                        Self::emit(&event_tx, err_event.clone());
-                        self.broadcast_event_to_plugins(&err_event).await;
-                        return Err(error);
-                    }
-                    if let Some(report) = self.context.last_compaction_report().cloned() {
-                        let active_messages = self
-                            .context
-                            .get_agent_visible_messages()
-                            .into_iter()
-                            .map(|message| CompactedMessagePreview {
-                                role: match message.role {
-                                    Role::System => "system".to_string(),
-                                    Role::User => "user".to_string(),
-                                    Role::Assistant => "assistant".to_string(),
-                                    Role::Tool => "tool".to_string(),
-                                },
-                                content: message.content.clone(),
-                            })
-                            .collect();
-                        let usage_before_percent = if self.config.token_limit == 0 {
-                            0.0
-                        } else {
-                            (report.tokens_before as f64 / self.config.token_limit as f64) * 100.0
-                        };
-                        Self::emit(
-                            &event_tx,
-                            AgentEvent::ContextCompacted {
-                                auto: true,
-                                tokens_before: report.tokens_before,
-                                tokens_after: report.tokens_after,
-                                tokens_saved: report.tokens_saved,
-                                messages_before: report.messages_before,
-                                messages_after: report.messages_after,
-                                usage_before_percent,
-                                summary: format!(
-                                    "Context automatically compacted: {} messages -> summary (saved {} tokens).",
-                                    report.messages_before, report.tokens_saved
-                                ),
-                                context_summary: report.summary.unwrap_or_default(),
-                                active_messages,
-                            },
-                        );
-                    }
-                    self.reset_dynamic_instruction_activation();
-
-                    Self::emit(
-                        &event_tx,
-                        AgentEvent::Progress("context compacted, retrying LLM call...".to_string()),
-                    );
-
-                    // Retry the LLM call once after compaction
-                    match self.generate_turn_response(&event_tx).await {
-                        Ok(result) => result,
-                        Err(retry_error) => {
-                            let err_event = AgentEvent::Error(retry_error.to_string());
-                            Self::emit(&event_tx, err_event.clone());
-                            self.broadcast_event_to_plugins(&err_event).await;
-                            return Err(retry_error);
-                        }
-                    }
-                }
-                Err(error) => {
-                    let err_event = AgentEvent::Error(error.to_string());
-                    Self::emit(&event_tx, err_event.clone());
-                    self.broadcast_event_to_plugins(&err_event).await;
-                    return Err(error);
-                }
-            };
+            let (response_text, tool_calls, usage) =
+                self.generate_turn_response_with_recovery(&event_tx).await?;
 
             // --- Fire AgentAfter plugin hook ---
             if self
@@ -868,6 +794,8 @@ impl AgentLoop {
                 nudge.user_visible = false;
                 self.context.add_message(nudge.clone());
                 session.add_message(nudge);
+                self.suppress_next_tokens = true;
+                detector.start_inject_cooldown();
                 continue;
             }
 
@@ -942,16 +870,23 @@ impl AgentLoop {
                                 let msg = format!(
                                     "LLM judge determined agent is stuck: {reason}. Try a completely different approach."
                                 );
-                                let assistant_message =
+                                let mut assistant_message =
                                     Message::new(Role::Assistant, response_text.clone())
                                         .with_tool_calls(tool_calls.clone());
+                                assistant_message.user_visible = false;
                                 self.context.add_message(assistant_message.clone());
                                 session.add_message(assistant_message);
-                                self.add_tool_results(&tool_calls, &tool_results, &mut session);
+                                self.add_tool_results_internal(
+                                    &tool_calls,
+                                    &tool_results,
+                                    &mut session,
+                                );
                                 Self::emit(&event_tx, AgentEvent::Progress(msg.clone()));
-                                let nudge = Message::new(Role::User, msg);
+                                let mut nudge = Message::new(Role::User, msg);
+                                nudge.user_visible = false;
                                 self.context.add_message(nudge.clone());
                                 session.add_message(nudge);
+                                self.suppress_next_tokens = true;
                                 continue;
                             }
                             // NOT_STUCK — continue normally
@@ -1073,92 +1008,7 @@ impl AgentLoop {
                 continue;
             }
 
-            if self.config.auto_compact && self.context.should_compact() {
-                // Try lightweight pruning first — much cheaper than LLM compaction.
-                let pruned = self.context.try_prune();
-                if pruned > 0 {
-                    Self::emit(
-                        &event_tx,
-                        AgentEvent::Progress(format!("pruned {pruned} old tool output(s)")),
-                    );
-                }
-                // If still over threshold after pruning, do full compaction.
-                if self.context.should_compact() {
-                    // --- session.compacting hook (request/response) ---
-                    if let Some(ref pm) = self.plugin_manager.clone() {
-                        let msg_count = self.context.get_messages().len();
-                        let token_count = self.context.token_count();
-                        let (extra_context, _custom_prompt) = pm
-                            .lock()
-                            .await
-                            .apply_session_compacting_hook(
-                                &session.id.to_string(),
-                                msg_count,
-                                token_count,
-                            )
-                            .await;
-                        // Inject extra context strings as system messages before compaction.
-                        for ctx_str in extra_context {
-                            self.context
-                                .add_message(Message::new(Role::System, ctx_str));
-                        }
-                    }
-                    if let Err(error) = self.context.compact_async().await {
-                        warn!(error = %error, "background auto-compaction failed; continuing run");
-                        Self::emit(
-                            &event_tx,
-                            AgentEvent::Progress(format!(
-                                "context compaction skipped after failure: {error}"
-                            )),
-                        );
-                        continue;
-                    }
-                    if let Some(report) = self.context.last_compaction_report().cloned() {
-                        let active_messages = self
-                            .context
-                            .get_agent_visible_messages()
-                            .into_iter()
-                            .map(|message| CompactedMessagePreview {
-                                role: match message.role {
-                                    Role::System => "system".to_string(),
-                                    Role::User => "user".to_string(),
-                                    Role::Assistant => "assistant".to_string(),
-                                    Role::Tool => "tool".to_string(),
-                                },
-                                content: message.content.clone(),
-                            })
-                            .collect();
-                        let usage_before_percent = if self.config.token_limit == 0 {
-                            0.0
-                        } else {
-                            (report.tokens_before as f64 / self.config.token_limit as f64) * 100.0
-                        };
-                        Self::emit(
-                            &event_tx,
-                            AgentEvent::ContextCompacted {
-                                auto: true,
-                                tokens_before: report.tokens_before,
-                                tokens_after: report.tokens_after,
-                                tokens_saved: report.tokens_saved,
-                                messages_before: report.messages_before,
-                                messages_after: report.messages_after,
-                                usage_before_percent,
-                                summary: format!(
-                                    "Context automatically compacted: {} messages -> summary (saved {} tokens).",
-                                    report.messages_before, report.tokens_saved
-                                ),
-                                context_summary: report.summary.unwrap_or_default(),
-                                active_messages,
-                            },
-                        );
-                    }
-                    self.reset_dynamic_instruction_activation();
-                    Self::emit(
-                        &event_tx,
-                        AgentEvent::Progress("context compacted".to_string()),
-                    );
-                }
-            }
+            self.run_auto_compaction_phase(&session, &event_tx).await;
 
             if self
                 .handle_attempt_completion(
@@ -1175,6 +1025,10 @@ impl AgentLoop {
         }
 
         // --- Cleanup ---
+        self.append_run_trace(RunEventKind::RunCompleted {
+            turns: turn,
+            total_ms: run_started_at.elapsed().as_millis() as u64,
+        });
         self.emit_final_completion(&mut session, total_usage, &detector, &event_tx)
             .await;
         Ok(session)

@@ -17,7 +17,6 @@ import {
   DEFAULT_GIT,
   DEFAULT_NOTIFICATIONS,
   DEFAULT_SETTINGS,
-  DEFAULT_TEAM,
   DEFAULT_UI,
 } from './settings-defaults'
 import type { AppSettings } from './settings-types'
@@ -70,42 +69,51 @@ function mergeModels(saved: ProviderModel[], defaults: ProviderModel[]): Provide
 /** Restore icon references from defaults for persisted agents */
 export function hydrateAgents(saved: AgentPreset[]): AgentPreset[] {
   return saved.map((sa) => {
+    const { tier: _legacyTier, ...cleanSaved } = sa as AgentPreset & { tier?: unknown }
     const def = defaultAgentPresets.find((d) => d.id === sa.id)
-    return def ? { ...def, ...sa, icon: def.icon } : sa
+    return def ? { ...def, ...cleanSaved, icon: def.icon } : cleanSaved
   })
 }
 
 /** Deep-merge partial settings with defaults (preserves new keys in sub-objects) */
 export function mergeWithDefaults(parsed: Partial<AppSettings>): AppSettings {
   // Migrate legacy "microagents" keys → "skills" (localStorage may have old names)
-  const legacy = parsed as Record<string, unknown>
+  const { team: _removedTeam, ...cleanParsed } = parsed as Partial<AppSettings> & {
+    team?: unknown
+  }
+  const legacy = cleanParsed as Record<string, unknown>
   const enabledSkills =
-    parsed.enabledSkills ?? (legacy.enabledMicroagents as string[] | undefined) ?? []
+    cleanParsed.enabledSkills ?? (legacy.enabledMicroagents as string[] | undefined) ?? []
   const customSkills =
-    parsed.customSkills ??
+    cleanParsed.customSkills ??
     (legacy.customMicroagents as AppSettings['customSkills'] | undefined) ??
     []
 
+  // Drop removed generation keys that may still exist in persisted localStorage
+  const { delegationEnabled: _deprecatedDelegationEnabled, ...persistedGeneration } =
+    (parsed.generation ?? {}) as AppSettings['generation'] & {
+      delegationEnabled?: boolean
+    }
+
   // Migrate thinkingEnabled → reasoningEffort (old boolean → new effort level)
-  const gen = { ...DEFAULT_GENERATION, ...parsed.generation }
+  const gen = { ...DEFAULT_GENERATION, ...persistedGeneration }
   if (!('reasoningEffort' in (parsed.generation ?? {}))) {
     gen.reasoningEffort = gen.thinkingEnabled ? 'medium' : 'off'
   }
 
   return {
     ...DEFAULT_SETTINGS,
-    ...parsed,
+    ...cleanParsed,
     enabledSkills,
     customSkills,
-    customRules: parsed.customRules ?? [],
-    hiddenBuiltInSkills: parsed.hiddenBuiltInSkills ?? [],
-    ui: { ...DEFAULT_UI, ...parsed.ui },
-    appearance: { ...DEFAULT_APPEARANCE, ...parsed.appearance },
+    customRules: cleanParsed.customRules ?? [],
+    hiddenBuiltInSkills: cleanParsed.hiddenBuiltInSkills ?? [],
+    ui: { ...DEFAULT_UI, ...cleanParsed.ui },
+    appearance: { ...DEFAULT_APPEARANCE, ...cleanParsed.appearance },
     generation: gen,
-    agentLimits: { ...DEFAULT_AGENT_LIMITS, ...parsed.agentLimits },
-    behavior: { ...DEFAULT_BEHAVIOR, ...parsed.behavior },
-    notifications: { ...DEFAULT_NOTIFICATIONS, ...parsed.notifications },
-    git: { ...DEFAULT_GIT, ...parsed.git },
-    team: { ...DEFAULT_TEAM, ...parsed.team },
+    agentLimits: { ...DEFAULT_AGENT_LIMITS, ...cleanParsed.agentLimits },
+    behavior: { ...DEFAULT_BEHAVIOR, ...cleanParsed.behavior },
+    notifications: { ...DEFAULT_NOTIFICATIONS, ...cleanParsed.notifications },
+    git: { ...DEFAULT_GIT, ...cleanParsed.git },
   }
 }

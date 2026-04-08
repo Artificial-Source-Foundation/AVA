@@ -36,6 +36,7 @@ pub async fn execute_plan(
         Ok::<SandboxOutput, SandboxError>(SandboxOutput {
             stdout: String::from_utf8_lossy(&output.stdout).to_string(),
             stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+            // infallible: code() returns None only when killed by signal; -1 is conventional
             exit_code: output.status.code().unwrap_or(-1),
         })
     })

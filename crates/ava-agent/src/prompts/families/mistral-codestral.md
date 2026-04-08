@@ -1,0 +1,1 @@
+- Codestral is optimized for code generation across 80+ languages. Favor code output over explanations.

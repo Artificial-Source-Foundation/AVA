@@ -295,57 +295,6 @@ pub struct PermissionsConfig {
     pub path_rules: Vec<PathRule>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct HqAgentOverride {
-    pub id: String,
-    #[serde(default = "default_hq_agent_enabled")]
-    pub enabled: bool,
-    #[serde(default)]
-    pub model_spec: String,
-    #[serde(default)]
-    pub system_prompt: String,
-}
-
-const fn default_hq_agent_enabled() -> bool {
-    true
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct HqConfig {
-    #[serde(default)]
-    pub director_model: String,
-    #[serde(default = "default_hq_tone_preference")]
-    pub tone_preference: String,
-    #[serde(default = "default_hq_auto_review")]
-    pub auto_review: bool,
-    #[serde(default)]
-    pub show_costs: bool,
-    #[serde(default)]
-    pub agent_overrides: Vec<HqAgentOverride>,
-}
-
-fn default_hq_tone_preference() -> String {
-    "technical".to_string()
-}
-
-const fn default_hq_auto_review() -> bool {
-    true
-}
-
-impl Default for HqConfig {
-    fn default() -> Self {
-        Self {
-            director_model: String::new(),
-            tone_preference: default_hq_tone_preference(),
-            auto_review: default_hq_auto_review(),
-            show_costs: false,
-            agent_overrides: vec![],
-        }
-    }
-}
-
 /// Main configuration struct
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Config {
@@ -389,8 +338,6 @@ pub struct Config {
     /// ```
     #[serde(default)]
     pub permissions: PermissionsConfig,
-    #[serde(default)]
-    pub hq: HqConfig,
 }
 
 /// Per-project ephemeral state (stored in `.ava/state.json` in the project root).

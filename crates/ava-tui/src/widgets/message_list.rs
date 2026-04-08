@@ -1,7 +1,7 @@
 use crate::app::{AppState, ViewMode};
 use crate::state::messages::{MessageKind, UiMessage};
-use crate::text_utils::{display_width, safe_char_width};
 use crate::widgets::message::{render_action_group, render_message_with_options};
+use crate::widgets::safe_render::hard_clamp_line;
 use crate::widgets::welcome::render_welcome;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
@@ -9,68 +9,35 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState};
 use ratatui::Frame;
 
-/// Hard-clamp a Line to at most `max_width` display columns.
-///
-/// This is the **final safety net** against text bleed.  Every line that enters
-/// the message-list Paragraph passes through this function.  If a line is
-/// already within budget it is returned unchanged (zero allocation).  Otherwise
-/// spans are truncated (and trailing spans dropped) until the total width fits.
-fn clamp_line_width(line: Line<'static>, max_width: usize) -> Line<'static> {
-    // Fast path: measure total width and bail early if it fits.
-    let total: usize = line
-        .spans
-        .iter()
-        .map(|s| display_width(s.content.as_ref()))
-        .sum();
-    if total <= max_width {
-        return line;
-    }
-
-    let alignment = line.alignment;
-    let mut remaining = max_width;
-    let mut clamped_spans: Vec<Span<'static>> = Vec::with_capacity(line.spans.len());
-
-    for span in line.spans {
-        if remaining == 0 {
-            break;
-        }
-        let span_w = display_width(span.content.as_ref());
-        if span_w <= remaining {
-            remaining -= span_w;
-            clamped_spans.push(span);
-        } else {
-            // Truncate this span at `remaining` display columns.
-            let mut col = 0usize;
-            let mut byte_end = 0usize;
-            for ch in span.content.chars() {
-                let cw = safe_char_width(ch);
-                if col + cw > remaining {
-                    break;
-                }
-                col += cw;
-                byte_end += ch.len_utf8();
-            }
-            if byte_end > 0 {
-                clamped_spans.push(Span::styled(
-                    span.content[..byte_end].to_owned(),
-                    span.style,
-                ));
-            }
-            break;
-        }
-    }
-
-    let mut result = Line::from(clamped_spans);
-    result.alignment = alignment;
-    result
-}
-
 enum RenderBlock<'a> {
     Message(&'a UiMessage),
     ActionGroup {
         messages: Vec<&'a UiMessage>,
         active: bool,
     },
+}
+
+fn block_spacing(previous: Option<&RenderBlock<'_>>, current: &RenderBlock<'_>) -> usize {
+    match (previous, current) {
+        (None, _) => 0,
+        (Some(RenderBlock::ActionGroup { .. }), RenderBlock::Message(message))
+            if matches!(message.kind, MessageKind::Assistant) =>
+        {
+            2
+        }
+        (Some(RenderBlock::Message(prev)), RenderBlock::Message(message))
+            if matches!(prev.kind, MessageKind::User)
+                && matches!(message.kind, MessageKind::Assistant) =>
+        {
+            2
+        }
+        (Some(RenderBlock::Message(prev)), RenderBlock::ActionGroup { .. })
+            if matches!(prev.kind, MessageKind::Assistant) =>
+        {
+            1
+        }
+        _ => 1,
+    }
 }
 
 fn derive_blocks(messages: &[UiMessage]) -> Vec<RenderBlock<'_>> {
@@ -170,7 +137,7 @@ pub fn render_message_list(frame: &mut Frame<'_>, area: Rect, state: &mut AppSta
     // ALL text rendering must use content_width to prevent bleed.
     let content_width = area.width.saturating_sub(3);
 
-    // Top padding: 1 blank line between status bar and first message.
+    // Top padding only; keep the conversation surface visually quiet.
     lines.push(Line::raw(""));
 
     // Add breadcrumb header when viewing a background task or sub-agent conversation.
@@ -205,10 +172,6 @@ pub fn render_message_list(frame: &mut Frame<'_>, area: Rect, state: &mut AppSta
             ),
             Span::styled(status_str, Style::default().fg(state.theme.text_muted)),
         ]));
-        lines.push(Line::from(Span::styled(
-            "\u{2500}".repeat(content_width as usize),
-            Style::default().fg(state.theme.border),
-        )));
         lines.push(Line::raw(""));
     }
 
@@ -235,10 +198,6 @@ pub fn render_message_list(frame: &mut Frame<'_>, area: Rect, state: &mut AppSta
                     .add_modifier(Modifier::BOLD),
             ),
         ]));
-        lines.push(Line::from(Span::styled(
-            "\u{2500}".repeat(content_width as usize),
-            Style::default().fg(state.theme.border),
-        )));
         lines.push(Line::raw(""));
     }
 
@@ -252,7 +211,10 @@ pub fn render_message_list(frame: &mut Frame<'_>, area: Rect, state: &mut AppSta
 
     for (i, block) in blocks.iter().enumerate() {
         if i > 0 {
-            lines.push(Line::raw(""));
+            let gap = block_spacing(blocks.get(i.saturating_sub(1)), block);
+            for _ in 0..gap {
+                lines.push(Line::raw(""));
+            }
         }
         let start = lines.len();
         match block {
@@ -292,6 +254,20 @@ pub fn render_message_list(frame: &mut Frame<'_>, area: Rect, state: &mut AppSta
                 }
             }
         }
+    }
+
+    if !state.messages.auto_scroll && state.messages.unseen_count > 0 {
+        lines.push(Line::raw(""));
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!("{} new", state.messages.unseen_count),
+                Style::default().fg(state.theme.text),
+            ),
+            Span::styled(
+                "  End to return to live",
+                Style::default().fg(state.theme.text_dimmed),
+            ),
+        ]));
     }
 
     // Bottom padding: 1 blank line between last message and composer.
@@ -369,7 +345,7 @@ pub fn render_message_list(frame: &mut Frame<'_>, area: Rect, state: &mut AppSta
     let clamped_width = content_area.width as usize;
     let clamped_lines: Vec<Line<'static>> = visible_lines
         .into_iter()
-        .map(|line| clamp_line_width(line, clamped_width))
+        .map(|line| hard_clamp_line(line, clamped_width))
         .collect();
 
     // STEP 5: Render the paragraph into the clipped content_area.

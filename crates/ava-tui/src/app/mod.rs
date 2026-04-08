@@ -20,6 +20,7 @@ use crate::state::btw::BtwState;
 use crate::state::custom_commands::CustomCommandRegistry;
 use crate::state::input::InputState;
 use crate::state::keybinds::{Action, KeybindState};
+use crate::state::lsp::LspSidebarEntry;
 use crate::state::messages::{MessageKind, MessageState, UiMessage};
 use crate::state::permission::PermissionState;
 use crate::state::rewind::RewindState;
@@ -65,6 +66,25 @@ pub(crate) struct PendingBackgroundGoal {
 struct BackgroundIsolation {
     worktree_path: PathBuf,
     branch_name: String,
+}
+
+#[derive(Debug, Clone)]
+pub enum SidebarClickAction {
+    ToggleMcpServer { name: String, enabled: bool },
+    RefreshLsp,
+}
+
+#[derive(Debug, Clone)]
+pub struct SidebarClickTarget {
+    pub x: std::ops::Range<u16>,
+    pub y: std::ops::Range<u16>,
+    pub action: SidebarClickAction,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct MousePosition {
+    pub column: u16,
+    pub row: u16,
 }
 
 pub struct AppState {
@@ -137,6 +157,18 @@ pub struct AppState {
     pub todo_items: Vec<ava_types::TodoItem>,
     /// Shared todo state handle (for async refresh).
     pub todo_state: Option<ava_types::TodoState>,
+    /// Cached MCP server details for sidebar rendering.
+    pub mcp_servers: Vec<ava_agent::stack::MCPServerInfo>,
+    /// Cached LSP/project-tool rows for sidebar rendering.
+    pub lsp_entries: Vec<LspSidebarEntry>,
+    /// Clickable sidebar targets populated during render.
+    pub sidebar_click_targets: Vec<SidebarClickTarget>,
+    /// Last observed mouse position for hover affordances.
+    pub mouse_position: Option<MousePosition>,
+    /// Whether MCP integration is enabled in config.
+    pub feature_mcp_enabled: bool,
+    /// Whether LSP integration is enabled in config.
+    pub feature_lsp_enabled: bool,
 
     // ── Extensions & Hooks ──────────────────────────────────────────────
     /// Registry of user-defined slash commands from TOML files.
@@ -272,6 +304,8 @@ pub struct App {
     data_dir: PathBuf,
     /// Set on terminal resize to force a full clear before next draw.
     needs_clear: bool,
+    lsp_refresh_inflight: bool,
+    last_lsp_refresh_at: Option<std::time::Instant>,
 }
 
 // StatusSummary removed — /status command was removed
@@ -324,6 +358,12 @@ impl App {
             })
             .unwrap_or_default();
 
+        let feature_config = if let Ok(manager) = ava_config::ConfigManager::load().await {
+            Some(manager.get().await.features)
+        } else {
+            None
+        };
+
         let (agent, question_rx, approval_rx, plan_rx) = AgentState::new(
             data_dir.clone(),
             provider,
@@ -334,7 +374,10 @@ impl App {
             cli.fast,
         )
         .await?;
+        let mcp_servers = agent.mcp_server_info().await.unwrap_or_default();
         let todo_state = agent.todo_state();
+        let workspace = std::env::current_dir().unwrap_or_default();
+        let lsp_entries = crate::state::lsp::refresh_lsp_entries(&workspace, &[]);
 
         let state = AppState {
             // Theme & Layout
@@ -386,6 +429,18 @@ impl App {
             // Sidebar & Todo
             todo_items: Vec::new(),
             todo_state,
+            mcp_servers,
+            lsp_entries,
+            sidebar_click_targets: Vec::new(),
+            mouse_position: None,
+            feature_mcp_enabled: feature_config
+                .as_ref()
+                .map(|f| f.enable_mcp)
+                .unwrap_or(true),
+            feature_lsp_enabled: feature_config
+                .as_ref()
+                .map(|f| f.enable_lsp)
+                .unwrap_or(true),
             // Extensions & Hooks
             custom_commands: CustomCommandRegistry::load(),
             hooks: HookRegistry::load(),
@@ -417,6 +472,8 @@ impl App {
             background_run_routes: HashMap::new(),
             data_dir,
             needs_clear: false,
+            lsp_refresh_inflight: false,
+            last_lsp_refresh_at: None,
         };
         app.sync_custom_command_autocomplete();
         Ok(app)
@@ -792,15 +849,49 @@ impl App {
         let items: Vec<SelectItem<String>> = Theme::all_names()
             .into_iter()
             .map(|name| {
+                let section = if [
+                    "github_light",
+                    "solarized_light",
+                    "catppuccin_latte",
+                    "one_light",
+                    "rose_pine_dawn",
+                    "terminal_paper",
+                ]
+                .contains(&name.as_str())
+                {
+                    Some("Light".to_string())
+                } else if ["graphite", "aurora", "terminal_paper"].contains(&name.as_str()) {
+                    Some("Modern".to_string())
+                } else {
+                    Some("Dark".to_string())
+                };
+                let detail = match name.as_str() {
+                    "graphite" => "neutral dark",
+                    "aurora" => "glow dark",
+                    "terminal_paper" => "soft light",
+                    "tokyo_night" => "city neon",
+                    "vesper" => "inky contrast",
+                    "poimandres" => "cool vivid",
+                    "rose_pine" => "muted rose",
+                    "catppuccin" => "soft pastel",
+                    "github_light" => "clean light",
+                    "one_light" => "editor light",
+                    _ => "classic",
+                }
+                .to_string();
                 let status = if &name == current {
                     Some(crate::widgets::select_list::ItemStatus::Active)
+                } else if ["graphite", "aurora", "terminal_paper"].contains(&name.as_str()) {
+                    Some(crate::widgets::select_list::ItemStatus::Info(
+                        "new".to_string(),
+                    ))
                 } else {
                     None
                 };
                 SelectItem {
                     title: name.clone(),
-                    detail: String::new(),
-                    section: None,
+                    detail,
+                    section,
                     status,
                     value: name,
                     enabled: true,
@@ -977,6 +1068,12 @@ impl App {
             // Sidebar & Todo
             todo_items: Vec::new(),
             todo_state: None,
+            mcp_servers: Vec::new(),
+            lsp_entries: Vec::new(),
+            sidebar_click_targets: Vec::new(),
+            mouse_position: None,
+            feature_mcp_enabled: true,
+            feature_lsp_enabled: true,
             // Extensions & Hooks
             custom_commands: CustomCommandRegistry::default(),
             hooks: HookRegistry::load(),
@@ -1008,6 +1105,8 @@ impl App {
             background_run_routes: HashMap::new(),
             data_dir: PathBuf::from(".ava-test"),
             needs_clear: false,
+            lsp_refresh_inflight: false,
+            last_lsp_refresh_at: None,
         }
     }
 

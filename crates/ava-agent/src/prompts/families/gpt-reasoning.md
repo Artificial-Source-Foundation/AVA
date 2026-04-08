@@ -1,0 +1,1 @@
+- Reasoning happens internally. Keep visible output to 1-2 sentence summaries.

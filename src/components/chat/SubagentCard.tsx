@@ -12,30 +12,13 @@
  * Done: collapsed 44px row, green bot icon (16px #34C759),
  *       two-line info (#86868B name, #48484A sub),
  *       check (12px #34C759), duration (#48484A), chevron-right
- *
- * Background Worker (HQ): amber border #F5A62330, hard-hat icon #F5A623
  */
 
-import {
-  Bot,
-  Check,
-  ChevronDown,
-  ChevronRight,
-  HardHat,
-  Loader2,
-  Octagon,
-  XCircle,
-} from 'lucide-solid'
-
-/** Stub for abortExecutor (replaces @ava/core-v2/agent import) */
-function abortExecutor(_id: string): boolean {
-  return false
-}
+import { Bot, Check, ChevronDown, ChevronRight, Loader2, XCircle } from 'lucide-solid'
 
 import { type Component, createMemo, createSignal, For, Show } from 'solid-js'
 import { useSecondTicker } from '../../hooks/useElapsedTimer'
 import { useLayout } from '../../stores/layout'
-import { useTeam } from '../../stores/team'
 import type { ToolCall } from '../../types'
 import { formatDuration, formatElapsed } from './tool-call-utils'
 
@@ -67,15 +50,8 @@ function parseNestedToolCalls(output: string): NestedToolCall[] {
   return calls
 }
 
-/** Detect if this is a background HQ worker */
-function isHqWorker(toolCall: ToolCall): boolean {
-  const args = toolCall.args as Record<string, unknown>
-  return !!(args.source === 'hq' || args.hq || args.background)
-}
-
 export const SubagentCard: Component<SubagentCardProps> = (props) => {
   const [expanded, setExpanded] = createSignal(false)
-  const team = useTeam()
   const { openSubagentDetail } = useLayout()
 
   const isRunning = () => props.toolCall.status === 'running' || props.toolCall.status === 'pending'
@@ -83,7 +59,6 @@ export const SubagentCard: Component<SubagentCardProps> = (props) => {
   const isSuccess = () => props.toolCall.status === 'success'
   const isDone = () => isSuccess() || isError()
   const hasOutput = () => !!(props.toolCall.output || props.toolCall.error)
-  const isHq = () => isHqWorker(props.toolCall)
   const nowTick = useSecondTicker(isRunning)
 
   const goal = () => {
@@ -109,18 +84,6 @@ export const SubagentCard: Component<SubagentCardProps> = (props) => {
     return parts.length > 0 ? parts.join(' \u00b7 ') : ''
   }
 
-  const matchedMember = createMemo(() => {
-    const args = props.toolCall.args
-    const taskText = String(args.task ?? args.prompt ?? args.goal ?? '')
-    if (!taskText) return null
-    for (const member of team.allMembers()) {
-      if (member.task && taskText.startsWith(member.task.slice(0, 40))) {
-        return member
-      }
-    }
-    return null
-  })
-
   const duration = () => {
     if (!props.toolCall.completedAt) return null
     return formatDuration(props.toolCall.completedAt - props.toolCall.startedAt)
@@ -137,23 +100,10 @@ export const SubagentCard: Component<SubagentCardProps> = (props) => {
     return formatElapsed(props.toolCall.startedAt)
   })
 
-  const handleStop = (e: Event) => {
-    e.stopPropagation()
-    const member = matchedMember()
-    if (member) {
-      const aborted = abortExecutor(member.id)
-      if (aborted) {
-        team.updateMemberStatus(member.id, 'error')
-        team.updateMember(member.id, { error: 'Stopped by user' })
-      }
-    }
-  }
-
-  /** Color scheme based on agent type */
-  const accentColor = () => (isHq() ? 'var(--warning)' : 'var(--thinking-accent)')
+  const accentColor = () => 'var(--thinking-accent)'
   const borderColor = () => {
     if (isError()) return 'var(--error-border)'
-    if (isRunning()) return isHq() ? 'var(--warning-border)' : 'var(--thinking-border)'
+    if (isRunning()) return 'var(--thinking-border)'
     return 'var(--border-default)'
   }
 
@@ -174,11 +124,7 @@ export const SubagentCard: Component<SubagentCardProps> = (props) => {
         class="flex cursor-pointer select-none items-center justify-between px-3.5 transition-colors duration-[var(--duration-fast)] hover:bg-[var(--alpha-white-5)]"
         style={{
           height: '44px',
-          background: isRunning()
-            ? isHq()
-              ? 'var(--warning-subtle)'
-              : 'var(--thinking-subtle)'
-            : 'transparent',
+          background: isRunning() ? 'var(--thinking-subtle)' : 'transparent',
         }}
         onClick={() => {
           openSubagentDetail(props.toolCall.id)
@@ -192,37 +138,18 @@ export const SubagentCard: Component<SubagentCardProps> = (props) => {
       >
         {/* Left: icon + two-line info */}
         <div class="flex items-center gap-2.5 min-w-0 flex-1">
-          {/* Bot / HardHat icon */}
-          <Show
-            when={!isHq()}
-            fallback={
-              <HardHat
-                class="flex-shrink-0"
-                style={{
-                  width: '16px',
-                  height: '16px',
-                  color: isDone()
-                    ? isSuccess()
-                      ? 'var(--success)'
-                      : 'var(--error)'
-                    : 'var(--warning)',
-                }}
-              />
-            }
-          >
-            <Bot
-              class="flex-shrink-0"
-              style={{
-                width: '16px',
-                height: '16px',
-                color: isDone()
-                  ? isSuccess()
-                    ? 'var(--success)'
-                    : 'var(--error)'
-                  : 'var(--thinking-accent)',
-              }}
-            />
-          </Show>
+          <Bot
+            class="flex-shrink-0"
+            style={{
+              width: '16px',
+              height: '16px',
+              color: isDone()
+                ? isSuccess()
+                  ? 'var(--success)'
+                  : 'var(--error)'
+                : 'var(--thinking-accent)',
+            }}
+          />
 
           {/* Two-line info */}
           <div class="flex flex-col gap-px min-w-0 flex-1">
@@ -255,19 +182,6 @@ export const SubagentCard: Component<SubagentCardProps> = (props) => {
 
         {/* Right: status indicators */}
         <div class="flex items-center gap-2 flex-shrink-0">
-          {/* Stop button */}
-          <Show when={isRunning() && matchedMember()}>
-            <button
-              type="button"
-              onClick={handleStop}
-              class="rounded p-1 text-[var(--text-muted)] transition-colors hover:bg-[var(--error-subtle)] hover:text-[var(--error)]"
-              title="Stop agent"
-              aria-label="Stop agent"
-            >
-              <Octagon style={{ width: '12px', height: '12px' }} />
-            </button>
-          </Show>
-
           {/* Running: spinner + elapsed */}
           <Show when={isRunning()}>
             <Loader2

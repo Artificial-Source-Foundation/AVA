@@ -40,11 +40,9 @@ export const ModelSelector: Component<ModelSelectorProps> = (props) => {
         if (prov.models.some((m) => m.id === modelId)) return prov.id
       }
       // 3. Infer from model name patterns
-      if (/gpt|o3-|o4-|chatgpt/i.test(modelId)) return 'openai'
+      if (/gpt|chatgpt/i.test(modelId)) return 'openai'
       if (/claude|sonnet|opus|haiku/i.test(modelId)) return 'anthropic'
       if (/gemini/i.test(modelId)) return 'google'
-      if (/deepseek/i.test(modelId)) return 'deepseek'
-      if (/mistral|codestral/i.test(modelId)) return 'mistral'
       if (/llama|qwen/i.test(modelId)) return 'ollama'
     }
 

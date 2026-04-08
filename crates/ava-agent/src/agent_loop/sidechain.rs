@@ -1,6 +1,6 @@
 //! Sidechain transcripts — JSONL recording of sub-agent conversations.
 //!
-//! When an agent has an `agent_id` (sub-agents, HQ workers), each message
+//! When an agent has an `agent_id` (sub-agents or delegated workers), each message
 //! is recorded to `.ava/sessions/{session_id}/agents/{agent_id}.jsonl`.
 //! The main session uses the existing session persistence and does not
 //! create a sidechain transcript.

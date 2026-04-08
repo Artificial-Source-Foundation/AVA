@@ -1,4 +1,4 @@
-<!-- Last verified: 2026-03-26 -->
+<!-- Last verified: 2026-04-08 -->
 # AI Coding Agent Instructions (v3)
 
 > Instructions for AI assistants working on AVA. This file is auto-injected into the AVA agent's system prompt.
@@ -18,21 +18,22 @@ pnpm tauri dev
 pnpm lint && pnpm typecheck
 ```
 
-Read first: `CLAUDE.md`
+This file is the primary source of truth for repo workflow and architecture.
 
 ## What AVA Is
 
-AVA is a Rust-first AI coding assistant (CLI/TUI + Tauri desktop) with a 21-crate Rust workspace.
+AVA is a Rust-first AI coding assistant (CLI/TUI + Tauri desktop + web mode) with a 22-crate Rust workspace.
 
 - **CLI/TUI**: `crates/ava-tui/` (Ratatui + Crossterm + Tokio)
-- **Agent runtime**: `crates/ava-agent/`, `ava-llm/`, `ava-tools/`, `ava-praxis/`
+- **Agent runtime**: `crates/ava-agent/`, `ava-llm/`, `ava-tools/`, `ava-review/`
 - **Desktop**: Tauri 2 -- SolidJS frontend calls Rust via Tauri IPC (`src-tauri/src/commands/`)
+- **Web**: `ava serve` from `crates/ava-tui/`
 
 **All new features MUST be Rust.** No TypeScript backend logic.
 
 ## Key Counts
 
-- 21 Rust crates in the root workspace (`src-tauri/` remains outside the workspace)
+- 22 Rust crates in the root workspace (`src-tauri/` remains outside the workspace)
 - 9 default tools: `read`, `write`, `edit`, `bash`, `glob`, `grep`, `web_fetch`, `web_search`, `git_read`
 - Additional tools load separately at runtime (for example `subagent`, `todo_*`, `question`, `plan`, MCP, and TOML custom tools)
 
@@ -40,7 +41,7 @@ AVA is a Rust-first AI coding assistant (CLI/TUI + Tauri desktop) with a 21-crat
 
 - New tools: `crates/ava-tools/src/core/` (implement `Tool` trait)
 - New providers: `crates/ava-llm/src/providers/`
-- New agent features: `crates/ava-agent/` or `crates/ava-praxis/`
+- New agent features: `crates/ava-agent/` or `crates/ava-review/`
 - External agent integration: `crates/ava-acp/` (Agent Client Protocol)
 - TUI features: `crates/ava-tui/`
 - Desktop commands: `src-tauri/src/commands/`
@@ -49,6 +50,8 @@ AVA is a Rust-first AI coding assistant (CLI/TUI + Tauri desktop) with a 21-crat
 ## Tool Surface Policy
 
 Keep the default set capped at 9. New tools should default to opt-in delivery (plugin, MCP, or custom-tool). Only promote to default with strong justification.
+
+Power plugins are part of the core architecture. The current 3.3 direction is to grow advanced capability behind plugin seams instead of expanding core product surfaces.
 
 ## Common Tasks
 
@@ -95,9 +98,9 @@ pnpm lint && pnpm format:check && pnpm typecheck
 **This is mandatory.** After completing a feature, fix, or refactor:
 
 1. **Update `CHANGELOG.md`** — add entry under current version section
-2. **Update `docs/backlog.md`** — check off completed items
-3. **Update `CLAUDE.md`** if crate count, tool count, or architecture changed
-4. **Update `docs/crate-map.md`** if crates were added or removed
+2. **Update `docs/project/backlog.md`** — update the relevant progress/status notes for completed work
+3. **Update `AGENTS.md`** if the source-of-truth architecture, workflow, or conventions changed
+4. **Update `docs/architecture/crate-map.md`** if crates were added or removed
 5. **Run `just check`** before committing
 
 Docs must always reflect the current codebase. Never let them drift.
@@ -113,12 +116,14 @@ Docs must always reflect the current codebase. Never let them drift.
 
 ## Documentation
 
-1. `CLAUDE.md` — primary architecture reference
-2. `AGENTS.md` — this file
-3. `docs/README.md` — documentation entry point
-4. `docs/plugins.md` — TOML custom tools and MCP guide
-5. `docs/crate-map.md` — crate dependency map
-6. `docs/architecture/plugin-system.md` — power plugin design
-7. `CHANGELOG.md` — version history
-8. `docs/backlog.md` — current backlog
-9. `docs/ideas/` — archived feature designs (reference only)
+1. `AGENTS.md` — primary source of truth for architecture, workflow, and conventions
+2. `docs/README.md` — documentation entry point
+3. `docs/project/roadmap.md` — source of truth for product direction
+4. `docs/project/backlog.md` — current backlog
+5. `CLAUDE.md` — compatibility reference that redirects back to the active docs
+6. `docs/extend/README.md` — plugin, MCP, command, skill, and custom-tool reference
+7. `docs/architecture/plugin-boundary.md` — first concrete core-to-plugin migration checklist
+8. `docs/architecture/crate-map.md` — crate dependency map
+9. `CHANGELOG.md` — version history
+
+`AGENTS.md` owns workflow, conventions, and architectural guidance. `docs/project/roadmap.md` owns product direction.

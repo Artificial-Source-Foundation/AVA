@@ -32,7 +32,7 @@ export const WelcomeStep: Component<WelcomeStepProps> = (props) => (
 
     {/* Subtitle - 2 lines, muted */}
     <p class="text-sm text-[var(--text-muted)] mb-10 max-w-[280px] leading-relaxed">
-      Your AI dev team — lean by default,
+      Your AI coding agent — lean by default,
       <br />
       infinitely extensible.
     </p>

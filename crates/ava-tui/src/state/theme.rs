@@ -34,12 +34,15 @@ const BUILTIN_NAMES: &[&str] = &[
     "horizon",
     "poimandres",
     "vesper",
+    "graphite",
+    "aurora",
     // Light themes
     "github_light",
     "solarized_light",
     "catppuccin_latte",
     "one_light",
     "rose_pine_dawn",
+    "terminal_paper",
 ];
 
 #[derive(Debug, Clone)]
@@ -159,43 +162,97 @@ fn resolve_color(hex: &Option<String>, fallback: Color) -> Color {
     }
 }
 
+fn rgb(color: Color) -> Option<(u8, u8, u8)> {
+    match color {
+        Color::Rgb(r, g, b) => Some((r, g, b)),
+        _ => None,
+    }
+}
+
+fn blend_colors(from: Color, to: Color, basis_points: u16) -> Color {
+    let Some((fr, fg, fb)) = rgb(from) else {
+        return to;
+    };
+    let Some((tr, tg, tb)) = rgb(to) else {
+        return from;
+    };
+
+    let mix = |a: u8, b: u8| -> u8 {
+        let a = u32::from(a);
+        let b = u32::from(b);
+        let basis_points = u32::from(basis_points);
+        (((a * (10_000 - basis_points)) + (b * basis_points)) / 10_000) as u8
+    };
+
+    Color::Rgb(mix(fr, tr), mix(fg, tg), mix(fb, tb))
+}
+
+fn pulse_basis_points(tick: usize, period: usize) -> u16 {
+    if period == 0 {
+        return 10_000;
+    }
+    let step = tick % period;
+    let half = period / 2;
+    if half == 0 {
+        return 10_000;
+    }
+
+    let distance = if step <= half {
+        step
+    } else {
+        period.saturating_sub(step)
+    };
+
+    ((distance * 10_000) / half) as u16
+}
+
 impl Theme {
+    pub fn animated_border(&self, tick: usize) -> Color {
+        let pulse = pulse_basis_points(tick, 48);
+        blend_colors(self.border_subtle, self.border_active, pulse)
+    }
+
+    pub fn animated_accent(&self, tick: usize) -> Color {
+        let pulse = pulse_basis_points(tick, 36);
+        blend_colors(self.primary, self.secondary, pulse)
+    }
+
     pub fn default_theme() -> Self {
         Self {
             name: "default".into(),
-            // Pencil design system palette
-            primary: Color::Rgb(77, 158, 246), // #4D9EF6 — accent-primary
-            secondary: Color::Rgb(123, 97, 255), // #7B61FF — accent-secondary (purple)
-            accent: Color::Rgb(251, 191, 36),  // #FBBF24 — accent-warning
-            success: Color::Rgb(52, 211, 153), // #34D399 — accent-success
-            error: Color::Rgb(248, 113, 113),  // #F87171 — accent-error
-            warning: Color::Rgb(251, 191, 36), // #FBBF24 — accent-warning
+            // Monochrome-first default tuned for a calmer, premium terminal feel.
+            primary: Color::Rgb(236, 239, 243),
+            secondary: Color::Rgb(166, 172, 180),
+            accent: Color::Rgb(210, 214, 220),
+            success: Color::Rgb(142, 201, 170),
+            error: Color::Rgb(214, 146, 146),
+            warning: Color::Rgb(209, 189, 141),
             // Text
-            text: Color::Rgb(232, 236, 241), // #E8ECF1 — text-primary
-            text_muted: Color::Rgb(139, 149, 165), // #8B95A5 — text-secondary
-            text_dimmed: Color::Rgb(95, 106, 125), // #5F6A7D — readable on #0B0E14 bg
+            text: Color::Rgb(245, 247, 250),
+            text_muted: Color::Rgb(162, 168, 177),
+            text_dimmed: Color::Rgb(108, 114, 123),
             // Surfaces
-            bg: Color::Rgb(11, 14, 20),              // #0B0E14 — bg-deep
-            bg_elevated: Color::Rgb(26, 31, 46),     // #1A1F2E — bg-elevated
-            bg_surface: Color::Rgb(19, 23, 32),      // #131720 — bg-surface
-            bg_deep: Color::Rgb(11, 14, 20),         // #0B0E14 — bg-deep
-            bg_user_message: Color::Rgb(26, 31, 46), // #1A1F2E — bg-elevated
+            bg: Color::Rgb(8, 8, 10),
+            bg_elevated: Color::Rgb(18, 18, 21),
+            bg_surface: Color::Rgb(24, 24, 28),
+            bg_deep: Color::Rgb(5, 5, 7),
+            bg_user_message: Color::Rgb(20, 20, 24),
             // Borders
-            border: Color::Rgb(42, 49, 66), // #2A3142 — visible on bg and bg_surface
-            border_active: Color::Rgb(77, 158, 246), // #4D9EF6 — accent-primary
-            border_subtle: Color::Rgb(30, 36, 51), // #1E2433 — subtle but distinct from border
+            border: Color::Rgb(44, 44, 50),
+            border_active: Color::Rgb(228, 232, 238),
+            border_subtle: Color::Rgb(31, 31, 36),
             // Diff
-            diff_added: Color::Rgb(63, 185, 80),        // #3fb950
-            diff_removed: Color::Rgb(248, 81, 73),      // #f85149
-            diff_context: Color::Rgb(125, 133, 144),    // #7d8590
-            diff_hunk_header: Color::Rgb(88, 166, 255), // #58a6ff
+            diff_added: Color::Rgb(63, 185, 80),     // #3fb950
+            diff_removed: Color::Rgb(248, 81, 73),   // #f85149
+            diff_context: Color::Rgb(125, 133, 144), // #7d8590
+            diff_hunk_header: Color::Rgb(196, 201, 208),
             diff_added_highlight: Color::Rgb(70, 220, 100), // brighter green
             diff_removed_highlight: Color::Rgb(255, 120, 110), // brighter red
-            diff_added_bg: Color::Rgb(26, 71, 33),      // #1a4721
-            diff_removed_bg: Color::Rgb(103, 6, 12),    // #67060c
+            diff_added_bg: Color::Rgb(26, 71, 33),          // #1a4721
+            diff_removed_bg: Color::Rgb(103, 6, 12),        // #67060c
             // Risk
-            risk_safe: Color::Rgb(63, 185, 80),     // success
-            risk_low: Color::Rgb(88, 166, 255),     // primary
+            risk_safe: Color::Rgb(63, 185, 80), // success
+            risk_low: Color::Rgb(188, 193, 200),
             risk_medium: Color::Rgb(210, 153, 34),  // warning
             risk_high: Color::Rgb(248, 81, 73),     // error
             risk_critical: Color::Rgb(255, 60, 50), // bright red
@@ -1240,6 +1297,114 @@ impl Theme {
         }
     }
 
+    pub fn graphite() -> Self {
+        Self {
+            name: "graphite".into(),
+            primary: Color::Rgb(160, 174, 192),
+            secondary: Color::Rgb(94, 234, 212),
+            accent: Color::Rgb(94, 234, 212),
+            success: Color::Rgb(74, 222, 128),
+            error: Color::Rgb(248, 113, 113),
+            warning: Color::Rgb(250, 204, 21),
+            text: Color::Rgb(241, 245, 249),
+            text_muted: Color::Rgb(148, 163, 184),
+            text_dimmed: Color::Rgb(100, 116, 139),
+            bg: Color::Rgb(9, 11, 15),
+            bg_elevated: Color::Rgb(15, 18, 24),
+            bg_surface: Color::Rgb(19, 23, 30),
+            bg_deep: Color::Rgb(5, 7, 10),
+            bg_user_message: Color::Rgb(15, 18, 24),
+            border: Color::Rgb(44, 52, 64),
+            border_active: Color::Rgb(94, 234, 212),
+            border_subtle: Color::Rgb(26, 32, 40),
+            diff_added: Color::Rgb(74, 222, 128),
+            diff_removed: Color::Rgb(248, 113, 113),
+            diff_context: Color::Rgb(148, 163, 184),
+            diff_hunk_header: Color::Rgb(94, 234, 212),
+            diff_added_highlight: Color::Rgb(110, 245, 155),
+            diff_removed_highlight: Color::Rgb(255, 145, 145),
+            diff_added_bg: Color::Rgb(16, 45, 28),
+            diff_removed_bg: Color::Rgb(55, 18, 22),
+            risk_safe: Color::Rgb(74, 222, 128),
+            risk_low: Color::Rgb(94, 234, 212),
+            risk_medium: Color::Rgb(250, 204, 21),
+            risk_high: Color::Rgb(248, 113, 113),
+            risk_critical: Color::Rgb(239, 68, 68),
+        }
+    }
+
+    pub fn aurora() -> Self {
+        Self {
+            name: "aurora".into(),
+            primary: Color::Rgb(125, 211, 252),
+            secondary: Color::Rgb(196, 181, 253),
+            accent: Color::Rgb(244, 114, 182),
+            success: Color::Rgb(110, 231, 183),
+            error: Color::Rgb(251, 113, 133),
+            warning: Color::Rgb(251, 191, 36),
+            text: Color::Rgb(232, 242, 255),
+            text_muted: Color::Rgb(154, 172, 204),
+            text_dimmed: Color::Rgb(98, 115, 147),
+            bg: Color::Rgb(12, 14, 28),
+            bg_elevated: Color::Rgb(22, 24, 44),
+            bg_surface: Color::Rgb(28, 31, 56),
+            bg_deep: Color::Rgb(8, 10, 20),
+            bg_user_message: Color::Rgb(22, 24, 44),
+            border: Color::Rgb(54, 60, 98),
+            border_active: Color::Rgb(125, 211, 252),
+            border_subtle: Color::Rgb(34, 38, 68),
+            diff_added: Color::Rgb(110, 231, 183),
+            diff_removed: Color::Rgb(251, 113, 133),
+            diff_context: Color::Rgb(154, 172, 204),
+            diff_hunk_header: Color::Rgb(196, 181, 253),
+            diff_added_highlight: Color::Rgb(145, 240, 200),
+            diff_removed_highlight: Color::Rgb(255, 145, 160),
+            diff_added_bg: Color::Rgb(18, 56, 45),
+            diff_removed_bg: Color::Rgb(66, 20, 36),
+            risk_safe: Color::Rgb(110, 231, 183),
+            risk_low: Color::Rgb(125, 211, 252),
+            risk_medium: Color::Rgb(251, 191, 36),
+            risk_high: Color::Rgb(251, 113, 133),
+            risk_critical: Color::Rgb(244, 63, 94),
+        }
+    }
+
+    pub fn terminal_paper() -> Self {
+        Self {
+            name: "terminal_paper".into(),
+            primary: Color::Rgb(26, 95, 122),
+            secondary: Color::Rgb(104, 78, 140),
+            accent: Color::Rgb(204, 120, 50),
+            success: Color::Rgb(58, 122, 92),
+            error: Color::Rgb(176, 70, 70),
+            warning: Color::Rgb(191, 132, 45),
+            text: Color::Rgb(45, 51, 59),
+            text_muted: Color::Rgb(96, 104, 116),
+            text_dimmed: Color::Rgb(138, 145, 154),
+            bg: Color::Rgb(248, 244, 236),
+            bg_elevated: Color::Rgb(242, 236, 226),
+            bg_surface: Color::Rgb(252, 249, 244),
+            bg_deep: Color::Rgb(240, 233, 222),
+            bg_user_message: Color::Rgb(242, 236, 226),
+            border: Color::Rgb(214, 205, 189),
+            border_active: Color::Rgb(26, 95, 122),
+            border_subtle: Color::Rgb(232, 225, 213),
+            diff_added: Color::Rgb(58, 122, 92),
+            diff_removed: Color::Rgb(176, 70, 70),
+            diff_context: Color::Rgb(96, 104, 116),
+            diff_hunk_header: Color::Rgb(26, 95, 122),
+            diff_added_highlight: Color::Rgb(80, 145, 110),
+            diff_removed_highlight: Color::Rgb(205, 95, 95),
+            diff_added_bg: Color::Rgb(223, 241, 228),
+            diff_removed_bg: Color::Rgb(247, 223, 223),
+            risk_safe: Color::Rgb(58, 122, 92),
+            risk_low: Color::Rgb(26, 95, 122),
+            risk_medium: Color::Rgb(191, 132, 45),
+            risk_high: Color::Rgb(176, 70, 70),
+            risk_critical: Color::Rgb(148, 45, 45),
+        }
+    }
+
     /// Look up a theme by name. Built-in themes take priority over custom themes.
     pub fn from_name(name: &str) -> Self {
         match name {
@@ -1267,11 +1432,14 @@ impl Theme {
             "horizon" => Self::horizon(),
             "poimandres" => Self::poimandres(),
             "vesper" => Self::vesper(),
+            "graphite" => Self::graphite(),
+            "aurora" => Self::aurora(),
             "github_light" => Self::github_light(),
             "solarized_light" => Self::solarized_light(),
             "catppuccin_latte" => Self::catppuccin_latte(),
             "one_light" => Self::one_light(),
             "rose_pine_dawn" => Self::rose_pine_dawn(),
+            "terminal_paper" => Self::terminal_paper(),
             _ => {
                 // Check custom themes
                 if let Some(custom) = custom_themes().iter().find(|t| t.name == name) {
@@ -1499,6 +1667,9 @@ primary = "#FF0000"
         assert!(names.contains(&"default".to_string()));
         assert!(names.contains(&"dracula".to_string()));
         assert!(names.contains(&"nord".to_string()));
+        assert!(names.contains(&"graphite".to_string()));
+        assert!(names.contains(&"aurora".to_string()));
+        assert!(names.contains(&"terminal_paper".to_string()));
     }
 
     #[test]

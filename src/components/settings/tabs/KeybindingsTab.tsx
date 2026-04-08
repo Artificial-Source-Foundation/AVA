@@ -108,19 +108,6 @@ export const KeybindingsTab: Component<KeybindingsTabProps> = (props) => {
 
   return (
     <div class="flex flex-col" style={{ gap: '24px' }}>
-      {/* Page title */}
-      <h2
-        style={{
-          'font-family': 'Geist, sans-serif',
-          'font-size': '22px',
-          'font-weight': '600',
-          color: '#F5F5F7',
-          margin: '0',
-        }}
-      >
-        Shortcuts
-      </h2>
-
       {/* Search input */}
       <input
         type="text"

@@ -177,29 +177,34 @@ async fn default_tester(provider: &str, store: &CredentialStore) -> Result<Strin
 }
 
 pub fn provider_name(provider: &str) -> String {
-    match provider {
+    let canonical = match provider {
+        "chatgpt" => "openai",
+        "google" => "gemini",
+        "alibaba-cn" => "alibaba",
+        "zhipuai-coding-plan" | "zai-coding-plan" => "zai",
+        "kimi-for-coding" => "kimi",
+        "minimax-coding-plan" | "minimax-cn-coding-plan" => "minimax",
+        other => other,
+    };
+
+    match canonical {
         "openai" => "OpenAI".to_string(),
         "openrouter" => "OpenRouter".to_string(),
         "ollama" => "Ollama".to_string(),
         "anthropic" => "Anthropic".to_string(),
         "gemini" => "Gemini".to_string(),
         "copilot" => "GitHub Copilot".to_string(),
-        "mistral" => "Mistral".to_string(),
-        "groq" => "Groq".to_string(),
-        "xai" => "xAI (Grok)".to_string(),
-        "deepinfra" => "DeepInfra".to_string(),
-        "together" => "Together AI".to_string(),
-        "cerebras" => "Cerebras".to_string(),
-        "perplexity" => "Perplexity".to_string(),
-        "cohere" => "Cohere".to_string(),
-        "azure" => "Azure OpenAI".to_string(),
-        "bedrock" => "AWS Bedrock".to_string(),
+        "inception" => "Inception".to_string(),
+        "alibaba" => "Alibaba Model Studio".to_string(),
+        "zai" => "Z.AI Coding Plan".to_string(),
+        "kimi" => "Kimi For Coding".to_string(),
+        "minimax" => "MiniMax Coding Plan".to_string(),
         _ => {
-            let mut chars = provider.chars();
+            let mut chars = canonical.chars();
             if let Some(first) = chars.next() {
                 format!("{}{}", first.to_ascii_uppercase(), chars.as_str())
             } else {
-                provider.to_string()
+                canonical.to_string()
             }
         }
     }

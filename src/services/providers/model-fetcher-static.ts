@@ -48,6 +48,18 @@ export function getAlibabaModels(): FetchedModel[] {
 // ============================================================================
 
 export const OPENAI_COMPAT_CONFIGS: Record<string, OpenAICompatConfig> = {
+  inception: {
+    baseUrl: 'https://api.inceptionlabs.ai/v1/models',
+    providerName: 'Inception',
+  },
+  zai: {
+    baseUrl: 'https://api.z.ai/api/coding/paas/v4/models',
+    providerName: 'Z.AI',
+  },
+  minimax: {
+    baseUrl: 'https://api.minimax.io/v1/models',
+    providerName: 'MiniMax',
+  },
   xai: {
     baseUrl: 'https://api.x.ai/v1/models',
     providerName: 'xAI',

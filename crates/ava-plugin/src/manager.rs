@@ -1,22 +1,27 @@
 //! Top-level plugin manager — owns all plugin runtimes and orchestrates lifecycle.
 
 use ava_types::Result;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::Mutex;
 use tracing::{debug, info, warn};
 
 /// Maximum time allowed for a plugin's `initialize` call before it is
 /// considered hung and the plugin is marked as Failed.
 const PLUGIN_INIT_TIMEOUT_SECS: u64 = 10;
+const PLUGIN_APP_CALL_TIMEOUT_SECS: u64 = 15;
 
 use crate::discovery::discover_plugins;
 use crate::hooks::{AuthCredentials, AuthMethodsResponse, HookDispatcher, HookEvent, HookResponse};
 use crate::runtime::PluginProcess;
 
 /// Status of a managed plugin.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub enum PluginStatus {
     /// Plugin process is running and ready.
     Running,
@@ -27,7 +32,8 @@ pub enum PluginStatus {
 }
 
 /// Summary info for a loaded plugin.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PluginInfo {
     /// Plugin name from manifest.
     pub name: String,
@@ -37,6 +43,148 @@ pub struct PluginInfo {
     pub status: PluginStatus,
     /// Hook subscriptions declared in manifest.
     pub hooks: Vec<String>,
+    /// App host capabilities exposed by the plugin.
+    pub app: PluginAppCapabilities,
+}
+
+/// App-level capabilities a plugin can expose to the host.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginAppCapabilities {
+    #[serde(default)]
+    pub commands: Vec<PluginCommandSpec>,
+    #[serde(default)]
+    pub routes: Vec<PluginRouteSpec>,
+    #[serde(default)]
+    pub events: Vec<PluginEventSpec>,
+    #[serde(default)]
+    pub mounts: Vec<PluginMountSpec>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginCommandSpec {
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginRouteSpec {
+    pub path: String,
+    pub method: String,
+    #[serde(default)]
+    pub description: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginEventSpec {
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginMountSpec {
+    pub id: String,
+    pub location: String,
+    pub label: String,
+    #[serde(default)]
+    pub description: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginAppEvent {
+    pub event: String,
+    #[serde(default)]
+    pub payload: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginAppResponse {
+    pub result: Value,
+    #[serde(default)]
+    pub emitted_events: Vec<PluginAppEvent>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginMountRegistration {
+    pub plugin: String,
+    pub mount: PluginMountSpec,
+}
+
+#[derive(Clone)]
+pub struct PluginAppHandle {
+    plugin: String,
+    process: Arc<Mutex<PluginProcess>>,
+}
+
+impl PluginAppHandle {
+    pub async fn invoke_command(&self, command: &str, payload: Value) -> Result<PluginAppResponse> {
+        let response =
+            tokio::time::timeout(Duration::from_secs(PLUGIN_APP_CALL_TIMEOUT_SECS), async {
+                self.process
+                    .lock()
+                    .await
+                    .send_request(
+                        "app.command",
+                        serde_json::json!({
+                            "command": command,
+                            "payload": payload,
+                        }),
+                    )
+                    .await
+            })
+            .await
+            .map_err(|_| {
+                ava_types::AvaError::ToolError(format!(
+                    "plugin '{}' command '{}' timed out after {}s",
+                    self.plugin, command, PLUGIN_APP_CALL_TIMEOUT_SECS
+                ))
+            })??;
+
+        Ok(parse_app_response(response))
+    }
+
+    pub async fn invoke_route(
+        &self,
+        method: &str,
+        path: &str,
+        query: Value,
+        body: Option<Value>,
+    ) -> Result<PluginAppResponse> {
+        let response =
+            tokio::time::timeout(Duration::from_secs(PLUGIN_APP_CALL_TIMEOUT_SECS), async {
+                self.process
+                    .lock()
+                    .await
+                    .send_request(
+                        "app.route",
+                        serde_json::json!({
+                            "method": method,
+                            "path": path,
+                            "query": query,
+                            "body": body,
+                        }),
+                    )
+                    .await
+            })
+            .await
+            .map_err(|_| {
+                ava_types::AvaError::ToolError(format!(
+                    "plugin '{}' route '{} {}' timed out after {}s",
+                    self.plugin, method, path, PLUGIN_APP_CALL_TIMEOUT_SECS
+                ))
+            })??;
+
+        Ok(parse_app_response(response))
+    }
 }
 
 /// Decision returned by a plugin for the `permission.ask` hook.
@@ -46,10 +194,48 @@ pub enum PluginPermissionDecision {
     Deny { reason: String },
 }
 
+fn parse_app_capabilities(init_caps: &Value) -> PluginAppCapabilities {
+    init_caps
+        .get("app")
+        .cloned()
+        .and_then(|value| serde_json::from_value::<PluginAppCapabilities>(value).ok())
+        .unwrap_or_default()
+}
+
+fn parse_app_response(value: Value) -> PluginAppResponse {
+    #[derive(Debug, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct ResponseEnvelope {
+        #[serde(default)]
+        result: Value,
+        #[serde(default)]
+        emitted_events: Vec<PluginAppEvent>,
+    }
+
+    let looks_like_envelope = value
+        .as_object()
+        .map(|object| object.contains_key("result") || object.contains_key("emittedEvents"))
+        .unwrap_or(false);
+
+    if looks_like_envelope {
+        if let Ok(envelope) = serde_json::from_value::<ResponseEnvelope>(value.clone()) {
+            return PluginAppResponse {
+                result: envelope.result,
+                emitted_events: envelope.emitted_events,
+            };
+        }
+    }
+
+    PluginAppResponse {
+        result: value,
+        emitted_events: Vec::new(),
+    }
+}
+
 /// Manages the lifecycle of all power plugins.
 pub struct PluginManager {
     /// Running plugin processes, keyed by plugin name.
-    processes: HashMap<String, PluginProcess>,
+    processes: HashMap<String, Arc<Mutex<PluginProcess>>>,
     /// Plugin metadata for reporting, keyed by plugin name.
     plugin_info: HashMap<String, PluginInfo>,
     /// Hook dispatcher for routing events.
@@ -94,15 +280,17 @@ impl PluginManager {
                 Ok(mut process) => {
                     // Send initialize with a timeout to prevent hanging forever.
                     let init_params = serde_json::json!({
-                        "plugin": name,
-                        "version": version,
+                        "plugin": name.clone(),
+                        "version": version.clone(),
                     });
                     let init_timeout = Duration::from_secs(PLUGIN_INIT_TIMEOUT_SECS);
                     let init_result =
                         tokio::time::timeout(init_timeout, process.initialize(init_params)).await;
+                    let mut app = PluginAppCapabilities::default();
 
                     match init_result {
                         Ok(Ok(_caps)) => {
+                            app = parse_app_capabilities(&_caps);
                             debug!(plugin = %name, "plugin initialized successfully");
                         }
                         Ok(Err(e)) => {
@@ -125,15 +313,16 @@ impl PluginManager {
                                         "initialize timed out after {PLUGIN_INIT_TIMEOUT_SECS}s"
                                     )),
                                     hooks,
+                                    app: PluginAppCapabilities::default(),
                                 },
                             );
                             continue;
                         }
                     }
 
-                    // Register hook subscriptions
                     self.dispatcher.register(&name, &hooks);
-                    self.processes.insert(name.clone(), process);
+                    self.processes
+                        .insert(name.clone(), Arc::new(Mutex::new(process)));
                     self.plugin_info.insert(
                         name.clone(),
                         PluginInfo {
@@ -141,6 +330,7 @@ impl PluginManager {
                             version,
                             status: PluginStatus::Running,
                             hooks,
+                            app,
                         },
                     );
                 }
@@ -153,6 +343,7 @@ impl PluginManager {
                             version,
                             status: PluginStatus::Failed(e.to_string()),
                             hooks,
+                            app: PluginAppCapabilities::default(),
                         },
                     );
                 }
@@ -165,7 +356,7 @@ impl PluginManager {
     /// Trigger a hook event, dispatching to all subscribed plugins.
     pub async fn trigger_hook(&mut self, event: HookEvent, params: Value) -> Vec<HookResponse> {
         self.dispatcher
-            .dispatch(&event, &params, &mut self.processes)
+            .dispatch(&event, &params, &self.processes)
             .await
     }
 
@@ -182,7 +373,7 @@ impl PluginManager {
         let params = serde_json::json!({ "provider": provider });
         let responses = self
             .dispatcher
-            .dispatch(&HookEvent::AuthMethods, &params, &mut self.processes)
+            .dispatch(&HookEvent::AuthMethods, &params, &self.processes)
             .await;
 
         let mut results = Vec::new();
@@ -232,7 +423,7 @@ impl PluginManager {
         });
         let responses = self
             .dispatcher
-            .dispatch(&HookEvent::AuthAuthorize, &params, &mut self.processes)
+            .dispatch(&HookEvent::AuthAuthorize, &params, &self.processes)
             .await;
 
         for resp in responses {
@@ -276,7 +467,7 @@ impl PluginManager {
         });
         let responses = self
             .dispatcher
-            .dispatch(&HookEvent::AuthRefresh, &params, &mut self.processes)
+            .dispatch(&HookEvent::AuthRefresh, &params, &self.processes)
             .await;
 
         for resp in responses {
@@ -333,7 +524,7 @@ impl PluginManager {
                 .dispatch_to_plugins(
                     &HookEvent::ToolDefinition,
                     &params,
-                    &mut self.processes,
+                    &self.processes,
                     std::slice::from_ref(plugin_name),
                 )
                 .await;
@@ -383,34 +574,41 @@ impl PluginManager {
         }
 
         let mut current = params;
-        let responses = self
-            .dispatcher
-            .dispatch(&HookEvent::ChatParams, &current, &mut self.processes)
-            .await;
+        for plugin_name in &subscribers {
+            let responses = self
+                .dispatcher
+                .dispatch_to_plugins(
+                    &HookEvent::ChatParams,
+                    &current,
+                    &self.processes,
+                    std::slice::from_ref(plugin_name),
+                )
+                .await;
 
-        for resp in responses {
-            if let Some(ref e) = resp.error {
-                warn!(
-                    plugin = resp.plugin_name,
-                    error = %e,
-                    "chat.params hook failed, keeping current params"
-                );
-                continue;
-            }
-            if resp.result.is_object() {
-                // Merge: plugin response fields override current fields.
-                if let (Value::Object(current_map), Value::Object(overrides)) =
-                    (&mut current, resp.result)
-                {
-                    for (k, v) in overrides {
-                        current_map.insert(k, v);
-                    }
+            for resp in responses {
+                if let Some(ref e) = resp.error {
+                    warn!(
+                        plugin = resp.plugin_name,
+                        error = %e,
+                        "chat.params hook failed, keeping current params"
+                    );
+                    continue;
                 }
-            } else {
-                warn!(
-                    plugin = resp.plugin_name,
-                    "chat.params hook did not return an object, ignoring"
-                );
+                if resp.result.is_object() {
+                    // Merge: plugin response fields override current fields.
+                    if let (Value::Object(current_map), Value::Object(overrides)) =
+                        (&mut current, resp.result)
+                    {
+                        for (k, v) in overrides {
+                            current_map.insert(k, v);
+                        }
+                    }
+                } else {
+                    warn!(
+                        plugin = resp.plugin_name,
+                        "chat.params hook did not return an object, ignoring"
+                    );
+                }
             }
         }
 
@@ -446,7 +644,7 @@ impl PluginManager {
         });
         let responses = self
             .dispatcher
-            .dispatch(&HookEvent::PermissionAsk, &params, &mut self.processes)
+            .dispatch(&HookEvent::PermissionAsk, &params, &self.processes)
             .await;
 
         for resp in responses {
@@ -508,7 +706,7 @@ impl PluginManager {
         let params = serde_json::json!({ "model": model, "provider": provider });
         let responses = self
             .dispatcher
-            .dispatch(&HookEvent::ChatSystem, &params, &mut self.processes)
+            .dispatch(&HookEvent::ChatSystem, &params, &self.processes)
             .await;
 
         let mut injections: Vec<String> = Vec::new();
@@ -566,7 +764,7 @@ impl PluginManager {
                 .dispatch_to_plugins(
                     &HookEvent::ChatMessagesTransform,
                     &params,
-                    &mut self.processes,
+                    &self.processes,
                     std::slice::from_ref(plugin_name),
                 )
                 .await;
@@ -632,7 +830,7 @@ impl PluginManager {
         });
         let responses = self
             .dispatcher
-            .dispatch(&HookEvent::SessionCompacting, &params, &mut self.processes)
+            .dispatch(&HookEvent::SessionCompacting, &params, &self.processes)
             .await;
 
         let mut extra_context: Vec<String> = Vec::new();
@@ -699,11 +897,7 @@ impl PluginManager {
         });
         let responses = self
             .dispatcher
-            .dispatch(
-                &HookEvent::CommandExecuteBefore,
-                &params,
-                &mut self.processes,
-            )
+            .dispatch(&HookEvent::CommandExecuteBefore, &params, &self.processes)
             .await;
 
         for resp in responses {
@@ -741,9 +935,9 @@ impl PluginManager {
         // Collect names to avoid borrow issues
         let names: Vec<String> = self.processes.keys().cloned().collect();
         for name in &names {
-            if let Some(mut process) = self.processes.remove(name) {
+            if let Some(process) = self.processes.remove(name) {
                 debug!(plugin = %name, "shutting down plugin");
-                process.shutdown().await;
+                process.lock().await.shutdown().await;
             }
             if let Some(info) = self.plugin_info.get_mut(name) {
                 info.status = PluginStatus::Stopped;
@@ -755,6 +949,92 @@ impl PluginManager {
     /// List all known plugins with their status and hooks.
     pub fn list_plugins(&self) -> Vec<PluginInfo> {
         self.plugin_info.values().cloned().collect()
+    }
+
+    /// List frontend mount registrations exposed by running plugins.
+    pub fn list_plugin_mounts(&self) -> Vec<PluginMountRegistration> {
+        self.plugin_info
+            .values()
+            .filter(|info| matches!(info.status, PluginStatus::Running))
+            .flat_map(|info| {
+                info.app
+                    .mounts
+                    .iter()
+                    .cloned()
+                    .map(|mount| PluginMountRegistration {
+                        plugin: info.name.clone(),
+                        mount,
+                    })
+            })
+            .collect()
+    }
+
+    pub fn get_app_command_handle(&self, plugin: &str, command: &str) -> Result<PluginAppHandle> {
+        let info = self.plugin_info.get(plugin).ok_or_else(|| {
+            ava_types::AvaError::ToolError(format!("plugin '{}' is not loaded", plugin))
+        })?;
+
+        if !matches!(info.status, PluginStatus::Running) {
+            return Err(ava_types::AvaError::ToolError(format!(
+                "plugin '{}' is not running",
+                plugin
+            )));
+        }
+
+        if !info.app.commands.iter().any(|spec| spec.name == command) {
+            return Err(ava_types::AvaError::ToolError(format!(
+                "plugin '{}' does not expose command '{}'",
+                plugin, command
+            )));
+        }
+
+        let process = self.processes.get(plugin).cloned().ok_or_else(|| {
+            ava_types::AvaError::ToolError(format!("plugin '{}' process is unavailable", plugin))
+        })?;
+
+        Ok(PluginAppHandle {
+            plugin: plugin.to_string(),
+            process,
+        })
+    }
+
+    pub fn get_app_route_handle(
+        &self,
+        plugin: &str,
+        method: &str,
+        path: &str,
+    ) -> Result<PluginAppHandle> {
+        let info = self.plugin_info.get(plugin).ok_or_else(|| {
+            ava_types::AvaError::ToolError(format!("plugin '{}' is not loaded", plugin))
+        })?;
+
+        if !matches!(info.status, PluginStatus::Running) {
+            return Err(ava_types::AvaError::ToolError(format!(
+                "plugin '{}' is not running",
+                plugin
+            )));
+        }
+
+        if !info
+            .app
+            .routes
+            .iter()
+            .any(|spec| spec.path == path && spec.method.eq_ignore_ascii_case(method))
+        {
+            return Err(ava_types::AvaError::ToolError(format!(
+                "plugin '{}' does not expose route '{} {}'",
+                plugin, method, path
+            )));
+        }
+
+        let process = self.processes.get(plugin).cloned().ok_or_else(|| {
+            ava_types::AvaError::ToolError(format!("plugin '{}' process is unavailable", plugin))
+        })?;
+
+        Ok(PluginAppHandle {
+            plugin: plugin.to_string(),
+            process,
+        })
     }
 
     /// Get the number of running plugins.
@@ -777,6 +1057,7 @@ mod tests {
     fn new_manager_is_empty() {
         let manager = PluginManager::new();
         assert!(manager.list_plugins().is_empty());
+        assert!(manager.list_plugin_mounts().is_empty());
         assert_eq!(manager.running_count(), 0);
     }
 
@@ -878,6 +1159,56 @@ mod tests {
             .collect_system_injections("claude-sonnet-4", "anthropic")
             .await;
         assert!(result.is_none(), "no plugins = no injections");
+    }
+
+    #[test]
+    fn parse_app_capabilities_defaults_cleanly() {
+        let capabilities = parse_app_capabilities(&serde_json::json!({"hooks": ["session.start"]}));
+        assert_eq!(capabilities, PluginAppCapabilities::default());
+    }
+
+    #[test]
+    fn parse_app_capabilities_reads_app_block() {
+        let capabilities = parse_app_capabilities(&serde_json::json!({
+            "app": {
+                "commands": [{"name": "demo.ping", "description": "Ping"}],
+                "routes": [{"path": "/status", "method": "GET", "description": "Status"}],
+                "events": [{"name": "demo.updated", "description": "Updated"}],
+                "mounts": [{"id": "demo.settings", "location": "settings.section", "label": "Demo", "description": "Demo settings"}]
+            }
+        }));
+        assert_eq!(capabilities.commands.len(), 1);
+        assert_eq!(capabilities.routes.len(), 1);
+        assert_eq!(capabilities.events.len(), 1);
+        assert_eq!(capabilities.mounts.len(), 1);
+    }
+
+    #[test]
+    fn parse_app_response_supports_envelope_and_bare_result() {
+        let enveloped = parse_app_response(serde_json::json!({
+            "result": {"ok": true},
+            "emittedEvents": [{"event": "demo.updated", "payload": {"count": 1}}]
+        }));
+        assert_eq!(enveloped.emitted_events.len(), 1);
+        assert_eq!(enveloped.result["ok"], true);
+
+        let bare = parse_app_response(serde_json::json!({"status": "ok"}));
+        assert!(bare.emitted_events.is_empty());
+        assert_eq!(bare.result["status"], "ok");
+    }
+
+    #[tokio::test]
+    async fn invoke_app_command_missing_plugin() {
+        let manager = PluginManager::new();
+        let result = manager.get_app_command_handle("missing", "demo.ping");
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn invoke_app_route_missing_plugin() {
+        let manager = PluginManager::new();
+        let result = manager.get_app_route_handle("missing", "GET", "/status");
+        assert!(result.is_err());
     }
 
     #[test]

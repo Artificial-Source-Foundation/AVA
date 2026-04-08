@@ -2,28 +2,24 @@ import { render } from 'solid-js/web'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ChatView } from './ChatView'
 
-const mockSendMessage = vi.fn()
+const mockRun = vi.fn()
 const mockStartFileWatcher = vi.fn()
 const mockStopFileWatcher = vi.fn()
 
 vi.mock('../../hooks/useAgent', () => ({
   useAgent: () => ({
+    run: (...args: unknown[]) => mockRun(...args),
+    isRunning: () => false,
     pendingApproval: () => null,
     resolveApproval: vi.fn(),
+    pendingQuestion: () => null,
+    resolveQuestion: vi.fn(),
   }),
 }))
 
 vi.mock('../../contexts/notification', () => ({
   useNotification: () => ({
     info: vi.fn(),
-  }),
-}))
-
-vi.mock('../../hooks/useChat', () => ({
-  useChat: () => ({
-    pendingApproval: () => null,
-    resolveApproval: vi.fn(),
-    sendMessage: (...args: unknown[]) => mockSendMessage(...args),
   }),
 }))
 
@@ -54,12 +50,6 @@ vi.mock('../../stores/settings', () => ({
   }),
 }))
 
-vi.mock('../../stores/team', () => ({
-  useTeam: () => ({
-    selectedMemberId: () => null,
-  }),
-}))
-
 vi.mock('../../services/clipboard-watcher', () => ({
   createClipboardWatcher: () => ({ start: vi.fn(), stop: vi.fn() }),
   looksLikeCode: () => false,
@@ -69,8 +59,20 @@ vi.mock('./ApprovalDock', () => ({
   ApprovalDock: () => null,
 }))
 
+vi.mock('./PlanDock', () => ({
+  PlanDock: () => null,
+}))
+
+vi.mock('./QuestionDock', () => ({
+  QuestionDock: () => null,
+}))
+
 vi.mock('./ContextBar', () => ({
   ContextBar: () => null,
+}))
+
+vi.mock('./ChatTitleBar', () => ({
+  ChatTitleBar: () => null,
 }))
 
 vi.mock('./MessageInput', () => ({
@@ -79,14 +81,6 @@ vi.mock('./MessageInput', () => ({
 
 vi.mock('./MessageList', () => ({
   MessageList: () => null,
-}))
-
-vi.mock('./TeamChatView', () => ({
-  TeamChatView: () => null,
-}))
-
-vi.mock('./TeamStatusStrip', () => ({
-  TeamStatusStrip: () => null,
 }))
 
 describe('ChatView integration', () => {
@@ -98,7 +92,7 @@ describe('ChatView integration', () => {
     vi.clearAllMocks()
   })
 
-  it('starts watcher and forwards AI question comment to chat.sendMessage', async () => {
+  it('starts watcher and forwards AI question comment to agent.run', async () => {
     const container = document.createElement('div')
     const dispose = render(() => <ChatView />, container)
 
@@ -125,11 +119,9 @@ describe('ChatView integration', () => {
       context: 'function oldName() {}',
     })
 
-    expect(mockSendMessage).toHaveBeenCalledOnce()
-    expect(mockSendMessage.mock.calls[0]?.[0]).toContain(
-      '[Question] Should we rename this function?'
-    )
-    expect(mockSendMessage.mock.calls[0]?.[0]).toContain('// File: src/file.ts:42')
+    expect(mockRun).toHaveBeenCalledOnce()
+    expect(mockRun.mock.calls[0]?.[0]).toContain('[Question] Should we rename this function?')
+    expect(mockRun.mock.calls[0]?.[0]).toContain('// File: src/file.ts:42')
 
     dispose()
     expect(mockStopFileWatcher).toHaveBeenCalled()

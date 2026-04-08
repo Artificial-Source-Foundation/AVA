@@ -1,12 +1,19 @@
 //! Mid-stream messaging: steering queue polling, steering message injection,
 //! and forced summary generation.
-#![allow(dead_code)] // Methods extracted for future use by refactored run_unified
 
 use ava_types::{Message, Role, Session, TokenUsage};
 use tokio::sync::mpsc;
 use tracing::info;
 
 use super::{AgentEvent, AgentLoop};
+
+fn format_steering_message(combined: &str) -> String {
+    format!(
+        "[The user has interrupted with a new instruction. \
+         Stop what you were doing and address this instead. \
+         Do NOT retry any interrupted tools.]\n\n{combined}"
+    )
+}
 
 impl AgentLoop {
     /// Inject a summary prompt and do one final LLM call so the agent can wrap up.
@@ -61,11 +68,7 @@ impl AgentLoop {
             event_tx,
             AgentEvent::Progress(format!("steering: {combined}")),
         );
-        let prefixed = format!(
-            "[The user has interrupted with a new instruction. \
-             Stop what you were doing and address this instead. \
-             Do NOT retry any interrupted tools.]\n\n{combined}"
-        );
+        let prefixed = format_steering_message(&combined);
         let msg = Message::new(Role::User, prefixed);
         self.context.add_message(msg.clone());
         session.add_message(msg);
@@ -82,31 +85,38 @@ impl AgentLoop {
         session: &mut Session,
         event_tx: &Option<mpsc::UnboundedSender<AgentEvent>>,
     ) -> bool {
-        let has_steering = if let Some(ref mut queue) = self.message_queue {
-            queue.poll();
-            queue.has_steering()
-        } else {
-            false
+        let Some(ref mut queue) = self.message_queue else {
+            return false;
         };
 
-        if !has_steering {
+        queue.poll();
+        let steering_msgs = queue.drain_steering();
+        if steering_msgs.is_empty() {
             return false;
         }
 
         info!("Natural completion deferred — steering messages pending");
-        if let Some(ref mut queue) = self.message_queue {
-            let steering_msgs = queue.drain_steering();
-            if !steering_msgs.is_empty() {
-                let combined = steering_msgs.join("\n");
-                Self::emit(
-                    event_tx,
-                    AgentEvent::Progress(format!("steering: {combined}")),
-                );
-                let msg = Message::new(Role::User, combined);
-                self.context.add_message(msg.clone());
-                session.add_message(msg);
-            }
-        }
+        let combined = steering_msgs.join("\n");
+        Self::emit(
+            event_tx,
+            AgentEvent::Progress(format!("steering: {combined}")),
+        );
+        let msg = Message::new(Role::User, format_steering_message(&combined));
+        self.context.add_message(msg.clone());
+        session.add_message(msg);
         true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::format_steering_message;
+
+    #[test]
+    fn steering_message_includes_interrupt_prefix() {
+        let formatted = format_steering_message("please switch tasks");
+        assert!(formatted.contains("interrupted with a new instruction"));
+        assert!(formatted.contains("Do NOT retry any interrupted tools"));
+        assert!(formatted.ends_with("please switch tasks"));
     }
 }

@@ -14,7 +14,7 @@ export const copilot: LLMProviderConfig = {
   enabled: false,
   status: 'disconnected',
   defaultModel: 'gpt-4.1',
-  // Context windows per models.dev github-copilot provider (Copilot enforces its own limits)
+  // Context windows follow the curated AVA catalog for Copilot-backed models.
   models: [
     // ── OpenAI ──
     {

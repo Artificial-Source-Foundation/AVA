@@ -5,6 +5,13 @@
 //! - Hook registration and invocation system
 //! - Extension descriptors and manager
 //! - Native (shared library) and WASM extension loaders
+//!
+//! This surface is distinct from MCP:
+//! - `ava-mcp` manages external MCP servers and MCP tool discovery
+//! - `ava-extensions` manages native/WASM extension descriptors and hook registration
+//!
+//! In the current 3.3 baseline, this crate is primarily used by the desktop
+//! extension-registration command surface and should not be conflated with MCP.
 
 /// Hook primitives and registration for extension lifecycle integration.
 pub mod hook;

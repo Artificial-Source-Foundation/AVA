@@ -1,14 +1,13 @@
 /**
  * useModelState Hook
  *
- * Encapsulates model selection, provider resolution, reasoning effort, and
- * delegation toggle logic. Consumed by both the composition shell and ToolbarStrip.
+ * Encapsulates model selection, provider resolution, and reasoning effort.
+ * Consumed by both the composition shell and ToolbarStrip.
  */
 
 import { type Accessor, createEffect, createMemo } from 'solid-js'
-import { useChatMode } from '../../../contexts/chat-mode'
 import { updateCoreBudgetLimit } from '../../../services/core-bridge'
-import { getModelFromCatalog } from '../../../services/providers/models-dev-catalog'
+import { getModelFromCatalog } from '../../../services/providers/curated-model-catalog'
 import { useSession } from '../../../stores/session'
 import { useSettings } from '../../../stores/settings'
 import type { LLMProvider } from '../../../types/llm'
@@ -24,7 +23,6 @@ export interface ModelState {
   activeProviderId: Accessor<string | null>
   modelSupportsReasoning: Accessor<boolean>
   handleCycleReasoning: () => void
-  toggleDelegation: () => void
 }
 
 // ---------------------------------------------------------------------------
@@ -32,7 +30,6 @@ export interface ModelState {
 // ---------------------------------------------------------------------------
 
 export function useModelState(): ModelState {
-  const chatMode = useChatMode()
   const sessionStore = useSession()
   const { selectedModel, selectedProvider, setSelectedModel } = sessionStore
   const { settings, updateSettings } = useSettings()
@@ -78,7 +75,7 @@ export function useModelState(): ModelState {
       }
     }
 
-    // 2. Fall back to the models.dev catalog (raw entry uses limit.context)
+    // 2. Fall back to the curated catalog (raw entry uses limit.context)
     const catalogModel = getModelFromCatalog(modelId, provId as LLMProvider | undefined)
     const catalogContextWindow = catalogModel?.limit?.context
     if (catalogContextWindow && catalogContextWindow > 0) {
@@ -87,9 +84,6 @@ export function useModelState(): ModelState {
   })
 
   const currentModelDisplay = createMemo(() => {
-    // Director mode can override the model display label
-    if (chatMode?.modelDisplay) return chatMode.modelDisplay()
-
     const modelId = selectedModel()
     const provId = selectedProvider()
     if (provId) {
@@ -133,12 +127,12 @@ export function useModelState(): ModelState {
       if (model?.capabilities?.length && checkCaps(model.capabilities)) return true
     }
 
-    // 2. Check models.dev catalog (authoritative source for capabilities)
+    // 2. Check the curated catalog (authoritative source for capabilities)
     const catalogModel = getModelFromCatalog(modelId, provId as LLMProvider | undefined)
     if (catalogModel?.reasoning === true) return true
 
     // 3. Infer from model name for unknown models
-    return /claude|sonnet|opus|gpt-5|o3-|o4-|codex|gemini|deepseek-r/i.test(modelId)
+    return /claude|sonnet|opus|gpt-5|codex|gemini/i.test(modelId)
   })
 
   const handleCycleReasoning = (): void => {
@@ -153,21 +147,11 @@ export function useModelState(): ModelState {
     })
   }
 
-  const toggleDelegation = (): void => {
-    updateSettings({
-      generation: {
-        ...settings().generation,
-        delegationEnabled: !settings().generation.delegationEnabled,
-      },
-    })
-  }
-
   return {
     enabledProviders,
     currentModelDisplay,
     activeProviderId,
     modelSupportsReasoning,
     handleCycleReasoning,
-    toggleDelegation,
   }
 }

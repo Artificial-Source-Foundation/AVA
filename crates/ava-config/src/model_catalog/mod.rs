@@ -1,18 +1,11 @@
-//! Dynamic model catalog with models.dev as primary source.
+//! Repo-owned model catalog for the curated AVA provider/model set.
 //!
-//! On startup: loads from disk cache (`~/.ava/cache/models.json`), then
-//! fetches fresh data from `https://models.dev/api.json` in the background.
-//! Cache is valid for 24 hours. Falls back to a minimal hardcoded registry
-//! (~12 essential models) when both cache and network are unavailable.
+//! The catalog is compiled into the binary and updated manually in-repo.
+//! There is no runtime network fetch for model metadata.
 
 mod fallback;
-mod fetch;
 pub mod registry;
 mod types;
-
-use std::time::Duration;
-
-const REFRESH_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60); // 24 hours
 
 pub use fallback::fallback_catalog;
 pub use types::{CatalogModel, CatalogState, ModelCatalog};
@@ -20,8 +13,6 @@ pub use types::{CatalogModel, CatalogState, ModelCatalog};
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
-
     #[test]
     fn cost_display_formatting() {
         let model = CatalogModel {
@@ -73,128 +64,6 @@ mod tests {
     }
 
     #[test]
-    fn from_raw_filters_tool_call() {
-        // models.dev puts models under hosting providers, not model creators
-        let raw_json = r#"{
-            "zenmux": {
-                "id": "zenmux",
-                "name": "ZenMux",
-                "models": {
-                    "claude-sonnet-4.6": {
-                        "id": "anthropic/claude-sonnet-4.6",
-                        "name": "Claude Sonnet 4.6",
-                        "tool_call": true,
-                        "cost": { "input": 3.0, "output": 15.0 },
-                        "limit": { "context": 200000, "output": 8192 }
-                    },
-                    "claude-haiku-4.5": {
-                        "id": "anthropic/claude-haiku-4.5",
-                        "name": "Claude Haiku 4.5",
-                        "tool_call": false,
-                        "cost": { "input": 1.0, "output": 5.0 },
-                        "limit": { "context": 100000, "output": 4096 }
-                    }
-                }
-            }
-        }"#;
-
-        let raw: HashMap<String, serde_json::Value> = serde_json::from_str(raw_json).unwrap();
-        let catalog = ModelCatalog::from_raw(raw, 1000);
-
-        let models = catalog.models_for("anthropic");
-        assert_eq!(models.len(), 1);
-        assert_eq!(models[0].name, "Claude Sonnet 4.6");
-        assert!(models[0].tool_call);
-    }
-
-    #[test]
-    fn from_raw_strips_provider_prefix() {
-        let raw_json = r#"{
-            "fastrouter": {
-                "id": "fastrouter",
-                "name": "FastRouter",
-                "models": {
-                    "gpt-5.1": {
-                        "id": "openai/gpt-5.1",
-                        "name": "GPT-5.1",
-                        "tool_call": true,
-                        "cost": { "input": 2.0, "output": 8.0 },
-                        "limit": { "context": 1000000, "output": 32768 }
-                    }
-                }
-            }
-        }"#;
-
-        let raw: HashMap<String, serde_json::Value> = serde_json::from_str(raw_json).unwrap();
-        let catalog = ModelCatalog::from_raw(raw, 1000);
-
-        let models = catalog.models_for("openai");
-        assert_eq!(models.len(), 1);
-        assert_eq!(models[0].id, "gpt-5.1"); // Prefix stripped
-    }
-
-    #[test]
-    fn from_raw_skips_deprecated() {
-        let raw_json = r#"{
-            "zenmux": {
-                "id": "zenmux",
-                "name": "ZenMux",
-                "models": {
-                    "gpt-5": {
-                        "id": "openai/gpt-5",
-                        "name": "GPT-5",
-                        "tool_call": true,
-                        "limit": { "context": 1000000, "output": 32768 }
-                    },
-                    "gpt-5.1": {
-                        "id": "openai/gpt-5.1",
-                        "name": "GPT-5.1",
-                        "tool_call": true,
-                        "status": "deprecated",
-                        "limit": { "context": 100000, "output": 4096 }
-                    }
-                }
-            }
-        }"#;
-
-        let raw: HashMap<String, serde_json::Value> = serde_json::from_str(raw_json).unwrap();
-        let catalog = ModelCatalog::from_raw(raw, 1000);
-        assert_eq!(catalog.models_for("openai").len(), 1);
-        assert_eq!(catalog.models_for("openai")[0].name, "GPT-5");
-    }
-
-    #[test]
-    fn from_raw_deduplicates_across_hosting_providers() {
-        // Same model appears under multiple hosting providers
-        let raw_json = r#"{
-            "zenmux": {
-                "id": "zenmux",
-                "models": {
-                    "gemini-2.5-pro": {
-                        "id": "google/gemini-2.5-pro",
-                        "name": "Gemini 2.5 Pro",
-                        "tool_call": true
-                    }
-                }
-            },
-            "fastrouter": {
-                "id": "fastrouter",
-                "models": {
-                    "gemini-2.5-pro": {
-                        "id": "google/gemini-2.5-pro",
-                        "name": "Gemini 2.5 Pro",
-                        "tool_call": true
-                    }
-                }
-            }
-        }"#;
-
-        let raw: HashMap<String, serde_json::Value> = serde_json::from_str(raw_json).unwrap();
-        let catalog = ModelCatalog::from_raw(raw, 1000);
-        assert_eq!(catalog.models_for("gemini").len(), 1);
-    }
-
-    #[test]
     fn fallback_catalog_has_models() {
         let catalog = fallback_catalog();
         assert!(!catalog.is_empty());
@@ -204,9 +73,9 @@ mod tests {
     }
 
     #[test]
-    fn needs_refresh_when_empty() {
+    fn fallback_catalog_starts_unfetched() {
         let catalog = ModelCatalog::default();
-        assert!(catalog.needs_refresh());
+        assert_eq!(catalog.fetched_at, 0);
     }
 
     #[test]

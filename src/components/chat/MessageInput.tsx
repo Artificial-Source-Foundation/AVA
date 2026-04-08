@@ -2,7 +2,6 @@
  * Message Input Component
  *
  * Chat input with Goose-style layout.
- * Supports an optional adapter so HQ can use this exact component path.
  */
 
 import { type Component, createMemo, type JSX, Show } from 'solid-js'
@@ -31,7 +30,7 @@ export const MessageInput: Component<{ adapter?: MessageInputAdapter }> = (props
   const { openModelBrowser } = useLayout()
 
   const queuedItems = createMemo<QueuedItem[]>(() =>
-    state.chat.messageQueue().map((msg, i) => ({
+    state.agent.messageQueue().map((msg, i) => ({
       id: `q-${i}-${msg.content.slice(0, 20)}`,
       content: msg.content,
       tier: (msg.tier as QueuedItem['tier']) ?? 'queued',
@@ -88,7 +87,7 @@ export const MessageInput: Component<{ adapter?: MessageInputAdapter }> = (props
           onRemovePaste={state.attachments.removePaste}
           onUpdatePaste={state.attachments.updatePaste}
           isProcessing={state.isProcessing}
-          isStreaming={state.chat.isStreaming}
+          isStreaming={state.agent.isRunning}
           elapsedSeconds={state.elapsedSeconds}
           onCancel={state.handleCancel}
           inputHasText={state.inputHasText}
@@ -98,10 +97,10 @@ export const MessageInput: Component<{ adapter?: MessageInputAdapter }> = (props
           onInterrupt={state.handleInterruptFromMenu}
           onPostComplete={state.handlePostCompleteFromMenu}
           queuedMessages={queuedItems}
-          onQueueRemove={(i) => state.chat.removeFromQueue(i)}
-          onQueueReorder={(from, to) => state.chat.reorderInQueue(from, to)}
-          onQueueEdit={(i, content) => state.chat.editInQueue(i, content)}
-          onQueueClearAll={() => state.chat.clearQueue()}
+          onQueueRemove={(i) => state.agent.removeFromQueue(i)}
+          onQueueReorder={(from, to) => state.agent.reorderInQueue(from, to)}
+          onQueueEdit={(i, content) => state.agent.editInQueue(i, content)}
+          onQueueClearAll={() => state.agent.clearQueue()}
         />
       </form>
     ),
@@ -110,7 +109,6 @@ export const MessageInput: Component<{ adapter?: MessageInputAdapter }> = (props
         currentModelDisplay={state.currentModelDisplay}
         modelSupportsReasoning={state.modelSupportsReasoning}
         handleCycleReasoning={state.handleCycleReasoning}
-        toggleDelegation={state.toggleDelegation}
         isProcessing={state.isProcessing}
         agent={state.agent}
         sessionStore={state.sessionStore}

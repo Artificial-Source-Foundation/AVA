@@ -137,21 +137,14 @@ impl App {
 
         tokio::spawn(async move {
             let stack = if let Some(isolation) = isolation {
-                let config = ava_agent::stack::AgentStackConfig {
+                let config = ava_agent::stack::AgentStackConfig::for_background_isolation(
                     data_dir,
-                    provider: provider_opt,
-                    model: model_opt,
+                    provider_opt,
+                    model_opt,
                     max_turns,
                     max_budget_usd,
-                    yolo: false,
-                    injected_provider: None,
-                    working_dir: Some(isolation.worktree_path),
-                    compaction_threshold_pct: 80,
-                    auto_compact: true,
-                    include_project_instructions: true,
-                    eager_codebase_indexing: true,
-                    discover_cli_agents: true,
-                };
+                    isolation.worktree_path,
+                );
                 match ava_agent::stack::AgentStack::new(config).await {
                     Ok((stack, _, _, _)) => Arc::new(stack),
                     Err(err) => {
@@ -388,19 +381,62 @@ impl App {
                 bg.add_tokens(task_id, input_tokens, output_tokens, cost_usd);
             }
             ava_agent::AgentEvent::ToolCall(call) => {
-                bg.append_message(
-                    task_id,
-                    UiMessage::new(
-                        MessageKind::ToolCall,
-                        format!("{} {}", call.name, call.arguments),
-                    ),
-                );
+                if call.name == "task" {
+                    let description = call
+                        .arguments
+                        .get("prompt")
+                        .and_then(|p| p.as_str())
+                        .map(String::from)
+                        .unwrap_or_else(|| "sub-agent task".to_string());
+                    let mut msg = UiMessage::new(MessageKind::SubAgent, String::new());
+                    msg.is_streaming = true;
+                    msg.sub_agent = Some(crate::state::messages::SubAgentData {
+                        description,
+                        tool_count: 0,
+                        current_tool: None,
+                        duration: None,
+                        is_running: true,
+                        failed: false,
+                        call_id: call.id.clone(),
+                        session_id: None,
+                        session_messages: Vec::new(),
+                        provider: None,
+                        resumed: false,
+                        cost_usd: None,
+                        input_tokens: None,
+                        output_tokens: None,
+                    });
+                    bg.append_message(task_id, msg);
+                } else {
+                    bg.append_message(
+                        task_id,
+                        UiMessage::new(
+                            MessageKind::ToolCall,
+                            format!("{} {}", call.name, call.arguments),
+                        ),
+                    );
+                }
             }
             ava_agent::AgentEvent::ToolResult(result) => {
-                bg.append_message(
-                    task_id,
-                    UiMessage::new(MessageKind::ToolResult, result.content),
-                );
+                if let Some(task) = bg.tasks.iter_mut().find(|t| t.id == task_id) {
+                    if let Some(msg) = task.messages.iter_mut().rev().find(|m| {
+                        matches!(m.kind, MessageKind::SubAgent)
+                            && m.sub_agent
+                                .as_ref()
+                                .is_some_and(|d| d.is_running && d.call_id == result.call_id)
+                    }) {
+                        msg.content = result.content;
+                        msg.is_streaming = false;
+                        if let Some(data) = msg.sub_agent.as_mut() {
+                            data.is_running = false;
+                            data.failed = result.is_error;
+                            data.current_tool = None;
+                        }
+                    } else {
+                        task.messages
+                            .push(UiMessage::new(MessageKind::ToolResult, result.content));
+                    }
+                }
             }
             ava_agent::AgentEvent::Error(err) => {
                 bg.append_message(task_id, UiMessage::new(MessageKind::Error, err));

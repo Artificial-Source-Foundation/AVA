@@ -13,7 +13,7 @@ const [activePlan, setActivePlan] = createSignal<PlanData | null>(null)
 const [isOpen, setIsOpen] = createSignal(false)
 const [pendingExecution, setPendingExecution] = createSignal<{
   plan: PlanData
-  mode: 'code' | 'hq'
+  mode: 'code'
 } | null>(null)
 const [stepComments, setStepComments] = createSignal<Record<string, string>>({})
 const [commentingStepId, setCommentingStepId] = createSignal<string | null>(null)
@@ -101,10 +101,10 @@ export function usePlanOverlay() {
         setAnnotations([])
       }, 200)
     },
-    executePlan: (mode: 'code' | 'hq') => {
+    executePlan: () => {
       const plan = activePlan()
       if (plan) {
-        setPendingExecution({ plan, mode })
+        setPendingExecution({ plan, mode: 'code' })
         setIsOpen(false)
         setTimeout(() => {
           setActivePlan(null)

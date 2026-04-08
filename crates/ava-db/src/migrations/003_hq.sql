@@ -1,3 +1,8 @@
+-- Historical HQ compatibility migration.
+--
+-- AVA 3.3 no longer uses these tables in the default core product surface, but
+-- they remain so existing databases can still migrate cleanly.
+
 CREATE TABLE IF NOT EXISTS hq_epics (
     id TEXT PRIMARY KEY,
     title TEXT NOT NULL,

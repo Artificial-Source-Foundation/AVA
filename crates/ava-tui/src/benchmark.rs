@@ -43,8 +43,9 @@ use crate::benchmark_support::{
 };
 use crate::benchmark_tasks::{
     advanced_rust_tasks, agent_quality_tasks, agentic_tasks, default_tasks, filter_tasks_by_name,
-    filter_tasks_by_suite, go_tasks, multi_file_tasks, python_tasks, security_tasks,
-    test_generation_tasks, typescript_tasks, BenchmarkSuite, BenchmarkTask, Language, TestHarness,
+    filter_tasks_by_suite, go_tasks, multi_file_tasks, normal_coding_tasks, python_tasks,
+    security_tasks, test_generation_tasks, tool_reliability_tasks, typescript_tasks,
+    BenchmarkSuite, BenchmarkTask, Language, TestHarness,
 };
 use crate::headless::spawn_auto_approve_requests;
 
@@ -116,6 +117,12 @@ pub struct BenchmarkResult {
     pub tool_calls_count: usize,
     /// List of tool names called (e.g. ["read", "edit", "bash"]).
     pub tool_calls_detail: Vec<String>,
+    /// Total number of tool results flagged as errors.
+    #[serde(default)]
+    pub tool_error_count: usize,
+    /// Tool error counts keyed by tool name.
+    #[serde(default)]
+    pub tool_error_breakdown: HashMap<String, usize>,
     /// Number of agent turns consumed (each assistant response = 1 turn).
     pub turns_used: usize,
     /// Number of times the model retried after a tool error (self-corrections).
@@ -142,6 +149,9 @@ pub struct BenchmarkResult {
     /// Only populated for tool-using tasks with `expected_min_tools` set.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_efficiency_score: Option<f64>,
+    /// Composite score for tool reliability tasks based on execution success and tool efficiency.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_reliability_score: Option<f64>,
     /// Ratio of expected helper usage to actual helper usage (1.0 = ideal).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub delegation_efficiency_score: Option<f64>,
@@ -211,6 +221,9 @@ pub struct BenchmarkReport {
     /// Mean tool efficiency across all tool-using tasks with efficiency scores.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub aggregate_tool_efficiency: Option<f64>,
+    /// Mean tool reliability across tool reliability tasks.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub aggregate_tool_reliability: Option<f64>,
     /// Mean delegation efficiency across tasks that expect helper usage.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub aggregate_delegation_efficiency: Option<f64>,
@@ -416,6 +429,8 @@ pub async fn run_benchmark(
     all_tasks.extend(test_generation_tasks());
     all_tasks.extend(advanced_rust_tasks());
     all_tasks.extend(multi_file_tasks(&workspace_dir));
+    all_tasks.extend(tool_reliability_tasks(&workspace_dir));
+    all_tasks.extend(normal_coding_tasks(&workspace_dir));
 
     // Append externally imported tasks (e.g., Aider Polyglot)
     if !imported_tasks.is_empty() {
@@ -522,6 +537,8 @@ pub async fn run_benchmark(
                         judge_scores: None,
                         tool_calls_count: 0,
                         tool_calls_detail: Vec::new(),
+                        tool_error_count: 0,
+                        tool_error_breakdown: HashMap::new(),
                         turns_used: 0,
                         self_corrections: 0,
                         subagent_calls_count: 0,
@@ -532,6 +549,7 @@ pub async fn run_benchmark(
                         raw_output: None,
                         cost_per_task_usd: None,
                         tool_efficiency_score: None,
+                        tool_reliability_score: None,
                         delegation_efficiency_score: None,
                         delegation_quality_score: None,
                         consistency_hash: None,
@@ -572,6 +590,16 @@ pub async fn run_benchmark(
         None
     };
 
+    let reliability_scores: Vec<f64> = results
+        .iter()
+        .filter_map(|r| r.tool_reliability_score)
+        .collect();
+    let aggregate_tool_reliability = if !reliability_scores.is_empty() {
+        Some(reliability_scores.iter().sum::<f64>() / reliability_scores.len() as f64)
+    } else {
+        None
+    };
+
     let delegation_scores: Vec<f64> = results
         .iter()
         .filter_map(|r| r.delegation_efficiency_score)
@@ -597,6 +625,7 @@ pub async fn run_benchmark(
         results,
         aggregate_cost_per_resolved,
         aggregate_tool_efficiency,
+        aggregate_tool_reliability,
         aggregate_delegation_efficiency,
         aggregate_delegation_quality,
     };
@@ -621,16 +650,15 @@ async fn run_single_task(
 
     let effective_turns = if task.needs_tools { max_turns } else { 3 };
 
-    let (stack, question_rx, approval_rx, _plan_rx) = AgentStack::new(AgentStackConfig {
-        data_dir,
-        provider: Some(spec.provider.clone()),
-        model: Some(spec.model.clone()),
-        max_turns: effective_turns,
-        yolo: true, // auto-approve for benchmarks
-        working_dir: Some(workspace_dir.to_path_buf()),
-        ..Default::default()
-    })
-    .await?;
+    let (stack, question_rx, approval_rx, _plan_rx) =
+        AgentStack::new(AgentStackConfig::for_benchmark(
+            data_dir,
+            spec.provider.clone(),
+            spec.model.clone(),
+            effective_turns,
+            workspace_dir.to_path_buf(),
+        ))
+        .await?;
     spawn_default_question_responses(question_rx);
     spawn_auto_approve_requests(approval_rx);
 
@@ -670,6 +698,8 @@ async fn run_single_task(
     // Agent-quality metrics
     let mut tool_calls_count: usize = 0;
     let mut tool_calls_detail: Vec<String> = Vec::new();
+    let mut tool_error_count: usize = 0;
+    let mut tool_error_breakdown: HashMap<String, usize> = HashMap::new();
     let mut turns_used: usize = 0;
     let mut self_corrections: usize = 0;
     let mut subagent_calls_count: usize = 0;
@@ -679,6 +709,7 @@ async fn run_single_task(
     let mut resumed_subagent_calls_count: usize = 0;
     let mut last_tool_was_error = false;
     let mut in_assistant_turn = false;
+    let mut tool_call_names: HashMap<String, String> = HashMap::new();
 
     while let Some(event) = rx.recv().await {
         match event {
@@ -707,6 +738,7 @@ async fn run_single_task(
             AgentEvent::ToolCall(tc) => {
                 tool_calls_count += 1;
                 tool_calls_detail.push(tc.name.clone());
+                tool_call_names.insert(tc.id.clone(), tc.name.clone());
                 // If the previous tool returned an error and the model is retrying,
                 // count it as a self-correction
                 if last_tool_was_error {
@@ -718,6 +750,14 @@ async fn run_single_task(
                 // Include tool results in output for quality checking
                 total_output.push_str(&tr.content);
                 last_tool_was_error = tr.is_error;
+                if tr.is_error {
+                    tool_error_count += 1;
+                    let tool_name = tool_call_names
+                        .get(&tr.call_id)
+                        .cloned()
+                        .unwrap_or_else(|| "unknown".to_string());
+                    *tool_error_breakdown.entry(tool_name).or_insert(0) += 1;
+                }
             }
             AgentEvent::SubAgentComplete {
                 description,
@@ -790,6 +830,19 @@ async fn run_single_task(
         None
     };
 
+    let tool_reliability_score = if task.category.to_string() == "tool_reliability" {
+        if tool_calls_count > 0 {
+            let success_ratio = 1.0 - (tool_error_count as f64 / tool_calls_count as f64);
+            let efficiency = tool_efficiency_score.unwrap_or(1.0).min(1.0);
+            let completion = if task_passed { 1.0 } else { 0.0 };
+            Some((success_ratio.max(0.0) * 0.7) + (efficiency * 0.2) + (completion * 0.1))
+        } else {
+            Some(0.0)
+        }
+    } else {
+        None
+    };
+
     let delegation_efficiency_score = if let Some(min) = expected_min_subagents(task.name) {
         if subagent_calls_count > 0 {
             Some(min as f64 / subagent_calls_count as f64)
@@ -840,6 +893,8 @@ async fn run_single_task(
         judge_scores: None,
         tool_calls_count,
         tool_calls_detail,
+        tool_error_count,
+        tool_error_breakdown,
         turns_used,
         self_corrections,
         subagent_calls_count,
@@ -850,6 +905,7 @@ async fn run_single_task(
         raw_output: Some(total_output),
         cost_per_task_usd,
         tool_efficiency_score,
+        tool_reliability_score,
         delegation_efficiency_score,
         delegation_quality_score,
         consistency_hash,

@@ -1,0 +1,3 @@
+- Mercury is extremely fast (~1000 tok/s). Use this speed for iterative exploration: try, check, adjust quickly.
+- Keep tool arguments simple. If a read returns empty, retry with explicit offset/limit rather than 0.
+- Favor many small focused tool calls over fewer large ones. Latency is near-zero.

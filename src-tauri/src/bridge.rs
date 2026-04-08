@@ -35,8 +35,6 @@ pub type PendingPlanReply = Arc<Mutex<Option<oneshot::Sender<ava_types::PlanDeci
 pub struct FileEditRecord {
     pub file_path: String,
     pub previous_content: String,
-    #[allow(dead_code)] // retained for future undo-history UI
-    pub timestamp: chrono::DateTime<chrono::Utc>,
 }
 
 /// Maximum number of file edit records to keep in the undo stack.
@@ -83,10 +81,7 @@ impl DesktopBridge {
     /// `data_dir` is the Tauri app-data directory (e.g. `~/.local/share/ava`).
     /// The `AgentStack` will store sessions, memory and config there.
     pub async fn init(data_dir: PathBuf) -> Result<Self, String> {
-        let config = AgentStackConfig {
-            data_dir,
-            ..Default::default()
-        };
+        let config = AgentStackConfig::for_desktop(data_dir);
 
         let (stack, question_rx, approval_rx, plan_rx) =
             AgentStack::new(config).await.map_err(|e| e.to_string())?;
@@ -141,21 +136,6 @@ impl DesktopBridge {
     /// Clear the message sender when the agent finishes.
     pub async fn clear_message_tx(&self) {
         *self.message_tx.write().await = None;
-    }
-
-    /// Record a file edit for undo support.
-    /// Called from `agent_commands.rs` forwarder task via `bridge.edit_history`.
-    #[allow(dead_code)]
-    pub async fn record_edit(&self, file_path: String, previous_content: String) {
-        let mut history = self.edit_history.write().await;
-        if history.len() >= MAX_EDIT_HISTORY {
-            history.pop_front();
-        }
-        history.push_back(FileEditRecord {
-            file_path,
-            previous_content,
-            timestamp: chrono::Utc::now(),
-        });
     }
 
     /// Pop the most recent file edit record from the undo stack.

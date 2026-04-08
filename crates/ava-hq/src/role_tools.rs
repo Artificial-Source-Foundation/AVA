@@ -6,12 +6,13 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use ava_config::AgentRoleProfile;
 use ava_platform::Platform;
 use ava_tools::core::{
-    bash, edit, file_backup, glob, grep, hashline, read, web_fetch, web_search, write, git_read,
+    bash, edit, file_backup, git_read, glob, grep, hashline, read, web_fetch, web_search, write,
 };
 use ava_tools::registry::ToolRegistry;
+
+use crate::roles::AgentRoleProfile;
 
 /// All built-in tool names that can be selectively registered.
 pub const ALL_BUILTIN_TOOLS: &[&str] = &[
@@ -103,7 +104,11 @@ pub fn compute_disabled_mcp_servers(
     all_server_names: &[String],
 ) -> HashSet<String> {
     let allowed = &profile.allowed_mcp_servers;
-    let denied: HashSet<&str> = profile.denied_mcp_servers.iter().map(|s| s.as_str()).collect();
+    let denied: HashSet<&str> = profile
+        .denied_mcp_servers
+        .iter()
+        .map(|s| s.as_str())
+        .collect();
 
     // Empty allowed = no MCP servers at all
     if allowed.is_empty() {
@@ -130,7 +135,10 @@ pub fn compute_disabled_mcp_servers(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ava_config::{AgentRoleProfile, default_role_profiles, ROLE_JUNIOR_WORKER, ROLE_SCOUT, ROLE_SENIOR_LEAD, ROLE_DIRECTOR};
+    use crate::roles::{
+        default_role_profiles, AgentRoleProfile, ROLE_DIRECTOR, ROLE_JUNIOR_WORKER, ROLE_SCOUT,
+        ROLE_SENIOR_LEAD,
+    };
     use ava_platform::StandardPlatform;
 
     #[test]
@@ -150,8 +158,14 @@ mod tests {
         assert!(names.iter().any(|n| n == "git"));
 
         // Denied tools must NOT be present
-        assert!(!names.iter().any(|n| n == "web_search"), "junior must not have web_search");
-        assert!(!names.iter().any(|n| n == "web_fetch"), "junior must not have web_fetch");
+        assert!(
+            !names.iter().any(|n| n == "web_search"),
+            "junior must not have web_search"
+        );
+        assert!(
+            !names.iter().any(|n| n == "web_fetch"),
+            "junior must not have web_fetch"
+        );
     }
 
     #[test]
@@ -193,9 +207,18 @@ mod tests {
         assert!(names.iter().any(|n| n == "glob"));
         assert!(names.iter().any(|n| n == "grep"));
         assert!(names.iter().any(|n| n == "git"));
-        assert!(!names.iter().any(|n| n == "write"), "director must not have write");
-        assert!(!names.iter().any(|n| n == "edit"), "director must not have edit");
-        assert!(!names.iter().any(|n| n == "bash"), "director must not have bash");
+        assert!(
+            !names.iter().any(|n| n == "write"),
+            "director must not have write"
+        );
+        assert!(
+            !names.iter().any(|n| n == "edit"),
+            "director must not have edit"
+        );
+        assert!(
+            !names.iter().any(|n| n == "bash"),
+            "director must not have bash"
+        );
     }
 
     #[test]

@@ -1,12 +1,12 @@
 use std::sync::Arc;
 
 use ava_agent::stack::{AgentStack, AgentStackConfig};
-use ava_hq::review::{
+use ava_platform::StandardPlatform;
+use ava_review::DiffMode;
+use ava_review::{
     build_review_system_prompt, collect_diff, determine_exit_code, format_json, format_markdown,
     format_text, parse_review_output, run_review_agent,
 };
-use ava_hq::DiffMode;
-use ava_platform::StandardPlatform;
 use color_eyre::eyre::{eyre, Result};
 
 use crate::config::cli::{ReviewArgs, ReviewFormat};
@@ -55,14 +55,9 @@ pub async fn run_review(args: ReviewArgs) -> Result<()> {
     }
 
     let data_dir = dirs::home_dir().unwrap_or_default().join(".ava");
-    let (stack, _question_rx, _approval_rx, _plan_rx) = AgentStack::new(AgentStackConfig {
-        data_dir,
-        provider,
-        model,
-        max_turns: args.max_turns,
-        yolo: true, // Review agent doesn't need approval prompts
-        ..Default::default()
-    })
+    let (stack, _question_rx, _approval_rx, _plan_rx) = AgentStack::new(
+        AgentStackConfig::for_review(data_dir, provider, model, args.max_turns),
+    )
     .await?;
 
     let (provider_name, model_name) = stack.current_model().await;

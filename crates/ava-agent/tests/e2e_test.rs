@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
@@ -6,7 +5,6 @@ use std::time::Duration;
 use async_trait::async_trait;
 use ava_agent::agent_loop::AgentEvent;
 use ava_agent::stack::{AgentStack, AgentStackConfig};
-use ava_hq::{Budget, Director, DirectorConfig, Task, TaskType};
 use ava_llm::provider::LLMProvider;
 use ava_llm::providers::mock::MockProvider;
 use ava_types::{AvaError, Message, Result, StreamChunk};
@@ -153,53 +151,6 @@ async fn agent_run_cancellation() {
         .await
         .expect_err("run should be cancelled");
     assert!(matches!(err, AvaError::Cancelled));
-}
-
-#[tokio::test]
-async fn director_multi_agent_coordination() {
-    let provider = Arc::new(MockProvider::new(
-        "test-model",
-        vec![completion_response("a"), completion_response("b")],
-    )) as Arc<dyn LLMProvider>;
-    let mut director = Director::new(DirectorConfig {
-        budget: Budget {
-            max_tokens: 4_000,
-            max_turns: 8,
-            max_cost_usd: 1.0,
-        },
-        default_provider: provider,
-        domain_providers: HashMap::new(),
-        platform: None,
-        scout_provider: None,
-        board_providers: vec![],
-        worker_names: vec![],
-        enabled_leads: vec![],
-        lead_prompts: std::collections::HashMap::new(),
-        worker_provider: None,
-    });
-
-    let worker_a = director
-        .delegate(Task {
-            description: "task a".to_string(),
-            task_type: TaskType::Simple,
-            files: vec![],
-        })
-        .expect("worker a");
-    let worker_b = director
-        .delegate(Task {
-            description: "task b".to_string(),
-            task_type: TaskType::Simple,
-            files: vec![],
-        })
-        .expect("worker b");
-
-    let (tx, _rx) = mpsc::unbounded_channel();
-    let session = director
-        .coordinate(vec![worker_a, worker_b], CancellationToken::new(), tx)
-        .await
-        .expect("coordination should succeed");
-
-    assert!(!session.messages.is_empty());
 }
 
 struct SlowProvider {

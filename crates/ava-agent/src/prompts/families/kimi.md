@@ -1,0 +1,3 @@
+- Kimi handles very long contexts (256K) well. Do not hesitate to read full files.
+- Kimi excels at sustained multi-step tool use (100+ sequential calls). Plan ambitiously.
+- Keep tool arguments simple and well-structured. Prefer explicit paths over globs when the target is known.

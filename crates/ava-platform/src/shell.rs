@@ -116,14 +116,20 @@ impl Shell for LocalShell {
                 Ok(Ok((status, stdout_buf, stderr_buf))) => Ok(CommandOutput {
                     stdout: String::from_utf8_lossy(&stdout_buf).to_string(),
                     stderr: String::from_utf8_lossy(&stderr_buf).to_string(),
+                    // infallible: code() returns None only when killed by signal; -1 is conventional
                     exit_code: status.code().unwrap_or(-1),
                     duration: start.elapsed(),
                 }),
                 Ok(Err(e)) => Err(AvaError::IoError(e.to_string())),
                 Err(_) => {
-                    // Kill the child process to avoid orphans
-                    child.kill().await.ok();
-                    child.wait().await.ok(); // Reap to avoid zombies
+                    // Kill the child process to avoid orphans; errors are non-fatal
+                    // (process may have already exited between timeout and kill)
+                    if let Err(e) = child.kill().await {
+                        tracing::trace!("kill after timeout (non-fatal): {e}");
+                    }
+                    if let Err(e) = child.wait().await {
+                        tracing::trace!("reap after timeout (non-fatal): {e}");
+                    }
                     Err(AvaError::TimeoutError(format!(
                         "Command timed out after {timeout:?}"
                     )))
@@ -137,6 +143,7 @@ impl Shell for LocalShell {
             Ok(CommandOutput {
                 stdout: String::from_utf8_lossy(&output.stdout).to_string(),
                 stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+                // infallible: code() returns None only when killed by signal; -1 is conventional
                 exit_code: output.status.code().unwrap_or(-1),
                 duration: start.elapsed(),
             })
@@ -190,7 +197,10 @@ impl Shell for LocalShell {
         tokio::spawn(async move {
             let mut lines = stdout_reader.lines();
             while let Ok(Some(line)) = lines.next_line().await {
-                let _ = tx_stdout.send(Ok(format!("[stdout] {line}")));
+                // Send failure means the stream consumer disconnected — stop reading
+                if tx_stdout.send(Ok(format!("[stdout] {line}"))).is_err() {
+                    break;
+                }
             }
         });
 
@@ -199,7 +209,10 @@ impl Shell for LocalShell {
         tokio::spawn(async move {
             let mut lines = stderr_reader.lines();
             while let Ok(Some(line)) = lines.next_line().await {
-                let _ = tx_stderr.send(Ok(format!("[stderr] {line}")));
+                // Send failure means the stream consumer disconnected — stop reading
+                if tx_stderr.send(Ok(format!("[stderr] {line}"))).is_err() {
+                    break;
+                }
             }
         });
 
@@ -214,11 +227,17 @@ impl Shell for LocalShell {
             tokio::spawn(async move {
                 tokio::select! {
                     _ = tokio::time::sleep(timeout) => {
-                        // Kill the child process to avoid orphans
+                        // Kill the child process to avoid orphans; errors are non-fatal
+                        // (process may have already exited between timeout and kill)
                         if let Some(mut ch) = child_timeout.lock().await.take() {
-                            ch.kill().await.ok();
-                            ch.wait().await.ok(); // Reap to avoid zombies
+                            if let Err(e) = ch.kill().await {
+                                tracing::trace!("streaming kill after timeout (non-fatal): {e}");
+                            }
+                            if let Err(e) = ch.wait().await {
+                                tracing::trace!("streaming reap after timeout (non-fatal): {e}");
+                            }
                         }
+                        // Send failure means stream consumer disconnected — acceptable
                         let _ = tx_timeout.send(Err(AvaError::TimeoutError(format!(
                             "Command timed out after {timeout:?}"
                         ))));
@@ -236,11 +255,16 @@ impl Shell for LocalShell {
             };
             match ch.wait().await {
                 Ok(status) => {
+                    // Signal completion to cancel the timeout task (receiver may be gone)
                     let _ = completion_tx.and_then(|tx_done| tx_done.send(()).ok());
+                    // infallible: code() returns None only when killed by signal; -1 is conventional
+                    // Send failure means stream consumer disconnected — acceptable
                     let _ = tx.send(Ok(format!("[exit] {}", status.code().unwrap_or(-1))));
                 }
                 Err(e) => {
+                    // Signal completion to cancel the timeout task (receiver may be gone)
                     let _ = completion_tx.and_then(|tx_done| tx_done.send(()).ok());
+                    // Send failure means stream consumer disconnected — acceptable
                     let _ = tx.send(Err(AvaError::PlatformError(format!("Process error: {e}"))));
                 }
             }

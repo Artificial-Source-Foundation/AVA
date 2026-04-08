@@ -8,13 +8,13 @@
 
 import type { PluginManifest, PluginPermission } from '../types/plugin'
 
-/** Minimal Disposable interface (replaces @ava/core-v2/extensions import) */
+/** Minimal disposable handle for the in-process plugin shim. */
 interface Disposable {
   dispose(): void
 }
 
-/** Minimal ExtensionAPI interface for plugin sandboxing */
-interface ExtensionAPI {
+/** Minimal in-process plugin API used by the frontend shim. */
+interface PluginSandboxAPI {
   registerTool(tool: { definition?: { name?: string }; [key: string]: unknown }): Disposable
   registerCommand: (...args: unknown[]) => Disposable
   registerAgentMode: (...args: unknown[]) => Disposable
@@ -38,14 +38,14 @@ const SHELL_TOOL_PATTERNS = /\b(bash|shell|terminal|exec)\b/i
 const NETWORK_TOOL_PATTERNS = /\b(websearch|webfetch|fetch|http|request)\b/i
 
 /**
- * Wrap an ExtensionAPI to enforce permission-based sandboxing.
+ * Wrap the in-process plugin API to enforce permission-based sandboxing.
  * Tools that don't match the plugin's declared permissions are silently blocked.
  */
 function createSandboxedApi(
-  api: ExtensionAPI,
+  api: PluginSandboxAPI,
   pluginName: string,
   permissions: PluginPermission[]
-): ExtensionAPI {
+): PluginSandboxAPI {
   const permSet = new Set(permissions)
 
   function isToolBlocked(toolName: string): string | null {
@@ -116,7 +116,7 @@ export function watchPluginDirectory(
         void unwatch()
       }
     } catch (err) {
-      console.warn(`[extension-loader] Failed to watch ${pluginPath}:`, err)
+      console.warn(`[plugin-loader] Failed to watch ${pluginPath}:`, err)
     }
   })()
 
@@ -135,7 +135,7 @@ export function watchPluginDirectory(
  * Returns a cleanup function and a map of plugin disposables for individual management.
  */
 export async function loadInstalledPlugins(
-  createApi: (name: string) => ExtensionAPI
+  createApi: (name: string) => PluginSandboxAPI
 ): Promise<{ cleanup: () => void; pluginDisposables: Map<string, Disposable> }> {
   const pluginDisposables = new Map<string, Disposable>()
 
@@ -152,7 +152,7 @@ export async function loadInstalledPlugins(
       try {
         const source = await readPluginSource(name)
         if (!source) {
-          console.warn(`[extension-loader] No source found for plugin: ${name}`)
+          console.warn(`[plugin-loader] No source found for plugin: ${name}`)
           continue
         }
 
@@ -167,7 +167,7 @@ export async function loadInstalledPlugins(
         try {
           const mod = (await import(/* @vite-ignore */ blobUrl)) as {
             activate?: (
-              api: ExtensionAPI
+              api: PluginSandboxAPI
             ) => Disposable | undefined | Promise<Disposable | undefined>
           }
 
@@ -179,20 +179,20 @@ export async function loadInstalledPlugins(
               pluginDisposables.set(name, disposable)
             }
             console.info(
-              `[extension-loader] Activated plugin: ${name} (permissions: ${permissions.length > 0 ? permissions.join(', ') : 'none'})`
+              `[plugin-loader] Activated plugin: ${name} (permissions: ${permissions.length > 0 ? permissions.join(', ') : 'none'})`
             )
           } else {
-            console.warn(`[extension-loader] Plugin ${name} has no activate() export`)
+            console.warn(`[plugin-loader] Plugin ${name} has no activate() export`)
           }
         } finally {
           URL.revokeObjectURL(blobUrl)
         }
       } catch (err) {
-        console.warn(`[extension-loader] Failed to load plugin ${name}:`, err)
+        console.warn(`[plugin-loader] Failed to load plugin ${name}:`, err)
       }
     }
   } catch (err) {
-    console.warn('[extension-loader] Failed to scan for installed plugins:', err)
+    console.warn('[plugin-loader] Failed to scan for installed plugins:', err)
   }
 
   const cleanup = () => {
@@ -216,7 +216,7 @@ export async function loadInstalledPlugins(
 export async function reloadPlugin(
   name: string,
   pluginDisposables: Map<string, Disposable>,
-  createApi: (name: string) => ExtensionAPI
+  createApi: (name: string) => PluginSandboxAPI
 ): Promise<void> {
   // Dispose existing
   const existing = pluginDisposables.get(name)
@@ -241,7 +241,7 @@ export async function reloadPlugin(
 
   try {
     const mod = (await import(/* @vite-ignore */ blobUrl)) as {
-      activate?: (api: ExtensionAPI) => Disposable | undefined | Promise<Disposable | undefined>
+      activate?: (api: PluginSandboxAPI) => Disposable | undefined | Promise<Disposable | undefined>
     }
 
     if (typeof mod.activate === 'function') {

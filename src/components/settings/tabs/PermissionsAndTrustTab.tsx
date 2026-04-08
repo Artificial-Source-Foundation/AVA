@@ -1,75 +1,55 @@
 /**
- * Permissions & Trust Tab — Pencil macOS-inspired flat design.
+ * Permissions & Trust Tab
  *
- * Global mode (segmented control), tool rules, trusted folders.
+ * Unified security surface for approval mode, tool rules, and trusted folders.
  */
 
-import { type Component, For } from 'solid-js'
+import { ShieldCheck, ShieldX } from 'lucide-solid'
+import { type Component, For, Show } from 'solid-js'
 import { useSettings } from '../../../stores/settings'
 import type { PermissionMode } from '../../../stores/settings/settings-types'
+import { SettingsCard } from '../SettingsCard'
+import { SETTINGS_CARD_GAP } from '../settings-constants'
 import { ToolRulesSection } from './permissions/ToolRulesSection'
-import { TrustedFoldersTab } from './TrustedFoldersTab'
-
-/** Shared divider */
-const Divider: Component = () => (
-  <div style={{ width: '100%', height: '1px', background: '#ffffff06' }} />
-)
+import { TrustedFoldersSection } from './permissions/TrustedFoldersSection'
 
 export const PermissionsAndTrustTab: Component = () => {
   const { settings, updateSettings } = useSettings()
 
   const rules = () => settings().toolRules
+  const permissionMode = () => settings().permissionMode
 
-  const modes: PermissionMode[] = ['ask', 'auto-approve']
+  const modes: PermissionMode[] = ['ask', 'auto-approve', 'bypass']
   const modeLabels: Record<PermissionMode, string> = {
     ask: 'Ask',
     'auto-approve': 'Auto',
-    bypass: 'Auto',
+    bypass: 'YOLO',
   }
 
   return (
-    <div style={{ display: 'flex', 'flex-direction': 'column', gap: '32px' }}>
-      {/* Page title */}
+    <div style={{ display: 'flex', 'flex-direction': 'column', gap: SETTINGS_CARD_GAP }}>
       <h1
         style={{
           'font-family': 'Geist, sans-serif',
           'font-size': '22px',
           'font-weight': '600',
-          color: '#F5F5F7',
+          color: 'var(--text-primary)',
         }}
       >
         Permissions & Trust
       </h1>
 
-      {/* Global Mode Section */}
-      <div style={{ display: 'flex', 'flex-direction': 'column', gap: '12px' }}>
-        <span
-          style={{
-            'font-family': 'Geist, sans-serif',
-            'font-size': '14px',
-            'font-weight': '500',
-            color: '#F5F5F7',
-          }}
-        >
-          Global Mode
-        </span>
-        <span
-          style={{
-            'font-family': 'Geist, sans-serif',
-            'font-size': '12px',
-            color: '#48484A',
-          }}
-        >
-          Control how AVA asks for permission before running tools
-        </span>
-
-        {/* Segmented control */}
+      <SettingsCard
+        icon={ShieldCheck}
+        title="Global Mode"
+        description="Control how AVA asks for permission before running tools."
+      >
         <div
           class="flex items-center"
           style={{
             'border-radius': '8px',
-            background: '#111114',
-            border: '1px solid #ffffff0a',
+            background: 'var(--surface-raised)',
+            border: '1px solid var(--border-subtle)',
             padding: '3px',
             gap: '2px',
             width: 'fit-content',
@@ -77,7 +57,7 @@ export const PermissionsAndTrustTab: Component = () => {
         >
           <For each={modes}>
             {(mode) => {
-              const isActive = () => settings().permissionMode === mode
+              const isActive = () => permissionMode() === mode
               return (
                 <button
                   type="button"
@@ -87,8 +67,8 @@ export const PermissionsAndTrustTab: Component = () => {
                     'border-radius': '6px',
                     height: '28px',
                     padding: '0 20px',
-                    background: isActive() ? '#0A84FF' : 'transparent',
-                    color: isActive() ? '#FFFFFF' : '#48484A',
+                    background: isActive() ? 'var(--accent)' : 'transparent',
+                    color: isActive() ? 'var(--text-on-accent)' : 'var(--text-muted)',
                     'font-family': 'Geist, sans-serif',
                     'font-size': '13px',
                     'font-weight': isActive() ? '500' : '400',
@@ -103,38 +83,30 @@ export const PermissionsAndTrustTab: Component = () => {
             }}
           </For>
         </div>
-      </div>
+        <Show when={!modes.includes(permissionMode())}>
+          <p class="text-[12px] text-[var(--text-muted)]">
+            Current mode from shared config: {permissionMode()}
+          </p>
+        </Show>
+      </SettingsCard>
 
-      <Divider />
-
-      {/* Tool Rules Section */}
-      <div style={{ display: 'flex', 'flex-direction': 'column', gap: '14px' }}>
-        <span
-          style={{
-            'font-family': 'Geist, sans-serif',
-            'font-size': '14px',
-            'font-weight': '500',
-            color: '#F5F5F7',
-          }}
-        >
-          Tool Rules
-        </span>
-        <span
-          style={{
-            'font-family': 'Geist, sans-serif',
-            'font-size': '12px',
-            color: '#48484A',
-          }}
-        >
-          Override the global mode for specific tools or patterns
-        </span>
+      <SettingsCard
+        title="Tool Rules"
+        description="Override the global mode for specific tools or patterns."
+      >
         <ToolRulesSection rules={rules()} onUpdateRules={(r) => updateSettings({ toolRules: r })} />
-      </div>
+      </SettingsCard>
 
-      <Divider />
-
-      {/* Trusted Folders Section */}
-      <TrustedFoldersTab />
+      <SettingsCard
+        icon={ShieldX}
+        title="Trusted Folders"
+        description="Allow or deny folder access explicitly for desktop safety boundaries."
+      >
+        <TrustedFoldersSection
+          trustedFolders={settings().trustedFolders}
+          onUpdate={(trustedFolders) => updateSettings({ trustedFolders })}
+        />
+      </SettingsCard>
     </div>
   )
 }

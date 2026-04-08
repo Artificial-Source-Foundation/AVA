@@ -105,6 +105,46 @@
       }
     },
     {
+      "id": "gpt-5.4-mini",
+      "provider": "openai",
+      "name": "GPT-5.4 Mini",
+      "aliases": ["gpt5.4-mini"],
+      "capabilities": {
+        "tool_call": true,
+        "vision": true,
+        "reasoning": true,
+        "streaming": true
+      },
+      "limits": {
+        "context_window": 400000,
+        "max_output": 128000
+      },
+      "cost": {
+        "input_per_million": 0.75,
+        "output_per_million": 4.5
+      }
+    },
+    {
+      "id": "gpt-5.4-nano",
+      "provider": "openai",
+      "name": "GPT-5.4 Nano",
+      "aliases": ["gpt5.4-nano"],
+      "capabilities": {
+        "tool_call": true,
+        "vision": true,
+        "reasoning": true,
+        "streaming": true
+      },
+      "limits": {
+        "context_window": 400000,
+        "max_output": 128000
+      },
+      "cost": {
+        "input_per_million": 0.2,
+        "output_per_million": 1.25
+      }
+    },
+    {
       "id": "gpt-5.3-codex",
       "provider": "openai",
       "name": "GPT-5.3 Codex",
@@ -459,25 +499,6 @@
       "cost": {
         "input_per_million": 0.25,
         "output_per_million": 0.75
-      }
-    },
-    {
-      "id": "accounts/fireworks/routers/kimi-k2p5-turbo",
-      "provider": "fireworks",
-      "name": "Kimi K2.5 Turbo (Fire Pass)",
-      "aliases": ["kimi-k2p5-turbo", "kimi-k2.5-turbo"],
-      "capabilities": {
-        "tool_call": true,
-        "vision": true,
-        "streaming": true
-      },
-      "limits": {
-        "context_window": 256000,
-        "max_output": 65536
-      },
-      "cost": {
-        "input_per_million": 0.0,
-        "output_per_million": 0.0
       }
     },
     {

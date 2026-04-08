@@ -34,8 +34,9 @@ use crate::benchmark_support::{
 };
 use crate::benchmark_tasks::{
     advanced_rust_tasks, agent_quality_tasks, agentic_tasks, default_tasks, filter_tasks_by_name,
-    filter_tasks_by_suite, go_tasks, multi_file_tasks, python_tasks, security_tasks,
-    test_generation_tasks, typescript_tasks, BenchmarkSuite, BenchmarkTask,
+    filter_tasks_by_suite, go_tasks, multi_file_tasks, normal_coding_tasks, python_tasks,
+    security_tasks, test_generation_tasks, tool_reliability_tasks, typescript_tasks,
+    BenchmarkSuite, BenchmarkTask,
 };
 use crate::headless::spawn_auto_approve_requests;
 
@@ -194,6 +195,8 @@ pub async fn run_harness(
     all_tasks.extend(test_generation_tasks());
     all_tasks.extend(advanced_rust_tasks());
     all_tasks.extend(multi_file_tasks(&workspace_dir));
+    all_tasks.extend(tool_reliability_tasks(&workspace_dir));
+    all_tasks.extend(normal_coding_tasks(&workspace_dir));
     all_tasks = filter_tasks_by_suite(all_tasks, suite);
     all_tasks = filter_tasks_by_name(all_tasks, task_filter);
 
@@ -312,16 +315,15 @@ async fn run_solo_task(
     let data_dir = dirs::home_dir().unwrap_or_default().join(".ava");
     let effective_turns = if task.needs_tools { max_turns } else { 3 };
 
-    let (stack, question_rx, approval_rx, _plan_rx) = AgentStack::new(AgentStackConfig {
-        data_dir,
-        provider: Some(spec.provider.clone()),
-        model: Some(spec.model.clone()),
-        max_turns: effective_turns,
-        yolo: true,
-        working_dir: Some(workspace_dir.to_path_buf()),
-        ..Default::default()
-    })
-    .await?;
+    let (stack, question_rx, approval_rx, _plan_rx) =
+        AgentStack::new(AgentStackConfig::for_benchmark(
+            data_dir,
+            spec.provider.clone(),
+            spec.model.clone(),
+            effective_turns,
+            workspace_dir.to_path_buf(),
+        ))
+        .await?;
     spawn_default_question_responses(question_rx);
     spawn_auto_approve_requests(approval_rx);
 
@@ -358,6 +360,8 @@ async fn run_solo_task(
     let mut cost_usd: f64 = 0.0;
     let mut tool_calls_count: usize = 0;
     let mut tool_calls_detail: Vec<String> = Vec::new();
+    let mut tool_error_count: usize = 0;
+    let mut tool_error_breakdown: HashMap<String, usize> = HashMap::new();
     let mut turns_used: usize = 0;
     let mut subagent_calls_count: usize = 0;
     let mut subagent_types: Vec<String> = Vec::new();
@@ -365,6 +369,7 @@ async fn run_solo_task(
     let mut subagent_cost_usd: f64 = 0.0;
     let mut resumed_subagent_calls_count: usize = 0;
     let mut in_assistant_turn = false;
+    let mut tool_call_names: HashMap<String, String> = HashMap::new();
 
     while let Some(event) = rx.recv().await {
         match event {
@@ -388,9 +393,18 @@ async fn run_solo_task(
             AgentEvent::ToolCall(tc) => {
                 tool_calls_count += 1;
                 tool_calls_detail.push(tc.name.clone());
+                tool_call_names.insert(tc.id.clone(), tc.name.clone());
             }
             AgentEvent::ToolResult(tr) => {
                 total_output.push_str(&tr.content);
+                if tr.is_error {
+                    tool_error_count += 1;
+                    let tool_name = tool_call_names
+                        .get(&tr.call_id)
+                        .cloned()
+                        .unwrap_or_else(|| "unknown".to_string());
+                    *tool_error_breakdown.entry(tool_name).or_insert(0) += 1;
+                }
             }
             AgentEvent::SubAgentComplete {
                 description,
@@ -455,6 +469,19 @@ async fn run_solo_task(
         None
     };
 
+    let tool_reliability_score = if task.category.to_string() == "tool_reliability" {
+        if tool_calls_count > 0 {
+            let success_ratio = 1.0 - (tool_error_count as f64 / tool_calls_count as f64);
+            let efficiency = tool_efficiency_score.unwrap_or(1.0).min(1.0);
+            let completion = if task_passed { 1.0 } else { 0.0 };
+            Some((success_ratio.max(0.0) * 0.7) + (efficiency * 0.2) + (completion * 0.1))
+        } else {
+            Some(0.0)
+        }
+    } else {
+        None
+    };
+
     let delegation_efficiency_score = if let Some(min) = expected_min_subagents(task.name) {
         if subagent_calls_count > 0 {
             Some(min as f64 / subagent_calls_count as f64)
@@ -496,6 +523,8 @@ async fn run_solo_task(
         judge_scores: None,
         tool_calls_count,
         tool_calls_detail,
+        tool_error_count,
+        tool_error_breakdown,
         turns_used,
         self_corrections: 0,
         subagent_calls_count,
@@ -506,6 +535,7 @@ async fn run_solo_task(
         raw_output: None,
         cost_per_task_usd,
         tool_efficiency_score,
+        tool_reliability_score,
         delegation_efficiency_score,
         delegation_quality_score,
         consistency_hash: None,
@@ -875,6 +905,8 @@ fn make_error_result(task: &BenchmarkTask, spec: &ModelSpec, error: &str) -> Ben
         judge_scores: None,
         tool_calls_count: 0,
         tool_calls_detail: Vec::new(),
+        tool_error_count: 0,
+        tool_error_breakdown: HashMap::new(),
         turns_used: 0,
         self_corrections: 0,
         subagent_calls_count: 0,
@@ -885,6 +917,7 @@ fn make_error_result(task: &BenchmarkTask, spec: &ModelSpec, error: &str) -> Ben
         raw_output: None,
         cost_per_task_usd: None,
         tool_efficiency_score: None,
+        tool_reliability_score: None,
         delegation_efficiency_score: None,
         delegation_quality_score: None,
         consistency_hash: None,

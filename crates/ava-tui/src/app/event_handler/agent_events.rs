@@ -166,6 +166,7 @@ impl App {
                     msg.sub_agent = Some(crate::state::messages::SubAgentData {
                         description,
                         tool_count: 0,
+                        current_tool: None,
                         duration: None,
                         is_running: true,
                         failed: false,
@@ -180,6 +181,27 @@ impl App {
                     });
                     self.state.messages.push(msg);
                 } else {
+                    if let Some(sa) = self
+                        .state
+                        .agent
+                        .sub_agents
+                        .iter_mut()
+                        .rev()
+                        .find(|s| s.is_running)
+                    {
+                        sa.tool_count += 1;
+                        sa.current_tool = Some(call.name.clone());
+                    }
+                    if let Some(msg) = self.state.messages.messages.iter_mut().rev().find(|m| {
+                        matches!(m.kind, MessageKind::SubAgent)
+                            && m.sub_agent.as_ref().is_some_and(|d| d.is_running)
+                    }) {
+                        if let Some(data) = msg.sub_agent.as_mut() {
+                            data.tool_count += 1;
+                            data.current_tool = Some(call.name.clone());
+                        }
+                    }
+
                     // Snapshot files before write/edit/apply_patch for rewind
                     if matches!(
                         call.name.as_str(),
@@ -272,6 +294,7 @@ impl App {
                             data.is_running = false;
                             data.failed = sa_failed;
                             data.tool_count = sa_tool_count.0;
+                            data.current_tool = None;
                             data.duration = sa_tool_count.1;
                         }
                     }
@@ -401,6 +424,7 @@ impl App {
                     if let Some(data) = msg.sub_agent.as_mut() {
                         data.session_id = Some(session_id);
                         data.session_messages = ui_messages;
+                        data.current_tool = None;
                         data.provider = provider;
                         data.resumed = resumed;
                         data.cost_usd = Some(cost_usd);

@@ -165,57 +165,15 @@ fn create_provider_base_url_override_ollama() {
 }
 
 #[test]
-fn create_provider_azure_succeeds_with_deployment_defaults_to_model() {
+fn create_provider_removed_long_tail_errors() {
     let mut store = CredentialStore::default();
-    store.set(
-        "azure",
-        ProviderCredential {
-            api_key: "azure-key".to_string(),
-            base_url: Some("https://example.openai.azure.com".to_string()),
-            org_id: None,
-            oauth_token: None,
-            oauth_refresh_token: None,
-            oauth_expires_at: None,
-            oauth_account_id: None,
-            litellm_compatible: None,
-            loop_prone: None,
-        },
-    );
-
-    let provider = create_provider("azure", "gpt-4o", &store, pool())
-        .expect("azure provider should be created");
-    assert_eq!(provider.model_name(), "gpt-4o");
-}
-
-#[test]
-fn create_provider_bedrock_succeeds_with_secret_key_in_oauth_field() {
-    let mut store = CredentialStore::default();
-    store.set(
-        "bedrock",
-        ProviderCredential {
-            api_key: "AKIA_TEST".to_string(),
-            base_url: None,
-            org_id: Some("us-west-2".to_string()),
-            oauth_token: Some("secret-key".to_string()),
-            oauth_refresh_token: None,
-            oauth_expires_at: None,
-            oauth_account_id: None,
-            litellm_compatible: None,
-            loop_prone: None,
-        },
-    );
-
-    let provider = create_provider(
-        "bedrock",
-        "anthropic.claude-sonnet-4-20250514-v1:0",
-        &store,
-        pool(),
-    )
-    .expect("bedrock provider should be created");
-    assert_eq!(
-        provider.model_name(),
-        "anthropic.claude-sonnet-4-20250514-v1:0"
-    );
+    for provider in ["azure", "bedrock", "xai", "mistral", "groq", "deepseek"] {
+        store.set(provider, credential("test-key"));
+        let error = create_provider(provider, "model", &store, pool())
+            .err()
+            .expect("long-tail provider should fail");
+        assert!(error.to_string().contains("unknown provider"));
+    }
 }
 
 #[tokio::test]

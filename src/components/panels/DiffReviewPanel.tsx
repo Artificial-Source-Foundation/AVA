@@ -8,7 +8,7 @@
 
 import { ChevronsDownUp, ChevronsUpDown, FileEdit, Minus, Plus } from 'lucide-solid'
 
-/** Emit event via DOM CustomEvent (replaces @ava/core-v2/extensions emitEvent) */
+/** Emit a review event through the shared DOM CustomEvent bridge. */
 function emitEvent(eventName: string, data: unknown): void {
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent(`ava:${eventName}`, { detail: data }))

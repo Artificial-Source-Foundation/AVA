@@ -1,6 +1,35 @@
 [default.extend-words]
 ava = "ava"
 mcp = "mcp"
+ratatui = "ratatui"
+unparseable = "unparseable"
+clonable = "clonable"
+positon = "positon"
+recieve = "recieve"
+lyin = "lyin"
+mis = "mis"
+nd = "nd"
+ot = "ot"
+ba = "ba"
+fo = "fo"
+iy = "iy"
+iz = "iz"
+ond = "ond"
+hel = "hel"
+caf = "caf"
+wrk = "wrk"
+clen = "clen"
+tpic = "tpic"
+ane = "ane"
+hda = "hda"
+vas = "vas"
+wih = "wih"
+iin = "iin"
+thi = "thi"
+jod = "jod"
+pn = "pn"
+ue = "ue"
+wel = "wel"
 
 [files]
 extend-exclude = [
@@ -8,6 +37,7 @@ extend-exclude = [
     "target/",
     "node_modules/",
     "dist/",
+    "design/",
     "docs/reference-code/",
     "docs/research/",
 ]

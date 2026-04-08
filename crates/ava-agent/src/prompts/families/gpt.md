@@ -1,0 +1,5 @@
+- Use function calling for all tool interactions. Make arguments explicit and schema-accurate.
+- Prefer parallel function calls when operations are independent. This is a core strength.
+- Keep visible text updates brief. Function calls do the work, text is for status only.
+- For clear file-fix or verification tasks, start with direct discovery/read/edit/verify tools. Avoid spending early turns on meta-tools like todo/question unless ambiguity is real.
+- If the task names a concrete behavior to fix, prefer acting on the code immediately over planning about the task.

@@ -4,29 +4,36 @@ use crate::widgets::safe_render::clamp_line;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Paragraph};
+use ratatui::widgets::{Block, Paragraph};
 use ratatui::Frame;
 
 /// Fixed height for the plan approval dock panel.
 pub const PLAN_APPROVAL_DOCK_HEIGHT: u16 = 6;
 
+fn key_pill(key: &str, theme: &Theme) -> Span<'static> {
+    Span::styled(
+        format!(" {key} "),
+        Style::default()
+            .fg(theme.bg_elevated)
+            .bg(theme.text_muted)
+            .add_modifier(Modifier::BOLD),
+    )
+}
+
 /// Render the plan approval as a bottom dock bar.
 ///
 /// Layout (4-5 rows inside bordered block):
-///   Line 1: ◆ Plan Proposed                    [codename]
+///   Line 1: ◆ Plan Proposed                    `[codename]`
 ///   Line 2:   {summary} ({N} steps, ~{M} turns)
 ///   Line 3:   Steps: 1. {first_step} 2. {second_step} ...
-///   Line 4: [e] Execute  [r] Reject  [f] Refine  [Esc] Cancel
+///   Line 4: `[e]` Execute  `[r]` Reject  `[f]` Refine  `[Esc]` Cancel
 pub fn render_plan_approval(
     frame: &mut Frame<'_>,
     area: Rect,
     state: &PlanApprovalState,
     theme: &Theme,
 ) {
-    let block = Block::default()
-        .style(Style::default().bg(theme.bg_elevated))
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(theme.accent));
+    let block = Block::default().style(Style::default().bg(theme.bg_elevated));
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
@@ -42,18 +49,13 @@ pub fn render_plan_approval(
     // --- Line 1: header with codename badge ---
     let codename_display = state.plan.codename.as_deref().unwrap_or("Plan");
     let mut header_spans: Vec<Span<'_>> = vec![
+        Span::styled("\u{25C6} ", Style::default().fg(theme.text_muted)),
         Span::styled(
-            "\u{25C6} ",
-            Style::default()
-                .fg(theme.accent)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(
-            "Plan Proposed",
+            "plan proposed",
             Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
         ),
     ];
-    let badge = format!("[{}]", codename_display);
+    let badge = codename_display.to_lowercase();
     let left_len: usize = header_spans
         .iter()
         .map(|s| crate::text_utils::display_width(s.content.as_ref()))
@@ -61,12 +63,7 @@ pub fn render_plan_approval(
     let badge_len = crate::text_utils::display_width(&badge);
     let gap = cw.saturating_sub(left_len + badge_len);
     header_spans.push(Span::raw(" ".repeat(gap)));
-    header_spans.push(Span::styled(
-        badge,
-        Style::default()
-            .fg(theme.accent)
-            .add_modifier(Modifier::BOLD),
-    ));
+    header_spans.push(Span::styled(badge, Style::default().fg(theme.text_dimmed)));
 
     let header_line = clamp_line(Line::from(header_spans), cw);
     frame.render_widget(
@@ -159,33 +156,13 @@ pub fn render_plan_approval(
             PlanApprovalStage::ActionSelect => {
                 let line = clamp_line(
                     Line::from(vec![
-                        Span::styled(
-                            "[e]",
-                            Style::default()
-                                .fg(theme.primary)
-                                .add_modifier(Modifier::BOLD),
-                        ),
+                        key_pill("e", theme),
                         Span::styled(" Execute  ", Style::default().fg(theme.text_dimmed)),
-                        Span::styled(
-                            "[r]",
-                            Style::default()
-                                .fg(theme.error)
-                                .add_modifier(Modifier::BOLD),
-                        ),
+                        key_pill("r", theme),
                         Span::styled(" Reject  ", Style::default().fg(theme.text_dimmed)),
-                        Span::styled(
-                            "[f]",
-                            Style::default()
-                                .fg(theme.text_muted)
-                                .add_modifier(Modifier::BOLD),
-                        ),
+                        key_pill("f", theme),
                         Span::styled(" Refine  ", Style::default().fg(theme.text_dimmed)),
-                        Span::styled(
-                            "[Esc]",
-                            Style::default()
-                                .fg(theme.text_muted)
-                                .add_modifier(Modifier::BOLD),
-                        ),
+                        key_pill("esc", theme),
                         Span::styled(" Cancel", Style::default().fg(theme.text_dimmed)),
                     ]),
                     cw,

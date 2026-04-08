@@ -2,8 +2,8 @@
  * Model Browser Helpers
  *
  * Aggregation, filtering, sorting, and formatting for the model browser.
- * Pricing and capabilities now come primarily from models.dev catalog
- * (src/services/providers/models-dev-catalog.ts). Hardcoded maps are kept
+ * Pricing and capabilities now come primarily from the curated backend catalog
+ * (`src/services/providers/curated-model-catalog.ts`). Hardcoded maps are kept
  * as offline fallbacks for when the catalog hasn't loaded.
  */
 
@@ -11,7 +11,7 @@ import type { LLMProviderConfig } from '../../../config/defaults/provider-defaul
 import {
   getModelFromCatalog,
   isBlockedModelId,
-} from '../../../services/providers/models-dev-catalog'
+} from '../../../services/providers/curated-model-catalog'
 import type {
   BrowsableModel,
   FilterState,
@@ -69,7 +69,7 @@ export function formatModelSelectionLabel(
 // ============================================================================
 
 /**
- * Look up pricing for a model. Tries models.dev catalog first, then hardcoded fallback.
+ * Look up pricing for a model. Tries the curated catalog first, then hardcoded fallback.
  */
 function lookupPricing(modelId: string): ModelPricing | undefined {
   const entry = getModelFromCatalog(modelId)
@@ -110,46 +110,24 @@ const FALLBACK_PRICING: Record<string, ModelPricing> = {
   // OpenAI
   'gpt-5.2': { input: 1.75, output: 14 },
   'gpt-5-mini': { input: 0.25, output: 2 },
-  'gpt-4.1': { input: 2, output: 8 },
-  o3: { input: 2, output: 8 },
-  'o4-mini': { input: 1.1, output: 4.4 },
   // Google
   'gemini-2.5-pro': { input: 1.25, output: 10 },
   'gemini-2.5-flash': { input: 0.3, output: 2.5 },
-  // xAI
-  'grok-4-1-fast-reasoning': { input: 0.2, output: 0.5 },
-  // Mistral
-  'mistral-large-latest': { input: 0.5, output: 1.5 },
-  'devstral-latest': { input: 0.4, output: 2 },
-  // DeepSeek
-  'deepseek-chat': { input: 0.28, output: 0.42 },
-  'deepseek-reasoner': { input: 0.28, output: 0.42 },
   // Cohere
   'command-a': { input: 2.5, output: 10 },
 }
 
 const FALLBACK_REASONING_EXACT = new Set([
-  'o3',
-  'o3-pro',
-  'o4-mini',
-  'o3-mini',
   'claude-opus-4-6',
   'claude-sonnet-4-6',
   'claude-haiku-4-5-20251001',
   'gemini-2.5-pro',
   'gemini-2.5-flash',
-  'grok-4-1-fast-reasoning',
-  'grok-code-fast-1',
-  'deepseek-reasoner',
-  'magistral-medium-latest',
-  'magistral-small-latest',
 ])
 
 /** Prefix patterns — any model starting with these supports reasoning */
 const FALLBACK_REASONING_PREFIXES = [
   'gpt-5', // covers gpt-5, gpt-5.1, gpt-5.2, gpt-5.3, gpt-5.4, gpt-5.x-codex, etc.
-  'o3', // covers o3, o3-pro, o3-mini
-  'o4', // covers o4-mini
   'claude-opus',
   'claude-sonnet',
 ]
@@ -167,20 +145,11 @@ const FALLBACK_VISION = new Set([
   'gpt-5.1',
   'gpt-5',
   'gpt-5-mini',
-  'gpt-4.1',
-  'gpt-4.1-mini',
-  'o3',
-  'o4-mini',
-  'gpt-4o',
   'claude-opus-4-6',
   'claude-sonnet-4-6',
   'claude-haiku-4-5-20251001',
   'gemini-2.5-pro',
   'gemini-2.5-flash',
-  'grok-4-1-fast-reasoning',
-  'grok-4-1-fast-non-reasoning',
-  'mistral-large-latest',
-  'mistral-medium-latest',
   'command-a-vision',
 ])
 
@@ -254,7 +223,7 @@ function mergeCapabilities(
       }
     }
     // Also apply provider-level free inference
-    if (providerId === 'groq' || providerId === 'ollama') caps.add('free')
+    if (providerId === 'ollama') caps.add('free')
     if (FREE_MODELS.has(modelId)) caps.add('free')
     return [...caps]
   }
@@ -272,7 +241,7 @@ export function inferCapabilities(modelId: string, providerId: string): ModelCap
   if (hasReasoning(modelId)) caps.push('reasoning')
   if (hasVision(modelId)) caps.push('vision')
 
-  if (FREE_MODELS.has(modelId) || providerId === 'groq' || providerId === 'ollama') {
+  if (FREE_MODELS.has(modelId) || providerId === 'ollama') {
     caps.push('free')
   }
 

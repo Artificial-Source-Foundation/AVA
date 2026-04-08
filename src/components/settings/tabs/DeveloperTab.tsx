@@ -107,18 +107,6 @@ export const DeveloperTab: Component = () => {
       style={{ display: 'flex', 'flex-direction': 'column', gap: SETTINGS_CARD_GAP }}
       onClick={handleOutsideClick}
     >
-      {/* Page title */}
-      <h1
-        style={{
-          'font-family': 'Geist, sans-serif',
-          'font-size': '22px',
-          'font-weight': '600',
-          color: '#F5F5F7',
-        }}
-      >
-        Developer
-      </h1>
-
       {/* ===== Dev Mode Card ===== */}
       <div
         style={{
@@ -182,7 +170,7 @@ export const DeveloperTab: Component = () => {
                 color: '#48484A',
               }}
             >
-              Controls Developer tab visibility in settings
+              Enables additional developer diagnostics and console output
             </span>
           </div>
           <button

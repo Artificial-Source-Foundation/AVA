@@ -1,0 +1,2 @@
+- MiniMax models are strong at multi-file code editing. Batch related edits across files.
+- Keep tool arguments explicit. MiniMax handles Rust, Java, Go, TypeScript, Python, and C++ well.

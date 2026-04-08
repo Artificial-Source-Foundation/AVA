@@ -7,7 +7,7 @@ use serde::Serialize;
 use tauri::State;
 
 use crate::bridge::DesktopBridge;
-use ava_config::model_catalog::registry;
+use ava_config::fallback_catalog;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -18,28 +18,64 @@ pub struct ModelInfo {
     pub tool_call: bool,
     pub vision: bool,
     pub reasoning: bool,
+    pub capabilities: Vec<String>,
     pub context_window: usize,
+    pub max_output: Option<usize>,
     pub cost_input: f64,
     pub cost_output: f64,
 }
 
-/// List all models from the compiled-in registry.
+/// List all models from the repo-owned curated catalog.
 #[tauri::command]
 pub async fn list_models() -> Result<Vec<ModelInfo>, String> {
-    let reg = registry::registry();
-    let models: Vec<ModelInfo> = reg
-        .models
+    let catalog = fallback_catalog();
+    let models: Vec<ModelInfo> = catalog
+        .all_models()
         .iter()
         .map(|m| ModelInfo {
-            id: m.id.clone(),
-            provider: m.provider.clone(),
+            id: m.api_model_id(m.ava_provider()),
+            provider: m.ava_provider().to_string(),
             name: m.name.clone(),
-            tool_call: m.capabilities.tool_call,
-            vision: m.capabilities.vision,
-            reasoning: m.capabilities.reasoning,
-            context_window: m.limits.context_window,
-            cost_input: m.cost.input_per_million,
-            cost_output: m.cost.output_per_million,
+            tool_call: m.tool_call,
+            vision: m.id.contains("vision")
+                || m.id.contains("gpt-4")
+                || m.id.contains("claude")
+                || m.provider_id == "google",
+            reasoning: matches!(
+                m.ava_provider(),
+                "anthropic" | "openai" | "gemini" | "zai" | "kimi" | "minimax"
+            ) || m.id.contains("reason")
+                || m.id.starts_with("o3")
+                || m.id.starts_with("o4")
+                || m.id.starts_with("gpt-5"),
+            capabilities: {
+                let mut caps = vec!["tools".to_string()];
+                if m.id.contains("vision")
+                    || m.id.contains("gpt-4")
+                    || m.id.contains("claude")
+                    || m.provider_id == "google"
+                {
+                    caps.push("vision".to_string());
+                }
+                if matches!(
+                    m.ava_provider(),
+                    "anthropic" | "openai" | "gemini" | "zai" | "kimi" | "minimax"
+                ) || m.id.contains("reason")
+                    || m.id.starts_with("o3")
+                    || m.id.starts_with("o4")
+                    || m.id.starts_with("gpt-5")
+                {
+                    caps.push("reasoning".to_string());
+                }
+                if matches!((m.cost_input, m.cost_output), (Some(0.0), Some(0.0))) {
+                    caps.push("free".to_string());
+                }
+                caps
+            },
+            context_window: m.context_window.unwrap_or(4096) as usize,
+            max_output: m.max_output.map(|v| v as usize),
+            cost_input: m.cost_input.unwrap_or(0.0),
+            cost_output: m.cost_output.unwrap_or(0.0),
         })
         .collect();
     Ok(models)

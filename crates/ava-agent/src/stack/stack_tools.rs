@@ -6,7 +6,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use ava_llm::provider::LLMProvider;
 use ava_mcp::config::{load_merged_mcp_config_with_scope, McpServerScope};
-use ava_mcp::manager::ExtensionManager;
+use ava_mcp::manager::McpManager;
 use ava_permissions::inspector::PermissionInspector;
 use ava_platform::Platform;
 use ava_tools::mcp_bridge::{MCPBridgeTool, MCPToolCaller};
@@ -21,12 +21,12 @@ use ava_permissions::inspector::InspectionContext;
 use ava_plugin::PluginManager;
 use ava_tools::core::register_default_tools_with_plugins;
 
-pub(crate) struct ExtensionManagerCaller {
-    pub(crate) manager: ExtensionManager,
+pub(crate) struct McpManagerCaller {
+    pub(crate) manager: McpManager,
 }
 
 #[async_trait]
-impl MCPToolCaller for ExtensionManagerCaller {
+impl MCPToolCaller for McpManagerCaller {
     async fn call_tool(&self, name: &str, arguments: Value) -> Result<ToolResult> {
         self.manager.call_tool(name, arguments).await
     }
@@ -100,8 +100,8 @@ pub(crate) async fn init_mcp_with_disabled(
             if configs.is_empty() {
                 // All servers disabled — return runtime with scope info but no tools
                 return Some(MCPRuntime {
-                    caller: Arc::new(ExtensionManagerCaller {
-                        manager: ExtensionManager::new(),
+                    caller: Arc::new(McpManagerCaller {
+                        manager: McpManager::new(),
                     }),
                     server_count: 0,
                     tool_count: 0,
@@ -110,7 +110,7 @@ pub(crate) async fn init_mcp_with_disabled(
                 });
             }
 
-            let mut manager = ExtensionManager::new();
+            let mut manager = McpManager::new();
             if let Err(e) = manager.initialize(configs).await {
                 warn!(error = %e, "Failed to initialize MCP servers");
                 return None;
@@ -118,7 +118,7 @@ pub(crate) async fn init_mcp_with_disabled(
             let server_count = manager.server_count();
             let mcp_tools_with_server = manager.list_tools_with_server().to_vec();
             let mcp_tools = manager.list_tools();
-            let caller: Arc<dyn MCPToolCaller> = Arc::new(ExtensionManagerCaller { manager });
+            let caller: Arc<dyn MCPToolCaller> = Arc::new(McpManagerCaller { manager });
             let mut tools_with_source = Vec::new();
             for (server_name, mcp_tool) in &mcp_tools_with_server {
                 if let Some(tool_def) = mcp_tools.iter().find(|t| t.name == mcp_tool.name) {

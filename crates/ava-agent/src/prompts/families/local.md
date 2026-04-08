@@ -1,0 +1,5 @@
+- Use short, concrete instructions. Local models have smaller context windows, so every token counts.
+- Prefer one tool call at a time when the next step is uncertain.
+- Re-check tool output before continuing. Local models are more likely to hallucinate tool results.
+- Keep code edits small and focused. Large multi-file refactors may exceed context limits.
+- If tool calling fails, describe what needs to change and let the user apply it.

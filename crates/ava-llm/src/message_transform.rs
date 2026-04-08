@@ -40,28 +40,19 @@ pub enum ProviderKind {
     Copilot,
     /// Inception (OpenAI-compatible).
     Inception,
-    /// Azure OpenAI (OpenAI-compatible with Azure-specific auth).
-    AzureOpenAI,
-    /// AWS Bedrock (Anthropic-compatible with SigV4 auth).
-    Bedrock,
 }
 
 impl ProviderKind {
     /// Whether this provider natively understands thinking/reasoning blocks.
     pub fn supports_thinking_blocks(self) -> bool {
-        matches!(self, Self::Anthropic | Self::Gemini | Self::Bedrock)
+        matches!(self, Self::Anthropic | Self::Gemini)
     }
 
     /// Whether this provider uses the OpenAI-compatible message format.
     pub fn is_openai_compatible(self) -> bool {
         matches!(
             self,
-            Self::OpenAI
-                | Self::OpenRouter
-                | Self::Copilot
-                | Self::Ollama
-                | Self::Inception
-                | Self::AzureOpenAI
+            Self::OpenAI | Self::OpenRouter | Self::Copilot | Self::Ollama | Self::Inception
         )
     }
 
@@ -71,12 +62,12 @@ impl ProviderKind {
             "anthropic"
             | "alibaba"
             | "alibaba-cn"
+            | "kimi"
             | "kimi-for-coding"
+            | "minimax"
             | "minimax-coding-plan"
             | "minimax-cn-coding-plan" => Self::Anthropic,
-            "openai" | "zai-coding-plan" | "zhipuai-coding-plan" => Self::OpenAI,
-            "azure" => Self::AzureOpenAI,
-            "bedrock" => Self::Bedrock,
+            "openai" | "zai" | "zai-coding-plan" | "zhipuai-coding-plan" => Self::OpenAI,
             "gemini" => Self::Gemini,
             "ollama" => Self::Ollama,
             "openrouter" => Self::OpenRouter,
@@ -341,12 +332,40 @@ mod tests {
             ProviderKind::Anthropic
         );
         assert_eq!(
+            ProviderKind::from_provider_name("alibaba-cn"),
+            ProviderKind::Anthropic
+        );
+        assert_eq!(
+            ProviderKind::from_provider_name("kimi"),
+            ProviderKind::Anthropic
+        );
+        assert_eq!(
             ProviderKind::from_provider_name("kimi-for-coding"),
+            ProviderKind::Anthropic
+        );
+        assert_eq!(
+            ProviderKind::from_provider_name("minimax"),
+            ProviderKind::Anthropic
+        );
+        assert_eq!(
+            ProviderKind::from_provider_name("minimax-coding-plan"),
+            ProviderKind::Anthropic
+        );
+        assert_eq!(
+            ProviderKind::from_provider_name("minimax-cn-coding-plan"),
             ProviderKind::Anthropic
         );
         // OpenAI-compatible coding plan providers
         assert_eq!(
+            ProviderKind::from_provider_name("zai"),
+            ProviderKind::OpenAI
+        );
+        assert_eq!(
             ProviderKind::from_provider_name("zai-coding-plan"),
+            ProviderKind::OpenAI
+        );
+        assert_eq!(
+            ProviderKind::from_provider_name("zhipuai-coding-plan"),
             ProviderKind::OpenAI
         );
         // Unknown defaults to OpenAI

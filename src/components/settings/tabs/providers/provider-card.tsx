@@ -40,10 +40,10 @@ const PROVIDER_COLORS: Record<string, { bg: string; text: string }> = {
   ollama: { bg: '#ffffff10', text: '#C8C8CC' },
   copilot: { bg: '#ffffff10', text: '#C8C8CC' },
   inception: { bg: '#FF6B3515', text: '#FF6B35' },
-  xai: { bg: '#ffffff10', text: '#C8C8CC' },
-  mistral: { bg: '#FF752015', text: '#FF7520' },
-  groq: { bg: '#F5508015', text: '#F55080' },
-  deepseek: { bg: '#0A84FF15', text: '#0A84FF' },
+  alibaba: { bg: '#FF6A0015', text: '#FF6A00' },
+  zai: { bg: '#0EA5E915', text: '#0EA5E9' },
+  kimi: { bg: '#7C3AED15', text: '#7C3AED' },
+  minimax: { bg: '#F59E0B15', text: '#F59E0B' },
 }
 
 export const ProviderCard: Component<ProviderCardProps> = (props) => {

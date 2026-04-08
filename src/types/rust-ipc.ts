@@ -151,133 +151,6 @@ export interface QuestionRequestEvent {
   options: string[]
 }
 
-// ── HQ multi-agent events ──────────────────────────────────────
-
-export interface HqWorkerStartedEvent {
-  type: 'hq_worker_started'
-  worker_id: string
-  lead: string
-  task: string
-}
-
-export interface HqWorkerProgressEvent {
-  type: 'hq_worker_progress'
-  worker_id: string
-  turn: number
-  max_turns: number
-}
-
-export interface HqWorkerTokenEvent {
-  type: 'hq_worker_token'
-  worker_id: string
-  token: string
-}
-
-export interface HqWorkerThinkingEvent {
-  type: 'hq_worker_thinking'
-  worker_id: string
-  content: string
-}
-
-export interface HqWorkerToolCallEvent {
-  type: 'hq_worker_tool_call'
-  worker_id: string
-  call_id: string
-  name: string
-  args: Record<string, JsonValue>
-}
-
-export interface HqWorkerToolResultEvent {
-  type: 'hq_worker_tool_result'
-  worker_id: string
-  call_id: string
-  content: string
-  is_error: boolean
-}
-
-export interface HqWorkerCompletedEvent {
-  type: 'hq_worker_completed'
-  worker_id: string
-  success: boolean
-  turns: number
-}
-
-export interface HqWorkerFailedEvent {
-  type: 'hq_worker_failed'
-  worker_id: string
-  error: string
-}
-
-export interface HqAllCompleteEvent {
-  type: 'hq_all_complete'
-  total_workers: number
-  succeeded: number
-  failed: number
-}
-
-export interface HqSummaryEvent {
-  type: 'hq_summary'
-  total_workers: number
-  succeeded: number
-  failed: number
-  total_turns: number
-}
-
-export interface HqPhaseStartedEvent {
-  type: 'hq_phase_started'
-  phase_index: number
-  phase_count: number
-  phase_name: string
-  role: string
-}
-
-export interface HqPhaseCompletedEvent {
-  type: 'hq_phase_completed'
-  phase_index: number
-  phase_name: string
-  turns: number
-  output_preview: string
-}
-
-export interface HqSpecCreatedEvent {
-  type: 'hq_spec_created'
-  spec_id: string
-  title: string
-}
-
-export interface HqArtifactCreatedEvent {
-  type: 'hq_artifact_created'
-  artifact_id: string
-  kind: string
-  producer: string
-  title: string
-}
-
-export interface HqConflictDetectedEvent {
-  type: 'hq_conflict_detected'
-  workers: [string, string]
-  overlapping_files: string[]
-}
-
-export interface HqExternalWorkerStartedEvent {
-  type: 'hq_external_worker_started'
-  worker_id: string
-  agent_name: string
-}
-
-export interface HqExternalWorkerCompletedEvent {
-  type: 'hq_external_worker_completed'
-  worker_id: string
-  success: boolean
-  cost_usd?: number
-}
-
-export interface HqExternalWorkerFailedEvent {
-  type: 'hq_external_worker_failed'
-  worker_id: string
-  error: string
-}
-
 // ── Plan events ──────────────────────────────────────────────────────
 
 export type PlanStepAction = 'research' | 'implement' | 'test' | 'review'
@@ -342,26 +215,6 @@ export interface ResolvePlanArgs {
   stepComments?: Record<string, string> | null
 }
 
-export type HqEvent =
-  | HqWorkerStartedEvent
-  | HqWorkerProgressEvent
-  | HqWorkerTokenEvent
-  | HqWorkerThinkingEvent
-  | HqWorkerToolCallEvent
-  | HqWorkerToolResultEvent
-  | HqWorkerCompletedEvent
-  | HqWorkerFailedEvent
-  | HqAllCompleteEvent
-  | HqSummaryEvent
-  | HqPhaseStartedEvent
-  | HqPhaseCompletedEvent
-  | HqSpecCreatedEvent
-  | HqArtifactCreatedEvent
-  | HqConflictDetectedEvent
-  | HqExternalWorkerStartedEvent
-  | HqExternalWorkerCompletedEvent
-  | HqExternalWorkerFailedEvent
-
 export type AgentEvent =
   | TokenEvent
   | ToolCallEvent
@@ -378,7 +231,6 @@ export type AgentEvent =
   | PlanCreatedEvent
   | PlanStepCompleteEvent
   | TodoUpdateEvent
-  | HqEvent
 
 export interface ComputeGrepMatch {
   file: string
@@ -524,7 +376,9 @@ export interface ModelInfo {
   toolCall: boolean
   vision: boolean
   reasoning: boolean
+  capabilities: string[]
   contextWindow: number
+  maxOutput?: number | null
   costInput: number
   costOutput: number
 }
@@ -628,38 +482,6 @@ export interface CompactContextResult {
   summary: string
   contextSummary: string
   usageBeforePercent: number
-}
-
-// HQ multi-agent IPC types
-
-export interface LeadConfigPayload {
-  domain: string
-  enabled: boolean
-  model: string
-  maxWorkers: number
-  customPrompt?: string
-}
-
-export interface TeamConfigPayload {
-  defaultDirectorModel: string
-  defaultLeadModel: string
-  defaultWorkerModel: string
-  defaultScoutModel: string
-  workerNames: string[]
-  leads: LeadConfigPayload[]
-}
-
-export interface StartHqArgs {
-  goal: string
-  domain?: string
-  teamConfig?: TeamConfigPayload
-}
-
-export interface HqStatusResult {
-  running: boolean
-  totalWorkers: number
-  succeeded: number
-  failed: number
 }
 
 // Subscription usage types

@@ -1,0 +1,3 @@
+- Be explicit with tool argument types. Gemini is strict about schema compliance.
+- Prefer grep/glob to discover files before reading individually. Extra turns are more expensive than larger reads.
+- Keep progress updates short and structured. Use numbered lists for multi-step plans.

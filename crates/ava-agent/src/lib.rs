@@ -8,6 +8,7 @@
 pub mod agent_loop;
 pub(crate) mod budget;
 pub mod cache_sharing;
+pub mod continuation;
 pub mod dream;
 pub mod error_hints;
 pub mod instruction_resolver;
@@ -44,6 +45,6 @@ pub(crate) mod tests {
 
     /// Create a mock LLM provider for stuck detection tests.
     pub fn mock_llm() -> Arc<dyn crate::llm_trait::LLMProvider> {
-        Arc::new(ava_llm::providers::MockProvider::new("mock", vec![]))
+        Arc::new(ava_llm::providers::mock::MockProvider::new("mock", vec![]))
     }
 }

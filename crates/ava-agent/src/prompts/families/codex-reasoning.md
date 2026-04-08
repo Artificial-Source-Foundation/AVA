@@ -1,0 +1,1 @@
+- Use medium reasoning for interactive coding, high or xhigh only for the hardest tasks.

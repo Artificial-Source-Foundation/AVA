@@ -15,46 +15,13 @@ import { DEFAULT_SETTINGS } from './settings-defaults'
 import { mergeWithDefaults } from './settings-hydration'
 import type { AppSettings } from './settings-types'
 
-interface HqAgentOverridePayload {
-  id: string
-  enabled: boolean
-  modelSpec: string
-  systemPrompt: string
-}
-
-function buildHqAgentOverrides(settings: AppSettings): HqAgentOverridePayload[] {
-  const providerDefaultModel = new Map(
-    settings.providers.map((provider) => [provider.id, provider.defaultModel])
-  )
-  return settings.agents
-    .filter((agent) => agent.tier != null)
-    .map((agent) => {
-      const modelSpec = agent.model
-        ? agent.provider
-          ? `${agent.provider}/${agent.model}`
-          : agent.model
-        : agent.provider
-          ? providerDefaultModel.get(agent.provider)
-            ? `${agent.provider}/${providerDefaultModel.get(agent.provider)}`
-            : ''
-          : ''
-
-      return {
-        id: agent.id,
-        enabled: agent.enabled,
-        modelSpec,
-        systemPrompt: agent.systemPrompt ?? '',
-      }
-    })
-}
-
 // ============================================================================
 // Credential Sync — bridges Settings UI → Core credential store
 // ============================================================================
 
 /**
  * Write a single provider's API key to the credential store.
- * Key format matches core-v2 getApiKey(): "ava:{provider}:api_key"
+ * Key format matches the shared desktop credential bridge: "ava:{provider}:api_key"
  * TauriCredentialStore adds "ava_cred_" prefix, so final localStorage
  * key is "ava_cred_ava:{provider}:api_key".
  */
@@ -72,17 +39,16 @@ export function syncProviderCredentials(providerId: string, apiKey: string | und
 // ============================================================================
 
 /** Map of provider IDs to their standard environment variable names */
-const ENV_VAR_MAP: Record<string, string> = {
-  anthropic: 'ANTHROPIC_API_KEY',
-  openai: 'OPENAI_API_KEY',
-  google: 'GOOGLE_API_KEY',
-  groq: 'GROQ_API_KEY',
-  mistral: 'MISTRAL_API_KEY',
-  deepseek: 'DEEPSEEK_API_KEY',
-  xai: 'XAI_API_KEY',
-  cohere: 'COHERE_API_KEY',
-  together: 'TOGETHER_API_KEY',
-  openrouter: 'OPENROUTER_API_KEY',
+const ENV_VAR_MAP: Record<string, string[]> = {
+  anthropic: ['ANTHROPIC_API_KEY'],
+  openai: ['OPENAI_API_KEY'],
+  gemini: ['GEMINI_API_KEY', 'GOOGLE_API_KEY'],
+  openrouter: ['OPENROUTER_API_KEY'],
+  inception: ['INCEPTION_API_KEY'],
+  alibaba: ['DASHSCOPE_API_KEY'],
+  zai: ['ZHIPU_API_KEY'],
+  kimi: ['KIMI_API_KEY'],
+  minimax: ['MINIMAX_API_KEY'],
 }
 
 export interface EnvKeyDetectionResult {
@@ -101,18 +67,21 @@ export async function detectEnvApiKeys(
 ): Promise<EnvKeyDetectionResult> {
   const detectedProviders: string[] = []
 
-  for (const [providerId, envVar] of Object.entries(ENV_VAR_MAP)) {
+  for (const [providerId, envVars] of Object.entries(ENV_VAR_MAP)) {
     const provider = currentProviders.find((p) => p.id === providerId)
     if (provider?.apiKey) continue
 
-    try {
-      const value = await invoke<string | null>('get_env_var', { name: envVar })
-      if (value) {
-        onDetected(providerId, { apiKey: value, status: 'connected', enabled: true })
-        detectedProviders.push(providerId)
+    for (const envVar of envVars) {
+      try {
+        const value = await invoke<string | null>('get_env_var', { name: envVar })
+        if (value) {
+          onDetected(providerId, { apiKey: value, status: 'connected', enabled: true })
+          detectedProviders.push(providerId)
+          break
+        }
+      } catch {
+        // Rust command not available (e.g., running in browser) — skip silently
       }
-    } catch {
-      // Rust command not available (e.g., running in browser) — skip silently
     }
   }
 
@@ -229,10 +198,6 @@ export function pushSettingsToCore(s: AppSettings): void {
     reasoningEffort: s.generation.reasoningEffort,
     maxTurns: s.agentLimits.agentMaxTurns,
     temperature: s.generation.temperature,
-  })
-
-  invoke('sync_hq_agent_overrides', { overrides: buildHqAgentOverrides(s) }).catch((err) => {
-    logWarn('settings', 'HQ agent override sync failed', err)
   })
 
   // Sync shared LLM config to config.yaml (fire-and-forget)
@@ -413,7 +378,6 @@ export function serializeSettings(s: AppSettings): Record<string, unknown> {
       model: a.model,
       isCustom: a.isCustom,
       type: a.type,
-      tier: a.tier,
       tools: a.tools,
       delegates: a.delegates,
       domain: a.domain,

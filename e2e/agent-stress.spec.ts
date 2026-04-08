@@ -19,7 +19,7 @@ import { expect, type Page, test } from '@playwright/test'
 // Constants
 // ---------------------------------------------------------------------------
 
-const AVA_WEB_URL = process.env['AVA_WEB_URL'] ?? 'http://localhost:8080'
+const AVA_WEB_URL = process.env.AVA_WEB_URL ?? 'http://localhost:8080'
 const AVA_HEALTH_URL = `${AVA_WEB_URL}/api/health`
 
 /** How long to wait for agent responses (LLM calls can be slow). */
@@ -431,7 +431,6 @@ test.describe('WebSocket Streaming Stress', () => {
     const result = await page.evaluate(
       async (wsUrl: string) => {
         const connections = 3
-        const results: boolean[] = []
 
         const promises = Array.from({ length: connections }, () => {
           return new Promise<boolean>((resolve) => {

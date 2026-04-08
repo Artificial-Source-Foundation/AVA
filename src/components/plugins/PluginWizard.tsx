@@ -185,9 +185,7 @@ export const PluginWizard: Component<PluginWizardProps> = (props) => {
               {/* Manifest preview */}
               <div class="rounded-[var(--radius-md)] bg-[var(--surface-sunken)] border border-[var(--border-subtle)] overflow-hidden">
                 <div class="px-3 py-1.5 bg-[var(--surface-raised)] border-b border-[var(--border-subtle)]">
-                  <span class="text-[10px] text-[var(--text-muted)] font-mono">
-                    ava-extension.json
-                  </span>
+                  <span class="text-[10px] text-[var(--text-muted)] font-mono">plugin.toml</span>
                 </div>
                 <pre class="p-3 text-[10px] text-[var(--text-secondary)] font-mono overflow-x-auto max-h-24">
                   {generateManifest(template(), pluginName(), pluginDescription(), pluginAuthor())}
@@ -197,7 +195,7 @@ export const PluginWizard: Component<PluginWizardProps> = (props) => {
               {/* Index.ts preview */}
               <div class="rounded-[var(--radius-md)] bg-[var(--surface-sunken)] border border-[var(--border-subtle)] overflow-hidden">
                 <div class="px-3 py-1.5 bg-[var(--surface-raised)] border-b border-[var(--border-subtle)]">
-                  <span class="text-[10px] text-[var(--text-muted)] font-mono">src/index.ts</span>
+                  <span class="text-[10px] text-[var(--text-muted)] font-mono">index.ts</span>
                 </div>
                 <pre class="p-3 text-[10px] text-[var(--text-secondary)] font-mono overflow-x-auto max-h-32">
                   {generateIndexTs(template(), pluginName(), pluginDescription())}

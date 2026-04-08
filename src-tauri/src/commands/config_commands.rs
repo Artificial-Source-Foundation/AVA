@@ -1,6 +1,5 @@
 //! Tauri commands for reading and writing configuration.
 
-use ava_config::HqAgentOverride;
 use serde::Deserialize;
 use tauri::State;
 use tracing::debug;
@@ -12,23 +11,6 @@ use crate::bridge::DesktopBridge;
 pub async fn get_config(bridge: State<'_, DesktopBridge>) -> Result<serde_json::Value, String> {
     let cfg = bridge.stack.config.get().await;
     serde_json::to_value(&cfg).map_err(|e| e.to_string())
-}
-
-/// Sync HQ agent overrides from desktop settings into Rust config.
-#[tauri::command]
-pub async fn sync_hq_agent_overrides(
-    overrides: Vec<HqAgentOverride>,
-    bridge: State<'_, DesktopBridge>,
-) -> Result<(), String> {
-    bridge
-        .stack
-        .config
-        .update(|config| {
-            config.hq.agent_overrides = overrides.clone();
-        })
-        .await
-        .map_err(|e| e.to_string())?;
-    bridge.stack.config.save().await.map_err(|e| e.to_string())
 }
 
 /// Update LLM settings (provider, model, temperature, max_tokens) in config.yaml.
@@ -62,7 +44,12 @@ pub async fn update_llm_config(
         .await
         .map_err(|e| e.to_string())?;
 
-    bridge.stack.config.save().await.map_err(|e| e.to_string())?;
+    bridge
+        .stack
+        .config
+        .save()
+        .await
+        .map_err(|e| e.to_string())?;
 
     let cfg = bridge.stack.config.get().await;
     serde_json::to_value(&cfg.llm).map_err(|e| e.to_string())
@@ -111,7 +98,12 @@ pub async fn update_feature_flags(
         .await
         .map_err(|e| e.to_string())?;
 
-    bridge.stack.config.save().await.map_err(|e| e.to_string())?;
+    bridge
+        .stack
+        .config
+        .save()
+        .await
+        .map_err(|e| e.to_string())?;
 
     let cfg = bridge.stack.config.get().await;
     serde_json::to_value(&cfg.features).map_err(|e| e.to_string())

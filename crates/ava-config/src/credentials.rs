@@ -186,7 +186,7 @@ impl CredentialStore {
     /// Get credential for provider. Env vars override file credentials.
     ///
     /// Lookup order:
-    /// 1) AVA_<PROVIDER>_API_KEY
+    /// 1) `AVA_<PROVIDER>_API_KEY`
     /// 2) Standard provider env var (e.g. OPENAI_API_KEY)
     /// 3) File credential
     pub fn get(&self, provider: &str) -> Option<ProviderCredential> {
@@ -467,16 +467,11 @@ pub fn known_providers() -> &'static [&'static str] {
         "openrouter",
         "copilot",
         "gemini",
-        "mistral",
-        "groq",
-        "xai",
-        "deepinfra",
-        "together",
-        "cerebras",
-        "perplexity",
-        "cohere",
-        "azure",
-        "bedrock",
+        "inception",
+        "alibaba",
+        "zai",
+        "kimi",
+        "minimax",
         "ollama",
     ]
 }
@@ -487,17 +482,12 @@ pub fn standard_env_var(provider: &str) -> Option<&'static str> {
         "openai" => Some("OPENAI_API_KEY"),
         "openrouter" => Some("OPENROUTER_API_KEY"),
         "gemini" => Some("GEMINI_API_KEY"),
+        "inception" => Some("INCEPTION_API_KEY"),
+        "alibaba" => Some("DASHSCOPE_API_KEY"),
+        "zai" => Some("ZHIPU_API_KEY"),
+        "kimi" => Some("KIMI_API_KEY"),
+        "minimax" => Some("MINIMAX_API_KEY"),
         "ollama" => Some("OLLAMA_API_KEY"),
-        "mistral" => Some("MISTRAL_API_KEY"),
-        "groq" => Some("GROQ_API_KEY"),
-        "xai" => Some("XAI_API_KEY"),
-        "deepinfra" => Some("DEEPINFRA_API_KEY"),
-        "together" => Some("TOGETHER_API_KEY"),
-        "cerebras" => Some("CEREBRAS_API_KEY"),
-        "perplexity" => Some("PERPLEXITY_API_KEY"),
-        "cohere" => Some("COHERE_API_KEY"),
-        "azure" => Some("AZURE_OPENAI_API_KEY"),
-        "bedrock" => Some("AWS_BEARER_TOKEN_BEDROCK"),
         _ => None,
     }
 }
@@ -582,18 +572,12 @@ mod tests {
     }
 
     #[test]
-    fn env_var_fallback() {
+    fn standard_env_var_maps_canonical_provider_ids() {
         let _guard = lock_env();
-        let mut store = CredentialStore::default();
-        store.set("envcredtest", sample_credential("file-key"));
-
-        let key = "AVA_ENVCREDTEST_API_KEY";
-        std::env::set_var(key, "env-key");
-
-        let credential = store.get("envcredtest").unwrap();
-        assert_eq!(credential.api_key, "env-key");
-
-        std::env::remove_var(key);
+        assert_eq!(standard_env_var("alibaba"), Some("DASHSCOPE_API_KEY"));
+        assert_eq!(standard_env_var("zai"), Some("ZHIPU_API_KEY"));
+        assert_eq!(standard_env_var("minimax"), Some("MINIMAX_API_KEY"));
+        assert_eq!(standard_env_var("inception"), Some("INCEPTION_API_KEY"));
     }
 
     #[test]

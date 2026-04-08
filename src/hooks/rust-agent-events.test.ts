@@ -18,7 +18,7 @@ vi.mock('../stores/planOverlayStore', () => ({
   usePlanOverlay: () => ({ markStepComplete: vi.fn() }),
 }))
 
-function createHandlerHarness() {
+function createHandlerHarness(opts?: { isTauriRuntime?: boolean }) {
   return createRoot((dispose) => {
     const history = createBoundedEventHistory<AgentEvent>(64)
     const [streamingContent, setStreamingContent] = createSignal('')
@@ -61,7 +61,7 @@ function createHandlerHarness() {
       setPendingPlan,
       setThinkingSegments,
       setTodos,
-      isTauriRuntime: true,
+      isTauriRuntime: opts?.isTauriRuntime ?? true,
     })
 
     return {
@@ -79,6 +79,7 @@ function createHandlerHarness() {
       pendingPlan,
       thinkingSegments,
       todos,
+      completion,
     }
   })
 }

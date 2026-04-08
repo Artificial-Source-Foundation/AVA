@@ -3,7 +3,9 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::Mutex;
 use tracing::{debug, warn};
 
 use crate::runtime::PluginProcess;
@@ -311,7 +313,7 @@ impl HookDispatcher {
         &self,
         event: &HookEvent,
         params: &Value,
-        plugins: &mut HashMap<String, PluginProcess>,
+        plugins: &HashMap<String, Arc<Mutex<PluginProcess>>>,
     ) -> Vec<HookResponse> {
         let subscribers = self.subscribers(event);
         if subscribers.is_empty() {
@@ -326,7 +328,7 @@ impl HookDispatcher {
         &self,
         event: &HookEvent,
         params: &Value,
-        plugins: &mut HashMap<String, PluginProcess>,
+        plugins: &HashMap<String, Arc<Mutex<PluginProcess>>>,
         subscribers: &[String],
     ) -> Vec<HookResponse> {
         if subscribers.is_empty() {
@@ -337,7 +339,7 @@ impl HookDispatcher {
         let mut responses = Vec::new();
 
         for plugin_name in subscribers {
-            let Some(process) = plugins.get_mut(plugin_name) else {
+            let Some(process) = plugins.get(plugin_name).cloned() else {
                 warn!(
                     plugin = plugin_name,
                     hook = event.wire_name(),
@@ -353,7 +355,11 @@ impl HookDispatcher {
                     hook = event.wire_name(),
                     "sending notification"
                 );
-                process.send_notification(&method, params.clone()).await;
+                process
+                    .lock()
+                    .await
+                    .send_notification(&method, params.clone())
+                    .await;
             } else {
                 // Request/response with timeout
                 debug!(
@@ -361,10 +367,13 @@ impl HookDispatcher {
                     hook = event.wire_name(),
                     "sending request"
                 );
-                match tokio::time::timeout(
-                    self.timeout,
-                    process.send_request(&method, params.clone()),
-                )
+                match tokio::time::timeout(self.timeout, async {
+                    process
+                        .lock()
+                        .await
+                        .send_request(&method, params.clone())
+                        .await
+                })
                 .await
                 {
                     Ok(Ok(result)) => {
@@ -568,9 +577,9 @@ mod tests {
     #[tokio::test]
     async fn dispatch_with_no_subscribers() {
         let dispatcher = HookDispatcher::new();
-        let mut plugins = HashMap::new();
+        let plugins = HashMap::new();
         let responses = dispatcher
-            .dispatch(&HookEvent::Auth, &Value::Null, &mut plugins)
+            .dispatch(&HookEvent::Auth, &Value::Null, &plugins)
             .await;
         assert!(responses.is_empty());
     }
@@ -676,9 +685,9 @@ mod tests {
         let mut dispatcher = HookDispatcher::new();
         dispatcher.register("ghost-plugin", &["auth".to_string()]);
 
-        let mut plugins = HashMap::new();
+        let plugins = HashMap::new();
         let responses = dispatcher
-            .dispatch(&HookEvent::Auth, &Value::Null, &mut plugins)
+            .dispatch(&HookEvent::Auth, &Value::Null, &plugins)
             .await;
         // Missing process is skipped, no response
         assert!(responses.is_empty());
@@ -695,10 +704,10 @@ mod tests {
         dispatcher.register("slow-plugin", &["auth".to_string()]);
 
         let mut plugins = HashMap::new();
-        plugins.insert("slow-plugin".to_string(), process);
+        plugins.insert("slow-plugin".to_string(), Arc::new(Mutex::new(process)));
 
         let responses = dispatcher
-            .dispatch(&HookEvent::Auth, &Value::Null, &mut plugins)
+            .dispatch(&HookEvent::Auth, &Value::Null, &plugins)
             .await;
 
         assert_eq!(responses.len(), 1);
@@ -707,8 +716,8 @@ mod tests {
             .as_deref()
             .is_some_and(|error| error.contains("timed out")));
 
-        if let Some(process) = plugins.get_mut("slow-plugin") {
-            process.shutdown().await;
+        if let Some(process) = plugins.get("slow-plugin") {
+            process.lock().await.shutdown().await;
         }
     }
 }

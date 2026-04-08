@@ -78,18 +78,18 @@ pub(super) async fn run_voice_loop(cli: CliArgs) -> Result<()> {
 
         eprintln!("[voice] Goal: {text}");
 
-        let (stack, _question_rx, approval_rx, _plan_rx) = AgentStack::new(AgentStackConfig {
-            data_dir: data_dir.clone(),
-            provider: provider.clone(),
-            model: model.clone(),
-            max_turns: cli.max_turns,
-            max_budget_usd: cli.max_budget_usd,
-            yolo: cli.auto_approve,
-            include_project_instructions: runtime_lean.include_project_instructions,
-            eager_codebase_indexing: runtime_lean.eager_codebase_indexing,
-            ..Default::default()
-        })
-        .await?;
+        let (stack, _question_rx, approval_rx, _plan_rx) =
+            AgentStack::new(AgentStackConfig::for_headless(
+                data_dir.clone(),
+                provider.clone(),
+                model.clone(),
+                cli.max_turns,
+                cli.max_budget_usd,
+                cli.auto_approve,
+                runtime_lean.include_project_instructions,
+                runtime_lean.eager_codebase_indexing,
+            ))
+            .await?;
         spawn_auto_approve_requests(approval_rx);
 
         let (tx, mut rx) = mpsc::unbounded_channel();

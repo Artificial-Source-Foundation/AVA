@@ -37,6 +37,7 @@ vi.mock('./use-rust-agent', () => {
       const [streamingContent, _setStreamingContent] = createSignal('')
       const [events, _setEvents] = createSignal<unknown[]>([])
       const [activeToolCalls] = createSignal<unknown[]>([])
+      const [thinkingSegments] = createSignal<unknown[]>([])
       const [lastResult, setLastResult] = createSignal<unknown>(null)
       const [tokenUsage] = createSignal({ input: 0, output: 0, cost: 0 })
       const [thinkingContent] = createSignal('')
@@ -64,6 +65,7 @@ vi.mock('./use-rust-agent', () => {
         isRunning,
         streamingContent,
         thinkingContent,
+        thinkingSegments,
         activeToolCalls,
         error,
         lastResult,
@@ -71,6 +73,10 @@ vi.mock('./use-rust-agent', () => {
         events,
         run,
         cancel,
+        endRun: vi.fn(),
+        steer: vi.fn(async () => {}),
+        followUp: vi.fn(async () => {}),
+        postComplete: vi.fn(async () => {}),
         clearError: () => {
           setError(null)
           h.clearErrorMock()
@@ -102,7 +108,13 @@ vi.mock('../services/tool-approval-bridge', () => ({
 vi.mock('../stores/settings', () => ({
   useSettings: () => ({
     settings: () => ({
-      generation: { customInstructions: '', delegationEnabled: false, reasoningEffort: 'off' },
+      generation: {
+        customInstructions: '',
+        reasoningEffort: 'off',
+        compactionModel: '',
+        autoCompact: false,
+        compactionThreshold: 80,
+      },
       behavior: { sessionAutoTitle: false },
       agentLimits: { agentMaxTurns: 20, agentMaxTimeMinutes: 10, autoFixLint: false },
       notifications: {},
@@ -112,8 +124,59 @@ vi.mock('../stores/settings', () => ({
   }),
 }))
 
-import { _resetAgentSingleton } from './useAgent'
-import { useChat } from './useChat'
+vi.mock('../stores/session', () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const solidJs = require('solid-js') as typeof import('solid-js')
+  const createSignal = solidJs.createSignal
+
+  const [currentSession, setCurrentSession] = createSignal<{ id: string; name: string } | null>(
+    null
+  )
+  const [messages, setMessages] = createSignal<unknown[]>([])
+  const [selectedModel] = createSignal<string | undefined>(undefined)
+  const [selectedProvider] = createSignal<string | undefined>(undefined)
+  const [checkpoints] = createSignal<unknown[]>([])
+  const [fileOperations] = createSignal<unknown[]>([])
+  const [editingMessageId] = createSignal<string | null>(null)
+  const [retryingMessageId] = createSignal<string | null>(null)
+  const [isLoadingMessages] = createSignal(false)
+  const [compactionIndex] = createSignal(-1)
+
+  return {
+    useSession: () => ({
+      currentSession,
+      messages,
+      selectedModel,
+      selectedProvider,
+      checkpoints,
+      fileOperations,
+      editingMessageId,
+      retryingMessageId,
+      isLoadingMessages,
+      compactionIndex,
+      createNewSession: async () => {
+        setCurrentSession({ id: 's1', name: 'New Session' })
+      },
+      addMessage: vi.fn((message: unknown) => {
+        setMessages((prev) => [...prev, message])
+      }),
+      updateMessage: vi.fn(),
+      deleteMessage: vi.fn(),
+      renameSession: vi.fn(async () => {}),
+      setMessages,
+      loadSessionMessages: vi.fn(async () => {}),
+      startEditing: vi.fn(),
+      stopEditing: vi.fn(),
+      rollbackToMessage: vi.fn(async () => 0),
+      branchAtMessage: vi.fn(async () => 0),
+      rollbackToCheckpoint: vi.fn(),
+      revertFilesAfter: vi.fn(async () => 0),
+      createCheckpoint: vi.fn(),
+    }),
+  }
+})
+
+import { _resetAgentSingleton, useAgent } from './useAgent'
 
 /** Flush multiple microtasks to let async code advance */
 async function flushMicrotasks(count = 10): Promise<void> {
@@ -122,7 +185,7 @@ async function flushMicrotasks(count = 10): Promise<void> {
   }
 }
 
-describe('useChat integration queue/steer/cancel', () => {
+describe('useAgent integration queue/steer/cancel', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     _resetAgentSingleton()
@@ -135,63 +198,63 @@ describe('useChat integration queue/steer/cancel', () => {
   })
 
   it('queues follow-up messages while streaming and clears queue on cancel', async () => {
-    const ctx = createRoot((dispose) => ({ chat: useChat(), dispose }))
+    const ctx = createRoot((dispose) => ({ agent: useAgent(), dispose }))
 
     // Start a run that will hang (pending promise)
-    void ctx.chat.sendMessage('first message')
+    void ctx.agent.run('first message')
     await flushMicrotasks()
 
     // The run should be in progress (isRunning=true from mock)
-    expect(ctx.chat.isStreaming()).toBe(true)
+    expect(ctx.agent.isRunning()).toBe(true)
 
     // Queue a follow-up while running
-    void ctx.chat.sendMessage('queued follow-up')
-    expect(ctx.chat.queuedCount()).toBe(1)
+    void ctx.agent.run('queued follow-up')
+    expect(ctx.agent.queuedCount()).toBe(1)
 
     // Cancel should clear queue
-    ctx.chat.cancel()
+    ctx.agent.cancel()
     await flushMicrotasks()
-    expect(ctx.chat.isStreaming()).toBe(false)
-    expect(ctx.chat.queuedCount()).toBe(0)
+    expect(ctx.agent.isRunning()).toBe(false)
+    expect(ctx.agent.queuedCount()).toBe(0)
 
     ctx.dispose()
   })
 
   it('steer uses cancel-and-requeue when running', async () => {
-    const ctx = createRoot((dispose) => ({ chat: useChat(), dispose }))
+    const ctx = createRoot((dispose) => ({ agent: useAgent(), dispose }))
 
-    void ctx.chat.sendMessage('stream in progress')
+    void ctx.agent.run('stream in progress')
     await flushMicrotasks()
 
     // Queue a follow-up while running
-    void ctx.chat.sendMessage('queued message')
-    expect(ctx.chat.queuedCount()).toBe(1)
+    void ctx.agent.run('queued message')
+    expect(ctx.agent.queuedCount()).toBe(1)
 
     // Steer while running — cancels and adds steer content to queue
-    ctx.chat.steer('priority steer')
+    ctx.agent.steer('priority steer')
     await flushMicrotasks()
 
     // After steer (which cancels), queue should have the steer content
     // (cancel clears the old queue, steer sets new queue)
-    expect(ctx.chat.queuedCount()).toBeLessThanOrEqual(1)
+    expect(ctx.agent.queuedCount()).toBeLessThanOrEqual(1)
 
-    ctx.chat.cancel()
+    ctx.agent.cancel()
     await flushMicrotasks()
-    expect(ctx.chat.queuedCount()).toBe(0)
+    expect(ctx.agent.queuedCount()).toBe(0)
 
     ctx.dispose()
   })
 
   it('auto-titles disabled does not rename session', async () => {
-    const ctx = createRoot((dispose) => ({ chat: useChat(), dispose }))
+    const ctx = createRoot((dispose) => ({ agent: useAgent(), dispose }))
 
-    void ctx.chat.sendMessage('Build OAuth flow')
+    void ctx.agent.run('Build OAuth flow')
     await flushMicrotasks()
 
     // With sessionAutoTitle=false in our mock settings, no rename should happen
     // This is a simplified test since the title generation requires core-v2
 
-    ctx.chat.cancel()
+    ctx.agent.cancel()
     ctx.dispose()
   })
 })

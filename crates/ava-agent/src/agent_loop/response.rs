@@ -1,6 +1,6 @@
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use ava_llm::ThinkingConfig;
 use ava_types::{AvaError, Message, Result, StreamToolCall, ThinkingLevel, TokenUsage, ToolCall};
@@ -111,6 +111,29 @@ fn merge_tool_arguments(existing: &mut String, incoming: &str) {
     // Cheap string-level dedup: some providers re-send the full payload.
     if existing == incoming {
         return;
+    }
+
+    // Some providers stream tool arguments as full or progressively growing JSON
+    // snapshots rather than true deltas. Replacing the buffer in those cases
+    // avoids corrupting valid JSON by concatenating successive snapshots.
+    let existing_trimmed = existing.trim();
+    let incoming_trimmed = incoming.trim();
+    let incoming_is_jsonish =
+        incoming_trimmed.starts_with('{') || incoming_trimmed.starts_with('[');
+    if incoming_is_jsonish {
+        let incoming_is_complete =
+            serde_json::from_str::<serde_json::Value>(incoming_trimmed).is_ok();
+        let existing_is_complete =
+            serde_json::from_str::<serde_json::Value>(existing_trimmed).is_ok();
+
+        if incoming_is_complete
+            || incoming_trimmed.starts_with(existing_trimmed)
+            || (!existing_is_complete && incoming_trimmed.len() >= existing_trimmed.len())
+        {
+            existing.clear();
+            existing.push_str(incoming);
+            return;
+        }
     }
 
     // Re-open heuristic: if we already have a complete JSON object and the
@@ -242,6 +265,11 @@ pub(super) fn request_dedup_hash(messages: &[Message]) -> u64 {
     hasher.finish()
 }
 
+pub(super) struct PreparedRequest {
+    pub messages: Vec<Message>,
+    pub dedup_hash: u64,
+}
+
 /// Tools allowed in Plan mode. The LLM only sees these — write/edit are hidden.
 /// Bash is included but restricted at execution time to read-only commands.
 const PLAN_MODE_ALLOWED_TOOLS: &[&str] = &[
@@ -261,6 +289,53 @@ const PLAN_MODE_ALLOWED_TOOLS: &[&str] = &[
 ];
 
 impl AgentLoop {
+    pub(super) fn prepare_llm_request(&mut self) -> PreparedRequest {
+        if self.context.needs_repair() {
+            let mut msgs = self.context.get_messages().to_vec();
+            let before = msgs.len();
+            ava_types::repair_conversation(&mut msgs);
+            if msgs.len() != before {
+                tracing::debug!(
+                    before,
+                    after = msgs.len(),
+                    removed = before - msgs.len(),
+                    "repaired conversation history before LLM call"
+                );
+                self.context.replace_messages(msgs);
+            } else {
+                self.context.clear_needs_repair();
+            }
+        }
+
+        let mut messages: Vec<Message> = self
+            .context
+            .get_messages()
+            .iter()
+            .filter(|m| m.agent_visible)
+            .cloned()
+            .collect();
+        super::completion::ensure_tool_call_consistency(&mut messages);
+
+        PreparedRequest {
+            dedup_hash: request_dedup_hash(&messages),
+            messages,
+        }
+    }
+
+    pub(super) fn check_dedup_guard(
+        &self,
+        dedup_hash: u64,
+    ) -> Option<(String, Vec<ToolCall>, Option<TokenUsage>)> {
+        if let (Some(prev_hash), Some(prev_time)) = (self.last_request_hash, self.last_request_time)
+        {
+            if dedup_hash == prev_hash && prev_time.elapsed().as_secs() < 2 {
+                warn!("Skipping duplicate request (same content within 2s)");
+                return Some((String::new(), vec![], None));
+            }
+        }
+        None
+    }
+
     /// Return the tool definitions that should be sent to the LLM, respecting
     /// the `extended_tools` config flag to filter by tier, and `plan_mode` to
     /// restrict to read-only tools.
@@ -393,106 +468,34 @@ impl AgentLoop {
 
     /// Generate a response, using native tool calling when the provider supports it.
     /// Returns (response_text, tool_calls, usage).
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(super) async fn generate_response(
         &mut self,
     ) -> Result<(String, Vec<ToolCall>, Option<TokenUsage>)> {
-        // Dedup guard: skip if identical request within 2s
-        // Only send agent-visible messages to the LLM (compacted messages excluded).
-        let mut messages: Vec<Message> = self
-            .context
-            .get_messages()
-            .iter()
-            .filter(|m| m.agent_visible)
-            .cloned()
-            .collect();
-        super::completion::ensure_tool_call_consistency(&mut messages);
-        let messages = messages.as_slice();
-        let hash = request_dedup_hash(messages);
-        if let (Some(prev_hash), Some(prev_time)) = (self.last_request_hash, self.last_request_time)
-        {
-            if hash == prev_hash && prev_time.elapsed().as_secs() < 2 {
-                warn!("Skipping duplicate request (same content within 2s)");
-                return Ok((String::new(), vec![], None));
-            }
+        let prepared = self.prepare_llm_request();
+        if let Some(empty) = self.check_dedup_guard(prepared.dedup_hash) {
+            return Ok(empty);
         }
-
-        let timeout_secs = self.config.stream_timeout_secs;
-        let result = if self.llm.supports_tools() {
-            let tool_defs = self.active_tool_defs_with_hooks().await;
-            let fut = self.llm.generate_with_tools(messages, &tool_defs);
-            let response = if timeout_secs > 0 {
-                tokio::time::timeout(Duration::from_secs(timeout_secs), fut)
-                    .await
-                    .map_err(|_| AvaError::ProviderError {
-                        provider: self.config.model.clone(),
-                        message: format!(
-                            "LLM request timed out after {timeout_secs} seconds. \
-                             The provider may be overloaded."
-                        ),
-                    })??
-            } else {
-                fut.await?
-            };
-            Ok((response.content, response.tool_calls, response.usage))
-        } else {
-            let fut = self.llm.generate(messages);
-            let response = if timeout_secs > 0 {
-                tokio::time::timeout(Duration::from_secs(timeout_secs), fut)
-                    .await
-                    .map_err(|_| AvaError::ProviderError {
-                        provider: self.config.model.clone(),
-                        message: format!(
-                            "LLM request timed out after {timeout_secs} seconds. \
-                             The provider may be overloaded."
-                        ),
-                    })??
-            } else {
-                fut.await?
-            };
-            let tool_calls = parse_tool_calls(&response)?;
-            Ok((response, tool_calls, None))
-        };
-
-        // Only set dedup hash when we got a non-empty response, so that
-        // empty responses (e.g. from format mismatches) don't prevent the
-        // next turn from making a real API call.
-        if let Ok((ref text, ref calls, _)) = result {
-            if !text.trim().is_empty() || !calls.is_empty() {
-                self.last_request_hash = Some(hash);
-                self.last_request_time = Some(Instant::now());
-            }
-        }
-
-        result
+        self.generate_response_prepared(prepared).await
     }
 
     /// Like `generate_response` but uses thinking when configured.
     pub(super) async fn generate_response_with_thinking(
         &mut self,
     ) -> Result<(String, Vec<ToolCall>, Option<TokenUsage>)> {
-        if self.config.thinking_level == ThinkingLevel::Off {
-            return self.generate_response().await;
-        }
+        let prepared = self.prepare_llm_request();
+        self.generate_response_with_thinking_prepared(prepared)
+            .await
+    }
 
-        // Dedup guard
-        // Only send agent-visible messages to the LLM (compacted messages excluded).
-        let mut messages: Vec<Message> = self
-            .context
-            .get_messages()
-            .iter()
-            .filter(|m| m.agent_visible)
-            .cloned()
-            .collect();
-        super::completion::ensure_tool_call_consistency(&mut messages);
-        let messages = messages.as_slice();
-        let hash = request_dedup_hash(messages);
-        if let (Some(prev_hash), Some(prev_time)) = (self.last_request_hash, self.last_request_time)
-        {
-            if hash == prev_hash && prev_time.elapsed().as_secs() < 2 {
-                warn!("Skipping duplicate request (same content within 2s)");
-                return Ok((String::new(), vec![], None));
-            }
+    pub(super) async fn generate_response_with_thinking_prepared(
+        &mut self,
+        prepared: PreparedRequest,
+    ) -> Result<(String, Vec<ToolCall>, Option<TokenUsage>)> {
+        if self.config.thinking_level == ThinkingLevel::Off {
+            return self.generate_response_prepared(prepared).await;
         }
+        let messages = prepared.messages.as_slice();
 
         let timeout_secs = self.config.stream_timeout_secs;
         let result = if self.llm.supports_tools() {
@@ -548,12 +551,51 @@ impl AgentLoop {
         };
 
         // Only set dedup hash for non-empty responses (see generate_response comment).
-        if let Ok((ref text, ref calls, _)) = result {
-            if !text.trim().is_empty() || !calls.is_empty() {
-                self.last_request_hash = Some(hash);
-                self.last_request_time = Some(Instant::now());
-            }
-        }
+        result
+    }
+
+    async fn generate_response_prepared(
+        &mut self,
+        prepared: PreparedRequest,
+    ) -> Result<(String, Vec<ToolCall>, Option<TokenUsage>)> {
+        let messages = prepared.messages.as_slice();
+
+        let timeout_secs = self.config.stream_timeout_secs;
+        let result = if self.llm.supports_tools() {
+            let tool_defs = self.active_tool_defs_with_hooks().await;
+            let fut = self.llm.generate_with_tools(messages, &tool_defs);
+            let response = if timeout_secs > 0 {
+                tokio::time::timeout(Duration::from_secs(timeout_secs), fut)
+                    .await
+                    .map_err(|_| AvaError::ProviderError {
+                        provider: self.config.model.clone(),
+                        message: format!(
+                            "LLM request timed out after {timeout_secs} seconds. \
+                             The provider may be overloaded."
+                        ),
+                    })??
+            } else {
+                fut.await?
+            };
+            Ok((response.content, response.tool_calls, response.usage))
+        } else {
+            let fut = self.llm.generate(messages);
+            let response = if timeout_secs > 0 {
+                tokio::time::timeout(Duration::from_secs(timeout_secs), fut)
+                    .await
+                    .map_err(|_| AvaError::ProviderError {
+                        provider: self.config.model.clone(),
+                        message: format!(
+                            "LLM request timed out after {timeout_secs} seconds. \
+                             The provider may be overloaded."
+                        ),
+                    })??
+            } else {
+                fut.await?
+            };
+            let tool_calls = parse_tool_calls(&response)?;
+            Ok((response, tool_calls, None))
+        };
 
         result
     }
@@ -772,6 +814,23 @@ mod tests {
         let mut existing = r#"{"pattern":"*.rs"}"#.to_string();
         merge_tool_arguments(&mut existing, r#","path":"src"}"#);
         assert_eq!(existing, r#"{"pattern":"*.rs","path":"src"}"#);
+    }
+
+    #[test]
+    fn merge_tool_arguments_replaces_with_new_complete_snapshot() {
+        let mut existing = r#"{"path":"src/main.rs"}"#.to_string();
+        merge_tool_arguments(
+            &mut existing,
+            r#"{"path":"src/main.rs","offset":1,"limit":200}"#,
+        );
+        assert_eq!(existing, r#"{"path":"src/main.rs","offset":1,"limit":200}"#);
+    }
+
+    #[test]
+    fn merge_tool_arguments_replaces_with_growing_json_snapshot() {
+        let mut existing = r#"{"path":"src""#.to_string();
+        merge_tool_arguments(&mut existing, r#"{"path":"src/main.rs""#);
+        assert_eq!(existing, r#"{"path":"src/main.rs""#);
     }
 
     #[test]

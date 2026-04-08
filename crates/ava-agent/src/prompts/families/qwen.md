@@ -1,0 +1,2 @@
+- Qwen models support very long contexts (up to 1M). Use this for full-repo analysis when needed.
+- Qwen-Coder excels at agentic tool calling and autonomous programming. Chain tool calls confidently.

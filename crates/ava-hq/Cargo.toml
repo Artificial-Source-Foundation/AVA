@@ -18,14 +18,15 @@ ava-acp = { path = "../ava-acp" }
 ava-context = { path = "../ava-context" }
 ava-llm = { path = "../ava-llm" }
 ava-platform = { path = "../ava-platform" }
+ava-review = { path = "../ava-review" }
 ava-tools = { path = "../ava-tools" }
 ava-types = { path = "../ava-types" }
 chrono.workspace = true
 fs2 = "0.4"
-regex = "1"
 futures.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+toml.workspace = true
 tracing.workspace = true
 tokio.workspace = true
 tokio-util = { version = "0.7", features = ["rt"] }

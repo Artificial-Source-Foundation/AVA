@@ -10,17 +10,11 @@
  * - Auto-scroll to new messages
  * - Dynamic height estimation
  * - Delete/rollback with confirmation dialog
- *
- * When ChatModeContext is present (e.g. HQ Director mode), the default adapter
- * automatically uses the overridden data sources and disables mutation actions
- * when readOnly is set, so the exact same rendering path is shared.
  */
 
-import { type Component, createMemo, createSignal, type JSX, Show } from 'solid-js'
-import { useChatMode } from '../../contexts/chat-mode'
+import { type Component, createMemo, createSignal, type JSX, Show, untrack } from 'solid-js'
 import { useNotification } from '../../contexts/notification'
 import { useAgent } from '../../hooks/useAgent'
-import { useChat } from '../../hooks/useChat'
 import { useLayout } from '../../stores/layout'
 import { useSession } from '../../stores/session'
 import { useSettings } from '../../stores/settings'
@@ -63,10 +57,9 @@ export interface MessageListAdapter {
 // No-op helpers for read-only mode
 // ============================================================================
 
-// biome-ignore lint/suspicious/noExplicitAny: intentional noop cast
-const noop = (() => {}) as (...args: any[]) => any
-// biome-ignore lint/suspicious/noExplicitAny: intentional noop cast
-const noopAsync = ((..._args: any[]) => Promise.resolve(0 as any)) as (...args: any[]) => any
+const noop = (): void => {}
+const noopAsyncVoid = async (): Promise<void> => {}
+const noopAsyncNumber = async (): Promise<number> => 0
 
 // ============================================================================
 // Component
@@ -77,9 +70,6 @@ export const MessageList: Component<{ adapter?: MessageListAdapter }> = (props) 
   const [searchMatchIds, setSearchMatchIds] = createSignal<Set<string>>(new Set())
   const [currentSearchId, setCurrentSearchId] = createSignal<string | null>(null)
   const { chatSearchOpen, closeChatSearch } = useLayout()
-
-  // ── Chat mode context (director mode overrides) ────────────────────────
-  const chatMode = useChatMode()
 
   const {
     messages: sessionMessages,
@@ -96,20 +86,18 @@ export const MessageList: Component<{ adapter?: MessageListAdapter }> = (props) 
     compactionIndex,
   } = useSession()
   const agent = useAgent()
-  const { isStreaming, retryMessage, editAndResend, regenerateResponse } = useChat()
+  const { isRunning, retryMessage, editAndResend, regenerateResponse } = agent
   const { success: notifySuccess } = useNotification()
 
-  // ── Effective data sources (context overrides or session defaults) ──────
-  const effectiveMessages = () => chatMode?.messages() ?? sessionMessages()
-  const effectiveLoading = () => chatMode?.isLoading() ?? isLoadingMessages()
-  const effectiveIsStreaming = () => chatMode?.isStreaming() ?? (isStreaming() || agent.isRunning())
-  const effectiveLiveMessageId = () => chatMode?.liveMessageId() ?? agent.liveMessageId()
-  const effectiveToolCalls = () => chatMode?.streamingToolCalls() ?? agent.activeToolCalls()
-  const effectiveStreamingContent = chatMode?.streamingContent ?? agent.streamingContent
-  const effectiveThinkingSegments = () =>
-    chatMode?.streamingThinkingSegments() ?? agent.thinkingSegments()
-  const effectiveCheckpoints = () => (chatMode?.readOnly ? [] : checkpoints())
-  const isReadOnly = chatMode?.readOnly ?? false
+  const effectiveMessages = sessionMessages
+  const effectiveLoading = isLoadingMessages
+  const effectiveIsStreaming = isRunning
+  const effectiveLiveMessageId = () => agent.liveMessageId()
+  const effectiveToolCalls = () => agent.activeToolCalls()
+  const effectiveStreamingContent = agent.streamingContent
+  const effectiveThinkingSegments = () => agent.thinkingSegments()
+  const effectiveCheckpoints = checkpoints
+  const isReadOnly = false
 
   // Track which messages have already animated in (persists across <For> re-creations)
   const animatedMessageIds = new Set<string>()
@@ -142,9 +130,9 @@ export const MessageList: Component<{ adapter?: MessageListAdapter }> = (props) 
   const actions = useMessageActions({
     messages: effectiveMessages,
     lastMessageId: data.lastMessageId,
-    rollbackToMessage: isReadOnly ? noop : rollbackToMessage,
-    branchAtMessage: isReadOnly ? noopAsync : branchAtMessage,
-    revertFilesAfter: isReadOnly ? noopAsync : revertFilesAfter,
+    rollbackToMessage: isReadOnly ? noopAsyncVoid : rollbackToMessage,
+    branchAtMessage: isReadOnly ? noopAsyncVoid : branchAtMessage,
+    revertFilesAfter: isReadOnly ? noopAsyncNumber : revertFilesAfter,
     notifySuccess,
   })
 
@@ -180,9 +168,6 @@ export const MessageList: Component<{ adapter?: MessageListAdapter }> = (props) 
     ),
     topContent: (
       <>
-        {/* Mode-specific top content (e.g. HQ status cards) */}
-        <Show when={chatMode?.topContent}>{(tc) => <>{tc()()}</>}</Show>
-
         <Show when={data.hiddenMessageCount() > 0}>
           <div class="mb-2 flex items-center justify-center">
             <button
@@ -250,7 +235,9 @@ export const MessageList: Component<{ adapter?: MessageListAdapter }> = (props) 
         streamingThinkingSegments: isLive() ? effectiveThinkingSegments() : undefined,
         onStartEdit: isReadOnly ? noop : () => startEditing(msg().id),
         onCancelEdit: isReadOnly ? noop : stopEditing,
-        onSaveEdit: isReadOnly ? noopAsync : (content: string) => editAndResend(msg().id, content),
+        onSaveEdit: isReadOnly
+          ? noopAsyncVoid
+          : (content: string) => editAndResend(msg().id, content),
         onRetry: isReadOnly ? noop : () => retryMessage(msg().id),
         onRegenerate: isReadOnly ? noop : () => regenerateResponse(msg().id),
         onDelete: isReadOnly ? noop : () => actions.handleDeleteRequest(msg().id),
@@ -262,9 +249,7 @@ export const MessageList: Component<{ adapter?: MessageListAdapter }> = (props) 
     bottomContent: (
       <Show when={effectiveIsStreaming()}>
         <div class="px-7 py-3">
-          <TypingIndicator
-            label={chatMode?.mode === 'director' ? 'Director is thinking...' : 'AVA is thinking...'}
-          />
+          <TypingIndicator label="AVA is thinking..." />
         </div>
       </Show>
     ),
@@ -302,7 +287,7 @@ export const MessageList: Component<{ adapter?: MessageListAdapter }> = (props) 
   // Compute adapter ONCE — not as a reactive getter that re-runs defaultAdapter()
   // on every signal change. Re-invoking defaultAdapter() creates new JSX elements
   // (e.g. SearchBar), which re-mount, fire effects, and cause infinite loops.
-  const adapter = props.adapter ?? defaultAdapter()
+  const adapter = untrack(() => props.adapter) ?? defaultAdapter()
 
   return (
     <>

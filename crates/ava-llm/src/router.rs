@@ -629,6 +629,10 @@ mod tests {
     #[tokio::test]
     async fn router_prefers_cheapest_candidate_for_cheap_profile() {
         let router = ModelRouter::new(store_with(&["anthropic", "openai"]));
+        let available_providers = router.available_providers().await;
+        let candidates = build_candidates(&available_providers, RouteRequirements::default());
+        let expected = select_cheap_candidate(&candidates, "anthropic", "claude-sonnet-4.6")
+            .expect("expected a cheaper route to exist");
         let decision = router
             .decide_route(
                 "anthropic",
@@ -643,8 +647,41 @@ mod tests {
             .await;
 
         assert_eq!(decision.source, RouteSource::PolicyAuto);
+        assert_eq!(decision.provider, expected.provider);
+        assert_eq!(decision.display_model, expected.display_model);
+        assert_eq!(
+            decision.cost_input_per_million,
+            Some(expected.cost_input_per_million)
+        );
+        assert_eq!(
+            decision.cost_output_per_million,
+            Some(expected.cost_output_per_million)
+        );
+    }
+
+    #[tokio::test]
+    async fn router_keeps_requested_model_when_it_is_already_the_cheapest_option() {
+        let router = ModelRouter::new(store_with(&["anthropic", "openai"]));
+        let decision = router
+            .decide_route(
+                "openai",
+                "gpt5.4-nano",
+                &RoutingConfig {
+                    mode: RoutingMode::Conservative,
+                    targets: RoutingTargets::default(),
+                },
+                RoutingProfile::Cheap,
+                RouteRequirements::default(),
+            )
+            .await;
+
+        assert_eq!(decision.source, RouteSource::ConfigDefault);
         assert_eq!(decision.provider, "openai");
-        assert_eq!(decision.display_model, "gpt-5-mini");
+        assert_eq!(decision.display_model, "gpt-5.4-nano");
+        assert!(decision
+            .reasons
+            .iter()
+            .any(|reason| reason.contains("no cheaper configured route")));
     }
 
     #[tokio::test]

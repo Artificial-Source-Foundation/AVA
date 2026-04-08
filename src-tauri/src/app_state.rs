@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use ava_extensions::ExtensionManager;
 use ava_permissions::{Action, Pattern, PermissionSystem, Rule};
 use ava_tools::browser::{BrowserDriver, BrowserEngine, BrowserError, BrowserResult};
 use ava_tools::edit::{EditEngine, EditRequest};
@@ -20,7 +19,6 @@ pub struct AppState {
     db: Arc<ava_db::Database>,
     memory: Arc<Mutex<ava_memory::MemorySystem>>,
     permissions: PermissionSystem,
-    extensions: Arc<Mutex<ExtensionManager>>,
     validator: Arc<ValidationPipeline>,
 }
 
@@ -57,7 +55,6 @@ impl AppState {
             db: Arc::new(db),
             memory: Arc::new(Mutex::new(memory)),
             permissions,
-            extensions: Arc::new(Mutex::new(ExtensionManager::new())),
             validator: Arc::new(validator),
         })
     }
@@ -89,7 +86,6 @@ impl AppState {
 
     pub fn database_status(&self) -> String {
         let _memory_guard = self.memory.lock().ok();
-        let _extensions_guard = self.extensions.lock().ok();
         let _permission_probe = self.permissions.evaluate("status", &[]);
         let _validation_probe = self.validator.validate("status");
 
@@ -100,20 +96,12 @@ impl AppState {
         }
     }
 
-    pub fn database(&self) -> &Arc<ava_db::Database> {
-        &self.db
-    }
-
     pub fn _memory(&self) -> &Arc<Mutex<ava_memory::MemorySystem>> {
         &self.memory
     }
 
     pub fn _permissions(&self) -> &PermissionSystem {
         &self.permissions
-    }
-
-    pub fn _extensions(&self) -> &Arc<Mutex<ExtensionManager>> {
-        &self.extensions
     }
 
     pub fn _validator(&self) -> &Arc<ValidationPipeline> {

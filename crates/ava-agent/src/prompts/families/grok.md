@@ -1,0 +1,2 @@
+- Grok models are fast and direct. Match that tone: be concise and skip ceremony.
+- Prefer parallel tool calls when possible. Grok handles concurrent operations well.

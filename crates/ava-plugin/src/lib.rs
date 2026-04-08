@@ -23,6 +23,10 @@ pub use hooks::{
     HookResponse,
 };
 pub use manager::PluginPermissionDecision;
-pub use manager::{PluginInfo, PluginManager, PluginStatus};
+pub use manager::{
+    PluginAppCapabilities, PluginAppEvent, PluginAppResponse, PluginCommandSpec, PluginEventSpec,
+    PluginInfo, PluginManager, PluginMountRegistration, PluginMountSpec, PluginRouteSpec,
+    PluginStatus,
+};
 pub use manifest::{HookSubscriptions, PluginManifest, RuntimeConfig};
 pub use runtime::PluginProcess;

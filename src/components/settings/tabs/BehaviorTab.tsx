@@ -14,28 +14,11 @@ import { useSettings } from '../../../stores/settings'
 import { ToggleRow } from '../../ui/ToggleRow'
 import { SettingsCard } from '../SettingsCard'
 
-// ============================================================================
-// Main Tab
-// ============================================================================
-
-export const BehaviorTab: Component = () => {
+export const BehaviorSettingsContent: Component = () => {
   const { settings, updateBehavior, updateNotifications, updateUI } = useSettings()
 
   return (
-    <div class="flex flex-col" style={{ gap: '24px' }}>
-      {/* Page title */}
-      <h2
-        style={{
-          'font-family': 'Geist, sans-serif',
-          'font-size': '22px',
-          'font-weight': '600',
-          color: '#F5F5F7',
-          margin: '0',
-        }}
-      >
-        Behavior
-      </h2>
-
+    <>
       {/* Input Card */}
       <SettingsCard icon={Keyboard} title="Input" description="Send key and input behavior">
         <div class="flex items-center justify-between">
@@ -258,6 +241,6 @@ export const BehaviorTab: Component = () => {
           onChange={(v) => updateBehavior({ updateCheck: v })}
         />
       </SettingsCard>
-    </div>
+    </>
   )
 }

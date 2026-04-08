@@ -3,6 +3,7 @@
 
 use ava_tui::app::{App, ModalType};
 use ava_tui::ui;
+use ava_tui::ui::layout::{sidebar_visible, SIDEBAR_AUTO_SHOW_WIDTH, SIDEBAR_MANUAL_SHOW_WIDTH};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::backend::TestBackend;
 use ratatui::Terminal;
@@ -58,7 +59,14 @@ fn welcome_screen_renders() {
     let (mut app, _tmp) = make_app();
     let terminal = render_frame(&mut app);
     let text = buffer_text(&terminal);
-    assert!(text.contains("AVA"), "welcome screen should contain 'AVA'");
+    assert!(
+        text.contains("A focused AI workspace for coding in the terminal"),
+        "welcome screen should contain the current product tagline"
+    );
+    assert!(
+        text.contains("test-model"),
+        "welcome screen should show the configured model"
+    );
 }
 
 #[test]
@@ -189,7 +197,23 @@ fn tool_approval_shows_risk() {
     let terminal = render_frame(&mut app);
     let text = buffer_text(&terminal);
     assert!(
-        text.contains("HIGH"),
-        "tool approval should display 'HIGH' risk label"
+        text.contains("high"),
+        "tool approval should display the lower-case risk badge"
     );
+    assert!(
+        text.contains("bash: rm -rf /"),
+        "tool approval should show the tool name and command summary"
+    );
+}
+
+#[test]
+fn sidebar_wide_screens_still_require_explicit_toggle() {
+    assert!(!sidebar_visible(SIDEBAR_AUTO_SHOW_WIDTH, false));
+    assert!(sidebar_visible(SIDEBAR_AUTO_SHOW_WIDTH, true));
+}
+
+#[test]
+fn sidebar_respects_middle_band_toggle() {
+    assert!(!sidebar_visible(SIDEBAR_MANUAL_SHOW_WIDTH, false));
+    assert!(sidebar_visible(SIDEBAR_MANUAL_SHOW_WIDTH, true));
 }

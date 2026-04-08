@@ -5,6 +5,7 @@ pub mod custom_commands;
 pub mod file_scanner;
 pub mod input;
 pub mod keybinds;
+pub mod lsp;
 pub mod message_queue;
 pub mod messages;
 pub mod permission;

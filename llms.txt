@@ -1,125 +1,29 @@
 # AVA
 
-> Multi-Agent AI Coding Assistant - Tauri + SolidJS Desktop
+This file is a compatibility summary for tools that probe `llms.txt`.
 
-## Quick Reference
+## Current Baseline
 
-```bash
-npm run tauri dev      # Development
-npm run lint           # Oxlint + ESLint
-npx tsc --noEmit       # Type check
-npm run test           # Vitest
-```
+1. AVA 3.3 is the baseline core.
+2. AVA is a Rust-first solo coding agent with TUI, desktop, and web surfaces.
+3. Core customization centers on `MCPs`, `Commands`, `Skills`, and plugins.
+4. HQ is no longer part of the default core product surface.
 
-Read: `CLAUDE.md` for memory bank workflow
+## Current Layout
 
----
+1. `crates/` — Rust workspace
+2. `crates/ava-tui/` — CLI and TUI entrypoint
+3. `crates/ava-agent/` — core runtime
+4. `crates/ava-llm/` — providers
+5. `crates/ava-tools/` — tools
+6. `src/` — SolidJS desktop frontend
+7. `src-tauri/` — Tauri backend
+8. `docs/` — active docs, architecture notes, and archived research
 
-## Architecture
+## Read First
 
-```
-AVA/
-├── packages/
-│   ├── core/              # Business logic (29,500+ lines)
-│   ├── platform-node/     # Node.js implementations
-│   └── platform-tauri/    # Tauri implementations
-├── cli/                   # CLI with ACP agent
-└── src/                   # Tauri SolidJS frontend (~3,700 lines)
-```
-
-### Core Modules (`packages/core/src/`)
-
-```
-├── agent/         # Autonomous loop, subagents, recovery
-├── commander/     # Hierarchical delegation (Team Lead → Senior Leads → Junior Devs)
-│   └── parallel/  # Concurrent execution, conflict detection
-├── tools/         # 22 tools (file, web, task, browser, plan, patch, batch, search)
-├── context/       # Token tracking, compaction
-├── memory/        # Episodic, semantic, procedural
-├── config/        # Settings, credentials
-├── validator/     # QA pipeline (syntax, types, lint)
-├── codebase/      # Repo understanding, PageRank
-├── permissions/   # Safety, risk assessment
-├── session/       # State, checkpoints, forking
-├── mcp/           # MCP protocol client
-├── diff/          # Change tracking
-├── git/           # Snapshots, rollback
-├── question/      # LLM-to-user questions
-├── instructions/  # Project instructions
-├── scheduler/     # Background tasks
-├── llm/           # Provider clients
-├── models/        # Model registry
-└── auth/          # OAuth, PKCE
-```
-
----
-
-## Tools (22)
-
-| Tool | Purpose |
-|------|---------|
-| read_file | Read file contents |
-| create_file | Create new file |
-| write_file | Overwrite file |
-| delete_file | Delete file |
-| edit | Fuzzy-matching file editing |
-| apply_patch | Apply unified diffs to files |
-| multiedit | Edit multiple files at once |
-| glob | Find files by pattern |
-| grep | Search file contents |
-| ls | Directory listing with tree |
-| bash | Execute shell commands (PTY supported) |
-| batch | Batch execute multiple tools |
-| codesearch | Search codebase with context |
-| question | Ask user clarifying questions |
-| skill | Auto-invoke skills from plugins |
-| todoread | Read session todo list |
-| todowrite | Update session todo list |
-| task | Spawn subagents |
-| websearch | Web search (Tavily, Exa) |
-| webfetch | Fetch and process web pages |
-| browser | Puppeteer browser automation |
-| attempt_completion | Finish task with summary |
-| plan_enter | Enter plan mode |
-| plan_exit | Exit plan mode |
-
----
-
-## Entry Points
-
-| File | Purpose |
-|------|---------|
-| `packages/core/src/index.ts` | Core exports |
-| `packages/core/src/agent/loop.ts` | AgentExecutor |
-| `packages/core/src/tools/index.ts` | Tool registry |
-| `cli/src/index.ts` | CLI entry |
-
----
-
-## Data Flow
-
-```
-CLI/Frontend → AgentExecutor.run() → Tools → LLM → Response
-                    ↓
-              Commander delegates
-                    ↓
-        Workers (parallel) → Validator → Results
-```
-
----
-
-## Status
-
-- **Epics Complete**: 1-21, 25-26, Sprints 1-7 (core + desktop app + LLM integration)
-- **Working**: Chat with streaming LLM responses (credential bridge connected)
-- **Next**: Tool execution in agent mode, session management UI
-
----
-
-## Links
-
-- [CLAUDE.md](CLAUDE.md) - Memory bank workflow
-- [AGENTS.md](AGENTS.md) - Universal AI instructions
-- [Memory Bank](docs/memory-bank/) - Current state
-- [Roadmap](docs/ROADMAP.md) - Epics 1-21 complete
-- [Architecture](docs/memory-bank/techContext.md) - Technical details
+1. `AGENTS.md`
+2. `docs/README.md`
+3. `docs/ava-3.3-plan.md`
+4. `docs/backlog.md`
+5. `docs/architecture/crate-map.md`

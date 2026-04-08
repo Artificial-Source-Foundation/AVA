@@ -7,7 +7,6 @@
 
 import { Sparkles } from 'lucide-solid'
 import { type Component, createMemo } from 'solid-js'
-import { useHq } from '../../stores/hq'
 import { useLayout } from '../../stores/layout'
 import { usePlanOverlay } from '../../stores/planOverlayStore'
 import { useSession } from '../../stores/session'
@@ -16,11 +15,9 @@ import { ChatView } from '../chat/ChatView'
 import { PlanFullScreen } from '../chat/plan-viewer/PlanFullScreen'
 import { SubagentDetailView } from '../chat/SubagentDetailView'
 import { DashboardView } from '../dashboard/DashboardView'
-import { HqShell } from '../hq'
 
 export const MainArea: Component = () => {
   const { currentSession, messages } = useSession()
-  const { hqMode } = useHq()
   const { dashboardVisible, viewingSubagentId, viewingPlanId, closePlanViewer } = useLayout()
   const planOverlay = usePlanOverlay()
 
@@ -45,16 +42,12 @@ export const MainArea: Component = () => {
 
   return (
     <div class="flex flex-col h-full w-full min-w-0 bg-[var(--surface)]">
-      {hqMode() ? (
-        <div class="flex-1 min-h-0 overflow-hidden">
-          <HqShell />
-        </div>
-      ) : viewingPlanId() && viewedPlan() ? (
+      {viewingPlanId() && viewedPlan() ? (
         <div class="flex-1 min-h-0 overflow-hidden">
           <PlanFullScreen
             plan={viewedPlan()!}
             onApprove={() => {
-              planOverlay.executePlan('code')
+              planOverlay.executePlan()
               closePlanViewer()
             }}
             onRevise={() => {

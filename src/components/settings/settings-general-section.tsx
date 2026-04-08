@@ -12,8 +12,17 @@ import { useSettings } from '../../stores/settings'
 import { Toggle } from '../ui/Toggle'
 import { ToggleRow } from '../ui/ToggleRow'
 import { SettingsCard } from './SettingsCard'
+import { BehaviorSettingsContent } from './tabs/BehaviorTab'
+import { type Keybinding, KeybindingsTab } from './tabs/KeybindingsTab'
 
-export const GeneralSection: Component = () => {
+interface GeneralSectionProps {
+  keybindings: Keybinding[]
+  onEditKeybinding: (id: string) => void
+  onResetKeybinding: (id: string) => void
+  onResetAllKeybindings: () => void
+}
+
+export const GeneralSection: Component<GeneralSectionProps> = (props) => {
   const { settings, updateUI, updateGit, exportSettings, importSettings } = useSettings()
 
   return (
@@ -192,10 +201,19 @@ export const GeneralSection: Component = () => {
               color: '#C8C8CC',
             }}
           >
-            AVA v2.1.0
+            AVA v3.x
           </span>
         </div>
       </SettingsCard>
+
+      <BehaviorSettingsContent />
+
+      <KeybindingsTab
+        keybindings={props.keybindings}
+        onEdit={props.onEditKeybinding}
+        onReset={props.onResetKeybinding}
+        onResetAll={props.onResetAllKeybindings}
+      />
     </div>
   )
 }

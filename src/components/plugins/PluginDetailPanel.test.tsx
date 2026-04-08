@@ -1,6 +1,6 @@
 import { render } from 'solid-js/web'
 import { afterEach, describe, expect, it } from 'vitest'
-import type { PluginCatalogItem, PluginState } from '../../types/plugin'
+import type { PluginCatalogItem, PluginMountRegistration, PluginState } from '../../types/plugin'
 import { PluginDetailPanel } from './PluginDetailPanel'
 
 const samplePlugin: PluginCatalogItem = {
@@ -18,6 +18,18 @@ const enabledState: PluginState = {
   installed: true,
   enabled: true,
 }
+
+const mounts: PluginMountRegistration[] = [
+  {
+    plugin: 'task-planner',
+    mount: {
+      id: 'task-planner.settings',
+      location: 'settings.section',
+      label: 'Task Planner',
+      description: 'Task Planner settings section',
+    },
+  },
+]
 
 afterEach(() => {
   document.body.innerHTML = ''
@@ -48,6 +60,22 @@ describe('PluginDetailPanel', () => {
     expect(container.textContent).toContain('official')
     expect(container.textContent).toContain('verified')
     expect(container.textContent).toContain('Installed + enabled')
+
+    dispose()
+  })
+
+  it('shows plugin mount metadata when available', () => {
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const dispose = render(
+      () => <PluginDetailPanel plugin={samplePlugin} state={enabledState} mounts={mounts} />,
+      container
+    )
+
+    expect(container.textContent).toContain('Exposed UI Mounts')
+    expect(container.textContent).toContain('settings.section')
+    expect(container.textContent).toContain('Task Planner settings section')
+    expect(container.textContent).toContain('task-planner.settings')
 
     dispose()
   })

@@ -19,6 +19,8 @@ pub struct SubAgentData {
     pub description: String,
     /// Number of tools the sub-agent used (populated on completion).
     pub tool_count: usize,
+    /// Current tool name while the sub-agent is running.
+    pub current_tool: Option<String>,
     /// How long the sub-agent took (populated on completion).
     pub duration: Option<Duration>,
     /// Whether the sub-agent is still executing.

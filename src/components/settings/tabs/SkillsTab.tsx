@@ -1,11 +1,7 @@
 /**
- * Rules & Commands Tab — Pencil design revamp
+ * Rules & Commands Content
  *
- * Two cards on one page:
- * 1. Rules — active rule files with status badges
- * 2. Custom Commands — TOML-based prompt templates with /command display
- *
- * Skills have moved to the dedicated AI > Skills tab.
+ * Shared content block rendered inside the merged Skills settings surface.
  */
 
 import { Plus, ScrollText, Terminal } from 'lucide-solid'
@@ -19,7 +15,7 @@ import { SETTINGS_CARD_GAP } from '../settings-constants'
 import { CommandEditForm } from './commands/CommandEditForm'
 import { RulesSection } from './rules-section'
 
-export const SkillsTab: Component = () => {
+export const RulesAndCommandsContent: Component = () => {
   // ----- Commands state -----
   const [commands, setCommands] = createSignal<CustomCommandFile[]>([])
   const [editingCmd, setEditingCmd] = createSignal<null | 'new' | string>(null)
@@ -53,18 +49,6 @@ export const SkillsTab: Component = () => {
 
   return (
     <div style={{ display: 'flex', 'flex-direction': 'column', gap: SETTINGS_CARD_GAP }}>
-      {/* Page title */}
-      <h1
-        style={{
-          'font-family': 'Geist, sans-serif',
-          'font-size': '22px',
-          'font-weight': '600',
-          color: '#F5F5F7',
-        }}
-      >
-        Rules & Commands
-      </h1>
-
       {/* ===== Rules Card ===== */}
       <div
         style={{

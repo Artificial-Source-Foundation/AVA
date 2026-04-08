@@ -10,6 +10,7 @@ mod greet;
 mod memory;
 mod oauth;
 mod permissions;
+mod plugin_host;
 mod plugin_state;
 pub mod pty;
 mod reflection;
@@ -23,7 +24,6 @@ pub mod agent_commands;
 pub mod config_commands;
 pub mod context_commands;
 mod helpers;
-pub mod hq_commands;
 pub mod mcp_commands;
 pub mod model_commands;
 pub mod permission_commands;
@@ -45,6 +45,7 @@ pub use greet::greet;
 pub use memory::{memory_recall, memory_recent, memory_remember, memory_search};
 pub use oauth::{oauth_copilot_device_poll, oauth_copilot_device_start, oauth_listen};
 pub use permissions::evaluate_permission;
+pub use plugin_host::{list_plugin_mounts, plugin_host_invoke};
 pub use plugin_state::{
     get_plugins_state, install_plugin, set_plugin_enabled, set_plugins_state, uninstall_plugin,
 };
@@ -62,17 +63,10 @@ pub use agent_commands::{
     resolve_question, retry_last_message, steer_agent, submit_goal, undo_last_edit,
 };
 pub use config_commands::{
-    get_config, get_feature_flags, load_credentials, sync_credentials, sync_hq_agent_overrides,
-    update_feature_flags, update_llm_config,
+    get_config, get_feature_flags, load_credentials, sync_credentials, update_feature_flags,
+    update_llm_config,
 };
 pub use context_commands::compact_context;
-pub use hq_commands::{
-    add_comment, approve_plan, bootstrap_hq_workspace, cancel_hq, create_epic, create_issue,
-    get_activity_feed, get_agent, get_agents, get_dashboard_metrics, get_director_chat, get_epic,
-    get_hq_settings, get_hq_status, get_issue, get_plan, list_epics, list_issues, move_issue,
-    reject_plan, send_director_message, start_hq, steer_lead, update_epic, update_hq_settings,
-    update_issue,
-};
 pub use mcp_commands::{list_mcp_servers, reload_mcp_servers};
 pub use model_commands::{get_current_model, list_models, switch_model};
 pub use permission_commands::{

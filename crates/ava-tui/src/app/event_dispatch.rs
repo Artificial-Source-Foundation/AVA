@@ -28,6 +28,10 @@ impl App {
             }
             AppEvent::Mouse(mouse) => {
                 use crossterm::event::MouseEventKind;
+                self.state.mouse_position = Some(MousePosition {
+                    column: mouse.column,
+                    row: mouse.row,
+                });
                 if let Some(modal) = self.state.active_modal {
                     self.handle_modal_mouse(modal, mouse, app_tx.clone());
                 } else {
@@ -35,6 +39,77 @@ impl App {
                         MouseEventKind::ScrollUp => self.state.messages.scroll_up(1),
                         MouseEventKind::ScrollDown => self.state.messages.scroll_down(1),
                         MouseEventKind::Down(crossterm::event::MouseButton::Left) => {
+                            if let Some(target) = self
+                                .state
+                                .sidebar_click_targets
+                                .iter()
+                                .find(|target| {
+                                    target.x.contains(&mouse.column)
+                                        && target.y.contains(&mouse.row)
+                                })
+                                .cloned()
+                            {
+                                match target.action {
+                                    SidebarClickAction::ToggleMcpServer { name, enabled } => {
+                                        let result = if enabled {
+                                            tokio::task::block_in_place(|| {
+                                                tokio::runtime::Handle::current().block_on(
+                                                    self.state.agent.mcp_disable_server(&name),
+                                                )
+                                            })
+                                        } else {
+                                            tokio::task::block_in_place(|| {
+                                                tokio::runtime::Handle::current().block_on(
+                                                    self.state.agent.mcp_enable_server(&name),
+                                                )
+                                            })
+                                        };
+                                        match result {
+                                            Ok(true) => {
+                                                self.state.mcp_servers =
+                                                    tokio::task::block_in_place(|| {
+                                                        tokio::runtime::Handle::current()
+                                                            .block_on(
+                                                                self.state.agent.mcp_server_info(),
+                                                            )
+                                                            .unwrap_or_default()
+                                                    });
+                                                self.set_status(
+                                                    if enabled {
+                                                        format!("Disabled MCP server: {name}")
+                                                    } else {
+                                                        format!("Enabled MCP server: {name}")
+                                                    },
+                                                    StatusLevel::Info,
+                                                );
+                                            }
+                                            Ok(false) => {
+                                                self.set_status(
+                                                    format!("No change for MCP server: {name}"),
+                                                    StatusLevel::Warn,
+                                                );
+                                            }
+                                            Err(err) => {
+                                                self.set_status(
+                                                    format!(
+                                                        "Failed to update MCP server {name}: {err}"
+                                                    ),
+                                                    StatusLevel::Error,
+                                                );
+                                            }
+                                        }
+                                    }
+                                    SidebarClickAction::RefreshLsp => {
+                                        if !self.lsp_refresh_inflight {
+                                            self.lsp_refresh_inflight = true;
+                                            self.last_lsp_refresh_at =
+                                                Some(std::time::Instant::now());
+                                            self.spawn_lsp_sidebar_refresh(app_tx.clone());
+                                        }
+                                    }
+                                }
+                                return;
+                            }
                             if let Some(idx) = self.state.messages.message_index_at_row(mouse.row) {
                                 if let Some(msg) = self.state.messages.messages.get(idx) {
                                     match msg.kind {
@@ -58,6 +133,17 @@ impl App {
             }
             AppEvent::Tick => {
                 self.flush_token_buffer();
+                if self.state.feature_lsp_enabled && !self.lsp_refresh_inflight {
+                    let should_refresh = self
+                        .last_lsp_refresh_at
+                        .map(|at| at.elapsed() >= std::time::Duration::from_secs(3))
+                        .unwrap_or(true);
+                    if should_refresh {
+                        self.lsp_refresh_inflight = true;
+                        self.last_lsp_refresh_at = Some(std::time::Instant::now());
+                        self.spawn_lsp_sidebar_refresh(app_tx.clone());
+                    }
+                }
                 if let Some(ref msg) = self.state.status_message {
                     if msg.is_expired() {
                         self.state.status_message = None;
@@ -180,6 +266,7 @@ impl App {
             AppEvent::McpServersLoaded(result) => match result {
                 Ok(servers) => {
                     let count = servers.len();
+                    self.state.mcp_servers = servers.clone();
                     let content = super::commands::format_mcp_server_list(&servers);
                     self.set_status(format!("Loaded {count} MCP servers"), StatusLevel::Info);
                     self.state.info_panel = Some(super::InfoPanelState {
@@ -194,6 +281,20 @@ impl App {
                     StatusLevel::Error,
                 ),
             },
+            AppEvent::LspEntriesLoaded(result) => {
+                self.lsp_refresh_inflight = false;
+                match result {
+                    Ok(entries) => {
+                        self.state.lsp_entries = entries;
+                    }
+                    Err(err) => {
+                        self.set_status(
+                            format!("Failed to refresh LSP rows: {err}"),
+                            StatusLevel::Error,
+                        );
+                    }
+                }
+            }
             AppEvent::CommandMessage(result) => {
                 if let Some((level, text)) = result.status {
                     self.set_status(text, level);

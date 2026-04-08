@@ -5,7 +5,7 @@ use crate::widgets::safe_render::{anchored_popup, clamp_line};
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph};
+use ratatui::widgets::{Block, Clear, Paragraph};
 use ratatui::Frame;
 
 /// Maximum number of visible items in the slash menu.
@@ -27,8 +27,7 @@ pub fn render_slash_menu(
     }
 
     let visible_count = item_count.min(MAX_VISIBLE);
-    // Each item is 1 row, plus 2 for border (top + bottom)
-    let menu_height = (visible_count as u16) + 2;
+    let menu_height = visible_count as u16;
     let menu_width = composer_rect.width.saturating_sub(1).min(60);
 
     // Use anchored_popup to guarantee the menu stays within the viewport
@@ -44,10 +43,7 @@ pub fn render_slash_menu(
     // Clear the area behind the menu
     frame.render_widget(Clear, menu_rect);
 
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(theme.border))
-        .style(Style::default().bg(theme.bg_elevated));
+    let block = Block::default().style(Style::default().bg(theme.bg_elevated));
 
     let inner = block.inner(menu_rect);
     frame.render_widget(block, menu_rect);
@@ -72,15 +68,15 @@ pub fn render_slash_menu(
         let is_selected = idx == state.selected;
 
         let bg = if is_selected {
-            theme.primary
+            theme.bg_surface
         } else {
             theme.bg_elevated
         };
-        let fg = if is_selected { theme.bg } else { theme.text };
+        let fg = theme.text;
         let detail_fg = if is_selected {
-            theme.bg
-        } else {
             theme.text_muted
+        } else {
+            theme.text_dimmed
         };
 
         let prefix = format!("/{}", item.value);
@@ -91,9 +87,7 @@ pub fn render_slash_menu(
         // Slash prefix styled
         spans.push(Span::styled(
             "/",
-            Style::default()
-                .fg(if is_selected { fg } else { theme.accent })
-                .bg(bg),
+            Style::default().fg(theme.text_muted).bg(bg),
         ));
         spans.push(Span::styled(
             item.value.clone(),

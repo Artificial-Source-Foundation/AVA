@@ -10,19 +10,13 @@ import type { Component } from 'solid-js'
 import {
   AlibabaCloudLogo,
   AnthropicLogo,
-  CohereLogo,
   CopilotLogo,
-  DeepSeekLogo,
   GLMLogo,
   GoogleLogo,
-  GroqLogo,
   KimiLogo,
-  MistralLogo,
   OllamaLogo,
   OpenAILogo,
   OpenRouterLogo,
-  TogetherLogo,
-  XAILogo,
 } from './provider-logos'
 
 type IconComponent = Component<{ class?: string }>
@@ -30,19 +24,21 @@ type IconComponent = Component<{ class?: string }>
 export const PROVIDER_LOGOS: Record<string, IconComponent> = {
   anthropic: AnthropicLogo,
   openai: OpenAILogo,
+  chatgpt: OpenAILogo,
+  gemini: GoogleLogo,
   google: GoogleLogo,
   copilot: CopilotLogo,
   openrouter: OpenRouterLogo,
-  xai: XAILogo,
-  mistral: MistralLogo,
-  groq: GroqLogo,
-  deepseek: DeepSeekLogo,
-  cohere: CohereLogo,
-  together: TogetherLogo,
+  inception: OpenAILogo,
+  alibaba: AlibabaCloudLogo,
+  'alibaba-cn': AlibabaCloudLogo,
+  zai: GLMLogo,
+  'zai-coding-plan': GLMLogo,
+  'zhipuai-coding-plan': GLMLogo,
   kimi: KimiLogo,
+  'kimi-for-coding': KimiLogo,
   glm: GLMLogo,
   ollama: OllamaLogo,
-  alibaba: AlibabaCloudLogo,
 }
 
 /** Get the logo component for a provider, falling back to Bot icon */

@@ -522,6 +522,7 @@ impl AgentStack {
             context,
             config,
         )
+        .with_trace_data_dir(self.data_dir.clone())
         .with_tool_visibility_profile(tool_visibility_profile)
         .with_history(history)
         .with_plugin_manager(Arc::clone(&self.plugin_manager));

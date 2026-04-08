@@ -1,7 +1,6 @@
 import type { LucideProps } from 'lucide-solid'
 import { Brain, ScrollText, Terminal, X } from 'lucide-solid'
 import { type Component, For, type JSX, lazy, Show } from 'solid-js'
-import { useHq } from '../../stores/hq'
 import { useLayout } from '../../stores/layout'
 import { usePlanOverlay } from '../../stores/planOverlayStore'
 import { useSettings } from '../../stores/settings'
@@ -44,7 +43,6 @@ export const AppShell: Component = () => {
     bottomPanelTab,
     switchBottomPanelTab,
   } = useLayout()
-  const { hqMode } = useHq()
   const { settings } = useSettings()
 
   const { settingsOpen } = useLayout()
@@ -58,7 +56,7 @@ export const AppShell: Component = () => {
     bottomPanelHeight,
     setBottomPanelHeight,
   })
-  const showChatSidebar = () => sidebarVisible() && !hqMode()
+  const showChatSidebar = () => sidebarVisible()
 
   return (
     <div class="h-screen flex flex-col text-[var(--text-primary)] overflow-hidden">

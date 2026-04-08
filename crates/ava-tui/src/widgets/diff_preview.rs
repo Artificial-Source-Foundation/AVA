@@ -3,7 +3,7 @@ use crate::widgets::safe_render::clamp_line;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Paragraph};
+use ratatui::widgets::{Block, Paragraph};
 use ratatui::Frame;
 use similar::TextDiff;
 use std::path::{Path, PathBuf};
@@ -419,26 +419,23 @@ pub fn render_diff_preview(
     theme: &Theme,
 ) {
     // Fill background
-    let bg = Block::default()
-        .style(Style::default().bg(theme.bg_elevated))
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(theme.border));
+    let bg = Block::default().style(Style::default().bg(theme.bg_elevated));
     frame.render_widget(bg, area);
 
     let inner = Rect {
-        x: area.x + 1,
+        x: area.x + 2,
         y: area.y + 1,
-        width: area.width.saturating_sub(2),
+        width: area.width.saturating_sub(4),
         height: area.height.saturating_sub(2),
     };
 
-    // Split: header (2) + body (rest) + footer (2)
+    // Split: header (1) + body (rest) + footer (1)
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(2),
+            Constraint::Length(1),
             Constraint::Min(0),
-            Constraint::Length(2),
+            Constraint::Length(1),
         ])
         .split(inner);
 
@@ -450,16 +447,16 @@ pub fn render_diff_preview(
 fn render_header(frame: &mut Frame<'_>, area: Rect, state: &DiffPreviewState, theme: &Theme) {
     let (total, accepted, rejected, undecided) = state.total_stats();
     let file_count = state.file_count();
-    let header_w = area.width.saturating_sub(2) as usize;
+    let header_w = area.width as usize;
 
     let title_spans = vec![
         Span::styled(
-            "Diff Preview".to_string(),
+            "diff".to_string(),
             Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
         ),
         Span::styled(
-            format!("  {file_count} file(s), {total} hunk(s)"),
-            Style::default().fg(theme.text_muted),
+            format!("  {file_count} files  {total} hunks"),
+            Style::default().fg(theme.text_dimmed),
         ),
         Span::raw("  ".to_string()),
         Span::styled(format!("{accepted}"), Style::default().fg(theme.diff_added)),
@@ -475,27 +472,7 @@ fn render_header(frame: &mut Frame<'_>, area: Rect, state: &DiffPreviewState, th
 
     frame.render_widget(
         Paragraph::new(clamp_line(Line::from(title_spans), header_w)),
-        Rect {
-            x: area.x + 1,
-            y: area.y,
-            width: area.width.saturating_sub(2),
-            height: 1,
-        },
-    );
-
-    // Separator line
-    let sep = "\u{2500}".repeat(area.width.saturating_sub(2) as usize);
-    frame.render_widget(
-        Paragraph::new(Line::from(Span::styled(
-            sep,
-            Style::default().fg(theme.border),
-        ))),
-        Rect {
-            x: area.x + 1,
-            y: area.y + 1,
-            width: area.width.saturating_sub(2),
-            height: 1,
-        },
+        area,
     );
 }
 
@@ -660,57 +637,33 @@ fn render_hunks(frame: &mut Frame<'_>, area: Rect, state: &DiffPreviewState, the
 }
 
 fn render_footer(frame: &mut Frame<'_>, area: Rect, _state: &DiffPreviewState, theme: &Theme) {
-    let footer_w = area.width.saturating_sub(2) as usize;
-    // Separator
-    let sep = "\u{2500}".repeat(area.width.saturating_sub(2) as usize);
-    frame.render_widget(
-        Paragraph::new(Line::from(Span::styled(
-            sep,
-            Style::default().fg(theme.border),
-        ))),
-        Rect {
-            x: area.x + 1,
-            y: area.y,
-            width: area.width.saturating_sub(2),
-            height: 1,
-        },
-    );
-
-    // Keybind hints
+    let footer_w = area.width as usize;
     let hints = vec![
         Span::styled(
             "y",
-            Style::default()
-                .fg(theme.diff_added)
-                .add_modifier(Modifier::BOLD),
+            Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
         ),
         Span::styled(" accept  ", Style::default().fg(theme.text_muted)),
         Span::styled(
             "n",
-            Style::default()
-                .fg(theme.diff_removed)
-                .add_modifier(Modifier::BOLD),
+            Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
         ),
         Span::styled(" reject  ", Style::default().fg(theme.text_muted)),
         Span::styled(
             "a",
-            Style::default()
-                .fg(theme.diff_added)
-                .add_modifier(Modifier::BOLD),
+            Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
         ),
-        Span::styled(" accept all  ", Style::default().fg(theme.text_muted)),
+        Span::styled(" all  ", Style::default().fg(theme.text_muted)),
         Span::styled(
             "d",
-            Style::default()
-                .fg(theme.diff_removed)
-                .add_modifier(Modifier::BOLD),
+            Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
         ),
-        Span::styled(" reject all  ", Style::default().fg(theme.text_muted)),
+        Span::styled(" none  ", Style::default().fg(theme.text_muted)),
         Span::styled(
             "j/k",
             Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
         ),
-        Span::styled(" nav  ", Style::default().fg(theme.text_muted)),
+        Span::styled(" move  ", Style::default().fg(theme.text_muted)),
         Span::styled(
             "Tab",
             Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
@@ -718,16 +671,12 @@ fn render_footer(frame: &mut Frame<'_>, area: Rect, _state: &DiffPreviewState, t
         Span::styled(" file  ", Style::default().fg(theme.text_muted)),
         Span::styled(
             "Enter",
-            Style::default()
-                .fg(theme.primary)
-                .add_modifier(Modifier::BOLD),
+            Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
         ),
         Span::styled(" apply  ", Style::default().fg(theme.text_muted)),
         Span::styled(
             "Esc",
-            Style::default()
-                .fg(theme.error)
-                .add_modifier(Modifier::BOLD),
+            Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
         ),
         Span::styled(" cancel", Style::default().fg(theme.text_muted)),
     ];
@@ -735,9 +684,9 @@ fn render_footer(frame: &mut Frame<'_>, area: Rect, _state: &DiffPreviewState, t
     frame.render_widget(
         Paragraph::new(clamp_line(Line::from(hints), footer_w)),
         Rect {
-            x: area.x + 1,
-            y: area.y + 1,
-            width: area.width.saturating_sub(2),
+            x: area.x,
+            y: area.y,
+            width: area.width,
             height: 1,
         },
     );

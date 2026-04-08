@@ -6,11 +6,24 @@
  */
 
 import { Package, Plus, Search } from 'lucide-solid'
-import { type Component, createMemo, createSignal, For, onCleanup, Show } from 'solid-js'
-import { watchPluginDirectory } from '../../../services/extension-loader'
+import {
+  type Component,
+  createEffect,
+  createMemo,
+  createSignal,
+  For,
+  onCleanup,
+  Show,
+} from 'solid-js'
+import { watchPluginDirectory } from '../../../services/plugin-loader'
+import { rustBackend } from '../../../services/rust-bridge'
 import { usePlugins } from '../../../stores/plugins'
 import { type PluginSortBy, sortPlugins } from '../../../stores/plugins-catalog'
-import { type PluginPermission, SENSITIVE_PERMISSIONS } from '../../../types/plugin'
+import {
+  type PluginMountRegistration,
+  type PluginPermission,
+  SENSITIVE_PERMISSIONS,
+} from '../../../types/plugin'
 import { PluginDetailPanel } from '../../plugins'
 import { PluginWizard } from '../../plugins/PluginWizard'
 import { PublishDialog } from '../../plugins/PublishDialog'
@@ -30,6 +43,9 @@ export const PluginsTab: Component = () => {
   const [devModePlugins, setDevModePlugins] = createSignal<Record<string, boolean>>({})
   const [devModeStatus, setDevModeStatus] = createSignal<Record<string, DevModeStatus>>({})
   const [devModeLogs, setDevModeLogs] = createSignal<Record<string, string[]>>({})
+  const [pluginMounts, setPluginMounts] = createSignal<Record<string, PluginMountRegistration[]>>(
+    {}
+  )
   const watchers = new Map<string, () => void>()
 
   // Dialog visibility
@@ -126,6 +142,27 @@ export const PluginsTab: Component = () => {
     watchers.clear()
   })
 
+  const refreshPluginMounts = async (): Promise<void> => {
+    try {
+      const mounts = await rustBackend.listPluginMounts()
+      const grouped = mounts.reduce<Record<string, PluginMountRegistration[]>>((acc, mount) => {
+        if (!acc[mount.plugin]) {
+          acc[mount.plugin] = []
+        }
+        acc[mount.plugin].push(mount)
+        return acc
+      }, {})
+      setPluginMounts(grouped)
+    } catch {
+      setPluginMounts({})
+    }
+  }
+
+  createEffect(() => {
+    plugins.pluginState()
+    void refreshPluginMounts()
+  })
+
   // Derived state
   const selectedPlugin = createMemo(() => {
     const id = selectedPluginId()
@@ -140,6 +177,11 @@ export const PluginsTab: Component = () => {
   })
 
   const sortedPlugins = createMemo(() => sortPlugins(plugins.filteredPlugins(), sortBy()))
+  const selectedMounts = createMemo(() => {
+    const id = selectedPluginId()
+    if (!id) return []
+    return pluginMounts()[id] ?? []
+  })
 
   return (
     <div style={{ display: 'flex', 'flex-direction': 'column', gap: SETTINGS_CARD_GAP }}>
@@ -453,7 +495,11 @@ export const PluginsTab: Component = () => {
           >
             Plugin Details
           </span>
-          <PluginDetailPanel plugin={selectedPlugin()} state={selectedState()} />
+          <PluginDetailPanel
+            plugin={selectedPlugin()}
+            state={selectedState()}
+            mounts={selectedMounts()}
+          />
         </div>
       </Show>
 

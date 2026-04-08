@@ -61,14 +61,12 @@
 pub mod api;
 mod api_agent;
 mod api_config;
-mod api_hq;
 mod api_interactive;
 mod api_plans;
+mod api_plugin_host;
 mod api_sessions;
 pub mod state;
 pub mod ws;
-
-use std::path::PathBuf;
 
 use axum::http::Method;
 use axum::routing::{get, patch, post};
@@ -165,6 +163,15 @@ fn build_router(state: WebState) -> Router {
         )
         // Plugins endpoint
         .route("/api/plugins", get(api::list_plugins))
+        .route("/api/plugins/mounts", get(api::list_plugin_mounts))
+        .route(
+            "/api/plugins/{plugin}/commands/{command}",
+            post(api::invoke_plugin_command),
+        )
+        .route(
+            "/api/plugins/{plugin}/routes/{*route_path}",
+            get(api::get_plugin_route).post(api::post_plugin_route),
+        )
         // Model/provider endpoints
         .route("/api/models", get(api::list_models))
         .route("/api/models/current", get(api::get_current_model))
@@ -186,25 +193,6 @@ fn build_router(state: WebState) -> Router {
         // Plan persistence
         .route("/api/plans", get(api_plans::list_plans))
         .route("/api/plans/{filename}", get(api_plans::get_plan))
-        // HQ endpoints
-        .route("/api/hq/epics", get(api::list_epics).post(api::create_epic))
-        .route("/api/hq/issues", get(api::list_issues))
-        .route("/api/hq/plans/{epic_id}", get(api::get_plan))
-        .route("/api/hq/plans/{plan_id}/approve", post(api::approve_plan))
-        .route("/api/hq/plans/{plan_id}/reject", post(api::reject_plan))
-        .route("/api/hq/agents", get(api::get_agents))
-        .route("/api/hq/agents/{id}", get(api::get_agent))
-        .route("/api/hq/activity", get(api::get_activity_feed))
-        .route("/api/hq/metrics", get(api::get_dashboard_metrics))
-        .route(
-            "/api/hq/director-chat",
-            get(api::get_director_chat).post(api::send_director_message),
-        )
-        .route(
-            "/api/hq/settings",
-            get(api::get_hq_settings).post(api::update_hq_settings),
-        )
-        .route("/api/hq/bootstrap", post(api::bootstrap_hq_workspace))
         // WebSocket
         .route("/ws", get(ws::ws_handler))
         // Frontend log ingestion
@@ -261,12 +249,4 @@ async fn shutdown_signal() {
     tokio::signal::ctrl_c()
         .await
         .expect("failed to install Ctrl+C handler");
-}
-
-/// Resolve the data directory, creating it if necessary.
-#[allow(dead_code)]
-fn resolve_data_dir() -> PathBuf {
-    let dir = dirs::home_dir().unwrap_or_default().join(".ava");
-    std::fs::create_dir_all(&dir).ok();
-    dir
 }

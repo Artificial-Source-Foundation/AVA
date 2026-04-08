@@ -2,10 +2,7 @@
  * Plugin Templates — data + code generation helpers
  *
  * Template definitions and scaffold code generators for the PluginWizard.
- *
- * NOTE: The @ava/core-v2/extensions imports below appear inside template string
- * literals (generated code for plugin authors). They reference the extension API
- * that plugins use, NOT runtime imports in this module.
+ * Templates mirror the current `@ava-ai/plugin` SDK and `plugin.toml` runtime manifest.
  */
 
 import { Code2, type Puzzle, Terminal, Wand2, Zap } from 'lucide-solid'
@@ -21,31 +18,31 @@ export interface PluginTemplate {
 export const TEMPLATES: PluginTemplate[] = [
   {
     id: 'tool',
-    name: 'Custom Tool',
-    description: 'Register a new tool that agents can use during their work.',
+    name: 'Tool Hook',
+    description: 'Inspect or modify existing tool calls with plugin hooks.',
     icon: Terminal,
-    files: ['src/index.ts', 'ava-extension.json', 'package.json'],
+    files: ['index.ts', 'plugin.toml', 'package.json'],
   },
   {
     id: 'command',
     name: 'Slash Command',
-    description: 'Add a /command that users can invoke from the chat input.',
+    description: 'Expose a plugin-owned app command through the host seam.',
     icon: Code2,
-    files: ['src/index.ts', 'ava-extension.json', 'package.json'],
+    files: ['index.ts', 'plugin.toml', 'package.json'],
   },
   {
     id: 'provider',
-    name: 'LLM Provider',
-    description: 'Integrate a new LLM provider with the multi-model system.',
+    name: 'Provider Auth Hook',
+    description: 'Supply auth or request headers for an existing provider path.',
     icon: Zap,
-    files: ['src/index.ts', 'src/client.ts', 'ava-extension.json', 'package.json'],
+    files: ['index.ts', 'plugin.toml', 'package.json'],
   },
   {
     id: 'skill',
     name: 'Context Skill',
-    description: 'Auto-invoked instructions based on file patterns and project context.',
+    description: 'Inject skill-like instructions into the system prompt at runtime.',
     icon: Wand2,
-    files: ['src/index.ts', 'skill.md', 'ava-extension.json', 'package.json'],
+    files: ['index.ts', 'plugin.toml', 'package.json'],
   },
 ]
 
@@ -58,25 +55,42 @@ export function kebabCase(s: string): string {
     .replace(/^-|-$/g, '')
 }
 
+function hookListForTemplate(templateId: string | undefined): string[] {
+  switch (templateId) {
+    case 'tool':
+      return ['tool.before', 'tool.after']
+    case 'command':
+      return ['session.start']
+    case 'provider':
+      return ['auth', 'request.headers']
+    case 'skill':
+      return ['chat.system', 'session.start']
+    default:
+      return []
+  }
+}
+
 export function generateManifest(
   template: PluginTemplate | undefined,
   pluginName: string,
   pluginDescription: string,
   pluginAuthor: string
 ): string {
-  return JSON.stringify(
-    {
-      name: kebabCase(pluginName),
-      version: '0.1.0',
-      description: pluginDescription,
-      author: pluginAuthor || undefined,
-      main: 'src/index.ts',
-      type: template?.id,
-      permissions: template?.id === 'tool' ? ['fs'] : [],
-    },
-    null,
-    2
-  )
+  const name = kebabCase(pluginName)
+  const subscribe = hookListForTemplate(template?.id)
+  const authorLine = pluginAuthor.trim() ? `author = "${pluginAuthor.trim()}"\n` : ''
+
+  return `[plugin]
+name = "${name}"
+version = "0.1.0"
+description = "${pluginDescription}"
+${authorLine}[runtime]
+command = "node"
+args = ["index.js"]
+
+[hooks]
+subscribe = [${subscribe.map((hook) => `"${hook}"`).join(', ')}]
+`
 }
 
 export function generateIndexTs(
@@ -86,62 +100,74 @@ export function generateIndexTs(
 ): string {
   if (!template) return ''
   const name = kebabCase(pluginName)
+  const envVar = `${name.toUpperCase().replace(/-/g, '_')}_TOKEN`
 
   switch (template.id) {
     case 'tool':
-      return `import type { ExtensionAPI } from '@ava/core-v2/extensions'
+      return `import { createPlugin } from '@ava-ai/plugin'
 
-export function activate(api: ExtensionAPI) {
-  return api.registerTool({
-    definition: {
-      name: '${name}',
-      description: '${pluginDescription}',
-      input_schema: {
-        type: 'object',
-        properties: {
-          input: { type: 'string', description: 'Input value' },
-        },
-        required: ['input'],
-      },
-    },
-    async execute(args) {
-      return { success: true, output: \`Executed ${name} with: \${args.input}\` }
-    },
-  })
-}`
+createPlugin({
+  'tool.before': async (_ctx, params) => {
+    if (params.tool === 'bash') {
+      console.error('[${name}] inspecting bash invocation')
+    }
+    return { args: params.args ?? {} }
+  },
+  'tool.after': async (_ctx, params) => {
+    console.error('[${name}] tool completed:', params.tool)
+    return {}
+  },
+})`
+
     case 'command':
-      return `import type { ExtensionAPI } from '@ava/core-v2/extensions'
+      return `import { createPlugin } from '@ava-ai/plugin'
 
-export function activate(api: ExtensionAPI) {
-  return api.registerCommand({
-    name: '${name}',
-    description: '${pluginDescription}',
-    async execute(args, ctx) {
-      ctx.addMessage({ role: 'system', content: 'Running ${name}...' })
+createPlugin(
+  {
+    'session.start': async (_ctx, params) => {
+      console.error('[${name}] session started:', params.session_id ?? 'unknown')
+      return undefined
     },
-  })
-}`
+  },
+  {
+    capabilities: {
+      commands: [{ name: '${name}.run', description: '${pluginDescription}' }],
+    },
+    commands: {
+      '${name}.run': async (ctx, payload) => ({
+        result: { ok: true, project: ctx.project.name, payload },
+      }),
+    },
+  }
+)`
+
     case 'provider':
-      return `import type { ExtensionAPI } from '@ava/core-v2/extensions'
+      return `import { createPlugin } from '@ava-ai/plugin'
 
-export function activate(api: ExtensionAPI) {
-  return api.registerProvider('${name}', () => ({
-    async chat(messages, options) {
-      // Implement your provider logic here
-      return { content: 'Hello from ${name}!' }
+createPlugin({
+  auth: async () => ({
+    token: process.env.${envVar} ?? '',
+  }),
+  'request.headers': async () => ({
+    headers: {
+      Authorization: \`Bearer \${process.env.${envVar} ?? ''}\`,
     },
-  }))
-}`
-    case 'skill':
-      return `import type { ExtensionAPI } from '@ava/core-v2/extensions'
+  }),
+})`
 
-export function activate(api: ExtensionAPI) {
-  // Skills are auto-invoked based on file patterns
-  api.on('session:start', () => {
-    api.log.info('${name} skill activated')
-  })
-  return { dispose() {} }
-}`
+    case 'skill':
+      return `import { createPlugin } from '@ava-ai/plugin'
+
+createPlugin({
+  'chat.system': async () => ({
+    inject: 'You are using the ${name} skill. ${pluginDescription}',
+  }),
+  'session.start': async (_ctx, params) => {
+    console.error('[${name}] skill active for session', params.session_id ?? 'unknown')
+    return undefined
+  },
+})`
+
     default:
       return ''
   }

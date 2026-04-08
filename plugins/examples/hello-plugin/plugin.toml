@@ -1,7 +1,7 @@
 [plugin]
 name = "hello-plugin"
 version = "0.1.0"
-description = "Example: logs session lifecycle events"
+description = "Example: logs session lifecycle events and exposes app host seams"
 
 [runtime]
 command = "node"

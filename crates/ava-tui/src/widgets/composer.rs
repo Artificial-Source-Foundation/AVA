@@ -4,11 +4,13 @@ use crate::state::messages::UiMessage;
 use crate::state::theme::Theme;
 use crate::state::voice::VoicePhase;
 use crate::text_utils::truncate_display;
-use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use crate::widgets::safe_render::{to_static_line, to_static_lines};
+use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Paragraph};
 use ratatui::Frame;
+use unicode_width::UnicodeWidthChar;
 
 /// Split a line of text into spans, styling paste placeholders with accent color.
 fn styled_text_spans<'a>(text: &str, input: &InputState, theme: &Theme) -> Vec<Span<'a>> {
@@ -69,11 +71,11 @@ fn styled_text_spans<'a>(text: &str, input: &InputState, theme: &Theme) -> Vec<S
 ///
 /// Design spec (Pencil):
 ///   Composer: bg=#1A1F2E, left bar 3px (#4D9EF6)
-///   Content: padding=[12,16], gap=4, justify=center, layout=vertical
+///   Content: `padding=[12,16]`, gap=4, justify=center, layout=vertical
 ///     Line 1+: ❯ (bold) + input text (multi-line), gap=8
 ///     Last line: provider (bold blue) + model name (muted), gap=12
 pub fn render_composer(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
-    let bar_color = match state.voice.phase {
+    let prompt_color = match state.voice.phase {
         VoicePhase::Recording => state.theme.error,
         VoicePhase::Transcribing => state.theme.accent,
         VoicePhase::Idle => {
@@ -84,20 +86,15 @@ pub fn render_composer(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
             }
         }
     };
-
-    // Design: 3px bar → 1 char full-block
-    let bar = Span::styled("\u{258E}", Style::default().fg(bar_color));
-    // Design: content padding 16px → 2 chars after bar
-    let pad = "  ";
+    let pad = "";
 
     // Build prompt lines (potentially multi-line)
-    let prompt_lines: Vec<Line<'_>> = match state.voice.phase {
+    let prompt_lines: Vec<Line<'static>> = match state.voice.phase {
         VoicePhase::Recording => {
             let elapsed = state.voice.recording_duration();
             vec![Line::from(vec![
-                bar.clone(),
                 Span::raw(pad),
-                Span::styled("\u{276f} ", Style::default().fg(state.theme.accent)),
+                Span::styled("\u{276f} ", Style::default().fg(prompt_color)),
                 Span::styled(
                     format!("Listening... ({elapsed:.1}s)"),
                     Style::default()
@@ -107,9 +104,8 @@ pub fn render_composer(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
             ])]
         }
         VoicePhase::Transcribing => vec![Line::from(vec![
-            bar.clone(),
             Span::raw(pad),
-            Span::styled("\u{276f} ", Style::default().fg(state.theme.accent)),
+            Span::styled("\u{276f} ", Style::default().fg(prompt_color)),
             Span::styled(
                 "Transcribing...",
                 Style::default()
@@ -120,16 +116,15 @@ pub fn render_composer(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
         VoicePhase::Idle => {
             if state.input.buffer.is_empty() {
                 vec![Line::from(vec![
-                    bar.clone(),
                     Span::raw(pad),
                     Span::styled(
                         "\u{276f} ",
                         Style::default()
-                            .fg(state.theme.primary)
+                            .fg(prompt_color)
                             .add_modifier(Modifier::BOLD),
                     ),
                     Span::styled(
-                        "Type a message... (Shift+Enter for newline)",
+                        "Type a message",
                         Style::default().fg(state.theme.text_dimmed),
                     ),
                 ])]
@@ -137,21 +132,13 @@ pub fn render_composer(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
                 let (cursor_line, cursor_col) = state.input.cursor_line_col();
                 let input_lines: Vec<&str> = state.input.buffer.split('\n').collect();
                 let mut lines = Vec::with_capacity(input_lines.len());
+                let wrap_width = area.width.saturating_sub(4) as usize;
 
                 for (i, line_text) in input_lines.iter().enumerate() {
-                    let prompt_char = if i == 0 { "\u{276f} " } else { "  " };
+                    let prompt_char = if i == 0 { "❯ " } else { "  " };
                     let is_cursor_line = i == cursor_line;
 
-                    let mut spans = vec![
-                        bar.clone(),
-                        Span::raw(pad),
-                        Span::styled(
-                            prompt_char,
-                            Style::default()
-                                .fg(state.theme.primary)
-                                .add_modifier(Modifier::BOLD),
-                        ),
-                    ];
+                    let mut body_spans = Vec::new();
 
                     if is_cursor_line {
                         // Split text at cursor position to show block cursor
@@ -160,12 +147,16 @@ pub fn render_composer(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
                         let after = &line_text[col..];
 
                         if !before.is_empty() {
-                            spans.extend(styled_text_spans(before, &state.input, &state.theme));
+                            body_spans.extend(styled_text_spans(
+                                before,
+                                &state.input,
+                                &state.theme,
+                            ));
                         }
                         // Block cursor character
                         if after.is_empty() {
-                            spans.push(Span::styled(
-                                "\u{2588}",
+                            body_spans.push(Span::styled(
+                                "█",
                                 Style::default().fg(state.theme.text_muted),
                             ));
                         } else {
@@ -174,14 +165,14 @@ pub fn render_composer(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
                             while char_end < after.len() && !after.is_char_boundary(char_end) {
                                 char_end += 1;
                             }
-                            spans.push(Span::styled(
+                            body_spans.push(Span::styled(
                                 after[..char_end].to_string(),
                                 Style::default()
                                     .fg(state.theme.bg_elevated)
                                     .bg(state.theme.text),
                             ));
                             if char_end < after.len() {
-                                spans.extend(styled_text_spans(
+                                body_spans.extend(styled_text_spans(
                                     &after[char_end..],
                                     &state.input,
                                     &state.theme,
@@ -189,10 +180,25 @@ pub fn render_composer(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
                             }
                         }
                     } else {
-                        spans.extend(styled_text_spans(line_text, &state.input, &state.theme));
+                        body_spans.extend(styled_text_spans(line_text, &state.input, &state.theme));
                     }
 
-                    lines.push(Line::from(spans));
+                    let first_prefix = vec![
+                        Span::raw(pad),
+                        Span::styled(
+                            prompt_char,
+                            Style::default()
+                                .fg(prompt_color)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                    ];
+                    let continuation_prefix = vec![Span::raw(pad), Span::raw("  ")];
+                    lines.extend(wrap_prefixed_spans(
+                        body_spans,
+                        first_prefix,
+                        continuation_prefix,
+                        wrap_width,
+                    ));
                 }
                 lines
             }
@@ -200,48 +206,129 @@ pub fn render_composer(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
     };
 
     // -- Model info line --
-    let mode_color = match state.agent_mode {
-        crate::state::agent::AgentMode::Code => state.theme.success,
-        crate::state::agent::AgentMode::Plan => state.theme.primary,
-    };
     // Clamp provider + model names so the line fits the composer width.
-    // bar(1) + pad(2) + mode badge + "  " + provider + "  " + model
-    let inner_w = area.width.saturating_sub(1) as usize; // usable cols
-    let mode_label = format!("[{}]", state.agent_mode.label());
-    let prefix_len = 1 + 2 + mode_label.len() + 2; // bar + pad + badge + gap
+    let inner_w = area.width.saturating_sub(4) as usize;
+    let mode_label = match state.agent_mode {
+        crate::state::agent::AgentMode::Code => "Build".to_string(),
+        crate::state::agent::AgentMode::Plan => "Plan".to_string(),
+    };
+    let prefix_len = 2 + mode_label.len() + 3;
     let remaining = inner_w.saturating_sub(prefix_len);
     let prov_max = remaining / 2;
     let model_max = remaining.saturating_sub(prov_max.min(state.agent.provider_name.len()) + 2);
     let prov_display = truncate_display(&state.agent.provider_name, prov_max);
     let model_display = truncate_display(&state.agent.model_name, model_max);
-    let model_info_line = Line::from(vec![
-        bar,
+    let token_total = state.agent.tokens_used.input + state.agent.tokens_used.output;
+    let token_text = if let Some(ctx) = state.agent.context_window {
+        let pct = if ctx > 0 {
+            (token_total as f64 / ctx as f64 * 100.0).round() as usize
+        } else {
+            0
+        };
+        format!("{} ({pct}%)", format_tokens(token_total))
+    } else {
+        format_tokens(token_total)
+    };
+    let thinking_text = if state.agent.model_supports_thinking()
+        && state.agent.thinking_level != ava_types::ThinkingLevel::Off
+    {
+        Some(state.agent.thinking_level.label().to_lowercase())
+    } else {
+        None
+    };
+
+    let mode_style = match state.agent_mode {
+        crate::state::agent::AgentMode::Code => Style::default()
+            .fg(state.theme.primary)
+            .add_modifier(Modifier::BOLD),
+        crate::state::agent::AgentMode::Plan => Style::default()
+            .fg(state.theme.text_muted)
+            .add_modifier(Modifier::BOLD),
+    };
+    let compact = inner_w < 72;
+
+    let mut left_spans = vec![
         Span::raw(pad),
-        Span::styled(
-            mode_label,
-            Style::default().fg(mode_color).add_modifier(Modifier::BOLD),
-        ),
+        Span::styled(format!(" {mode_label} "), mode_style),
         Span::styled("  ", Style::default()),
-        Span::styled(
+        Span::styled(model_display.clone(), Style::default().fg(state.theme.text)),
+    ];
+    if !compact {
+        left_spans.push(Span::styled("  ", Style::default()));
+        left_spans.push(Span::styled(
             prov_display,
+            Style::default().fg(state.theme.text_dimmed),
+        ));
+    }
+    if compact {
+        left_spans = vec![
+            Span::raw(pad),
+            Span::styled(format!(" {mode_label} "), mode_style),
+            Span::styled("  ", Style::default()),
+            Span::styled(model_display, Style::default().fg(state.theme.text)),
+        ];
+    }
+    let mut right_spans: Vec<Span<'_>> = Vec::new();
+    if state.agent.is_running {
+        right_spans.push(Span::styled(
+            crate::state::messages::spinner_frame(state.messages.spinner_tick).to_string(),
+            Style::default().fg(state.theme.text_muted),
+        ));
+        right_spans.push(Span::styled("  ", Style::default()));
+    }
+    if let Some(thinking_text) = thinking_text {
+        right_spans.push(Span::styled(
+            format!(" {thinking_text} "),
             Style::default()
-                .fg(state.theme.primary)
+                .fg(state.theme.warning)
+                .bg(state.theme.bg_surface)
                 .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled("  ", Style::default()),
-        Span::styled(model_display, Style::default().fg(state.theme.text_muted)),
-    ]);
+        ));
+        right_spans.push(Span::styled("  ", Style::default()));
+    }
+    let utility_right = if state.input.queue_display.total_count() > 0 {
+        format!("{} queued", state.input.queue_display.total_count())
+    } else {
+        token_text.clone()
+    };
+    right_spans.push(Span::styled(
+        utility_right,
+        Style::default().fg(state.theme.text_dimmed),
+    ));
+    let left_width: usize = left_spans
+        .iter()
+        .map(|s| crate::text_utils::span_display_width(s))
+        .sum();
+    let right_width: usize = right_spans
+        .iter()
+        .map(|s| crate::text_utils::span_display_width(s))
+        .sum();
+    let gap = inner_w.saturating_sub(left_width + right_width);
+    let mut model_spans = left_spans;
+    model_spans.push(Span::raw(" ".repeat(gap.max(2))));
+    model_spans.extend(right_spans);
+    let model_info_line = Line::from(model_spans);
 
-    // Fill entire composer area with bg_elevated first
-    let bg = Block::default().style(Style::default().bg(state.theme.bg_elevated));
-    frame.render_widget(bg, area);
+    let panel = Block::default().style(Style::default().bg(state.theme.bg_elevated));
+    frame.render_widget(panel, area);
 
-    // Combine prompt lines + queue display + model info line
-    let mut all_lines = prompt_lines;
+    let inner_area = Rect {
+        x: area.x + 2,
+        y: area.y + 1,
+        width: area.width.saturating_sub(4),
+        height: area.height.saturating_sub(1),
+    };
+
+    if inner_area.width == 0 || inner_area.height == 0 {
+        return;
+    }
+
+    // Prompt lines are already wrapped correctly by `wrap_prefixed_spans` and
+    // must not go through the generic safe-width wrapper again.
+    let mut extra_lines: Vec<Line<'static>> = Vec::new();
 
     // Show context attachments as badges
     if !state.input.attachments.is_empty() {
-        let bar_a = Span::styled("\u{258E}", Style::default().fg(state.theme.accent));
         for attachment in &state.input.attachments {
             let badge = match attachment {
                 ava_types::ContextAttachment::File { .. } => "[@file]",
@@ -250,8 +337,7 @@ pub fn render_composer(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
             };
             let label = attachment.label();
             let truncated = crate::text_utils::truncate_display_start(&label, 45);
-            all_lines.push(Line::from(vec![
-                bar_a.clone(),
+            extra_lines.push(Line::from(vec![
                 Span::raw(pad),
                 Span::styled(
                     badge,
@@ -269,10 +355,8 @@ pub fn render_composer(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
 
     // Show pending image attachments as individual badges
     if state.pending_image_count > 0 {
-        let bar_i = Span::styled("\u{258E}", Style::default().fg(state.theme.accent));
         for i in 1..=state.pending_image_count {
-            all_lines.push(Line::from(vec![
-                bar_i.clone(),
+            extra_lines.push(Line::from(vec![
                 Span::raw(pad),
                 Span::styled(
                     format!("[IMAGE {i}]"),
@@ -286,7 +370,6 @@ pub fn render_composer(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
 
     // Show pending queued messages between input and model info
     if !state.input.queue_display.is_empty() {
-        let bar_q = Span::styled("\u{258E}", Style::default().fg(state.theme.text_dimmed));
         for item in &state.input.queue_display.items {
             let (badge, badge_color) = match &item.tier {
                 ava_types::MessageTier::Steering => ("[S]", state.theme.warning),
@@ -302,8 +385,7 @@ pub fn render_composer(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
                 _ => badge.to_string(),
             };
             let truncated = crate::text_utils::truncate_display(&item.text, 50);
-            all_lines.push(Line::from(vec![
-                bar_q.clone(),
+            extra_lines.push(Line::from(vec![
                 Span::raw(pad),
                 Span::styled(
                     badge_text,
@@ -319,39 +401,109 @@ pub fn render_composer(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
         }
     }
 
-    all_lines.push(model_info_line);
-
-    let content_lines = all_lines.len() as u16;
-    let top_pad = area.height.saturating_sub(content_lines) / 2;
-    let inner = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(top_pad),
-            Constraint::Length(content_lines),
-            Constraint::Min(0),
-        ])
-        .split(area)[1];
-
-    let max_width = inner.width as usize;
-    let clamped_lines: Vec<Line<'static>> = all_lines
-        .into_iter()
-        .flat_map(|line| {
-            // Convert from Line<'_> to Line<'static> by cloning span content
-            let static_spans: Vec<Span<'static>> = line
-                .spans
-                .into_iter()
-                .map(|s| Span::styled(s.content.to_string(), s.style))
-                .collect();
-            // Wrap long lines instead of truncating with "..."
-            let wrapped = UiMessage::wrap_line_spans(static_spans, max_width);
-            if wrapped.is_empty() {
-                vec![Line::from(Vec::new())]
-            } else {
-                wrapped.into_iter().map(Line::from).collect::<Vec<_>>()
-            }
-        })
-        .collect();
+    let max_width = inner_area.width as usize;
+    let mut wrapped_body_lines = prompt_lines;
+    wrapped_body_lines.extend(to_static_lines(
+        extra_lines
+            .into_iter()
+            .flat_map(|line| {
+                let wrapped = UiMessage::wrap_line_spans(to_static_line(line).spans, max_width);
+                if wrapped.is_empty() {
+                    vec![Line::from(Vec::new())]
+                } else {
+                    wrapped.into_iter().map(Line::from).collect::<Vec<_>>()
+                }
+            })
+            .collect(),
+    ));
+    let wrapped_meta_core: Vec<Line<'static>> = to_static_lines(
+        vec![model_info_line]
+            .into_iter()
+            .flat_map(|line| {
+                let wrapped = UiMessage::wrap_line_spans(to_static_line(line).spans, max_width);
+                if wrapped.is_empty() {
+                    vec![Line::from(Vec::new())]
+                } else {
+                    wrapped.into_iter().map(Line::from).collect::<Vec<_>>()
+                }
+            })
+            .collect(),
+    );
+    let body_len = wrapped_body_lines.len();
+    let meta_len = wrapped_meta_core.len();
+    let can_afford_spacer = body_len + meta_len < inner_area.height as usize;
+    let wrapped_meta_lines: Vec<Line<'static>> = if can_afford_spacer {
+        let mut lines = vec![Line::from("")];
+        lines.extend(wrapped_meta_core);
+        lines
+    } else {
+        wrapped_meta_core
+    };
+    let reserved_meta = wrapped_meta_lines.len().min(inner_area.height as usize);
+    let available_body = inner_area.height as usize - reserved_meta;
+    let body_start = wrapped_body_lines.len().saturating_sub(available_body);
+    let mut clamped_lines = wrapped_body_lines[body_start..].to_vec();
+    clamped_lines.extend(wrapped_meta_lines.into_iter().take(reserved_meta));
     let paragraph =
         Paragraph::new(clamped_lines).style(Style::default().bg(state.theme.bg_elevated));
-    frame.render_widget(paragraph, inner);
+    frame.render_widget(paragraph, inner_area);
+}
+
+fn wrap_prefixed_spans(
+    body_spans: Vec<Span<'_>>,
+    first_prefix: Vec<Span<'static>>,
+    continuation_prefix: Vec<Span<'static>>,
+    max_width: usize,
+) -> Vec<Line<'static>> {
+    let first_prefix_width: usize = first_prefix.iter().map(actual_span_width).sum();
+    let continuation_prefix_width: usize = continuation_prefix.iter().map(actual_span_width).sum();
+
+    let body_spans: Vec<Span<'static>> = body_spans
+        .into_iter()
+        .map(|span| Span::styled(span.content.into_owned(), span.style))
+        .collect();
+
+    let mut rows: Vec<Line<'static>> = Vec::new();
+    let mut current_row = first_prefix.clone();
+    let mut current_width = first_prefix_width;
+    let mut current_prefix_width = first_prefix_width;
+
+    for span in body_spans {
+        for ch in span.content.chars() {
+            let ch_width = actual_char_width(ch);
+            if current_width + ch_width > max_width && current_width > current_prefix_width {
+                rows.push(Line::from(current_row));
+                current_row = continuation_prefix.clone();
+                current_width = continuation_prefix_width;
+                current_prefix_width = continuation_prefix_width;
+            }
+
+            current_row.push(Span::styled(ch.to_string(), span.style));
+            current_width += ch_width;
+        }
+    }
+
+    if !current_row.is_empty() {
+        rows.push(Line::from(current_row));
+    }
+
+    rows
+}
+
+fn actual_char_width(ch: char) -> usize {
+    UnicodeWidthChar::width(ch).unwrap_or(0).max(1)
+}
+
+fn actual_span_width(span: &Span<'_>) -> usize {
+    span.content.chars().map(actual_char_width).sum()
+}
+
+fn format_tokens(n: usize) -> String {
+    if n >= 1_000_000 {
+        format!("{:.1}M", n as f64 / 1_000_000.0)
+    } else if n >= 1_000 {
+        format!("{:.1}K", n as f64 / 1_000.0)
+    } else {
+        n.to_string()
+    }
 }

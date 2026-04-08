@@ -1,19 +1,13 @@
 import {
   BarChart3,
-  Bot,
-  Brain,
-  Building2,
   Code2,
   Cpu,
-  Info,
-  Keyboard,
   Monitor,
   Palette,
   Puzzle,
   Server,
   type Settings,
   ShieldCheck,
-  Sliders,
   Sparkles,
   Zap,
 } from 'lucide-solid'
@@ -21,20 +15,14 @@ import {
 export type SettingsTab =
   | 'general'
   | 'appearance'
-  | 'behavior'
-  | 'shortcuts'
   | 'providers'
-  | 'agents'
+  | 'advanced'
   | 'permissions-trust'
   | 'mcp'
   | 'plugins'
   | 'skills'
-  | 'skills-commands'
   | 'llm'
-  | 'hq'
   | 'usage'
-  | 'developer'
-  | 'about'
 
 export interface TabConfig {
   id: SettingsTab
@@ -50,71 +38,40 @@ export interface TabGroup {
 
 export const tabGroups: TabGroup[] = [
   {
-    label: 'APP',
+    label: 'General',
     tabs: [
       {
         id: 'general',
         label: 'General',
         icon: Monitor,
-        keywords: ['language', 'updates', 'startup', 'default'],
-      },
-      {
-        id: 'appearance',
-        label: 'Appearance',
-        icon: Palette,
-        keywords: ['theme', 'font', 'color', 'dark', 'light', 'density', 'glass'],
-      },
-      {
-        id: 'behavior',
-        label: 'Behavior',
-        icon: Sliders,
-        keywords: ['auto', 'save', 'scroll', 'confirm', 'notification'],
-      },
-      {
-        id: 'shortcuts',
-        label: 'Shortcuts',
-        icon: Keyboard,
-        keywords: ['keyboard', 'hotkey', 'keybinding', 'keys', 'shortcut'],
+        keywords: [
+          'language',
+          'updates',
+          'startup',
+          'default',
+          'behavior',
+          'scroll',
+          'notification',
+          'send key',
+          'word wrap',
+        ],
       },
     ],
   },
   {
-    label: 'AI',
+    label: 'Models',
     tabs: [
       {
         id: 'providers',
         label: 'Providers',
         icon: Zap,
-        keywords: ['api', 'key', 'openai', 'anthropic', 'google', 'connection'],
+        keywords: ['api', 'key', 'openai', 'anthropic', 'gemini', 'connection'],
       },
       {
         id: 'usage',
         label: 'Usage',
         icon: BarChart3,
         keywords: ['usage', 'quota', 'subscription', 'credits', 'plan', 'limit', 'balance'],
-      },
-      {
-        id: 'agents',
-        label: 'Agents',
-        icon: Bot,
-        keywords: ['agent', 'preset', 'capability', 'assistant', 'automation'],
-      },
-      {
-        id: 'skills',
-        label: 'Skills',
-        icon: Sparkles,
-        keywords: [
-          'skill',
-          'domain',
-          'prompt',
-          'glob',
-          'pattern',
-          'microagent',
-          'activation',
-          'instructions',
-          'context',
-          'file',
-        ],
       },
       {
         id: 'llm',
@@ -138,29 +95,7 @@ export const tabGroups: TabGroup[] = [
     ],
   },
   {
-    label: 'HQ',
-    tabs: [
-      {
-        id: 'hq',
-        label: 'HQ',
-        icon: Building2,
-        keywords: [
-          'hq',
-          'director',
-          'team',
-          'lead',
-          'worker',
-          'epic',
-          'kanban',
-          'orchestration',
-          'review',
-          'cost',
-        ],
-      },
-    ],
-  },
-  {
-    label: 'TOOLS',
+    label: 'Tools',
     tabs: [
       {
         id: 'mcp',
@@ -175,26 +110,34 @@ export const tabGroups: TabGroup[] = [
         keywords: ['extension', 'install', 'community', 'marketplace'],
       },
       {
-        id: 'skills-commands',
-        label: 'Rules & Commands',
-        icon: Brain,
+        id: 'skills',
+        label: 'Skills & Rules',
+        icon: Sparkles,
         keywords: [
+          'skill',
+          'domain',
+          'prompt',
+          'glob',
+          'pattern',
+          'microagent',
+          'activation',
+          'instructions',
+          'context',
+          'file',
           'rule',
           'coding-rule',
           'always',
           'auto',
-          'activation',
           'command',
           'slash',
           'custom',
           'toml',
-          'prompt',
         ],
       },
     ],
   },
   {
-    label: 'SECURITY',
+    label: 'Permissions',
     tabs: [
       {
         id: 'permissions-trust',
@@ -218,15 +161,39 @@ export const tabGroups: TabGroup[] = [
     ],
   },
   {
-    label: 'OTHER',
+    label: 'Appearance',
     tabs: [
       {
-        id: 'developer',
-        label: 'Developer',
-        icon: Code2,
-        keywords: ['debug', 'logs', 'devtools', 'advanced'],
+        id: 'appearance',
+        label: 'Appearance',
+        icon: Palette,
+        keywords: ['theme', 'font', 'color', 'dark', 'light', 'density', 'glass'],
       },
-      { id: 'about', label: 'About', icon: Info, keywords: ['version', 'license', 'credits'] },
+    ],
+  },
+  {
+    label: 'Advanced',
+    tabs: [
+      {
+        id: 'advanced',
+        label: 'Advanced',
+        icon: Code2,
+        keywords: [
+          'advanced',
+          'agent',
+          'preset',
+          'capability',
+          'assistant',
+          'automation',
+          'debug',
+          'logs',
+          'devtools',
+          'developer',
+          'version',
+          'license',
+          'credits',
+        ],
+      },
     ],
   },
 ]
@@ -326,73 +293,167 @@ export const settingsSearchIndex: SettingsSearchEntry[] = [
   },
   { label: 'Sidebar order', tab: 'appearance', tabLabel: 'Appearance' },
 
-  // Behavior
+  // General behavior
   {
     label: 'Send message with',
     description: 'Enter or Ctrl+Enter',
-    tab: 'behavior',
-    tabLabel: 'Behavior',
+    tab: 'general',
+    tabLabel: 'General',
   },
-  { label: 'Auto-scroll to new messages', tab: 'behavior', tabLabel: 'Behavior' },
-  { label: 'Auto-title sessions', tab: 'behavior', tabLabel: 'Behavior' },
+  { label: 'Auto-scroll to new messages', tab: 'general', tabLabel: 'General' },
+  { label: 'Auto-title sessions', tab: 'general', tabLabel: 'General' },
   {
     label: 'Line numbers',
     description: 'Code block line numbers',
-    tab: 'behavior',
-    tabLabel: 'Behavior',
+    tab: 'general',
+    tabLabel: 'General',
   },
   {
     label: 'Word wrap',
     description: 'Wrap long lines in code blocks',
-    tab: 'behavior',
-    tabLabel: 'Behavior',
+    tab: 'general',
+    tabLabel: 'General',
   },
   {
     label: 'Tool response style',
     description: 'Concise or detailed',
-    tab: 'behavior',
-    tabLabel: 'Behavior',
+    tab: 'general',
+    tabLabel: 'General',
   },
   {
     label: 'Auto-update',
     description: 'Check for updates on startup',
-    tab: 'behavior',
-    tabLabel: 'Behavior',
+    tab: 'general',
+    tabLabel: 'General',
   },
-  { label: 'Desktop notifications', tab: 'behavior', tabLabel: 'Behavior' },
-  { label: 'Sound on completion', tab: 'behavior', tabLabel: 'Behavior' },
-  { label: 'Notification volume', tab: 'behavior', tabLabel: 'Behavior' },
+  { label: 'Desktop notifications', tab: 'general', tabLabel: 'General' },
+  { label: 'Sound on completion', tab: 'general', tabLabel: 'General' },
+  { label: 'Notification volume', tab: 'general', tabLabel: 'General' },
+
+  // General shortcuts
+  {
+    label: 'Keyboard shortcuts',
+    description: 'Search, edit, and reset shortcut bindings',
+    tab: 'general',
+    tabLabel: 'General',
+  },
+  { label: 'Shortcut search', tab: 'general', tabLabel: 'General' },
+  { label: 'Reset shortcuts', tab: 'general', tabLabel: 'General' },
 
   // Skills
   {
     label: 'Skills',
     description: 'Context-aware instruction modules',
     tab: 'skills',
-    tabLabel: 'Skills',
+    tabLabel: 'Skills & Rules',
   },
   {
     label: 'Built-in skills',
     description: 'Language-specific prompt modules',
     tab: 'skills',
-    tabLabel: 'Skills',
+    tabLabel: 'Skills & Rules',
   },
   {
     label: 'Custom skills',
     description: 'User-defined instruction modules',
     tab: 'skills',
-    tabLabel: 'Skills',
+    tabLabel: 'Skills & Rules',
   },
   {
     label: 'Skill file globs',
     description: 'File patterns that activate skills',
     tab: 'skills',
-    tabLabel: 'Skills',
+    tabLabel: 'Skills & Rules',
   },
   {
     label: 'Skill sources',
     description: 'Directories where skills are loaded from',
     tab: 'skills',
-    tabLabel: 'Skills',
+    tabLabel: 'Skills & Rules',
+  },
+  {
+    label: 'Rules',
+    description: 'Project-specific instruction files',
+    tab: 'skills',
+    tabLabel: 'Skills & Rules',
+  },
+  {
+    label: 'Custom commands',
+    description: '/slash command templates and parameters',
+    tab: 'skills',
+    tabLabel: 'Skills & Rules',
+  },
+  {
+    label: 'Allowed tools for commands',
+    description: 'Restrict tool access per command',
+    tab: 'skills',
+    tabLabel: 'Skills & Rules',
+  },
+  {
+    label: 'Command mode',
+    description: 'Normal vs plan mode',
+    tab: 'skills',
+    tabLabel: 'Skills & Rules',
+  },
+
+  // Providers
+  {
+    label: 'API keys',
+    description: 'Connect provider credentials and defaults',
+    tab: 'providers',
+    tabLabel: 'Providers',
+  },
+  {
+    label: 'Base URL',
+    description: 'Custom endpoint for a provider',
+    tab: 'providers',
+    tabLabel: 'Providers',
+  },
+  {
+    label: 'Provider connection test',
+    description: 'Validate provider credentials and available models',
+    tab: 'providers',
+    tabLabel: 'Providers',
+  },
+
+  // MCP
+  {
+    label: 'MCP servers',
+    description: 'Manage stdio and remote MCP integrations',
+    tab: 'mcp',
+    tabLabel: 'MCP Servers',
+  },
+  {
+    label: 'Add MCP server',
+    description: 'Register a new MCP server connection',
+    tab: 'mcp',
+    tabLabel: 'MCP Servers',
+  },
+  {
+    label: 'Server transport',
+    description: 'stdio, command, args, and connection details',
+    tab: 'mcp',
+    tabLabel: 'MCP Servers',
+  },
+
+  // Plugins
+  {
+    label: 'Plugins',
+    description: 'Install, enable, and inspect plugins',
+    tab: 'plugins',
+    tabLabel: 'Plugins',
+  },
+  {
+    label: 'Plugin permissions',
+    description: 'Review requested plugin access before install',
+    tab: 'plugins',
+    tabLabel: 'Plugins',
+  },
+  {
+    label: 'Plugin dev mode',
+    description: 'Watch, reload, and inspect local plugin development',
+    tab: 'plugins',
+    tabLabel: 'Plugins',
   },
 
   // Generation (LLM)
@@ -487,36 +548,30 @@ export const settingsSearchIndex: SettingsSearchEntry[] = [
     tabLabel: 'Usage',
   },
 
-  // HQ
-  { label: 'Director model', tab: 'hq', tabLabel: 'HQ' },
-  { label: 'Tone preference', description: 'Technical or simple', tab: 'hq', tabLabel: 'HQ' },
-  { label: 'Auto review', description: 'QA review after each phase', tab: 'hq', tabLabel: 'HQ' },
-  { label: 'Cost estimates', tab: 'hq', tabLabel: 'HQ' },
-
-  // Developer
+  // Advanced
   {
     label: 'Developer mode',
     description: 'Developer console and log verbosity',
-    tab: 'developer',
-    tabLabel: 'Developer',
+    tab: 'advanced',
+    tabLabel: 'Advanced',
   },
   {
     label: 'Log level',
     description: 'DEBUG, INFO, WARN, ERROR',
-    tab: 'developer',
-    tabLabel: 'Developer',
+    tab: 'advanced',
+    tabLabel: 'Advanced',
   },
   {
     label: 'Console output',
     description: 'Live log viewer',
-    tab: 'developer',
-    tabLabel: 'Developer',
+    tab: 'advanced',
+    tabLabel: 'Advanced',
   },
   {
     label: 'File logs',
     description: 'Persistent logs across sessions',
-    tab: 'developer',
-    tabLabel: 'Developer',
+    tab: 'advanced',
+    tabLabel: 'Advanced',
   },
 ]
 

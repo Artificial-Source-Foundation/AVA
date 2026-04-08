@@ -217,18 +217,18 @@ pub(super) async fn run_single_agent(cli: CliArgs, goal: &str) -> Result<()> {
         );
     }
 
-    let (stack, _question_rx, approval_rx, _plan_rx) = AgentStack::new(AgentStackConfig {
-        data_dir,
-        provider,
-        model,
-        max_turns: cli.max_turns,
-        max_budget_usd: cli.max_budget_usd,
-        yolo: cli.auto_approve,
-        include_project_instructions: runtime_lean.include_project_instructions,
-        eager_codebase_indexing: runtime_lean.eager_codebase_indexing,
-        ..Default::default()
-    })
-    .await?;
+    let (stack, _question_rx, approval_rx, _plan_rx) =
+        AgentStack::new(AgentStackConfig::for_headless(
+            data_dir,
+            provider,
+            model,
+            cli.max_turns,
+            cli.max_budget_usd,
+            cli.auto_approve,
+            runtime_lean.include_project_instructions,
+            runtime_lean.eager_codebase_indexing,
+        ))
+        .await?;
     spawn_auto_approve_requests(approval_rx);
 
     // Apply thinking level from CLI flag
@@ -625,11 +625,11 @@ pub(super) async fn run_single_agent(cli: CliArgs, goal: &str) -> Result<()> {
 /// Run a code review on working directory changes after the agent completes.
 /// Returns `Some(findings_text)` if actionable issues found, `None` otherwise.
 async fn run_post_completion_review(cli: &CliArgs) -> Option<String> {
-    use ava_hq::review::{
+    use ava_platform::StandardPlatform;
+    use ava_review::{
         build_review_system_prompt, collect_diff, format_text, parse_review_output,
         run_review_agent, DiffMode, Severity,
     };
-    use ava_platform::StandardPlatform;
 
     eprintln!("\n[review] Running post-completion code review...");
 
@@ -665,22 +665,14 @@ async fn run_post_completion_review(cli: &CliArgs) -> Option<String> {
     };
 
     let data_dir = dirs::home_dir().unwrap_or_default().join(".ava");
-    let (review_stack, _q, _a, _p) = match AgentStack::new(AgentStackConfig {
-        data_dir,
-        provider,
-        model,
-        max_turns: 5,
-        yolo: true,
-        ..Default::default()
-    })
-    .await
-    {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("[review] Failed to create review stack: {e}");
-            return None;
-        }
-    };
+    let (review_stack, _q, _a, _p) =
+        match AgentStack::new(AgentStackConfig::for_review(data_dir, provider, model, 5)).await {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("[review] Failed to create review stack: {e}");
+                return None;
+            }
+        };
 
     let (provider_name, model_name) = review_stack.current_model().await;
     let resolved_provider = match review_stack

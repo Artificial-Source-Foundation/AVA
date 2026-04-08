@@ -32,5 +32,5 @@
 - Architecture: desktop-first, plugin ecosystem planned in frontend and partially implemented in core backend
 
 ## Notes
-- Use `CLAUDE.md` and `AGENTS.md` at the repo root as the current source of truth for architecture and workflow details.
+- Use `AGENTS.md` as the source of truth, then `docs/README.md` and `docs/architecture/crate-map.md` for the active docs set. `CLAUDE.md` is only a compatibility entrypoint.
 - Plugin SDK examples live under `plugins/`, but the main product backend is the Rust workspace under `crates/`.

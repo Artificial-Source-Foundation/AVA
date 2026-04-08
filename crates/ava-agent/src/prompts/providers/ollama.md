@@ -1,0 +1,1 @@
+- Running locally via Ollama. There is no network latency, but behavior is limited by local hardware.

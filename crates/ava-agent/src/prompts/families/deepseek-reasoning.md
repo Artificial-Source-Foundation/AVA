@@ -1,0 +1,1 @@
+- DeepSeek reasoning is olympiad-level strong. Use it for complex logic and math. Keep visible reasoning terse.

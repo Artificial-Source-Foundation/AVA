@@ -86,8 +86,6 @@ pub struct AuthFlowState {
 /// Handles discovery, PKCE auth flows, token exchange, and refresh for
 /// MCP servers that require OAuth authentication.
 pub struct McpOAuthProvider {
-    #[allow(dead_code)]
-    http_client: reqwest::Client,
     server_name: String,
     client_id: String,
     redirect_port: u16,
@@ -95,13 +93,7 @@ pub struct McpOAuthProvider {
 
 impl McpOAuthProvider {
     pub fn new(server_name: impl Into<String>, client_id: impl Into<String>) -> Self {
-        let http_client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(30))
-            .build()
-            .expect("failed to build OAuth HTTP client");
-
         Self {
-            http_client,
             server_name: server_name.into(),
             client_id: client_id.into(),
             redirect_port: 9876,
@@ -134,7 +126,7 @@ impl McpOAuthProvider {
         start_auth_flow(meta, &self.client_id, self.redirect_port, scopes).await
     }
 
-    /// Exchange an authorization code using this provider's HTTP client.
+    /// Exchange an authorization code using this provider's configuration.
     pub async fn exchange(
         &self,
         code: &str,

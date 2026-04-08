@@ -15,9 +15,8 @@ import { logInfo } from '../../services/logger'
 // Once loaded, skip the wait on subsequent messages (avoids 1.5s delay).
 let instructionsLoaded = false
 
-/** Stub event listener (replaces @ava/core-v2/extensions onEvent) */
+/** Listen for the shared DOM event that signals instruction loading. */
 function _onInstructionsLoaded(): void {
-  // Listen for DOM custom event instead of core-v2 event bus
   installReplaceableWindowListener('prompt-builder:instructions-loaded', (target) => {
     const listener = () => {
       instructionsLoaded = true
@@ -28,7 +27,7 @@ function _onInstructionsLoaded(): void {
 }
 _onInstructionsLoaded()
 
-/** Local prompt sections registry (replaces packages/extensions/prompts) */
+/** Local prompt section registry used by the desktop prompt builder. */
 const _promptSections = new Map<string, { name: string; priority: number; content: string }>()
 
 function addPromptSection(section: {

@@ -1,19 +1,19 @@
 /**
  * Command Resolver
  *
- * Bridges the core-v2 slash command registry to the desktop app.
+ * Local slash-command registry for the desktop app.
  * Parses user input for /commands, resolves them against the registry,
  * and provides a sorted list for autocomplete.
  */
 
-/** Minimal SlashCommand type (replaces @ava/core-v2/extensions import) */
+/** Minimal slash-command shape used by the frontend registry. */
 export interface SlashCommand {
   description: string
   execute?: (...args: unknown[]) => unknown
   [key: string]: unknown
 }
 
-/** Local command registry — populated by frontend code instead of core-v2 */
+/** Local command registry populated by frontend code. */
 const _commands = new Map<string, SlashCommand>()
 
 function getCommands(): Map<string, SlashCommand> {
@@ -133,7 +133,7 @@ export function registerBuiltInCommands(): void {
     description: 'Cycle or switch theme',
   })
   registerCommand('permissions', {
-    description: 'Toggle permission level',
+    description: 'Open permissions settings',
   })
   registerCommand('think', {
     description: 'Toggle thinking visibility',

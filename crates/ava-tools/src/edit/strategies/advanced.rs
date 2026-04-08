@@ -87,17 +87,26 @@ impl EditStrategy for LineNumberStrategy {
         }
 
         let mut lines: Vec<String> = request.content.lines().map(str::to_string).collect();
+        let had_trailing_newline = request.content.ends_with('\n');
         if line_number > lines.len() {
             return Ok(None);
         }
         let idx = line_number - 1;
         if request.old_text.is_empty() {
             lines[idx] = request.new_text.clone();
-            return Ok(Some(lines.join("\n")));
+            let mut output = lines.join("\n");
+            if had_trailing_newline {
+                output.push('\n');
+            }
+            return Ok(Some(output));
         }
         if lines[idx].contains(&request.old_text) {
             lines[idx] = lines[idx].replacen(&request.old_text, &request.new_text, 1);
-            return Ok(Some(lines.join("\n")));
+            let mut output = lines.join("\n");
+            if had_trailing_newline {
+                output.push('\n');
+            }
+            return Ok(Some(output));
         }
         Ok(None)
     }
@@ -154,6 +163,10 @@ impl EditStrategy for IndentationAwareStrategy {
                 replacement.push_str(&format!("{indent}{first}"));
                 for rest in replacement_lines {
                     replacement.push('\n');
+                    if rest.is_empty() {
+                        continue;
+                    }
+                    replacement.push_str(&indent);
                     replacement.push_str(rest);
                 }
                 *line = replacement;
@@ -212,6 +225,7 @@ fn dedent(input: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::edit::error::EditError;
 
     #[test]
     fn anchor_strategy_replaces_inside_block() {
@@ -222,15 +236,65 @@ mod tests {
     }
 
     #[test]
+    fn anchor_strategy_returns_none_without_both_anchors() {
+        let req = EditRequest::new("hello world", "world", "there");
+        assert!(BlockAnchorStrategy.apply(&req).unwrap().is_none());
+    }
+
+    #[test]
+    fn anchor_strategy_replaces_entire_block_when_old_text_empty() {
+        let req = EditRequest::new("A<start>mid<end>Z", "", "NEW").with_anchors("<start>", "<end>");
+        let out = BlockAnchorStrategy.apply(&req).unwrap().unwrap();
+        assert_eq!(out, "A<start>NEW<end>Z");
+    }
+
+    #[test]
     fn regex_strategy_works() {
-        let req = EditRequest::new("value=123", "", "value=999").with_regex_pattern(r"value=\d+");
+        let req = EditRequest::new("value=123 value=456", "", "value=999")
+            .with_regex_pattern(r"value=\d+");
         let out = RegexMatchStrategy.apply(&req).unwrap().unwrap();
-        assert_eq!(out, "value=999");
+        assert_eq!(out, "value=999 value=456");
+    }
+
+    #[test]
+    fn regex_strategy_invalid_pattern_errors() {
+        let req = EditRequest::new("value=123", "", "value=999").with_regex_pattern("(");
+        let err = RegexMatchStrategy.apply(&req).unwrap_err();
+        assert!(matches!(err, EditError::InvalidRegex(_)));
+    }
+
+    #[test]
+    fn regex_strategy_returns_none_when_no_match() {
+        let req = EditRequest::new("value=123", "", "value=999").with_regex_pattern(r"count=\d+");
+        assert!(RegexMatchStrategy.apply(&req).unwrap().is_none());
     }
 
     #[test]
     fn line_number_replaces_specific_line() {
         let req = EditRequest::new("a\nb\nc", "b", "B").with_line_number(2);
+        let out = LineNumberStrategy.apply(&req).unwrap().unwrap();
+        assert_eq!(out, "a\nB\nc");
+    }
+
+    #[test]
+    fn line_number_preserves_trailing_newline() {
+        let req = EditRequest::new("a\nb\nc\n", "b", "B").with_line_number(2);
+        let out = LineNumberStrategy.apply(&req).unwrap().unwrap();
+        assert_eq!(out, "a\nB\nc\n");
+    }
+
+    #[test]
+    fn line_number_returns_none_for_zero_and_past_end() {
+        let zero = EditRequest::new("a\nb", "a", "A").with_line_number(0);
+        assert!(LineNumberStrategy.apply(&zero).unwrap().is_none());
+
+        let past_end = EditRequest::new("a\nb", "a", "A").with_line_number(3);
+        assert!(LineNumberStrategy.apply(&past_end).unwrap().is_none());
+    }
+
+    #[test]
+    fn line_number_replaces_whole_line_when_old_text_empty() {
+        let req = EditRequest::new("a\nb\nc", "", "B").with_line_number(2);
         let out = LineNumberStrategy.apply(&req).unwrap().unwrap();
         assert_eq!(out, "a\nB\nc");
     }
@@ -243,10 +307,48 @@ mod tests {
     }
 
     #[test]
+    fn token_boundary_returns_none_for_non_boundary_match() {
+        let req = EditRequest::new("concatenate", "cat", "dog");
+        assert!(TokenBoundaryStrategy.apply(&req).unwrap().is_none());
+    }
+
+    #[test]
     fn indentation_strategy_preserves_relative_indentation() {
         let req = EditRequest::new("    return x;", "return x;", "if y {\n    return y;\n}");
         let out = IndentationAwareStrategy.apply(&req).unwrap().unwrap();
-        assert_eq!(out, "    if y {\n    return y;\n}");
+        assert_eq!(out, "    if y {\n        return y;\n    }");
+    }
+
+    #[test]
+    fn indentation_strategy_reindents_following_lines_relative_to_source_indent() {
+        let req = EditRequest::new("        return x;", "return x;", "if y {\n    return y;\n}");
+        let out = IndentationAwareStrategy.apply(&req).unwrap().unwrap();
+        assert_eq!(out, "        if y {\n            return y;\n        }");
+    }
+
+    #[test]
+    fn indentation_strategy_dedents_new_text_before_reindenting() {
+        let req = EditRequest::new(
+            "    old();",
+            "old();",
+            "    if ready {\n        run();\n    }",
+        );
+        let out = IndentationAwareStrategy.apply(&req).unwrap().unwrap();
+        assert_eq!(out, "    if ready {\n        run();\n    }");
+    }
+
+    #[test]
+    fn indentation_strategy_returns_none_for_whitespace_only_old_text() {
+        let req = EditRequest::new("    return x;", "   ", "return y;");
+        assert!(IndentationAwareStrategy.apply(&req).unwrap().is_none());
+    }
+
+    #[test]
+    fn dedent_removes_common_indent() {
+        assert_eq!(
+            dedent("    if x {\n        run();\n    }"),
+            "if x {\n    run();\n}"
+        );
     }
 
     #[test]
@@ -254,5 +356,18 @@ mod tests {
         let req = EditRequest::new("x x x", "x", "y").with_occurrence(2);
         let out = MultiOccurrenceStrategy.apply(&req).unwrap().unwrap();
         assert_eq!(out, "x y x");
+    }
+
+    #[test]
+    fn multi_occurrence_defaults_to_second_match() {
+        let req = EditRequest::new("x x x", "x", "y");
+        let out = MultiOccurrenceStrategy.apply(&req).unwrap().unwrap();
+        assert_eq!(out, "x y x");
+    }
+
+    #[test]
+    fn multi_occurrence_returns_none_when_target_occurrence_missing() {
+        let req = EditRequest::new("x x", "x", "y").with_occurrence(3);
+        assert!(MultiOccurrenceStrategy.apply(&req).unwrap().is_none());
     }
 }

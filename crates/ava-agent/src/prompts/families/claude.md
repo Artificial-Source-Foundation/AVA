@@ -1,0 +1,4 @@
+- Follow structured instructions closely and keep pre-tool prose minimal.
+- Prefer one decisive tool/action at a time unless safe parallel work is obvious.
+- After a tool failure, briefly explain the new plan instead of retrying blindly.
+- When given large contexts, prioritize the most recent instructions and tool results over older history.

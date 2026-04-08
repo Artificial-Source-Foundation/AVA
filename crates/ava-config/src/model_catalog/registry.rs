@@ -1,9 +1,7 @@
-//! Minimal compiled-in model registry for offline fallback, pricing, and name normalization.
+//! Compiled-in model registry for pricing and name normalization.
 //!
-//! The registry is embedded at compile time via `include_str!("registry.json")` and contains
-//! only ~12 essential models. The primary model catalog comes from models.dev (see `fetch.rs`).
-//! This registry serves as: (1) offline fallback when both cache and network are unavailable,
-//! (2) pricing source for cost estimation, and (3) alias/normalization database.
+//! The registry is embedded at compile time via `include_str!("registry.json")` and serves as
+//! the repo-owned source for model identity, pricing, aliasing, and capability metadata.
 
 use serde::Deserialize;
 

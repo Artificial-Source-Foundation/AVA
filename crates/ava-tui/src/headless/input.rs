@@ -1,5 +1,4 @@
 use crate::config::cli::CliArgs;
-use ava_agent::message_queue::MessageQueue;
 use ava_types::{MessageTier, QueuedMessage};
 use tokio::io::AsyncBufReadExt;
 use tokio::sync::mpsc;
@@ -163,6 +162,3 @@ pub(super) fn spawn_stdin_reader(
         }
     });
 }
-
-#[allow(dead_code)]
-fn _queue_type_anchor(_: &MessageQueue) {}

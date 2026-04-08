@@ -53,7 +53,7 @@ pub(crate) const CURATED_MODELS: &[(&str, &[&str])] = &[
         ],
     ),
     (
-        "google",
+        "gemini",
         &[
             "gemini-2.5-pro",
             "gemini-2.5-flash",
@@ -63,17 +63,7 @@ pub(crate) const CURATED_MODELS: &[(&str, &[&str])] = &[
     ),
     // Coding plan providers
     (
-        "zai-coding-plan",
-        &[
-            "glm-4.7",
-            "glm-4.6",
-            "glm-4.5",
-            "glm-4.5-flash",
-            "glm-4.7-flash",
-        ],
-    ),
-    (
-        "zhipuai-coding-plan",
+        "zai",
         &[
             "glm-4.7",
             "glm-4.6",
@@ -95,22 +85,8 @@ pub(crate) const CURATED_MODELS: &[(&str, &[&str])] = &[
             "kimi-k2.5",
         ],
     ),
-    (
-        "alibaba-cn",
-        &[
-            "qwen3.5-plus",
-            "qwen3-max-2026-01-23",
-            "qwen3-coder-next",
-            "qwen3-coder-plus",
-            "MiniMax-M2.5",
-            "glm-5",
-            "glm-4.7",
-            "kimi-k2.5",
-        ],
-    ),
-    ("kimi-for-coding", &["k2p5", "kimi-k2-thinking"]),
-    ("minimax-coding-plan", &["MiniMax-M2", "MiniMax-M2.1"]),
-    ("minimax-cn-coding-plan", &["MiniMax-M2", "MiniMax-M2.1"]),
+    ("kimi", &["k2p5", "kimi-k2-thinking"]),
+    ("minimax", &["MiniMax-M2", "MiniMax-M2.1"]),
 ];
 
 /// Hardcoded fallback models for when fetch + cache both fail.
@@ -261,23 +237,10 @@ fn add_subscription_models(providers: &mut HashMap<String, Vec<CatalogModel>>) {
         ],
     );
 
-    // ZAI Coding Plan
+    // ZAI / Zhipu coding plan
     add_models(
         providers,
-        "zai-coding-plan",
-        &[
-            ("glm-4.7", "GLM-4.7", 204_800, Some(131_072)),
-            ("glm-4.6", "GLM-4.6", 204_800, Some(131_072)),
-            ("glm-4.5", "GLM-4.5", 131_072, Some(98_304)),
-            ("glm-4.5-flash", "GLM-4.5 Flash", 131_072, Some(98_304)),
-            ("glm-4.7-flash", "GLM-4.7 Flash", 204_800, Some(131_072)),
-        ],
-    );
-
-    // ZhipuAI Coding Plan (same models as ZAI)
-    add_models(
-        providers,
-        "zhipuai-coding-plan",
+        "zai",
         &[
             ("glm-4.7", "GLM-4.7", 204_800, Some(131_072)),
             ("glm-4.6", "GLM-4.6", 204_800, Some(131_072)),
@@ -303,26 +266,10 @@ fn add_subscription_models(providers: &mut HashMap<String, Vec<CatalogModel>>) {
         ],
     );
 
-    // Alibaba CN (same models)
-    add_models(
-        providers,
-        "alibaba-cn",
-        &[
-            ("qwen3.5-plus", "Qwen3.5 Plus", 131_072, None),
-            ("qwen3-max-2026-01-23", "Qwen3 Max", 131_072, None),
-            ("qwen3-coder-next", "Qwen3 Coder Next", 131_072, None),
-            ("qwen3-coder-plus", "Qwen3 Coder Plus", 131_072, None),
-            ("MiniMax-M2.5", "MiniMax M2.5", 131_072, None),
-            ("glm-5", "GLM-5", 131_072, None),
-            ("glm-4.7", "GLM-4.7", 131_072, None),
-            ("kimi-k2.5", "Kimi K2.5", 131_072, None),
-        ],
-    );
-
     // Kimi for Coding
     add_models(
         providers,
-        "kimi-for-coding",
+        "kimi",
         &[
             ("k2p5", "Kimi K2.5", 262_144, Some(32_768)),
             (
@@ -334,20 +281,10 @@ fn add_subscription_models(providers: &mut HashMap<String, Vec<CatalogModel>>) {
         ],
     );
 
-    // MiniMax Coding Plan
+    // MiniMax coding plan
     add_models(
         providers,
-        "minimax-coding-plan",
-        &[
-            ("MiniMax-M2", "MiniMax M2", 196_608, Some(128_000)),
-            ("MiniMax-M2.1", "MiniMax M2.1", 204_800, Some(131_072)),
-        ],
-    );
-
-    // MiniMax CN Coding Plan
-    add_models(
-        providers,
-        "minimax-cn-coding-plan",
+        "minimax",
         &[
             ("MiniMax-M2", "MiniMax M2", 196_608, Some(128_000)),
             ("MiniMax-M2.1", "MiniMax M2.1", 204_800, Some(131_072)),

@@ -7,7 +7,7 @@
  */
 
 import type { ProviderModel } from '../../config/defaults/provider-defaults'
-import type { AnyLLMProvider } from '../../types/llm'
+import { type AnyLLMProvider, normalizeProviderId } from '../../types/llm'
 import type { ModelInfo } from '../../types/rust-ipc'
 import { rustBackend } from '../rust-bridge'
 
@@ -99,7 +99,8 @@ function backendModelToCatalogEntry(model: ModelInfo): ModelsDevModel {
 }
 
 function isCuratedProviderModel(provider: string, modelId: string): boolean {
-  const curatedIds = CURATED_PROVIDER_MODEL_IDS[provider as AnyLLMProvider]
+  const canonicalProvider = normalizeProviderId(provider)
+  const curatedIds = CURATED_PROVIDER_MODEL_IDS[canonicalProvider as AnyLLMProvider]
   if (!curatedIds) return true
   return curatedIds.includes(modelId)
 }
@@ -111,8 +112,9 @@ export async function syncModelsCatalog(): Promise<ModelsDevCatalog | null> {
 
     for (const model of models) {
       if (!isCuratedProviderModel(model.provider as string, model.id)) continue
-      const providerBucket = catalog[model.provider] ?? {}
-      catalog[model.provider] = providerBucket
+      const providerId = normalizeProviderId(model.provider)
+      const providerBucket = catalog[providerId] ?? {}
+      catalog[providerId] = providerBucket
       providerBucket[model.id] = backendModelToCatalogEntry(model)
     }
 
@@ -126,7 +128,7 @@ export async function syncModelsCatalog(): Promise<ModelsDevCatalog | null> {
 export function getModelsDevModels(avaProviderId: AnyLLMProvider): ProviderModel[] {
   if (!memoryCatalog) return []
 
-  const provider = memoryCatalog[avaProviderId]
+  const provider = memoryCatalog[normalizeProviderId(avaProviderId)]
   if (!provider) return []
 
   return Object.values(provider)
@@ -141,7 +143,7 @@ export function getModelFromCatalog(
   if (!memoryCatalog) return null
 
   if (avaProviderId) {
-    return memoryCatalog[avaProviderId]?.[modelId] ?? null
+    return memoryCatalog[normalizeProviderId(avaProviderId)]?.[modelId] ?? null
   }
 
   for (const provider of Object.values(memoryCatalog)) {

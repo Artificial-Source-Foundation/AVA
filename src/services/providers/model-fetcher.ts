@@ -12,7 +12,7 @@
  */
 
 import type { ProviderModel } from '../../config/defaults/provider-defaults'
-import type { AnyLLMProvider } from '../../types/llm'
+import { type AnyLLMProvider, normalizeProviderId } from '../../types/llm'
 import { logWarn } from '../logger'
 import { getModelFromCatalog, getModelsDevModels } from './curated-model-catalog'
 
@@ -44,7 +44,9 @@ export async function fetchModels(
   provider: AnyLLMProvider,
   options: { apiKey?: string; baseUrl?: string } = {}
 ): Promise<FetchedModel[]> {
-  switch (provider) {
+  const normalizedProvider = normalizeProviderId(provider) as AnyLLMProvider
+
+  switch (normalizedProvider) {
     case 'openai':
       if (options.apiKey) {
         return enrichWithCatalog('openai', await fetchOpenAIModels(options.apiKey))
@@ -72,7 +74,6 @@ export async function fetchModels(
     }
 
     case 'gemini':
-    case 'google':
       if (options.apiKey) {
         try {
           return await fetchGoogleModels(options.apiKey)
@@ -98,9 +99,7 @@ export async function fetchModels(
       return catalogModelsToFetched(getModelsDevModels('inception'))
     }
 
-    case 'zai':
-    case 'zai-coding-plan':
-    case 'zhipuai-coding-plan': {
+    case 'zai': {
       const config = OPENAI_COMPAT_CONFIGS.zai
       if (options.apiKey && config) {
         try {
@@ -113,9 +112,7 @@ export async function fetchModels(
       return catalogModelsToFetched(getModelsDevModels('zai'))
     }
 
-    case 'minimax':
-    case 'minimax-coding-plan':
-    case 'minimax-cn-coding-plan': {
+    case 'minimax': {
       const config = OPENAI_COMPAT_CONFIGS.minimax
       if (options.apiKey && config) {
         try {
@@ -129,21 +126,18 @@ export async function fetchModels(
     }
 
     case 'kimi': {
-      const config = OPENAI_COMPAT_CONFIGS[provider]
+      const config = OPENAI_COMPAT_CONFIGS[normalizedProvider]
       if (options.apiKey && config) {
         try {
           const models = await fetchOpenAICompatModels(options.apiKey, config)
-          return enrichWithCatalog(provider, models)
+          return enrichWithCatalog(normalizedProvider, models)
         } catch {
           logWarn('models', `Could not fetch ${config.providerName} models, trying catalog`)
         }
       }
       // Try the curated catalog before falling back to empty
-      return catalogModelsToFetched(getModelsDevModels(provider))
+      return catalogModelsToFetched(getModelsDevModels(normalizedProvider))
     }
-
-    case 'kimi-for-coding':
-      return catalogModelsToFetched(getModelsDevModels('kimi'))
 
     case 'xai':
     case 'mistral':
@@ -152,8 +146,6 @@ export async function fetchModels(
     case 'together':
     case 'cohere':
     case 'glm':
-    case 'chatgpt':
-    case 'alibaba-cn':
     case 'azure':
     case 'bedrock':
     case 'mock':
@@ -171,6 +163,9 @@ export async function fetchModels(
         logWarn('models', 'Could not fetch Ollama models, using defaults')
         return []
       }
+
+    default:
+      return []
   }
 }
 

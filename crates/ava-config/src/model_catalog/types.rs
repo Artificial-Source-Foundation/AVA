@@ -9,6 +9,25 @@ use tokio::sync::RwLock;
 
 use super::fallback_catalog;
 
+fn canonical_ava_provider_id(provider_id: &str) -> &str {
+    match provider_id {
+        "chatgpt" => "openai",
+        "google" => "gemini",
+        "alibaba-cn" => "alibaba",
+        "zhipuai-coding-plan" | "zai-coding-plan" => "zai",
+        "kimi-for-coding" => "kimi",
+        "minimax-coding-plan" | "minimax-cn-coding-plan" => "minimax",
+        other => other,
+    }
+}
+
+fn catalog_provider_bucket(provider_id: &str) -> &str {
+    match canonical_ava_provider_id(provider_id) {
+        "gemini" => "google",
+        other => other,
+    }
+}
+
 /// A single model from the catalog.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CatalogModel {
@@ -44,10 +63,7 @@ impl CatalogModel {
 
     /// Map catalog provider ID to AVA's internal provider name.
     pub fn ava_provider(&self) -> &str {
-        match self.provider_id.as_str() {
-            "google" => "gemini",
-            other => other,
-        }
+        canonical_ava_provider_id(&self.provider_id)
     }
 
     /// Return the model ID suitable for the given AVA provider.
@@ -117,11 +133,7 @@ impl ModelCatalog {
 
     /// Get models for a specific provider (using AVA's provider names).
     pub fn models_for(&self, ava_provider: &str) -> &[CatalogModel] {
-        // Map AVA provider name to catalog provider name
-        let dev_provider = match ava_provider {
-            "gemini" => "google",
-            other => other,
-        };
+        let dev_provider = catalog_provider_bucket(ava_provider);
         self.providers
             .get(dev_provider)
             .map(|v| v.as_slice())

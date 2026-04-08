@@ -51,6 +51,27 @@ export type LLMProvider = CoreLLMProvider
 /** Provider IDs that may still appear in compatibility or normalization paths. */
 export type AnyLLMProvider = LLMProvider | LegacyLLMProvider
 
+export function normalizeProviderId(provider: AnyLLMProvider | string): LLMProvider | string {
+  switch (provider) {
+    case 'chatgpt':
+      return 'openai'
+    case 'google':
+      return 'gemini'
+    case 'alibaba-cn':
+      return 'alibaba'
+    case 'zhipuai-coding-plan':
+    case 'zai-coding-plan':
+      return 'zai'
+    case 'kimi-for-coding':
+      return 'kimi'
+    case 'minimax-coding-plan':
+    case 'minimax-cn-coding-plan':
+      return 'minimax'
+    default:
+      return provider
+  }
+}
+
 /** Authentication methods */
 export type AuthMethod = 'api-key' | 'oauth' | 'gateway'
 

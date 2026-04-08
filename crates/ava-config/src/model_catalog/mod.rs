@@ -183,9 +183,12 @@ mod tests {
         let coding_plan_providers = [
             "alibaba",
             "alibaba-cn",
+            "zai",
             "zai-coding-plan",
             "zhipuai-coding-plan",
+            "kimi",
             "kimi-for-coding",
+            "minimax",
             "minimax-coding-plan",
             "minimax-cn-coding-plan",
         ];
@@ -196,5 +199,26 @@ mod tests {
                 "Coding plan provider {provider} has no models in fallback_catalog()"
             );
         }
+    }
+
+    #[test]
+    fn legacy_provider_aliases_resolve_to_canonical_buckets() {
+        let catalog = fallback_catalog();
+        assert_eq!(
+            catalog.models_for("alibaba").len(),
+            catalog.models_for("alibaba-cn").len()
+        );
+        assert_eq!(
+            catalog.models_for("zai").len(),
+            catalog.models_for("zhipuai-coding-plan").len()
+        );
+        assert_eq!(
+            catalog.models_for("kimi").len(),
+            catalog.models_for("kimi-for-coding").len()
+        );
+        assert_eq!(
+            catalog.models_for("minimax").len(),
+            catalog.models_for("minimax-cn-coding-plan").len()
+        );
     }
 }

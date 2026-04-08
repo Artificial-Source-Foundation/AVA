@@ -13,7 +13,8 @@ All notable changes to AVA are documented in this file.
 - Made secure credential handling the default runtime path: desktop sync now writes to the Rust secure store, normal settings persistence no longer serializes raw provider API keys, and startup prefers secure storage while still reading an existing plaintext `~/.ava/credentials.json` for compatibility.
 - Reworked onboarding into an optional in-app guide instead of a startup gate, with a reopen entry in Settings > General.
 - Moved plugin and MCP management into `Advanced` by default so the main settings surface stays focused on core product configuration.
-- Started the HQ plugin reintroduction from the plugin side: `ava-hq` now ships a small `ava-hq-plugin` binary and `plugins/examples/ava-hq/` local-link artifact that re-register HQ-owned commands, routes, events, and mount metadata through the existing plugin host seam.
+- Started the HQ plugin reintroduction groundwork from the plugin side: `ava-hq` now ships a small `ava-hq-plugin` binary and `plugins/examples/ava-hq/` local-link artifact, but that track is now deferred behind the future roadmap while current work stays focused on core AVA.
+- Normalized provider route/region aliases back into the canonical core provider surface: the repo-owned fallback model catalog now collapses legacy coding-plan/region variants into their main providers, and the frontend model/docs helpers now resolve those old IDs through the same canonical paths instead of treating them like separate providers.
 
 ## [3.3.0] — 2026-04-07
 

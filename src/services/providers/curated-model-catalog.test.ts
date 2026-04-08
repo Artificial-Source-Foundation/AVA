@@ -83,6 +83,30 @@ describe('curated-model-catalog', () => {
     expect(models[0].capabilities).toContain('reasoning')
   })
 
+  it('normalizes legacy provider aliases into canonical catalog buckets', async () => {
+    mockListModels.mockResolvedValue([
+      ...MOCK_MODELS,
+      {
+        id: 'glm-4.7',
+        provider: 'zhipuai-coding-plan',
+        name: 'GLM-4.7',
+        toolCall: true,
+        vision: false,
+        reasoning: true,
+        capabilities: ['tools', 'reasoning'],
+        contextWindow: 204800,
+        maxOutput: 131072,
+        costInput: 0,
+        costOutput: 0,
+      },
+    ])
+    await syncModelsCatalog()
+
+    expect(getModelsDevModels('zai')).toHaveLength(1)
+    expect(getModelsDevModels('zhipuai-coding-plan')).toHaveLength(1)
+    expect(getModelFromCatalog('glm-4.7', 'zai')?.name).toBe('GLM-4.7')
+  })
+
   it('filters blocked model ids from provider lists', async () => {
     await syncModelsCatalog()
     const models = getModelsDevModels('xai' as 'openai')

@@ -27,7 +27,7 @@ cargo install --path crates/ava-tui
 Add credentials:
 
 ```bash
-ava --connect openrouter
+ava auth login openrouter
 ```
 
 Security note:
@@ -101,8 +101,10 @@ Plugins are a core part of AVA's identity, but plugin-owned UI and settings shou
 4. [docs/project/backlog.md](docs/project/backlog.md) - active work and priorities
 5. [docs/architecture/crate-map.md](docs/architecture/crate-map.md) - current crate and dependency map
 6. [docs/extend/README.md](docs/extend/README.md) - extension and customization overview
-7. [docs/reference/credential-storage.md](docs/reference/credential-storage.md) - credential storage and security guidance
-8. [CLAUDE.md](CLAUDE.md) - compatibility entrypoint pointing back to the active docs
+7. [docs/reference/providers-and-auth.md](docs/reference/providers-and-auth.md) - provider IDs, aliases, and auth behavior
+8. [docs/reference/commands.md](docs/reference/commands.md) - slash commands and CLI surfaces
+9. [docs/reference/credential-storage.md](docs/reference/credential-storage.md) - credential storage and security guidance
+10. [CLAUDE.md](CLAUDE.md) - compatibility entrypoint pointing back to the active docs
 
 ## Contributing
 

@@ -6,6 +6,8 @@ All notable changes to AVA are documented in this file.
 
 ### Changed
 - Reorganized the active docs set into clearer purpose-based sections: roadmap and backlog now live under `docs/project/`, extension and credential references now live under `docs/reference/`, `docs/README.md` now explains the docs taxonomy by audience, and the root `README.md` plus contributor compatibility entrypoints were updated to match the new structure.
+- Expanded the docs so the codebase is represented as a usable retrieval layer: added dedicated references for providers/auth and command surfaces, split extension docs into page-sized sections for plugins, MCP, commands/hooks, tools, and instructions, added architecture entrypoint and contributor workflow docs, and corrected stale path and trust-model details to match the current runtime.
+- Made the active docs website-ready: added consistent frontmatter across active pages, added section `_meta.json` navigation manifests, created a troubleshooting index page, and aligned sidebar ordering so the Markdown can be imported into a future docs site with minimal extra work.
 - Tightened release-hardening coverage around current 3.3 routing and TUI behavior: cheap-route tests now assert against the computed cheapest configured candidate, stale TUI interaction assertions were updated to the current UI contract, and the release verification path is green again across Rust and frontend checks.
 - Cleaned the standard verification path by fixing the current frontend lint/reactivity warnings and clearing the remaining workspace clippy warnings in `ava-plugin`, `ava-acp`, and `ava-tui`.
 

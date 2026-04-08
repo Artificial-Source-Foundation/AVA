@@ -1,3 +1,10 @@
+---
+title: "WebKitGTK Rendering Issues"
+description: "Known Linux WebKitGTK rendering failures and workarounds for AVA's Tauri webview."
+order: 3
+updated: "2026-04-08"
+---
+
 # WebKitGTK Rendering Issues (Tauri/Linux)
 
 Tauri uses WebKitGTK as its webview on Linux. WebKitGTK has known rendering bugs on certain Wayland compositors and GPU driver combinations.

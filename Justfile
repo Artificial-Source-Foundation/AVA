@@ -7,7 +7,7 @@ default:
 check:
     cargo fmt --all --check
     cargo clippy --workspace -- -D warnings
-    cargo nextest run -p ava-agent -p ava-praxis -p ava-tools -j 4
+    cargo nextest run -p ava-agent -p ava-tools -p ava-review -j 4
 
 # Run tests (per-crate to avoid OOM)
 test *ARGS:

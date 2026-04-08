@@ -98,7 +98,7 @@ pnpm lint && pnpm format:check && pnpm typecheck
 **This is mandatory.** After completing a feature, fix, or refactor:
 
 1. **Update `CHANGELOG.md`** — add entry under current version section
-2. **Update `docs/project/backlog.md`** — update the relevant progress/status notes for completed work
+2. **Update the relevant docs** — at minimum `docs/project/backlog.md`, plus any architecture, reference, contributor, or README docs affected by the change
 3. **Update `AGENTS.md`** if the source-of-truth architecture, workflow, or conventions changed
 4. **Update `docs/architecture/crate-map.md`** if crates were added or removed
 5. **Run `just check`** before committing
@@ -127,3 +127,5 @@ Docs must always reflect the current codebase. Never let them drift.
 9. `CHANGELOG.md` — version history
 
 `AGENTS.md` owns workflow, conventions, and architectural guidance. `docs/project/roadmap.md` owns product direction.
+
+For the full docs index including reference material, see `README.md` and `docs/README.md`.

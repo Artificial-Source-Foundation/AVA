@@ -24,6 +24,6 @@ This file is a compatibility summary for tools that probe `llms.txt`.
 
 1. `AGENTS.md`
 2. `docs/README.md`
-3. `docs/ava-3.3-plan.md`
-4. `docs/backlog.md`
+3. `docs/project/roadmap.md`
+4. `docs/project/backlog.md`
 5. `docs/architecture/crate-map.md`

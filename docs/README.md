@@ -1,3 +1,10 @@
+---
+title: "Docs"
+description: "Entry point for AVA's documentation, organized by audience and purpose."
+order: 1
+updated: "2026-04-08"
+---
+
 # AVA Docs
 
 AVA's documentation is organized by purpose so the repo is easier to navigate for users, contributors, and maintainers.
@@ -15,11 +22,9 @@ AVA's documentation is organized by purpose so the repo is easier to navigate fo
 1. [project/](project/) - roadmap and active backlog
 2. [architecture/](architecture/) - crate map and architecture checklists
 3. [extend/](extend/) - plugins, MCP, custom tools, and instruction surfaces
-4. [reference/](reference/) - stable reference material such as credential guidance
+4. [reference/](reference/) - providers, commands, credentials, and other stable reference material
 5. [contributing/](contributing/) - contributor and release workflow docs
 6. [troubleshooting/](troubleshooting/) - environment and platform-specific fixes
-7. [archive/](archive/) - historical notes and research kept for context
-8. [reference-code/](reference-code/) - external codebase snapshots used for comparison and research
 
 ## Recommended Reading By Audience
 
@@ -33,3 +38,5 @@ AVA's documentation is organized by purpose so the repo is easier to navigate fo
 2. `AGENTS.md` remains the authoritative workflow and architecture document for this repo.
 3. `CLAUDE.md`, `llms.txt`, and `CODEBASE_STRUCTURE.md` are compatibility entrypoints that point back to the active docs.
 4. Historical material is preserved for context, not as current roadmap guidance.
+5. Active docs pages now include frontmatter and `_meta.json` navigation manifests so the Markdown can be imported into a docs website later without a full rewrite.
+6. `archive/` and `reference-code/` are intentionally kept outside the main published docs navigation because they are historical and research-oriented, not part of the primary website surface.

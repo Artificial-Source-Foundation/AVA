@@ -1,3 +1,10 @@
+---
+title: "Tauri Linux Toolchain Checklist"
+description: "Checklist for verifying Linux compiler, linker, and system dependencies before running Tauri locally."
+order: 2
+updated: "2026-04-08"
+---
+
 # Tauri Linux Toolchain Checklist
 
 Use this checklist before running `npm run tauri dev` on Linux.

@@ -785,9 +785,9 @@ impl App {
                 let hello_path = tools_dir.join("hello.toml");
                 if !hello_path.exists() {
                     let hello_content = "\
-[tool]\nname = \"hello\"\ndescription = \"Example custom tool \u{2014} prints a greeting\"\n\n\
-[tool.parameters.name]\ntype = \"string\"\ndescription = \"Name to greet\"\nrequired = true\n\n\
-[execute]\ncommand = \"echo 'Hello, {{name}}!'\"\n";
+name = \"hello\"\ndescription = \"Example custom tool \u{2014} prints a greeting\"\n\n\
+[[params]]\nname = \"name\"\ntype = \"string\"\nrequired = true\ndescription = \"Name to greet\"\n\n\
+[execution]\ntype = \"shell\"\ncommand = \"echo 'Hello, {{name}}!'\"\n";
                     if std::fs::write(&hello_path, hello_content).is_ok() {
                         created.push(".ava/tools/hello.toml");
                     }

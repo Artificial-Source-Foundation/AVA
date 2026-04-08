@@ -208,6 +208,18 @@ impl KeychainManager {
         Ok(())
     }
 
+    /// Replace the secure store contents with the provided set.
+    pub fn replace_all(&self, store: &CredentialStore) -> Result<()> {
+        let existing = self.list_providers()?;
+        for provider in existing {
+            if !store.providers.contains_key(&provider) {
+                let _ = self.delete(&provider)?;
+            }
+        }
+
+        self.store_all(store)
+    }
+
     /// Migrate from plaintext credentials.json to secure storage.
     ///
     /// Reads the existing plaintext file, stores each credential in the keychain,
@@ -456,7 +468,19 @@ fn update_provider_index(_provider: &str, _remove: bool) -> std::result::Result<
 ///
 /// Reads from AVA_MASTER_PASSWORD env var first, then prompts interactively.
 /// The `creating` flag controls the prompt text.
+#[cfg(test)]
+static TEST_MASTER_PASSWORD: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
 fn get_master_password(creating: bool) -> Result<String> {
+    #[cfg(test)]
+    if let Some(password) = TEST_MASTER_PASSWORD
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone()
+    {
+        return Ok(password);
+    }
+
     // Check environment variable first (for CI, headless, tests)
     if let Ok(password) = std::env::var("AVA_MASTER_PASSWORD") {
         if !password.is_empty() {
@@ -609,6 +633,12 @@ mod tests {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
+    fn set_master_password(password: Option<&str>) {
+        *TEST_MASTER_PASSWORD
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = password.map(ToString::to_string);
+    }
+
     #[test]
     fn redact_key_for_log_short_keys() {
         assert_eq!(redact_key_for_log(""), "****");
@@ -724,7 +754,7 @@ mod tests {
         let enc_path = dir.path().join("credentials.enc");
 
         // Set master password via env for non-interactive test
-        std::env::set_var("AVA_MASTER_PASSWORD", "test-file-roundtrip");
+        set_master_password(Some("test-file-roundtrip"));
 
         let manager = KeychainManager::with_path(enc_path.clone());
 
@@ -754,7 +784,7 @@ mod tests {
         assert!(manager.delete("openrouter").unwrap());
         assert!(manager.retrieve("openrouter").unwrap().is_none());
 
-        std::env::remove_var("AVA_MASTER_PASSWORD");
+        set_master_password(None);
     }
 
     #[cfg(feature = "keychain")]
@@ -783,7 +813,7 @@ mod tests {
             );
             store.save(&plaintext_path).await.unwrap();
 
-            std::env::set_var("AVA_MASTER_PASSWORD", "migration-test-pw");
+            set_master_password(Some("migration-test-pw"));
 
             let manager = KeychainManager::with_path(enc_path);
             let result = manager
@@ -797,20 +827,22 @@ mod tests {
             let retrieved = manager.retrieve("openai").unwrap().unwrap();
             assert_eq!(retrieved.api_key, "sk-migrate-test");
 
-            std::env::remove_var("AVA_MASTER_PASSWORD");
+            set_master_password(None);
         });
     }
 
     #[cfg(feature = "keychain")]
-    #[tokio::test]
-    async fn migration_no_file() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let missing = dir.path().join("does-not-exist.json");
-        let enc_path = dir.path().join("credentials.enc");
+    #[test]
+    fn migration_no_file() {
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            let dir = tempfile::TempDir::new().unwrap();
+            let missing = dir.path().join("does-not-exist.json");
+            let enc_path = dir.path().join("credentials.enc");
 
-        let manager = KeychainManager::with_path(enc_path);
-        let result = manager.migrate_from_plaintext(&missing).await.unwrap();
-        assert_eq!(result, MigrationResult::NoFileFound);
+            let manager = KeychainManager::with_path(enc_path);
+            let result = manager.migrate_from_plaintext(&missing).await.unwrap();
+            assert_eq!(result, MigrationResult::NoFileFound);
+        });
     }
 
     #[cfg(feature = "keychain")]
@@ -820,7 +852,7 @@ mod tests {
         let dir = tempfile::TempDir::new().unwrap();
         let enc_path = dir.path().join("credentials.enc");
 
-        std::env::set_var("AVA_MASTER_PASSWORD", "bulk-test-pw");
+        set_master_password(Some("bulk-test-pw"));
 
         let manager = KeychainManager::with_path(enc_path);
 
@@ -867,6 +899,77 @@ mod tests {
             "gem-bulk-key"
         );
 
-        std::env::remove_var("AVA_MASTER_PASSWORD");
+        set_master_password(None);
+    }
+
+    #[cfg(feature = "keychain")]
+    #[test]
+    fn replace_all_removes_deleted_providers() {
+        let _guard = lock_env();
+        let dir = tempfile::TempDir::new().unwrap();
+        let enc_path = dir.path().join("credentials.enc");
+
+        set_master_password(Some("replace-all-test-pw"));
+
+        let manager = KeychainManager::with_path(enc_path);
+
+        let mut initial = CredentialStore::default();
+        initial.set(
+            "anthropic",
+            ProviderCredential {
+                api_key: "sk-ant".to_string(),
+                base_url: None,
+                org_id: None,
+                oauth_token: None,
+                oauth_refresh_token: None,
+                oauth_expires_at: None,
+                oauth_account_id: None,
+                litellm_compatible: None,
+                loop_prone: None,
+            },
+        );
+        initial.set(
+            "openai",
+            ProviderCredential {
+                api_key: "sk-openai".to_string(),
+                base_url: None,
+                org_id: None,
+                oauth_token: None,
+                oauth_refresh_token: None,
+                oauth_expires_at: None,
+                oauth_account_id: None,
+                litellm_compatible: None,
+                loop_prone: None,
+            },
+        );
+        manager.store_all(&initial).unwrap();
+
+        let mut replacement = CredentialStore::default();
+        replacement.set(
+            "openai",
+            ProviderCredential {
+                api_key: "sk-openai-new".to_string(),
+                base_url: None,
+                org_id: None,
+                oauth_token: None,
+                oauth_refresh_token: None,
+                oauth_expires_at: None,
+                oauth_account_id: None,
+                litellm_compatible: None,
+                loop_prone: None,
+            },
+        );
+
+        manager.replace_all(&replacement).unwrap();
+
+        let loaded = manager.load_all().unwrap();
+        assert_eq!(loaded.providers.len(), 1);
+        assert!(!loaded.providers.contains_key("anthropic"));
+        assert_eq!(
+            loaded.providers.get("openai").unwrap().api_key,
+            "sk-openai-new"
+        );
+
+        set_master_password(None);
     }
 }

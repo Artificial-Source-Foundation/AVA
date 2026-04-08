@@ -18,6 +18,28 @@ pnpm tauri dev
 pnpm lint && pnpm typecheck
 ```
 
+## Local Resource Throttling
+
+This repo is often worked on interactively on a developer machine. Heavy commands must be run with reduced CPU and I/O priority unless the user explicitly asks for maximum speed.
+
+Default throttle for heavy Rust commands:
+
+```bash
+ionice -c 3 nice -n 15 env CARGO_BUILD_JOBS=4 cargo test --workspace -- --test-threads=4
+ionice -c 3 nice -n 15 env CARGO_BUILD_JOBS=4 cargo clippy --workspace --all-targets
+ionice -c 3 nice -n 15 env CARGO_BUILD_JOBS=4 cargo fmt --all -- --check
+```
+
+Default throttle for heavy frontend commands:
+
+```bash
+ionice -c 3 nice -n 15 pnpm lint
+ionice -c 3 nice -n 15 pnpm typecheck
+ionice -c 3 nice -n 15 pnpm test
+```
+
+If the machine is still too laggy, lower parallelism further before retrying, for example `CARGO_BUILD_JOBS=2` and `--test-threads=2`.
+
 This file is the primary source of truth for repo workflow and architecture.
 
 ## What AVA Is

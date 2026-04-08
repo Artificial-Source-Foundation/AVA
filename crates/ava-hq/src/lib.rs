@@ -24,6 +24,7 @@ pub mod lead;
 pub mod mailbox;
 pub mod memory;
 pub mod plan;
+pub mod plugin_host;
 pub mod prompts;
 pub mod review;
 pub mod roles;

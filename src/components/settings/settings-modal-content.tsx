@@ -15,6 +15,7 @@ import { UsageTab } from './tabs/UsageTab'
 
 interface SettingsModalContentProps {
   activeTab: () => SettingsTab
+  onSelectTab: (tab: SettingsTab) => void
   settings: () => AppSettings
   keybindings: () => Keybinding[]
   mcpServers: () => MCPServer[]
@@ -73,7 +74,7 @@ export const SettingsModalContent: Component<SettingsModalContentProps> = (props
       case 'permissions-trust':
         return <PermissionsAndTrustTab />
       case 'advanced':
-        return <AdvancedTab />
+        return <AdvancedTab onSelectTab={props.onSelectTab} />
       case 'llm':
         return <LLMTab />
       case 'mcp':

@@ -119,7 +119,7 @@ pub async fn get_feature_flags(
 }
 
 // ============================================================================
-// Credential Sync — Desktop ↔ ~/.ava/credentials.json
+// Credential Sync — Desktop ↔ secure credential store
 // ============================================================================
 
 #[derive(Debug, Deserialize)]
@@ -129,7 +129,7 @@ pub struct CredentialEntry {
     pub api_key: String,
 }
 
-/// Sync provider API keys from the Desktop frontend into ~/.ava/credentials.json.
+/// Sync provider API keys from the Desktop frontend into the secure credential store.
 ///
 /// Additive: only sets keys that are provided; does not remove existing entries.
 /// Skips empty API keys silently.
@@ -168,11 +168,11 @@ pub async fn sync_credentials(
         .await
         .map_err(|e| e.to_string())?;
 
-    debug!(count, "Synced Desktop credentials to credentials.json");
+    debug!(count, "Synced Desktop credentials to secure store");
     Ok(())
 }
 
-/// Load provider credentials from ~/.ava/credentials.json for the Desktop frontend.
+/// Load provider credentials from the secure credential store for the Desktop frontend.
 ///
 /// Returns a list of `{ provider, apiKey }` entries for all providers that have a
 /// non-empty API key. OAuth tokens and other sensitive fields are NOT returned —

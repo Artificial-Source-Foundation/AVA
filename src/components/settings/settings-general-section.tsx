@@ -6,7 +6,7 @@
  * Each card: #111114 surface, #ffffff08 border, rounded-12, 20px padding, 16px gap.
  */
 
-import { Database, Download, GitBranch, Monitor, Upload } from 'lucide-solid'
+import { Compass, Database, Download, GitBranch, Monitor, Upload } from 'lucide-solid'
 import { type Component, Show } from 'solid-js'
 import { useSettings } from '../../stores/settings'
 import { Toggle } from '../ui/Toggle'
@@ -24,6 +24,7 @@ interface GeneralSectionProps {
 
 export const GeneralSection: Component<GeneralSectionProps> = (props) => {
   const { settings, updateUI, updateGit, exportSettings, importSettings } = useSettings()
+  const openOnboardingGuide = () => window.dispatchEvent(new CustomEvent('ava:open-onboarding'))
 
   return (
     <div class="flex flex-col" style={{ gap: '24px' }}>
@@ -203,6 +204,54 @@ export const GeneralSection: Component<GeneralSectionProps> = (props) => {
           >
             AVA v3.x
           </span>
+        </div>
+      </SettingsCard>
+
+      <SettingsCard
+        icon={Compass}
+        title="Quick Start"
+        description="Optional setup guidance inside the app"
+      >
+        <div class="flex items-center justify-between" style={{ width: '100%' }}>
+          <div style={{ display: 'flex', 'flex-direction': 'column', gap: '2px' }}>
+            <span
+              style={{
+                'font-family': 'Geist, sans-serif',
+                'font-size': '13px',
+                color: '#C8C8CC',
+              }}
+            >
+              Reopen onboarding guide
+            </span>
+            <span
+              style={{
+                'font-family': 'Geist, sans-serif',
+                'font-size': '12px',
+                color: '#48484A',
+              }}
+            >
+              Launch the optional in-app setup flow any time.
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={openOnboardingGuide}
+            class="flex items-center transition-colors"
+            style={{
+              gap: '6px',
+              'border-radius': '8px',
+              border: '1px solid #ffffff0a',
+              height: '32px',
+              padding: '0 14px',
+              color: '#C8C8CC',
+              'font-family': 'Geist, sans-serif',
+              'font-size': '13px',
+              background: 'transparent',
+              cursor: 'pointer',
+            }}
+          >
+            Open Guide
+          </button>
         </div>
       </SettingsCard>
 

@@ -19,6 +19,31 @@ import type { AppSettings } from './settings-types'
 // Credential Sync — bridges Settings UI → Core credential store
 // ============================================================================
 
+function hasTauriRuntime(): boolean {
+  return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
+}
+
+function readCachedProviderApiKey(providerId: string): string | undefined {
+  try {
+    const cached = localStorage.getItem(`ava_cred_ava:${providerId}:api_key`)
+    return cached?.trim() ? cached : undefined
+  } catch {
+    return undefined
+  }
+}
+
+function applyCachedProviderApiKeys(settings: AppSettings): AppSettings {
+  if (hasTauriRuntime()) return settings
+
+  return {
+    ...settings,
+    providers: settings.providers.map((provider) => ({
+      ...provider,
+      apiKey: provider.apiKey ?? readCachedProviderApiKey(provider.id),
+    })),
+  }
+}
+
 /**
  * Write a single provider's API key to the credential store.
  * Key format matches the shared desktop credential bridge: "ava:{provider}:api_key"
@@ -26,6 +51,8 @@ import type { AppSettings } from './settings-types'
  * key is "ava_cred_ava:{provider}:api_key".
  */
 export function syncProviderCredentials(providerId: string, apiKey: string | undefined): void {
+  if (hasTauriRuntime()) return
+
   const storageKey = `ava_cred_ava:${providerId}:api_key`
   if (apiKey) {
     localStorage.setItem(storageKey, apiKey)
@@ -106,8 +133,8 @@ export function syncAllApiKeys(current: AppSettings): void {
 // ============================================================================
 
 /**
- * Push all Desktop provider API keys to the Rust CredentialStore
- * (~/.ava/credentials.json) so the TUI/CLI can use them.
+ * Push all Desktop provider API keys to the Rust credential store
+ * (native keychain when available, encrypted fallback otherwise) so the TUI/CLI can use them.
  * Fire-and-forget — never blocks the UI.
  */
 function syncCredentialsToCore(s: AppSettings): void {
@@ -117,7 +144,7 @@ function syncCredentialsToCore(s: AppSettings): void {
   if (credentials.length === 0) return
 
   invoke('sync_credentials', { credentials }).catch((err) => {
-    logWarn('settings', 'Credential sync to credentials.json failed', err)
+    logWarn('settings', 'Credential sync to secure store failed', err)
   })
 }
 
@@ -127,7 +154,7 @@ interface CoreCredentialEntry {
 }
 
 /**
- * Load credentials from ~/.ava/credentials.json and merge any API keys that
+ * Load credentials from the Rust secure store and merge any API keys that
  * exist in the Rust store but are missing from the Desktop settings.
  *
  * Returns a providers patch (only providers that need updating), or null if
@@ -156,7 +183,6 @@ async function loadCredentialsFromCore(
             status: 'connected',
             enabled: true,
           }
-          // Also write to localStorage credential cache
           syncProviderCredentials(entry.provider, entry.apiKey)
           changed = true
         }
@@ -164,12 +190,12 @@ async function loadCredentialsFromCore(
     }
 
     if (!changed) return null
-    logInfo('settings', 'Loaded credentials from credentials.json', {
+    logInfo('settings', 'Loaded credentials from secure store', {
       count: entries.length,
     })
     return { providers: updatedProviders } as Partial<AppSettings>
   } catch (err) {
-    logWarn('settings', 'Failed to load credentials from credentials.json', err)
+    logWarn('settings', 'Failed to load credentials from secure store', err)
     return null
   }
 }
@@ -206,7 +232,7 @@ export function pushSettingsToCore(s: AppSettings): void {
   // Sync shared feature flags to config.yaml (fire-and-forget)
   syncFeatureFlagsToYaml(s)
 
-  // Sync provider API keys to ~/.ava/credentials.json (fire-and-forget)
+  // Sync provider API keys to the Rust secure store (fire-and-forget)
   syncCredentialsToCore(s)
 }
 
@@ -361,7 +387,6 @@ export function serializeSettings(s: AppSettings): Record<string, unknown> {
       name: p.name,
       description: p.description,
       enabled: p.enabled,
-      apiKey: p.apiKey,
       baseUrl: p.baseUrl,
       defaultModel: p.defaultModel,
       models: p.models,
@@ -391,12 +416,12 @@ export function loadSettings(): AppSettings {
     const raw = localStorage.getItem(STORAGE_KEYS.SETTINGS)
     if (raw) {
       const parsed = JSON.parse(raw) as Partial<AppSettings>
-      return mergeWithDefaults(parsed)
+      return applyCachedProviderApiKeys(mergeWithDefaults(parsed))
     }
   } catch {
     /* corrupted data — use defaults */
   }
-  return { ...DEFAULT_SETTINGS }
+  return applyCachedProviderApiKeys({ ...DEFAULT_SETTINGS })
 }
 
 const SETTINGS_PERSIST_DELAY_MS = 180

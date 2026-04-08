@@ -398,6 +398,36 @@ pub struct ConfigManager {
 }
 
 impl ConfigManager {
+    async fn load_credentials_store(credentials_path: &Path) -> Result<CredentialStore> {
+        if credentials_path == CredentialStore::default_path()?.as_path() {
+            let keychain = KeychainManager::new()?;
+            let existing = keychain.load_all()?;
+            if !existing.providers.is_empty() {
+                return Ok(existing);
+            }
+
+            if credentials_path.exists() {
+                return CredentialStore::load(credentials_path).await;
+            }
+
+            return Ok(existing);
+        }
+
+        CredentialStore::load(credentials_path).await
+    }
+
+    async fn save_credentials_store(
+        credentials_path: &Path,
+        credentials: &CredentialStore,
+    ) -> Result<()> {
+        if credentials_path == CredentialStore::default_path()?.as_path() {
+            let keychain = KeychainManager::new()?;
+            return keychain.replace_all(credentials);
+        }
+
+        credentials.save(credentials_path).await
+    }
+
     /// Load configuration from default location
     pub async fn load() -> Result<Self> {
         let config_path = Self::default_config_path()?;
@@ -429,7 +459,7 @@ impl ConfigManager {
         config.llm.routing.normalize();
         config.llm.thinking_budgets.normalize_keys();
 
-        let credentials = CredentialStore::load(&credentials_path).await?;
+        let credentials = Self::load_credentials_store(&credentials_path).await?;
 
         Ok(Self {
             config: Arc::new(RwLock::new(config)),
@@ -462,7 +492,7 @@ impl ConfigManager {
     /// Save credentials to file
     pub async fn save_credentials(&self) -> Result<()> {
         let credentials = self.credentials.read().await;
-        credentials.save(&self.credentials_path).await
+        Self::save_credentials_store(&self.credentials_path, &credentials).await
     }
 
     /// Get current configuration

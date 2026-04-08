@@ -213,6 +213,20 @@ mod tests {
 
     #[tokio::test]
     async fn session_logger_creates_file() {
+        async fn wait_for_line_count(path: &std::path::Path, expected: usize) {
+            for _ in 0..20 {
+                if let Ok(content) = std::fs::read_to_string(path) {
+                    if content.lines().count() == expected {
+                        return;
+                    }
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+            }
+
+            let content = std::fs::read_to_string(path).unwrap();
+            assert_eq!(content.lines().count(), expected);
+        }
+
         let dir = tempfile::tempdir().unwrap();
         let log_path = dir.path().join("test-session.jsonl");
         let logger = SessionLogger {
@@ -228,15 +242,14 @@ mod tests {
             Duration::from_millis(100),
         );
         logger.log_turn(&entry);
-        // Give spawn_blocking time to complete
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        wait_for_line_count(&log_path, 1).await;
         let content = std::fs::read_to_string(&log_path).unwrap();
         assert!(content.contains("\"turn\":1"));
         assert_eq!(content.lines().count(), 1);
 
         // Second entry appends
         logger.log_turn(&entry);
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        wait_for_line_count(&log_path, 2).await;
         let content = std::fs::read_to_string(&log_path).unwrap();
         assert_eq!(content.lines().count(), 2);
     }

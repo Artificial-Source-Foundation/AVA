@@ -10,6 +10,10 @@ All notable changes to AVA are documented in this file.
 - Made the active docs website-ready: added consistent frontmatter across active pages, added section `_meta.json` navigation manifests, created a troubleshooting index page, and aligned sidebar ordering so the Markdown can be imported into a future docs site with minimal extra work.
 - Tightened release-hardening coverage around current 3.3 routing and TUI behavior: cheap-route tests now assert against the computed cheapest configured candidate, stale TUI interaction assertions were updated to the current UI contract, and the release verification path is green again across Rust and frontend checks.
 - Cleaned the standard verification path by fixing the current frontend lint/reactivity warnings and clearing the remaining workspace clippy warnings in `ava-plugin`, `ava-acp`, and `ava-tui`.
+- Made secure credential handling the default runtime path: desktop sync now writes to the Rust secure store, normal settings persistence no longer serializes raw provider API keys, and startup prefers secure storage while still reading an existing plaintext `~/.ava/credentials.json` for compatibility.
+- Reworked onboarding into an optional in-app guide instead of a startup gate, with a reopen entry in Settings > General.
+- Moved plugin and MCP management into `Advanced` by default so the main settings surface stays focused on core product configuration.
+- Started the HQ plugin reintroduction from the plugin side: `ava-hq` now ships a small `ava-hq-plugin` binary and `plugins/examples/ava-hq/` local-link artifact that re-register HQ-owned commands, routes, events, and mount metadata through the existing plugin host seam.
 
 ## [3.3.0] — 2026-04-07
 

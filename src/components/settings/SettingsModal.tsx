@@ -229,6 +229,7 @@ export const SettingsModal: Component = () => {
           >
             <SettingsModalContent
               activeTab={activeTab}
+              onSelectTab={setActiveTab}
               settings={settings}
               keybindings={keybindings}
               mcpServers={mcpServers}

@@ -98,18 +98,6 @@ export const tabGroups: TabGroup[] = [
     label: 'Tools',
     tabs: [
       {
-        id: 'mcp',
-        label: 'MCP Servers',
-        icon: Server,
-        keywords: ['server', 'protocol', 'stdio', 'transport'],
-      },
-      {
-        id: 'plugins',
-        label: 'Plugins',
-        icon: Puzzle,
-        keywords: ['extension', 'install', 'community', 'marketplace'],
-      },
-      {
         id: 'skills',
         label: 'Skills & Rules',
         icon: Sparkles,
@@ -194,6 +182,18 @@ export const tabGroups: TabGroup[] = [
           'credits',
         ],
       },
+      {
+        id: 'mcp',
+        label: 'MCP Servers',
+        icon: Server,
+        keywords: ['server', 'protocol', 'stdio', 'transport', 'mcp'],
+      },
+      {
+        id: 'plugins',
+        label: 'Plugins',
+        icon: Puzzle,
+        keywords: ['extension', 'install', 'community', 'marketplace', 'plugin'],
+      },
     ],
   },
 ]
@@ -232,6 +232,12 @@ export const settingsSearchIndex: SettingsSearchEntry[] = [
   { label: 'Export settings', tab: 'general', tabLabel: 'General' },
   { label: 'Import settings', tab: 'general', tabLabel: 'General' },
   { label: 'Clear all data', tab: 'general', tabLabel: 'General' },
+  {
+    label: 'Onboarding guide',
+    description: 'Reopen the in-app quick start flow',
+    tab: 'general',
+    tabLabel: 'General',
+  },
 
   // Appearance
   {

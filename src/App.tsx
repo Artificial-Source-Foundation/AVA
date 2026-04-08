@@ -44,6 +44,7 @@ function App() {
   const [toolListDialogOpen, setToolListDialogOpen] = createSignal(false)
   const [updateInfo, setUpdateInfo] = createSignal<UpdateInfo | null>(null)
   const [changelogOpen, setChangelogOpen] = createSignal(false)
+  const [onboardingOpen, setOnboardingOpen] = createSignal(false)
 
   // Show toast when env API keys are detected (fires after init completes)
   createEffect(
@@ -146,15 +147,21 @@ function App() {
     const cleanupTheme = setupSystemThemeListener()
     onCleanup(cleanupTheme)
 
+    const handleOpenOnboarding = () => setOnboardingOpen(true)
+    window.addEventListener('ava:open-onboarding', handleOpenOnboarding)
+    onCleanup(() => window.removeEventListener('ava:open-onboarding', handleOpenOnboarding))
+
     registerAppShortcuts(setExportDialogOpen, setCheckpointDialogOpen, setProjectHubVisible)
 
     const result = await runAppInit(setSplashStatus, setProjectHubVisible)
     if (result.error) setInitError(result.error)
+    if (!settings().onboardingComplete) setOnboardingOpen(true)
     setIsInitializing(false)
   })
 
   const handleOnboardingComplete = (data: OnboardingData) => {
     updateSettings({ onboardingComplete: true, theme: data.theme, mode: data.mode })
+    setOnboardingOpen(false)
 
     // Apply appearance choices from the new onboarding flow
     if (data.accentColor || data.darkStyle || data.borderRadius) {
@@ -214,33 +221,32 @@ function App() {
             </div>
           }
         >
-          <Show
-            when={settings().onboardingComplete}
-            fallback={
+          <Show when={!projectHubVisible()} fallback={<ProjectHub />}>
+            <AppShell />
+            <AppDialogs
+              workflowDialogOpen={workflowDialogOpen()}
+              setWorkflowDialogOpen={setWorkflowDialogOpen}
+              checkpointDialogOpen={checkpointDialogOpen()}
+              setCheckpointDialogOpen={setCheckpointDialogOpen}
+              exportDialogOpen={exportDialogOpen()}
+              setExportDialogOpen={setExportDialogOpen}
+              changelogOpen={changelogOpen()}
+              setChangelogOpen={setChangelogOpen}
+              updateDialogOpen={updateDialogOpen()}
+              setUpdateDialogOpen={setUpdateDialogOpen}
+              toolListDialogOpen={toolListDialogOpen()}
+              setToolListDialogOpen={setToolListDialogOpen}
+              updateInfo={updateInfo()}
+              onInstallUpdate={downloadAndInstallUpdate}
+              setProjectHubVisible={setProjectHubVisible}
+            />
+            <Show when={onboardingOpen()}>
               <OnboardingScreen
                 onComplete={handleOnboardingComplete}
-                onSkip={() => updateSettings({ onboardingComplete: true })}
-              />
-            }
-          >
-            <Show when={!projectHubVisible()} fallback={<ProjectHub />}>
-              <AppShell />
-              <AppDialogs
-                workflowDialogOpen={workflowDialogOpen()}
-                setWorkflowDialogOpen={setWorkflowDialogOpen}
-                checkpointDialogOpen={checkpointDialogOpen()}
-                setCheckpointDialogOpen={setCheckpointDialogOpen}
-                exportDialogOpen={exportDialogOpen()}
-                setExportDialogOpen={setExportDialogOpen}
-                changelogOpen={changelogOpen()}
-                setChangelogOpen={setChangelogOpen}
-                updateDialogOpen={updateDialogOpen()}
-                setUpdateDialogOpen={setUpdateDialogOpen}
-                toolListDialogOpen={toolListDialogOpen()}
-                setToolListDialogOpen={setToolListDialogOpen}
-                updateInfo={updateInfo()}
-                onInstallUpdate={downloadAndInstallUpdate}
-                setProjectHubVisible={setProjectHubVisible}
+                onSkip={() => {
+                  updateSettings({ onboardingComplete: true })
+                  setOnboardingOpen(false)
+                }}
               />
             </Show>
           </Show>

@@ -14,7 +14,7 @@ workspace = true
 [dependencies]
 thiserror.workspace = true
 tantivy = "0.22"
-petgraph = "0.6"
+petgraph = "0.8"
 tokio = { workspace = true, features = ["fs", "rt"] }
 regex = "1"
 tracing.workspace = true

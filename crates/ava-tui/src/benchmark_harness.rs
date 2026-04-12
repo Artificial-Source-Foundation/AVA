@@ -28,18 +28,20 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 use crate::benchmark::{compute_delegation_quality_score, BenchmarkResult, ModelSpec};
+use crate::benchmark_format::{print_harness_table, short_model_name};
 use crate::benchmark_support::{
-    compile_and_test, expected_min_subagents, prepare_benchmark_workspace, run_tier3_validation,
-    setup_agentic_file, spawn_default_question_responses, subagent_type_from_description,
+    expected_min_subagents, prepare_benchmark_workspace, run_tier3_validation, setup_agentic_file,
+    spawn_default_question_responses, subagent_type_from_description, BenchmarkWorkspaceGuard,
 };
 use crate::benchmark_tasks::{
     advanced_rust_tasks, agent_quality_tasks, agentic_tasks, default_tasks, filter_tasks_by_name,
     filter_tasks_by_suite, go_tasks, large_project_tasks, lsp_smoke_tasks, maintenance_tasks,
     mcp_integration_tasks, multi_file_tasks, normal_coding_tasks, product_smoke_tasks,
-    python_tasks, security_tasks, small_coding_tasks, stress_coding_tasks, test_generation_tasks,
-    test_heavy_tasks, tool_recovery_tasks, tool_reliability_tasks, typescript_tasks,
-    BenchmarkSuite, BenchmarkTask,
+    prompt_regression_tasks, python_tasks, security_tasks, small_coding_tasks, stress_coding_tasks,
+    test_generation_tasks, test_heavy_tasks, tool_recovery_tasks, tool_reliability_tasks,
+    typescript_tasks, BenchmarkSuite, BenchmarkTask,
 };
+use crate::benchmark_validation::run_tier2_validation;
 use crate::headless::spawn_auto_approve_requests;
 
 /// Configuration for a harnessed-pair benchmark run.
@@ -111,32 +113,6 @@ pub fn parse_single_model_spec(spec: &str) -> Result<ModelSpec> {
     })
 }
 
-/// Short display name for a model (last segment of model path).
-fn short_model_name(model: &str) -> String {
-    model.rsplit('/').next().unwrap_or(model).to_string()
-}
-
-fn format_delegation_mix(results: &[BenchmarkResult]) -> Option<String> {
-    let mut counts = std::collections::BTreeMap::new();
-    for result in results {
-        for agent_type in &result.subagent_types {
-            *counts.entry(agent_type.as_str()).or_insert(0usize) += 1;
-        }
-    }
-
-    if counts.is_empty() {
-        return None;
-    }
-
-    Some(
-        counts
-            .into_iter()
-            .map(|(agent_type, count)| format!("{agent_type} x{count}"))
-            .collect::<Vec<_>>()
-            .join(", "),
-    )
-}
-
 /// All HQ domains used for worker routing.
 const ALL_DOMAINS: &[Domain] = &[
     Domain::Backend,
@@ -174,6 +150,7 @@ pub async fn run_harness(
         .await
         .map_err(|e| eyre!("Failed to create benchmark workspace: {}", e))?;
     prepare_benchmark_workspace(&workspace_dir).await?;
+    let _workspace_guard = BenchmarkWorkspaceGuard::activate(&workspace_dir);
 
     // Copy Cargo.toml for tasks that need it
     let project_cargo = std::env::current_dir()
@@ -208,6 +185,7 @@ pub async fn run_harness(
     all_tasks.extend(product_smoke_tasks(&workspace_dir));
     all_tasks.extend(mcp_integration_tasks(&workspace_dir));
     all_tasks.extend(lsp_smoke_tasks(&workspace_dir));
+    all_tasks.extend(prompt_regression_tasks(&workspace_dir));
     all_tasks = filter_tasks_by_suite(all_tasks, suite);
     all_tasks = filter_tasks_by_name(all_tasks, task_filter);
 
@@ -333,6 +311,7 @@ async fn run_solo_task(
             spec.model.clone(),
             effective_turns,
             workspace_dir.to_path_buf(),
+            None,
         ))
         .await?;
     spawn_default_question_responses(question_rx);
@@ -445,7 +424,7 @@ async fn run_solo_task(
     let _result = handle.await??;
 
     // Quality check
-    let quality_pass = check_patterns(&total_output, &task.expected_patterns);
+    let pattern_pass = check_patterns(&total_output, &tool_calls_detail, &task.expected_patterns);
 
     // Compile & test validation
     let (compile_success, tests_passed, tests_total, compile_error) =
@@ -465,8 +444,21 @@ async fn run_solo_task(
         0.0
     };
 
+    let validation_pass = match (compile_success, tests_passed, tests_total) {
+        (Some(false), _, _) => Some(false),
+        (Some(true), Some(passed), Some(total)) => Some(passed == total),
+        (Some(true), None, None) => Some(true),
+        (Some(true), _, _) => Some(false),
+        (None, _, _) => None,
+    };
+    let quality_pass = if task.test_harness.is_some() {
+        pattern_pass && validation_pass.unwrap_or(false)
+    } else {
+        pattern_pass
+    };
+
     // Determine if the task passed
-    let task_passed = compile_success.unwrap_or(quality_pass);
+    let task_passed = quality_pass;
     let cost_per_task_usd = if task_passed { Some(cost_usd) } else { None };
 
     // tool_efficiency_score
@@ -518,6 +510,10 @@ async fn run_solo_task(
         task_category: task.category.to_string(),
         provider: spec.provider.clone(),
         model: spec.model.clone(),
+        prompt_family: None,
+        prompt_variant: None,
+        prompt_hash: None,
+        run_index: None,
         ttft_ms: None,
         total_time_ms,
         input_tokens,
@@ -785,9 +781,10 @@ async fn run_harness_task(
     let director_cost = dir_provider_ref.estimate_cost(est_input, est_director_output);
     let worker_cost = wrk_provider_ref.estimate_cost(est_input, est_worker_output);
     let total_cost = director_cost + worker_cost;
+    let tool_calls_detail: Vec<String> = Vec::new();
 
     // Quality check
-    let quality_pass = check_patterns(&total_output, &task.expected_patterns);
+    let quality_pass = check_patterns(&total_output, &tool_calls_detail, &task.expected_patterns);
 
     // Also check the session messages for quality patterns
     let session_text: String = session
@@ -796,7 +793,8 @@ async fn run_harness_task(
         .map(|m| m.content.as_str())
         .collect::<Vec<_>>()
         .join("\n");
-    let quality_pass = quality_pass || check_patterns(&session_text, &task.expected_patterns);
+    let quality_pass =
+        quality_pass || check_patterns(&session_text, &tool_calls_detail, &task.expected_patterns);
 
     // Compile & test validation
     let (compile_success, tests_passed, tests_total, _compile_error) =
@@ -834,63 +832,19 @@ async fn run_harness_task(
 // ─── Shared validation helpers ───
 
 /// Check if output matches expected regex patterns.
-fn check_patterns(output: &str, patterns: &[&str]) -> bool {
+fn check_patterns(output: &str, tool_calls: &[String], patterns: &[&str]) -> bool {
     if output.trim().is_empty() {
         return false;
     }
     patterns.iter().all(|pat| {
+        if let Some(tool_name) = pat.strip_prefix("tool:") {
+            return tool_calls.iter().any(|call| call == tool_name);
+        }
+
         regex::Regex::new(pat)
             .map(|re| re.is_match(output))
             .unwrap_or(true)
     })
-}
-
-/// Extract Rust code from model output.
-fn extract_rust_code(output: &str) -> Option<String> {
-    let re_rust = regex::Regex::new(r"(?s)```rust\s*\n(.*?)```").ok()?;
-    if let Some(cap) = re_rust.captures(output) {
-        return Some(cap[1].to_string());
-    }
-    let re_generic = regex::Regex::new(r"(?s)```\s*\n(.*?)```").ok()?;
-    if let Some(cap) = re_generic.captures(output) {
-        return Some(cap[1].to_string());
-    }
-    let re_fn = regex::Regex::new(r"(?s)((?:use\s+.*?;\s*)*(?:pub\s+)?fn\s+\w+.*?\n\})").ok()?;
-    if let Some(cap) = re_fn.captures(output) {
-        return Some(cap[1].to_string());
-    }
-    if output.contains("fn ") {
-        return Some(output.to_string());
-    }
-    None
-}
-
-/// Tier 2: Extract code, compile + test.
-async fn run_tier2_validation(
-    model_output: &str,
-    harness: &crate::benchmark_tasks::TestHarness,
-) -> (Option<bool>, Option<usize>, Option<usize>, Option<String>) {
-    let Some(code) = extract_rust_code(model_output) else {
-        return (
-            Some(false),
-            None,
-            None,
-            Some("Could not extract Rust code from output".to_string()),
-        );
-    };
-
-    let mut full_source = String::new();
-    if harness.test_code.contains("HashMap") && !code.contains("use std::collections::HashMap") {
-        full_source.push_str("use std::collections::HashMap;\n");
-    }
-    if harness.test_code.contains("Hash") && !code.contains("use std::hash::Hash") {
-        full_source.push_str("use std::hash::Hash;\n");
-    }
-    full_source.push_str(&code);
-    full_source.push_str("\n\nfn main() {}\n");
-    full_source.push_str(harness.test_code);
-
-    compile_and_test(&full_source, harness.test_count).await
 }
 
 /// Create an error result for a solo run.
@@ -900,6 +854,10 @@ fn make_error_result(task: &BenchmarkTask, spec: &ModelSpec, error: &str) -> Ben
         task_category: task.category.to_string(),
         provider: spec.provider.clone(),
         model: spec.model.clone(),
+        prompt_family: None,
+        prompt_variant: None,
+        prompt_hash: None,
+        run_index: None,
         ttft_ms: None,
         total_time_ms: 0,
         input_tokens: 0,
@@ -933,291 +891,6 @@ fn make_error_result(task: &BenchmarkTask, spec: &ModelSpec, error: &str) -> Ben
         delegation_quality_score: None,
         consistency_hash: None,
     }
-}
-
-// ─── Output formatting ───
-
-/// Print the harnessed-pair comparison table.
-fn print_harness_table(report: &HarnessReport) {
-    let dir_name = short_model_name(&report.config.director.model);
-    let wrk_name = short_model_name(&report.config.worker.model);
-
-    println!();
-    println!("=======================================================================");
-    println!("           AVA Harnessed-Pair Benchmark Results");
-    println!("           Director: {} | Worker: {}", dir_name, wrk_name);
-    println!("           {}", &report.timestamp[..19]);
-    println!("=======================================================================");
-
-    // Group by task
-    let mut tasks_seen: Vec<String> = Vec::new();
-    for r in &report.results {
-        if !tasks_seen.contains(&r.task_name) {
-            tasks_seen.push(r.task_name.clone());
-        }
-    }
-
-    for task_name in &tasks_seen {
-        let harness_r = report.results.iter().find(|r| &r.task_name == task_name);
-        let solo_dir = report
-            .solo_director_results
-            .as_ref()
-            .and_then(|v| v.iter().find(|r| r.task_name == *task_name));
-        let solo_wrk = report
-            .solo_worker_results
-            .as_ref()
-            .and_then(|v| v.iter().find(|r| r.task_name == *task_name));
-
-        let category = harness_r.map(|r| r.task_category.as_str()).unwrap_or("?");
-
-        println!();
-        println!("  Task: {} [{}]", task_name, category);
-        println!(
-            "  {:<20} {:>9} {:>10} {:>10} {:>8} {:>8} {:>7} {:>7}",
-            "Mode", "Total(s)", "Dir Cost", "Wrk Cost", "Total$", "Compile", "Tests", "Quality"
-        );
-        println!(
-            "  {:-<20} {:-<9} {:-<10} {:-<10} {:-<8} {:-<8} {:-<7} {:-<7}",
-            "", "", "", "", "", "", "", ""
-        );
-
-        // Director solo row
-        if let Some(r) = solo_dir {
-            let compile_str = match r.compile_success {
-                Some(true) => "PASS",
-                Some(false) => "FAIL",
-                None => "-",
-            };
-            let tests_str = match (r.tests_passed, r.tests_total) {
-                (Some(p), Some(t)) => format!("{}/{}", p, t),
-                _ => "-".to_string(),
-            };
-            let quality_str = if r.error.is_some() {
-                "ERROR"
-            } else if r.quality_pass {
-                "PASS"
-            } else {
-                "FAIL"
-            };
-            let label = format!("{} solo", dir_name);
-            let label = if label.len() > 20 {
-                format!("{}...", &label[..17])
-            } else {
-                label
-            };
-            println!(
-                "  {:<20} {:>8.1}s {:>10} {:>10} {:>7} {:>8} {:>7} {:>7}",
-                label,
-                r.total_time_ms as f64 / 1000.0,
-                format!("${:.4}", r.cost_usd),
-                "-",
-                format!("${:.4}", r.cost_usd),
-                compile_str,
-                tests_str,
-                quality_str,
-            );
-            if let Some(summary) = r.delegation_summary() {
-                println!("  {:<20} delegation: {}", "", summary);
-            }
-        }
-
-        // Worker solo row
-        if let Some(r) = solo_wrk {
-            let compile_str = match r.compile_success {
-                Some(true) => "PASS",
-                Some(false) => "FAIL",
-                None => "-",
-            };
-            let tests_str = match (r.tests_passed, r.tests_total) {
-                (Some(p), Some(t)) => format!("{}/{}", p, t),
-                _ => "-".to_string(),
-            };
-            let quality_str = if r.error.is_some() {
-                "ERROR"
-            } else if r.quality_pass {
-                "PASS"
-            } else {
-                "FAIL"
-            };
-            let label = format!("{} solo", wrk_name);
-            let label = if label.len() > 20 {
-                format!("{}...", &label[..17])
-            } else {
-                label
-            };
-            println!(
-                "  {:<20} {:>8.1}s {:>10} {:>10} {:>7} {:>8} {:>7} {:>7}",
-                label,
-                r.total_time_ms as f64 / 1000.0,
-                "-",
-                format!("${:.4}", r.cost_usd),
-                format!("${:.4}", r.cost_usd),
-                compile_str,
-                tests_str,
-                quality_str,
-            );
-            if let Some(summary) = r.delegation_summary() {
-                println!("  {:<20} delegation: {}", "", summary);
-            }
-        }
-
-        // Harnessed pair row
-        if let Some(r) = harness_r {
-            let compile_str = match r.compile_success {
-                Some(true) => "PASS",
-                Some(false) => "FAIL",
-                None => "-",
-            };
-            let tests_str = match (r.tests_passed, r.tests_total) {
-                (Some(p), Some(t)) => format!("{}/{}", p, t),
-                _ => "-".to_string(),
-            };
-            let quality_str = if r.error.is_some() {
-                "ERROR"
-            } else if r.quality_pass {
-                "PASS"
-            } else {
-                "FAIL"
-            };
-            let label = format!("{}+{}", dir_name, wrk_name);
-            let label = if label.len() > 20 {
-                format!("{}...", &label[..17])
-            } else {
-                label
-            };
-            println!(
-                "  {:<20} {:>8.1}s {:>10} {:>10} {:>7} {:>8} {:>7} {:>7}",
-                label,
-                r.total_time_ms as f64 / 1000.0,
-                format!("${:.4}", r.director_cost),
-                format!("${:.4}", r.worker_cost),
-                format!("${:.4}", r.total_cost),
-                compile_str,
-                tests_str,
-                quality_str,
-            );
-
-            // Savings comparison vs director solo
-            if let Some(dir_r) = solo_dir {
-                if dir_r.cost_usd > 0.0 && r.total_cost > 0.0 {
-                    let cost_savings =
-                        ((dir_r.cost_usd - r.total_cost) / dir_r.cost_usd * 100.0).max(0.0);
-                    let time_savings = if dir_r.total_time_ms > 0 {
-                        ((dir_r.total_time_ms as f64 - r.total_time_ms as f64)
-                            / dir_r.total_time_ms as f64
-                            * 100.0)
-                            .max(0.0)
-                    } else {
-                        0.0
-                    };
-                    if cost_savings > 0.0 || time_savings > 0.0 {
-                        println!(
-                            "  Savings vs {} solo: {:.0}% cost, {:.0}% faster",
-                            dir_name, cost_savings, time_savings,
-                        );
-                    }
-                }
-            }
-        }
-    }
-
-    // Summary
-    println!();
-    println!("-----------------------------------------------------------------------");
-
-    let harness_total_cost: f64 = report.results.iter().map(|r| r.total_cost).sum();
-    let harness_total_time: f64 = report
-        .results
-        .iter()
-        .map(|r| r.total_time_ms as f64 / 1000.0)
-        .sum();
-    let harness_pass = report.results.iter().filter(|r| r.quality_pass).count();
-
-    let dir_total_cost: f64 = report
-        .solo_director_results
-        .as_ref()
-        .map(|v| v.iter().map(|r| r.cost_usd).sum())
-        .unwrap_or(0.0);
-    let wrk_total_cost: f64 = report
-        .solo_worker_results
-        .as_ref()
-        .map(|v| v.iter().map(|r| r.cost_usd).sum())
-        .unwrap_or(0.0);
-    let dir_total_subagents: usize = report
-        .solo_director_results
-        .as_ref()
-        .map(|v| v.iter().map(|r| r.subagent_calls_count).sum())
-        .unwrap_or(0);
-    let wrk_total_subagents: usize = report
-        .solo_worker_results
-        .as_ref()
-        .map(|v| v.iter().map(|r| r.subagent_calls_count).sum())
-        .unwrap_or(0);
-    let dir_total_delegated_cost: f64 = report
-        .solo_director_results
-        .as_ref()
-        .map(|v| v.iter().map(|r| r.subagent_cost_usd).sum())
-        .unwrap_or(0.0);
-    let wrk_total_delegated_cost: f64 = report
-        .solo_worker_results
-        .as_ref()
-        .map(|v| v.iter().map(|r| r.subagent_cost_usd).sum())
-        .unwrap_or(0.0);
-
-    println!(
-        "  Harness: {} tasks, {}/{} passed, {:.1}s, ${:.4}",
-        report.results.len(),
-        harness_pass,
-        report.results.len(),
-        harness_total_time,
-        harness_total_cost,
-    );
-    println!(
-        "  {} solo total: ${:.4} | {} solo total: ${:.4}",
-        dir_name, dir_total_cost, wrk_name, wrk_total_cost,
-    );
-
-    if dir_total_subagents > 0 {
-        println!(
-            "  {} solo delegation: {} helper runs, ${:.4} delegated{}",
-            dir_name,
-            dir_total_subagents,
-            dir_total_delegated_cost,
-            report
-                .solo_director_results
-                .as_ref()
-                .and_then(|results| format_delegation_mix(results))
-                .map(|mix| format!(", mix: {mix}"))
-                .unwrap_or_default()
-        );
-    }
-
-    if wrk_total_subagents > 0 {
-        println!(
-            "  {} solo delegation: {} helper runs, ${:.4} delegated{}",
-            wrk_name,
-            wrk_total_subagents,
-            wrk_total_delegated_cost,
-            report
-                .solo_worker_results
-                .as_ref()
-                .and_then(|results| format_delegation_mix(results))
-                .map(|mix| format!(", mix: {mix}"))
-                .unwrap_or_default()
-        );
-    }
-
-    if dir_total_cost > 0.0 {
-        let overall_savings =
-            ((dir_total_cost - harness_total_cost) / dir_total_cost * 100.0).max(0.0);
-        println!(
-            "  Overall cost savings vs {} solo: {:.0}%",
-            dir_name, overall_savings,
-        );
-    }
-
-    println!("=======================================================================");
-    println!();
 }
 
 /// Save harness results as JSON.
@@ -1277,11 +950,17 @@ mod tests {
 
     #[test]
     fn test_check_patterns() {
+        let tool_calls: Vec<String> = Vec::new();
         assert!(check_patterns(
             "fn is_palindrome() -> bool",
+            &tool_calls,
             &[r"fn\s+is_palindrome", r"-> bool"]
         ));
-        assert!(!check_patterns("fn other()", &[r"fn\s+is_palindrome"]));
-        assert!(!check_patterns("", &[r"anything"]));
+        assert!(!check_patterns(
+            "fn other()",
+            &tool_calls,
+            &[r"fn\s+is_palindrome"]
+        ));
+        assert!(!check_patterns("", &tool_calls, &[r"anything"]));
     }
 }

@@ -18,37 +18,37 @@
 //!
 //! Judges automatically use `ThinkingLevel::High` for deeper analysis.
 
-use std::collections::hash_map::DefaultHasher;
-use std::collections::HashMap;
-use std::hash::{Hash, Hasher};
-use std::path::Path;
-use std::sync::{Arc, LazyLock};
+use std::collections::{BTreeMap, HashMap};
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use ava_agent::stack::{AgentStack, AgentStackConfig};
+use ava_agent::system_prompt::{resolved_prompt_family, BenchmarkPromptOverride};
 use ava_agent::AgentEvent;
-use ava_config::CredentialStore;
-use ava_llm::pool::ConnectionPool;
-use ava_llm::providers::create_provider;
-use ava_types::{Message, Role, ThinkingLevel};
 use color_eyre::eyre::{eyre, Result};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
+use crate::benchmark_format::{
+    format_subagent_mix, print_repeat_summary, print_results_table, short_model_name,
+};
+use crate::benchmark_judge::judge_outputs;
+use crate::benchmark_reporting::{compute_aggregate_summary, AggregateScoreSummary, ScoreInput};
 use crate::benchmark_support::{
-    compile_and_test, expected_min_subagents, prepare_benchmark_workspace, run_tier3_validation,
-    setup_agentic_file, spawn_default_question_responses, subagent_type_from_description,
+    expected_min_subagents, prepare_benchmark_workspace, run_tier3_validation, setup_agentic_file,
+    spawn_default_question_responses, subagent_type_from_description, BenchmarkWorkspaceGuard,
 };
 use crate::benchmark_tasks::{
     advanced_rust_tasks, agent_quality_tasks, agentic_tasks, default_tasks, filter_tasks_by_name,
     filter_tasks_by_suite, go_tasks, large_project_tasks, lsp_smoke_tasks, maintenance_tasks,
     mcp_integration_tasks, multi_file_tasks, normal_coding_tasks, product_smoke_tasks,
-    python_tasks, security_tasks, small_coding_tasks, stress_coding_tasks, test_generation_tasks,
-    test_heavy_tasks, tool_recovery_tasks, tool_reliability_tasks, typescript_tasks,
-    BenchmarkSuite, BenchmarkTask, Language, TestHarness,
+    prompt_regression_tasks, python_tasks, security_tasks, small_coding_tasks, stress_coding_tasks,
+    test_generation_tasks, test_heavy_tasks, tool_recovery_tasks, tool_reliability_tasks,
+    typescript_tasks, BenchmarkSuite, BenchmarkTask, Language,
 };
+use crate::benchmark_validation::run_tier2_validation;
 use crate::headless::spawn_auto_approve_requests;
 
 /// A provider:model pair to benchmark.
@@ -58,15 +58,174 @@ pub struct ModelSpec {
     pub model: String,
 }
 
+const BENCHMARK_REPORT_SCHEMA_VERSION: u32 = 2;
+
+fn default_report_schema_version() -> u32 {
+    0
+}
+
+fn default_run_count() -> usize {
+    1
+}
+
+#[derive(Debug, Clone)]
+pub struct BenchmarkOptions {
+    pub prompt: BenchmarkPromptConfig,
+    pub repeat: usize,
+    pub seed: Option<u64>,
+    pub output_path: Option<PathBuf>,
+}
+
+impl Default for BenchmarkOptions {
+    fn default() -> Self {
+        Self {
+            prompt: BenchmarkPromptConfig::default(),
+            repeat: 1,
+            seed: None,
+            output_path: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BenchmarkPromptConfig {
+    #[serde(default)]
+    pub family: Option<String>,
+    #[serde(default)]
+    pub variant: Option<String>,
+    #[serde(default)]
+    pub file_path: Option<String>,
+    #[serde(default)]
+    pub version: Option<String>,
+    #[serde(default)]
+    pub hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_contents: Option<String>,
+}
+
+impl BenchmarkPromptConfig {
+    pub async fn from_cli(
+        family: Option<&str>,
+        variant: Option<&str>,
+        file_path: Option<&str>,
+        version: Option<&str>,
+        hash: Option<&str>,
+    ) -> Result<Self> {
+        let file_contents = if let Some(path) = file_path {
+            Some(
+                tokio::fs::read_to_string(path)
+                    .await
+                    .map_err(|e| eyre!("Failed to read prompt override file {}: {}", path, e))?,
+            )
+        } else {
+            None
+        };
+
+        let mut config = Self {
+            family: family.map(str::to_string),
+            variant: variant.map(str::to_string),
+            file_path: file_path.map(str::to_string),
+            version: version.map(str::to_string),
+            hash: hash.map(str::to_string),
+            file_contents,
+        };
+
+        if config.hash.is_none() {
+            config.hash = config.derived_hash();
+        }
+
+        Ok(config)
+    }
+
+    pub fn agent_override(&self) -> Option<BenchmarkPromptOverride> {
+        if self.family.is_none() && self.file_contents.is_none() {
+            return None;
+        }
+
+        Some(BenchmarkPromptOverride {
+            family: self.family.clone(),
+            prompt_file_contents: self.file_contents.clone(),
+        })
+    }
+
+    pub fn derived_hash(&self) -> Option<String> {
+        if self.family.is_none()
+            && self.variant.is_none()
+            && self.file_path.is_none()
+            && self.version.is_none()
+            && self.file_contents.is_none()
+        {
+            return None;
+        }
+
+        let mut input = String::new();
+        if let Some(family) = &self.family {
+            input.push_str("family=");
+            input.push_str(family);
+            input.push('\n');
+        }
+        if let Some(variant) = &self.variant {
+            input.push_str("variant=");
+            input.push_str(variant);
+            input.push('\n');
+        }
+        if let Some(version) = &self.version {
+            input.push_str("version=");
+            input.push_str(version);
+            input.push('\n');
+        }
+        if let Some(path) = &self.file_path {
+            input.push_str("file=");
+            input.push_str(path);
+            input.push('\n');
+        }
+        if let Some(contents) = &self.file_contents {
+            input.push_str("contents=\n");
+            input.push_str(contents);
+        }
+
+        Some(stable_hash_hex(&input))
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+pub struct BenchmarkRepeatTaskSummary {
+    pub task_name: String,
+    pub task_category: String,
+    pub provider: String,
+    pub model: String,
+    #[serde(default)]
+    pub prompt_family: Option<String>,
+    #[serde(default)]
+    pub prompt_variant: Option<String>,
+    #[serde(default)]
+    pub prompt_hash: Option<String>,
+    pub attempts: usize,
+    pub passes: usize,
+    pub failures: usize,
+    pub pass_rate: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub compile_pass_rate: Option<f64>,
+    pub median_total_time_ms: u64,
+    pub p95_total_time_ms: u64,
+    pub median_tool_calls_count: usize,
+    pub median_subagent_calls_count: usize,
+    pub average_cost_usd: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+pub struct BenchmarkRepeatSummary {
+    pub repeat_count: usize,
+    pub overall_pass_rate: f64,
+    pub median_total_time_ms: u64,
+    pub worst_task_variance_ms: u64,
+    pub task_summaries: Vec<BenchmarkRepeatTaskSummary>,
+}
+
 impl std::fmt::Display for ModelSpec {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}:{}", self.provider, self.model)
     }
-}
-
-/// Short display name for a model (last segment of model path).
-fn short_model_name(model: &str) -> String {
-    model.rsplit('/').next().unwrap_or(model).to_string()
 }
 
 /// Scores from a single LLM judge evaluation.
@@ -98,6 +257,14 @@ pub struct BenchmarkResult {
     pub task_category: String,
     pub provider: String,
     pub model: String,
+    #[serde(default)]
+    pub prompt_family: Option<String>,
+    #[serde(default)]
+    pub prompt_variant: Option<String>,
+    #[serde(default)]
+    pub prompt_hash: Option<String>,
+    #[serde(default)]
+    pub run_index: Option<usize>,
     pub ttft_ms: Option<u64>,
     pub total_time_ms: u64,
     pub input_tokens: usize,
@@ -215,8 +382,40 @@ impl BenchmarkResult {
 /// Full benchmark suite results.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BenchmarkReport {
+    #[serde(default = "default_report_schema_version")]
+    pub schema_version: u32,
+    #[serde(default)]
+    pub binary_version: Option<String>,
+    #[serde(default)]
+    pub binary_commit: Option<String>,
+    #[serde(default)]
+    pub suite_name: Option<String>,
+    #[serde(default)]
+    pub task_filter: Option<String>,
+    #[serde(default)]
+    pub provider: Option<String>,
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub prompt: BenchmarkPromptConfig,
+    #[serde(default = "default_run_count")]
+    pub run_count: usize,
+    #[serde(default)]
+    pub run_index: Option<usize>,
+    #[serde(default)]
+    pub run_seed: Option<u64>,
+    #[serde(default)]
+    pub runner_mode: Option<String>,
     pub timestamp: String,
     pub results: Vec<BenchmarkResult>,
+    #[serde(default)]
+    pub score_summary: Option<AggregateScoreSummary>,
+    #[serde(default)]
+    pub repeat_summary: Option<BenchmarkRepeatSummary>,
+    #[serde(default)]
+    pub raw_report_paths: Vec<String>,
+    #[serde(default)]
+    pub saved_path: Option<String>,
     /// Total cost / number of resolved (passed) tasks.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub aggregate_cost_per_resolved: Option<f64>,
@@ -275,25 +474,6 @@ pub(crate) fn compute_delegation_quality_score(
     let cost_penalty = delegated_cost_ratio * 0.25;
 
     Some((outcome_score * 0.6 + judge_bonus * 0.4 + resume_bonus - cost_penalty).clamp(0.0, 1.2))
-}
-
-fn format_subagent_mix(types: &[String]) -> Option<String> {
-    if types.is_empty() {
-        return None;
-    }
-
-    let mut counts = std::collections::BTreeMap::new();
-    for agent_type in types {
-        *counts.entry(agent_type.as_str()).or_insert(0usize) += 1;
-    }
-
-    Some(
-        counts
-            .into_iter()
-            .map(|(agent_type, count)| format!("{agent_type} x{count}"))
-            .collect::<Vec<_>>()
-            .join(", "),
-    )
 }
 
 /// Parse a `--models` string like "openrouter:model1,openrouter:model2"
@@ -390,24 +570,194 @@ pub async fn run_benchmark(
     imported_tasks: Vec<BenchmarkTask>,
     language_filter: Option<Vec<Language>>,
     task_filter: Option<&str>,
+    options: BenchmarkOptions,
 ) -> Result<BenchmarkReport> {
     let max_turns = if max_turns == 0 { 10 } else { max_turns };
+    let repeat = options.repeat.max(1);
+    let workspace_dir = benchmark_workspace_dir();
 
     eprintln!("[benchmark] Suite: {}", suite);
+    eprintln!("[benchmark] Workspace: {}", workspace_dir.display());
+    if let Some(filter) = task_filter.filter(|value| !value.trim().is_empty()) {
+        eprintln!("[benchmark] Task filter: {}", filter.trim());
+    }
+    if let Some(ref langs) = language_filter {
+        let lang_names: Vec<_> = langs.iter().map(|l| l.to_string()).collect();
+        eprintln!("[benchmark] Language filter: {}", lang_names.join(", "));
+    }
+    if let Some(family) = options.prompt.family.as_deref() {
+        eprintln!("[benchmark] Prompt family: {}", family);
+    }
+    if let Some(variant) = options.prompt.variant.as_deref() {
+        eprintln!("[benchmark] Prompt variant: {}", variant);
+    }
+    if repeat > 1 {
+        eprintln!("[benchmark] Repeat count: {}", repeat);
+    }
 
-    // Use a stable workspace directory for benchmark runs, isolated from the project.
-    // This prevents benchmark tool calls (read, edit, bash) from touching the real codebase.
-    let workspace_dir = dirs::home_dir()
+    let all_tasks = build_task_list(
+        &workspace_dir,
+        tasks,
+        imported_tasks,
+        suite,
+        language_filter.as_ref(),
+        task_filter,
+    )?;
+
+    if repeat == 1 {
+        let mut report = run_benchmark_once(
+            &specs,
+            &all_tasks,
+            max_turns,
+            &judge_specs,
+            suite,
+            task_filter,
+            &options.prompt,
+            1,
+            repeat,
+            options.seed,
+            &workspace_dir,
+        )
+        .await?;
+        print_results_table(&report, suite);
+        save_results_json(
+            &mut report,
+            options.output_path.as_deref(),
+            BenchmarkArtifactKind::SingleRun,
+        )
+        .await?;
+        return Ok(report);
+    }
+
+    let mut raw_reports = Vec::with_capacity(repeat);
+    let mut raw_report_paths = Vec::with_capacity(repeat);
+    for run_index in 1..=repeat {
+        eprintln!("\n[benchmark] Repeat {}/{}", run_index, repeat);
+        let mut report = run_benchmark_once(
+            &specs,
+            &all_tasks,
+            max_turns,
+            &judge_specs,
+            suite,
+            task_filter,
+            &options.prompt,
+            run_index,
+            repeat,
+            options.seed,
+            &workspace_dir,
+        )
+        .await?;
+        let path = save_results_json(&mut report, None, BenchmarkArtifactKind::RawRun).await?;
+        raw_report_paths.push(path.display().to_string());
+        raw_reports.push(report);
+    }
+
+    let mut aggregate_report = build_repeat_aggregate_report(
+        &raw_reports,
+        &specs,
+        suite,
+        task_filter,
+        &options.prompt,
+        options.seed,
+        raw_report_paths,
+    );
+    print_repeat_summary(&aggregate_report, suite);
+    save_results_json(
+        &mut aggregate_report,
+        options.output_path.as_deref(),
+        BenchmarkArtifactKind::Aggregate,
+    )
+    .await?;
+
+    Ok(aggregate_report)
+}
+
+#[derive(Debug, Clone, Copy)]
+enum BenchmarkArtifactKind {
+    SingleRun,
+    RawRun,
+    Aggregate,
+}
+
+fn benchmark_workspace_dir() -> PathBuf {
+    dirs::home_dir()
         .unwrap_or_default()
         .join(".ava")
         .join("benchmarks")
-        .join("workspace");
-    tokio::fs::create_dir_all(&workspace_dir)
+        .join("workspace")
+}
+
+fn build_task_list(
+    workspace_dir: &Path,
+    tasks: Option<Vec<BenchmarkTask>>,
+    imported_tasks: Vec<BenchmarkTask>,
+    suite: BenchmarkSuite,
+    language_filter: Option<&Vec<Language>>,
+    task_filter: Option<&str>,
+) -> Result<Vec<BenchmarkTask>> {
+    let mut all_tasks = tasks.unwrap_or_else(default_tasks);
+    all_tasks.extend(agentic_tasks(workspace_dir));
+    all_tasks.extend(agent_quality_tasks(workspace_dir));
+    all_tasks.extend(python_tasks());
+    all_tasks.extend(typescript_tasks());
+    all_tasks.extend(go_tasks());
+    all_tasks.extend(security_tasks(workspace_dir));
+    all_tasks.extend(test_generation_tasks());
+    all_tasks.extend(advanced_rust_tasks());
+    all_tasks.extend(multi_file_tasks(workspace_dir));
+    all_tasks.extend(tool_reliability_tasks(workspace_dir));
+    all_tasks.extend(normal_coding_tasks(workspace_dir));
+    all_tasks.extend(small_coding_tasks(workspace_dir));
+    all_tasks.extend(stress_coding_tasks(workspace_dir));
+    all_tasks.extend(large_project_tasks(workspace_dir));
+    all_tasks.extend(test_heavy_tasks(workspace_dir));
+    all_tasks.extend(maintenance_tasks(workspace_dir));
+    all_tasks.extend(tool_recovery_tasks(workspace_dir));
+    all_tasks.extend(product_smoke_tasks(workspace_dir));
+    all_tasks.extend(mcp_integration_tasks(workspace_dir));
+    all_tasks.extend(lsp_smoke_tasks(workspace_dir));
+    all_tasks.extend(prompt_regression_tasks(workspace_dir));
+
+    if !imported_tasks.is_empty() {
+        eprintln!("[benchmark] Adding {} imported tasks", imported_tasks.len());
+        all_tasks.extend(imported_tasks);
+    }
+
+    all_tasks = filter_tasks_by_suite(all_tasks, suite);
+    all_tasks = filter_tasks_by_name(all_tasks, task_filter);
+
+    if let Some(langs) = language_filter {
+        all_tasks.retain(|task| langs.contains(&task.language()));
+    }
+
+    if all_tasks.is_empty() {
+        return Err(eyre!(
+            "No benchmark tasks matched the current suite/language/task filter selection"
+        ));
+    }
+
+    Ok(all_tasks)
+}
+
+async fn run_benchmark_once(
+    specs: &[ModelSpec],
+    all_tasks: &[BenchmarkTask],
+    max_turns: usize,
+    judge_specs: &[ModelSpec],
+    suite: BenchmarkSuite,
+    task_filter: Option<&str>,
+    prompt: &BenchmarkPromptConfig,
+    run_index: usize,
+    run_count: usize,
+    seed: Option<u64>,
+    workspace_dir: &Path,
+) -> Result<BenchmarkReport> {
+    tokio::fs::create_dir_all(workspace_dir)
         .await
         .map_err(|e| eyre!("Failed to create benchmark workspace: {}", e))?;
-    prepare_benchmark_workspace(&workspace_dir).await?;
+    prepare_benchmark_workspace(workspace_dir).await?;
+    let _workspace_guard = BenchmarkWorkspaceGuard::activate(workspace_dir);
 
-    // Copy Cargo.toml into the workspace so the `read_cargo` task can read it.
     let project_cargo = std::env::current_dir()
         .unwrap_or_default()
         .join("Cargo.toml");
@@ -418,83 +768,29 @@ pub async fn run_benchmark(
             .map_err(|e| eyre!("Failed to copy Cargo.toml to workspace: {}", e))?;
     }
 
-    eprintln!("[benchmark] Workspace: {}", workspace_dir.display());
-
-    // Build task list: all task categories
-    let mut all_tasks = tasks.unwrap_or_else(default_tasks);
-    all_tasks.extend(agentic_tasks(&workspace_dir));
-    all_tasks.extend(agent_quality_tasks(&workspace_dir));
-    all_tasks.extend(python_tasks());
-    all_tasks.extend(typescript_tasks());
-    all_tasks.extend(go_tasks());
-    all_tasks.extend(security_tasks(&workspace_dir));
-    all_tasks.extend(test_generation_tasks());
-    all_tasks.extend(advanced_rust_tasks());
-    all_tasks.extend(multi_file_tasks(&workspace_dir));
-    all_tasks.extend(tool_reliability_tasks(&workspace_dir));
-    all_tasks.extend(normal_coding_tasks(&workspace_dir));
-    all_tasks.extend(small_coding_tasks(&workspace_dir));
-    all_tasks.extend(stress_coding_tasks(&workspace_dir));
-    all_tasks.extend(large_project_tasks(&workspace_dir));
-    all_tasks.extend(test_heavy_tasks(&workspace_dir));
-    all_tasks.extend(maintenance_tasks(&workspace_dir));
-    all_tasks.extend(tool_recovery_tasks(&workspace_dir));
-    all_tasks.extend(product_smoke_tasks(&workspace_dir));
-    all_tasks.extend(mcp_integration_tasks(&workspace_dir));
-    all_tasks.extend(lsp_smoke_tasks(&workspace_dir));
-
-    // Append externally imported tasks (e.g., Aider Polyglot)
-    if !imported_tasks.is_empty() {
-        eprintln!("[benchmark] Adding {} imported tasks", imported_tasks.len());
-        all_tasks.extend(imported_tasks);
-    }
-
-    // Filter by suite
-    all_tasks = filter_tasks_by_suite(all_tasks, suite);
-
-    // Filter by task name
-    all_tasks = filter_tasks_by_name(all_tasks, task_filter);
-
-    // Filter by language
-    if let Some(ref langs) = language_filter {
-        all_tasks.retain(|t| langs.contains(&t.language()));
-        let lang_names: Vec<_> = langs.iter().map(|l| l.to_string()).collect();
-        eprintln!("[benchmark] Language filter: {}", lang_names.join(", "));
-    }
-
-    if let Some(filter) = task_filter.filter(|value| !value.trim().is_empty()) {
-        eprintln!("[benchmark] Task filter: {}", filter.trim());
-    }
-
-    if all_tasks.is_empty() {
-        return Err(eyre!(
-            "No benchmark tasks matched the current suite/language/task filter selection"
-        ));
-    }
-
     let mut results = Vec::new();
     let total_runs = all_tasks.len() * specs.len();
-    let mut run_idx = 0;
+    let mut task_idx = 0;
 
-    for task in &all_tasks {
-        for spec in &specs {
-            run_idx += 1;
+    for task in all_tasks {
+        for spec in specs {
+            task_idx += 1;
             eprintln!(
                 "\n[benchmark {}/{}] task={} model={}",
-                run_idx,
+                task_idx,
                 total_runs,
                 task.name,
                 short_model_name(&spec.model),
             );
 
-            // Set up Tier 3 files if needed
             if let Some(ref harness) = task.test_harness {
                 if let Some(setup_code) = harness.setup_code {
-                    setup_agentic_file(&workspace_dir, task.name, setup_code).await?;
+                    setup_agentic_file(workspace_dir, task.name, setup_code).await?;
                 }
             }
 
-            let result = run_single_task(task, spec, max_turns, &workspace_dir).await;
+            let result =
+                run_single_task(task, spec, max_turns, workspace_dir, prompt, run_index).await;
             match result {
                 Ok(r) => {
                     let status = if r.quality_pass { "PASS" } else { "FAIL" };
@@ -527,59 +823,52 @@ pub async fn run_benchmark(
                 }
                 Err(e) => {
                     eprintln!("  => ERROR: {}", e);
-                    results.push(BenchmarkResult {
-                        task_name: task.name.to_string(),
-                        task_category: task.category.to_string(),
-                        provider: spec.provider.clone(),
-                        model: spec.model.clone(),
-                        ttft_ms: None,
-                        total_time_ms: 0,
-                        input_tokens: 0,
-                        output_tokens: 0,
-                        tokens_per_second: 0.0,
-                        cost_usd: 0.0,
-                        quality_pass: false,
-                        quality_details: "error".to_string(),
-                        error: Some(e.to_string()),
-                        compile_success: None,
-                        tests_passed: None,
-                        tests_total: None,
-                        compile_error: None,
-                        judge_scores: None,
-                        tool_calls_count: 0,
-                        tool_calls_detail: Vec::new(),
-                        tool_error_count: 0,
-                        tool_error_breakdown: HashMap::new(),
-                        turns_used: 0,
-                        self_corrections: 0,
-                        subagent_calls_count: 0,
-                        subagent_types: Vec::new(),
-                        subagent_providers: Vec::new(),
-                        subagent_cost_usd: 0.0,
-                        resumed_subagent_calls_count: 0,
-                        raw_output: None,
-                        cost_per_task_usd: None,
-                        tool_efficiency_score: None,
-                        tool_reliability_score: None,
-                        delegation_efficiency_score: None,
-                        delegation_quality_score: None,
-                        consistency_hash: None,
-                    });
+                    results.push(make_error_result(
+                        task,
+                        spec,
+                        prompt,
+                        run_index,
+                        &e.to_string(),
+                    ));
                 }
             }
         }
     }
 
-    // LLM-as-Judge evaluation
     if !judge_specs.is_empty() {
         eprintln!(
             "\n[benchmark] Running LLM-as-Judge evaluation with {} judge(s)...",
             judge_specs.len()
         );
-        judge_outputs(&mut results, &judge_specs, &all_tasks).await;
+        judge_outputs(&mut results, judge_specs, all_tasks).await;
     }
 
-    // Compute aggregate metrics
+    Ok(build_report_from_results(
+        results,
+        specs,
+        suite,
+        task_filter,
+        prompt,
+        Some(run_index),
+        run_count,
+        seed,
+        None,
+        None,
+    ))
+}
+
+fn build_report_from_results(
+    results: Vec<BenchmarkResult>,
+    specs: &[ModelSpec],
+    suite: BenchmarkSuite,
+    task_filter: Option<&str>,
+    prompt: &BenchmarkPromptConfig,
+    run_index: Option<usize>,
+    run_count: usize,
+    seed: Option<u64>,
+    repeat_summary: Option<BenchmarkRepeatSummary>,
+    raw_report_paths: Option<Vec<String>>,
+) -> BenchmarkReport {
     let total_cost: f64 = results.iter().map(|r| r.cost_usd).sum();
     let resolved_count = results
         .iter()
@@ -631,23 +920,72 @@ pub async fn run_benchmark(
         None
     };
 
-    let report = BenchmarkReport {
+    let score_inputs: Vec<ScoreInput> = results.iter().map(score_input_from_result).collect();
+    let score_summary = Some(compute_aggregate_summary(&score_inputs));
+
+    BenchmarkReport {
+        schema_version: BENCHMARK_REPORT_SCHEMA_VERSION,
+        binary_version: Some(env!("CARGO_PKG_VERSION").to_string()),
+        binary_commit: option_env!("VERGEN_GIT_SHA").map(str::to_string),
+        suite_name: Some(suite.to_string()),
+        task_filter: task_filter
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string),
+        provider: single_value(specs.iter().map(|spec| spec.provider.as_str())),
+        model: single_value(specs.iter().map(|spec| spec.model.as_str())),
+        prompt: BenchmarkPromptConfig {
+            family: prompt.family.clone(),
+            variant: prompt.variant.clone(),
+            file_path: prompt.file_path.clone(),
+            version: prompt.version.clone(),
+            hash: prompt.hash.clone(),
+            file_contents: None,
+        },
+        run_count,
+        run_index,
+        run_seed: seed,
+        runner_mode: Some("benchmark".to_string()),
         timestamp: chrono::Utc::now().to_rfc3339(),
         results,
+        score_summary,
+        repeat_summary,
+        raw_report_paths: raw_report_paths.unwrap_or_default(),
+        saved_path: None,
         aggregate_cost_per_resolved,
         aggregate_tool_efficiency,
         aggregate_tool_reliability,
         aggregate_delegation_efficiency,
         aggregate_delegation_quality,
-    };
+    }
+}
 
-    // Print formatted table
-    print_results_table(&report, suite);
-
-    // Save JSON results
-    save_results_json(&report).await?;
-
-    Ok(report)
+fn build_repeat_aggregate_report(
+    raw_reports: &[BenchmarkReport],
+    specs: &[ModelSpec],
+    suite: BenchmarkSuite,
+    task_filter: Option<&str>,
+    prompt: &BenchmarkPromptConfig,
+    seed: Option<u64>,
+    raw_report_paths: Vec<String>,
+) -> BenchmarkReport {
+    let flattened_results: Vec<BenchmarkResult> = raw_reports
+        .iter()
+        .flat_map(|report| report.results.clone())
+        .collect();
+    let repeat_summary = Some(build_repeat_summary(&flattened_results, raw_reports.len()));
+    build_report_from_results(
+        flattened_results,
+        specs,
+        suite,
+        task_filter,
+        prompt,
+        None,
+        raw_reports.len(),
+        seed,
+        repeat_summary,
+        Some(raw_report_paths),
+    )
 }
 
 /// Run a single task against a single model, collecting metrics.
@@ -656,6 +994,8 @@ async fn run_single_task(
     spec: &ModelSpec,
     max_turns: usize,
     workspace_dir: &Path,
+    prompt: &BenchmarkPromptConfig,
+    run_index: usize,
 ) -> Result<BenchmarkResult> {
     let data_dir = dirs::home_dir().unwrap_or_default().join(".ava");
 
@@ -668,6 +1008,7 @@ async fn run_single_task(
             spec.model.clone(),
             effective_turns,
             workspace_dir.to_path_buf(),
+            prompt.agent_override(),
         ))
         .await?;
     spawn_default_question_responses(question_rx);
@@ -802,7 +1143,8 @@ async fn run_single_task(
     let _result = handle.await??;
 
     // Quality check (Tier 1: regex patterns)
-    let (quality_pass, quality_details) = check_quality(&total_output, &task.expected_patterns);
+    let (pattern_pass, mut quality_details) =
+        check_quality(&total_output, &tool_calls_detail, &task.expected_patterns);
 
     let tokens_per_second = if total_time_ms > 0 {
         (output_tokens as f64) / (total_time_ms as f64 / 1000.0)
@@ -824,8 +1166,29 @@ async fn run_single_task(
             (None, None, None, None)
         };
 
-    // Determine if the task passed (compile_success for code tasks, quality_pass for others)
-    let task_passed = compile_success.unwrap_or(quality_pass);
+    let validation_pass = validation_pass(compile_success, tests_passed, tests_total);
+    let quality_pass = if task.test_harness.is_some() {
+        pattern_pass && validation_pass.unwrap_or(false)
+    } else {
+        pattern_pass
+    };
+
+    if task.test_harness.is_some() {
+        if let Some(false) = validation_pass {
+            let validation_details = format_validation_failure_details(
+                compile_success,
+                tests_passed,
+                tests_total,
+                compile_error.as_deref(),
+            );
+            quality_details.push_str(&format!("; {validation_details}"));
+        } else if !pattern_pass {
+            quality_details.push_str("; validation passed");
+        }
+    }
+
+    // Determine if the task passed using the full quality signal for code tasks.
+    let task_passed = quality_pass;
 
     // cost_per_task_usd: only for resolved tasks
     let cost_per_task_usd = if task_passed { Some(cost_usd) } else { None };
@@ -876,9 +1239,7 @@ async fn run_single_task(
 
     // consistency_hash: hash of the output for variance tracking across runs
     let consistency_hash = if !total_output.trim().is_empty() {
-        let mut hasher = DefaultHasher::new();
-        total_output.hash(&mut hasher);
-        Some(format!("{:016x}", hasher.finish()))
+        Some(stable_hash_hex(&total_output))
     } else {
         None
     };
@@ -888,6 +1249,13 @@ async fn run_single_task(
         task_category: task.category.to_string(),
         provider: spec.provider.clone(),
         model: spec.model.clone(),
+        prompt_family: Some(resolved_prompt_family(
+            &spec.model,
+            prompt.family.as_deref(),
+        )),
+        prompt_variant: prompt.variant.clone(),
+        prompt_hash: prompt.hash.clone(),
+        run_index: Some(run_index),
         ttft_ms: ttft,
         total_time_ms,
         input_tokens,
@@ -923,634 +1291,219 @@ async fn run_single_task(
     })
 }
 
-/// Extract code from model output, aware of the target language.
-///
-/// Looks for fenced code blocks tagged with the appropriate language, then falls
-/// back to generic fenced blocks, then to language-specific heuristics.
-fn extract_code(output: &str, language: Language) -> Option<String> {
-    // Language-specific fenced block tags to try first
-    let lang_tags: &[&str] = match language {
-        Language::Rust => &["rust"],
-        Language::Python => &["python", "py"],
-        Language::JavaScript => &["javascript", "js", "jsx", "typescript", "ts", "tsx"],
-        Language::Go => &["go", "golang"],
-    };
-
-    // Try language-specific fenced blocks first
-    for tag in lang_tags {
-        let pattern = format!(r"(?s)```{}\s*\n(.*?)```", tag);
-        if let Ok(re) = Regex::new(&pattern) {
-            if let Some(cap) = re.captures(output) {
-                return Some(cap[1].to_string());
-            }
-        }
-    }
-
-    // Try generic ``` blocks
-    let re_generic = Regex::new(r"(?s)```\s*\n(.*?)```").ok()?;
-    if let Some(cap) = re_generic.captures(output) {
-        return Some(cap[1].to_string());
-    }
-
-    // Language-specific heuristics for unfenced code
-    match language {
-        Language::Rust => {
-            // Try to find code that looks like a function definition without fences
-            let re_fn = Regex::new(r"(?s)((?:use\s+.*?;\s*)*(?:pub\s+)?fn\s+\w+.*?\n\})").ok()?;
-            if let Some(cap) = re_fn.captures(output) {
-                return Some(cap[1].to_string());
-            }
-            if output.contains("fn ") {
-                return Some(output.to_string());
-            }
-        }
-        Language::Python => {
-            // Look for def or class definitions
-            let re_def =
-                Regex::new(r"(?s)((?:import\s+.*\n|from\s+.*\n)*(?:def|class)\s+\w+.*)").ok()?;
-            if let Some(cap) = re_def.captures(output) {
-                return Some(cap[1].to_string());
-            }
-            if output.contains("def ") || output.contains("class ") {
-                return Some(output.to_string());
-            }
-        }
-        Language::JavaScript => {
-            // Look for function definitions or const/let assignments
-            let re_fn = Regex::new(r"(?s)((?:const|let|var|function)\s+\w+.*)").ok()?;
-            if let Some(cap) = re_fn.captures(output) {
-                return Some(cap[1].to_string());
-            }
-            if output.contains("function ") || output.contains("const ") {
-                return Some(output.to_string());
-            }
-        }
-        Language::Go => {
-            // Look for func or type definitions
-            let re_fn =
-                Regex::new(r"(?s)((?:package\s+\w+\s*\n)?(?:import\s+.*\n)*(?:type|func)\s+\w+.*)")
-                    .ok()?;
-            if let Some(cap) = re_fn.captures(output) {
-                return Some(cap[1].to_string());
-            }
-            if output.contains("func ") || output.contains("type ") {
-                return Some(output.to_string());
-            }
-        }
-    }
-
-    None
-}
-
-/// Backward-compatible wrapper for Rust code extraction (used in tests).
-#[cfg(test)]
-fn extract_rust_code(output: &str) -> Option<String> {
-    extract_code(output, Language::Rust)
-}
-
-/// Tier 2: Extract code from model output, write to temp file with tests, compile and run.
-///
-/// Dispatches to language-specific validation based on `harness.language`.
-async fn run_tier2_validation(
-    model_output: &str,
-    harness: &TestHarness,
-) -> (Option<bool>, Option<usize>, Option<usize>, Option<String>) {
-    match harness.language {
-        Language::Rust => run_tier2_rust(model_output, harness).await,
-        Language::Python => run_tier2_python(model_output, harness).await,
-        Language::JavaScript => run_tier2_javascript(model_output, harness).await,
-        Language::Go => run_tier2_go(model_output, harness).await,
+fn make_error_result(
+    task: &BenchmarkTask,
+    spec: &ModelSpec,
+    prompt: &BenchmarkPromptConfig,
+    run_index: usize,
+    error: &str,
+) -> BenchmarkResult {
+    BenchmarkResult {
+        task_name: task.name.to_string(),
+        task_category: task.category.to_string(),
+        provider: spec.provider.clone(),
+        model: spec.model.clone(),
+        prompt_family: Some(resolved_prompt_family(
+            &spec.model,
+            prompt.family.as_deref(),
+        )),
+        prompt_variant: prompt.variant.clone(),
+        prompt_hash: prompt.hash.clone(),
+        run_index: Some(run_index),
+        ttft_ms: None,
+        total_time_ms: 0,
+        input_tokens: 0,
+        output_tokens: 0,
+        tokens_per_second: 0.0,
+        cost_usd: 0.0,
+        quality_pass: false,
+        quality_details: "error".to_string(),
+        error: Some(error.to_string()),
+        compile_success: None,
+        tests_passed: None,
+        tests_total: None,
+        compile_error: None,
+        judge_scores: None,
+        tool_calls_count: 0,
+        tool_calls_detail: Vec::new(),
+        tool_error_count: 0,
+        tool_error_breakdown: HashMap::new(),
+        turns_used: 0,
+        self_corrections: 0,
+        subagent_calls_count: 0,
+        subagent_types: Vec::new(),
+        subagent_providers: Vec::new(),
+        subagent_cost_usd: 0.0,
+        resumed_subagent_calls_count: 0,
+        raw_output: None,
+        cost_per_task_usd: None,
+        tool_efficiency_score: None,
+        tool_reliability_score: None,
+        delegation_efficiency_score: None,
+        delegation_quality_score: None,
+        consistency_hash: None,
     }
 }
 
-/// Tier 2 validation for Rust: compile with rustc --test, run the binary.
-async fn run_tier2_rust(
-    model_output: &str,
-    harness: &TestHarness,
-) -> (Option<bool>, Option<usize>, Option<usize>, Option<String>) {
-    let Some(code) = extract_code(model_output, Language::Rust) else {
-        return (
-            Some(false),
-            None,
-            None,
-            Some("Could not extract Rust code from output".to_string()),
-        );
-    };
-
-    // Build the full source: extracted code + use statements for HashMap if needed + test harness
-    let mut full_source = String::new();
-
-    // Add common imports if not present
-    if harness.test_code.contains("HashMap") && !code.contains("use std::collections::HashMap") {
-        full_source.push_str("use std::collections::HashMap;\n");
+fn score_input_from_result(result: &BenchmarkResult) -> ScoreInput {
+    let validation_ok = validation_pass(
+        result.compile_success,
+        result.tests_passed,
+        result.tests_total,
+    )
+    .unwrap_or(result.quality_pass);
+    ScoreInput {
+        task_pass: validation_ok && result.error.is_none(),
+        quality_pass: result.quality_pass,
+        compile_success: result.compile_success,
+        tests_passed: result.tests_passed,
+        tests_total: result.tests_total,
+        cost_usd: result.cost_usd,
+        total_time_ms: result.total_time_ms,
     }
-    if harness.test_code.contains("Hash") && !code.contains("use std::hash::Hash") {
-        full_source.push_str("use std::hash::Hash;\n");
-    }
-
-    full_source.push_str(&code);
-    full_source.push_str("\n\nfn main() {}\n");
-    full_source.push_str(harness.test_code);
-
-    compile_and_test(&full_source, harness.test_count).await
 }
 
-/// Tier 2 validation for Python: concatenate extracted code + test harness, run with python3.
-async fn run_tier2_python(
-    model_output: &str,
-    harness: &TestHarness,
-) -> (Option<bool>, Option<usize>, Option<usize>, Option<String>) {
-    let Some(code) = extract_code(model_output, Language::Python) else {
-        return (
-            Some(false),
-            None,
-            None,
-            Some("Could not extract Python code from output".to_string()),
-        );
-    };
-
-    let full_source = format!("{}\n{}", code, harness.test_code);
-    run_script("python3", &full_source, "py", harness.test_count).await
-}
-
-/// Tier 2 validation for JavaScript: concatenate extracted code + test harness, run with node.
-async fn run_tier2_javascript(
-    model_output: &str,
-    harness: &TestHarness,
-) -> (Option<bool>, Option<usize>, Option<usize>, Option<String>) {
-    let Some(code) = extract_code(model_output, Language::JavaScript) else {
-        return (
-            Some(false),
-            None,
-            None,
-            Some("Could not extract JavaScript code from output".to_string()),
-        );
-    };
-
-    let full_source = format!("{}\n{}", code, harness.test_code);
-    run_script("node", &full_source, "js", harness.test_count).await
-}
-
-/// Compiled regex for stripping `func main()` bodies from model-generated Go code.
-///
-/// Using `LazyLock` ensures the pattern is validated at first use (in tests)
-/// rather than panicking at runtime with `.unwrap()`.
-static RE_GO_MAIN: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?s)func\s+main\s*\(\s*\)\s*\{[^}]*\}")
-        .expect("RE_GO_MAIN: static regex pattern is invalid — this is a compile-time bug")
-});
-
-/// Tier 2 validation for Go: wrap extracted code in package main with imports, run with `go run`.
-async fn run_tier2_go(
-    model_output: &str,
-    harness: &TestHarness,
-) -> (Option<bool>, Option<usize>, Option<usize>, Option<String>) {
-    let Some(code) = extract_code(model_output, Language::Go) else {
-        return (
-            Some(false),
-            None,
-            None,
-            Some("Could not extract Go code from output".to_string()),
-        );
-    };
-
-    // Build a single-file Go program. If the model already included `package main`,
-    // we skip adding it again; otherwise we wrap everything.
-    let mut full_source = String::new();
-
-    let has_package = code.contains("package ");
-
-    if !has_package {
-        full_source.push_str("package main\n\n");
+fn build_repeat_summary(
+    results: &[BenchmarkResult],
+    repeat_count: usize,
+) -> BenchmarkRepeatSummary {
+    let mut grouped: BTreeMap<(String, String, String), Vec<&BenchmarkResult>> = BTreeMap::new();
+    for result in results {
+        grouped
+            .entry((
+                result.task_name.clone(),
+                result.provider.clone(),
+                result.model.clone(),
+            ))
+            .or_default()
+            .push(result);
     }
 
-    // Gather required imports from both code and test harness
-    let combined = format!("{}\n{}", code, harness.test_code);
-    let mut imports: Vec<&str> = Vec::new();
-    if combined.contains("fmt.") && !combined.contains("\"fmt\"") {
-        imports.push("\"fmt\"");
-    }
-    if combined.contains("os.") && !combined.contains("\"os\"") {
-        imports.push("\"os\"");
-    }
-    if combined.contains("sync.") && !combined.contains("\"sync\"") {
-        imports.push("\"sync\"");
-    }
+    let mut worst_task_variance_ms = 0;
+    let mut task_summaries = Vec::with_capacity(grouped.len());
+    for ((_task_name, _provider, _model), group) in grouped {
+        let mut durations: Vec<u64> = group.iter().map(|result| result.total_time_ms).collect();
+        let mut tool_counts: Vec<usize> =
+            group.iter().map(|result| result.tool_calls_count).collect();
+        let mut subagent_counts: Vec<usize> = group
+            .iter()
+            .map(|result| result.subagent_calls_count)
+            .collect();
+        durations.sort_unstable();
+        tool_counts.sort_unstable();
+        subagent_counts.sort_unstable();
 
-    if !imports.is_empty() && !code.contains("import ") {
-        full_source.push_str("import (\n");
-        for imp in &imports {
-            full_source.push_str(&format!("    {}\n", imp));
-        }
-        full_source.push_str(")\n\n");
-    }
+        let min_time = durations.first().copied().unwrap_or(0);
+        let max_time = durations.last().copied().unwrap_or(0);
+        worst_task_variance_ms = worst_task_variance_ms.max(max_time.saturating_sub(min_time));
 
-    // Strip package/import lines from model code if we already added them
-    let code_lines: Vec<&str> = code.lines().collect();
-    let mut skip_import_block = false;
-    for line in &code_lines {
-        let trimmed = line.trim();
-        if !has_package && trimmed.starts_with("package ") {
-            continue;
-        }
-        if !has_package && trimmed == "import (" {
-            skip_import_block = true;
-            continue;
-        }
-        if skip_import_block {
-            if trimmed == ")" {
-                skip_import_block = false;
-            }
-            continue;
-        }
-        if !has_package && trimmed.starts_with("import ") && !trimmed.contains("(") {
-            continue;
-        }
-        full_source.push_str(line);
-        full_source.push('\n');
-    }
-
-    // Remove any `func main()` from the model code since the test harness provides one
-    let source_without_main = RE_GO_MAIN.replace_all(&full_source, "").to_string();
-
-    let final_source = format!("{}\n{}", source_without_main, harness.test_code);
-    run_script("go", &final_source, "go", harness.test_count).await
-}
-
-/// Run a script file with the given interpreter and check results.
-///
-/// For Go, uses `go run <file>`. For others, uses `<interpreter> <file>`.
-/// Returns the standard (compile_success, tests_passed, tests_total, error) tuple.
-async fn run_script(
-    interpreter: &str,
-    source: &str,
-    extension: &str,
-    expected_test_count: usize,
-) -> (Option<bool>, Option<usize>, Option<usize>, Option<String>) {
-    let temp_dir = match tempfile::tempdir() {
-        Ok(d) => d,
-        Err(e) => {
-            return (
-                Some(false),
-                None,
-                None,
-                Some(format!("Failed to create temp dir: {}", e)),
-            );
-        }
-    };
-
-    let filename = format!("bench_test.{}", extension);
-    let source_path = temp_dir.path().join(&filename);
-
-    if let Err(e) = tokio::fs::write(&source_path, source).await {
-        return (
-            Some(false),
-            None,
-            None,
-            Some(format!("Failed to write source: {}", e)),
-        );
-    }
-
-    // Build the command based on interpreter
-    let output = if interpreter == "go" {
-        tokio::process::Command::new("go")
-            .arg("run")
-            .arg(source_path.to_str().unwrap_or(&filename))
-            .current_dir(temp_dir.path())
-            .output()
-            .await
-    } else {
-        tokio::process::Command::new(interpreter)
-            .arg(source_path.to_str().unwrap_or(&filename))
-            .current_dir(temp_dir.path())
-            .output()
-            .await
-    };
-
-    let result = match output {
-        Ok(r) => r,
-        Err(e) => {
-            return (
-                Some(false),
-                None,
-                None,
-                Some(format!("Failed to run {} {}: {}", interpreter, filename, e)),
-            );
-        }
-    };
-
-    let stdout = String::from_utf8_lossy(&result.stdout);
-    let stderr = String::from_utf8_lossy(&result.stderr);
-
-    if result.status.success() {
-        // For Python unittest, parse "Ran N tests" from stderr
-        let tests_passed = if interpreter == "python3" {
-            parse_python_test_count(&stderr).unwrap_or(expected_test_count)
+        let attempts = group.len();
+        let passes = group.iter().filter(|result| result.quality_pass).count();
+        let failures = attempts.saturating_sub(passes);
+        let compile_total = group
+            .iter()
+            .filter(|result| result.compile_success.is_some())
+            .count();
+        let compile_passes = group
+            .iter()
+            .filter(|result| result.compile_success == Some(true))
+            .count();
+        let average_cost_usd = if attempts > 0 {
+            group.iter().map(|result| result.cost_usd).sum::<f64>() / attempts as f64
         } else {
-            expected_test_count
-        };
-        (Some(true), Some(tests_passed), Some(tests_passed), None)
-    } else {
-        let error_output = if !stderr.is_empty() {
-            stderr.to_string()
-        } else {
-            stdout.to_string()
-        };
-        let error_msg = if error_output.len() > 500 {
-            format!("{}...", &error_output[..500])
-        } else {
-            error_output
+            0.0
         };
 
-        // For Python, try to parse how many tests passed vs failed
-        if interpreter == "python3" {
-            let (passed, failed) = parse_python_test_results(&stderr);
-            if passed + failed > 0 {
-                return (
-                    Some(true),
-                    Some(passed),
-                    Some(passed + failed),
-                    Some(error_msg),
-                );
-            }
-        }
-
-        (
-            Some(false),
-            Some(0),
-            Some(expected_test_count),
-            Some(error_msg),
-        )
-    }
-}
-
-/// Parse "Ran N tests" from Python unittest output (printed to stderr).
-fn parse_python_test_count(output: &str) -> Option<usize> {
-    let re = Regex::new(r"Ran (\d+) test").ok()?;
-    re.captures(output)
-        .and_then(|cap| cap[1].parse::<usize>().ok())
-}
-
-/// Parse Python unittest failure details: "FAILED (failures=N)" or "OK".
-fn parse_python_test_results(output: &str) -> (usize, usize) {
-    let total = parse_python_test_count(output).unwrap_or(0);
-    if output.contains("OK") && !output.contains("FAILED") {
-        return (total, 0);
-    }
-    let re_fail = Regex::new(r"failures=(\d+)").ok();
-    let failures = re_fail
-        .and_then(|re| re.captures(output))
-        .and_then(|cap| cap[1].parse::<usize>().ok())
-        .unwrap_or(0);
-    let re_errors = Regex::new(r"errors=(\d+)").ok();
-    let errors = re_errors
-        .and_then(|re| re.captures(output))
-        .and_then(|cap| cap[1].parse::<usize>().ok())
-        .unwrap_or(0);
-    let failed = failures + errors;
-    (total.saturating_sub(failed), failed)
-}
-
-// ---------------------------------------------------------------------------
-// LLM-as-Judge
-// ---------------------------------------------------------------------------
-
-const JUDGE_PROMPT_TEMPLATE: &str = r#"You are an expert code evaluator judging AI-generated code for a benchmark.
-
-Think carefully and step by step about each dimension before providing your scores. Consider edge cases, algorithmic complexity, error handling, and Rust best practices. Reason through what the code does, whether it handles all inputs correctly, and how it compares to an ideal solution.
-
-## Task
-{task_prompt}
-
-## Model Output
-{model_output}
-
-## Compilation Result
-{compile_result}
-
-## Test Results
-{test_results}
-
-Rate the output on these dimensions (0-10 each). For each dimension, think through your reasoning before assigning a score:
-- **correctness**: Does the code solve the task correctly? Consider edge cases, off-by-one errors, and boundary conditions.
-- **code_quality**: Is the code clean, readable, well-structured? Consider naming, modularity, and documentation.
-- **efficiency**: Is the algorithm efficient for the problem? Consider time and space complexity.
-- **idiomatic**: Does it use idiomatic Rust patterns? Consider ownership, error handling, iterator usage, and type system leverage.
-
-Respond ONLY with JSON (no markdown wrapping):
-{"correctness": N, "code_quality": N, "efficiency": N, "idiomatic": N, "notes": "brief explanation of key strengths and weaknesses"}"#;
-
-/// Run LLM-as-Judge evaluation on all benchmark results.
-async fn judge_outputs(
-    results: &mut [BenchmarkResult],
-    judge_specs: &[ModelSpec],
-    tasks: &[BenchmarkTask],
-) {
-    // Build a task prompt lookup
-    let task_prompts: HashMap<&str, &str> =
-        tasks.iter().map(|t| (t.name, t.prompt.as_str())).collect();
-
-    let credentials = CredentialStore::load_default().await.unwrap_or_default();
-    let pool = Arc::new(ConnectionPool::new());
-
-    for result in results.iter_mut() {
-        let raw_output = match &result.raw_output {
-            Some(o) if !o.trim().is_empty() => o.clone(),
-            _ => continue,
-        };
-
-        let task_prompt = task_prompts
-            .get(result.task_name.as_str())
-            .copied()
-            .unwrap_or("(unknown task)");
-
-        let compile_result = match result.compile_success {
-            Some(true) => "Compilation succeeded".to_string(),
-            Some(false) => {
-                let err = result.compile_error.as_deref().unwrap_or("unknown error");
-                format!("Compilation failed: {}", err)
-            }
-            None => "Not applicable (no compilation step)".to_string(),
-        };
-
-        let test_results = match (result.tests_passed, result.tests_total) {
-            (Some(p), Some(t)) => format!("{}/{} tests passed", p, t),
-            _ => "Not applicable (no tests)".to_string(),
-        };
-
-        // Truncate output for judge to avoid huge prompts
-        let truncated_output = if raw_output.len() > 4000 {
-            format!("{}...(truncated)", &raw_output[..4000])
-        } else {
-            raw_output.clone()
-        };
-
-        let judge_prompt = JUDGE_PROMPT_TEMPLATE
-            .replace("{task_prompt}", task_prompt)
-            .replace("{model_output}", &truncated_output)
-            .replace("{compile_result}", &compile_result)
-            .replace("{test_results}", &test_results);
-
-        let mut evaluations = Vec::new();
-
-        for judge_spec in judge_specs {
-            eprintln!(
-                "  [judge] {} evaluating {}:{}...",
-                short_model_name(&judge_spec.model),
-                result.task_name,
-                short_model_name(&result.model),
-            );
-
-            match evaluate_with_judge(&judge_prompt, judge_spec, &credentials, pool.clone()).await {
-                Ok(eval) => evaluations.push(eval),
-                Err(e) => {
-                    eprintln!(
-                        "  [judge] ERROR from {}: {}",
-                        short_model_name(&judge_spec.model),
-                        e
-                    );
-                }
-            }
-        }
-
-        if !evaluations.is_empty() {
-            let n = evaluations.len() as f64;
-            let correctness = evaluations.iter().map(|e| e.correctness).sum::<f64>() / n;
-            let code_quality = evaluations.iter().map(|e| e.code_quality).sum::<f64>() / n;
-            let efficiency = evaluations.iter().map(|e| e.efficiency).sum::<f64>() / n;
-            let idiomatic = evaluations.iter().map(|e| e.idiomatic).sum::<f64>() / n;
-            let average = (correctness + code_quality + efficiency + idiomatic) / 4.0;
-
-            result.judge_scores = Some(JudgeScores {
-                correctness,
-                code_quality,
-                efficiency,
-                idiomatic,
-                average,
-                evaluations,
-            });
-            result.delegation_quality_score = compute_delegation_quality_score(
-                result.quality_pass,
-                result.compile_success,
-                result.judge_scores.as_ref(),
-                result.subagent_calls_count,
-                result.resumed_subagent_calls_count,
-                result.subagent_cost_usd,
-                result.cost_usd,
-            );
-        }
-    }
-}
-
-/// Call a single judge model to evaluate a benchmark output.
-///
-/// Uses `generate_with_thinking` at `ThinkingLevel::High` so that judge models
-/// engage their reasoning capabilities for deeper evaluation. This maps to:
-/// - Anthropic: extended thinking (high budget)
-/// - OpenAI: reasoning_effort "high"
-/// - Gemini: reasoning_effort "high"
-/// - Other providers: graceful fallback to standard generation
-async fn evaluate_with_judge(
-    judge_prompt: &str,
-    judge_spec: &ModelSpec,
-    credentials: &CredentialStore,
-    pool: Arc<ConnectionPool>,
-) -> Result<JudgeEvaluation> {
-    let provider = create_provider(&judge_spec.provider, &judge_spec.model, credentials, pool)
-        .map_err(|e| eyre!("Failed to create judge provider: {}", e))?;
-
-    let messages = vec![Message::new(Role::User, judge_prompt)];
-
-    // Use thinking/reasoning mode for higher-quality evaluations.
-    // ThinkingLevel::High enables extended thinking on Anthropic, reasoning_effort
-    // "high" on OpenAI/Gemini. Providers that don't support thinking fall back to
-    // standard generation via the default trait implementation.
-    let response = if provider.supports_thinking() {
-        let llm_response = provider
-            .generate_with_thinking(&messages, &[], ThinkingLevel::High)
-            .await
-            .map_err(|e| eyre!("Judge generate_with_thinking failed: {}", e))?;
-        llm_response.content
-    } else {
-        provider
-            .generate(&messages)
-            .await
-            .map_err(|e| eyre!("Judge generate failed: {}", e))?
-    };
-
-    // Parse JSON from response (the model should return only JSON)
-    parse_judge_response(&response, &judge_spec.model)
-}
-
-/// Parse the judge's JSON response into a JudgeEvaluation.
-fn parse_judge_response(response: &str, judge_model: &str) -> Result<JudgeEvaluation> {
-    // Try to find JSON in the response (may have markdown wrapping)
-    let json_str = extract_json(response).ok_or_else(|| {
-        eyre!(
-            "Could not extract JSON from judge response: {}",
-            if response.len() > 200 {
-                format!("{}...", &response[..200])
+        let first = group[0];
+        task_summaries.push(BenchmarkRepeatTaskSummary {
+            task_name: first.task_name.clone(),
+            task_category: first.task_category.clone(),
+            provider: first.provider.clone(),
+            model: first.model.clone(),
+            prompt_family: first.prompt_family.clone(),
+            prompt_variant: first.prompt_variant.clone(),
+            prompt_hash: first.prompt_hash.clone(),
+            attempts,
+            passes,
+            failures,
+            pass_rate: if attempts > 0 {
+                passes as f64 / attempts as f64
             } else {
-                response.to_string()
-            }
-        )
-    })?;
+                0.0
+            },
+            compile_pass_rate: if compile_total > 0 {
+                Some(compile_passes as f64 / compile_total as f64)
+            } else {
+                None
+            },
+            median_total_time_ms: median_u64(&durations),
+            p95_total_time_ms: p95_u64(&durations),
+            median_tool_calls_count: median_usize(&tool_counts),
+            median_subagent_calls_count: median_usize(&subagent_counts),
+            average_cost_usd,
+        });
+    }
 
-    let parsed: serde_json::Value =
-        serde_json::from_str(&json_str).map_err(|e| eyre!("Failed to parse judge JSON: {}", e))?;
+    let mut all_durations: Vec<u64> = results.iter().map(|result| result.total_time_ms).collect();
+    all_durations.sort_unstable();
+    let overall_passes = results.iter().filter(|result| result.quality_pass).count();
 
-    let correctness = parsed["correctness"]
-        .as_f64()
-        .unwrap_or(0.0)
-        .clamp(0.0, 10.0);
-    let code_quality = parsed["code_quality"]
-        .as_f64()
-        .unwrap_or(0.0)
-        .clamp(0.0, 10.0);
-    let efficiency = parsed["efficiency"]
-        .as_f64()
-        .unwrap_or(0.0)
-        .clamp(0.0, 10.0);
-    let idiomatic = parsed["idiomatic"].as_f64().unwrap_or(0.0).clamp(0.0, 10.0);
-    let notes = parsed["notes"].as_str().unwrap_or("").to_string();
-
-    Ok(JudgeEvaluation {
-        judge_model: judge_model.to_string(),
-        correctness,
-        code_quality,
-        efficiency,
-        idiomatic,
-        notes,
-    })
+    BenchmarkRepeatSummary {
+        repeat_count,
+        overall_pass_rate: if results.is_empty() {
+            0.0
+        } else {
+            overall_passes as f64 / results.len() as f64
+        },
+        median_total_time_ms: median_u64(&all_durations),
+        worst_task_variance_ms,
+        task_summaries,
+    }
 }
 
-/// Extract a JSON object from a string that may contain markdown fences or other text.
-fn extract_json(text: &str) -> Option<String> {
-    // Try direct parse first
-    if serde_json::from_str::<serde_json::Value>(text.trim()).is_ok() {
-        return Some(text.trim().to_string());
+fn single_value<'a>(mut values: impl Iterator<Item = &'a str>) -> Option<String> {
+    let first = values.next()?;
+    if values.all(|value| value == first) {
+        Some(first.to_string())
+    } else {
+        None
     }
+}
 
-    // Try to find JSON in ```json ... ``` blocks
-    let re_json = Regex::new(r"(?s)```(?:json)?\s*\n(\{.*?\})\s*```").ok()?;
-    if let Some(cap) = re_json.captures(text) {
-        let candidate = cap[1].to_string();
-        if serde_json::from_str::<serde_json::Value>(&candidate).is_ok() {
-            return Some(candidate);
-        }
+fn stable_hash_hex(value: &str) -> String {
+    const FNV_OFFSET_BASIS: u64 = 0xcbf29ce484222325;
+    const FNV_PRIME: u64 = 0x100000001b3;
+
+    let mut hash = FNV_OFFSET_BASIS;
+    for byte in value.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(FNV_PRIME);
     }
+    format!("{hash:016x}")
+}
 
-    // Try to find any { ... } that parses as JSON
-    let start = text.find('{')?;
-    let end = text.rfind('}')? + 1;
-    if start < end {
-        let candidate = &text[start..end];
-        if serde_json::from_str::<serde_json::Value>(candidate).is_ok() {
-            return Some(candidate.to_string());
-        }
+fn median_u64(values: &[u64]) -> u64 {
+    if values.is_empty() {
+        0
+    } else {
+        values[values.len() / 2]
     }
+}
 
-    None
+fn median_usize(values: &[usize]) -> usize {
+    if values.is_empty() {
+        0
+    } else {
+        values[values.len() / 2]
+    }
+}
+
+fn p95_u64(values: &[u64]) -> u64 {
+    if values.is_empty() {
+        return 0;
+    }
+    let idx = ((values.len() - 1) * 95) / 100;
+    values[idx]
 }
 
 // ---------------------------------------------------------------------------
@@ -1558,7 +1511,11 @@ fn extract_json(text: &str) -> Option<String> {
 // ---------------------------------------------------------------------------
 
 /// Check output quality against expected regex patterns.
-fn check_quality(output: &str, expected_patterns: &[&str]) -> (bool, String) {
+fn check_quality(
+    output: &str,
+    tool_calls: &[String],
+    expected_patterns: &[&str],
+) -> (bool, String) {
     if output.trim().is_empty() {
         return (false, "empty output".to_string());
     }
@@ -1568,6 +1525,15 @@ fn check_quality(output: &str, expected_patterns: &[&str]) -> (bool, String) {
     let mut missing = Vec::new();
 
     for pattern in expected_patterns {
+        if let Some(tool_name) = pattern.strip_prefix("tool:") {
+            if tool_calls.iter().any(|call| call == tool_name) {
+                passed += 1;
+            } else {
+                missing.push(*pattern);
+            }
+            continue;
+        }
+
         match Regex::new(pattern) {
             Ok(re) => {
                 if re.is_match(output) {
@@ -1610,383 +1576,76 @@ fn truncate_pattern(p: &str) -> String {
     }
 }
 
-/// Print a formatted results table to stdout.
-fn print_results_table(report: &BenchmarkReport, suite: BenchmarkSuite) {
-    if report.results.is_empty() {
-        println!("No benchmark results.");
-        return;
+fn validation_pass(
+    compile_success: Option<bool>,
+    tests_passed: Option<usize>,
+    tests_total: Option<usize>,
+) -> Option<bool> {
+    match (compile_success, tests_passed, tests_total) {
+        (Some(false), _, _) => Some(false),
+        (Some(true), Some(passed), Some(total)) => Some(passed == total),
+        (Some(true), None, None) => Some(true),
+        (Some(true), _, _) => Some(false),
+        (None, _, _) => None,
     }
+}
 
-    // Group results by task
-    let mut tasks_seen: Vec<String> = Vec::new();
-    for r in &report.results {
-        if !tasks_seen.contains(&r.task_name) {
-            tasks_seen.push(r.task_name.clone());
-        }
-    }
-
-    println!();
-    println!("=======================================================================",);
-    println!(
-        "                AVA Model Benchmark Results ({} suite)",
-        suite
-    );
-    println!("                     {}", &report.timestamp[..19]);
-    println!("=======================================================================",);
-
-    let has_judges = report.results.iter().any(|r| r.judge_scores.is_some());
-
-    for task_name in &tasks_seen {
-        let task_results: Vec<&BenchmarkResult> = report
-            .results
-            .iter()
-            .filter(|r| &r.task_name == task_name)
-            .collect();
-
-        if task_results.is_empty() {
-            continue;
-        }
-
-        let has_compile = task_results.iter().any(|r| r.compile_success.is_some());
-        let has_tools = task_results.iter().any(|r| r.tool_calls_count > 0);
-        let has_subagents = task_results.iter().any(|r| r.subagent_calls_count > 0);
-        let has_activity_metrics = has_tools || has_subagents;
-
-        println!();
-        println!("  Task: {} [{}]", task_name, task_results[0].task_category);
-
-        if has_compile && has_judges {
-            println!(
-                "  {:<22} {:>9} {:>9} {:>7} {:>8} {:>7} {:>6} {:>5} {:>6} {:>7}",
-                "Model",
-                "TTFT(ms)",
-                "Total(s)",
-                "Tok/s",
-                "Compile",
-                "Tests",
-                "Tools",
-                "Subs",
-                "Turns",
-                "Score",
-            );
-            println!(
-                "  {:-<22} {:-<9} {:-<9} {:-<7} {:-<8} {:-<7} {:-<6} {:-<5} {:-<6} {:-<7}",
-                "", "", "", "", "", "", "", "", "", ""
-            );
-        } else if has_compile {
-            println!(
-                "  {:<22} {:>9} {:>9} {:>7} {:>8} {:>7} {:>6} {:>5} {:>6}  Quality",
-                "Model",
-                "TTFT(ms)",
-                "Total(s)",
-                "Tok/s",
-                "Compile",
-                "Tests",
-                "Tools",
-                "Subs",
-                "Turns",
-            );
-            println!(
-                "  {:-<22} {:-<9} {:-<9} {:-<7} {:-<8} {:-<7} {:-<6} {:-<5} {:-<6}  {:-<20}",
-                "", "", "", "", "", "", "", "", "", ""
-            );
-        } else if has_activity_metrics {
-            println!(
-                "  {:<22} {:>9} {:>9} {:>7} {:>8} {:>8} {:>6} {:>5} {:>6}  Quality",
-                "Model",
-                "TTFT(ms)",
-                "Total(s)",
-                "Tok/s",
-                "In Tok",
-                "Cost",
-                "Tools",
-                "Subs",
-                "Turns",
-            );
-            println!(
-                "  {:-<22} {:-<9} {:-<9} {:-<7} {:-<8} {:-<8} {:-<6} {:-<5} {:-<6}  {:-<20}",
-                "", "", "", "", "", "", "", "", "", ""
-            );
-        } else if has_judges {
-            println!(
-                "  {:<22} {:>9} {:>9} {:>7} {:>8} {:>8} {:>7}",
-                "Model", "TTFT(ms)", "Total(s)", "Tok/s", "In Tok", "Cost", "Score",
-            );
-            println!(
-                "  {:-<22} {:-<9} {:-<9} {:-<7} {:-<8} {:-<8} {:-<7}",
-                "", "", "", "", "", "", ""
-            );
-        } else {
-            println!(
-                "  {:<22} {:>9} {:>9} {:>8} {:>8} {:>8}  Quality",
-                "Model", "TTFT(ms)", "Total(s)", "Tok/s", "In Tok", "Cost",
-            );
-            println!(
-                "  {:-<22} {:-<9} {:-<9} {:-<8} {:-<8} {:-<8}  {:-<20}",
-                "", "", "", "", "", "", ""
-            );
-        }
-
-        for r in &task_results {
-            let model_short = short_model_name(&r.model);
-            let model_display = if model_short.len() > 22 {
-                format!("{}...", &model_short[..19])
+fn format_validation_failure_details(
+    compile_success: Option<bool>,
+    tests_passed: Option<usize>,
+    tests_total: Option<usize>,
+    compile_error: Option<&str>,
+) -> String {
+    match (compile_success, tests_passed, tests_total) {
+        (Some(false), _, _) => {
+            if let Some(error) = compile_error {
+                format!(
+                    "compile/test validation failed: {}",
+                    summarize_validation_error(error)
+                )
             } else {
-                model_short
-            };
-
-            let ttft_str = r
-                .ttft_ms
-                .map(|t| t.to_string())
-                .unwrap_or_else(|| "-".to_string());
-
-            let total_str = format!("{:.1}", r.total_time_ms as f64 / 1000.0);
-
-            let tps_str = if r.tokens_per_second > 0.0 {
-                format!("{:.0}", r.tokens_per_second)
-            } else {
-                "-".to_string()
-            };
-
-            let compile_str = match r.compile_success {
-                Some(true) => "PASS".to_string(),
-                Some(false) => "FAIL".to_string(),
-                None => "-".to_string(),
-            };
-
-            let tests_str = match (r.tests_passed, r.tests_total) {
-                (Some(p), Some(t)) => format!("{}/{}", p, t),
-                _ => "-".to_string(),
-            };
-
-            let score_str = match &r.judge_scores {
-                Some(scores) => format!("{:.1}", scores.average),
-                None => "-".to_string(),
-            };
-
-            let cost_str = if r.cost_usd > 0.0 {
-                format!("${:.4}", r.cost_usd)
-            } else {
-                "$0.00".to_string()
-            };
-
-            let quality_str = if r.error.is_some() {
-                "ERROR".to_string()
-            } else if r.quality_pass {
-                "PASS".to_string()
-            } else {
-                "FAIL".to_string()
-            };
-
-            let tools_str = if r.tool_calls_count > 0 {
-                r.tool_calls_count.to_string()
-            } else {
-                "-".to_string()
-            };
-
-            let subs_str = if r.subagent_calls_count > 0 {
-                r.subagent_calls_count.to_string()
-            } else {
-                "-".to_string()
-            };
-
-            let turns_str = if r.turns_used > 0 {
-                r.turns_used.to_string()
-            } else {
-                "-".to_string()
-            };
-
-            if has_compile && has_judges {
-                println!(
-                    "  {:<22} {:>9} {:>9} {:>7} {:>8} {:>7} {:>6} {:>5} {:>6} {:>7}",
-                    model_display,
-                    ttft_str,
-                    total_str,
-                    tps_str,
-                    compile_str,
-                    tests_str,
-                    tools_str,
-                    subs_str,
-                    turns_str,
-                    score_str,
-                );
-            } else if has_compile {
-                println!(
-                    "  {:<22} {:>9} {:>9} {:>7} {:>8} {:>7} {:>6} {:>5} {:>6}  {}",
-                    model_display,
-                    ttft_str,
-                    total_str,
-                    tps_str,
-                    compile_str,
-                    tests_str,
-                    tools_str,
-                    subs_str,
-                    turns_str,
-                    quality_str,
-                );
-            } else if has_activity_metrics {
-                println!(
-                    "  {:<22} {:>9} {:>9} {:>7} {:>8} {:>8} {:>6} {:>5} {:>6}  {}",
-                    model_display,
-                    ttft_str,
-                    total_str,
-                    tps_str,
-                    r.input_tokens,
-                    cost_str,
-                    tools_str,
-                    subs_str,
-                    turns_str,
-                    quality_str,
-                );
-            } else if has_judges {
-                println!(
-                    "  {:<22} {:>9} {:>9} {:>7} {:>8} {:>8} {:>7}",
-                    model_display,
-                    ttft_str,
-                    total_str,
-                    tps_str,
-                    r.input_tokens,
-                    cost_str,
-                    score_str,
-                );
-            } else {
-                println!(
-                    "  {:<22} {:>9} {:>9} {:>8} {:>8} {:>8}  {}",
-                    model_display,
-                    ttft_str,
-                    total_str,
-                    tps_str,
-                    r.input_tokens,
-                    cost_str,
-                    quality_str,
-                );
-            }
-
-            if let Some(summary) = r.delegation_summary() {
-                println!("  {:<22} delegation: {}", "", summary);
+                "compile/test validation failed".to_string()
             }
         }
-    }
-
-    // Summary
-    println!();
-    println!("-----------------------------------------------------------------------");
-
-    let total_cost: f64 = report.results.iter().map(|r| r.cost_usd).sum();
-    let total_subagents: usize = report.results.iter().map(|r| r.subagent_calls_count).sum();
-    let total_subagent_cost: f64 = report.results.iter().map(|r| r.subagent_cost_usd).sum();
-    let total_time: f64 = report
-        .results
-        .iter()
-        .map(|r| r.total_time_ms as f64 / 1000.0)
-        .sum();
-    let pass_count = report.results.iter().filter(|r| r.quality_pass).count();
-    let compile_count = report
-        .results
-        .iter()
-        .filter(|r| r.compile_success == Some(true))
-        .count();
-    let compile_total = report
-        .results
-        .iter()
-        .filter(|r| r.compile_success.is_some())
-        .count();
-    let error_count = report.results.iter().filter(|r| r.error.is_some()).count();
-
-    let mut summary = format!(
-        "  Total: {} runs, {}/{} quality passed",
-        report.results.len(),
-        pass_count,
-        report.results.len(),
-    );
-
-    if compile_total > 0 {
-        summary.push_str(&format!(", {}/{} compiled", compile_count, compile_total));
-    }
-
-    if error_count > 0 {
-        summary.push_str(&format!(", {} errors", error_count));
-    }
-
-    summary.push_str(&format!(
-        ", {:.1}s elapsed, ${:.4} total cost",
-        total_time, total_cost,
-    ));
-
-    // Average judge score
-    let judge_results: Vec<&BenchmarkResult> = report
-        .results
-        .iter()
-        .filter(|r| r.judge_scores.is_some())
-        .collect();
-    if !judge_results.is_empty() {
-        let avg_score: f64 = judge_results
-            .iter()
-            .map(|r| r.judge_scores.as_ref().unwrap().average)
-            .sum::<f64>()
-            / judge_results.len() as f64;
-        summary.push_str(&format!(", avg judge score: {:.1}/10", avg_score));
-    }
-
-    // Aggregate cost per resolved task
-    if let Some(cpr) = report.aggregate_cost_per_resolved {
-        summary.push_str(&format!(", ${:.4}/resolved", cpr));
-    }
-
-    // Aggregate tool efficiency
-    if let Some(eff) = report.aggregate_tool_efficiency {
-        summary.push_str(&format!(", tool efficiency: {:.2}", eff));
-    }
-
-    if total_subagents > 0 {
-        summary.push_str(&format!(
-            ", {} subagents, ${:.4} delegated",
-            total_subagents, total_subagent_cost
-        ));
-    }
-
-    if let Some(eff) = report.aggregate_delegation_efficiency {
-        summary.push_str(&format!(", delegation efficiency: {:.2}", eff));
-    }
-
-    if let Some(score) = report.aggregate_delegation_quality {
-        summary.push_str(&format!(", delegation quality: {:.2}", score));
-    }
-
-    println!("{}", summary);
-    if total_subagents > 0 {
-        let all_subagent_types: Vec<String> = report
-            .results
-            .iter()
-            .flat_map(|result| result.subagent_types.iter().cloned())
-            .collect();
-        if let Some(mix) = format_subagent_mix(&all_subagent_types) {
-            println!("  Delegation mix: {}", mix);
+        (Some(true), Some(passed), Some(total)) if passed != total => {
+            format!("tests failed ({passed}/{total} passed)")
         }
+        _ => "compile/test validation failed".to_string(),
     }
-    println!("=======================================================================");
-    println!();
+}
+
+fn summarize_validation_error(error: &str) -> String {
+    error
+        .lines()
+        .find(|line| !line.trim().is_empty())
+        .map(|line| line.trim().to_string())
+        .unwrap_or_else(|| "unknown validation error".to_string())
 }
 
 /// Save the full results as JSON to ~/.ava/benchmarks/.
-async fn save_results_json(report: &BenchmarkReport) -> Result<()> {
-    let benchmarks_dir = dirs::home_dir()
-        .unwrap_or_default()
-        .join(".ava")
-        .join("benchmarks");
+async fn save_results_json(
+    report: &mut BenchmarkReport,
+    output_path: Option<&Path>,
+    artifact_kind: BenchmarkArtifactKind,
+) -> Result<PathBuf> {
+    let path = if let Some(path) = output_path {
+        path.to_path_buf()
+    } else {
+        default_report_path(report, artifact_kind)
+    };
 
-    tokio::fs::create_dir_all(&benchmarks_dir)
-        .await
-        .map_err(|e| eyre!("Failed to create benchmarks dir: {}", e))?;
+    if let Some(parent) = path.parent() {
+        tokio::fs::create_dir_all(parent).await.map_err(|e| {
+            eyre!(
+                "Failed to create benchmark output dir {}: {}",
+                parent.display(),
+                e
+            )
+        })?;
+    }
 
-    // Use timestamp for filename
-    let filename = format!(
-        "bench-{}.json",
-        &report.timestamp.replace(':', "-").replace('T', "_")[..19]
-    );
-    let path = benchmarks_dir.join(&filename);
+    report.saved_path = Some(path.display().to_string());
 
-    // Strip raw_output from saved JSON to keep file size reasonable
     let mut save_report = report.clone();
     for result in &mut save_report.results {
         result.raw_output = None;
@@ -2001,54 +1660,53 @@ async fn save_results_json(report: &BenchmarkReport) -> Result<()> {
 
     tracing::info!("[benchmark] Results saved to {}", path.display());
 
-    Ok(())
+    Ok(path)
+}
+
+fn default_report_path(report: &BenchmarkReport, artifact_kind: BenchmarkArtifactKind) -> PathBuf {
+    let benchmarks_dir = dirs::home_dir()
+        .unwrap_or_default()
+        .join(".ava")
+        .join("benchmarks");
+    let date = report.timestamp.get(..10).unwrap_or("unknown-date");
+    let suite = sanitize_path_segment(report.suite_name.as_deref().unwrap_or("benchmark"));
+    let provider = sanitize_path_segment(report.provider.as_deref().unwrap_or("mixed-provider"));
+    let model = sanitize_path_segment(report.model.as_deref().unwrap_or("mixed-model"));
+    let family = sanitize_path_segment(report.prompt.family.as_deref().unwrap_or("auto"));
+    let variant = sanitize_path_segment(report.prompt.variant.as_deref().unwrap_or("default"));
+
+    let mut base_name = format!("{}-{}-{}-{}-{}", suite, provider, model, family, variant);
+    if let Some(run_index) = report.run_index {
+        base_name.push_str(&format!("-run{}", run_index));
+    }
+
+    match artifact_kind {
+        BenchmarkArtifactKind::SingleRun => benchmarks_dir.join(format!("{}.json", base_name)),
+        BenchmarkArtifactKind::RawRun => benchmarks_dir
+            .join("raw")
+            .join(date)
+            .join(format!("{}.json", base_name)),
+        BenchmarkArtifactKind::Aggregate => benchmarks_dir
+            .join("aggregate")
+            .join(date)
+            .join(format!("{}-summary.json", base_name)),
+    }
+}
+
+fn sanitize_path_segment(value: &str) -> String {
+    value
+        .chars()
+        .map(|ch| match ch {
+            'a'..='z' | 'A'..='Z' | '0'..='9' | '-' | '_' => ch,
+            '/' | ':' | '.' => '-',
+            _ => '-',
+        })
+        .collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_extract_rust_code_fenced() {
-        let output = "Here is the code:\n```rust\nfn foo() -> bool { true }\n```\nDone.";
-        let code = extract_rust_code(output).unwrap();
-        assert!(code.contains("fn foo()"));
-    }
-
-    #[test]
-    fn test_extract_rust_code_generic_fence() {
-        let output = "```\nfn bar() {}\n```";
-        let code = extract_rust_code(output).unwrap();
-        assert!(code.contains("fn bar()"));
-    }
-
-    #[test]
-    fn test_extract_rust_code_no_fence() {
-        let output = "pub fn baz(x: i32) -> i32 {\n    x + 1\n}";
-        let code = extract_rust_code(output).unwrap();
-        assert!(code.contains("fn baz"));
-    }
-
-    #[test]
-    fn test_extract_json_direct() {
-        let json = r#"{"correctness": 8, "code_quality": 7, "efficiency": 9, "idiomatic": 8, "notes": "good"}"#;
-        let result = extract_json(json).unwrap();
-        assert!(result.contains("correctness"));
-    }
-
-    #[test]
-    fn test_extract_json_fenced() {
-        let text = "Here is the evaluation:\n```json\n{\"correctness\": 8}\n```";
-        let result = extract_json(text).unwrap();
-        assert!(result.contains("correctness"));
-    }
-
-    #[test]
-    fn test_extract_json_embedded() {
-        let text = "My evaluation: {\"correctness\": 5, \"code_quality\": 6, \"efficiency\": 7, \"idiomatic\": 8, \"notes\": \"ok\"} end.";
-        let result = extract_json(text).unwrap();
-        assert!(result.contains("correctness"));
-    }
 
     #[test]
     fn test_parse_test_output() {
@@ -2064,17 +1722,6 @@ mod tests {
         let (passed, failed) = crate::benchmark_support::parse_test_output(output);
         assert_eq!(passed, 2);
         assert_eq!(failed, 1);
-    }
-
-    #[test]
-    fn test_parse_judge_response() {
-        let response = r#"{"correctness": 9, "code_quality": 8, "efficiency": 7, "idiomatic": 8.5, "notes": "Well done"}"#;
-        let eval = parse_judge_response(response, "test-model").unwrap();
-        assert_eq!(eval.correctness, 9.0);
-        assert_eq!(eval.code_quality, 8.0);
-        assert_eq!(eval.efficiency, 7.0);
-        assert_eq!(eval.idiomatic, 8.5);
-        assert_eq!(eval.notes, "Well done");
     }
 
     #[test]
@@ -2099,13 +1746,68 @@ mod tests {
         assert!(specs.is_empty());
     }
 
-    /// Verify all static regexes compile successfully.
-    /// Catches any future regex mutation that would otherwise panic at runtime.
     #[test]
-    fn regexes_compile() {
-        // Force initialisation of the LazyLock; panics here rather than at runtime if invalid.
-        let _ = &*RE_GO_MAIN;
-        assert!(RE_GO_MAIN.is_match("func main() { return }"));
-        assert!(!RE_GO_MAIN.is_match("func helper() { return }"));
+    fn stable_hash_hex_is_pinned() {
+        assert_eq!(stable_hash_hex("benchmark-prompt-hash"), "3038090fbdbbbbf4");
+    }
+
+    #[test]
+    fn check_quality_accepts_tool_patterns() {
+        let tool_calls = vec!["bash".to_string(), "read".to_string()];
+        let (pass, details) = check_quality("verified and done", &tool_calls, &["tool:bash"]);
+        assert!(pass, "details: {details}");
+    }
+
+    #[test]
+    fn score_input_requires_test_success_for_code_tasks() {
+        let result = BenchmarkResult {
+            task_name: "code_task".to_string(),
+            task_category: "prompt_regression".to_string(),
+            provider: "test".to_string(),
+            model: "test-model".to_string(),
+            prompt_family: None,
+            prompt_variant: None,
+            prompt_hash: None,
+            run_index: None,
+            ttft_ms: None,
+            total_time_ms: 100,
+            input_tokens: 10,
+            output_tokens: 10,
+            tokens_per_second: 1.0,
+            cost_usd: 0.0,
+            quality_pass: false,
+            quality_details: "tests failed".to_string(),
+            error: None,
+            compile_success: Some(true),
+            tests_passed: Some(0),
+            tests_total: Some(2),
+            compile_error: Some("tests failed".to_string()),
+            judge_scores: None,
+            tool_calls_count: 0,
+            tool_calls_detail: Vec::new(),
+            tool_error_count: 0,
+            tool_error_breakdown: std::collections::HashMap::new(),
+            turns_used: 0,
+            self_corrections: 0,
+            subagent_calls_count: 0,
+            subagent_types: Vec::new(),
+            subagent_providers: Vec::new(),
+            subagent_cost_usd: 0.0,
+            resumed_subagent_calls_count: 0,
+            raw_output: None,
+            cost_per_task_usd: None,
+            tool_efficiency_score: None,
+            tool_reliability_score: None,
+            delegation_efficiency_score: None,
+            delegation_quality_score: None,
+            consistency_hash: None,
+        };
+
+        assert!(!score_input_from_result(&result).task_pass);
+    }
+
+    #[test]
+    fn validation_pass_allows_compile_only_success() {
+        assert_eq!(validation_pass(Some(true), None, None), Some(true));
     }
 }

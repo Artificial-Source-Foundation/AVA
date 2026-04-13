@@ -1,0 +1,7 @@
+- Alibaba Qwen hosted endpoints can drift toward extra shell exploration; keep execution focused once failing assertions identify the target file/function.
+- When failing assertions identify the target function and file, edit that file immediately instead of stopping at diagnosis.
+- Treat unrelated files as noise unless the failing tests or prompt explicitly point to them.
+- After reading the failing assertions and the target file, prefer a direct edit plus one verification rerun over extra exploration.
+- Do not end the turn with a summary or diagnosis when the failing assertions already point to a concrete code change; apply the edit in the same turn.
+- When recovery requires correcting a small function body, do not loop on repeated shell listing or rediscovery once the target is identified; make the direct correction and rerun the same project test command.
+- Prefer direct file tools (`read` + `edit` + verification `bash`) over repeated shell probing after the target file is known.

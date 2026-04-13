@@ -1,0 +1,10 @@
+- When the failing assertion and target file are already clear, prefer these notes over extra rediscovery.
+- Use the failing assertion as the source of truth for the exact behavior change and patch the identified function directly.
+- After each edit, rerun the same project test command immediately and keep iterating on that same target file until the failing assertion passes.
+- Do not stop at diagnosis when the assertion already implies a concrete code change; apply the edit in the same turn.
+- For single-function fixes, keep the patch minimal: edit only that target function and avoid broader edits, unrelated files, or extra helper logic.
+- For minimal string-normalization fixes, avoid adding imports, dependencies, extra modules, or Cargo changes when a standard-library edit inside the target function is enough.
+- Do not preserve brittle fallback normalization paths alongside the fix.
+- Keep normalization changes minimal and behavior-focused: make the direct correction the failing assertion implies without widening the implementation unnecessarily.
+- For tuple or default-value fixes, use direct file tools (`read`/`edit`/`write` + verification `bash`) and avoid shell search/replace workflows, delegation, or subagents.
+- Produce the complete intended value in one atomic edit and avoid partial, staged, or field-by-field updates.

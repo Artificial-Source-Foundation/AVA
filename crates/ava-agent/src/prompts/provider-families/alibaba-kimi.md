@@ -1,2 +1,5 @@
 - Alibaba Kimi endpoints can be stricter about oversized tool arguments; keep payloads compact and avoid redundant keys.
 - Prefer plain, schema-accurate JSON/tool payloads; avoid markdown fencing or schema re-echoes around arguments.
+- When failing assertions identify the target function, apply the direct edit in that file immediately instead of ending on diagnosis-only text.
+- Recovery guidance does not mean intentionally making a wrong first edit; attempt the most likely correct fix first, then rerun the same project test command and iterate only if tests fail.
+- For tuple or default-value fixes, use direct file tools and update the complete intended value in one atomic edit before verification.

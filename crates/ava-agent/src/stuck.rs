@@ -156,8 +156,29 @@ impl LoopThresholds {
             }
         }
 
+        // Tier 2: Explicit Alibaba-hosted Qwen coverage.
+        // Keep this scoped to provider+family so we do not blanket-match provider.
+        if Self::is_alibaba_hosted_qwen(provider, model) {
+            return Self::aggressive();
+        }
+
         // Tier 2+3: Fall through to model registry + heuristics
         Self::for_model(model)
+    }
+
+    fn is_alibaba_hosted_qwen(provider: &str, model: &str) -> bool {
+        let provider = provider.to_lowercase();
+        let model = model.to_lowercase();
+
+        let is_alibaba_provider = matches!(provider.as_str(), "alibaba" | "alibaba-cn");
+        if !is_alibaba_provider {
+            return false;
+        }
+
+        matches!(
+            model.as_str(),
+            "qwen3.5-plus" | "qwen3-max-2026-01-23" | "qwen3-coder-next" | "qwen3-coder-plus"
+        ) || model.contains("qwen")
     }
 
     /// Check `~/.ava/credentials.json` for a provider-level `loop_prone` override.
@@ -1321,6 +1342,46 @@ mod tests {
     }
 
     #[test]
+    fn for_provider_model_returns_aggressive_for_alibaba_qwen_variants() {
+        let variants = [
+            "qwen3.5-plus",
+            "qwen3-max-2026-01-23",
+            "qwen3-coder-next",
+            "qwen3-coder-plus",
+            "Qwen3-Coder-Plus",
+        ];
+
+        for variant in variants {
+            let t = LoopThresholds::for_provider_model("alibaba", variant);
+            assert_eq!(t.tool_repeat_count, 2, "{variant} should be aggressive");
+            assert!(t.enable_llm_judge, "{variant} should enable judge");
+        }
+    }
+
+    #[test]
+    fn for_provider_model_returns_aggressive_for_alibaba_cn_qwen() {
+        let t = LoopThresholds::for_provider_model("alibaba-cn", "qwen3-coder-next");
+        assert_eq!(t.tool_repeat_count, 2);
+        assert!(t.enable_llm_judge);
+    }
+
+    #[test]
+    fn for_provider_model_keeps_existing_alibaba_glm_kimi_minimax_behavior() {
+        for model in ["glm-5", "kimi-k2.5", "MiniMax-M2.5"] {
+            let t = LoopThresholds::for_provider_model("alibaba", model);
+            assert_eq!(t.tool_repeat_count, 2, "{model} should remain aggressive");
+            assert!(t.enable_llm_judge, "{model} should remain aggressive");
+        }
+    }
+
+    #[test]
+    fn for_provider_model_does_not_blanket_match_alibaba_provider() {
+        let t = LoopThresholds::for_provider_model("alibaba", "claude-opus-4.6");
+        assert_eq!(t.tool_repeat_count, 3);
+        assert!(!t.enable_llm_judge);
+    }
+
+    #[test]
     fn kimi_loop_policy_nudges_twice_then_stops_on_repeated_similarity() {
         let mut detector =
             StuckDetector::with_thresholds(LoopThresholds::for_provider_model("kimi", "k2p5"));
@@ -1359,6 +1420,53 @@ mod tests {
                 assert!(
                     matches!(action, StuckAction::Stop(_)),
                     "third repeated similarity should stop loop-prone kimi run"
+                );
+            }
+            detector.last_responses.clear();
+        }
+    }
+
+    #[test]
+    fn alibaba_qwen_loop_policy_nudges_twice_then_stops_on_repeated_similarity() {
+        let mut detector = StuckDetector::with_thresholds(LoopThresholds::for_provider_model(
+            "alibaba",
+            "qwen3-coder-plus",
+        ));
+        let config = make_config(10.0, true);
+        let llm = mock_llm();
+
+        let response_pairs = [
+            (
+                "I will inspect the parser path and patch the null branch",
+                "I will inspect the parser path and patch the null-branch",
+            ),
+            (
+                "I will inspect the routing path and patch the retry branch",
+                "I will inspect the routing path and patch the retry-branch",
+            ),
+            (
+                "I will inspect the timeout path and patch the fallback branch",
+                "I will inspect the timeout path and patch the fallback-branch",
+            ),
+        ];
+
+        for (idx, (first, second)) in response_pairs.into_iter().enumerate() {
+            let action = detector.check(first, &[], &[], None, &config, llm.as_ref());
+            assert!(
+                matches!(action, StuckAction::Continue),
+                "pair {idx} first turn should continue"
+            );
+
+            let action = detector.check(second, &[], &[], None, &config, llm.as_ref());
+            if idx < 2 {
+                assert!(
+                    matches!(action, StuckAction::InjectMessage(_)),
+                    "pair {idx} second turn should nudge"
+                );
+            } else {
+                assert!(
+                    matches!(action, StuckAction::Stop(_)),
+                    "third repeated similarity should stop loop-prone alibaba qwen run"
                 );
             }
             detector.last_responses.clear();

@@ -439,6 +439,12 @@ fn provider_family_overlay_notes(provider_name: Option<&str>, model_family: &str
         ("alibaba" | "alibaba-cn", "kimi") => {
             prompt_note_lines(PROMPT_NOTES_PROVIDER_FAMILY_ALIBABA_KIMI)
         }
+        ("alibaba" | "alibaba-cn", "qwen") => {
+            prompt_note_lines(PROMPT_NOTES_PROVIDER_FAMILY_ALIBABA_QWEN)
+        }
+        ("alibaba" | "alibaba-cn", "minimax") => {
+            prompt_note_lines(PROMPT_NOTES_PROVIDER_FAMILY_ALIBABA_MINIMAX)
+        }
         _ => vec![],
     }
 }
@@ -602,6 +608,10 @@ const PROMPT_NOTES_PROVIDER_FAMILY_ALIBABA_GLM: &str =
     include_str!("prompts/provider-families/alibaba-glm.md");
 const PROMPT_NOTES_PROVIDER_FAMILY_ALIBABA_KIMI: &str =
     include_str!("prompts/provider-families/alibaba-kimi.md");
+const PROMPT_NOTES_PROVIDER_FAMILY_ALIBABA_QWEN: &str =
+    include_str!("prompts/provider-families/alibaba-qwen.md");
+const PROMPT_NOTES_PROVIDER_FAMILY_ALIBABA_MINIMAX: &str =
+    include_str!("prompts/provider-families/alibaba-minimax.md");
 
 fn select_base_prompt_with_family(model_name: &str, family_override: Option<&str>) -> &'static str {
     if let Some(family) = family_override.and_then(normalize_prompt_family) {
@@ -1121,6 +1131,48 @@ mod tests {
     }
 
     #[test]
+    fn alibaba_qwen_gets_provider_family_overlay() {
+        let suffix = provider_prompt_suffix_with_provider_and_override(
+            ProviderKind::Anthropic,
+            Some("alibaba"),
+            "qwen3.5-plus",
+            None,
+        )
+        .unwrap();
+
+        assert!(suffix.contains("Alibaba Qwen"));
+    }
+
+    #[test]
+    fn alibaba_minimax_gets_provider_family_overlay() {
+        let suffix = provider_prompt_suffix_with_provider_and_override(
+            ProviderKind::Anthropic,
+            Some("alibaba"),
+            "MiniMax-M2.5",
+            None,
+        )
+        .unwrap();
+
+        assert!(suffix.contains("Alibaba MiniMax"));
+    }
+
+    #[test]
+    fn alibaba_minimax_overlay_keeps_generic_behavioral_refinements() {
+        let suffix = provider_prompt_suffix_with_provider_and_override(
+            ProviderKind::Anthropic,
+            Some("alibaba"),
+            "MiniMax-M2.5",
+            None,
+        )
+        .unwrap();
+
+        assert!(suffix.contains("prefer these notes over extra rediscovery"));
+        assert!(suffix.contains("Do not use regex-based whitespace normalization"));
+        assert!(suffix.contains("one atomic edit"));
+        assert!(suffix.contains("direct file tools (`read`/`edit`/`write` + verification `bash`)"));
+    }
+
+    #[test]
     fn generic_kimi_provider_has_no_alibaba_overlay() {
         let suffix = provider_prompt_suffix_with_provider_and_override(
             ProviderKind::Anthropic,
@@ -1131,5 +1183,18 @@ mod tests {
         .unwrap();
 
         assert!(!suffix.contains("Alibaba Kimi"));
+    }
+
+    #[test]
+    fn generic_minimax_provider_has_no_alibaba_overlay() {
+        let suffix = provider_prompt_suffix_with_provider_and_override(
+            ProviderKind::Anthropic,
+            Some("minimax"),
+            "MiniMax-M2.5",
+            None,
+        )
+        .unwrap();
+
+        assert!(!suffix.contains("Alibaba MiniMax"));
     }
 }

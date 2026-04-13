@@ -49,6 +49,10 @@ coverage/
 *.tmp
 *.temp
 .tmp/
+*.bak
+*.orig
+*.rej
+/workspace/
 
 # Docs (local dev reference, not tracked)
 docs/
@@ -64,6 +68,8 @@ test-results/
 .ava/
 .playwright-mcp/
 /*.png
+/test
+/test_check
 plugins/examples/code-stats/index.js
 plugins/examples/env-guard/index.js
 plugins/examples/hello-plugin/index.js

@@ -475,6 +475,7 @@ pub async fn run_review_agent(
         thinking_level: ava_types::ThinkingLevel::Off,
         thinking_budget_tokens: None,
         system_prompt_suffix: None,
+        benchmark_prompt_override: None,
         project_root: None,
         enable_dynamic_rules: false,
         extended_tools: true,

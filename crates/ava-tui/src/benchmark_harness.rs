@@ -75,6 +75,8 @@ pub struct HarnessResult {
     pub director_model: String,
     pub worker_model: String,
     pub total_time_ms: u64,
+    #[serde(default)]
+    pub worker_input_tokens: usize,
     pub director_tokens: usize,
     pub worker_tokens: usize,
     pub director_cost: f64,
@@ -87,6 +89,56 @@ pub struct HarnessResult {
     pub worker_calls: usize,
     pub total_turns: usize,
     pub error: Option<String>,
+}
+
+fn wall_clock_tokens_per_second(output_tokens: usize, total_time_ms: u64) -> f64 {
+    if total_time_ms > 0 {
+        output_tokens as f64 / (total_time_ms as f64 / 1000.0)
+    } else {
+        0.0
+    }
+}
+
+fn generation_tokens_per_second(
+    output_tokens: usize,
+    total_time_ms: u64,
+    ttft_ms: Option<u64>,
+) -> Option<f64> {
+    let ttft_ms = ttft_ms?;
+    let generation_time_ms = total_time_ms.checked_sub(ttft_ms)?;
+    if generation_time_ms > 0 {
+        Some(output_tokens as f64 / (generation_time_ms as f64 / 1000.0))
+    } else {
+        None
+    }
+}
+
+fn accumulate_token_usage(
+    input_tokens: &mut usize,
+    output_tokens: &mut usize,
+    cost_usd: &mut f64,
+    usage_input_tokens: usize,
+    usage_output_tokens: usize,
+    usage_cost_usd: f64,
+) {
+    *input_tokens += usage_input_tokens;
+    *output_tokens += usage_output_tokens;
+    *cost_usd += usage_cost_usd;
+}
+
+fn accumulate_subagent_usage(
+    input_tokens: &mut usize,
+    output_tokens: &mut usize,
+    cost_usd: &mut f64,
+    subagent_cost_usd: &mut f64,
+    sub_input_tokens: usize,
+    sub_output_tokens: usize,
+    sub_cost_usd: f64,
+) {
+    *input_tokens += sub_input_tokens;
+    *output_tokens += sub_output_tokens;
+    *subagent_cost_usd += sub_cost_usd;
+    *cost_usd += sub_cost_usd;
 }
 
 /// Full harness benchmark report.
@@ -329,6 +381,7 @@ async fn run_solo_task(
 
     let goal = task.prompt.clone();
     let start = Instant::now();
+    let mut ttft: Option<u64> = None;
     let handle = tokio::spawn(async move {
         stack
             .run(
@@ -353,17 +406,22 @@ async fn run_solo_task(
     let mut tool_error_count: usize = 0;
     let mut tool_error_breakdown: HashMap<String, usize> = HashMap::new();
     let mut turns_used: usize = 0;
+    let mut self_corrections: usize = 0;
     let mut subagent_calls_count: usize = 0;
     let mut subagent_types: Vec<String> = Vec::new();
     let mut subagent_providers: Vec<String> = Vec::new();
     let mut subagent_cost_usd: f64 = 0.0;
     let mut resumed_subagent_calls_count: usize = 0;
     let mut in_assistant_turn = false;
+    let mut last_tool_was_error = false;
     let mut tool_call_names: HashMap<String, String> = HashMap::new();
 
     while let Some(event) = rx.recv().await {
         match event {
             AgentEvent::Token(t) => {
+                if ttft.is_none() {
+                    ttft = Some(start.elapsed().as_millis() as u64);
+                }
                 if !in_assistant_turn {
                     turns_used += 1;
                     in_assistant_turn = true;
@@ -375,18 +433,28 @@ async fn run_solo_task(
                 output_tokens: ot,
                 cost_usd: c,
             } => {
-                input_tokens += it;
-                output_tokens += ot;
-                cost_usd += c;
+                accumulate_token_usage(
+                    &mut input_tokens,
+                    &mut output_tokens,
+                    &mut cost_usd,
+                    it,
+                    ot,
+                    c,
+                );
                 in_assistant_turn = false;
             }
             AgentEvent::ToolCall(tc) => {
                 tool_calls_count += 1;
                 tool_calls_detail.push(tc.name.clone());
                 tool_call_names.insert(tc.id.clone(), tc.name.clone());
+                if last_tool_was_error {
+                    self_corrections += 1;
+                    last_tool_was_error = false;
+                }
             }
             AgentEvent::ToolResult(tr) => {
                 total_output.push_str(&tr.content);
+                last_tool_was_error = tr.is_error;
                 if tr.is_error {
                     tool_error_count += 1;
                     let tool_name = tool_call_names
@@ -398,6 +466,8 @@ async fn run_solo_task(
             }
             AgentEvent::SubAgentComplete {
                 description,
+                input_tokens: sub_input_tokens,
+                output_tokens: sub_output_tokens,
                 cost_usd: sub_cost,
                 provider,
                 resumed,
@@ -411,8 +481,15 @@ async fn run_solo_task(
                 if resumed {
                     resumed_subagent_calls_count += 1;
                 }
-                subagent_cost_usd += sub_cost;
-                cost_usd += sub_cost;
+                accumulate_subagent_usage(
+                    &mut input_tokens,
+                    &mut output_tokens,
+                    &mut cost_usd,
+                    &mut subagent_cost_usd,
+                    sub_input_tokens,
+                    sub_output_tokens,
+                    sub_cost,
+                );
             }
             AgentEvent::Complete(_) => break,
             AgentEvent::Error(e) => return Err(eyre!("Agent error: {}", e)),
@@ -438,11 +515,8 @@ async fn run_solo_task(
             (None, None, None, None)
         };
 
-    let tokens_per_second = if total_time_ms > 0 {
-        (output_tokens as f64) / (total_time_ms as f64 / 1000.0)
-    } else {
-        0.0
-    };
+    let tokens_per_second = wall_clock_tokens_per_second(output_tokens, total_time_ms);
+    let generation_tps = generation_tokens_per_second(output_tokens, total_time_ms, ttft);
 
     let validation_pass = match (compile_success, tests_passed, tests_total) {
         (Some(false), _, _) => Some(false),
@@ -514,11 +588,12 @@ async fn run_solo_task(
         prompt_variant: None,
         prompt_hash: None,
         run_index: None,
-        ttft_ms: None,
+        ttft_ms: ttft,
         total_time_ms,
         input_tokens,
         output_tokens,
         tokens_per_second,
+        generation_tps,
         cost_usd,
         quality_pass,
         quality_details: String::new(),
@@ -533,7 +608,7 @@ async fn run_solo_task(
         tool_error_count,
         tool_error_breakdown,
         turns_used,
-        self_corrections: 0,
+        self_corrections,
         subagent_calls_count,
         subagent_types,
         subagent_providers,
@@ -580,6 +655,7 @@ async fn run_harness_phase(
                         director_model: director_spec.model.clone(),
                         worker_model: worker_spec.model.clone(),
                         total_time_ms: 0,
+                        worker_input_tokens: 0,
                         director_tokens: 0,
                         worker_tokens: 0,
                         director_cost: 0.0,
@@ -620,6 +696,7 @@ async fn run_harness_phase(
                     director_model: director_spec.model.clone(),
                     worker_model: worker_spec.model.clone(),
                     total_time_ms: 0,
+                    worker_input_tokens: 0,
                     director_tokens: 0,
                     worker_tokens: 0,
                     director_cost: 0.0,
@@ -734,6 +811,9 @@ async fn run_harness_task(
     let mut total_output = String::new();
     let mut worker_calls: usize = 0;
     let mut total_turns: usize = 0;
+    let mut worker_input_tokens: usize = 0;
+    let mut worker_output_tokens: usize = 0;
+    let mut worker_cost: f64 = 0.0;
 
     while let Some(event) = rx.recv().await {
         match &event {
@@ -742,6 +822,26 @@ async fn run_harness_task(
             }
             HqEvent::WorkerToken { token, .. } => {
                 total_output.push_str(token);
+            }
+            HqEvent::WorkerTokenUsage {
+                input_tokens,
+                output_tokens,
+                cost_usd,
+                ..
+            } => {
+                worker_input_tokens += input_tokens;
+                worker_output_tokens += output_tokens;
+                worker_cost += cost_usd;
+            }
+            HqEvent::WorkerSubAgentComplete {
+                input_tokens,
+                output_tokens,
+                cost_usd,
+                ..
+            } => {
+                worker_input_tokens += input_tokens;
+                worker_output_tokens += output_tokens;
+                worker_cost += cost_usd;
             }
             HqEvent::WorkerCompleted { turns, .. } => {
                 total_turns += turns;
@@ -761,25 +861,10 @@ async fn run_harness_task(
         .await?
         .map_err(|e| eyre!("Director coordination failed: {}", e))?;
 
-    // Estimate token usage and costs from the providers
-    // The director cost is estimated from planning overhead, worker cost from execution
-    let dir_provider_ref = director_arc.as_ref();
-    let wrk_provider_ref = worker_arc.as_ref();
-
-    // Rough estimation: director uses ~20% of total output for planning/review,
-    // worker uses ~80% for actual code generation. Input tokens are estimated from prompt.
-    let total_chars = total_output.len();
-    let dir_slice_end = if total_chars == 0 {
-        0
-    } else {
-        (total_chars / 5).max(1)
-    };
-    let est_director_output = dir_provider_ref.estimate_tokens(&total_output[..dir_slice_end]);
-    let est_worker_output = wrk_provider_ref.estimate_tokens(&total_output);
-    let est_input = dir_provider_ref.estimate_tokens(&task.prompt);
-
-    let director_cost = dir_provider_ref.estimate_cost(est_input, est_director_output);
-    let worker_cost = wrk_provider_ref.estimate_cost(est_input, est_worker_output);
+    // This harness path only surfaces real worker usage today. Keep worker accounting
+    // measured and leave director usage at zero instead of fabricating a token split.
+    let director_tokens = 0;
+    let director_cost = 0.0;
     let total_cost = director_cost + worker_cost;
     let tool_calls_detail: Vec<String> = Vec::new();
 
@@ -814,8 +899,9 @@ async fn run_harness_task(
         director_model: director_spec.model.clone(),
         worker_model: worker_spec.model.clone(),
         total_time_ms,
-        director_tokens: est_director_output,
-        worker_tokens: est_worker_output,
+        worker_input_tokens,
+        director_tokens,
+        worker_tokens: worker_output_tokens,
         director_cost,
         worker_cost,
         total_cost,
@@ -863,6 +949,7 @@ fn make_error_result(task: &BenchmarkTask, spec: &ModelSpec, error: &str) -> Ben
         input_tokens: 0,
         output_tokens: 0,
         tokens_per_second: 0.0,
+        generation_tps: None,
         cost_usd: 0.0,
         quality_pass: false,
         quality_details: "error".to_string(),
@@ -925,6 +1012,8 @@ async fn save_harness_json(report: &HarnessReport) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ava_agent::AgentEvent;
+    use ava_types::{Message, Role, Session};
 
     #[test]
     fn test_parse_single_model_spec() {
@@ -962,5 +1051,89 @@ mod tests {
             &[r"fn\s+is_palindrome"]
         ));
         assert!(!check_patterns("", &tool_calls, &[r"anything"]));
+    }
+
+    #[test]
+    fn wall_clock_tps_uses_inclusive_output_tokens() {
+        assert_eq!(wall_clock_tokens_per_second(130, 1000), 130.0);
+        assert_eq!(wall_clock_tokens_per_second(130, 0), 0.0);
+    }
+
+    #[test]
+    fn generation_tps_uses_post_ttft_window() {
+        assert_eq!(
+            generation_tokens_per_second(130, 2000, Some(1000)),
+            Some(130.0)
+        );
+        assert_eq!(generation_tokens_per_second(130, 1000, Some(1000)), None);
+        assert_eq!(generation_tokens_per_second(130, 1000, None), None);
+    }
+
+    #[test]
+    fn subagent_usage_counts_toward_harness_solo_totals() {
+        let mut input_tokens = 0;
+        let mut output_tokens = 0;
+        let mut cost_usd = 0.0;
+        let mut subagent_cost_usd = 0.0;
+
+        let events = vec![
+            AgentEvent::TokenUsage {
+                input_tokens: 100,
+                output_tokens: 50,
+                cost_usd: 0.01,
+            },
+            AgentEvent::SubAgentComplete {
+                call_id: "call-1".to_string(),
+                session_id: "session-1".to_string(),
+                messages: vec![Message::new(Role::Assistant, "child")],
+                description: "Review code".to_string(),
+                input_tokens: 200,
+                output_tokens: 80,
+                cost_usd: 0.02,
+                agent_type: Some("reviewer".to_string()),
+                provider: Some("test-provider".to_string()),
+                resumed: false,
+            },
+            AgentEvent::Complete(Session::new()),
+        ];
+
+        for event in events {
+            match event {
+                AgentEvent::TokenUsage {
+                    input_tokens: it,
+                    output_tokens: ot,
+                    cost_usd: c,
+                } => accumulate_token_usage(
+                    &mut input_tokens,
+                    &mut output_tokens,
+                    &mut cost_usd,
+                    it,
+                    ot,
+                    c,
+                ),
+                AgentEvent::SubAgentComplete {
+                    input_tokens: sub_it,
+                    output_tokens: sub_ot,
+                    cost_usd: sub_cost,
+                    ..
+                } => accumulate_subagent_usage(
+                    &mut input_tokens,
+                    &mut output_tokens,
+                    &mut cost_usd,
+                    &mut subagent_cost_usd,
+                    sub_it,
+                    sub_ot,
+                    sub_cost,
+                ),
+                AgentEvent::Complete(_) => break,
+                _ => {}
+            }
+        }
+
+        assert_eq!(input_tokens, 300);
+        assert_eq!(output_tokens, 130);
+        assert!((cost_usd - 0.03).abs() < 1e-9);
+        assert!((subagent_cost_usd - 0.02).abs() < 1e-9);
+        assert_eq!(wall_clock_tokens_per_second(output_tokens, 1000), 130.0);
     }
 }

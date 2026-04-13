@@ -93,6 +93,12 @@ impl CommandPaletteState {
                 "MCP",
                 CommandExec::Slash("/mcp reload".to_string()),
             ),
+            make_item(
+                "List Skills",
+                "",
+                "Info",
+                CommandExec::Slash("/skills".to_string()),
+            ),
             // Info
             make_item("Help", "", "Info", CommandExec::Slash("/help".to_string())),
             // UI

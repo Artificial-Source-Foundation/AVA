@@ -6,7 +6,7 @@ pub(crate) use validation::parse_test_output;
 pub(crate) use validation::{compile_and_test, run_tier3_validation};
 pub(crate) use workspace::{
     expected_min_subagents, prepare_benchmark_workspace, setup_agentic_file,
-    subagent_type_from_description,
+    subagent_type_from_description, BenchmarkWorkspaceGuard,
 };
 
 pub(crate) fn spawn_default_question_responses(

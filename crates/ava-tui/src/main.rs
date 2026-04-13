@@ -79,26 +79,29 @@ async fn main() -> Result<()> {
     // Benchmark modes (only available with --features benchmark)
     #[cfg(feature = "benchmark")]
     {
-        if cli.benchmark_compare_ava_report.is_some()
-            || cli.benchmark_compare_opencode_report.is_some()
+        if cli.benchmark_compare_left_report.is_some()
+            || cli.benchmark_compare_right_report.is_some()
         {
-            let ava_report = cli.benchmark_compare_ava_report.as_deref().ok_or_else(|| {
-                color_eyre::eyre::eyre!(
-                    "Missing --benchmark-compare-ava-report. Provide both report paths."
-                )
-            })?;
-            let opencode_report = cli
-                .benchmark_compare_opencode_report
+            let left_report = cli
+                .benchmark_compare_left_report
                 .as_deref()
                 .ok_or_else(|| {
                     color_eyre::eyre::eyre!(
-                        "Missing --benchmark-compare-opencode-report. Provide both report paths."
+                        "Missing --benchmark-compare-left-report. Provide both report paths."
+                    )
+                })?;
+            let right_report = cli
+                .benchmark_compare_right_report
+                .as_deref()
+                .ok_or_else(|| {
+                    color_eyre::eyre::eyre!(
+                        "Missing --benchmark-compare-right-report. Provide both report paths."
                     )
                 })?;
 
-            ava_tui::benchmark_compare::run_ava_vs_opencode_comparison(
-                std::path::Path::new(ava_report),
-                std::path::Path::new(opencode_report),
+            ava_tui::benchmark_compare::run_benchmark_report_comparison(
+                std::path::Path::new(left_report),
+                std::path::Path::new(right_report),
                 cli.benchmark_compare_output
                     .as_deref()
                     .map(std::path::Path::new),
@@ -177,6 +180,23 @@ async fn main() -> Result<()> {
                     .collect::<Vec<_>>()
             });
 
+            let benchmark_options = benchmark::BenchmarkOptions {
+                prompt: benchmark::BenchmarkPromptConfig::from_cli(
+                    cli.prompt_family.as_deref(),
+                    cli.prompt_variant.as_deref(),
+                    cli.prompt_file.as_deref(),
+                    cli.prompt_version.as_deref(),
+                    cli.prompt_hash.as_deref(),
+                )
+                .await?,
+                repeat: cli.repeat,
+                seed: cli.seed,
+                output_path: cli
+                    .benchmark_output
+                    .as_deref()
+                    .map(std::path::PathBuf::from),
+            };
+
             benchmark::run_benchmark(
                 specs,
                 None,
@@ -186,6 +206,7 @@ async fn main() -> Result<()> {
                 imported_tasks,
                 language_filter,
                 cli.task_filter.as_deref(),
+                benchmark_options,
             )
             .await?;
             return Ok(());
@@ -194,9 +215,17 @@ async fn main() -> Result<()> {
 
     #[cfg(not(feature = "benchmark"))]
     {
-        if cli.benchmark_compare_ava_report.is_some()
-            || cli.benchmark_compare_opencode_report.is_some()
+        if cli.benchmark_compare_left_report.is_some()
+            || cli.benchmark_compare_right_report.is_some()
             || cli.benchmark_compare_output.is_some()
+            || cli.benchmark_output.is_some()
+            || cli.prompt_family.is_some()
+            || cli.prompt_variant.is_some()
+            || cli.prompt_file.is_some()
+            || cli.prompt_version.is_some()
+            || cli.prompt_hash.is_some()
+            || cli.repeat > 1
+            || cli.seed.is_some()
         {
             eprintln!("Benchmark comparison requires the 'benchmark' feature. Rebuild with:");
             eprintln!("  cargo build -p ava-tui --features benchmark");

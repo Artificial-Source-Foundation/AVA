@@ -4,6 +4,9 @@ use uuid::Uuid;
 
 use super::AvaError;
 
+pub(crate) const MISSING_ANTHROPIC_COMPLETION_CONTENT: &str =
+    "missing Anthropic completion content";
+
 pub fn parse_anthropic_completion_payload(payload: &Value) -> Result<String> {
     payload
         .get("content")
@@ -17,7 +20,7 @@ pub fn parse_anthropic_completion_payload(payload: &Value) -> Result<String> {
         .and_then(Value::as_str)
         .map(ToString::to_string)
         .ok_or_else(|| {
-            AvaError::SerializationError("missing Anthropic completion content".to_string())
+            AvaError::SerializationError(MISSING_ANTHROPIC_COMPLETION_CONTENT.to_string())
         })
 }
 

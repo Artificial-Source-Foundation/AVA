@@ -79,10 +79,30 @@ pub(super) fn accumulate_tool_call(
         acc.id.clone_from(id);
     }
     if let Some(ref name) = tc.name {
-        acc.name.clone_from(name);
+        let (tool_name, inline_args) = split_inline_tool_args(name);
+        acc.name.clone_from(&tool_name);
+        if let Some(args) = inline_args {
+            merge_tool_arguments(&mut acc.arguments_json, &args);
+        }
     }
     if let Some(ref args) = tc.arguments_delta {
         merge_tool_arguments(&mut acc.arguments_json, args);
+    }
+}
+
+fn split_inline_tool_args(name: &str) -> (String, Option<String>) {
+    const ARG_BEGIN: &str = "<|tool_call_argument_begin|>";
+
+    let Some((tool_name, args)) = name.split_once(ARG_BEGIN) else {
+        return (name.to_string(), None);
+    };
+
+    let tool_name = tool_name.trim().to_string();
+    let args = args.trim();
+    if args.is_empty() {
+        (tool_name, None)
+    } else {
+        (tool_name, Some(args.to_string()))
     }
 }
 
@@ -664,6 +684,7 @@ mod tests {
             thinking_level: ThinkingLevel::Off,
             thinking_budget_tokens: None,
             system_prompt_suffix: None,
+            benchmark_prompt_override: None,
             project_root: None,
             enable_dynamic_rules: false,
             extended_tools: false,
@@ -763,6 +784,31 @@ mod tests {
         assert_eq!(
             tool_calls[0].arguments,
             serde_json::json!({"pattern": "**/*.md"})
+        );
+    }
+
+    #[test]
+    fn accumulate_tool_call_splits_inline_argument_prefix_from_name() {
+        let mut accumulators = Vec::new();
+
+        accumulate_tool_call(
+            &mut accumulators,
+            &StreamToolCall {
+                index: 0,
+                id: Some("call-1".to_string()),
+                name: Some(
+                    "read<|tool_call_argument_begin|>{\"path\":\"src/main.rs\"}".to_string(),
+                ),
+                arguments_delta: None,
+            },
+        );
+
+        let tool_calls = finalize_tool_calls(accumulators);
+        assert_eq!(tool_calls.len(), 1);
+        assert_eq!(tool_calls[0].name, "read");
+        assert_eq!(
+            tool_calls[0].arguments,
+            serde_json::json!({"path": "src/main.rs"})
         );
     }
 

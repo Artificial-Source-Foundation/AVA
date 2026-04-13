@@ -188,6 +188,56 @@ impl BenchmarkPromptConfig {
     }
 }
 
+fn wall_clock_tokens_per_second(output_tokens: usize, total_time_ms: u64) -> f64 {
+    if total_time_ms > 0 {
+        output_tokens as f64 / (total_time_ms as f64 / 1000.0)
+    } else {
+        0.0
+    }
+}
+
+fn generation_tokens_per_second(
+    output_tokens: usize,
+    total_time_ms: u64,
+    ttft_ms: Option<u64>,
+) -> Option<f64> {
+    let ttft_ms = ttft_ms?;
+    let generation_time_ms = total_time_ms.checked_sub(ttft_ms)?;
+    if generation_time_ms > 0 {
+        Some(output_tokens as f64 / (generation_time_ms as f64 / 1000.0))
+    } else {
+        None
+    }
+}
+
+fn accumulate_token_usage(
+    input_tokens: &mut usize,
+    output_tokens: &mut usize,
+    cost_usd: &mut f64,
+    usage_input_tokens: usize,
+    usage_output_tokens: usize,
+    usage_cost_usd: f64,
+) {
+    *input_tokens += usage_input_tokens;
+    *output_tokens += usage_output_tokens;
+    *cost_usd += usage_cost_usd;
+}
+
+fn accumulate_subagent_usage(
+    input_tokens: &mut usize,
+    output_tokens: &mut usize,
+    cost_usd: &mut f64,
+    subagent_cost_usd: &mut f64,
+    sub_input_tokens: usize,
+    sub_output_tokens: usize,
+    sub_cost_usd: f64,
+) {
+    *input_tokens += sub_input_tokens;
+    *output_tokens += sub_output_tokens;
+    *subagent_cost_usd += sub_cost_usd;
+    *cost_usd += sub_cost_usd;
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 pub struct BenchmarkRepeatTaskSummary {
     pub task_name: String,
@@ -270,6 +320,8 @@ pub struct BenchmarkResult {
     pub input_tokens: usize,
     pub output_tokens: usize,
     pub tokens_per_second: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub generation_tps: Option<f64>,
     pub cost_usd: f64,
     pub quality_pass: bool,
     pub quality_details: String,
@@ -810,10 +862,10 @@ async fn run_benchmark_once(
                         String::new()
                     };
                     eprintln!(
-                        "  => {}: {:.1}s, {} tok/s, ${:.4}, {}{}{}",
+                        "  => {}: {:.1}s, {:.1} wall tok/s, ${:.4}, {}{}{}",
                         status,
                         r.total_time_ms as f64 / 1000.0,
-                        r.tokens_per_second as u64,
+                        r.tokens_per_second,
                         r.cost_usd,
                         r.quality_details,
                         compile_info,
@@ -1081,9 +1133,14 @@ async fn run_single_task(
                 output_tokens: ot,
                 cost_usd: c,
             } => {
-                input_tokens += it;
-                output_tokens += ot;
-                cost_usd += c;
+                accumulate_token_usage(
+                    &mut input_tokens,
+                    &mut output_tokens,
+                    &mut cost_usd,
+                    it,
+                    ot,
+                    c,
+                );
                 // TokenUsage marks the end of an assistant response; reset turn tracking
                 in_assistant_turn = false;
             }
@@ -1113,6 +1170,8 @@ async fn run_single_task(
             }
             AgentEvent::SubAgentComplete {
                 description,
+                input_tokens: sub_input_tokens,
+                output_tokens: sub_output_tokens,
                 cost_usd: sub_cost,
                 provider,
                 resumed,
@@ -1126,8 +1185,15 @@ async fn run_single_task(
                 if resumed {
                     resumed_subagent_calls_count += 1;
                 }
-                subagent_cost_usd += sub_cost;
-                cost_usd += sub_cost;
+                accumulate_subagent_usage(
+                    &mut input_tokens,
+                    &mut output_tokens,
+                    &mut cost_usd,
+                    &mut subagent_cost_usd,
+                    sub_input_tokens,
+                    sub_output_tokens,
+                    sub_cost,
+                );
             }
             AgentEvent::Complete(_) => break,
             AgentEvent::Error(e) => {
@@ -1146,11 +1212,8 @@ async fn run_single_task(
     let (pattern_pass, mut quality_details) =
         check_quality(&total_output, &tool_calls_detail, &task.expected_patterns);
 
-    let tokens_per_second = if total_time_ms > 0 {
-        (output_tokens as f64) / (total_time_ms as f64 / 1000.0)
-    } else {
-        0.0
-    };
+    let tokens_per_second = wall_clock_tokens_per_second(output_tokens, total_time_ms);
+    let generation_tps = generation_tokens_per_second(output_tokens, total_time_ms, ttft);
 
     // Tier 2/3: Compile & test validation
     let (compile_success, tests_passed, tests_total, compile_error) =
@@ -1261,6 +1324,7 @@ async fn run_single_task(
         input_tokens,
         output_tokens,
         tokens_per_second,
+        generation_tps,
         cost_usd,
         quality_pass,
         quality_details,
@@ -1315,6 +1379,7 @@ fn make_error_result(
         input_tokens: 0,
         output_tokens: 0,
         tokens_per_second: 0.0,
+        generation_tps: None,
         cost_usd: 0.0,
         quality_pass: false,
         quality_details: "error".to_string(),
@@ -1707,6 +1772,8 @@ fn sanitize_path_segment(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ava_agent::AgentEvent;
+    use ava_types::{Message, Role, Session};
 
     #[test]
     fn test_parse_test_output() {
@@ -1774,6 +1841,7 @@ mod tests {
             input_tokens: 10,
             output_tokens: 10,
             tokens_per_second: 1.0,
+            generation_tps: None,
             cost_usd: 0.0,
             quality_pass: false,
             quality_details: "tests failed".to_string(),
@@ -1809,5 +1877,89 @@ mod tests {
     #[test]
     fn validation_pass_allows_compile_only_success() {
         assert_eq!(validation_pass(Some(true), None, None), Some(true));
+    }
+
+    #[test]
+    fn wall_clock_tps_uses_inclusive_output_tokens() {
+        assert_eq!(wall_clock_tokens_per_second(130, 1000), 130.0);
+        assert_eq!(wall_clock_tokens_per_second(130, 0), 0.0);
+    }
+
+    #[test]
+    fn generation_tps_uses_post_ttft_window() {
+        assert_eq!(
+            generation_tokens_per_second(130, 2000, Some(1000)),
+            Some(130.0)
+        );
+        assert_eq!(generation_tokens_per_second(130, 1000, Some(1000)), None);
+        assert_eq!(generation_tokens_per_second(130, 1000, None), None);
+    }
+
+    #[test]
+    fn subagent_usage_counts_toward_benchmark_totals() {
+        let mut input_tokens = 0;
+        let mut output_tokens = 0;
+        let mut cost_usd = 0.0;
+        let mut subagent_cost_usd = 0.0;
+
+        let events = vec![
+            AgentEvent::TokenUsage {
+                input_tokens: 100,
+                output_tokens: 50,
+                cost_usd: 0.01,
+            },
+            AgentEvent::SubAgentComplete {
+                call_id: "call-1".to_string(),
+                session_id: "session-1".to_string(),
+                messages: vec![Message::new(Role::Assistant, "child")],
+                description: "Review code".to_string(),
+                input_tokens: 200,
+                output_tokens: 80,
+                cost_usd: 0.02,
+                agent_type: Some("reviewer".to_string()),
+                provider: Some("test-provider".to_string()),
+                resumed: false,
+            },
+            AgentEvent::Complete(Session::new()),
+        ];
+
+        for event in events {
+            match event {
+                AgentEvent::TokenUsage {
+                    input_tokens: it,
+                    output_tokens: ot,
+                    cost_usd: c,
+                } => accumulate_token_usage(
+                    &mut input_tokens,
+                    &mut output_tokens,
+                    &mut cost_usd,
+                    it,
+                    ot,
+                    c,
+                ),
+                AgentEvent::SubAgentComplete {
+                    input_tokens: sub_it,
+                    output_tokens: sub_ot,
+                    cost_usd: sub_cost,
+                    ..
+                } => accumulate_subagent_usage(
+                    &mut input_tokens,
+                    &mut output_tokens,
+                    &mut cost_usd,
+                    &mut subagent_cost_usd,
+                    sub_it,
+                    sub_ot,
+                    sub_cost,
+                ),
+                AgentEvent::Complete(_) => break,
+                _ => {}
+            }
+        }
+
+        assert_eq!(input_tokens, 300);
+        assert_eq!(output_tokens, 130);
+        assert!((cost_usd - 0.03).abs() < 1e-9);
+        assert!((subagent_cost_usd - 0.02).abs() < 1e-9);
+        assert_eq!(wall_clock_tokens_per_second(output_tokens, 1000), 130.0);
     }
 }

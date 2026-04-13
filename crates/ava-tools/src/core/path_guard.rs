@@ -1,13 +1,49 @@
 use std::path::{Component, Path, PathBuf};
 
+use std::sync::MutexGuard;
+
 use ava_types::{AvaError, Result};
 
 #[cfg(test)]
 static TEST_WORKSPACE_OVERRIDE: std::sync::LazyLock<std::sync::Mutex<Option<PathBuf>>> =
     std::sync::LazyLock::new(|| std::sync::Mutex::new(None));
+static RUNTIME_WORKSPACE_OVERRIDE: std::sync::LazyLock<std::sync::Mutex<Option<PathBuf>>> =
+    std::sync::LazyLock::new(|| std::sync::Mutex::new(None));
+static RUNTIME_WORKSPACE_OVERRIDE_LOCK: std::sync::LazyLock<std::sync::Mutex<()>> =
+    std::sync::LazyLock::new(|| std::sync::Mutex::new(()));
 #[cfg(test)]
 static TEST_WORKSPACE_LOCK: std::sync::LazyLock<std::sync::Mutex<()>> =
     std::sync::LazyLock::new(|| std::sync::Mutex::new(()));
+
+pub struct WorkspaceOverrideGuard {
+    previous: Option<PathBuf>,
+    _lock: MutexGuard<'static, ()>,
+}
+
+impl Drop for WorkspaceOverrideGuard {
+    fn drop(&mut self) {
+        let mut guard = RUNTIME_WORKSPACE_OVERRIDE
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        *guard = self.previous.take();
+    }
+}
+
+pub fn activate_workspace_override(path: PathBuf) -> WorkspaceOverrideGuard {
+    let lock = RUNTIME_WORKSPACE_OVERRIDE_LOCK
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    let mut guard = RUNTIME_WORKSPACE_OVERRIDE
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    let previous = (*guard).replace(path);
+    drop(guard);
+
+    WorkspaceOverrideGuard {
+        previous,
+        _lock: lock,
+    }
+}
 
 /// Resolve a tool path to a workspace-safe absolute path.
 ///
@@ -112,6 +148,14 @@ pub fn check_symlink_escape(
 pub(crate) fn workspace_root() -> Result<PathBuf> {
     #[cfg(test)]
     if let Some(workspace) = TEST_WORKSPACE_OVERRIDE
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .clone()
+    {
+        return Ok(workspace);
+    }
+
+    if let Some(workspace) = RUNTIME_WORKSPACE_OVERRIDE
         .lock()
         .unwrap_or_else(|error| error.into_inner())
         .clone()
@@ -327,5 +371,19 @@ mod tests {
         );
 
         restore_workspace(previous);
+    }
+
+    #[test]
+    fn runtime_workspace_override_restores_previous_value_on_drop() {
+        let original = std::env::current_dir().unwrap().canonicalize().unwrap();
+        let ws = TempDir::new().unwrap();
+        let override_root = ws.path().canonicalize().unwrap();
+
+        {
+            let _guard = activate_workspace_override(override_root.clone());
+            assert_eq!(workspace_root().unwrap(), override_root);
+        }
+
+        assert_eq!(workspace_root().unwrap(), original);
     }
 }

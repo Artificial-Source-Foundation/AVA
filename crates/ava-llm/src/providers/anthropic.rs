@@ -433,6 +433,24 @@ impl AnthropicProvider {
     }
 }
 
+fn anthropic_content_or_tool_calls(
+    parsed_content: Result<String>,
+    provider_label: &str,
+    tool_call_count: usize,
+) -> Result<String> {
+    match parsed_content {
+        Ok(content) => Ok(content),
+        Err(AvaError::SerializationError(message))
+            if tool_call_count > 0 && message == common::MISSING_ANTHROPIC_COMPLETION_CONTENT =>
+        {
+            Ok(String::new())
+        }
+        Err(error) => {
+            common::completion_text_or_tool_calls(Err(error), provider_label, tool_call_count)
+        }
+    }
+}
+
 #[async_trait]
 impl LLMProvider for AnthropicProvider {
     #[instrument(skip(self, messages), fields(model = %self.model))]
@@ -544,7 +562,7 @@ impl LLMProvider for AnthropicProvider {
         );
 
         let tool_calls = common::parse_anthropic_tool_calls(&payload);
-        let content = common::completion_text_or_tool_calls(
+        let content = anthropic_content_or_tool_calls(
             common::parse_anthropic_completion_payload(&payload),
             &self.provider_label,
             tool_calls.len(),
@@ -1139,5 +1157,19 @@ mod tests {
             tool_defs[0].get("cache_control").is_none(),
             "third-party provider should not add cache_control to tools"
         );
+    }
+
+    #[test]
+    fn tool_only_anthropic_payload_is_not_treated_as_parse_failure() {
+        let content = anthropic_content_or_tool_calls(
+            Err(AvaError::SerializationError(
+                common::MISSING_ANTHROPIC_COMPLETION_CONTENT.to_string(),
+            )),
+            "alibaba",
+            1,
+        )
+        .unwrap();
+
+        assert!(content.is_empty());
     }
 }

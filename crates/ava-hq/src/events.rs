@@ -22,6 +22,18 @@ pub enum HqEvent {
         worker_id: Uuid,
         token: String,
     },
+    WorkerTokenUsage {
+        worker_id: Uuid,
+        input_tokens: usize,
+        output_tokens: usize,
+        cost_usd: f64,
+    },
+    WorkerSubAgentComplete {
+        worker_id: Uuid,
+        input_tokens: usize,
+        output_tokens: usize,
+        cost_usd: f64,
+    },
     WorkerThinking {
         worker_id: Uuid,
         content: String,

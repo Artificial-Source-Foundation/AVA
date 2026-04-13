@@ -77,6 +77,33 @@ Power plugins are part of the core architecture. The current 3.3 direction is to
 
 ## Common Tasks
 
+### Benchmark Changes
+
+When changing benchmark code, preserve or improve runtime logging. Benchmark runs must clearly log:
+
+1. suite, workspace, and task filter
+2. provider/model and prompt variant context
+3. per-task start/finish
+4. validation outcome
+5. artifact save paths
+
+Do not make benchmark execution quieter if that reduces debuggability or trust.
+
+### Prompt Tuning Policy
+
+Treat prompt tuning as benchmark-first and as lean as possible.
+
+1. Start from a lean baseline prompt.
+2. If the baseline works, keep it.
+3. If it fails, tune only the specific failure mode exposed by the benchmark.
+4. Re-test and keep the smallest prompt that works reliably.
+
+General rule of thumb:
+
+1. Strong frontier models usually need less prompt specialization.
+2. Weaker or more failure-prone families often need targeted tuning.
+3. Provider-hosted variants of the same family should be tested rather than assumed equivalent.
+
 ### Add Tool (Rust)
 
 1. Tier decision: default to opt-in delivery unless it truly belongs in the default 9
@@ -144,9 +171,12 @@ Docs must always reflect the current codebase. Never let them drift.
 4. `docs/project/backlog.md` — current backlog
 5. `CLAUDE.md` — compatibility reference that redirects back to the active docs
 6. `docs/extend/README.md` — plugin, MCP, command, skill, and custom-tool reference
-7. `docs/architecture/plugin-boundary.md` — first concrete core-to-plugin migration checklist
-8. `docs/architecture/crate-map.md` — crate dependency map
-9. `CHANGELOG.md` — version history
+7. `docs/benchmark/README.md` — benchmark architecture, workflows, reports, and prompt tuning
+8. `docs/testing/README.md` — testing and verification concepts across Rust, frontend, and benchmark flows
+9. `docs/operations/README.md` — maintainer runbooks and operational guidance
+10. `docs/architecture/plugin-boundary.md` — first concrete core-to-plugin migration checklist
+11. `docs/architecture/crate-map.md` — crate dependency map
+12. `CHANGELOG.md` — version history
 
 `AGENTS.md` owns workflow, conventions, and architectural guidance. `docs/project/roadmap.md` owns product direction.
 

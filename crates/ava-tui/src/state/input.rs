@@ -404,6 +404,7 @@ impl InputState {
                     AutocompleteItem::new("disconnect", "Remove provider credentials"),
                     AutocompleteItem::new("mcp", "List MCP servers"),
                     AutocompleteItem::new("mcp reload", "Reload MCP config"),
+                    AutocompleteItem::new("skills", "List discovered runtime skills"),
                     AutocompleteItem::new("tasks", "Show background task list"),
                     AutocompleteItem::new("permissions", "Toggle permission level"),
                     AutocompleteItem::new("copy", "Copy last response to clipboard"),

@@ -43,6 +43,8 @@ use stack_tools::{
     build_tool_registry_with_plugins, init_mcp_with_disabled, resolve_workspace_roots, MCPRuntime,
 };
 
+use crate::system_prompt::BenchmarkPromptOverride;
+
 const CONFIG_HOOK_TIMEOUT_MS: u64 = 150;
 
 pub struct AgentStack {
@@ -96,6 +98,8 @@ pub struct AgentStack {
     compaction_model_override: RwLock<Option<(String, String)>>,
     /// When false, skip loading project instruction files into the system prompt.
     include_project_instructions: bool,
+    /// Benchmark-only prompt family/file override for prompt assembly.
+    benchmark_prompt_override: Option<BenchmarkPromptOverride>,
     /// Parent session ID for linking sub-agent sessions back to their parent.
     /// Set by the TUI before calling `run()` so spawned sub-agents record lineage.
     pub parent_session_id: RwLock<Option<String>>,
@@ -258,10 +262,21 @@ impl AgentStack {
 
         // Initialize plugin manager and load plugins from default directories.
         let mut plugin_mgr = PluginManager::new();
-        let plugin_dirs = vec![
-            config.data_dir.join("plugins"),
-            effective_cwd.join(".ava").join("plugins"),
-        ];
+        let plugin_dirs = if project_trusted {
+            vec![
+                config.data_dir.join("plugins"),
+                effective_cwd.join(".ava").join("plugins"),
+            ]
+        } else {
+            let candidate = effective_cwd.join(".ava").join("plugins");
+            if candidate.is_dir() {
+                tracing::warn!(
+                    "Skipping project-local plugins — project not trusted. \
+                     Run with --trust to approve."
+                );
+            }
+            vec![config.data_dir.join("plugins")]
+        };
         if let Err(e) = plugin_mgr.load_plugins(&plugin_dirs).await {
             warn!("Failed to load plugins: {e}");
         }
@@ -441,6 +456,7 @@ impl AgentStack {
                 auto_compact: RwLock::new(config.auto_compact),
                 compaction_model_override: RwLock::new(None),
                 include_project_instructions: config.include_project_instructions,
+                benchmark_prompt_override: config.benchmark_prompt_override,
                 parent_session_id: RwLock::new(None),
                 plugin_manager,
                 index_task: std::sync::Mutex::new(index_handle),

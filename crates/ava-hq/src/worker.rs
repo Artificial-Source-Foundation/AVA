@@ -80,6 +80,31 @@ pub(crate) async fn run_worker(
                     token,
                 });
             }
+            AgentEvent::TokenUsage {
+                input_tokens,
+                output_tokens,
+                cost_usd,
+            } => {
+                let _ = event_tx.send(HqEvent::WorkerTokenUsage {
+                    worker_id: worker.id,
+                    input_tokens,
+                    output_tokens,
+                    cost_usd,
+                });
+            }
+            AgentEvent::SubAgentComplete {
+                input_tokens,
+                output_tokens,
+                cost_usd,
+                ..
+            } => {
+                let _ = event_tx.send(HqEvent::WorkerSubAgentComplete {
+                    worker_id: worker.id,
+                    input_tokens,
+                    output_tokens,
+                    cost_usd,
+                });
+            }
             AgentEvent::Thinking(content) => {
                 let _ = event_tx.send(HqEvent::WorkerThinking {
                     worker_id: worker.id,
@@ -107,8 +132,6 @@ pub(crate) async fn run_worker(
             AgentEvent::Error(error) => return Err(AvaError::ToolError(error)),
             AgentEvent::ToolStats(_)
             | AgentEvent::BudgetWarning { .. }
-            | AgentEvent::TokenUsage { .. }
-            | AgentEvent::SubAgentComplete { .. }
             | AgentEvent::DiffPreview { .. }
             | AgentEvent::MCPToolsChanged { .. }
             | AgentEvent::Checkpoint(_)

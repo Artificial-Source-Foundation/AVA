@@ -103,7 +103,7 @@ pub fn tool_recovery_tasks(temp_dir: &std::path::Path) -> Vec<BenchmarkTask> {
                 "Directory {dir} has Rust tests that reference a missing module file. Recover by creating the missing file and implementing `slugify` so ticket slug formatting works deterministically. Verify all tests pass before finishing.",
                 dir = missing_file_dir.display()
             ),
-            expected_patterns: vec![r"slugify", r"ticket-", r"to_lowercase|to_ascii_lowercase"],
+            expected_patterns: vec![r"slugify", r"ticket-", r"trim|whitespace|lower"],
             category: TaskCategory::ToolRecovery,
             needs_tools: true,
             test_harness: Some(TestHarness {

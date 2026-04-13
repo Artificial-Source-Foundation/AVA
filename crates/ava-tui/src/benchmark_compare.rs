@@ -683,6 +683,7 @@ mod tests {
             input_tokens: 10,
             output_tokens: 20,
             tokens_per_second: 5.0,
+            generation_tps: None,
             cost_usd,
             quality_pass,
             quality_details: "ok".to_string(),

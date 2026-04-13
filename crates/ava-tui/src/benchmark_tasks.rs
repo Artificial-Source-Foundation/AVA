@@ -22,6 +22,8 @@ mod multi_language_tasks;
 mod normal_coding_tasks;
 #[path = "benchmark_tasks/product_smoke_tasks.rs"]
 mod product_smoke_tasks;
+#[path = "benchmark_tasks/prompt_regression_tasks.rs"]
+mod prompt_regression_tasks;
 #[path = "benchmark_tasks/security_and_test_tasks.rs"]
 mod security_and_test_tasks;
 #[path = "benchmark_tasks/small_coding_tasks.rs"]
@@ -40,12 +42,14 @@ mod tool_reliability_tasks;
 /// Benchmark suite tiers — controls which tasks are included.
 ///
 /// Suites are cumulative: `Speed` includes only speed-tier tasks,
-/// `Standard` includes speed + standard, and `Frontier`/`All` include everything.
+/// `Standard` includes speed + standard, `Frontier`/`All` include everything,
+/// and `PromptRegression` isolates prompt-regression tasks only.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum BenchmarkSuite {
     Speed,
     Standard,
     Frontier,
+    PromptRegression,
     All,
 }
 
@@ -56,6 +60,7 @@ impl BenchmarkSuite {
             "speed" => Some(Self::Speed),
             "standard" => Some(Self::Standard),
             "frontier" => Some(Self::Frontier),
+            "prompt_regression" | "prompt-regression" => Some(Self::PromptRegression),
             "all" => Some(Self::All),
             _ => None,
         }
@@ -68,6 +73,7 @@ impl std::fmt::Display for BenchmarkSuite {
             Self::Speed => write!(f, "speed"),
             Self::Standard => write!(f, "standard"),
             Self::Frontier => write!(f, "frontier"),
+            Self::PromptRegression => write!(f, "prompt_regression"),
             Self::All => write!(f, "all"),
         }
     }
@@ -151,6 +157,8 @@ pub enum TaskCategory {
     McpIntegration,
     /// LSP-adjacent presence and language project smoke tasks.
     LspSmoke,
+    /// Prompt-sensitive regression checks for agent behavior discipline.
+    PromptRegression,
 }
 
 impl std::fmt::Display for TaskCategory {
@@ -179,6 +187,7 @@ impl std::fmt::Display for TaskCategory {
             Self::ProductSmoke => write!(f, "product_smoke"),
             Self::McpIntegration => write!(f, "mcp_integration"),
             Self::LspSmoke => write!(f, "lsp_smoke"),
+            Self::PromptRegression => write!(f, "prompt_regression"),
         }
     }
 }
@@ -197,7 +206,8 @@ impl TaskCategory {
             | Self::Security
             | Self::ToolReliability
             | Self::NormalCoding
-            | Self::SmallCoding => BenchmarkSuite::Standard,
+            | Self::SmallCoding
+            | Self::PromptRegression => BenchmarkSuite::Standard,
             Self::MultiStep
             | Self::StressCoding
             | Self::LargeProject
@@ -217,6 +227,7 @@ impl TaskCategory {
 /// Speed includes only speed-tier tasks.
 /// Standard includes speed + standard tasks.
 /// Frontier and All include everything.
+/// PromptRegression includes only prompt-regression tasks.
 pub fn filter_tasks_by_suite(
     tasks: Vec<BenchmarkTask>,
     suite: BenchmarkSuite,
@@ -235,6 +246,10 @@ pub fn filter_tasks_by_suite(
         BenchmarkSuite::Speed => tasks
             .into_iter()
             .filter(|t| matches!(t.category.min_suite(), BenchmarkSuite::Speed))
+            .collect(),
+        BenchmarkSuite::PromptRegression => tasks
+            .into_iter()
+            .filter(|t| matches!(t.category, TaskCategory::PromptRegression))
             .collect(),
     }
 }
@@ -338,6 +353,20 @@ mod task_filter_tests {
         let names: Vec<_> = filtered.into_iter().map(|task| task.name).collect();
 
         assert_eq!(names, vec!["speed_baseline", "small_coding_stub"]);
+    }
+
+    #[test]
+    fn prompt_regression_suite_includes_only_prompt_regression_tasks() {
+        let tasks = vec![
+            task_with_category("speed_baseline", TaskCategory::Simple),
+            task_with_category("prompt_lane", TaskCategory::PromptRegression),
+            task_with_category("frontier_lane", TaskCategory::StressCoding),
+        ];
+
+        let filtered = filter_tasks_by_suite(tasks, BenchmarkSuite::PromptRegression);
+        let names: Vec<_> = filtered.into_iter().map(|task| task.name).collect();
+
+        assert_eq!(names, vec!["prompt_lane"]);
     }
 }
 
@@ -533,6 +562,8 @@ pub use multi_language_tasks::{go_tasks, python_tasks, typescript_tasks};
 pub use normal_coding_tasks::normal_coding_tasks;
 #[allow(unused_imports)]
 pub use product_smoke_tasks::product_smoke_tasks;
+#[allow(unused_imports)]
+pub use prompt_regression_tasks::prompt_regression_tasks;
 #[allow(unused_imports)]
 pub use security_and_test_tasks::{security_tasks, test_generation_tasks};
 #[allow(unused_imports)]

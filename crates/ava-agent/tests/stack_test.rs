@@ -16,6 +16,28 @@ use tokio::sync::mpsc;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
+fn write_plugin_manifest(root: &std::path::Path, name: &str) {
+    let plugin_dir = root.join(".ava").join("plugins").join(name);
+    std::fs::create_dir_all(&plugin_dir).unwrap();
+    std::fs::write(
+        plugin_dir.join("plugin.toml"),
+        format!(
+            r#"
+[plugin]
+name = "{name}"
+version = "0.1.0"
+
+[runtime]
+command = "true"
+
+[hooks]
+subscribe = ["auth"]
+"#
+        ),
+    )
+    .unwrap();
+}
+
 fn completion_response(result: &str) -> String {
     format!(
         r#"{{"tool_calls":[{{"name":"attempt_completion","arguments":{{"result":"{result}"}}}}]}}"#
@@ -646,6 +668,30 @@ async fn agent_stack_initializes_with_plugin_manager() {
     let pm = stack.plugin_manager.lock().await;
     assert_eq!(pm.running_count(), 0);
     assert!(pm.list_plugins().is_empty());
+}
+
+#[tokio::test]
+async fn agent_stack_skips_project_local_plugins_when_project_is_untrusted() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let data_dir = tempfile::tempdir().expect("data dir");
+    write_plugin_manifest(dir.path(), "local-only-plugin");
+
+    let (stack, _question_rx, _approval_rx, _plan_rx) = AgentStack::new(AgentStackConfig {
+        data_dir: data_dir.path().to_path_buf(),
+        working_dir: Some(dir.path().to_path_buf()),
+        yolo: true,
+        injected_provider: Some(Arc::new(MockProvider::new("test", vec![]))),
+        ..Default::default()
+    })
+    .await
+    .expect("stack init should succeed");
+
+    let pm = stack.plugin_manager.lock().await;
+    assert_eq!(pm.running_count(), 0);
+    assert!(
+        pm.list_plugins().is_empty(),
+        "untrusted project-local plugins must not be auto-discovered or started"
+    );
 }
 
 #[tokio::test]

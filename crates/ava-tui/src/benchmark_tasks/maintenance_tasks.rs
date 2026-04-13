@@ -8,8 +8,14 @@ pub struct ServiceConfig {
 
 impl ServiceConfig {
     pub fn from_legacy_timeout_ms(timeout_ms: u64, retry_limit: u8) -> Self {
+        let timeout_seconds = if timeout_ms == 0 {
+            0
+        } else {
+            timeout_ms.saturating_add(999) / 1000
+        };
+
         Self {
-            timeout_seconds: timeout_ms / 1000,
+            timeout_seconds,
             retry_limit,
         }
     }
@@ -28,7 +34,11 @@ pub fn maintenance_tasks(temp_dir: &std::path::Path) -> Vec<BenchmarkTask> {
              model. Verify tests pass after refactoring.",
             dir = task_dir.display()
         ),
-        expected_patterns: vec![r"from_legacy_timeout_ms", r"timeout_seconds", r"/1000|div"],
+        expected_patterns: vec![
+            r"from_legacy_timeout_ms",
+            r"timeout_seconds",
+            r"/\s*1000|div|saturating_add",
+        ],
         category: TaskCategory::Maintenance,
         needs_tools: true,
         test_harness: Some(TestHarness {

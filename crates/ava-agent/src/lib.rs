@@ -19,7 +19,6 @@ pub mod message_queue;
 pub mod reflection;
 pub mod routing;
 pub mod session_logger;
-pub mod skills;
 pub mod stack;
 pub mod streaming_diff;
 pub mod stuck;
@@ -28,9 +27,10 @@ pub mod trace;
 pub mod turn_diff;
 
 pub use instructions::{
-    contextual_instructions_for_file, load_project_instructions,
-    load_startup_project_instructions_with_config, matching_rule_instructions_for_file,
-    trim_instructions_to_budget,
+    contextual_instructions_for_file, discover_runtime_skills, discover_runtime_skills_from_root,
+    load_project_instructions, load_startup_project_instructions_with_config,
+    matching_rule_instructions_for_file, trim_instructions_to_budget, RuntimeSkill,
+    RuntimeSkillDiscovery, RuntimeSkillScope,
 };
 /// Reflection loop primitives for error analysis and auto-fix retries.
 pub use reflection::{ErrorKind, ReflectionAgent, ReflectionLoop, ToolExecutor, ToolResult};

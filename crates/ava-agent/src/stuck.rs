@@ -564,6 +564,7 @@ mod tests {
             thinking_level: ava_types::ThinkingLevel::Off,
             thinking_budget_tokens: None,
             system_prompt_suffix: None,
+            benchmark_prompt_override: None,
             project_root: None,
             enable_dynamic_rules: false,
             extended_tools: false,
@@ -1305,5 +1306,62 @@ mod tests {
         let t = LoopThresholds::for_model("claude-opus-4.6");
         assert_eq!(t.tool_repeat_count, 3);
         assert!(!t.enable_llm_judge);
+    }
+
+    #[test]
+    fn for_provider_model_returns_aggressive_for_kimi_k2p5() {
+        let t = LoopThresholds::for_provider_model("kimi", "k2p5");
+        assert_eq!(t.tool_repeat_count, 2);
+        assert_eq!(t.text_repeat_count, 2);
+        assert!(t.enable_llm_judge);
+        assert_eq!(
+            t.policy.on_text_similarity,
+            DoomLoopAction::NudgeTwiceThenStop
+        );
+    }
+
+    #[test]
+    fn kimi_loop_policy_nudges_twice_then_stops_on_repeated_similarity() {
+        let mut detector =
+            StuckDetector::with_thresholds(LoopThresholds::for_provider_model("kimi", "k2p5"));
+        let config = make_config(10.0, true);
+        let llm = mock_llm();
+
+        let response_pairs = [
+            (
+                "I will inspect the parser path and patch the null branch",
+                "I will inspect the parser path and patch the null-branch",
+            ),
+            (
+                "I will inspect the routing path and patch the retry branch",
+                "I will inspect the routing path and patch the retry-branch",
+            ),
+            (
+                "I will inspect the timeout path and patch the fallback branch",
+                "I will inspect the timeout path and patch the fallback-branch",
+            ),
+        ];
+
+        for (idx, (first, second)) in response_pairs.into_iter().enumerate() {
+            let action = detector.check(first, &[], &[], None, &config, llm.as_ref());
+            assert!(
+                matches!(action, StuckAction::Continue),
+                "pair {idx} first turn should continue"
+            );
+
+            let action = detector.check(second, &[], &[], None, &config, llm.as_ref());
+            if idx < 2 {
+                assert!(
+                    matches!(action, StuckAction::InjectMessage(_)),
+                    "pair {idx} second turn should nudge"
+                );
+            } else {
+                assert!(
+                    matches!(action, StuckAction::Stop(_)),
+                    "third repeated similarity should stop loop-prone kimi run"
+                );
+            }
+            detector.last_responses.clear();
+        }
     }
 }

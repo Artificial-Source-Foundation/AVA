@@ -1,8 +1,9 @@
 use super::input::{populate_queue_from_cli, spawn_stdin_reader};
 use super::spawn_auto_approve_requests;
-use crate::app::{App, ModalType};
+use crate::app::{format_skill_list, App, ModalType};
 use crate::config::cli::CliArgs;
 use crate::state::messages::MessageKind;
+use ava_agent::discover_runtime_skills;
 use ava_agent::message_queue::MessageQueue;
 use ava_agent::stack::{AgentStack, AgentStackConfig};
 use ava_agent::AgentEvent;
@@ -94,7 +95,7 @@ fn dispatch_headless_slash_with_app(app: &mut App, goal: &str) -> HeadlessSlashO
 /// Slash commands that can be answered instantly without creating an AgentStack.
 fn dispatch_lightweight_slash(goal: &str) -> Option<HeadlessSlashOutcome> {
     let trimmed = goal.trim();
-    let (cmd, _arg) = trimmed.split_once(' ').unwrap_or((trimmed, ""));
+    let (cmd, arg) = trimmed.split_once(' ').unwrap_or((trimmed, ""));
     match cmd {
         "/help" => {
             // Duplicated from App::handle_slash_command to avoid 2s startup.
@@ -112,6 +113,7 @@ Help — Available Commands\n\
 /mcp reload              — reload MCP config\n\
 /mcp enable <name>       — enable a disabled MCP server\n\
 /mcp disable <name>      — disable an MCP server (session-scoped)\n\
+/skills [list]           — list discovered runtime skills\n\
 /new [title]             — start a new session (optional title)\n\
 /sessions                — session picker\n\
 /bookmark [label]        — bookmark current point (list/clear/remove)\n\
@@ -137,6 +139,19 @@ Help — Available Commands\n\
                 help.to_string(),
             ))
         }
+        "/skills" => match arg.trim() {
+            "" | "list" => Some(HeadlessSlashOutcome::Message(
+                MessageKind::System,
+                format!(
+                    "Skills\n\n{}",
+                    format_skill_list(&discover_runtime_skills())
+                ),
+            )),
+            sub => Some(HeadlessSlashOutcome::Message(
+                MessageKind::Error,
+                format!("Unknown /skills subcommand: {sub}. Use: /skills or /skills list"),
+            )),
+        },
         _ => None,
     }
 }
@@ -783,11 +798,16 @@ pub(super) fn load_cli_images(paths: &[String]) -> Vec<ImageContent> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use clap::Parser;
 
     fn make_app() -> (App, tempfile::TempDir) {
         let tmp = tempfile::tempdir().expect("tempdir");
         let db_path = tmp.path().join("test.db");
         (App::test_new(&db_path), tmp)
+    }
+
+    fn headless_cli() -> CliArgs {
+        CliArgs::parse_from(["ava", "--headless"])
     }
 
     #[test]
@@ -812,6 +832,7 @@ mod tests {
             HeadlessSlashOutcome::Message(MessageKind::System, msg) => {
                 assert!(msg.contains("Help"));
                 assert!(msg.contains("/compact"));
+                assert!(msg.contains("/skills"));
             }
             _ => panic!("expected help text for /help"),
         }
@@ -826,6 +847,68 @@ mod tests {
                 assert!(!msg.trim().is_empty());
             }
             _ => panic!("expected error for unknown slash command"),
+        }
+    }
+
+    #[tokio::test]
+    async fn headless_help_slash_uses_production_dispatch_path() {
+        let cli = headless_cli();
+        let outcome = dispatch_headless_slash_command(&cli, "/help")
+            .await
+            .unwrap();
+        match outcome {
+            HeadlessSlashOutcome::Message(MessageKind::System, msg) => {
+                assert!(msg.contains("Help — Available Commands"));
+                assert!(msg.contains("/help"));
+                assert!(msg.contains("/skills"));
+            }
+            _ => panic!("expected system help message for /help"),
+        }
+    }
+
+    #[tokio::test]
+    async fn headless_skills_slash_uses_lightweight_dispatch_path() {
+        let cli = headless_cli();
+        let outcome = dispatch_headless_slash_command(&cli, "/skills")
+            .await
+            .unwrap();
+        match outcome {
+            HeadlessSlashOutcome::Message(MessageKind::System, msg) => {
+                assert!(msg.contains("Skills"));
+                assert!(
+                    msg.contains("No skills discovered.") || msg.contains("Discovered skills:")
+                );
+            }
+            _ => panic!("expected system skill message for /skills"),
+        }
+    }
+
+    #[tokio::test]
+    async fn headless_unknown_slash_uses_production_dispatch_path() {
+        let cli = headless_cli();
+        let outcome = dispatch_headless_slash_command(&cli, "/definitely-unknown-command")
+            .await
+            .unwrap();
+        match outcome {
+            HeadlessSlashOutcome::Message(MessageKind::Error, msg) => {
+                assert_eq!(msg, "Unknown slash command: /definitely-unknown-command");
+            }
+            _ => panic!("expected unknown slash command error"),
+        }
+    }
+
+    #[tokio::test]
+    async fn headless_rejects_tui_only_slash_in_production_dispatch_path() {
+        let cli = headless_cli();
+        let outcome = dispatch_headless_slash_command(&cli, "/sessions")
+            .await
+            .unwrap();
+        match outcome {
+            HeadlessSlashOutcome::Message(MessageKind::Error, msg) => {
+                assert!(msg.contains("/sessions opens the session list"));
+                assert!(msg.contains("not available in headless mode"));
+            }
+            _ => panic!("expected TUI-only command rejection in headless mode"),
         }
     }
 }

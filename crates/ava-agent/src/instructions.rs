@@ -8,6 +8,40 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeSkillScope {
+    Global,
+    Project,
+}
+
+impl std::fmt::Display for RuntimeSkillScope {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Global => write!(f, "global"),
+            Self::Project => write!(f, "project"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeSkill {
+    pub name: String,
+    pub path: PathBuf,
+    pub scope: RuntimeSkillScope,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct RuntimeSkillDiscovery {
+    pub skills: Vec<RuntimeSkill>,
+    pub project_trusted: bool,
+}
+
+impl RuntimeSkillDiscovery {
+    pub fn is_empty(&self) -> bool {
+        self.skills.is_empty()
+    }
+}
+
 /// Well-known instruction file names checked in the project root.
 const PROJECT_ROOT_FILES: &[&str] = &[
     "AGENTS.md",
@@ -49,7 +83,24 @@ fn estimate_tokens(text: &str) -> usize {
 /// Non-existent or non-includable files are silently left as-is.
 pub fn process_includes(content: &str, base_path: &Path, visited: &mut HashSet<PathBuf>) -> String {
     let total_included = AtomicUsize::new(0);
-    process_includes_inner(content, base_path, visited, 0, &total_included)
+    process_includes_inner(content, base_path, visited, 0, &total_included, None)
+}
+
+fn process_includes_bounded(
+    content: &str,
+    base_path: &Path,
+    visited: &mut HashSet<PathBuf>,
+    boundary: &Path,
+) -> String {
+    let total_included = AtomicUsize::new(0);
+    process_includes_inner(
+        content,
+        base_path,
+        visited,
+        0,
+        &total_included,
+        Some(boundary),
+    )
 }
 
 fn process_includes_inner(
@@ -58,6 +109,7 @@ fn process_includes_inner(
     visited: &mut HashSet<PathBuf>,
     depth: usize,
     total_included: &AtomicUsize,
+    boundary: Option<&Path>,
 ) -> String {
     if depth >= MAX_INCLUDE_DEPTH {
         return content.to_string();
@@ -103,7 +155,8 @@ fn process_includes_inner(
         }
 
         // Process @include references in this line
-        let processed = resolve_includes_in_line(line, base_path, visited, depth, total_included);
+        let processed =
+            resolve_includes_in_line(line, base_path, visited, depth, total_included, boundary);
         result.push_str(&processed);
         result.push('\n');
     }
@@ -123,6 +176,7 @@ fn resolve_includes_in_line(
     visited: &mut HashSet<PathBuf>,
     depth: usize,
     total_included: &AtomicUsize,
+    boundary: Option<&Path>,
 ) -> String {
     let mut result = String::new();
     let mut remaining = line;
@@ -135,9 +189,14 @@ fn resolve_includes_in_line(
 
         // Try to parse a path reference
         if let Some((path_str, consumed)) = parse_include_path(after_at) {
-            if let Some(resolved) =
-                try_resolve_include(&path_str, base_path, visited, depth, total_included)
-            {
+            if let Some(resolved) = try_resolve_include(
+                &path_str,
+                base_path,
+                visited,
+                depth,
+                total_included,
+                boundary,
+            ) {
                 result.push_str(&resolved);
                 remaining = &remaining[at_pos + 1 + consumed..];
                 continue;
@@ -202,6 +261,7 @@ fn try_resolve_include(
     visited: &mut HashSet<PathBuf>,
     depth: usize,
     total_included: &AtomicUsize,
+    boundary: Option<&Path>,
 ) -> Option<String> {
     let resolved_path = if path_str.starts_with("./") || path_str.starts_with("../") {
         base_path.join(path_str)
@@ -216,6 +276,17 @@ fn try_resolve_include(
     };
 
     let canonical = fs::canonicalize(&resolved_path).ok()?;
+
+    if let Some(root) = boundary {
+        let project_root = fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+        if !canonical.starts_with(&project_root) {
+            tracing::warn!(
+                "skipping @include {} — resolves outside project root",
+                path_str
+            );
+            return None;
+        }
+    }
 
     // Circular reference check
     if visited.contains(&canonical) {
@@ -251,6 +322,7 @@ fn try_resolve_include(
         visited,
         depth + 1,
         total_included,
+        boundary,
     );
 
     Some(processed)
@@ -301,6 +373,56 @@ pub fn trim_instructions_to_budget(instructions: &str, max_tokens: usize) -> Str
 /// Each file's content is prefixed with `# From: <filepath>` header.
 pub fn load_project_instructions() -> Option<String> {
     load_project_instructions_with_config(&[])
+}
+
+/// Discover the runtime-visible skill files for the current working directory.
+///
+/// Uses the same live filesystem discovery model as instruction loading:
+/// global skills are always visible, while project-local skills require trust.
+pub fn discover_runtime_skills() -> RuntimeSkillDiscovery {
+    let root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let home = dirs::home_dir();
+    let project_trusted = ava_config::is_project_trusted(&root);
+    discover_runtime_skills_from_root(&root, home.as_deref(), project_trusted)
+}
+
+/// Discover the runtime-visible skill files for an explicit project root.
+pub fn discover_runtime_skills_from_root(
+    root: &Path,
+    home: Option<&Path>,
+    project_trusted: bool,
+) -> RuntimeSkillDiscovery {
+    let mut seen = HashSet::new();
+    let mut skills = Vec::new();
+
+    if let Some(home) = home {
+        for skill_dir in SKILL_DIRS {
+            collect_discovered_skill_files(
+                &home.join(skill_dir),
+                None,
+                RuntimeSkillScope::Global,
+                &mut skills,
+                &mut seen,
+            );
+        }
+    }
+
+    if project_trusted {
+        for skill_dir in SKILL_DIRS {
+            collect_discovered_skill_files(
+                &root.join(skill_dir),
+                Some(root),
+                RuntimeSkillScope::Project,
+                &mut skills,
+                &mut seen,
+            );
+        }
+    }
+
+    RuntimeSkillDiscovery {
+        skills,
+        project_trusted,
+    }
 }
 
 /// Load the lean startup instruction set used for the initial system prompt.
@@ -393,22 +515,6 @@ fn load_startup_from_root_with_extras(
     }
 
     if project_trusted {
-        let mut ancestors = Vec::new();
-        let mut dir = root.parent();
-        while let Some(d) = dir {
-            if d.join(".git").exists() {
-                ancestors.push(d.to_path_buf());
-                break;
-            }
-            ancestors.push(d.to_path_buf());
-            dir = d.parent();
-        }
-        ancestors.reverse();
-        for ancestor in &ancestors {
-            let path = ancestor.join("AGENTS.md");
-            try_load_file(&path, &mut seen, &mut sections);
-        }
-
         let project_agents = root.join("AGENTS.md");
         try_load_file_bounded(&project_agents, root, &mut seen, &mut sections);
 
@@ -488,28 +594,6 @@ fn load_from_root_with_extras(
     // --- Everything below is project-local and requires trust ---
 
     if project_trusted {
-        // 1b. Walk parent directories for AGENTS.md (monorepo support)
-        // Stop at filesystem root or directory containing .git
-        {
-            let mut ancestors = Vec::new();
-            let mut dir = root.parent();
-            while let Some(d) = dir {
-                if d.join(".git").exists() {
-                    // This directory is a repo boundary — include it but don't go higher
-                    ancestors.push(d.to_path_buf());
-                    break;
-                }
-                ancestors.push(d.to_path_buf());
-                dir = d.parent();
-            }
-            // Load in top-down order (outermost first) so more-specific rules take priority
-            ancestors.reverse();
-            for ancestor in &ancestors {
-                let path = ancestor.join("AGENTS.md");
-                try_load_file(&path, &mut seen, &mut sections);
-            }
-        }
-
         // 2. Project root files
         for name in PROJECT_ROOT_FILES {
             let path = root.join(name);
@@ -611,6 +695,44 @@ fn load_skill_sections(
     }
 }
 
+fn collect_discovered_skill_files(
+    skill_dir: &Path,
+    boundary: Option<&Path>,
+    scope: RuntimeSkillScope,
+    skills: &mut Vec<RuntimeSkill>,
+    seen: &mut HashSet<PathBuf>,
+) {
+    for skill_file in skill_file_candidates(skill_dir) {
+        try_collect_runtime_skill(&skill_file, boundary, scope, skills, seen);
+    }
+}
+
+fn skill_file_candidates(skill_dir: &Path) -> Vec<PathBuf> {
+    if !skill_dir.is_dir() {
+        return Vec::new();
+    }
+
+    let mut candidates = Vec::new();
+    let direct_skill = skill_dir.join("SKILL.md");
+    if direct_skill.is_file() {
+        candidates.push(direct_skill);
+    }
+
+    if let Ok(entries) = fs::read_dir(skill_dir) {
+        let mut nested_skill_files: Vec<PathBuf> = entries
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.path())
+            .filter(|path| path.is_dir())
+            .map(|dir| dir.join("SKILL.md"))
+            .filter(|path| path.is_file())
+            .collect();
+        nested_skill_files.sort();
+        candidates.extend(nested_skill_files);
+    }
+
+    candidates
+}
+
 /// Collect SKILL.md files from a skill directory.
 /// Supported layout:
 /// - <dir>/SKILL.md
@@ -624,27 +746,88 @@ fn collect_skill_files(
     sections: &mut Vec<String>,
     seen: &mut HashSet<PathBuf>,
 ) {
-    if !skill_dir.is_dir() {
+    for skill_file in skill_file_candidates(skill_dir) {
+        try_load_skill_file(&skill_file, boundary, seen, sections);
+    }
+}
+
+fn skill_name_from_path(path: &Path) -> String {
+    let Some(parent) = path.parent() else {
+        return "SKILL".to_string();
+    };
+
+    let name = parent
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string());
+    match name {
+        Some(name) if !name.is_empty() && !name.eq_ignore_ascii_case("skills") => name,
+        _ => "SKILL".to_string(),
+    }
+}
+
+struct InspectedSkillFile {
+    canonical: PathBuf,
+    body: String,
+}
+
+fn inspect_skill_file(path: &Path, boundary: Option<&Path>) -> Option<InspectedSkillFile> {
+    let canonical = fs::canonicalize(path).ok()?;
+
+    if let Some(root) = boundary {
+        let project_root = fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+        if !canonical.starts_with(&project_root) {
+            tracing::warn!(
+                "Skill file {} resolves outside project root — skipping",
+                path.display()
+            );
+            return None;
+        }
+    }
+
+    let content = fs::read_to_string(path).ok()?;
+    let trimmed = content.trim();
+    if trimmed.is_empty() {
+        tracing::debug!("skipping empty instruction file: {}", path.display());
+        return None;
+    }
+
+    let (_, body) = parse_frontmatter(trimmed);
+    let body = body.trim();
+    if body.is_empty() {
+        tracing::debug!(
+            "skipping empty instruction file (after frontmatter): {}",
+            path.display()
+        );
+        return None;
+    }
+
+    Some(InspectedSkillFile {
+        canonical,
+        body: body.to_string(),
+    })
+}
+
+fn try_collect_runtime_skill(
+    path: &Path,
+    boundary: Option<&Path>,
+    scope: RuntimeSkillScope,
+    skills: &mut Vec<RuntimeSkill>,
+    seen: &mut HashSet<PathBuf>,
+) {
+    let Some(inspected) = inspect_skill_file(path, boundary) else {
+        return;
+    };
+
+    if !seen.insert(inspected.canonical) {
+        tracing::debug!("skipping duplicate instruction file: {}", path.display());
         return;
     }
 
-    let direct_skill = skill_dir.join("SKILL.md");
-    try_load_skill_file(&direct_skill, boundary, seen, sections);
-
-    if let Ok(entries) = fs::read_dir(skill_dir) {
-        let mut nested_skill_files: Vec<PathBuf> = entries
-            .filter_map(|entry| entry.ok())
-            .map(|entry| entry.path())
-            .filter(|path| path.is_dir())
-            .map(|dir| dir.join("SKILL.md"))
-            .filter(|path| path.is_file())
-            .collect();
-        nested_skill_files.sort();
-
-        for skill_file in nested_skill_files {
-            try_load_skill_file(&skill_file, boundary, seen, sections);
-        }
-    }
+    skills.push(RuntimeSkill {
+        name: skill_name_from_path(path),
+        path: path.to_path_buf(),
+        scope,
+    });
 }
 
 /// Try to load a skill file and append it as a section.
@@ -656,49 +839,17 @@ fn try_load_skill_file(
     seen: &mut HashSet<PathBuf>,
     sections: &mut Vec<String>,
 ) {
-    let Ok(canonical) = fs::canonicalize(path) else {
+    let Some(inspected) = inspect_skill_file(path, boundary) else {
         return;
     };
 
-    // Verify the canonical path stays within the boundary (symlink escape prevention).
-    if let Some(root) = boundary {
-        let project_root = fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
-        if !canonical.starts_with(&project_root) {
-            tracing::warn!(
-                "Skill file {} resolves outside project root — skipping",
-                path.display()
-            );
-            return;
-        }
-    }
-
-    if !seen.insert(canonical) {
+    if !seen.insert(inspected.canonical) {
         tracing::debug!("skipping duplicate instruction file: {}", path.display());
         return;
     }
 
-    let Ok(content) = fs::read_to_string(path) else {
-        return;
-    };
-
-    let trimmed = content.trim();
-    if trimmed.is_empty() {
-        tracing::debug!("skipping empty instruction file: {}", path.display());
-        return;
-    }
-
-    let (_, body) = parse_frontmatter(trimmed);
-    let body = body.trim();
-    if body.is_empty() {
-        tracing::debug!(
-            "skipping empty instruction file (after frontmatter): {}",
-            path.display()
-        );
-        return;
-    }
-
     tracing::debug!("loaded instruction file: {}", path.display());
-    sections.push(format!("# From: {}\n\n{}", path.display(), body));
+    sections.push(format!("# From: {}\n\n{}", path.display(), inspected.body));
 }
 
 /// Parse optional YAML frontmatter from markdown content.
@@ -978,7 +1129,7 @@ pub fn contextual_instructions_for_file_once(
 /// Try to read a single file and append it as a section.
 /// Deduplicates by canonical path and skips empty content.
 fn try_load_file(path: &Path, seen: &mut HashSet<PathBuf>, sections: &mut Vec<String>) {
-    try_load_file_inner(path, None, seen, sections);
+    try_load_file_inner(path, None, false, seen, sections);
 }
 
 /// Try to read a project-local file, verifying the canonical path stays within `root`.
@@ -990,12 +1141,13 @@ fn try_load_file_bounded(
     seen: &mut HashSet<PathBuf>,
     sections: &mut Vec<String>,
 ) {
-    try_load_file_inner(path, Some(root), seen, sections);
+    try_load_file_inner(path, Some(root), true, seen, sections);
 }
 
 fn try_load_file_inner(
     path: &Path,
     boundary: Option<&Path>,
+    enforce_file_boundary: bool,
     seen: &mut HashSet<PathBuf>,
     sections: &mut Vec<String>,
 ) {
@@ -1005,7 +1157,10 @@ fn try_load_file_inner(
     };
 
     // If a boundary is specified, verify the canonical path stays within it.
-    if let Some(root) = boundary {
+    if enforce_file_boundary {
+        let Some(root) = boundary else {
+            unreachable!("file boundary enforcement requires a boundary path");
+        };
         let project_root = fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
         if !canonical.starts_with(&project_root) {
             tracing::warn!(
@@ -1037,7 +1192,11 @@ fn try_load_file_inner(
     if let Ok(canon) = fs::canonicalize(path) {
         include_visited.insert(canon);
     }
-    let processed = process_includes(trimmed, base_dir, &mut include_visited);
+    let processed = if let Some(root) = boundary {
+        process_includes_bounded(trimmed, base_dir, &mut include_visited, root)
+    } else {
+        process_includes(trimmed, base_dir, &mut include_visited)
+    };
 
     tracing::debug!("loaded instruction file: {}", path.display());
     sections.push(format!("# From: {}\n\n{}", path.display(), processed));
@@ -1177,7 +1336,7 @@ mod tests {
     }
 
     #[test]
-    fn test_ancestor_walking() {
+    fn test_ancestor_agents_outside_trusted_root_are_skipped() {
         let tmp = TempDir::new().unwrap();
         let grandparent = tmp.path().join("grandparent");
         let parent = grandparent.join("parent");
@@ -1185,42 +1344,18 @@ mod tests {
         fs::create_dir_all(&child).unwrap();
 
         fs::write(grandparent.join("AGENTS.md"), "Grandparent rules.").unwrap();
+        fs::write(child.join("AGENTS.md"), "Child rules.").unwrap();
 
         let result = load_from_root(&child, None);
         assert!(result.is_some());
         let text = result.unwrap();
         assert!(
-            text.contains("Grandparent rules."),
-            "Should find AGENTS.md in ancestor directory"
-        );
-    }
-
-    #[test]
-    fn test_ancestor_stops_at_git() {
-        let tmp = TempDir::new().unwrap();
-        let above_repo = tmp.path().join("above");
-        let repo = above_repo.join("repo");
-        let child = repo.join("child");
-        fs::create_dir_all(&child).unwrap();
-
-        // Put .git at repo level
-        fs::create_dir_all(repo.join(".git")).unwrap();
-
-        // Put AGENTS.md above the repo boundary
-        fs::write(above_repo.join("AGENTS.md"), "Should NOT appear.").unwrap();
-        // Put AGENTS.md at repo level (should appear — it has .git)
-        fs::write(repo.join("AGENTS.md"), "Repo rules.").unwrap();
-
-        let result = load_from_root(&child, None);
-        assert!(result.is_some());
-        let text = result.unwrap();
-        assert!(
-            !text.contains("Should NOT appear."),
-            "Should not load AGENTS.md above .git boundary"
+            !text.contains("Grandparent rules."),
+            "Should not load AGENTS.md outside the trusted project root"
         );
         assert!(
-            text.contains("Repo rules."),
-            "Should load AGENTS.md at the .git boundary"
+            text.contains("Child rules."),
+            "Should still load AGENTS.md at the trusted project root"
         );
     }
 
@@ -1548,6 +1683,61 @@ mod tests {
         assert!(text.contains("Use composition-first patterns."));
         assert!(!text.contains("name: React Patterns"));
         assert!(!text.contains("description: React guidance"));
+    }
+
+    #[test]
+    fn test_runtime_skill_discovery_lists_live_project_and_global_skills() {
+        let tmp = TempDir::new().unwrap();
+        let fake_home = TempDir::new().unwrap();
+
+        let global_skill = fake_home
+            .path()
+            .join(".ava")
+            .join("skills")
+            .join("global-debug");
+        let project_skill = tmp.path().join(".agents").join("skills").join("local-rust");
+        fs::create_dir_all(&global_skill).unwrap();
+        fs::create_dir_all(&project_skill).unwrap();
+
+        fs::write(global_skill.join("SKILL.md"), "Global debugging guidance.").unwrap();
+        fs::write(project_skill.join("SKILL.md"), "Local Rust guidance.").unwrap();
+
+        let discovery = discover_runtime_skills_from_root(tmp.path(), Some(fake_home.path()), true);
+
+        assert!(discovery.project_trusted);
+        assert_eq!(discovery.skills.len(), 2);
+        assert_eq!(discovery.skills[0].name, "global-debug");
+        assert_eq!(discovery.skills[0].scope, RuntimeSkillScope::Global);
+        assert_eq!(discovery.skills[0].path, global_skill.join("SKILL.md"));
+        assert_eq!(discovery.skills[1].name, "local-rust");
+        assert_eq!(discovery.skills[1].scope, RuntimeSkillScope::Project);
+        assert_eq!(discovery.skills[1].path, project_skill.join("SKILL.md"));
+    }
+
+    #[test]
+    fn test_runtime_skill_discovery_respects_trust_gate() {
+        let tmp = TempDir::new().unwrap();
+        let fake_home = TempDir::new().unwrap();
+
+        let global_skill = fake_home
+            .path()
+            .join(".agents")
+            .join("skills")
+            .join("shared");
+        let project_skill = tmp.path().join(".ava").join("skills").join("private");
+        fs::create_dir_all(&global_skill).unwrap();
+        fs::create_dir_all(&project_skill).unwrap();
+
+        fs::write(global_skill.join("SKILL.md"), "Shared guidance.").unwrap();
+        fs::write(project_skill.join("SKILL.md"), "Private guidance.").unwrap();
+
+        let discovery =
+            discover_runtime_skills_from_root(tmp.path(), Some(fake_home.path()), false);
+
+        assert!(!discovery.project_trusted);
+        assert_eq!(discovery.skills.len(), 1);
+        assert_eq!(discovery.skills[0].name, "shared");
+        assert_eq!(discovery.skills[0].scope, RuntimeSkillScope::Global);
     }
 
     // --- contextual_instructions_for_file tests ---
@@ -1931,6 +2121,82 @@ mod tests {
         let mut visited = HashSet::new();
         let result = process_includes(content, tmp.path(), &mut visited);
         assert!(result.contains("@./binary.exe"));
+    }
+
+    #[test]
+    fn test_project_instruction_include_cannot_escape_project_root() {
+        let tmp = TempDir::new().unwrap();
+        let project = tmp.path().join("project");
+        fs::create_dir_all(&project).unwrap();
+        fs::write(project.join("local.md"), "Local include.").unwrap();
+        fs::write(tmp.path().join("secret.md"), "Outside boundary.").unwrap();
+        fs::write(
+            project.join("AGENTS.md"),
+            "Inside @./local.md and blocked @../secret.md",
+        )
+        .unwrap();
+
+        let text = load_from_root_with_extras(&project, None, &[], true).unwrap();
+        assert!(text.contains("Local include."));
+        assert!(!text.contains("Outside boundary."));
+        assert!(text.contains("@../secret.md"));
+    }
+
+    #[test]
+    fn test_startup_ancestor_agents_outside_trusted_root_are_skipped() {
+        let tmp = TempDir::new().unwrap();
+        let repo = tmp.path().join("repo");
+        let child = repo.join("child");
+        fs::create_dir_all(&child).unwrap();
+        fs::write(repo.join("AGENTS.md"), "Repo rules.").unwrap();
+        fs::write(child.join("AGENTS.md"), "Child rules.").unwrap();
+
+        let text = load_startup_from_root_with_extras(
+            &child,
+            None,
+            &[],
+            true,
+            StartupInstructionProfile::AgentsOnly,
+        )
+        .unwrap();
+        assert!(!text.contains("Repo rules."));
+        assert!(text.contains("Child rules."));
+    }
+
+    #[test]
+    fn test_global_instruction_include_can_resolve_outside_ava_dir() {
+        let tmp = TempDir::new().unwrap();
+        let project = tmp.path().join("project");
+        fs::create_dir_all(&project).unwrap();
+
+        let fake_home = TempDir::new().unwrap();
+        let ava_dir = fake_home.path().join(".ava");
+        fs::create_dir_all(&ava_dir).unwrap();
+        fs::write(fake_home.path().join("shared.md"), "Shared home include.").unwrap();
+        fs::write(
+            ava_dir.join("AGENTS.md"),
+            "Global @../shared.md instructions.",
+        )
+        .unwrap();
+
+        let text =
+            load_from_root_with_extras(&project, Some(fake_home.path()), &[], false).unwrap();
+        assert!(text.contains("Shared home include."));
+    }
+
+    #[test]
+    fn test_runtime_skill_discovery_flat_layout_uses_generic_skill_name() {
+        let tmp = TempDir::new().unwrap();
+        let fake_home = TempDir::new().unwrap();
+        let flat_skill = fake_home.path().join(".ava").join("skills");
+        fs::create_dir_all(&flat_skill).unwrap();
+        fs::write(flat_skill.join("SKILL.md"), "Shared flat-layout guidance.").unwrap();
+
+        let discovery = discover_runtime_skills_from_root(tmp.path(), Some(fake_home.path()), true);
+
+        assert_eq!(discovery.skills.len(), 1);
+        assert_eq!(discovery.skills[0].name, "SKILL");
+        assert_eq!(discovery.skills[0].path, flat_skill.join("SKILL.md"));
     }
 
     // --- local override file tests (F38) ---

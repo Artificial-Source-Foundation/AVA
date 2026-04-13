@@ -17,7 +17,10 @@ use super::response;
 use super::tool_execution::READ_ONLY_TOOLS;
 use super::{AgentEvent, AgentLoop};
 use crate::stuck::StuckDetector;
-use crate::system_prompt::{build_system_prompt, provider_prompt_suffix, SystemPromptParts};
+use crate::system_prompt::{
+    build_system_prompt_with_override, provider_prompt_suffix_with_provider_and_override,
+    SystemPromptParts,
+};
 use crate::trace::RunEventKind;
 
 use super::response::parse_tool_calls;
@@ -126,12 +129,13 @@ impl AgentLoop {
             let provider_kind = self.llm.provider_kind();
             let tool_defs = self.active_tool_defs_with_hooks().await;
             (
-                build_system_prompt(
+                build_system_prompt_with_override(
                     &tool_defs,
                     native,
                     provider_kind,
                     &self.config.model,
                     self.tool_visibility_profile,
+                    self.config.benchmark_prompt_override.as_ref(),
                 ),
                 false,
             )
@@ -139,7 +143,12 @@ impl AgentLoop {
 
         // Append provider-specific instructions to the dynamic suffix.
         let provider_kind = self.llm.provider_kind();
-        if let Some(p_suffix) = provider_prompt_suffix(provider_kind, &self.config.model) {
+        if let Some(p_suffix) = provider_prompt_suffix_with_provider_and_override(
+            provider_kind,
+            Some(&self.config.provider),
+            &self.config.model,
+            self.config.benchmark_prompt_override.as_ref(),
+        ) {
             parts.dynamic_suffix.push_str("\n\n");
             parts.dynamic_suffix.push_str(&p_suffix);
         }

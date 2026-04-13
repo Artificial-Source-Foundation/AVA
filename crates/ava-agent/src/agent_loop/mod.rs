@@ -27,6 +27,7 @@ use tracing::{debug, instrument, warn};
 use crate::llm_trait::LLMProvider;
 use crate::message_queue::MessageQueue;
 use crate::stuck::{StuckAction, StuckDetector};
+use crate::system_prompt::BenchmarkPromptOverride;
 use crate::trace::{append_trace_event, RunEvent, RunEventKind};
 
 use repetition::RepetitionDetector;
@@ -137,6 +138,9 @@ pub struct AgentConfig {
     /// Optional suffix appended to the system prompt (e.g., mode-specific instructions).
     #[serde(default)]
     pub system_prompt_suffix: Option<String>,
+    /// Benchmark-only family/file override for prompt assembly.
+    #[serde(default)]
+    pub benchmark_prompt_override: Option<BenchmarkPromptOverride>,
     /// Trusted project root used for contextual instruction resolution.
     #[serde(default)]
     pub project_root: Option<std::path::PathBuf>,
@@ -1133,6 +1137,7 @@ mod tests {
             thinking_level: ThinkingLevel::Off,
             thinking_budget_tokens: None,
             system_prompt_suffix: None,
+            benchmark_prompt_override: None,
             project_root: None,
             enable_dynamic_rules: false,
             extended_tools: false,
@@ -1170,6 +1175,7 @@ mod tests {
             thinking_level: ThinkingLevel::Off,
             thinking_budget_tokens: None,
             system_prompt_suffix: None,
+            benchmark_prompt_override: None,
             project_root: None,
             enable_dynamic_rules: false,
             extended_tools: false,
@@ -1210,6 +1216,7 @@ mod tests {
             thinking_level: ThinkingLevel::Off,
             thinking_budget_tokens: None,
             system_prompt_suffix: None,
+            benchmark_prompt_override: None,
             project_root: None,
             enable_dynamic_rules: false,
             extended_tools: false,
@@ -1267,6 +1274,7 @@ mod tests {
             thinking_level: ThinkingLevel::Off,
             thinking_budget_tokens: None,
             system_prompt_suffix: None,
+            benchmark_prompt_override: None,
             project_root: None,
             enable_dynamic_rules: false,
             extended_tools: false,
@@ -1324,6 +1332,7 @@ mod tests {
             thinking_level: ThinkingLevel::Off,
             thinking_budget_tokens: None,
             system_prompt_suffix: None,
+            benchmark_prompt_override: None,
             project_root: None,
             enable_dynamic_rules: false,
             extended_tools: false,
@@ -1356,6 +1365,7 @@ mod tests {
             thinking_level: ThinkingLevel::Off,
             thinking_budget_tokens: None,
             system_prompt_suffix: None,
+            benchmark_prompt_override: None,
             project_root: None,
             enable_dynamic_rules: false,
             extended_tools: false,

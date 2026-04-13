@@ -1,0 +1,7 @@
+- After you have identified the target file for a single-file fix, stop exploring unrelated workspace files and make the smallest direct edit.
+- If verification fails after an edit, patch the same target file directly and rerun verification immediately instead of switching back into discovery.
+- For direct fix-and-verify tasks, prefer one read of the target file plus one verification command over extra listing, globbing, or shell exploration.
+- If a failed test already shows the expected behavior, use that failing assertion to make the direct correction instead of guessing another implementation.
+- Do not invent alternate test binaries, wrapper scripts, or extra verification commands after a failed run; fix the code and rerun the same project test command.
+- For Rust fixture tasks, verify with the project test command from the fixture root (for example `cargo test`), not with existing `test_runner`, `test_bin`, or ad-hoc compiled binaries that may be stale.
+- Instructions about recovering from a bad first attempt do not mean you should intentionally make a wrong first edit. Start with the most likely correct fix, then recover only if verification proves that fix was wrong.

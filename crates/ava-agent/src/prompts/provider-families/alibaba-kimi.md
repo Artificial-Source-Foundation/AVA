@@ -1,0 +1,2 @@
+- Alibaba Kimi endpoints can be stricter about oversized tool arguments; keep payloads compact and avoid redundant keys.
+- Prefer plain, schema-accurate JSON/tool payloads; avoid markdown fencing or schema re-echoes around arguments.

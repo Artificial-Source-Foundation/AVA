@@ -55,6 +55,12 @@ pub(crate) async fn run_tier3_validation(
         "tool_reliability_normalize",
         "tool_recovery_missing_file",
         "tool_recovery_targeted_edit",
+        "prompt_regression_verify_before_finish",
+        "prompt_regression_targeted_edit_only",
+        "prompt_regression_minimal_patch",
+        "prompt_regression_read_before_edit",
+        "prompt_regression_wrong_first_edit_recovery",
+        "prompt_regression_tool_choice_discipline",
         "stress_coding_log_pipeline",
         "large_project_feature_flags",
         "maintenance_config_migration",
@@ -632,6 +638,14 @@ async fn validate_standalone_rust_test_dir(
         "stress_coding_log_pipeline" => "stress_coding_log_pipeline",
         "large_project_feature_flags" => "large_project_feature_flags",
         "maintenance_config_migration" => "maintenance_config_migration",
+        "prompt_regression_verify_before_finish" => "prompt_regression_verify_before_finish",
+        "prompt_regression_targeted_edit_only" => "prompt_regression_targeted_edit_only",
+        "prompt_regression_minimal_patch" => "prompt_regression_minimal_patch",
+        "prompt_regression_read_before_edit" => "prompt_regression_read_before_edit",
+        "prompt_regression_wrong_first_edit_recovery" => {
+            "prompt_regression_wrong_first_edit_recovery"
+        }
+        "prompt_regression_tool_choice_discipline" => "prompt_regression_tool_choice_discipline",
         _ => unreachable!("validated by caller"),
     });
     let tests_path = dir.join("tests.rs");

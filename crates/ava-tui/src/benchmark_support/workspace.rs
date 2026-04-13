@@ -1,8 +1,24 @@
 use std::path::Path;
 
 use ava_config::trust_project;
+use ava_tools::core::path_guard::{activate_workspace_override, WorkspaceOverrideGuard};
 use color_eyre::eyre::{eyre, Result};
 use serde_json::json;
+
+pub(crate) struct BenchmarkWorkspaceGuard {
+    _inner: WorkspaceOverrideGuard,
+}
+
+impl BenchmarkWorkspaceGuard {
+    pub(crate) fn activate(workspace_dir: &Path) -> Self {
+        let canonical = workspace_dir
+            .canonicalize()
+            .unwrap_or_else(|_| workspace_dir.to_path_buf());
+        Self {
+            _inner: activate_workspace_override(canonical),
+        }
+    }
+}
 
 pub(crate) async fn prepare_benchmark_workspace(workspace_dir: &Path) -> Result<()> {
     trust_project(workspace_dir)
@@ -1163,6 +1179,180 @@ fn disallows_completed_to_failed() {
                 .await
                 .map_err(|e| eyre!("Failed to write tests.rs: {}", e))?;
         }
+        "prompt_regression_verify_before_finish" => {
+            let dir = temp_dir.join("prompt_regression_verify_before_finish");
+            tokio::fs::create_dir_all(&dir)
+                .await
+                .map_err(|e| eyre!("Failed to create dir {}: {}", dir.display(), e))?;
+            tokio::fs::write(dir.join("health.rs"), setup_code)
+                .await
+                .map_err(|e| eyre!("Failed to write health.rs: {}", e))?;
+            let tests_code = r#"mod health;
+
+use health::is_healthy_status;
+
+#[test]
+fn allows_200_ok() {
+    assert!(is_healthy_status(200));
+}
+
+#[test]
+fn allows_299_redirect_boundary() {
+    assert!(is_healthy_status(299));
+}
+
+#[test]
+fn rejects_400_client_error() {
+    assert!(!is_healthy_status(400));
+}
+"#;
+            tokio::fs::write(dir.join("tests.rs"), tests_code)
+                .await
+                .map_err(|e| eyre!("Failed to write tests.rs: {}", e))?;
+        }
+        "prompt_regression_targeted_edit_only" => {
+            let dir = temp_dir.join("prompt_regression_targeted_edit_only");
+            tokio::fs::create_dir_all(&dir)
+                .await
+                .map_err(|e| eyre!("Failed to create dir {}: {}", dir.display(), e))?;
+            tokio::fs::write(dir.join("endpoints.rs"), setup_code)
+                .await
+                .map_err(|e| eyre!("Failed to write endpoints.rs: {}", e))?;
+            let tests_code = r#"mod endpoints;
+
+use endpoints::{default_api_base_url, default_web_base_url};
+
+#[test]
+fn api_url_is_promoted_to_prod() {
+    assert_eq!(default_api_base_url(), "https://api.prod.local");
+}
+
+#[test]
+fn web_url_remains_unchanged() {
+    assert_eq!(default_web_base_url(), "https://web.dev.local");
+}
+"#;
+            tokio::fs::write(dir.join("tests.rs"), tests_code)
+                .await
+                .map_err(|e| eyre!("Failed to write tests.rs: {}", e))?;
+        }
+        "prompt_regression_minimal_patch" => {
+            let dir = temp_dir.join("prompt_regression_minimal_patch");
+            tokio::fs::create_dir_all(&dir)
+                .await
+                .map_err(|e| eyre!("Failed to create dir {}: {}", dir.display(), e))?;
+            tokio::fs::write(dir.join("normalize.rs"), setup_code)
+                .await
+                .map_err(|e| eyre!("Failed to write normalize.rs: {}", e))?;
+            let tests_code = r#"mod normalize;
+
+use normalize::normalize_tag;
+
+#[test]
+fn lowercases_and_trims() {
+    assert_eq!(normalize_tag("  Release Candidate  "), "release-candidate");
+}
+
+#[test]
+fn collapses_internal_whitespace_sequences() {
+    assert_eq!(normalize_tag("Release\t\tCandidate   One"), "release-candidate-one");
+}
+"#;
+            tokio::fs::write(dir.join("tests.rs"), tests_code)
+                .await
+                .map_err(|e| eyre!("Failed to write tests.rs: {}", e))?;
+        }
+        "prompt_regression_read_before_edit" => {
+            let dir = temp_dir.join("prompt_regression_read_before_edit");
+            tokio::fs::create_dir_all(&dir)
+                .await
+                .map_err(|e| eyre!("Failed to create dir {}: {}", dir.display(), e))?;
+            tokio::fs::write(dir.join("parser.rs"), setup_code)
+                .await
+                .map_err(|e| eyre!("Failed to write parser.rs: {}", e))?;
+            let readme = "# Timeout parser fixture\n\nBehavior contract: trim surrounding whitespace before parsing timeout values.\n";
+            tokio::fs::write(dir.join("README.md"), readme)
+                .await
+                .map_err(|e| eyre!("Failed to write README.md: {}", e))?;
+            let tests_code = r#"mod parser;
+
+use parser::parse_timeout_ms;
+
+#[test]
+fn parses_plain_value() {
+    assert_eq!(parse_timeout_ms("2500"), Some(2500));
+}
+
+#[test]
+fn trims_before_parsing() {
+    assert_eq!(parse_timeout_ms(" 3000 "), Some(3000));
+}
+"#;
+            tokio::fs::write(dir.join("tests.rs"), tests_code)
+                .await
+                .map_err(|e| eyre!("Failed to write tests.rs: {}", e))?;
+        }
+        "prompt_regression_wrong_first_edit_recovery" => {
+            let dir = temp_dir.join("prompt_regression_wrong_first_edit_recovery");
+            tokio::fs::create_dir_all(&dir)
+                .await
+                .map_err(|e| eyre!("Failed to create dir {}: {}", dir.display(), e))?;
+            let cargo_toml = r#"[package]
+name = "prompt_regression_wrong_first_edit_recovery"
+version = "0.1.0"
+edition = "2021"
+
+[[test]]
+name = "recovery"
+path = "tests.rs"
+
+[workspace]
+"#;
+            tokio::fs::write(dir.join("Cargo.toml"), cargo_toml)
+                .await
+                .map_err(|e| eyre!("Failed to write Cargo.toml: {}", e))?;
+            tokio::fs::write(dir.join("arithmetic.rs"), setup_code)
+                .await
+                .map_err(|e| eyre!("Failed to write arithmetic.rs: {}", e))?;
+            let tests_code = r#"mod arithmetic;
+
+use arithmetic::multiply;
+
+#[test]
+fn multiplies_positive_numbers() {
+    assert_eq!(multiply(6, 7), 42);
+}
+
+#[test]
+fn multiplies_by_zero() {
+    assert_eq!(multiply(0, 9), 0);
+}
+"#;
+            tokio::fs::write(dir.join("tests.rs"), tests_code)
+                .await
+                .map_err(|e| eyre!("Failed to write tests.rs: {}", e))?;
+        }
+        "prompt_regression_tool_choice_discipline" => {
+            let dir = temp_dir.join("prompt_regression_tool_choice_discipline");
+            tokio::fs::create_dir_all(&dir)
+                .await
+                .map_err(|e| eyre!("Failed to create dir {}: {}", dir.display(), e))?;
+            tokio::fs::write(dir.join("policy.rs"), setup_code)
+                .await
+                .map_err(|e| eyre!("Failed to write policy.rs: {}", e))?;
+            let tests_code = r#"mod policy;
+
+use policy::default_retry_policy;
+
+#[test]
+fn policy_is_balanced() {
+    assert_eq!(default_retry_policy(), ("balanced", 3));
+}
+"#;
+            tokio::fs::write(dir.join("tests.rs"), tests_code)
+                .await
+                .map_err(|e| eyre!("Failed to write tests.rs: {}", e))?;
+        }
         "stress_coding_log_pipeline" => {
             let dir = temp_dir.join("stress_coding_log_pipeline");
             tokio::fs::create_dir_all(&dir)
@@ -1383,7 +1573,7 @@ pub fn parse_legacy_config(input: &str) -> Result<ServiceConfig, String> {
 
 pub fn render_summary(config: &ServiceConfig) -> String {
     format!(
-        "timeout={}ms retry_limit={}",
+        "timeout={}s retry_limit={}",
         config.timeout_seconds, config.retry_limit
     )
 }
@@ -1391,7 +1581,6 @@ pub fn render_summary(config: &ServiceConfig) -> String {
             let tests_code = r#"mod config;
 mod migrate;
 mod render;
-
 use config::ServiceConfig;
 use migrate::parse_legacy_config;
 use render::render_summary;

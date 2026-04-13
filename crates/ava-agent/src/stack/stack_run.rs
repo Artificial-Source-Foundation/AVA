@@ -438,6 +438,7 @@ impl AgentStack {
                     provider: provider.clone(),
                     platform: self.platform.clone(),
                     model_name: provider.model_name().to_string(),
+                    benchmark_prompt_override: self.benchmark_prompt_override.clone(),
                     max_turns: turns_limit,
                     agents_config: self.agents_config.clone(),
                     router: self.router.clone(),
@@ -495,6 +496,7 @@ impl AgentStack {
             thinking_level: thinking,
             thinking_budget_tokens,
             system_prompt_suffix,
+            benchmark_prompt_override: self.benchmark_prompt_override.clone(),
             project_root: Some(project_root.clone()),
             enable_dynamic_rules: true,
             extended_tools: false,
@@ -813,6 +815,7 @@ struct AgentTaskSpawner {
     provider: Arc<dyn LLMProvider>,
     platform: Arc<dyn Platform>,
     model_name: String,
+    benchmark_prompt_override: Option<crate::system_prompt::BenchmarkPromptOverride>,
     max_turns: usize,
     agents_config: AgentsConfig,
     /// Router for resolving per-agent model overrides from agents.toml.
@@ -955,6 +958,7 @@ impl TaskSpawner for AgentTaskSpawner {
                 &effective_model,
                 &std::env::current_dir().unwrap_or_default(),
             ),
+            benchmark_prompt_override: self.benchmark_prompt_override.clone(),
             project_root: Some(std::env::current_dir().unwrap_or_default()),
             enable_dynamic_rules: true,
             extended_tools: true, // sub-agents get full tool access
@@ -1116,6 +1120,7 @@ impl TaskSpawner for AgentTaskSpawner {
         let event_tx = self.event_tx.clone();
         let session_manager = self.session_manager.clone();
         let parent_session_id = self.parent_session_id.clone();
+        let benchmark_prompt_override = self.benchmark_prompt_override.clone();
         let agent_type = agent_type.to_string();
         let prompt = prompt.to_string();
 
@@ -1131,14 +1136,16 @@ impl TaskSpawner for AgentTaskSpawner {
                 provider,
                 platform,
                 model_name,
+                benchmark_prompt_override,
                 max_turns,
                 agents_config,
                 router,
                 event_tx: event_tx.clone(),
                 session_manager,
                 parent_session_id,
-                depth: 0,      // background agents are top-level from their perspective
-                max_spawns: 0, // background agents cannot spawn further sub-agents
+                depth: 0, // background agents are top-level from their perspective
+                // Allow this background child to spawn once via `spawn_named`, but no further.
+                max_spawns: 1,
                 spawn_count: Arc::new(AtomicUsize::new(0)),
             };
 

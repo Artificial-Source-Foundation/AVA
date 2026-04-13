@@ -1,5 +1,6 @@
-use crate::benchmark::{BenchmarkReport, BenchmarkResult, BenchmarkSuite};
+use crate::benchmark::{BenchmarkReport, BenchmarkResult};
 use crate::benchmark_harness::HarnessReport;
+use crate::benchmark_tasks::BenchmarkSuite;
 
 fn short_timestamp(timestamp: &str) -> &str {
     timestamp.get(..19).unwrap_or(timestamp)
@@ -100,11 +101,12 @@ pub(crate) fn print_results_table(report: &BenchmarkReport, suite: BenchmarkSuit
 
         if has_compile && has_judges {
             println!(
-                "  {:<22} {:>9} {:>9} {:>7} {:>8} {:>7} {:>6} {:>5} {:>6} {:>7}",
+                "  {:<22} {:>9} {:>9} {:>9} {:>8} {:>8} {:>7} {:>6} {:>5} {:>6} {:>7}",
                 "Model",
                 "TTFT(ms)",
                 "Total(s)",
-                "Tok/s",
+                "WallTok/s",
+                "GenTok/s",
                 "Compile",
                 "Tests",
                 "Tools",
@@ -113,16 +115,17 @@ pub(crate) fn print_results_table(report: &BenchmarkReport, suite: BenchmarkSuit
                 "Score",
             );
             println!(
-                "  {:-<22} {:-<9} {:-<9} {:-<7} {:-<8} {:-<7} {:-<6} {:-<5} {:-<6} {:-<7}",
-                "", "", "", "", "", "", "", "", "", ""
+                "  {:-<22} {:-<9} {:-<9} {:-<9} {:-<8} {:-<8} {:-<7} {:-<6} {:-<5} {:-<6} {:-<7}",
+                "", "", "", "", "", "", "", "", "", "", ""
             );
         } else if has_compile {
             println!(
-                "  {:<22} {:>9} {:>9} {:>7} {:>8} {:>7} {:>6} {:>5} {:>6}  Quality",
+                "  {:<22} {:>9} {:>9} {:>9} {:>8} {:>8} {:>7} {:>6} {:>5} {:>6}  Quality",
                 "Model",
                 "TTFT(ms)",
                 "Total(s)",
-                "Tok/s",
+                "WallTok/s",
+                "GenTok/s",
                 "Compile",
                 "Tests",
                 "Tools",
@@ -130,16 +133,17 @@ pub(crate) fn print_results_table(report: &BenchmarkReport, suite: BenchmarkSuit
                 "Turns",
             );
             println!(
-                "  {:-<22} {:-<9} {:-<9} {:-<7} {:-<8} {:-<7} {:-<6} {:-<5} {:-<6}  {:-<20}",
-                "", "", "", "", "", "", "", "", "", ""
+                "  {:-<22} {:-<9} {:-<9} {:-<9} {:-<8} {:-<8} {:-<7} {:-<6} {:-<5} {:-<6}  {:-<20}",
+                "", "", "", "", "", "", "", "", "", "", ""
             );
         } else if has_activity_metrics {
             println!(
-                "  {:<22} {:>9} {:>9} {:>7} {:>8} {:>8} {:>6} {:>5} {:>6}  Quality",
+                "  {:<22} {:>9} {:>9} {:>9} {:>8} {:>8} {:>8} {:>6} {:>5} {:>6}  Quality",
                 "Model",
                 "TTFT(ms)",
                 "Total(s)",
-                "Tok/s",
+                "WallTok/s",
+                "GenTok/s",
                 "In Tok",
                 "Cost",
                 "Tools",
@@ -147,26 +151,26 @@ pub(crate) fn print_results_table(report: &BenchmarkReport, suite: BenchmarkSuit
                 "Turns",
             );
             println!(
-                "  {:-<22} {:-<9} {:-<9} {:-<7} {:-<8} {:-<8} {:-<6} {:-<5} {:-<6}  {:-<20}",
-                "", "", "", "", "", "", "", "", "", ""
+                "  {:-<22} {:-<9} {:-<9} {:-<9} {:-<8} {:-<8} {:-<8} {:-<6} {:-<5} {:-<6}  {:-<20}",
+                "", "", "", "", "", "", "", "", "", "", ""
             );
         } else if has_judges {
             println!(
-                "  {:<22} {:>9} {:>9} {:>7} {:>8} {:>8} {:>7}",
-                "Model", "TTFT(ms)", "Total(s)", "Tok/s", "In Tok", "Cost", "Score",
+                "  {:<22} {:>9} {:>9} {:>9} {:>8} {:>8} {:>8} {:>7}",
+                "Model", "TTFT(ms)", "Total(s)", "WallTok/s", "GenTok/s", "In Tok", "Cost", "Score",
             );
             println!(
-                "  {:-<22} {:-<9} {:-<9} {:-<7} {:-<8} {:-<8} {:-<7}",
-                "", "", "", "", "", "", ""
+                "  {:-<22} {:-<9} {:-<9} {:-<9} {:-<8} {:-<8} {:-<8} {:-<7}",
+                "", "", "", "", "", "", "", ""
             );
         } else {
             println!(
-                "  {:<22} {:>9} {:>9} {:>8} {:>8} {:>8}  Quality",
-                "Model", "TTFT(ms)", "Total(s)", "Tok/s", "In Tok", "Cost",
+                "  {:<22} {:>9} {:>9} {:>9} {:>8} {:>8} {:>8}  Quality",
+                "Model", "TTFT(ms)", "Total(s)", "WallTok/s", "GenTok/s", "In Tok", "Cost",
             );
             println!(
-                "  {:-<22} {:-<9} {:-<9} {:-<8} {:-<8} {:-<8}  {:-<20}",
-                "", "", "", "", "", "", ""
+                "  {:-<22} {:-<9} {:-<9} {:-<9} {:-<8} {:-<8} {:-<8}  {:-<20}",
+                "", "", "", "", "", "", "", ""
             );
         }
 
@@ -190,6 +194,12 @@ pub(crate) fn print_results_table(report: &BenchmarkReport, suite: BenchmarkSuit
             } else {
                 "-".to_string()
             };
+
+            let generation_tps_str = r
+                .generation_tps
+                .filter(|tps| *tps > 0.0)
+                .map(|tps| format!("{:.0}", tps))
+                .unwrap_or_else(|| "-".to_string());
 
             let compile_str = match r.compile_success {
                 Some(true) => "PASS".to_string(),
@@ -241,11 +251,12 @@ pub(crate) fn print_results_table(report: &BenchmarkReport, suite: BenchmarkSuit
 
             if has_compile && has_judges {
                 println!(
-                    "  {:<22} {:>9} {:>9} {:>7} {:>8} {:>7} {:>6} {:>5} {:>6} {:>7}",
+                    "  {:<22} {:>9} {:>9} {:>9} {:>8} {:>8} {:>7} {:>6} {:>5} {:>6} {:>7}",
                     model_display,
                     ttft_str,
                     total_str,
                     tps_str,
+                    generation_tps_str,
                     compile_str,
                     tests_str,
                     tools_str,
@@ -255,11 +266,12 @@ pub(crate) fn print_results_table(report: &BenchmarkReport, suite: BenchmarkSuit
                 );
             } else if has_compile {
                 println!(
-                    "  {:<22} {:>9} {:>9} {:>7} {:>8} {:>7} {:>6} {:>5} {:>6}  {}",
+                    "  {:<22} {:>9} {:>9} {:>9} {:>8} {:>8} {:>7} {:>6} {:>5} {:>6}  {}",
                     model_display,
                     ttft_str,
                     total_str,
                     tps_str,
+                    generation_tps_str,
                     compile_str,
                     tests_str,
                     tools_str,
@@ -269,11 +281,12 @@ pub(crate) fn print_results_table(report: &BenchmarkReport, suite: BenchmarkSuit
                 );
             } else if has_activity_metrics {
                 println!(
-                    "  {:<22} {:>9} {:>9} {:>7} {:>8} {:>8} {:>6} {:>5} {:>6}  {}",
+                    "  {:<22} {:>9} {:>9} {:>9} {:>8} {:>8} {:>8} {:>6} {:>5} {:>6}  {}",
                     model_display,
                     ttft_str,
                     total_str,
                     tps_str,
+                    generation_tps_str,
                     r.input_tokens,
                     cost_str,
                     tools_str,
@@ -283,22 +296,24 @@ pub(crate) fn print_results_table(report: &BenchmarkReport, suite: BenchmarkSuit
                 );
             } else if has_judges {
                 println!(
-                    "  {:<22} {:>9} {:>9} {:>7} {:>8} {:>8} {:>7}",
+                    "  {:<22} {:>9} {:>9} {:>9} {:>8} {:>8} {:>8} {:>7}",
                     model_display,
                     ttft_str,
                     total_str,
                     tps_str,
+                    generation_tps_str,
                     r.input_tokens,
                     cost_str,
                     score_str,
                 );
             } else {
                 println!(
-                    "  {:<22} {:>9} {:>9} {:>8} {:>8} {:>8}  {}",
+                    "  {:<22} {:>9} {:>9} {:>9} {:>8} {:>8} {:>8}  {}",
                     model_display,
                     ttft_str,
                     total_str,
                     tps_str,
+                    generation_tps_str,
                     r.input_tokens,
                     cost_str,
                     quality_str,
@@ -804,6 +819,7 @@ mod tests {
             input_tokens: 0,
             output_tokens: 0,
             tokens_per_second: 0.0,
+            generation_tps: None,
             cost_usd: 0.0,
             quality_pass: true,
             quality_details: String::new(),

@@ -104,7 +104,7 @@ pub struct CliArgs {
     #[arg(long)]
     pub judges: Option<String>,
 
-    /// Benchmark suite filter: speed, standard, frontier, all (default: all)
+    /// Benchmark suite filter: speed, standard, frontier, prompt_regression, all (default: all)
     #[arg(long, default_value = "all")]
     pub suite: String,
 
@@ -132,13 +132,50 @@ pub struct CliArgs {
     #[arg(long)]
     pub import_polyglot: Option<String>,
 
-    /// Compare an AVA benchmark JSON report against an OpenCode report (path to AVA report)
+    /// Force a prompt family for benchmark prompt assembly (e.g. gpt, claude, gemini, generic)
     #[arg(long)]
-    pub benchmark_compare_ava_report: Option<String>,
+    pub prompt_family: Option<String>,
 
-    /// Compare an AVA benchmark JSON report against an OpenCode report (path to OpenCode report)
     #[arg(long)]
-    pub benchmark_compare_opencode_report: Option<String>,
+    pub prompt_variant: Option<String>,
+
+    /// Load benchmark prompt note overrides from a local file
+    #[arg(long)]
+    pub prompt_file: Option<String>,
+
+    #[arg(long)]
+    pub prompt_version: Option<String>,
+
+    #[arg(long)]
+    pub prompt_hash: Option<String>,
+
+    /// Repeat benchmark runs N times and emit an aggregate summary
+    #[arg(long, default_value_t = 1)]
+    pub repeat: usize,
+
+    /// Optional benchmark seed recorded in report metadata
+    #[arg(long)]
+    pub seed: Option<u64>,
+
+    /// Optional output path for benchmark JSON artifact
+    #[arg(long)]
+    pub benchmark_output: Option<String>,
+
+    /// Compare two benchmark JSON reports (left side path)
+    #[arg(
+        long = "benchmark-compare-left-report",
+        alias = "benchmark-compare-ava-report",
+        alias = "benchmark-compare-prompt-a-report"
+    )]
+    pub benchmark_compare_left_report: Option<String>,
+
+    /// Compare two benchmark JSON reports (right side path)
+    #[arg(
+        long = "benchmark-compare-right-report",
+        alias = "benchmark-compare-opencode-report",
+        alias = "benchmark-compare-prompt-b-report"
+    )]
+    pub benchmark_compare_right_report: Option<String>,
 
     /// Optional output path for comparison JSON artifact
     #[arg(long)]
@@ -261,8 +298,16 @@ mod tests {
             director: None,
             worker: None,
             import_polyglot: None,
-            benchmark_compare_ava_report: None,
-            benchmark_compare_opencode_report: None,
+            prompt_family: None,
+            prompt_variant: None,
+            prompt_file: None,
+            prompt_version: None,
+            prompt_hash: None,
+            repeat: 1,
+            seed: None,
+            benchmark_output: None,
+            benchmark_compare_left_report: None,
+            benchmark_compare_right_report: None,
             benchmark_compare_output: None,
             follow_up: Vec::new(),
             later: Vec::new(),

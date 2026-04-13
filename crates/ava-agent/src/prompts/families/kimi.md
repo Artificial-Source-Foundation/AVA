@@ -1,3 +1,6 @@
 - Kimi handles very long contexts (256K) well. Do not hesitate to read full files.
 - Kimi excels at sustained multi-step tool use (100+ sequential calls). Plan ambitiously.
 - Keep tool arguments simple and well-structured. Prefer explicit paths over globs when the target is known.
+- For verification-sensitive tasks, actually run the relevant checks before finishing. Prefer showing real verification through tool use instead of claiming success from reasoning alone.
+- When a task says to recover after a bad first attempt, inspect the failing output, make one targeted correction, and rerun verification before responding.
+- Prefer direct file tools and the smallest correct edit. Avoid unnecessary delegation or broad rewrites when a task is explicitly constrained.

@@ -1,6 +1,7 @@
 use base64::Engine as _;
 
 use ava_agent::stack::MCPServerInfo;
+use ava_agent::{discover_runtime_skills, RuntimeSkillDiscovery};
 
 use super::*;
 
@@ -25,6 +26,38 @@ pub(crate) fn format_mcp_server_list(servers: &[MCPServerInfo]) -> String {
         })
         .collect();
     format!("MCP Servers:\n{}", lines.join("\n"))
+}
+
+/// Format discovered runtime skills for display.
+pub(crate) fn format_skill_list(discovery: &RuntimeSkillDiscovery) -> String {
+    if discovery.skills.is_empty() {
+        let mut text = "No skills discovered.\n\nAVA looks for SKILL.md files in ~/.claude/skills, ~/.agents/skills, ~/.ava/skills, and trusted project-local skill directories.".to_string();
+        if !discovery.project_trusted {
+            text.push_str(
+                "\n\nProject-local skills are currently skipped because this project is not trusted. Run `ava --trust` to include them.",
+            );
+        }
+        return text;
+    }
+
+    let mut lines = vec!["Discovered skills:".to_string()];
+    lines.extend(discovery.skills.iter().map(|skill| {
+        format!(
+            "  • {} ({}) — {}",
+            skill.name,
+            skill.scope,
+            skill.path.display()
+        )
+    }));
+
+    if !discovery.project_trusted {
+        lines.push(String::new());
+        lines.push(
+            "Project-local skills are currently skipped because this project is not trusted. Run `ava --trust` to include them.".to_string(),
+        );
+    }
+
+    lines.join("\n")
 }
 
 impl App {
@@ -243,6 +276,22 @@ impl App {
                     )),
                 }
             }
+            "/skills" => match arg {
+                None | Some("" | "list") => {
+                    let text = format_skill_list(&discover_runtime_skills());
+                    self.state.info_panel = Some(super::InfoPanelState {
+                        title: "Skills".to_string(),
+                        content: text,
+                        scroll: 0,
+                    });
+                    self.state.active_modal = Some(super::ModalType::InfoPanel);
+                    None
+                }
+                Some(sub) => Some((
+                    MessageKind::Error,
+                    format!("Unknown /skills subcommand: {sub}. Use: /skills or /skills list"),
+                )),
+            },
             "/connect" | "/providers" => {
                 if let Some(tx) = app_tx.clone() {
                     self.state.provider_connect = Some(ProviderConnectState::from_credentials(
@@ -581,6 +630,7 @@ impl App {
 /mcp reload              \u{2014} reload MCP config
 /mcp enable <name>       \u{2014} enable a disabled MCP server
 /mcp disable <name>      \u{2014} disable an MCP server (session-scoped)
+/skills [list]           \u{2014} list discovered runtime skills
 /new [title]             \u{2014} start a new session (optional title)
 /sessions                \u{2014} session picker
 /bookmark [label]        \u{2014} bookmark current point (list/clear/remove)
@@ -837,6 +887,7 @@ name = \"hello\"\ndescription = \"Example custom tool \u{2014} prints a greeting
 mod tests {
     use crate::app::App;
     use crate::event::{AppEvent, ModelSwitchContext};
+    use ava_agent::{RuntimeSkill, RuntimeSkillDiscovery, RuntimeSkillScope};
     use tempfile::tempdir;
     use tokio::sync::mpsc;
 
@@ -859,5 +910,29 @@ mod tests {
             }
             other => panic!("unexpected event: {other:?}"),
         }
+    }
+
+    #[test]
+    fn format_skill_list_includes_scope_and_trust_note() {
+        let discovery = RuntimeSkillDiscovery {
+            skills: vec![
+                RuntimeSkill {
+                    name: "debug".to_string(),
+                    path: "/tmp/home/.ava/skills/debug/SKILL.md".into(),
+                    scope: RuntimeSkillScope::Global,
+                },
+                RuntimeSkill {
+                    name: "rust".to_string(),
+                    path: "/tmp/project/.ava/skills/rust/SKILL.md".into(),
+                    scope: RuntimeSkillScope::Project,
+                },
+            ],
+            project_trusted: false,
+        };
+
+        let formatted = super::format_skill_list(&discovery);
+        assert!(formatted.contains("debug (global)"));
+        assert!(formatted.contains("rust (project)"));
+        assert!(formatted.contains("Run `ava --trust` to include them"));
     }
 }

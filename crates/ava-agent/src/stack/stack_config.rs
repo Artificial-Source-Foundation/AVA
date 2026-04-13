@@ -6,6 +6,8 @@ use std::sync::Arc;
 use ava_llm::provider::LLMProvider;
 use ava_types::Session;
 
+use crate::system_prompt::BenchmarkPromptOverride;
+
 pub struct AgentStackConfig {
     pub data_dir: PathBuf,
     pub provider: Option<String>,
@@ -30,6 +32,8 @@ pub struct AgentStackConfig {
     pub eager_codebase_indexing: bool,
     /// When false, skip probing the system for installed external CLI agents.
     pub discover_cli_agents: bool,
+    /// Benchmark-only prompt override for family forcing or one-off prompt note files.
+    pub benchmark_prompt_override: Option<BenchmarkPromptOverride>,
 }
 
 impl AgentStackConfig {
@@ -105,6 +109,7 @@ impl AgentStackConfig {
         model: String,
         max_turns: usize,
         working_dir: PathBuf,
+        benchmark_prompt_override: Option<BenchmarkPromptOverride>,
     ) -> Self {
         Self {
             data_dir,
@@ -116,6 +121,7 @@ impl AgentStackConfig {
             include_project_instructions: false,
             eager_codebase_indexing: false,
             discover_cli_agents: false,
+            benchmark_prompt_override,
             ..Self::default()
         }
     }
@@ -183,6 +189,7 @@ impl Default for AgentStackConfig {
             include_project_instructions: true,
             eager_codebase_indexing: true,
             discover_cli_agents: true,
+            benchmark_prompt_override: None,
         }
     }
 }
@@ -240,6 +247,7 @@ mod tests {
             "gpt-5".to_string(),
             3,
             PathBuf::from("/tmp/worktree"),
+            None,
         );
         assert!(cfg.yolo);
         assert_eq!(cfg.working_dir, Some(PathBuf::from("/tmp/worktree")));

@@ -56,6 +56,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc;
 use tracing::debug;
 
+pub(crate) use commands::format_skill_list;
+
 #[derive(Debug, Clone)]
 pub(crate) struct PendingBackgroundGoal {
     pub goal: String,

@@ -151,6 +151,7 @@ impl Scout {
                 cwd.display(),
                 query
             )),
+            benchmark_prompt_override: None,
             project_root: Some(cwd.to_path_buf()),
             enable_dynamic_rules: false,
             extended_tools: false,

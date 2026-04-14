@@ -244,6 +244,16 @@ impl CliArgs {
             };
         }
 
+        // Keep normal interactive TUI startup lean: avoid eager indexing at boot
+        // while still including project instructions.
+        if !self.headless {
+            return RuntimeLeanSettings {
+                include_project_instructions: true,
+                eager_codebase_indexing: false,
+                auto_lean: false,
+            };
+        }
+
         if self.qualifies_for_auto_lean() {
             return RuntimeLeanSettings {
                 include_project_instructions: true,
@@ -347,6 +357,18 @@ mod tests {
         assert!(!settings.auto_lean);
         assert!(settings.include_project_instructions);
         assert!(settings.eager_codebase_indexing);
+    }
+
+    #[test]
+    fn interactive_tui_startup_stays_lean_without_auto_lean() {
+        let mut cli = base_cli();
+        cli.headless = false;
+        cli.goal = None;
+
+        let settings = cli.runtime_lean_settings();
+        assert!(!settings.auto_lean);
+        assert!(settings.include_project_instructions);
+        assert!(!settings.eager_codebase_indexing);
     }
 }
 

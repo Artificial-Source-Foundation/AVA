@@ -5,6 +5,7 @@ All notable changes to AVA are documented in this file.
 ## [Unreleased]
 
 ### Changed
+- Milestone 3 prompt/tool grounding now includes a narrow fake-claim hardening pass: the shared system prompt and GPT-family prompt text now explicitly forbid claiming file edits, writes, or todo updates without successful tool evidence, and `ava-agent` now rejects obviously ungrounded completion claims for those categories unless matching successful tools actually ran in-session.
 - Milestone 5 Alibaba+Qwen prompt tuning now includes a minimal recovery-discipline overlay refinement from a fresh `prompt_regression --repeat 3` baseline on `qwen3-coder-plus`: once the target function is known, hosted Qwen is now explicitly steered away from repeated shell listing loops and toward direct file-tool edit+verify cycles (especially on `wrong_first_edit_recovery`).
 - Added a narrow Alibaba+Kimi Milestone 4 overlay refinement from `prompt_regression --repeat 3` failure shape: hosted Kimi now gets explicit direct-edit (no diagnosis-only stop), first-try-correct recovery discipline, and one-shot tuple guidance for `tool_choice_discipline`.
 - Finalized the Alibaba+MiniMax Milestone 3 overlay with stronger but more generic execution guidance: hosted MiniMax models are now steered toward assertion-led direct edits, immediate reruns of the same verification command, minimal normalization changes without brittle fallback paths, and atomic direct-tool updates for default-value fixes.

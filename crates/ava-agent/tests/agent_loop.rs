@@ -196,13 +196,12 @@ impl LLMProvider for UsageMockProvider {
     }
 }
 
-fn build_loop(responses: Vec<String>, token_limit: usize, max_turns: usize) -> AgentLoop {
-    let mut tools = ToolRegistry::new();
-    tools.register(NoopTool { name: "echo" });
-    tools.register(NoopTool {
-        name: "attempt_completion",
-    });
-
+fn build_loop_with_tools(
+    responses: Vec<String>,
+    tools: ToolRegistry,
+    token_limit: usize,
+    max_turns: usize,
+) -> AgentLoop {
     AgentLoop::new(
         Box::new(MockLLMProvider::new(responses)),
         tools,
@@ -232,6 +231,15 @@ fn build_loop(responses: Vec<String>, token_limit: usize, max_turns: usize) -> A
             is_subagent: false,
         },
     )
+}
+
+fn build_loop(responses: Vec<String>, token_limit: usize, max_turns: usize) -> AgentLoop {
+    let mut tools = ToolRegistry::new();
+    tools.register(NoopTool { name: "echo" });
+    tools.register(NoopTool {
+        name: "attempt_completion",
+    });
+    build_loop_with_tools(responses, tools, token_limit, max_turns)
 }
 
 #[tokio::test]
@@ -272,6 +280,536 @@ async fn natural_completion_on_text_only_response() {
             .count(),
         1
     );
+}
+
+#[tokio::test]
+async fn natural_completion_allows_honest_no_files_changed_statement() {
+    let mut loop_engine = build_loop(
+        vec!["I investigated the issue and no files were changed.".to_string()],
+        1_000,
+        5,
+    );
+
+    let session = loop_engine
+        .run("check the project")
+        .await
+        .expect("run should succeed");
+
+    let assistant_messages: Vec<_> = session
+        .messages
+        .iter()
+        .filter(|message| message.role == ava_types::Role::Assistant)
+        .collect();
+    assert_eq!(
+        assistant_messages.len(),
+        1,
+        "honest negative should complete"
+    );
+    assert!(assistant_messages[0]
+        .content
+        .contains("no files were changed"));
+
+    assert!(!session.messages.iter().any(|message| {
+        message.role == ava_types::Role::User
+            && !message.user_visible
+            && message
+                .content
+                .contains("no successful matching tool result")
+    }));
+}
+
+#[tokio::test]
+async fn natural_completion_allows_honest_no_todo_changes_statement() {
+    let mut loop_engine = build_loop(
+        vec!["I did not change the todo list.".to_string()],
+        1_000,
+        5,
+    );
+
+    let session = loop_engine
+        .run("track checklist state")
+        .await
+        .expect("run should succeed");
+
+    let assistant_messages: Vec<_> = session
+        .messages
+        .iter()
+        .filter(|message| message.role == ava_types::Role::Assistant)
+        .collect();
+    assert_eq!(
+        assistant_messages.len(),
+        1,
+        "honest negative should complete"
+    );
+    assert!(assistant_messages[0]
+        .content
+        .contains("did not change the todo list"));
+
+    assert!(!session.messages.iter().any(|message| {
+        message.role == ava_types::Role::User
+            && !message.user_visible
+            && message
+                .content
+                .contains("no successful matching tool result")
+    }));
+}
+
+#[tokio::test]
+async fn natural_completion_allows_generic_source_code_phrase_without_file_claim() {
+    let mut loop_engine = build_loop(
+        vec![
+            "I changed approach after reviewing the source code and documented the likely fix."
+                .to_string(),
+        ],
+        1_000,
+        5,
+    );
+
+    let session = loop_engine
+        .run("investigate only")
+        .await
+        .expect("run should succeed");
+
+    let assistant_messages: Vec<_> = session
+        .messages
+        .iter()
+        .filter(|message| message.role == ava_types::Role::Assistant)
+        .collect();
+    assert_eq!(
+        assistant_messages.len(),
+        1,
+        "generic source/code phrase should not trigger file-claim guard"
+    );
+
+    assert!(!session.messages.iter().any(|message| {
+        message.role == ava_types::Role::User
+            && !message.user_visible
+            && message
+                .content
+                .contains("no successful matching tool result")
+    }));
+}
+
+#[tokio::test]
+async fn natural_completion_rejects_ungrounded_file_claims() {
+    let mut loop_engine = build_loop(
+        vec![
+            "Updated src/lib.rs with the fix.".to_string(),
+            "I inspected the code and found the likely fix, but I did not change files."
+                .to_string(),
+        ],
+        1_000,
+        5,
+    );
+
+    let session = loop_engine
+        .run("check the project")
+        .await
+        .expect("run should succeed");
+
+    let assistant_messages: Vec<_> = session
+        .messages
+        .iter()
+        .filter(|message| message.role == ava_types::Role::Assistant)
+        .collect();
+    assert_eq!(
+        assistant_messages.len(),
+        2,
+        "guard should force another turn"
+    );
+    assert!(assistant_messages[0].content.contains("Updated src/lib.rs"));
+    assert!(assistant_messages[1]
+        .content
+        .contains("did not change files"));
+
+    let nudge = session
+        .messages
+        .iter()
+        .find(|message| {
+            message.role == ava_types::Role::User
+                && !message.user_visible
+                && message
+                    .content
+                    .contains("no successful matching tool result")
+        })
+        .expect("expected hidden grounding nudge");
+    assert!(nudge
+        .content
+        .contains("Do not claim actions that were not executed"));
+}
+
+#[tokio::test]
+async fn natural_completion_allows_grounded_file_claim_after_successful_write() {
+    let mut tools = ToolRegistry::new();
+    tools.register(RecordingTool {
+        name: "write",
+        calls: Arc::new(Mutex::new(Vec::new())),
+        result: ToolResult {
+            call_id: "call_write".to_string(),
+            content: "Wrote 1 lines to src/lib.rs".to_string(),
+            is_error: false,
+        },
+    });
+
+    let mut loop_engine = build_loop_with_tools(
+        vec![
+            json!({
+                "tool_call": {
+                    "name": "write",
+                    "arguments": {"path": "src/lib.rs", "content": "updated"}
+                }
+            })
+            .to_string(),
+            "I updated src/lib.rs with the requested change.".to_string(),
+            "should not be consumed".to_string(),
+        ],
+        tools,
+        10_000,
+        5,
+    );
+
+    let session = loop_engine
+        .run("write the fix")
+        .await
+        .expect("run should succeed");
+
+    let assistant_messages: Vec<_> = session
+        .messages
+        .iter()
+        .filter(|message| message.role == ava_types::Role::Assistant)
+        .collect();
+    assert_eq!(
+        assistant_messages.len(),
+        2,
+        "grounded natural completion should end after write + claim"
+    );
+    assert_eq!(
+        assistant_messages[1].content,
+        "I updated src/lib.rs with the requested change."
+    );
+
+    assert!(!session.messages.iter().any(|message| {
+        message.role == ava_types::Role::User
+            && !message.user_visible
+            && message
+                .content
+                .contains("no successful matching tool result")
+    }));
+
+    let tool_message = session
+        .messages
+        .iter()
+        .find(|message| message.role == ava_types::Role::Tool)
+        .expect("tool message should be present");
+    assert!(tool_message.content.contains("Wrote 1 lines to src/lib.rs"));
+}
+
+#[tokio::test]
+async fn natural_completion_caps_repeated_ungrounded_claim_retries() {
+    let mut loop_engine = build_loop(
+        vec![
+            "Updated src/lib.rs with the fix.".to_string(),
+            "Updated src/lib.rs with the fix again.".to_string(),
+            "third response should not be consumed".to_string(),
+        ],
+        1_000,
+        10,
+    );
+
+    let session = loop_engine
+        .run("check the project")
+        .await
+        .expect("run should succeed");
+
+    let assistant_messages: Vec<_> = session
+        .messages
+        .iter()
+        .filter(|message| message.role == ava_types::Role::Assistant)
+        .collect();
+    assert_eq!(
+        assistant_messages.len(),
+        3,
+        "guard should stop on second rejection"
+    );
+    assert!(assistant_messages[2]
+        .content
+        .contains("Stopping here because the run repeatedly claimed file edits or writes"));
+    assert!(!assistant_messages.iter().any(|message| message
+        .content
+        .contains("third response should not be consumed")));
+
+    let nudge_count = session
+        .messages
+        .iter()
+        .filter(|message| {
+            message.role == ava_types::Role::User
+                && !message.user_visible
+                && message
+                    .content
+                    .contains("no successful matching tool result")
+        })
+        .count();
+    assert_eq!(nudge_count, 1, "guard should only retry once");
+}
+
+#[tokio::test]
+async fn attempt_completion_rejects_ungrounded_claims() {
+    let mut loop_engine = build_loop(
+        vec![
+            json!({
+                "tool_call": {
+                    "name": "attempt_completion",
+                    "arguments": {"result": "Updated src/lib.rs and the todo list."}
+                }
+            })
+            .to_string(),
+            "I only inspected the files and did not change them.".to_string(),
+        ],
+        1_000,
+        5,
+    );
+
+    let session = loop_engine
+        .run("finish honestly")
+        .await
+        .expect("run should succeed");
+
+    let assistant_messages: Vec<_> = session
+        .messages
+        .iter()
+        .filter(|message| message.role == ava_types::Role::Assistant)
+        .collect();
+    assert_eq!(
+        assistant_messages.len(),
+        2,
+        "attempt_completion should be rejected"
+    );
+    assert!(assistant_messages[1]
+        .content
+        .contains("I only inspected the files and did not change them."));
+
+    assert!(session.messages.iter().any(|message| {
+        message.role == ava_types::Role::User
+            && !message.user_visible
+            && message.content.contains("todo updates")
+    }));
+}
+
+#[tokio::test]
+async fn attempt_completion_rejects_ungrounded_file_claim_after_failed_write() {
+    let mut tools = ToolRegistry::new();
+    tools.register(RecordingTool {
+        name: "write",
+        calls: Arc::new(Mutex::new(Vec::new())),
+        result: ToolResult {
+            call_id: "call_write".to_string(),
+            content: "write failed: permission denied".to_string(),
+            is_error: true,
+        },
+    });
+    tools.register(NoopTool {
+        name: "attempt_completion",
+    });
+
+    let mut loop_engine = build_loop_with_tools(
+        vec![
+            json!({
+                "tool_call": {
+                    "name": "write",
+                    "arguments": {"file_path": "src/lib.rs", "content": "updated"}
+                }
+            })
+            .to_string(),
+            json!({
+                "tool_call": {
+                    "name": "attempt_completion",
+                    "arguments": {"result": "Updated src/lib.rs with the fix."}
+                }
+            })
+            .to_string(),
+            "I attempted a write, but it failed, so no files were changed.".to_string(),
+        ],
+        tools,
+        10_000,
+        5,
+    );
+
+    let session = loop_engine
+        .run("make the write")
+        .await
+        .expect("run should succeed");
+
+    assert!(session.messages.iter().any(|message| {
+        message.role == ava_types::Role::User
+            && !message.user_visible
+            && message.content.contains("file edits or writes")
+    }));
+    assert!(session.messages.iter().any(|message| {
+        message.role == ava_types::Role::Tool
+            && message.tool_results.iter().any(|result| result.is_error)
+    }));
+
+    let assistant_messages: Vec<_> = session
+        .messages
+        .iter()
+        .filter(|message| message.role == ava_types::Role::Assistant)
+        .collect();
+    assert!(assistant_messages
+        .last()
+        .expect("expected assistant reply")
+        .content
+        .contains("it failed, so no files were changed"));
+}
+
+#[tokio::test]
+async fn attempt_completion_rejects_ungrounded_mixed_claim_when_only_file_edit_succeeded() {
+    let mut tools = ToolRegistry::new();
+    tools.register(RecordingTool {
+        name: "edit",
+        calls: Arc::new(Mutex::new(Vec::new())),
+        result: ToolResult {
+            call_id: "call_edit".to_string(),
+            content: "Applied exact_match; changed 1 lines".to_string(),
+            is_error: false,
+        },
+    });
+    tools.register(NoopTool {
+        name: "attempt_completion",
+    });
+
+    let mut loop_engine = build_loop_with_tools(
+        vec![
+            json!({
+                "tool_call": {
+                    "name": "edit",
+                    "arguments": {"path": "src/lib.rs", "old_text": "a", "new_text": "b"}
+                }
+            })
+            .to_string(),
+            json!({
+                "tool_call": {
+                    "name": "attempt_completion",
+                    "arguments": {"result": "Updated src/lib.rs and the todo list."}
+                }
+            })
+            .to_string(),
+            "I updated src/lib.rs, but I did not change the todo list.".to_string(),
+        ],
+        tools,
+        10_000,
+        5,
+    );
+
+    let session = loop_engine
+        .run("finish honestly")
+        .await
+        .expect("run should succeed");
+
+    let nudge = session
+        .messages
+        .iter()
+        .find(|message| {
+            message.role == ava_types::Role::User
+                && !message.user_visible
+                && message
+                    .content
+                    .contains("no successful matching tool result")
+        })
+        .expect("expected hidden grounding nudge");
+    assert!(nudge.content.contains("todo updates"));
+    assert!(!nudge.content.contains("file edits or writes"));
+
+    let assistant_messages: Vec<_> = session
+        .messages
+        .iter()
+        .filter(|message| message.role == ava_types::Role::Assistant)
+        .collect();
+    assert!(assistant_messages
+        .last()
+        .expect("expected assistant reply")
+        .content
+        .contains("did not change the todo list"));
+}
+
+#[tokio::test]
+async fn attempt_completion_allows_grounded_file_claims_after_successful_edit() {
+    let mut tools = ToolRegistry::new();
+    tools.register(RecordingTool {
+        name: "edit",
+        calls: Arc::new(Mutex::new(Vec::new())),
+        result: ToolResult {
+            call_id: "call_edit".to_string(),
+            content: "Applied exact_match; changed 1 lines".to_string(),
+            is_error: false,
+        },
+    });
+    tools.register(NoopTool {
+        name: "attempt_completion",
+    });
+
+    let mut loop_engine = AgentLoop::new(
+        Box::new(MockLLMProvider::new(vec![
+            json!({
+                "tool_call": {
+                    "name": "edit",
+                    "arguments": {"path": "src/lib.rs", "old_text": "a", "new_text": "b"}
+                }
+            })
+            .to_string(),
+            json!({
+                "tool_call": {
+                    "name": "attempt_completion",
+                    "arguments": {"result": "Updated src/lib.rs with the fix."}
+                }
+            })
+            .to_string(),
+        ])),
+        tools,
+        ContextManager::new(10_000),
+        AgentConfig {
+            max_turns: 5,
+            token_limit: 10_000,
+            provider: String::new(),
+            model: "mock-model".to_string(),
+            max_budget_usd: 0.0,
+            max_cost_usd: 10.0,
+            loop_detection: true,
+            custom_system_prompt: None,
+            thinking_level: ava_types::ThinkingLevel::Off,
+            thinking_budget_tokens: None,
+            system_prompt_suffix: None,
+            benchmark_prompt_override: None,
+            project_root: None,
+            enable_dynamic_rules: false,
+            extended_tools: false,
+            plan_mode: false,
+            post_edit_validation: None,
+            auto_compact: true,
+            stream_timeout_secs: 90,
+            prompt_caching: true,
+            headless: false,
+            is_subagent: false,
+        },
+    );
+
+    let session = loop_engine
+        .run("make the edit")
+        .await
+        .expect("run should succeed");
+
+    let assistant_messages: Vec<_> = session
+        .messages
+        .iter()
+        .filter(|message| message.role == ava_types::Role::Assistant)
+        .collect();
+    assert_eq!(assistant_messages.len(), 2);
+    assert!(!session.messages.iter().any(|message| {
+        message.role == ava_types::Role::User
+            && !message.user_visible
+            && message
+                .content
+                .contains("no successful matching tool result")
+    }));
 }
 
 #[tokio::test]

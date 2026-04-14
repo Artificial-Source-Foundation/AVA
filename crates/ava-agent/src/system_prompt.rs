@@ -699,7 +699,7 @@ pub fn build_system_prompt_with_override(
     if native_tools && tool_visibility_profile != crate::routing::ToolVisibilityProfile::AnswerOnly
     {
         static_prefix.push_str(
-            "\n# Tool use\nUse the provided native tool/function calling interface for tool interactions.\n",
+            "\n# Tool use\nUse the provided native tool/function calling interface for tool interactions.\nNever claim to have written, edited, created, deleted, updated, or otherwise changed project state unless a matching tool call actually succeeded in this session. If no such tool ran, describe only what you inspected, inferred, or proposed.\n",
         );
     } else if !native_tools
         && tool_visibility_profile != crate::routing::ToolVisibilityProfile::AnswerOnly
@@ -710,7 +710,8 @@ pub fn build_system_prompt_with_override(
              ```json\n\
              {\"tool_calls\": [{\"name\": \"tool_name\", \"arguments\": {\"param\": \"value\"}}]}\n\
              ```\n\n\
-             Do NOT mix tool calls with natural text.\n\n",
+             Do NOT mix tool calls with natural text.\n\
+             Never claim file edits, file writes, todo updates, or other project changes unless matching tool calls actually succeeded in this session.\n\n",
         );
 
         for tool in tools {
@@ -730,7 +731,8 @@ pub fn build_system_prompt_with_override(
         static_prefix.push_str("\n### attempt_completion\n");
         static_prefix.push_str(
             "Call this when you have completed the task. \
-             Parameters: {\"result\": \"description of what you did\"}\n",
+             Parameters: {\"result\": \"description of what you did\"}\n\
+             The result must describe only work backed by successful tool calls from this session. Do not claim edits, writes, todo updates, or similar actions that were not actually executed.\n",
         );
     }
 
@@ -851,6 +853,22 @@ mod tests {
             "prompt too long: {} chars",
             prompt.len()
         );
+    }
+
+    #[test]
+    fn prompt_includes_grounded_action_rule() {
+        let tools = mock_tools();
+        let prompt = build_system_prompt(
+            &tools,
+            true,
+            ProviderKind::OpenAI,
+            "gpt-5.4",
+            crate::routing::ToolVisibilityProfile::Full,
+        )
+        .full_prompt();
+
+        assert!(prompt.contains("matching tool call actually succeeded"));
+        assert!(prompt.contains("work backed by successful tool calls"));
     }
 
     #[test]

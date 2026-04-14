@@ -5,6 +5,7 @@
 //! messages transforms and chat params, plus completion detection helpers
 //! (turn/budget limits, natural completion, attempt_completion).
 
+use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
 use ava_llm::ThinkingConfig;
@@ -99,7 +100,297 @@ fn estimate_tokens(text: &str) -> usize {
     ava_context::count_tokens_default(text)
 }
 
+const FILE_MUTATION_TOOLS: &[&str] = &["write", "edit", "multiedit", "apply_patch"];
+const TODO_MUTATION_TOOLS: &[&str] = &["todo_write"];
+const MAX_UNGROUNDED_COMPLETION_REJECTIONS: usize = 1;
+const MUTATION_VERBS: &[&str] = &[
+    "wrote",
+    "written",
+    "edited",
+    "updated",
+    "modified",
+    "changed",
+    "patched",
+    "created",
+    "added",
+    "deleted",
+    "removed",
+    "rewrote",
+    "saved",
+    "implemented",
+];
+const FILE_TARGET_MARKERS: &[&str] = &["file", "files", "patch"];
+const TODO_TARGET_MARKERS: &[&str] = &["todo", "todos", "todo list", "checklist", "task list"];
+const CODE_FILE_EXTENSIONS: &[&str] = &[
+    ".rs", ".toml", ".md", ".json", ".yaml", ".yml", ".ts", ".tsx", ".js", ".jsx", ".py", ".go",
+    ".java", ".c", ".cc", ".cpp", ".h", ".hpp", ".css", ".html", ".sql",
+];
+const GROUNDING_GUARD_NUDGE_MATCH: &str = "no successful matching tool result for that claim";
+const FILE_MUTATION_NEGATION_MARKERS: &[&str] = &[
+    "no files were changed",
+    "no file was changed",
+    "no files changed",
+    "no file changed",
+    "did not change files",
+    "didn't change files",
+    "did not change any files",
+    "didn't change any files",
+    "did not modify files",
+    "didn't modify files",
+    "did not edit files",
+    "didn't edit files",
+    "did not update files",
+    "didn't update files",
+    "without changing files",
+    "no changes were made",
+    "no code changes were made",
+    "no source changes were made",
+];
+const TODO_MUTATION_NEGATION_MARKERS: &[&str] = &[
+    "no todo changes were made",
+    "no todo list changes were made",
+    "no todo list was changed",
+    "no todo list has changed",
+    "did not change the todo list",
+    "didn't change the todo list",
+    "did not change any todo list",
+    "didn't change any todo list",
+    "did not update the todo list",
+    "didn't update the todo list",
+    "did not update todo list",
+    "didn't update todo list",
+    "did not change the todo",
+    "didn't change the todo",
+];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CompletionClaimGuardOutcome {
+    Allow,
+    Retry,
+    Stop,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CompletionClaimCategory {
+    FileMutation,
+    TodoMutation,
+}
+
+impl CompletionClaimCategory {
+    fn label(self) -> &'static str {
+        match self {
+            Self::FileMutation => "file edits or writes",
+            Self::TodoMutation => "todo updates",
+        }
+    }
+
+    fn required_tools(self) -> &'static [&'static str] {
+        match self {
+            Self::FileMutation => FILE_MUTATION_TOOLS,
+            Self::TodoMutation => TODO_MUTATION_TOOLS,
+        }
+    }
+}
+
+fn contains_any(text: &str, needles: &[&str]) -> bool {
+    needles.iter().any(|needle| text.contains(needle))
+}
+
+fn looks_like_path_reference(text: &str) -> bool {
+    text.split(|ch: char| {
+        ch.is_whitespace() || matches!(ch, ',' | ';' | ':' | '(' | ')' | '[' | ']' | '{' | '}')
+    })
+    .map(|token| token.trim_matches(|ch: char| matches!(ch, '"' | '\'' | '`' | '.' | ',')))
+    .any(|token| {
+        !token.is_empty()
+            && (token.contains('/')
+                || CODE_FILE_EXTENSIONS
+                    .iter()
+                    .any(|extension| token.ends_with(extension)))
+    })
+}
+
+fn has_explicit_file_mutation_negation(text: &str) -> bool {
+    contains_any(text, FILE_MUTATION_NEGATION_MARKERS)
+}
+
+fn has_explicit_todo_mutation_negation(text: &str) -> bool {
+    contains_any(text, TODO_MUTATION_NEGATION_MARKERS)
+}
+
+fn claims_file_mutation(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    if has_explicit_file_mutation_negation(&lower) {
+        return false;
+    }
+
+    lower.contains("applied patch")
+        || (contains_any(&lower, MUTATION_VERBS)
+            && (contains_any(&lower, FILE_TARGET_MARKERS) || looks_like_path_reference(&lower)))
+}
+
+fn claims_todo_mutation(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    if has_explicit_todo_mutation_negation(&lower) {
+        return false;
+    }
+
+    contains_any(&lower, MUTATION_VERBS) && contains_any(&lower, TODO_TARGET_MARKERS)
+}
+
+fn successful_tool_names(session: &Session) -> HashSet<String> {
+    let mut call_names = HashMap::new();
+    for message in &session.messages {
+        if message.role != Role::Assistant {
+            continue;
+        }
+        for call in &message.tool_calls {
+            call_names.insert(call.id.clone(), call.name.clone());
+        }
+    }
+
+    let mut successful = HashSet::new();
+    for message in &session.messages {
+        if message.role != Role::Tool {
+            continue;
+        }
+        let message_call_id = message.tool_call_id.as_deref();
+        for result in &message.tool_results {
+            if result.is_error {
+                continue;
+            }
+            let call_id = message_call_id.unwrap_or(result.call_id.as_str());
+            if let Some(name) = call_names.get(call_id) {
+                successful.insert(name.clone());
+            }
+        }
+    }
+
+    successful
+}
+
+fn missing_completion_claim_grounding(
+    text: &str,
+    successful_tools: &HashSet<String>,
+) -> Vec<CompletionClaimCategory> {
+    let mut missing = Vec::new();
+
+    if claims_file_mutation(text)
+        && !CompletionClaimCategory::FileMutation
+            .required_tools()
+            .iter()
+            .any(|tool| successful_tools.contains(*tool))
+    {
+        missing.push(CompletionClaimCategory::FileMutation);
+    }
+
+    if claims_todo_mutation(text)
+        && !CompletionClaimCategory::TodoMutation
+            .required_tools()
+            .iter()
+            .any(|tool| successful_tools.contains(*tool))
+    {
+        missing.push(CompletionClaimCategory::TodoMutation);
+    }
+
+    missing
+}
+
+fn attempt_completion_result_text(tool_calls: &[ToolCall]) -> Option<&str> {
+    tool_calls
+        .iter()
+        .find(|call| call.name == "attempt_completion")
+        .and_then(|call| call.arguments.get("result"))
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+}
+
+fn format_grounding_guard_nudge(categories: &str) -> String {
+    format!(
+        "Your completion text claims {categories}, but this session has {GROUNDING_GUARD_NUDGE_MATCH}. Do not claim actions that were not executed. If you only inspected or planned work, say that instead. Otherwise run the needed tool first, then complete."
+    )
+}
+
+fn grounding_guard_retry_count(session: &Session) -> usize {
+    session
+        .messages
+        .iter()
+        .filter(|message| {
+            message.role == Role::User
+                && !message.user_visible
+                && message.content.contains(GROUNDING_GUARD_NUDGE_MATCH)
+        })
+        .count()
+}
+
+fn repeated_grounding_guard_stop_text(categories: &str) -> String {
+    format!(
+        "Stopping here because the run repeatedly claimed {categories} without a successful matching tool result. No verified completion covering those claims was produced in this session."
+    )
+}
+
 impl AgentLoop {
+    async fn reject_ungrounded_completion_claim(
+        &mut self,
+        claim_text: &str,
+        session: &mut Session,
+        event_tx: &Option<mpsc::UnboundedSender<AgentEvent>>,
+    ) -> CompletionClaimGuardOutcome {
+        let successful_tools = successful_tool_names(session);
+        let missing = missing_completion_claim_grounding(claim_text, &successful_tools);
+        if missing.is_empty() {
+            return CompletionClaimGuardOutcome::Allow;
+        }
+
+        let categories = missing
+            .iter()
+            .map(|category| category.label())
+            .collect::<Vec<_>>()
+            .join(" and ");
+        let prior_retries = grounding_guard_retry_count(session);
+        if prior_retries >= MAX_UNGROUNDED_COMPLETION_REJECTIONS {
+            warn!(
+                claim = claim_text,
+                categories = %categories,
+                prior_retries,
+                "stopping after repeated ungrounded completion claims"
+            );
+            let correction = Message::new(
+                Role::Assistant,
+                repeated_grounding_guard_stop_text(&categories),
+            );
+            self.context.add_message(correction.clone());
+            session.add_message(correction);
+            Self::emit(
+                event_tx,
+                AgentEvent::Progress(
+                    "stopping after repeated ungrounded completion claims".to_string(),
+                ),
+            );
+            return CompletionClaimGuardOutcome::Stop;
+        }
+
+        warn!(
+            claim = claim_text,
+            categories = %categories,
+            prior_retries,
+            "rejecting ungrounded completion claim"
+        );
+
+        let mut nudge = Message::new(Role::User, format_grounding_guard_nudge(&categories));
+        nudge.user_visible = false;
+        self.context.add_message(nudge.clone());
+        session.add_message(nudge);
+        Self::emit(
+            event_tx,
+            AgentEvent::Progress(
+                "nudging agent to ground completion claims in successful tool results".to_string(),
+            ),
+        );
+        CompletionClaimGuardOutcome::Retry
+    }
+
     /// Inject the system prompt into the context before the first turn.
     /// Idempotent: calling this multiple times (e.g., follow-up runs) is safe.
     ///
@@ -791,6 +1082,25 @@ impl AgentLoop {
             return false; // Continue looping
         }
 
+        match self
+            .reject_ungrounded_completion_claim(response_text, session, event_tx)
+            .await
+        {
+            CompletionClaimGuardOutcome::Allow => {}
+            CompletionClaimGuardOutcome::Retry => return false,
+            CompletionClaimGuardOutcome::Stop => {
+                session.token_usage = total_usage;
+                Self::emit(
+                    event_tx,
+                    AgentEvent::ToolStats(detector.tool_monitor().stats()),
+                );
+                let complete_event = AgentEvent::Complete(session.clone());
+                Self::emit(event_tx, complete_event.clone());
+                self.broadcast_event_to_plugins(&complete_event).await;
+                return true;
+            }
+        }
+
         info!(
             text_len = response_text.len(),
             "natural completion — no tool calls"
@@ -827,7 +1137,7 @@ impl AgentLoop {
 
     /// Emit completion events for attempt_completion tool call.
     pub(super) async fn handle_attempt_completion(
-        &self,
+        &mut self,
         tool_calls: &[ToolCall],
         session: &mut Session,
         total_usage: TokenUsage,
@@ -840,6 +1150,28 @@ impl AgentLoop {
         if !completion_requested {
             return false;
         }
+
+        if let Some(result_text) = attempt_completion_result_text(tool_calls) {
+            match self
+                .reject_ungrounded_completion_claim(result_text, session, event_tx)
+                .await
+            {
+                CompletionClaimGuardOutcome::Allow => {}
+                CompletionClaimGuardOutcome::Retry => return false,
+                CompletionClaimGuardOutcome::Stop => {
+                    session.token_usage = total_usage;
+                    Self::emit(
+                        event_tx,
+                        AgentEvent::ToolStats(detector.tool_monitor().stats()),
+                    );
+                    let complete_event = AgentEvent::Complete(session.clone());
+                    Self::emit(event_tx, complete_event.clone());
+                    self.broadcast_event_to_plugins(&complete_event).await;
+                    return true;
+                }
+            }
+        }
+
         session.token_usage = total_usage;
         Self::emit(
             event_tx,

@@ -44,7 +44,8 @@ impl AgentStackConfig {
         max_turns: usize,
         max_budget_usd: f64,
         yolo: bool,
-        fast: bool,
+        include_project_instructions: bool,
+        eager_codebase_indexing: bool,
     ) -> Self {
         Self {
             data_dir,
@@ -53,8 +54,8 @@ impl AgentStackConfig {
             max_turns,
             max_budget_usd,
             yolo,
-            include_project_instructions: !fast,
-            eager_codebase_indexing: false,
+            include_project_instructions,
+            eager_codebase_indexing,
             discover_cli_agents: false,
             ..Self::default()
         }
@@ -201,8 +202,16 @@ mod tests {
 
     #[test]
     fn tui_preset_disables_expensive_startup_work() {
-        let cfg =
-            AgentStackConfig::for_tui(PathBuf::from("/tmp/ava"), None, None, 10, 5.0, false, false);
+        let cfg = AgentStackConfig::for_tui(
+            PathBuf::from("/tmp/ava"),
+            None,
+            None,
+            10,
+            5.0,
+            false,
+            true,
+            false,
+        );
         assert!(!cfg.eager_codebase_indexing);
         assert!(!cfg.discover_cli_agents);
         assert!(cfg.include_project_instructions);

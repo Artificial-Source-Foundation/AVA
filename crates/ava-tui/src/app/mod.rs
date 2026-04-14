@@ -366,6 +366,8 @@ impl App {
             None
         };
 
+        let runtime_lean = cli.runtime_lean_settings();
+
         let (agent, question_rx, approval_rx, plan_rx) = AgentState::new(
             data_dir.clone(),
             provider,
@@ -373,7 +375,8 @@ impl App {
             cli.max_turns,
             cli.max_budget_usd,
             cli.auto_approve,
-            cli.fast,
+            runtime_lean.include_project_instructions,
+            runtime_lean.eager_codebase_indexing,
         )
         .await?;
         let mcp_servers = agent.mcp_server_info().await.unwrap_or_default();

@@ -138,6 +138,49 @@ fn slash_opens_inline_autocomplete() {
 }
 
 #[test]
+fn slash_autocomplete_enter_executes_selected_command() {
+    let (mut app, _tmp) = make_app();
+
+    // Open inline autocomplete and move from default selection (/btw) to /help.
+    press_char(&mut app, '/');
+    assert_eq!(
+        app.state.input.autocomplete_selected_value().as_deref(),
+        Some("btw")
+    );
+    press(&mut app, KeyCode::Down);
+    assert_eq!(
+        app.state.input.autocomplete_selected_value().as_deref(),
+        Some("help"),
+        "Down should move selection to /help"
+    );
+
+    // Accept selected command directly from autocomplete with Enter and verify execution.
+    press(&mut app, KeyCode::Enter);
+    assert!(
+        app.state.input.autocomplete.is_none(),
+        "autocomplete should be dismissed after command execution"
+    );
+    assert_eq!(
+        app.state.input.buffer, "",
+        "input should be cleared after autocomplete execution"
+    );
+    assert_eq!(
+        app.state.active_modal,
+        Some(ModalType::InfoPanel),
+        "/help should execute and open the info panel modal"
+    );
+    let panel = app
+        .state
+        .info_panel
+        .as_ref()
+        .expect("info panel should be set by /help");
+    assert!(
+        panel.title.contains("Help"),
+        "info panel should show help title"
+    );
+}
+
+#[test]
 fn sidebar_toggles() {
     let (mut app, _tmp) = make_app();
     assert!(!app.state.show_sidebar, "sidebar should start hidden");

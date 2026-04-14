@@ -381,3 +381,4 @@ Progress:
 2. Keeping long-tail providers in core without official support quality.
 3. Preserving the current large settings model.
 4. Preserving stale docs just because they exist.
+1. Dependency security maintenance moved forward again: the repo lockfiles/manifests now clear the current npm/pnpm advisory set and refresh the fixable Rust advisories (`rand`, `bytes`, `time`, `quinn-proto`, `rustls-webpki`, `lru`, `lz4_flex`, plus the latest `tauri` 2.10 patch line). The only remaining blocker is the upstream-constrained Linux `glib` alert, because current `tauri 2.10.x` still pins `gtk 0.18` / `glib 0.18`.

@@ -87,7 +87,10 @@ impl SearchIndex {
             .parse_query(&query.query)
             .map_err(|e| CodebaseError::InvalidQuery(e.to_string()))?;
 
-        let docs = searcher.search(&parsed, &TopDocs::with_limit(query.max_results))?;
+        let docs = searcher.search(
+            &parsed,
+            &TopDocs::with_limit(query.max_results).order_by_score(),
+        )?;
         let mut hits = Vec::with_capacity(docs.len());
 
         for (score, address) in docs {

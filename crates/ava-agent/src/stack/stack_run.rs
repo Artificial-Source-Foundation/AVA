@@ -22,9 +22,8 @@ use ava_tools::core::{
     file_backup::new_backup_session, register_custom_tools_with_plugins, register_plan_tool,
     register_question_tool, register_task_tool, register_todo_tools,
 };
-use ava_tools::mcp_bridge::MCPBridgeTool;
 use ava_tools::permission_middleware::{convert_tool_source, SharedToolSources};
-use ava_tools::registry::{ToolRegistry, ToolSource};
+use ava_tools::registry::ToolRegistry;
 use ava_types::{
     AvaError, DelegationRecord, ExternalSessionLink, Result, Role, Session, ThinkingLevel,
 };
@@ -38,11 +37,38 @@ use super::stack_tools::{build_tool_registry_with_plugins, LlmSummarizer};
 use super::{AgentRunResult, AgentStack};
 use crate::agent_loop::{AgentConfig, AgentEvent, AgentLoop, LLM_STREAM_TIMEOUT_SECS};
 use crate::budget::BudgetTelemetry;
-use crate::routing::{analyze_task, analyze_task_full, EXPLICIT_DELEGATION_REASON};
+use crate::routing::{analyze_task, analyze_task_full_with_history, EXPLICIT_DELEGATION_REASON};
 
 const ADAPTIVE_DELEGATION_LOOKBACK: usize = 8;
 
 impl AgentStack {
+    pub(crate) async fn runtime_tool_access_profile(
+        &self,
+        goal: &str,
+        history: &[ava_types::Message],
+        images: &[ava_types::ImageContent],
+    ) -> (
+        ThinkingLevel,
+        bool,
+        crate::routing::ToolVisibilityProfile,
+        crate::routing::SubagentDelegationPolicy,
+    ) {
+        let thinking = *self.thinking_level.read().await;
+        let plan_mode = *self.plan_mode.read().await;
+        let task_analysis =
+            analyze_task_full_with_history(goal, history, images, thinking, plan_mode);
+        let delegation_policy = self
+            .adapt_delegation_policy(goal, task_analysis.delegation.clone())
+            .await;
+
+        (
+            thinking,
+            plan_mode,
+            task_analysis.tool_visibility,
+            delegation_policy,
+        )
+    }
+
     async fn adapt_delegation_policy(
         &self,
         goal: &str,
@@ -243,17 +269,13 @@ impl AgentStack {
         } else {
             self.max_turns // may also be 0 (unlimited)
         };
-        let thinking = *self.thinking_level.read().await;
+        let (thinking, plan_mode, tool_visibility_profile, delegation_policy) = self
+            .runtime_tool_access_profile(goal, &history, &images)
+            .await;
         let thinking_budget_tokens = cfg
             .llm
             .thinking_budgets
             .resolve(&resolved_provider_name, provider.model_name());
-        let plan_mode = *self.plan_mode.read().await;
-        let task_analysis = analyze_task_full(goal, &images, thinking, plan_mode);
-        let tool_visibility_profile = task_analysis.tool_visibility;
-        let delegation_policy = self
-            .adapt_delegation_policy(goal, task_analysis.delegation.clone())
-            .await;
         let startup_instruction_profile = if !self.include_project_instructions {
             crate::instructions::StartupInstructionProfile::None
         } else {
@@ -455,24 +477,7 @@ impl AgentStack {
                 register_task_tool(&mut registry, spawner);
             }
 
-            {
-                let mcp_guard = self.mcp.read().await;
-                if let Some(ref runtime) = *mcp_guard {
-                    for (server_name, tool_def) in &runtime.tools_with_source {
-                        let source = ToolSource::MCP {
-                            server: server_name.clone(),
-                        };
-                        registry.register_with_source(
-                            MCPBridgeTool::new(
-                                tool_def.clone(),
-                                runtime.caller.clone(),
-                                server_name,
-                            ),
-                            source,
-                        );
-                    }
-                }
-            }
+            self.register_enabled_runtime_mcp_tools(&mut registry).await;
 
             (registry, run_tool_sources, run_backup_session)
         };

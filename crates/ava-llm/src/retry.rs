@@ -136,7 +136,7 @@ impl RetryBudget {
                 let exponential = self
                     .base_delay
                     .saturating_mul(1u32 << (attempt - 1).min(30));
-                let jitter_factor = rand::thread_rng().gen_range(0.8..=1.2);
+                let jitter_factor = rand::rng().random_range(0.8..=1.2);
                 let delay = exponential.mul_f64(jitter_factor);
                 Some(delay.min(self.max_delay))
             }
@@ -154,7 +154,7 @@ impl RetryBudget {
                 let exponential = self
                     .base_delay
                     .saturating_mul(1u32 << (attempt.min(30).saturating_sub(1)) as u32);
-                let jitter_factor = rand::thread_rng().gen_range(0.8..=1.2);
+                let jitter_factor = rand::rng().random_range(0.8..=1.2);
                 let delay = exponential.mul_f64(jitter_factor);
                 Some(delay.min(PERSISTENT_MAX_DELAY))
             }
@@ -188,7 +188,7 @@ impl RetryBudget {
                     Some(hint) => hint.max(exponential),
                     None => exponential,
                 };
-                let jitter_factor = rand::thread_rng().gen_range(0.8..=1.2);
+                let jitter_factor = rand::rng().random_range(0.8..=1.2);
                 let delay = base.mul_f64(jitter_factor);
                 Some(delay.min(self.max_delay))
             }
@@ -209,7 +209,7 @@ impl RetryBudget {
                     Some(hint) => hint.max(exponential),
                     None => exponential,
                 };
-                let jitter_factor = rand::thread_rng().gen_range(0.8..=1.2);
+                let jitter_factor = rand::rng().random_range(0.8..=1.2);
                 let delay = base.mul_f64(jitter_factor);
                 Some(delay.min(PERSISTENT_MAX_DELAY))
             }

@@ -160,3 +160,5 @@ Release polish, documentation, and E2E test matrix.
 
 ### Removed
 - Migration-era backlog and architecture docs no longer relevant to v2 release.
+- Refreshed dependency security baselines across the repo: the frontend/tooling lockfile now resolves the open `dompurify`, `markdown-it`, `picomatch`, `rollup`, `vite`, `flatted`, `minimatch`, `brace-expansion`, `ajv`, `smol-toml`, and `yaml` advisories via direct version bumps plus targeted pnpm overrides, while the Rust manifests/lockfiles now move `rand`, `bytes`, `time`, `quinn-proto`, `rustls-webpki`, `lru`, and `lz4_flex` forward to non-alerted versions where the current dependency graph allows it.
+- Raised the workspace Rust baseline to 1.86 so AVA can take the current secure `ratatui 0.30` and `tantivy 0.26` lines that clear the remaining `lru`/`lz4_flex` dependency alerts in the core workspace and desktop app.

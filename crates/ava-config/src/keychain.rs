@@ -525,8 +525,8 @@ fn encrypt_store(store: &CredentialStore, password: &str) -> Result<EncryptedEnv
     // Generate random salt and nonce
     let mut salt = [0u8; SALT_SIZE];
     let mut nonce_bytes = [0u8; NONCE_SIZE];
-    rand::thread_rng().fill_bytes(&mut salt);
-    rand::thread_rng().fill_bytes(&mut nonce_bytes);
+    rand::rng().fill_bytes(&mut salt);
+    rand::rng().fill_bytes(&mut nonce_bytes);
 
     // Derive key from password using PBKDF2-HMAC-SHA256
     let mut key = [0u8; 32];

@@ -140,13 +140,12 @@ impl Tool for TaskTool {
                 mode = "background",
                 "spawning background sub-agent"
             );
-            let session_id = self.spawner.spawn_background(agent_type, prompt).await?;
+            self.spawner.spawn_background(agent_type, prompt).await?;
             Ok(ToolResult {
                 call_id: String::new(),
-                content: format!(
-                    "Background sub-agent launched (session: {session_id}). \
+                content: "Background sub-agent launched. \
                      You will be notified when it completes. Continue with other work."
-                ),
+                    .to_string(),
                 is_error: false,
             })
         } else {

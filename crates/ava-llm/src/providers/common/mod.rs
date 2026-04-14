@@ -306,7 +306,7 @@ fn compute_retry_delay(
         Some(hint) => hint.max(exponential),
         None => exponential,
     };
-    let jitter_factor = rand::thread_rng().gen_range(0.8..=1.2);
+    let jitter_factor = rand::rng().random_range(0.8..=1.2);
     base.mul_f64(jitter_factor).min(max_delay)
 }
 

@@ -181,3 +181,5 @@ Docs must always reflect the current codebase. Never let them drift.
 `AGENTS.md` owns workflow, conventions, and architectural guidance. `docs/project/roadmap.md` owns product direction.
 
 For the full docs index including reference material, see `README.md` and `docs/README.md`.
+
+Current workspace Rust baseline: `rust-version = 1.86`.

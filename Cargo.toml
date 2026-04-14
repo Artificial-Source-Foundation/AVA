@@ -29,7 +29,7 @@ resolver = "2"
 [workspace.package]
 version = "3.3.0"
 edition = "2021"
-rust-version = "1.75"
+rust-version = "1.86"
 authors = ["ASF Group"]
 license = "MIT"
 repository = "https://github.com/Artificial-Source-Foundation/AVA"

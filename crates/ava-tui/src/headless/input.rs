@@ -1,5 +1,8 @@
 use crate::config::cli::CliArgs;
-use ava_types::{MessageTier, QueuedMessage};
+use ava_agent::control_plane::commands::{
+    queue_command_from_alias, queue_message_tier, ControlPlaneCommand,
+};
+use ava_types::QueuedMessage;
 use tokio::io::AsyncBufReadExt;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
@@ -10,7 +13,8 @@ pub(super) fn populate_queue_from_cli(cli: &CliArgs, tx: &mpsc::UnboundedSender<
         debug!(text = %msg, "Pre-queuing follow-up message from CLI");
         let _ = tx.send(QueuedMessage {
             text: msg.clone(),
-            tier: MessageTier::FollowUp,
+            tier: queue_message_tier(ControlPlaneCommand::FollowUpAgent, None)
+                .expect("follow-up command should map to a queue tier"),
         });
     }
 
@@ -19,7 +23,8 @@ pub(super) fn populate_queue_from_cli(cli: &CliArgs, tx: &mpsc::UnboundedSender<
         debug!(text = %msg, group, "Pre-queuing post-complete message from CLI");
         let _ = tx.send(QueuedMessage {
             text: msg.clone(),
-            tier: MessageTier::PostComplete { group },
+            tier: queue_message_tier(ControlPlaneCommand::PostCompleteAgent, Some(group))
+                .expect("post-complete command should map to a queue tier"),
         });
     }
 
@@ -30,7 +35,8 @@ pub(super) fn populate_queue_from_cli(cli: &CliArgs, tx: &mpsc::UnboundedSender<
                 debug!(text = %chunk[1], group, "Pre-queuing post-complete message (explicit group) from CLI");
                 let _ = tx.send(QueuedMessage {
                     text: chunk[1].clone(),
-                    tier: MessageTier::PostComplete { group },
+                    tier: queue_message_tier(ControlPlaneCommand::PostCompleteAgent, Some(group))
+                        .expect("post-complete command should map to a queue tier"),
                 });
             } else {
                 eprintln!(
@@ -69,7 +75,8 @@ pub(super) fn parse_stdin_message(line: &str) -> Option<QueuedMessage> {
             }
             Some(QueuedMessage {
                 text,
-                tier: MessageTier::PostComplete { group },
+                tier: queue_message_tier(ControlPlaneCommand::PostCompleteAgent, Some(group))
+                    .expect("post-complete command should map to a queue tier"),
             })
         } else {
             let text = rest.to_string();
@@ -78,7 +85,8 @@ pub(super) fn parse_stdin_message(line: &str) -> Option<QueuedMessage> {
             }
             Some(QueuedMessage {
                 text,
-                tier: MessageTier::PostComplete { group: 1 },
+                tier: queue_message_tier(ControlPlaneCommand::PostCompleteAgent, Some(1))
+                    .expect("post-complete command should map to a queue tier"),
             })
         }
     } else if let Some(rest) = line.strip_prefix('>') {
@@ -88,7 +96,8 @@ pub(super) fn parse_stdin_message(line: &str) -> Option<QueuedMessage> {
         }
         Some(QueuedMessage {
             text,
-            tier: MessageTier::FollowUp,
+            tier: queue_message_tier(ControlPlaneCommand::FollowUpAgent, None)
+                .expect("follow-up command should map to a queue tier"),
         })
     } else if let Some(rest) = line.strip_prefix('!') {
         let text = rest.trim().to_string();
@@ -97,12 +106,14 @@ pub(super) fn parse_stdin_message(line: &str) -> Option<QueuedMessage> {
         }
         Some(QueuedMessage {
             text,
-            tier: MessageTier::Steering,
+            tier: queue_message_tier(ControlPlaneCommand::SteerAgent, None)
+                .expect("steer command should map to a queue tier"),
         })
     } else {
         Some(QueuedMessage {
             text: line.to_string(),
-            tier: MessageTier::Steering,
+            tier: queue_message_tier(ControlPlaneCommand::SteerAgent, None)
+                .expect("steer command should map to a queue tier"),
         })
     }
 }
@@ -114,15 +125,12 @@ pub(super) fn parse_json_stdin_message(line: &str) -> Option<QueuedMessage> {
         return None;
     }
     let tier_str = v.get("tier").and_then(|t| t.as_str()).unwrap_or("steering");
-    let tier = match tier_str {
-        "steering" => MessageTier::Steering,
-        "follow-up" | "followup" | "follow_up" => MessageTier::FollowUp,
-        "post-complete" | "postcomplete" | "post_complete" => {
-            let group = v.get("group").and_then(|g| g.as_u64()).unwrap_or(1) as u32;
-            MessageTier::PostComplete { group }
-        }
-        _ => MessageTier::Steering,
-    };
+    let command = queue_command_from_alias(tier_str).unwrap_or(ControlPlaneCommand::SteerAgent);
+    let group = v
+        .get("group")
+        .and_then(|g| g.as_u64())
+        .map(|value| value as u32);
+    let tier = queue_message_tier(command, group).expect("queue command should map to a tier");
     Some(QueuedMessage { text, tier })
 }
 

@@ -105,8 +105,8 @@ describe('storeOAuthCredentials', () => {
   beforeEach(() => localStorage.clear())
   afterEach(() => localStorage.clear())
 
-  it('stores credentials in localStorage', () => {
-    storeOAuthCredentials('openai', { accessToken: 'tok-abc' })
+  it('stores credentials in localStorage', async () => {
+    await storeOAuthCredentials('openai', { accessToken: 'tok-abc' })
     const raw = localStorage.getItem('ava_credentials')
     expect(raw).not.toBeNull()
     const parsed = JSON.parse(raw!)
@@ -116,9 +116,9 @@ describe('storeOAuthCredentials', () => {
     expect(localStorage.getItem('ava_credentials')).toBe(raw)
   })
 
-  it('stores multiple providers without overwriting', () => {
-    storeOAuthCredentials('openai', { accessToken: 'tok-o' })
-    storeOAuthCredentials('copilot', { accessToken: 'tok-c' })
+  it('stores multiple providers without overwriting', async () => {
+    await storeOAuthCredentials('openai', { accessToken: 'tok-o' })
+    await storeOAuthCredentials('copilot', { accessToken: 'tok-c' })
     const parsed = JSON.parse(localStorage.getItem('ava_credentials')!)
     expect(parsed.openai.value).toBe('tok-o')
     expect(parsed.copilot.value).toBe('tok-c')
@@ -211,8 +211,11 @@ describe('startOAuthFlow', () => {
     expect(url).toContain('code_challenge_method=S256')
 
     // Tokens returned
-    expect('accessToken' in result).toBe(true)
-    const tokens = result as import('./oauth').OAuthTokens
+    expect(result.kind).toBe('connected')
+    if (result.kind !== 'connected') {
+      throw new Error('Expected connected OAuth result')
+    }
+    const tokens = result.tokens
     expect(tokens.accessToken).toBe('oauth-access-tok')
 
     vi.unstubAllGlobals()
@@ -223,8 +226,11 @@ describe('startOAuthFlow', () => {
 
     const result = await startOAuthFlow('copilot')
     expect(result).toBeDefined()
-    expect('deviceCode' in result).toBe(true)
-    const deviceResult = result as import('./oauth').DeviceCodeResponse
+    expect(result.kind).toBe('pending')
+    if (result.kind !== 'pending') {
+      throw new Error('Expected pending device-code OAuth result')
+    }
+    const deviceResult = result.deviceCode
     expect(deviceResult.deviceCode).toBe('DC-123')
     expect(deviceResult.userCode).toBe('ABCD-1234')
     expect(deviceResult.verificationUri).toBe('https://github.com/login/device')

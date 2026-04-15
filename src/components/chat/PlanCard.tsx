@@ -135,7 +135,7 @@ const StepNumber: Component<{ index: number; step: PlanStep }> = (props) => {
 }
 
 /** Status icon on the right side of a step row */
-const StepStatusIcon: Component<{ approved: boolean }> = (props) => (
+const StepStatusIcon: Component<{ approved?: boolean }> = (props) => (
   <Show
     when={props.approved}
     fallback={<Circle class="w-4 h-4 flex-shrink-0" style={{ color: 'var(--text-muted)' }} />}

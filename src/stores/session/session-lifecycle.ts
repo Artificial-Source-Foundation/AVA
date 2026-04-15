@@ -26,6 +26,7 @@ import {
 import { logDebug, logError, logInfo, logWarn } from '../../services/logger'
 import { rustAgent } from '../../services/rust-bridge'
 import type { Session, SessionWithStats } from '../../types'
+import type { ActiveSessionSyncSnapshot } from '../../types/rust-ipc'
 import { useProject } from '../project'
 import { getLastSessionForProject, setLastSessionForProject } from '../session-persistence'
 import { createLatestRequestGate } from './request-gate'
@@ -100,6 +101,25 @@ function hydrateSessionArtifacts(result: {
   })
 }
 
+function buildDesktopSessionSnapshot(
+  session: Pick<Session, 'name'>,
+  messages: Awaited<ReturnType<typeof getMessages>>
+): ActiveSessionSyncSnapshot {
+  return {
+    title: session.name,
+    messages: messages.map((message) => ({
+      id: message.id,
+      role: message.role,
+      content: message.content,
+      createdAt: message.createdAt,
+      images: message.images?.map((image) => ({
+        data: image.data,
+        mediaType: image.mimeType,
+      })),
+    })),
+  }
+}
+
 export async function loadSessionsForCurrentProject(): Promise<void> {
   const { currentProject } = useProject()
   const projectId = currentProject()?.id
@@ -149,14 +169,17 @@ export async function restoreForCurrentProject(): Promise<void> {
   await switchSession(restoreTarget.id)
 }
 
-export async function createNewSession(name?: string): Promise<Session> {
+export async function createNewSession(
+  name?: string,
+  projectIdOverride?: string
+): Promise<Session> {
   // Fire-and-forget cancel so a running agent from the previous session
   // doesn't block the new session with a 409 conflict.
   rustAgent.cancel().catch(() => {})
 
   const { currentProject } = useProject()
   const project = currentProject()
-  const projectId = project?.id
+  const projectId = projectIdOverride ?? project?.id
   const session = await dbCreateSession(name || DEFAULTS.SESSION_NAME, projectId)
   const sessionWithStats: SessionWithStats = { ...session, messageCount: 0, totalTokens: 0 }
 
@@ -172,7 +195,10 @@ export async function createNewSession(name?: string): Promise<Session> {
 
   const { currentProject: getProject } = useProject()
   const cwd = getProject()?.directory || '.'
-  notifySessionOpened(session.id, cwd)
+  await notifySessionOpened(session.id, cwd, buildDesktopSessionSnapshot(session, []))
+  if (currentSession()?.id !== session.id) {
+    return session
+  }
   localStorage.setItem(STORAGE_KEYS.LAST_SESSION, session.id)
   setLastSessionForProject(projectId, session.id)
   return session
@@ -191,6 +217,7 @@ export async function switchSession(id: string): Promise<void> {
   rustAgent.cancel().catch(() => {})
 
   const requestToken = sessionSwitchGate.begin()
+  let loadedMessages: Awaited<ReturnType<typeof getMessages>> = []
   setEditingMessageId(null)
   setRetryingMessageId(null)
   setCurrentSession(session)
@@ -213,6 +240,7 @@ export async function switchSession(id: string): Promise<void> {
     if (!sessionSwitchGate.isCurrent(requestToken) || currentSession()?.id !== id) {
       return
     }
+    loadedMessages = dbMessages
     log.debug('session', `switchSession: loaded ${dbMessages.length} messages from DB for ${id}`)
     hydrateSessionArtifacts({
       messages: dbMessages,
@@ -242,62 +270,33 @@ export async function switchSession(id: string): Promise<void> {
 
   const { currentProject: getProject } = useProject()
   const cwd = getProject()?.directory || '.'
-  notifySessionOpened(id, cwd)
+  await notifySessionOpened(id, cwd, buildDesktopSessionSnapshot(session, loadedMessages))
+  if (!sessionSwitchGate.isCurrent(requestToken) || currentSession()?.id !== id) {
+    return
+  }
   localStorage.setItem(STORAGE_KEYS.LAST_SESSION, id)
   const { currentProject } = useProject()
   setLastSessionForProject(currentProject()?.id, id)
 }
 
 /** Switch to most-recent or create new session after removal */
-async function switchAfterRemoval(projectId: string | undefined): Promise<void> {
+async function switchAfterRemoval(projectId?: string): Promise<void> {
   const remaining = sessions()
   if (remaining.length > 0) {
-    const mostRecent = remaining[0]
-    setCurrentSession(mostRecent)
-    resetSessionArtifacts()
-    setIsLoadingMessages(true)
-    try {
-      const [dbMessages, dbAgents, dbFileOps, dbTerminalExecs, dbMemItems, dbCheckpoints] =
-        await Promise.all([
-          getMessages(mostRecent.id),
-          getAgents(mostRecent.id),
-          getFileOperations(mostRecent.id),
-          getTerminalExecutions(mostRecent.id),
-          getMemoryItems(mostRecent.id),
-          getCheckpoints(mostRecent.id),
-        ])
-      if (currentSession()?.id !== mostRecent.id) {
-        return
-      }
-      hydrateSessionArtifacts({
-        messages: dbMessages,
-        agents: dbAgents,
-        fileOps: dbFileOps,
-        terminalExecutions: dbTerminalExecs,
-        memoryItems: dbMemItems,
-        checkpoints: dbCheckpoints,
-      })
-    } catch {
-      if (currentSession()?.id !== mostRecent.id) {
-        return
-      }
-      resetSessionArtifacts()
-    } finally {
-      if (currentSession()?.id === mostRecent.id) {
-        setIsLoadingMessages(false)
-      }
+    const replacement = projectId
+      ? remaining.find((session) => session.projectId === projectId)
+      : remaining.find((session) => session.projectId === undefined)
+
+    if (replacement) {
+      await switchSession(replacement.id)
+      return
     }
-    localStorage.setItem(STORAGE_KEYS.LAST_SESSION, mostRecent.id)
-    setLastSessionForProject(projectId, mostRecent.id)
-  } else {
-    const newSession = await dbCreateSession(DEFAULTS.SESSION_NAME, projectId)
-    const s: SessionWithStats = { ...newSession, messageCount: 0, totalTokens: 0 }
-    setSessions([s])
-    setCurrentSession(newSession)
-    resetSessionArtifacts()
-    localStorage.setItem(STORAGE_KEYS.LAST_SESSION, newSession.id)
-    setLastSessionForProject(projectId, newSession.id)
+
+    await createNewSession(undefined, projectId)
+    return
   }
+
+  await createNewSession(undefined, projectId)
 }
 
 export async function renameSession(id: string, newName: string): Promise<void> {
@@ -317,8 +316,7 @@ export async function renameSession(id: string, newName: string): Promise<void> 
 
 export async function archiveSession(id: string): Promise<void> {
   log.info('session', 'Session archived', { id })
-  const { currentProject } = useProject()
-  const projectId = currentProject()?.id
+  const projectId = currentSession()?.id === id ? currentSession()?.projectId : undefined
   await dbArchiveSession(id)
   setSessions((prev) => prev.filter((s) => s.id !== id))
   if (currentSession()?.id === id) await switchAfterRemoval(projectId)
@@ -356,8 +354,7 @@ export async function updateSessionSlug(id: string, slug: string): Promise<void>
 
 export async function deleteSessionPermanently(id: string): Promise<void> {
   log.info('session', 'Session deleted permanently', { id })
-  const { currentProject } = useProject()
-  const projectId = currentProject()?.id
+  const projectId = currentSession()?.id === id ? currentSession()?.projectId : undefined
   await dbDeleteSession(id)
   setSessions((prev) => prev.filter((s) => s.id !== id))
   if (currentSession()?.id === id) await switchAfterRemoval(projectId)

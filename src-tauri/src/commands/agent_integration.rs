@@ -31,6 +31,7 @@ pub async fn agent_run(goal: String, state: State<'_, AppState>) -> Result<Value
 #[tauri::command]
 pub async fn agent_stream(
     goal: String,
+    run_id: Option<String>,
     window: Window,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
@@ -38,22 +39,34 @@ pub async fn agent_stream(
 
     let emitter = EventEmitter::new(window);
     let tool_call_id = "agent-run-preview";
-    emitter.emit_progress(&format!("Streaming with {}", state.database_status()))?;
-    emitter.emit_tool_call(tool_call_id, "agent_run", json!({ "goal": goal }))?;
+    emitter.emit_progress(
+        &format!("Streaming with {}", state.database_status()),
+        run_id.as_deref(),
+    )?;
+    emitter.emit_tool_call(
+        tool_call_id,
+        "agent_run",
+        json!({ "goal": goal }),
+        run_id.as_deref(),
+    )?;
     if goal.contains("error") {
-        emitter.emit_error("Full agent loop not yet wired - use CLI")?;
+        emitter.emit_error("Full agent loop not yet wired - use CLI", run_id.as_deref())?;
     } else {
-        emitter.emit_token("Full agent loop not yet wired - use CLI")?;
+        emitter.emit_token("Full agent loop not yet wired - use CLI", run_id.as_deref())?;
     }
     emitter.emit_tool_result(
         tool_call_id,
         "Full agent loop not yet wired - use CLI",
         true,
+        run_id.as_deref(),
     )?;
-    emitter.emit_complete(json!({
-        "completed": false,
-        "message": "Full agent loop not yet wired - use CLI"
-    }))?;
+    emitter.emit_complete(
+        json!({
+            "completed": false,
+            "message": "Full agent loop not yet wired - use CLI"
+        }),
+        run_id.as_deref(),
+    )?;
     Ok(())
 }
 

@@ -9,6 +9,7 @@ pub mod agent_loop;
 pub(crate) mod budget;
 pub mod cache_sharing;
 pub mod continuation;
+pub mod control_plane;
 pub mod dream;
 pub mod error_hints;
 pub mod instruction_resolver;
@@ -36,6 +37,18 @@ pub use instructions::{
 pub use reflection::{ErrorKind, ReflectionAgent, ReflectionLoop, ToolExecutor, ToolResult};
 pub use {
     agent_loop::*,
+    control_plane::commands::{
+        canonical_command_specs, command_spec, command_spec_by_name, queue_command_from_alias,
+        queue_command_from_tier, queue_command_label, queue_message_tier, CommandFamily,
+        CommandSpec, CompletionMode, ControlPlaneCommand, CorrelationIdKey,
+        CorrelationIdRequirements, ResponseEnvelope, TerminalClosureSignal,
+    },
+    control_plane::interactive::{
+        canonical_interactive_timeout_policy, InteractiveRequestHandle, InteractiveRequestKind,
+        InteractiveRequestPhase, InteractiveRequestStore, InteractiveTimeoutPolicy,
+        ResolveInteractiveRequestError, TerminalInteractiveRequest,
+        DEFAULT_INTERACTIVE_REQUEST_TIMEOUT,
+    },
     llm_trait::{LLMProvider, LLMResponse},
 };
 

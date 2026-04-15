@@ -1,15 +1,24 @@
 //! Agent-related HTTP API handlers: submit, cancel, status, retry, edit-resend,
 //! regenerate, mid-stream messaging (steer/follow-up/post-complete), queue.
 
+use std::sync::Arc;
+
+use ava_agent::control_plane::commands::{queue_message_tier, ControlPlaneCommand};
+use ava_tools::core::plan::PlanRequest;
+use ava_tools::core::question::QuestionRequest;
+use ava_tools::permission_middleware::{ApprovalRequest, ToolApproval};
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::Json;
 use serde::{Deserialize, Serialize};
-use tokio::sync::mpsc;
+use tokio::sync::{broadcast, mpsc};
+use tokio::task::JoinHandle;
 use tracing::info;
 
-use super::state::{FileEditRecord, PlanStepPayload, TodoItemPayload, WebEvent, WebState};
+use super::state::{
+    FileEditRecord, PlanStepPayload, TodoItemPayload, WebEvent, WebState, WebStateInner,
+};
 
 use super::api::{error_response, ErrorResponse};
 
@@ -38,6 +47,165 @@ pub struct SubmitGoalResponse {
     pub turns: usize,
     #[serde(rename = "sessionId")]
     pub session_id: String,
+}
+
+fn emit_interactive_request_cleared(
+    event_tx: &broadcast::Sender<WebEvent>,
+    request_id: &str,
+    request_kind: &str,
+    timed_out: bool,
+) {
+    let _ = event_tx.send(WebEvent::InteractiveRequestCleared {
+        request_id: request_id.to_string(),
+        request_kind: request_kind.to_string(),
+        timed_out,
+    });
+}
+
+fn plan_step_payloads(plan: &ava_types::Plan) -> Vec<PlanStepPayload> {
+    plan.steps
+        .iter()
+        .map(|s| {
+            let action = match s.action {
+                ava_types::PlanAction::Research => "research",
+                ava_types::PlanAction::Implement => "implement",
+                ava_types::PlanAction::Test => "test",
+                ava_types::PlanAction::Review => "review",
+            };
+            PlanStepPayload {
+                id: s.id.clone(),
+                description: s.description.clone(),
+                files: s.files.clone(),
+                action: action.to_string(),
+                depends_on: s.depends_on.clone(),
+            }
+        })
+        .collect()
+}
+
+fn spawn_interactive_forwarders(
+    inner: Arc<WebStateInner>,
+    mut approval_rx: mpsc::UnboundedReceiver<ApprovalRequest>,
+    mut question_rx: mpsc::UnboundedReceiver<QuestionRequest>,
+    mut plan_rx: mpsc::UnboundedReceiver<PlanRequest>,
+) -> (JoinHandle<()>, JoinHandle<()>, JoinHandle<()>) {
+    let approval_inner = inner.clone();
+    let approval_forwarder = tokio::spawn(async move {
+        while let Some(req) = approval_rx.recv().await {
+            let risk_level = format!("{:?}", req.inspection.risk_level).to_lowercase();
+            let handle = approval_inner
+                .pending_approval_reply
+                .register(req.reply)
+                .await;
+            let request_id = handle.request_id.clone();
+
+            let _ = approval_inner.event_tx.send(WebEvent::ApprovalRequest {
+                id: request_id.clone(),
+                tool_name: req.call.name.clone(),
+                args: req.call.arguments.clone(),
+                risk_level,
+                reason: req.inspection.reason.clone(),
+                warnings: req.inspection.warnings.clone(),
+            });
+
+            let pending = approval_inner.pending_approval_reply.clone();
+            let event_tx = approval_inner.event_tx.clone();
+            tokio::spawn(async move {
+                tokio::time::sleep(pending.timeout()).await;
+                if let Some(timed_out) = pending.timeout_request(&request_id).await {
+                    tracing::warn!(
+                        request_id = %timed_out.handle.request_id,
+                        timeout_secs = pending.timeout().as_secs(),
+                        "Web approval request timed out — auto-denying to unblock agent"
+                    );
+                    let _ = timed_out.reply.send(ToolApproval::Rejected(Some(
+                        "Timed out waiting for user approval in web UI".to_string(),
+                    )));
+                    emit_interactive_request_cleared(
+                        &event_tx,
+                        &timed_out.handle.request_id,
+                        timed_out.handle.kind.as_str(),
+                        true,
+                    );
+                }
+            });
+        }
+    });
+
+    let question_inner = inner.clone();
+    let question_forwarder = tokio::spawn(async move {
+        while let Some(req) = question_rx.recv().await {
+            let handle = question_inner
+                .pending_question_reply
+                .register(req.reply)
+                .await;
+            let request_id = handle.request_id.clone();
+
+            let _ = question_inner.event_tx.send(WebEvent::QuestionRequest {
+                id: request_id.clone(),
+                question: req.question.clone(),
+                options: req.options.clone(),
+            });
+
+            let pending = question_inner.pending_question_reply.clone();
+            let event_tx = question_inner.event_tx.clone();
+            tokio::spawn(async move {
+                tokio::time::sleep(pending.timeout()).await;
+                if let Some(timed_out) = pending.timeout_request(&request_id).await {
+                    tracing::warn!(
+                        request_id = %timed_out.handle.request_id,
+                        timeout_secs = pending.timeout().as_secs(),
+                        "Web question request timed out — sending empty response to unblock agent"
+                    );
+                    let _ = timed_out.reply.send(String::new());
+                    emit_interactive_request_cleared(
+                        &event_tx,
+                        &timed_out.handle.request_id,
+                        timed_out.handle.kind.as_str(),
+                        true,
+                    );
+                }
+            });
+        }
+    });
+
+    let plan_forwarder = tokio::spawn(async move {
+        while let Some(req) = plan_rx.recv().await {
+            let handle = inner.pending_plan_reply.register(req.reply).await;
+            let request_id = handle.request_id.clone();
+
+            let _ = inner.event_tx.send(WebEvent::PlanCreated {
+                id: request_id.clone(),
+                summary: req.plan.summary.clone(),
+                steps: plan_step_payloads(&req.plan),
+                estimated_turns: req.plan.estimated_turns.unwrap_or(0) as usize,
+            });
+
+            let pending = inner.pending_plan_reply.clone();
+            let event_tx = inner.event_tx.clone();
+            tokio::spawn(async move {
+                tokio::time::sleep(pending.timeout()).await;
+                if let Some(timed_out) = pending.timeout_request(&request_id).await {
+                    tracing::warn!(
+                        request_id = %timed_out.handle.request_id,
+                        timeout_secs = pending.timeout().as_secs(),
+                        "Web plan request timed out — auto-rejecting to unblock agent"
+                    );
+                    let _ = timed_out.reply.send(ava_types::PlanDecision::Rejected {
+                        feedback: "Timed out waiting for plan response in web UI".to_string(),
+                    });
+                    emit_interactive_request_cleared(
+                        &event_tx,
+                        &timed_out.handle.request_id,
+                        timed_out.handle.kind.as_str(),
+                        true,
+                    );
+                }
+            });
+        }
+    });
+
+    (approval_forwarder, question_forwarder, plan_forwarder)
 }
 
 /// Start the agent with a goal asynchronously.
@@ -119,9 +287,6 @@ pub(crate) async fn submit_goal(
         std::mem::replace(&mut *lock, empty)
     };
 
-    let pending_approval = inner.pending_approval_reply.clone();
-    let pending_question = inner.pending_question_reply.clone();
-    let pending_plan = inner.pending_plan_reply.clone();
     let edit_history = inner.edit_history.clone();
 
     // Spawn the agent run in a background task
@@ -186,70 +351,8 @@ pub(crate) async fn submit_goal(
             }
         });
 
-        // Forward approval requests as WebEvent::ApprovalRequest
-        let event_broadcast_approval = inner.event_tx.clone();
-        let approval_forwarder = tokio::spawn(async move {
-            while let Some(req) = approval_rx.recv().await {
-                let risk_level = format!("{:?}", req.inspection.risk_level).to_lowercase();
-                let id = format!("approval-{}", uuid::Uuid::new_v4());
-                *pending_approval.lock().await = Some(req.reply);
-                let _ = event_broadcast_approval.send(WebEvent::ApprovalRequest {
-                    id,
-                    tool_name: req.call.name.clone(),
-                    args: req.call.arguments.clone(),
-                    risk_level,
-                    reason: req.inspection.reason.clone(),
-                    warnings: req.inspection.warnings.clone(),
-                });
-            }
-        });
-
-        // Forward question requests as WebEvent::QuestionRequest
-        let event_broadcast_question = inner.event_tx.clone();
-        let question_forwarder = tokio::spawn(async move {
-            while let Some(req) = question_rx.recv().await {
-                let id = format!("question-{}", uuid::Uuid::new_v4());
-                *pending_question.lock().await = Some(req.reply);
-                let _ = event_broadcast_question.send(WebEvent::QuestionRequest {
-                    id,
-                    question: req.question.clone(),
-                    options: req.options.clone(),
-                });
-            }
-        });
-
-        // Forward plan requests as WebEvent::PlanCreated
-        let event_broadcast_plan = inner.event_tx.clone();
-        let plan_forwarder = tokio::spawn(async move {
-            while let Some(req) = plan_rx.recv().await {
-                *pending_plan.lock().await = Some(req.reply);
-                let steps: Vec<PlanStepPayload> = req
-                    .plan
-                    .steps
-                    .iter()
-                    .map(|s| {
-                        let action = match s.action {
-                            ava_types::PlanAction::Research => "research",
-                            ava_types::PlanAction::Implement => "implement",
-                            ava_types::PlanAction::Test => "test",
-                            ava_types::PlanAction::Review => "review",
-                        };
-                        PlanStepPayload {
-                            id: s.id.clone(),
-                            description: s.description.clone(),
-                            files: s.files.clone(),
-                            action: action.to_string(),
-                            depends_on: s.depends_on.clone(),
-                        }
-                    })
-                    .collect();
-                let _ = event_broadcast_plan.send(WebEvent::PlanCreated {
-                    summary: req.plan.summary.clone(),
-                    steps,
-                    estimated_turns: req.plan.estimated_turns.unwrap_or(0) as usize,
-                });
-            }
-        });
+        let (approval_forwarder, question_forwarder, plan_forwarder) =
+            spawn_interactive_forwarders(inner.clone(), approval_rx, question_rx, plan_rx);
 
         let result = stack
             .run(
@@ -322,13 +425,107 @@ pub(crate) async fn submit_goal(
     }))
 }
 
+fn retry_replay_payload(
+    session: &ava_types::Session,
+) -> Result<
+    (
+        String,
+        Vec<ava_types::Message>,
+        Vec<ava_types::ImageContent>,
+    ),
+    String,
+> {
+    let last_user_msg = session
+        .messages
+        .iter()
+        .rev()
+        .find(|message| message.role == ava_types::Role::User)
+        .ok_or_else(|| "No user message found in session".to_string())?;
+
+    Ok((
+        last_user_msg.content.clone(),
+        collect_history_before_last_user(&session.messages),
+        last_user_msg.images.clone(),
+    ))
+}
+
+fn edit_replay_payload(
+    session: &ava_types::Session,
+    message_id: Option<uuid::Uuid>,
+    new_content: String,
+) -> Result<
+    (
+        String,
+        Vec<ava_types::Message>,
+        Vec<ava_types::ImageContent>,
+    ),
+    String,
+> {
+    let target_id = message_id.ok_or_else(|| "Invalid message ID for edit-resend".to_string())?;
+    let pos = session
+        .messages
+        .iter()
+        .position(|message| message.id == target_id)
+        .ok_or_else(|| format!("Message {target_id} not found in session"))?;
+
+    if session.messages[pos].role != ava_types::Role::User {
+        return Err("Only user messages can be edited".to_string());
+    }
+
+    Ok((
+        new_content,
+        session.messages[..pos].to_vec(),
+        session.messages[pos].images.clone(),
+    ))
+}
+
+fn regenerate_replay_payload(
+    session: &ava_types::Session,
+) -> Result<
+    (
+        String,
+        Vec<ava_types::Message>,
+        Vec<ava_types::ImageContent>,
+    ),
+    String,
+> {
+    let last_user_pos = session
+        .messages
+        .iter()
+        .rposition(|message| message.role == ava_types::Role::User)
+        .ok_or_else(|| "No user message found in session to regenerate from".to_string())?;
+
+    Ok((
+        session.messages[last_user_pos].content.clone(),
+        session.messages[..last_user_pos].to_vec(),
+        session.messages[last_user_pos].images.clone(),
+    ))
+}
+
 /// Cancel the currently-running agent.
 pub(crate) async fn cancel_agent(State(state): State<WebState>) -> impl IntoResponse {
     state.cancel().await;
-    // Clear any pending interactive replies
-    let _ = state.inner.pending_approval_reply.lock().await.take();
-    let _ = state.inner.pending_question_reply.lock().await.take();
-    let _ = state.inner.pending_plan_reply.lock().await.take();
+
+    if let Some(cancelled) = state.inner.pending_approval_reply.cancel_pending().await {
+        let request_id = cancelled.handle.request_id.clone();
+        let _ = cancelled.reply.send(ToolApproval::Rejected(Some(
+            "Agent run cancelled from web UI".to_string(),
+        )));
+        emit_interactive_request_cleared(&state.inner.event_tx, &request_id, "approval", false);
+    }
+    if let Some(cancelled) = state.inner.pending_question_reply.cancel_pending().await {
+        let request_id = cancelled.handle.request_id.clone();
+        let _ = cancelled.reply.send(String::new());
+        emit_interactive_request_cleared(&state.inner.event_tx, &request_id, "question", false);
+    }
+    if let Some(cancelled) = state.inner.pending_plan_reply.cancel_pending().await {
+        let request_id = cancelled.handle.request_id.clone();
+        let _ = cancelled.reply.send(ava_types::PlanDecision::Rejected {
+            feedback: "Agent run cancelled from web UI".to_string(),
+        });
+        emit_interactive_request_cleared(&state.inner.event_tx, &request_id, "plan", false);
+    }
+
     Json(serde_json::json!({ "cancelled": true }))
 }
 
@@ -358,8 +555,10 @@ pub(crate) async fn agent_status(State(state): State<WebState>) -> impl IntoResp
 /// the same format as SubmitGoalResponse. Used by retry/regenerate/edit-resend.
 pub(crate) async fn run_agent_from_history(
     state: &WebState,
+    session_id: uuid::Uuid,
     goal: String,
     history: Vec<ava_types::Message>,
+    images: Vec<ava_types::ImageContent>,
 ) -> Result<Json<SubmitGoalResponse>, (StatusCode, Json<ErrorResponse>)> {
     // Build a fake SubmitGoalRequest and reuse submit_goal logic
     let req = SubmitGoalRequest {
@@ -367,7 +566,7 @@ pub(crate) async fn run_agent_from_history(
         max_turns: 0,
         provider: None,
         model: None,
-        session_id: None,
+        session_id: Some(session_id.to_string()),
     };
     // We override the history by temporarily injecting it via a one-shot path.
     // Since submit_goal loads history from session_id, we instead call the inner
@@ -383,7 +582,7 @@ pub(crate) async fn run_agent_from_history(
     }
     *state.inner.running.write().await = true;
 
-    let session_id_str = uuid::Uuid::new_v4().to_string();
+    let session_id_str = session_id.to_string();
     let cancel = state.new_cancel_token().await;
     let inner = state.inner.clone();
     let stack = inner.stack.clone();
@@ -409,9 +608,6 @@ pub(crate) async fn run_agent_from_history(
         std::mem::replace(&mut *lock, empty)
     };
 
-    let pending_approval = inner.pending_approval_reply.clone();
-    let pending_question = inner.pending_question_reply.clone();
-    let pending_plan = inner.pending_plan_reply.clone();
     let edit_history = inner.edit_history.clone();
 
     tokio::spawn(async move {
@@ -441,67 +637,8 @@ pub(crate) async fn run_agent_from_history(
             }
         });
 
-        let event_broadcast_approval = inner.event_tx.clone();
-        let approval_forwarder = tokio::spawn(async move {
-            while let Some(req) = approval_rx.recv().await {
-                let risk_level = format!("{:?}", req.inspection.risk_level).to_lowercase();
-                let id = format!("approval-{}", uuid::Uuid::new_v4());
-                *pending_approval.lock().await = Some(req.reply);
-                let _ = event_broadcast_approval.send(WebEvent::ApprovalRequest {
-                    id,
-                    tool_name: req.call.name.clone(),
-                    args: req.call.arguments.clone(),
-                    risk_level,
-                    reason: req.inspection.reason.clone(),
-                    warnings: req.inspection.warnings.clone(),
-                });
-            }
-        });
-
-        let event_broadcast_question = inner.event_tx.clone();
-        let question_forwarder = tokio::spawn(async move {
-            while let Some(req) = question_rx.recv().await {
-                let id = format!("question-{}", uuid::Uuid::new_v4());
-                *pending_question.lock().await = Some(req.reply);
-                let _ = event_broadcast_question.send(WebEvent::QuestionRequest {
-                    id,
-                    question: req.question.clone(),
-                    options: req.options.clone(),
-                });
-            }
-        });
-
-        let event_broadcast_plan = inner.event_tx.clone();
-        let plan_forwarder = tokio::spawn(async move {
-            while let Some(req) = plan_rx.recv().await {
-                *pending_plan.lock().await = Some(req.reply);
-                let steps: Vec<PlanStepPayload> = req
-                    .plan
-                    .steps
-                    .iter()
-                    .map(|s| {
-                        let action = match s.action {
-                            ava_types::PlanAction::Research => "research",
-                            ava_types::PlanAction::Implement => "implement",
-                            ava_types::PlanAction::Test => "test",
-                            ava_types::PlanAction::Review => "review",
-                        };
-                        PlanStepPayload {
-                            id: s.id.clone(),
-                            description: s.description.clone(),
-                            files: s.files.clone(),
-                            action: action.to_string(),
-                            depends_on: s.depends_on.clone(),
-                        }
-                    })
-                    .collect();
-                let _ = event_broadcast_plan.send(WebEvent::PlanCreated {
-                    summary: req.plan.summary.clone(),
-                    steps,
-                    estimated_turns: req.plan.estimated_turns.unwrap_or(0) as usize,
-                });
-            }
-        });
+        let (approval_forwarder, question_forwarder, plan_forwarder) =
+            spawn_interactive_forwarders(inner.clone(), approval_rx, question_rx, plan_rx);
 
         let result = stack
             .run(
@@ -511,8 +648,8 @@ pub(crate) async fn run_agent_from_history(
                 cancel,
                 history,
                 Some(msg_queue),
-                vec![],
-                None, // retry/regenerate — let backend generate a new session ID
+                images,
+                Some(session_id),
             )
             .await;
 
@@ -566,18 +703,11 @@ pub(crate) async fn retry_last_message(
         .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?
         .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "Session not found"))?;
 
-    let last_user_msg = session
-        .messages
-        .iter()
-        .rev()
-        .find(|m| m.role == ava_types::Role::User)
-        .ok_or_else(|| error_response(StatusCode::CONFLICT, "No user message found in session"))?;
-
-    let goal = last_user_msg.content.clone();
-    let history = collect_history_before_last_user(&session.messages);
+    let (goal, history, images) = retry_replay_payload(&session)
+        .map_err(|error| error_response(StatusCode::CONFLICT, &error))?;
 
     info!(goal = %goal, %session_id, "Web: retry_last_message");
-    run_agent_from_history(&state, goal, history).await
+    run_agent_from_history(&state, session_id, goal, history, images).await
 }
 
 #[derive(Deserialize)]
@@ -590,48 +720,44 @@ pub struct EditAndResendRequest {
 ///
 /// The frontend generates its own message IDs (client-side UUIDs stored in
 /// IndexedDB) which may not match the backend's session IDs in SQLite.
-/// When the target message cannot be found by ID, we fall back to using
-/// all existing session history as context and treat `new_content` as a
-/// fresh goal. This ensures edit-resend works in web mode where frontend
-/// and backend message IDs diverge.
+/// When the target message cannot be resolved by ID, the request is rejected.
+/// Browser mode must not silently edit the wrong turn.
 pub(crate) async fn edit_and_resend(
     State(state): State<WebState>,
     Json(req): Json<EditAndResendRequest>,
 ) -> Result<Json<SubmitGoalResponse>, (StatusCode, Json<ErrorResponse>)> {
-    let session_id = state.inner.last_session_id.read().await;
+    let session_id = *state.inner.last_session_id.read().await;
 
-    // Try to load the session and find the target message for precise history
-    // truncation. If anything fails (no session, message not found), fall back
-    // to using whatever history exists.
-    let history: Vec<ava_types::Message> = if let Some(sid) = session_id.as_ref() {
-        let session = state.inner.stack.session_manager.get(*sid).ok().flatten();
+    let (goal, history, images): (
+        String,
+        Vec<ava_types::Message>,
+        Vec<ava_types::ImageContent>,
+    ) = if let Some(sid) = session_id {
+        let session = state.inner.stack.session_manager.get(sid).ok().flatten();
 
         if let Some(session) = session {
-            // Try to find the exact message to truncate history at that point
             let target_id = uuid::Uuid::parse_str(&req.message_id).ok();
-            let pos = target_id.and_then(|tid| session.messages.iter().position(|m| m.id == tid));
-
-            if let Some(pos) = pos {
-                // Found the message — use history before it
-                session.messages[..pos].to_vec()
-            } else {
-                // Message ID not found (frontend/backend ID mismatch).
-                // Use all history up to (but not including) the last user message
-                // so we don't duplicate the message the user just edited.
-                collect_history_before_last_user(&session.messages)
-            }
+            edit_replay_payload(&session, target_id, req.new_content)
+                .map_err(|error| error_response(StatusCode::CONFLICT, &error))?
         } else {
-            vec![]
+            return Err(error_response(StatusCode::NOT_FOUND, "Session not found"));
         }
     } else {
-        vec![]
+        return Err(error_response(
+            StatusCode::CONFLICT,
+            "No previous session to edit",
+        ));
     };
-    // Drop the read guard before calling run_agent_from_history which takes
-    // its own locks on the state.
-    drop(session_id);
-
-    info!(new_content = %req.new_content, message_id = %req.message_id, "Web: edit_and_resend");
-    run_agent_from_history(&state, req.new_content, history).await
+    info!(new_content = %goal, message_id = %req.message_id, "Web: edit_and_resend");
+    run_agent_from_history(
+        &state,
+        session_id
+            .ok_or_else(|| error_response(StatusCode::CONFLICT, "No previous session to edit"))?,
+        goal,
+        history,
+        images,
+    )
+    .await
 }
 
 /// Regenerate the last assistant response.
@@ -653,22 +779,11 @@ pub(crate) async fn regenerate_response(
         .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?
         .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "Session not found"))?;
 
-    let last_user_pos = session
-        .messages
-        .iter()
-        .rposition(|m| m.role == ava_types::Role::User)
-        .ok_or_else(|| {
-            error_response(
-                StatusCode::CONFLICT,
-                "No user message found in session to regenerate from",
-            )
-        })?;
-
-    let goal = session.messages[last_user_pos].content.clone();
-    let history: Vec<ava_types::Message> = session.messages[..last_user_pos].to_vec();
+    let (goal, history, images) = regenerate_replay_payload(&session)
+        .map_err(|error| error_response(StatusCode::CONFLICT, &error))?;
 
     info!(goal = %goal, %session_id, "Web: regenerate_response");
-    run_agent_from_history(&state, goal, history).await
+    run_agent_from_history(&state, session_id, goal, history, images).await
 }
 
 /// Collect all messages before the last user message (for retry/regenerate).
@@ -704,7 +819,8 @@ pub(crate) async fn steer_agent(
     if let Some(ref tx) = *state.inner.message_queue.read().await {
         let _ = tx.send(ava_types::QueuedMessage {
             text: req.message,
-            tier: ava_types::MessageTier::Steering,
+            tier: queue_message_tier(ControlPlaneCommand::SteerAgent, None)
+                .expect("steer command should map to a queue tier"),
         });
     }
     Ok(Json(serde_json::json!({ "ok": true })))
@@ -727,7 +843,8 @@ pub(crate) async fn follow_up_agent(
     if let Some(ref tx) = *state.inner.message_queue.read().await {
         let _ = tx.send(ava_types::QueuedMessage {
             text: req.message,
-            tier: ava_types::MessageTier::FollowUp,
+            tier: queue_message_tier(ControlPlaneCommand::FollowUpAgent, None)
+                .expect("follow-up command should map to a queue tier"),
         });
     }
     Ok(Json(serde_json::json!({ "ok": true })))
@@ -756,7 +873,8 @@ pub(crate) async fn post_complete_agent(
     if let Some(ref tx) = *state.inner.message_queue.read().await {
         let _ = tx.send(ava_types::QueuedMessage {
             text: req.message,
-            tier: ava_types::MessageTier::PostComplete { group: req.group },
+            tier: queue_message_tier(ControlPlaneCommand::PostCompleteAgent, Some(req.group))
+                .expect("post-complete command should map to a queue tier"),
         });
     }
     Ok(Json(serde_json::json!({ "ok": true })))
@@ -1079,12 +1197,12 @@ pub(crate) async fn compact_context(
 /// Clear the message queue.
 ///
 /// Cancels the agent for "all" and "steering" targets (which clears the steering
-/// queue). For follow-up and post-complete, returns OK — those are drained by
-/// the agent loop when it processes them; there is no safe external drain path.
+/// queue). Follow-up and post-complete clears are rejected until a real drain
+/// path exists.
 pub(crate) async fn clear_message_queue(
     State(state): State<WebState>,
     body: Option<Json<serde_json::Value>>,
-) -> impl IntoResponse {
+) -> Result<impl IntoResponse, (StatusCode, Json<ErrorResponse>)> {
     let target_str = body
         .and_then(|b| b.get("target").and_then(|v| v.as_str()).map(String::from))
         .unwrap_or_else(|| "all".to_string());
@@ -1092,8 +1210,86 @@ pub(crate) async fn clear_message_queue(
     match target_str.as_str() {
         "all" | "steering" | "All" | "Steering" => {
             state.cancel().await;
+            Ok(Json(serde_json::json!({ "ok": true })))
         }
-        _ => {}
+        "followUp" | "follow_up" | "follow-up" | "FollowUp" | "postComplete" | "post_complete"
+        | "post-complete" | "PostComplete" => Err(error_response(
+            StatusCode::BAD_REQUEST,
+            "Clearing follow-up or post-complete queues is not supported yet.",
+        )),
+        _ => Err(error_response(
+            StatusCode::BAD_REQUEST,
+            &format!("Unsupported clear target '{target_str}'"),
+        )),
     }
-    Json(serde_json::json!({ "ok": true }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_image(label: &str) -> ava_types::ImageContent {
+        ava_types::ImageContent::new(label, ava_types::ImageMediaType::Png)
+    }
+
+    fn sample_user_message(
+        content: &str,
+        images: Vec<ava_types::ImageContent>,
+    ) -> ava_types::Message {
+        let mut message = ava_types::Message::new(ava_types::Role::User, content);
+        message.images = images;
+        message
+    }
+
+    #[test]
+    fn retry_replay_payload_preserves_user_images() {
+        let mut session = ava_types::Session::new();
+        session.add_message(sample_user_message("describe", vec![sample_image("retry")]));
+
+        let (_, _, images) = retry_replay_payload(&session).expect("retry payload");
+        assert_eq!(images, vec![sample_image("retry")]);
+    }
+
+    #[test]
+    fn edit_replay_payload_preserves_target_images() {
+        let mut session = ava_types::Session::new();
+        let target = sample_user_message("before", vec![sample_image("edit")]);
+        let target_id = target.id;
+        session.add_message(target);
+
+        let (_, _, images) = edit_replay_payload(&session, Some(target_id), "after".to_string())
+            .expect("edit payload");
+        assert_eq!(images, vec![sample_image("edit")]);
+    }
+
+    #[test]
+    fn edit_replay_payload_rejects_missing_targets() {
+        let session = ava_types::Session::new();
+
+        let error = edit_replay_payload(&session, None, "after".to_string())
+            .expect_err("missing target should fail");
+        assert!(error.contains("Invalid message ID"));
+    }
+
+    #[test]
+    fn edit_replay_payload_rejects_non_user_targets() {
+        let mut session = ava_types::Session::new();
+        let assistant = ava_types::Message::new(ava_types::Role::Assistant, "done");
+        let assistant_id = assistant.id;
+        session.add_message(assistant);
+
+        let error = edit_replay_payload(&session, Some(assistant_id), "after".to_string())
+            .expect_err("assistant target should fail");
+        assert!(error.contains("Only user messages"));
+    }
+
+    #[test]
+    fn regenerate_replay_payload_preserves_last_user_images() {
+        let mut session = ava_types::Session::new();
+        session.add_message(sample_user_message("before", vec![sample_image("regen")]));
+        session.add_message(ava_types::Message::new(ava_types::Role::Assistant, "done"));
+
+        let (_, _, images) = regenerate_replay_payload(&session).expect("regen payload");
+        assert_eq!(images, vec![sample_image("regen")]);
+    }
 }

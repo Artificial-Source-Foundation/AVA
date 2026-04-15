@@ -24,7 +24,12 @@ interface GeneralSectionProps {
 
 export const GeneralSection: Component<GeneralSectionProps> = (props) => {
   const { settings, updateUI, updateGit, exportSettings, importSettings } = useSettings()
-  const openOnboardingGuide = () => window.dispatchEvent(new CustomEvent('ava:open-onboarding'))
+  const openOnboardingGuide = () =>
+    window.dispatchEvent(
+      new CustomEvent('ava:open-onboarding', {
+        detail: { returnFocusSelector: 'button[aria-label="Settings"]' },
+      })
+    )
 
   return (
     <div class="flex flex-col" style={{ gap: '24px' }}>

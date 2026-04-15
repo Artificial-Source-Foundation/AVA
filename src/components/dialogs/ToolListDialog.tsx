@@ -9,7 +9,9 @@
 import { Package, Plug, Search, Terminal, Wrench, X } from 'lucide-solid'
 import { type Component, createMemo, createResource, createSignal, For, Show } from 'solid-js'
 import { rustBackend } from '../../services/rust-bridge'
-import type { AgentToolInfo } from '../../types/rust-ipc'
+import { useSession } from '../../stores/session'
+import type { Message } from '../../types'
+import type { AgentToolInfo, ToolIntrospectionContext } from '../../types/rust-ipc'
 
 interface ToolListDialogProps {
   open: boolean
@@ -50,15 +52,75 @@ const categoryColors: Record<SourceCategory, string> = {
   Other: '#9CA3AF',
 }
 
+function lastUserMessageIndex(messages: Message[]): number {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (messages[index]?.role === 'user') return index
+  }
+  return -1
+}
+
+function buildToolIntrospectionContext(
+  sessionId: string | undefined,
+  messageList: Message[]
+): ToolIntrospectionContext {
+  const index = lastUserMessageIndex(messageList)
+  if (index < 0) {
+    return { sessionId }
+  }
+
+  const goalMessage = messageList[index]
+  const history = messageList.slice(0, index).map((message) => {
+    const agentVisible = message.metadata?.agentVisible
+    return {
+      role: message.role,
+      content: message.content,
+      ...(typeof agentVisible === 'boolean' ? { agentVisible } : {}),
+    }
+  })
+
+  const images = (goalMessage.images ?? []).map((image) => ({
+    data: image.data,
+    mediaType: image.mimeType,
+  }))
+
+  return {
+    sessionId,
+    goal: goalMessage.content,
+    history,
+    images,
+  }
+}
+
 export const ToolListDialog: Component<ToolListDialogProps> = (props) => {
   const [query, setQuery] = createSignal('')
+  const { currentSession, messages, sessions } = useSession()
+
+  const toolIntrospectionContext = createMemo<ToolIntrospectionContext>(() => {
+    return buildToolIntrospectionContext(currentSession()?.id, messages())
+  })
+
+  const toolVisibilityVersion = createMemo(() => {
+    const sessionId = currentSession()?.id
+    if (!sessionId) return 0
+
+    return (
+      sessions().find((session) => session.id === sessionId)?.updatedAt ??
+      currentSession()?.updatedAt ??
+      0
+    )
+  })
 
   const [allTools] = createResource(
-    () => props.open,
-    async (isOpen) => {
-      if (!isOpen) return []
+    () => ({
+      open: props.open,
+      sessionId: toolIntrospectionContext().sessionId,
+      toolVisibilityVersion: toolVisibilityVersion(),
+      messageSnapshot: messages(),
+    }),
+    async ({ open }) => {
+      if (!open) return []
       try {
-        return await rustBackend.listAgentTools()
+        return await rustBackend.listAgentTools(toolIntrospectionContext())
       } catch {
         return []
       }

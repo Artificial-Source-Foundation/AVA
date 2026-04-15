@@ -32,7 +32,7 @@ pub fn render_slash_menu(
     let visible_count = item_count.min(MAX_VISIBLE);
     let menu_height = visible_count as u16 + 2; // +2 for border
 
-    // Slightly content-fit + centered: keep menu compact and balanced over composer.
+    // Slightly content-fit, but keep the popup visually attached to the input edge.
     let max_row = state
         .items
         .iter()
@@ -55,8 +55,7 @@ pub fn render_slash_menu(
     let menu_content_width = desired_content_width.clamp(menu_min, menu_cap) as u16;
     let menu_width = menu_content_width.saturating_add(2); // account for border glyphs
 
-    let composer_center = composer_rect.x.saturating_add(composer_rect.width / 2);
-    let menu_x = composer_center.saturating_sub(menu_width / 2);
+    let menu_x = composer_rect.x;
 
     // Use anchored_popup to guarantee the menu stays within the viewport
     let viewport = frame.area();
@@ -230,14 +229,13 @@ mod tests {
             "inner width should keep intended content width"
         );
 
-        let composer_center = composer.x.saturating_add(composer.width / 2);
-        let expected_menu_x = composer_center.saturating_sub((expected_inner_width + 2) / 2);
+        let expected_menu_x = composer.x;
         assert_eq!(menu_left, expected_menu_x);
         assert_eq!(menu_y, composer.y.saturating_sub(menu_height + 1));
     }
 
     #[test]
-    fn slash_menu_renders_centered_without_viewport_overflow_near_top() {
+    fn slash_menu_keeps_left_anchor_without_viewport_overflow_near_top() {
         let theme = Theme::default_theme();
         let state = AutocompleteState::new(
             AutocompleteTrigger::Slash,
@@ -285,8 +283,7 @@ mod tests {
         let menu_min = std::cmp::min(MENU_WIDTH_MIN as usize, menu_cap);
         let expected_inner_width = desired_content_width.clamp(menu_min, menu_cap) as u16;
         let expected_menu_width = expected_inner_width.saturating_add(2);
-        let composer_center = composer.x.saturating_add(composer.width / 2);
-        let expected_menu_x = composer_center.saturating_sub(expected_menu_width / 2);
+        let expected_menu_x = composer.x;
         let expected_menu = anchored_popup(
             viewport,
             expected_menu_x,

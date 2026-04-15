@@ -8,6 +8,7 @@ use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use ava_agent::control_plane::interactive::{InteractiveRequestKind, InteractiveRequestStore};
 use ava_agent::stack::{AgentStack, AgentStackConfig};
 use ava_tools::core::plan::PlanRequest;
 use ava_tools::core::question::QuestionRequest;
@@ -15,15 +16,12 @@ use ava_tools::permission_middleware::{ApprovalRequest, ToolApproval};
 use ava_types::{PlanDecision, QueuedMessage};
 use color_eyre::Result;
 use serde_json::Value;
-use tokio::sync::{broadcast, mpsc, oneshot, Mutex, RwLock};
+use tokio::sync::{broadcast, mpsc, Mutex, RwLock};
 use tokio_util::sync::CancellationToken;
 
-/// Pending oneshot sender for an approval request.
-pub type PendingApprovalReply = Arc<Mutex<Option<oneshot::Sender<ToolApproval>>>>;
-/// Pending oneshot sender for a question request.
-pub type PendingQuestionReply = Arc<Mutex<Option<oneshot::Sender<String>>>>;
-/// Pending oneshot sender for a plan decision.
-pub type PendingPlanReply = Arc<Mutex<Option<oneshot::Sender<PlanDecision>>>>;
+pub type PendingApprovalReply = InteractiveRequestStore<ToolApproval>;
+pub type PendingQuestionReply = InteractiveRequestStore<String>;
+pub type PendingPlanReply = InteractiveRequestStore<PlanDecision>;
 
 /// A recorded file edit for undo support.
 #[derive(Debug, Clone)]
@@ -59,8 +57,14 @@ pub enum WebEvent {
         question: String,
         options: Vec<String>,
     },
+    InteractiveRequestCleared {
+        request_id: String,
+        request_kind: String,
+        timed_out: bool,
+    },
     /// A plan proposed by the agent for user review.
     PlanCreated {
+        id: String,
         summary: String,
         steps: Vec<PlanStepPayload>,
         estimated_turns: usize,
@@ -148,9 +152,13 @@ impl WebState {
                 approval_rx: Mutex::new(approval_rx),
                 plan_rx: Mutex::new(plan_rx),
                 message_queue: RwLock::new(None),
-                pending_approval_reply: Arc::new(Mutex::new(None)),
-                pending_question_reply: Arc::new(Mutex::new(None)),
-                pending_plan_reply: Arc::new(Mutex::new(None)),
+                pending_approval_reply: InteractiveRequestStore::new(
+                    InteractiveRequestKind::Approval,
+                ),
+                pending_question_reply: InteractiveRequestStore::new(
+                    InteractiveRequestKind::Question,
+                ),
+                pending_plan_reply: InteractiveRequestStore::new(InteractiveRequestKind::Plan),
                 last_session_id: RwLock::new(None),
                 edit_history: Arc::new(RwLock::new(VecDeque::new())),
             }),

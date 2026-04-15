@@ -18,6 +18,7 @@ interface ProvidersTabGridProps {
   onToggle?: (id: string, enabled: boolean) => void
   onSaveApiKey?: (id: string, key: string) => void
   onClearApiKey?: (id: string) => void
+  onOAuthConnected?: (providerId: string) => void
   onSetDefaultModel?: (providerId: string, modelId: string) => void
   onTestConnection?: (id: string) => void
   onUpdateModels?: (providerId: string, models: ProviderModel[]) => void
@@ -43,6 +44,7 @@ export const ProvidersTabGrid: Component<ProvidersTabGridProps> = (props) => (
             onToggle={(enabled) => props.onToggle?.(provider.id, enabled)}
             onSaveApiKey={(key) => props.onSaveApiKey?.(provider.id, key)}
             onClearApiKey={() => props.onClearApiKey?.(provider.id)}
+            onOAuthConnected={() => props.onOAuthConnected?.(provider.id)}
             onSetDefaultModel={(modelId) => props.onSetDefaultModel?.(provider.id, modelId)}
             onTestConnection={() => props.onTestConnection?.(provider.id)}
             onUpdateModels={(models) => props.onUpdateModels?.(provider.id, models)}

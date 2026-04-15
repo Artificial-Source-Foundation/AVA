@@ -28,6 +28,7 @@ const COMMAND_TO_ENDPOINT: Record<string, { path: string; method: 'GET' | 'POST'
   clear_message_queue: { path: '/api/agent/queue/clear', method: 'POST' },
   resolve_approval: { path: '/api/agent/resolve-approval', method: 'POST' },
   resolve_question: { path: '/api/agent/resolve-question', method: 'POST' },
+  resolve_plan: { path: '/api/agent/resolve-plan', method: 'POST' },
   retry_last_message: { path: '/api/agent/retry', method: 'POST' },
   edit_and_resend: { path: '/api/agent/edit-resend', method: 'POST' },
   regenerate_response: { path: '/api/agent/regenerate', method: 'POST' },
@@ -62,7 +63,7 @@ const COMMAND_TO_ENDPOINT: Record<string, { path: string; method: 'GET' | 'POST'
 
   // Tools
   list_tools: { path: '/api/tools', method: 'GET' },
-  list_agent_tools: { path: '/api/tools/agent', method: 'GET' },
+  list_agent_tools: { path: '/api/tools/agent', method: 'POST' },
   execute_tool: { path: '/api/tools/execute', method: 'POST' },
 
   // MCP

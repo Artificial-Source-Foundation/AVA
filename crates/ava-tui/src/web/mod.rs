@@ -49,6 +49,7 @@
 //! | GET    | `/api/providers`                  | List configured providers                 |
 //! | GET    | `/api/cli-agents`                 | List discovered CLI agents                |
 //! | GET    | `/api/config`                     | Get full configuration as JSON            |
+//! | POST   | `/api/tools/agent`                | List runtime-visible tools for a session  |
 //! | GET    | `/api/permissions`                | Get current permission level              |
 //! | POST   | `/api/permissions`                | Set permission level                      |
 //! | POST   | `/api/permissions/toggle`         | Toggle permission level                   |
@@ -65,6 +66,7 @@ mod api_interactive;
 mod api_plans;
 mod api_plugin_host;
 mod api_sessions;
+mod api_tools;
 pub mod state;
 pub mod ws;
 
@@ -181,6 +183,8 @@ fn build_router(state: WebState) -> Router {
         .route("/api/cli-agents", get(api::list_cli_agents))
         // Config
         .route("/api/config", get(api::get_config))
+        // Tools
+        .route("/api/tools/agent", post(api::list_agent_tools))
         // Permission level
         .route(
             "/api/permissions",
@@ -249,4 +253,549 @@ async fn shutdown_signal() {
     tokio::signal::ctrl_c()
         .await
         .expect("failed to install Ctrl+C handler");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::web::state::WebEvent;
+    use ava_tools::permission_middleware::ToolApproval;
+    use ava_types::PlanDecision;
+    use axum::body::{to_bytes, Body};
+    use axum::http::{Request, StatusCode};
+    use tokio::sync::oneshot;
+    use tower::ServiceExt;
+
+    #[tokio::test]
+    async fn resolve_plan_route_requires_request_id_and_preserves_pending_state() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let state = WebState::init(temp.path().to_path_buf())
+            .await
+            .expect("web state");
+
+        let (tx, rx) = oneshot::channel();
+        let request = state.inner.pending_plan_reply.register(tx).await;
+
+        let retry_state = state.clone();
+        let app = build_router(state);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/agent/resolve-plan")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"response":"approved"}"#))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+        let body = to_bytes(response.into_body(), 8 * 1024)
+            .await
+            .expect("body");
+        assert!(String::from_utf8_lossy(&body).contains("request_id is required"));
+
+        let app = build_router(retry_state);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/agent/resolve-plan")
+                    .header("content-type", "application/json")
+                    .body(Body::from(format!(
+                        r#"{{"request_id":"{}","response":"approved"}}"#,
+                        request.request_id
+                    )))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let decision = rx.await.expect("plan decision");
+        assert!(matches!(decision, PlanDecision::Approved));
+    }
+
+    #[tokio::test]
+    async fn resolve_plan_route_returns_ok_for_approved_decision() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let state = WebState::init(temp.path().to_path_buf())
+            .await
+            .expect("web state");
+        let mut events = state.inner.event_tx.subscribe();
+
+        let (tx, rx) = oneshot::channel();
+        let request = state.inner.pending_plan_reply.register(tx).await;
+
+        let app = build_router(state);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/agent/resolve-plan")
+                    .header("content-type", "application/json")
+                    .body(Body::from(format!(
+                        r#"{{"request_id":"{}","response":"approved"}}"#,
+                        request.request_id
+                    )))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let decision = rx.await.expect("plan decision");
+        assert!(matches!(decision, PlanDecision::Approved));
+
+        match events.recv().await.expect("clear event") {
+            WebEvent::InteractiveRequestCleared {
+                request_id,
+                request_kind,
+                timed_out,
+            } => {
+                assert_eq!(request_id, request.request_id);
+                assert_eq!(request_kind, "plan");
+                assert!(!timed_out);
+            }
+            other => panic!("expected interactive_request_cleared event, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn resolve_approval_route_emits_clear_event_on_success() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let state = WebState::init(temp.path().to_path_buf())
+            .await
+            .expect("web state");
+        let mut events = state.inner.event_tx.subscribe();
+
+        let (tx, rx) = oneshot::channel();
+        let request = state.inner.pending_approval_reply.register(tx).await;
+
+        let app = build_router(state);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/agent/resolve-approval")
+                    .header("content-type", "application/json")
+                    .body(Body::from(format!(
+                        r#"{{"request_id":"{}","approved":true}}"#,
+                        request.request_id
+                    )))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(matches!(
+            rx.await.expect("approval decision"),
+            ToolApproval::AllowedForSession
+        ));
+
+        match events.recv().await.expect("clear event") {
+            WebEvent::InteractiveRequestCleared {
+                request_id,
+                request_kind,
+                timed_out,
+            } => {
+                assert_eq!(request_id, request.request_id);
+                assert_eq!(request_kind, "approval");
+                assert!(!timed_out);
+            }
+            other => panic!("expected interactive_request_cleared event, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn resolve_question_route_emits_clear_event_on_success() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let state = WebState::init(temp.path().to_path_buf())
+            .await
+            .expect("web state");
+        let mut events = state.inner.event_tx.subscribe();
+
+        let (tx, rx) = oneshot::channel();
+        let request = state.inner.pending_question_reply.register(tx).await;
+
+        let app = build_router(state);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/agent/resolve-question")
+                    .header("content-type", "application/json")
+                    .body(Body::from(format!(
+                        r#"{{"request_id":"{}","answer":"yes"}}"#,
+                        request.request_id
+                    )))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(rx.await.expect("question answer"), "yes");
+
+        match events.recv().await.expect("clear event") {
+            WebEvent::InteractiveRequestCleared {
+                request_id,
+                request_kind,
+                timed_out,
+            } => {
+                assert_eq!(request_id, request.request_id);
+                assert_eq!(request_kind, "question");
+                assert!(!timed_out);
+            }
+            other => panic!("expected interactive_request_cleared event, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn resolve_plan_route_returns_bad_request_for_modified_without_plan() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let state = WebState::init(temp.path().to_path_buf())
+            .await
+            .expect("web state");
+        let retry_state = state.clone();
+
+        let (tx, _rx) = oneshot::channel();
+        let request = state.inner.pending_plan_reply.register(tx).await;
+
+        let app = build_router(state);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/agent/resolve-plan")
+                    .header("content-type", "application/json")
+                    .body(Body::from(format!(
+                        r#"{{"request_id":"{}","response":"modified"}}"#,
+                        request.request_id
+                    )))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+        let body = to_bytes(response.into_body(), 8 * 1024)
+            .await
+            .expect("body");
+        assert!(String::from_utf8_lossy(&body).contains("modified_plan is required"));
+
+        let app = build_router(retry_state);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/agent/resolve-plan")
+                    .header("content-type", "application/json")
+                    .body(Body::from(format!(
+                        r#"{{"request_id":"{}","response":"approved"}}"#,
+                        request.request_id
+                    )))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn resolve_plan_route_accepts_modified_plan_payloads() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let state = WebState::init(temp.path().to_path_buf())
+            .await
+            .expect("web state");
+
+        let (tx, rx) = oneshot::channel();
+        let request = state.inner.pending_plan_reply.register(tx).await;
+
+        let app = build_router(state);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/agent/resolve-plan")
+                    .header("content-type", "application/json")
+                    .body(Body::from(format!(
+                        r#"{{"request_id":"{}","response":"modified","modified_plan":{{"summary":"Ship polish","steps":[{{"id":"step-1","description":"Do it","files":[],"action":"implement","depends_on":[]}}],"estimated_turns":2}},"feedback":"looks good"}}"#,
+                        request.request_id
+                    )))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        match rx.await.expect("plan decision") {
+            PlanDecision::Modified { plan, feedback } => {
+                assert_eq!(plan.summary, "Ship polish");
+                assert_eq!(plan.estimated_turns, Some(2));
+                assert_eq!(feedback, "looks good");
+            }
+            other => panic!("expected modified plan decision, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn resolve_plan_route_rejects_stale_request_ids_without_consuming_current_request() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let state = WebState::init(temp.path().to_path_buf())
+            .await
+            .expect("web state");
+        let retry_state = state.clone();
+
+        let (tx, rx) = oneshot::channel();
+        let request = state.inner.pending_plan_reply.register(tx).await;
+
+        let app = build_router(state);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/agent/resolve-plan")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"request_id":"plan-stale","response":"approved"}"#,
+                    ))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        let body = to_bytes(response.into_body(), 8 * 1024)
+            .await
+            .expect("body");
+        assert!(String::from_utf8_lossy(&body).contains("No matching pending plan request"));
+
+        let app = build_router(retry_state);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/agent/resolve-plan")
+                    .header("content-type", "application/json")
+                    .body(Body::from(format!(
+                        r#"{{"request_id":"{}","response":"approved"}}"#,
+                        request.request_id
+                    )))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let decision = rx.await.expect("plan decision");
+        assert!(matches!(decision, PlanDecision::Approved));
+    }
+
+    #[tokio::test]
+    async fn resolve_plan_route_emits_clear_event_when_receiver_is_gone() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let state = WebState::init(temp.path().to_path_buf())
+            .await
+            .expect("web state");
+        let mut events = state.inner.event_tx.subscribe();
+
+        let (tx, rx) = oneshot::channel::<PlanDecision>();
+        drop(rx);
+        let request = state.inner.pending_plan_reply.register(tx).await;
+
+        let app = build_router(state);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/agent/resolve-plan")
+                    .header("content-type", "application/json")
+                    .body(Body::from(format!(
+                        r#"{{"request_id":"{}","response":"approved"}}"#,
+                        request.request_id
+                    )))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+
+        assert_eq!(response.status(), StatusCode::GONE);
+        match events.recv().await.expect("clear event") {
+            WebEvent::InteractiveRequestCleared {
+                request_id,
+                request_kind,
+                timed_out,
+            } => {
+                assert_eq!(request_id, request.request_id);
+                assert_eq!(request_kind, "plan");
+                assert!(!timed_out);
+            }
+            other => panic!("expected interactive_request_cleared event, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn cancel_route_clears_pending_requests_and_emits_clear_event() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let state = WebState::init(temp.path().to_path_buf())
+            .await
+            .expect("web state");
+        let mut events = state.inner.event_tx.subscribe();
+
+        let (tx, rx) = oneshot::channel();
+        let request = state.inner.pending_approval_reply.register(tx).await;
+
+        let app = build_router(state);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/agent/cancel")
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        match rx.await.expect("cancelled approval reply") {
+            ToolApproval::Rejected(Some(reason)) => {
+                assert!(reason.contains("cancelled from web UI"));
+            }
+            other => panic!("expected rejected approval, got {other:?}"),
+        }
+
+        match events.recv().await.expect("clear event") {
+            WebEvent::InteractiveRequestCleared {
+                request_id,
+                request_kind,
+                timed_out,
+            } => {
+                assert_eq!(request_id, request.request_id);
+                assert_eq!(request_kind, "approval");
+                assert!(!timed_out);
+            }
+            other => panic!("expected interactive_request_cleared event, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn clear_message_queue_rejects_unsupported_follow_up_targets() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let state = WebState::init(temp.path().to_path_buf())
+            .await
+            .expect("web state");
+        let app = build_router(state);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/agent/queue/clear")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"target":"followUp"}"#))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+        let body = to_bytes(response.into_body(), 8 * 1024)
+            .await
+            .expect("body");
+        assert!(String::from_utf8_lossy(&body).contains("not supported yet"));
+    }
+
+    #[tokio::test]
+    async fn edit_resend_route_rejects_invalid_message_targets() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let state = WebState::init(temp.path().to_path_buf())
+            .await
+            .expect("web state");
+
+        let session_id = uuid::Uuid::new_v4();
+        let mut session = ava_types::Session::new().with_id(session_id);
+        session.add_message(ava_types::Message::new(ava_types::Role::User, "hello"));
+        state
+            .inner
+            .stack
+            .session_manager
+            .save(&session)
+            .expect("save session");
+        *state.inner.last_session_id.write().await = Some(session_id);
+
+        let app = build_router(state);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/agent/edit-resend")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"message_id":"not-a-uuid","new_content":"retry this"}"#,
+                    ))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+
+        let body = to_bytes(response.into_body(), 8 * 1024)
+            .await
+            .expect("body");
+        assert!(String::from_utf8_lossy(&body).contains("Invalid message ID"));
+    }
+
+    #[tokio::test]
+    async fn edit_resend_route_rejects_non_user_targets() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let state = WebState::init(temp.path().to_path_buf())
+            .await
+            .expect("web state");
+
+        let session_id = uuid::Uuid::new_v4();
+        let mut session = ava_types::Session::new().with_id(session_id);
+        let assistant = ava_types::Message::new(ava_types::Role::Assistant, "done");
+        let assistant_id = assistant.id;
+        session.add_message(assistant);
+        state
+            .inner
+            .stack
+            .session_manager
+            .save(&session)
+            .expect("save session");
+        *state.inner.last_session_id.write().await = Some(session_id);
+
+        let app = build_router(state);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/agent/edit-resend")
+                    .header("content-type", "application/json")
+                    .body(Body::from(format!(
+                        r#"{{"message_id":"{assistant_id}","new_content":"retry this"}}"#
+                    )))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+
+        let body = to_bytes(response.into_body(), 8 * 1024)
+            .await
+            .expect("body");
+        assert!(String::from_utf8_lossy(&body).contains("Only user messages can be edited"));
+    }
 }

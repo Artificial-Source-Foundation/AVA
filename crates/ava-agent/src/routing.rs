@@ -1,6 +1,6 @@
 use ava_config::RoutingProfile;
 use ava_llm::RouteRequirements;
-use ava_types::{ImageContent, ThinkingLevel};
+use ava_types::{ImageContent, Message, Role, ThinkingLevel};
 
 pub const EXPLICIT_DELEGATION_REASON: &str =
     "prompt explicitly asks for delegation or specialist help";
@@ -83,7 +83,17 @@ pub fn analyze_task_full(
     thinking: ThinkingLevel,
     plan_mode: bool,
 ) -> TaskAnalysis {
-    let signals = analyze_signals(goal, images, thinking, plan_mode);
+    analyze_task_full_with_history(goal, &[], images, thinking, plan_mode)
+}
+
+pub fn analyze_task_full_with_history(
+    goal: &str,
+    history: &[Message],
+    images: &[ImageContent],
+    thinking: ThinkingLevel,
+    plan_mode: bool,
+) -> TaskAnalysis {
+    let signals = analyze_signals(goal, history, images, thinking, plan_mode);
     let routing = classify_routing(&signals, thinking, plan_mode);
     let tool_visibility = classify_tool_visibility(&signals, thinking, plan_mode);
     let delegation = classify_delegation(&signals, &tool_visibility);
@@ -126,6 +136,7 @@ pub fn infer_subagent_delegation(
 
 fn analyze_signals(
     goal: &str,
+    history: &[Message],
     images: &[ImageContent],
     thinking: ThinkingLevel,
     plan_mode: bool,
@@ -183,17 +194,6 @@ fn analyze_signals(
         "migrate",
         "add",
     ];
-    let explicit_delegate_keywords = [
-        "subagent",
-        "sub-agent",
-        "delegate",
-        "parallel",
-        "background agent",
-        "scout",
-        "reviewer",
-        "planner",
-        "worker",
-    ];
     let broad_task_keywords = [
         "across files",
         "multiple files",
@@ -246,9 +246,8 @@ fn analyze_signals(
         mentions_write: write_keywords
             .iter()
             .any(|keyword| contains_keyword(&lower, keyword)),
-        explicit_delegate: explicit_delegate_keywords
-            .iter()
-            .any(|keyword| lower.contains(keyword)),
+        explicit_delegate: contains_explicit_delegate_keyword(&lower)
+            || inherits_explicit_delegation_from_history(&lower, line_count, history),
         broad_task: broad_task_keywords
             .iter()
             .any(|keyword| lower.contains(keyword)),
@@ -265,6 +264,68 @@ fn analyze_signals(
         has_images,
         capable_reasons,
     }
+}
+
+fn contains_explicit_delegate_keyword(text: &str) -> bool {
+    [
+        "subagent",
+        "sub-agent",
+        "delegate",
+        "parallel",
+        "background agent",
+        "scout",
+        "reviewer",
+        "planner",
+        "worker",
+    ]
+    .iter()
+    .any(|keyword| text.contains(keyword))
+}
+
+fn inherits_explicit_delegation_from_history(
+    goal_lower: &str,
+    line_count: usize,
+    history: &[Message],
+) -> bool {
+    if !looks_like_short_follow_up(goal_lower, line_count) {
+        return false;
+    }
+
+    history
+        .iter()
+        .rev()
+        .find(|message| message.agent_visible && message.role == Role::User)
+        .is_some_and(|message| contains_explicit_delegate_keyword(&message.content.to_lowercase()))
+}
+
+fn looks_like_short_follow_up(goal_lower: &str, line_count: usize) -> bool {
+    if goal_lower.len() > 160 || line_count > 3 {
+        return false;
+    }
+
+    [
+        "go ahead",
+        "continue",
+        "do it",
+        "do that",
+        "implement it",
+        "implement the fix",
+        "fix it",
+        "apply it",
+        "use that plan",
+        "next step",
+        "use one",
+        "invoke one",
+        "test it",
+    ]
+    .iter()
+    .any(|marker| goal_lower.contains(marker))
+        || (goal_lower.starts_with("now ") || goal_lower.starts_with("now,"))
+            && [
+                " it", " that", " this", " one", " fix", " plan", " scout", " review",
+            ]
+            .iter()
+            .any(|needle| goal_lower.contains(needle))
 }
 
 fn classify_routing(
@@ -618,6 +679,72 @@ mod tests {
 
         assert!(policy.enable_subagent_tool);
         assert_eq!(policy.max_subagents, 3);
+    }
+
+    #[test]
+    fn delegation_policy_does_not_inherit_from_unrelated_now_follow_up() {
+        let history = vec![
+            Message::new(
+                Role::User,
+                "Use a scout subagent to inspect the repo, then review the final change.",
+            ),
+            Message::new(Role::Assistant, "I'll scout the repo first."),
+        ];
+
+        let analysis = analyze_task_full_with_history(
+            "Now summarize the README.",
+            &history,
+            &[],
+            ThinkingLevel::Off,
+            false,
+        );
+
+        assert!(!analysis.delegation.enable_subagent_tool);
+    }
+
+    #[test]
+    fn delegation_policy_keeps_explicit_follow_up_requests_enabled() {
+        let history = vec![
+            Message::new(
+                Role::User,
+                "Use a scout subagent to inspect the repo, then review the final change.",
+            ),
+            Message::new(Role::Assistant, "I'll scout the repo first."),
+        ];
+
+        let policy = analyze_task_full_with_history(
+            "Now implement the fix.",
+            &history,
+            &[],
+            ThinkingLevel::Off,
+            false,
+        )
+        .delegation;
+
+        assert!(policy.enable_subagent_tool);
+        assert_eq!(policy.reason, EXPLICIT_DELEGATION_REASON);
+    }
+
+    #[test]
+    fn delegation_policy_does_not_enable_follow_up_helpers_for_unrelated_short_turns() {
+        let history = vec![
+            Message::new(
+                Role::User,
+                "Use a scout subagent to inspect the repo, then review the final change.",
+            ),
+            Message::new(Role::Assistant, "I'll scout the repo first."),
+        ];
+
+        let policy = analyze_task_full_with_history(
+            "Summarize the README in one bullet.",
+            &history,
+            &[],
+            ThinkingLevel::Off,
+            false,
+        )
+        .delegation;
+
+        assert!(!policy.enable_subagent_tool);
     }
 
     // --- F17: Effort level tests ---

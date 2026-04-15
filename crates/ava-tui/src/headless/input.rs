@@ -118,20 +118,40 @@ pub(super) fn parse_stdin_message(line: &str) -> Option<QueuedMessage> {
     }
 }
 
+#[cfg(test)]
 pub(super) fn parse_json_stdin_message(line: &str) -> Option<QueuedMessage> {
-    let v: serde_json::Value = serde_json::from_str(line).ok()?;
-    let text = v.get("text")?.as_str()?.to_string();
+    parse_json_stdin_message_result(line).ok().flatten()
+}
+
+fn parse_json_stdin_message_result(line: &str) -> Result<Option<QueuedMessage>, String> {
+    let v: serde_json::Value = serde_json::from_str(line)
+        .map_err(|error| format!("Invalid queued message JSON: {error}"))?;
+    let text = match v.get("text").and_then(|value| value.as_str()) {
+        Some(text) => text.to_string(),
+        None => return Ok(None),
+    };
     if text.is_empty() {
-        return None;
+        return Ok(None);
     }
-    let tier_str = v.get("tier").and_then(|t| t.as_str()).unwrap_or("steering");
-    let command = queue_command_from_alias(tier_str).unwrap_or(ControlPlaneCommand::SteerAgent);
-    let group = v
-        .get("group")
-        .and_then(|g| g.as_u64())
-        .map(|value| value as u32);
+    let command = match v.get("tier").and_then(|t| t.as_str()) {
+        Some(tier_str) => queue_command_from_alias(tier_str)
+            .ok_or_else(|| format!("Unsupported queue tier '{tier_str}'"))?,
+        None => ControlPlaneCommand::SteerAgent,
+    };
+    let group = match v.get("group") {
+        Some(value) => {
+            let parsed = value
+                .as_u64()
+                .ok_or_else(|| "Queued message group must be an integer".to_string())?;
+            if parsed > u32::MAX as u64 {
+                return Err("Queued message group must be between 0 and 4294967295".to_string());
+            }
+            Some(parsed as u32)
+        }
+        None => None,
+    };
     let tier = queue_message_tier(command, group).expect("queue command should map to a tier");
-    Some(QueuedMessage { text, tier })
+    Ok(Some(QueuedMessage { text, tier }))
 }
 
 pub(super) fn spawn_stdin_reader(
@@ -151,7 +171,14 @@ pub(super) fn spawn_stdin_reader(
                     match result {
                         Ok(Some(line)) => {
                             let msg = if json_mode {
-                                parse_json_stdin_message(&line)
+                                match parse_json_stdin_message_result(&line) {
+                                    Ok(msg) => msg,
+                                    Err(error) => {
+                                        tracing::warn!(%error, line = %line, "Rejected invalid headless queue message");
+                                        eprintln!("[warning] {error}");
+                                        None
+                                    }
+                                }
                             } else {
                                 parse_stdin_message(&line)
                             };

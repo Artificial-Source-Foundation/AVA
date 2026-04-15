@@ -290,24 +290,6 @@ pub(super) struct PreparedRequest {
     pub dedup_hash: u64,
 }
 
-/// Tools allowed in Plan mode. The LLM only sees these — write/edit are hidden.
-/// Bash is included but restricted at execution time to read-only commands.
-const PLAN_MODE_ALLOWED_TOOLS: &[&str] = &[
-    "read",
-    "glob",
-    "grep",
-    "web_fetch",
-    "web_search",
-    "git",
-    "plan",
-    "todo_read",
-    "todo_write",
-    "question",
-    "codebase_search",
-    "memory_read",
-    "bash", // allowed but restricted to read-only commands at execution time
-];
-
 impl AgentLoop {
     pub(super) fn prepare_llm_request(&mut self) -> PreparedRequest {
         if self.context.needs_repair() {
@@ -386,7 +368,7 @@ impl AgentLoop {
         let mut tools = if self.config.plan_mode {
             all_tools
                 .into_iter()
-                .filter(|t| PLAN_MODE_ALLOWED_TOOLS.contains(&t.name.as_str()))
+                .filter(|t| crate::agent_loop::PLAN_MODE_ALLOWED_TOOLS.contains(&t.name.as_str()))
                 .collect()
         } else {
             all_tools

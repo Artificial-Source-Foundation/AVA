@@ -17,6 +17,8 @@ pub enum MessageKind {
 pub struct SubAgentData {
     /// The task prompt/description sent to the sub-agent.
     pub description: String,
+    /// Whether the sub-agent was launched in background mode.
+    pub background: bool,
     /// Number of tools the sub-agent used (populated on completion).
     pub tool_count: usize,
     /// Current tool name while the sub-agent is running.

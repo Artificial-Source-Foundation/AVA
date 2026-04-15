@@ -6,7 +6,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use ava_llm::provider::LLMProvider;
 use ava_mcp::config::{load_merged_mcp_config_with_scope, McpServerScope};
-use ava_mcp::manager::McpManager;
+use ava_mcp::manager::{McpManager, McpServerInitStatus};
 use ava_permissions::inspector::PermissionInspector;
 use ava_platform::Platform;
 use ava_tools::mcp_bridge::{MCPBridgeTool, MCPToolCaller};
@@ -60,8 +60,16 @@ pub struct MCPServerInfo {
     pub tool_count: usize,
     pub scope: McpServerScope,
     pub enabled: bool,
+    /// Whether the current UI toggle action is supported by the backend.
+    pub can_toggle: bool,
     /// Current connection status for UI display.
     pub status: McpServerStatus,
+}
+
+#[derive(Default)]
+pub(crate) struct MCPInitResult {
+    pub(crate) runtime: Option<MCPRuntime>,
+    pub(crate) statuses: HashMap<String, McpServerStatus>,
 }
 
 /// Summarizer adapter for the LLM provider (used by context compaction).
@@ -81,7 +89,7 @@ pub(crate) async fn init_mcp_with_disabled(
     project_config: &std::path::Path,
     registry: &mut ToolRegistry,
     disabled: &HashSet<String>,
-) -> Option<MCPRuntime> {
+) -> MCPInitResult {
     match load_merged_mcp_config_with_scope(global_config, project_config).await {
         Ok(configs_with_scope) if !configs_with_scope.is_empty() => {
             // Build scope map from all configs (before filtering)
@@ -99,22 +107,33 @@ pub(crate) async fn init_mcp_with_disabled(
 
             if configs.is_empty() {
                 // All servers disabled — return runtime with scope info but no tools
-                return Some(MCPRuntime {
-                    caller: Arc::new(McpManagerCaller {
-                        manager: McpManager::new(),
+                return MCPInitResult {
+                    runtime: Some(MCPRuntime {
+                        caller: Arc::new(McpManagerCaller {
+                            manager: McpManager::new(),
+                        }),
+                        server_count: 0,
+                        tool_count: 0,
+                        tools_with_source: Vec::new(),
+                        server_scopes,
                     }),
-                    server_count: 0,
-                    tool_count: 0,
-                    tools_with_source: Vec::new(),
-                    server_scopes,
-                });
+                    statuses: HashMap::new(),
+                };
             }
 
             let mut manager = McpManager::new();
-            if let Err(e) = manager.initialize(configs).await {
-                warn!(error = %e, "Failed to initialize MCP servers");
-                return None;
-            }
+            let statuses = manager
+                .initialize_with_report(configs)
+                .await
+                .into_iter()
+                .map(|report| {
+                    let status = match report.status {
+                        McpServerInitStatus::Connected => McpServerStatus::Connected,
+                        McpServerInitStatus::Failed(error) => McpServerStatus::Failed(error),
+                    };
+                    (report.name, status)
+                })
+                .collect();
             let server_count = manager.server_count();
             let mcp_tools_with_server = manager.list_tools_with_server().to_vec();
             let mcp_tools = manager.list_tools();
@@ -141,18 +160,21 @@ pub(crate) async fn init_mcp_with_disabled(
                 tools = tool_count,
                 "MCP initialized"
             );
-            Some(MCPRuntime {
-                caller,
-                server_count,
-                tool_count,
-                tools_with_source,
-                server_scopes,
-            })
+            MCPInitResult {
+                runtime: Some(MCPRuntime {
+                    caller,
+                    server_count,
+                    tool_count,
+                    tools_with_source,
+                    server_scopes,
+                }),
+                statuses,
+            }
         }
-        Ok(_) => None,
+        Ok(_) => MCPInitResult::default(),
         Err(e) => {
             warn!(error = %e, "Failed to load MCP config, continuing without MCP tools");
-            None
+            MCPInitResult::default()
         }
     }
 }

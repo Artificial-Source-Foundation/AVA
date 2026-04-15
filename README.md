@@ -99,12 +99,20 @@ Plugins are a core part of AVA's identity, but plugin-owned UI and settings shou
 2. [AGENTS.md](AGENTS.md) - source of truth for repo workflow, conventions, and architecture
 3. [docs/project/roadmap.md](docs/project/roadmap.md) - current product direction
 4. [docs/project/backlog.md](docs/project/backlog.md) - active work and priorities
-5. [docs/architecture/crate-map.md](docs/architecture/crate-map.md) - current crate and dependency map
-6. [docs/extend/README.md](docs/extend/README.md) - extension and customization overview
-7. [docs/reference/providers-and-auth.md](docs/reference/providers-and-auth.md) - provider IDs, aliases, and auth behavior
-8. [docs/reference/commands.md](docs/reference/commands.md) - slash commands and CLI surfaces
-9. [docs/reference/credential-storage.md](docs/reference/credential-storage.md) - credential storage and security guidance
-10. [CLAUDE.md](CLAUDE.md) - compatibility entrypoint pointing back to the active docs
+5. [docs/architecture/README.md](docs/architecture/README.md) - architecture entrypoint, capability audits, and transition docs
+6. [docs/architecture/agent-backend-capability-audit-m1.md](docs/architecture/agent-backend-capability-audit-m1.md) - current coding-agent backend capability inventory
+7. [docs/architecture/agent-backend-capability-comparison-m2.md](docs/architecture/agent-backend-capability-comparison-m2.md) - comparison matrix for AVA vs external coding-agent backends
+8. [docs/architecture/cross-surface-runtime-map-m4.md](docs/architecture/cross-surface-runtime-map-m4.md) - runtime wiring map across interactive TUI, headless CLI, desktop, and web
+9. [docs/architecture/cross-surface-behavior-audit-m5.md](docs/architecture/cross-surface-behavior-audit-m5.md) - shared-vs-divergent backend behavior audit across surfaces
+10. [docs/architecture/shared-backend-contract-m6.md](docs/architecture/shared-backend-contract-m6.md) - canonical shared-backend contract for cross-surface semantics
+11. [docs/architecture/backend-correction-roadmap-m7.md](docs/architecture/backend-correction-roadmap-m7.md) - implementation roadmap for backend contract adoption
+12. [docs/architecture/backend-contract-exceptions.md](docs/architecture/backend-contract-exceptions.md) - versioned backend-contract exception registry
+13. [docs/architecture/crate-map.md](docs/architecture/crate-map.md) - current crate and dependency map
+14. [docs/extend/README.md](docs/extend/README.md) - extension and customization overview
+15. [docs/reference/providers-and-auth.md](docs/reference/providers-and-auth.md) - provider IDs, aliases, and auth behavior
+16. [docs/reference/commands.md](docs/reference/commands.md) - slash commands and CLI surfaces
+17. [docs/reference/credential-storage.md](docs/reference/credential-storage.md) - credential storage and security guidance
+18. [CLAUDE.md](CLAUDE.md) - compatibility entrypoint pointing back to the active docs
 
 ## Contributing
 

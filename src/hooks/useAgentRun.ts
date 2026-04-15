@@ -15,7 +15,7 @@ import { generateMessageId } from '../lib/ids'
 import { log } from '../lib/logger'
 import { deriveSessionTitle } from '../lib/title-utils'
 import { decodeCompactionModel } from '../services/context-compaction'
-import { getCoreBudget } from '../services/core-bridge'
+import { getCoreBudget, markActiveSessionSynced } from '../services/core-bridge'
 import { registerBackendSessionId } from '../services/db-web-fallback'
 import type { Message } from '../types'
 import type { ToolActivity } from './agent'
@@ -47,6 +47,10 @@ export interface RunDeps {
 
   // Streaming offsets
   streaming: StreamingOffsets
+  runOwnership: {
+    beginRun: () => number
+    isCurrentRun: (token: number) => boolean
+  }
 }
 
 export function createAgentRun(deps: RunDeps) {
@@ -65,6 +69,7 @@ export function createAgentRun(deps: RunDeps) {
     liveMessageId,
     setLiveMessageId,
     streaming,
+    runOwnership,
   } = deps
 
   async function run(
@@ -75,6 +80,8 @@ export function createAgentRun(deps: RunDeps) {
       setMessageQueue((prev) => [...prev, { content: goal }])
       return null
     }
+
+    const runToken = runOwnership.beginRun()
 
     // Track whether the run completed successfully (not cancelled / errored).
     // The queue should only auto-submit after successful completions.
@@ -99,6 +106,46 @@ export function createAgentRun(deps: RunDeps) {
       currentSess = session.currentSession()
     }
     const sessionId = currentSess?.id ?? ''
+    const ownsOriginSession = (): boolean => session.currentSession()?.id === sessionId
+    const runIsCurrent = (): boolean => runOwnership.isCurrentRun(runToken)
+    const canMutateOriginSession = (): boolean => runIsCurrent() && ownsOriginSession()
+    const settleRunMessageId = (fallbackId: string): string => {
+      if (runIsCurrent()) {
+        return liveMessageId() || fallbackId
+      }
+      return fallbackId
+    }
+    const updateOriginMessage = (messageId: string, updates: Partial<Message>): void => {
+      if (ownsOriginSession()) {
+        session.updateMessage(messageId, updates)
+        return
+      }
+      session.updateMessageInSession?.(sessionId, messageId, updates)
+    }
+    const deleteOriginMessage = async (messageId: string): Promise<void> => {
+      if (ownsOriginSession()) {
+        await session.deleteMessage(messageId)
+        return
+      }
+      await session.deleteMessageInSession?.(sessionId, messageId)
+    }
+    const addOriginMessage = (message: Message): void => {
+      if (ownsOriginSession()) {
+        session.addMessage(message)
+        return
+      }
+      session.addMessageToSession?.(message)
+    }
+    const clearRunUiIfCurrent = (): void => {
+      if (!runIsCurrent()) {
+        return
+      }
+      batch(() => {
+        rustAgent.endRun()
+        setLiveMessageId(null)
+        setStreamingStartedAt(null)
+      })
+    }
 
     // Add user message to the session store so it's visible immediately
     const userMsg: Message = {
@@ -185,7 +232,7 @@ export function createAgentRun(deps: RunDeps) {
 
         if (isCancelled) {
           log.info('agent', 'Run cancelled by user — preserving partial response')
-          const cancelMsgId = liveMessageId() || assistantMsgId
+          const cancelMsgId = settleRunMessageId(assistantMsgId)
           const fullPartial = rustAgent.streamingContent()
           const cOffset = streaming.streamingContentOffset()
           const partialContent = cOffset > 0 ? fullPartial.slice(cOffset) : fullPartial
@@ -198,7 +245,7 @@ export function createAgentRun(deps: RunDeps) {
             const allTc = rustAgent.activeToolCalls()
             const tOffset = streaming.toolCallsOffset()
             const partialToolCalls = tOffset > 0 ? allTc.slice(tOffset) : allTc
-            session.updateMessage(cancelMsgId, {
+            updateOriginMessage(cancelMsgId, {
               content: partialContent,
               tokensUsed: rustAgent.tokenUsage().output,
               costUSD: rustAgent.tokenUsage().cost || undefined,
@@ -214,7 +261,7 @@ export function createAgentRun(deps: RunDeps) {
               },
             })
           } else {
-            session.deleteMessage(cancelMsgId)
+            await deleteOriginMessage(cancelMsgId)
           }
           // Add a subtle system-level cancellation note
           const cancelNote: Message = {
@@ -226,24 +273,23 @@ export function createAgentRun(deps: RunDeps) {
             metadata: { cancelled: true, system: true },
             error: { type: 'cancelled', message: 'Session interrupted', timestamp: Date.now() },
           }
-          session.addMessage(cancelNote)
+          addOriginMessage(cancelNote)
+          clearRunUiIfCurrent()
           return null
         }
 
         log.error('agent', 'Run failed', { error: errorText })
-        const errorMsgId = liveMessageId() || assistantMsgId
-        batch(() => {
-          session.updateMessage(errorMsgId, {
-            content: '',
-            error: { type: 'unknown', message: errorText, timestamp: Date.now() },
-          })
-          rustAgent.endRun()
+        const errorMsgId = settleRunMessageId(assistantMsgId)
+        updateOriginMessage(errorMsgId, {
+          content: '',
+          error: { type: 'unknown', message: errorText, timestamp: Date.now() },
         })
+        clearRunUiIfCurrent()
         return null
       }
 
       // Settle the assistant response into the placeholder.
-      const finalMsgId = liveMessageId() || assistantMsgId
+      const finalMsgId = settleRunMessageId(assistantMsgId)
       const fullContent = rustAgent.streamingContent()
       const contentOffset = streaming.streamingContentOffset()
       const content = contentOffset > 0 ? fullContent.slice(contentOffset) : fullContent
@@ -262,29 +308,25 @@ export function createAgentRun(deps: RunDeps) {
         segments.length > 0 ? `${segments.length} segments` : ''
       )
 
-      batch(() => {
-        if (content) {
-          session.updateMessage(finalMsgId, {
-            content,
-            tokensUsed: rustAgent.tokenUsage().output,
-            costUSD: rustAgent.tokenUsage().cost || undefined,
-            toolCalls,
-            metadata: {
-              provider: selectedProviderId,
-              model: selectedModelId,
-              mode: isPlanMode() ? 'plan' : 'code',
-              elapsedMs,
-              ...(thinking ? { thinking } : {}),
-              ...(segments.length > 1 ? { thinkingSegments: segments } : {}),
-            },
-          })
-        } else {
-          session.deleteMessage(finalMsgId)
-        }
-        rustAgent.endRun()
-        setLiveMessageId(null)
-        setStreamingStartedAt(null)
-      })
+      if (content) {
+        updateOriginMessage(finalMsgId, {
+          content,
+          tokensUsed: rustAgent.tokenUsage().output,
+          costUSD: rustAgent.tokenUsage().cost || undefined,
+          toolCalls,
+          metadata: {
+            provider: selectedProviderId,
+            model: selectedModelId,
+            mode: isPlanMode() ? 'plan' : 'code',
+            elapsedMs,
+            ...(thinking ? { thinking } : {}),
+            ...(segments.length > 1 ? { thinkingSegments: segments } : {}),
+          },
+        })
+      } else {
+        await deleteOriginMessage(finalMsgId)
+      }
+      clearRunUiIfCurrent()
 
       log.info('agent', 'Run completed', {
         success: true,
@@ -295,32 +337,72 @@ export function createAgentRun(deps: RunDeps) {
       })
 
       const backendSessionId = result?.sessionId || sessionId
-      if (!isTauri() && backendSessionId) {
+      if (backendSessionId && canMutateOriginSession()) {
+        markActiveSessionSynced(backendSessionId)
+      }
+      if (!isTauri() && backendSessionId && canMutateOriginSession()) {
+        try {
+          const apiBase = (import.meta.env.VITE_API_URL as string) || ''
+          const res = await fetch(`${apiBase}/api/sessions/${backendSessionId}/messages`)
+          if (res.ok) {
+            const rawMsgs = (await res.json()) as Array<Record<string, unknown>>
+            const backendMsgs: Message[] = rawMsgs.map((m) => {
+              const metaRaw = m.metadata
+              const metadata =
+                typeof metaRaw === 'string'
+                  ? (JSON.parse(metaRaw) as Record<string, unknown>)
+                  : (metaRaw as Record<string, unknown> | undefined)
+              return {
+                id: m.id as string,
+                sessionId: backendSessionId,
+                role: m.role as Message['role'],
+                content: (m.content as string) ?? '',
+                createdAt:
+                  typeof m.created_at === 'number'
+                    ? m.created_at
+                    : typeof m.timestamp === 'string'
+                      ? new Date(m.timestamp).getTime()
+                      : Date.now(),
+                tokensUsed: (m.tokens_used as number) || undefined,
+                costUSD: (m.cost_usd as number | null) ?? undefined,
+                model: (m.model as string | null) ?? undefined,
+                metadata,
+                toolCalls: (metadata?.toolCalls as Message['toolCalls']) ?? undefined,
+              }
+            })
+            session.replaceMessagesFromBackend(backendMsgs)
+          }
+        } catch (syncErr) {
+          log.warn('agent', 'Failed to sync messages from backend after run', {
+            error: String(syncErr),
+          })
+        }
         registerBackendSessionId(sessionId, backendSessionId)
         log.info('agent', 'Backend session ID registered', { backendSessionId })
       }
 
-      ranSuccessfully = true
+      ranSuccessfully = canMutateOriginSession()
       return result
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       log.error('agent', 'Unexpected agent error', { error: msg })
-      batch(() => {
-        session.updateMessage(assistantMsgId, {
-          content: `**Error:** ${msg}`,
-          error: { type: 'unknown', message: msg, timestamp: Date.now() },
-        })
-        rustAgent.endRun()
+      const errorMsgId = settleRunMessageId(assistantMsgId)
+      updateOriginMessage(errorMsgId, {
+        content: `**Error:** ${msg}`,
+        error: { type: 'unknown', message: msg, timestamp: Date.now() },
       })
+      clearRunUiIfCurrent()
       return null
     } finally {
-      batch(() => {
-        setStreamingStartedAt(null)
-        setLiveMessageId(null)
-      })
+      if (runIsCurrent()) {
+        batch(() => {
+          setStreamingStartedAt(null)
+          setLiveMessageId(null)
+        })
+      }
       // Auto-submit queued messages only after successful runs.
       // Don't drain on cancel/error — the user should decide what to do.
-      if (ranSuccessfully) {
+      if (ranSuccessfully && canMutateOriginSession()) {
         const queue = messageQueue()
         if (queue.length > 0) {
           const next = queue[0]!

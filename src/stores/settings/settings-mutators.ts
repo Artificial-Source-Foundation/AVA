@@ -37,7 +37,7 @@ export function updateProvider(id: string, patch: Partial<LLMProviderConfig>): v
     saveSettings(next)
     return next
   })
-  if (patch.apiKey !== undefined) {
+  if ('apiKey' in patch) {
     syncProviderCredentials(id, patch.apiKey)
     // Auto-fetch models when an API key is set
     if (patch.apiKey) autoFetchModels(id)

@@ -22,6 +22,7 @@ interface ProviderCardProps {
   onToggle?: (enabled: boolean) => void
   onSaveApiKey?: (key: string) => void
   onClearApiKey?: () => void
+  onOAuthConnected?: () => void
   onSetDefaultModel?: (modelId: string) => void
   onTestConnection?: () => void
   onUpdateModels?: (models: LLMProviderConfig['models']) => void
@@ -177,6 +178,7 @@ export const ProviderCard: Component<ProviderCardProps> = (props) => {
               provider={props.provider}
               onSaveApiKey={props.onSaveApiKey}
               onClearApiKey={props.onClearApiKey}
+              onOAuthConnected={props.onOAuthConnected}
               onSetDefaultModel={props.onSetDefaultModel}
               onTestConnection={props.onTestConnection}
               onUpdateModels={props.onUpdateModels}

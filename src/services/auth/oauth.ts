@@ -43,6 +43,18 @@ import { exchangeCodeForTokens, storeOAuthCredentials } from './oauth-tokens'
 
 const LOG_SRC = 'oauth'
 
+export interface OAuthConnectedResult {
+  kind: 'connected'
+  tokens: OAuthTokens
+}
+
+export interface OAuthPendingResult {
+  kind: 'pending'
+  deviceCode: import('./oauth-config').DeviceCodeResponse
+}
+
+export type OAuthFlowResult = OAuthConnectedResult | OAuthPendingResult
+
 // ============================================================================
 // PKCE Storage
 // ============================================================================
@@ -96,9 +108,7 @@ let pkceInProgress = false
  * redirect, exchanges code for tokens, stores credentials, and returns tokens.
  * For device-code providers (copilot): returns DeviceCodeResponse for UI polling.
  */
-export async function startOAuthFlow(
-  provider: LLMProvider
-): Promise<import('./oauth-config').DeviceCodeResponse | OAuthTokens> {
+export async function startOAuthFlow(provider: LLMProvider): Promise<OAuthFlowResult> {
   const config = OAUTH_CONFIGS[provider]
   if (!config) {
     throw new Error(`OAuth not supported for provider: ${provider}`)
@@ -106,7 +116,10 @@ export async function startOAuthFlow(
 
   // Device code flow (GitHub Copilot)
   if (config.flow === 'device-code') {
-    return startDeviceCodeFlow(provider)
+    return {
+      kind: 'pending',
+      deviceCode: await startDeviceCodeFlow(provider),
+    }
   }
 
   // Prevent multiple PKCE flows — they share port 1455
@@ -145,9 +158,12 @@ export async function startOAuthFlow(
     })
 
     // Store tokens and bridge to core credential store
-    storeOAuthCredentials(provider, tokens)
+    await storeOAuthCredentials(provider, tokens)
 
-    return tokens
+    return {
+      kind: 'connected',
+      tokens,
+    }
   } catch (err) {
     logError(LOG_SRC, `OAuth flow failed for ${provider}`, {
       error: err instanceof Error ? err.message : String(err),

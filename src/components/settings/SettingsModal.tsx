@@ -8,6 +8,7 @@ import { fetchModels } from '../../services/providers/model-fetcher'
 import { rustBackend } from '../../services/rust-bridge'
 import { useLayout } from '../../stores/layout'
 import { useSettings } from '../../stores/settings'
+import type { MCPServerConfig } from '../../stores/settings/settings-types'
 import { useShortcuts } from '../../stores/shortcuts'
 import type { LLMProvider } from '../../types/llm'
 import { AddMCPServerDialog } from '../dialogs/AddMCPServerDialog'
@@ -31,10 +32,13 @@ export const SettingsModal: Component = () => {
   const [editingKeybinding, setEditingKeybinding] = createSignal<Keybinding | null>(null)
   const [addMcpDialogOpen, setAddMcpDialogOpen] = createSignal(false)
   const [backendMcpServers, setBackendMcpServers] = createSignal<MCPServer[] | null>(null)
+  const [hasAttemptedLiveMcpFetch, setHasAttemptedLiveMcpFetch] = createSignal(false)
+  const [isLiveMcpLoading, setIsLiveMcpLoading] = createSignal(false)
   let contentScrollRef: HTMLDivElement | undefined
   const validTabs = new Set<SettingsTab>(
     tabGroups.flatMap((group) => group.tabs.map((tab) => tab.id))
   )
+  let mcpRequestGeneration = 0
 
   /** Map backend status strings to MCPServer.status union. */
   function mapMcpStatus(backendStatus: string | undefined, enabled: boolean): MCPServer['status'] {
@@ -53,6 +57,28 @@ export const SettingsModal: Component = () => {
     }
   }
 
+  function normalizeMcpScope(scope: string | undefined): MCPServer['scope'] {
+    if (!scope) return undefined
+    const normalized = scope.toLowerCase()
+    return normalized === 'local' ? 'local' : normalized === 'global' ? 'global' : undefined
+  }
+
+  function mapSavedMcpServer(server: MCPServerConfig): MCPServer {
+    return {
+      id: server.name,
+      name: server.name,
+      url:
+        server.url ??
+        (server.command ? `${server.command} ${(server.args ?? []).join(' ')}`.trim() : 'stdio'),
+      enabled: true,
+      hasBackendIdentity: false,
+      hasSavedConfig: true,
+      scope: 'local',
+      status: 'disconnected',
+      description: `${server.type} transport`,
+    }
+  }
+
   /** Build MCPServer list from a backend response, merging with local settings for URLs. */
   function mapBackendMcpServers(
     servers: import('../../types/rust-ipc').McpServerInfo[]
@@ -67,58 +93,136 @@ export const SettingsModal: Component = () => {
         name: s.name,
         url,
         enabled: s.enabled,
-        scope: s.scope as 'global' | 'local' | undefined,
+        canToggle: s.canToggle,
+        hasBackendIdentity: true,
+        hasSavedConfig: Boolean(local),
+        scope: normalizeMcpScope(s.scope),
         toolCount: s.toolCount,
         status: mapMcpStatus(s.status, s.enabled),
-        description: `${s.toolCount} tool${s.toolCount !== 1 ? 's' : ''} · ${s.scope}`,
+        error: s.error,
+        description: `${s.toolCount} tool${s.toolCount !== 1 ? 's' : ''}${s.scope ? ` · ${s.scope.toLowerCase()}` : ''}`,
       }
     })
   }
 
-  // Fetch real MCP server status from the Rust backend whenever the MCP tab is active.
-  createEffect(
-    on(activeTab, (tab) => {
-      if (tab !== 'mcp') return
-      rustBackend
-        .listMcpServers()
-        .then((servers) => setBackendMcpServers(mapBackendMcpServers(servers)))
-        .catch((error) => {
-          setBackendMcpServers(null)
-          notification.error(
-            'MCP status unavailable',
-            error instanceof Error ? error.message : 'Using saved MCP configuration only'
-          )
-        })
-    })
-  )
+  function applyCurrentSavedMcpConfig(server: MCPServer): MCPServer {
+    const local = settings().mcpServers.find((savedServer) => savedServer.name === server.name)
+    const url =
+      local?.url ??
+      (local?.command
+        ? `${local.command} ${(local.args ?? []).join(' ')}`.trim()
+        : server.hasSavedConfig
+          ? ''
+          : server.url)
 
-  const mcpServers = (): MCPServer[] => {
-    // Prefer live backend data when available; fall back to local settings.
-    const live = backendMcpServers()
-    if (live !== null) return live
-    return settings().mcpServers.map((s) => ({
-      id: s.name,
-      name: s.name,
-      url: s.url ?? (s.command ? `${s.command} ${(s.args ?? []).join(' ')}` : 'stdio'),
-      enabled: true,
-      status: 'disconnected' as const,
-      description: `${s.type} transport`,
-    }))
+    return {
+      ...server,
+      url,
+      hasSavedConfig: Boolean(local),
+    }
   }
 
+  function mergeMcpServers(liveServers: MCPServer[] | null): MCPServer[] {
+    const savedServers = settings().mcpServers.map(mapSavedMcpServer)
+    if (liveServers === null) return savedServers
+
+    const mergedServers = new Map(
+      liveServers.map((server) => [server.name, applyCurrentSavedMcpConfig(server)])
+    )
+    for (const server of savedServers) {
+      if (!mergedServers.has(server.name)) {
+        mergedServers.set(server.name, server)
+      }
+    }
+
+    return Array.from(mergedServers.values())
+  }
+
+  const mcpServers = (): MCPServer[] => {
+    return mergeMcpServers(backendMcpServers())
+  }
+
+  const formatMcpError = (error: unknown, fallback: string): string =>
+    error instanceof Error ? error.message : fallback
+
+  const isCurrentMcpRequest = (generation: number): boolean => generation === mcpRequestGeneration
+
+  const invalidateLiveMcpRequests = (): void => {
+    mcpRequestGeneration += 1
+    setIsLiveMcpLoading(false)
+  }
+
+  const fetchLiveMcpServers = async (errorTitle: string): Promise<boolean> => {
+    const requestGeneration = ++mcpRequestGeneration
+    setHasAttemptedLiveMcpFetch(true)
+    setIsLiveMcpLoading(true)
+    try {
+      const servers = await rustBackend.listMcpServers()
+      if (!isCurrentMcpRequest(requestGeneration)) return false
+      setBackendMcpServers(mapBackendMcpServers(servers))
+      return true
+    } catch (error) {
+      if (!isCurrentMcpRequest(requestGeneration)) return false
+      notification.error(errorTitle, formatMcpError(error, 'Unable to fetch MCP server status'))
+      return false
+    } finally {
+      if (isCurrentMcpRequest(requestGeneration)) {
+        setIsLiveMcpLoading(false)
+      }
+    }
+  }
+
+  const reloadLiveMcpServers = async (): Promise<boolean> => {
+    const requestGeneration = mcpRequestGeneration
+    try {
+      await rustBackend.reloadMcpServers()
+    } catch (error) {
+      if (!isCurrentMcpRequest(requestGeneration)) return false
+      notification.error('Failed to reload MCP servers', formatMcpError(error, 'Reload failed'))
+      return false
+    }
+
+    if (!isCurrentMcpRequest(requestGeneration)) return false
+
+    return fetchLiveMcpServers('Failed to refresh MCP server status')
+  }
+
+  // Fetch live MCP state whenever the settings surface opens on the MCP tab.
+  createEffect(
+    on(
+      () => [settingsOpen(), activeTab()] as const,
+      ([open, tab]) => {
+        if (!open || tab !== 'mcp') return
+        void fetchLiveMcpServers('MCP status unavailable')
+      }
+    )
+  )
+
+  createEffect(
+    on(
+      () => settings().mcpServers,
+      () => {
+        if (backendMcpServers() === null && !hasAttemptedLiveMcpFetch()) return
+        invalidateLiveMcpRequests()
+      },
+      { defer: true }
+    )
+  )
+
   const handleRefreshMcp = (): void => {
-    setBackendMcpServers(null)
-    rustBackend
-      .listMcpServers()
-      .then((servers) => setBackendMcpServers(mapBackendMcpServers(servers)))
-      .catch(() => setBackendMcpServers(null))
+    void reloadLiveMcpServers()
   }
 
   const handleToggleMcp = (name: string, enabled: boolean): void => {
+    const requestGeneration = mcpRequestGeneration
     const action = enabled ? rustBackend.enableMcpServer(name) : rustBackend.disableMcpServer(name)
     action
-      .then(() => handleRefreshMcp())
+      .then(() => {
+        if (!isCurrentMcpRequest(requestGeneration)) return false
+        return fetchLiveMcpServers(`Failed to refresh MCP server status for ${name}`)
+      })
       .catch((error) => {
+        if (!isCurrentMcpRequest(requestGeneration)) return
         notification.error(
           `Failed to ${enabled ? 'enable' : 'disable'} ${name}`,
           error instanceof Error ? error.message : String(error)
@@ -243,6 +347,7 @@ export const SettingsModal: Component = () => {
               onAddMcpServer={() => setAddMcpDialogOpen(true)}
               onRefreshMcpServers={handleRefreshMcp}
               onToggleMcpServer={handleToggleMcp}
+              isMcpLoading={isLiveMcpLoading}
             />
           </div>
         </div>

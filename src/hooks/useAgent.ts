@@ -21,6 +21,7 @@ import { useSession } from '../stores/session'
 import { useSettings } from '../stores/settings'
 import type {
   ApprovalRequestEvent,
+  InteractiveRequestClearedEvent,
   PlanCreatedEvent,
   PlanData,
   QuestionRequestEvent,
@@ -70,6 +71,18 @@ function createAgentStore() {
   const rustAgent = useRustAgent()
   const settingsRef = useSettings()
   const session = useSession()
+  let nextRunToken = 0
+  let activeRunToken = 0
+
+  const runOwnership = {
+    beginRun(): number {
+      activeRunToken = ++nextRunToken
+      return activeRunToken
+    },
+    isCurrentRun(token: number): boolean {
+      return activeRunToken === token
+    },
+  }
 
   // ── Frontend-only signals ───────────────────────────────────────────
   const [isPlanMode, setIsPlanMode] = createSignal(false)
@@ -200,9 +213,27 @@ function createAgentStore() {
             options: questionEvent.options,
           })
         }
+        if (event.type === 'interactive_request_cleared') {
+          const clearedEvent = event as InteractiveRequestClearedEvent
+          const requestId = clearedEvent.requestId ?? clearedEvent.request_id ?? null
+          const requestKind = clearedEvent.requestKind ?? clearedEvent.request_kind
+
+          if (requestKind === 'approval' && pendingApproval()?.id === requestId) {
+            setPendingApproval(null)
+          }
+          if (requestKind === 'question' && pendingQuestion()?.id === requestId) {
+            setPendingQuestion(null)
+          }
+          if (requestKind === 'plan' && pendingPlan()?.requestId === requestId) {
+            setPendingPlan(null)
+          }
+        }
         if (event.type === 'plan_created') {
           const planEvent = event as PlanCreatedEvent
-          setPendingPlan(planEvent.plan)
+          setPendingPlan({
+            ...planEvent.plan,
+            requestId: planEvent.id ?? planEvent.plan.requestId,
+          })
         }
       }
       lastEventIdx = allEvents.length
@@ -240,6 +271,7 @@ function createAgentStore() {
     liveMessageId,
     setLiveMessageId,
     streaming: streamingState,
+    runOwnership,
   })
 
   const runModule = createAgentRun({
@@ -258,6 +290,7 @@ function createAgentStore() {
     liveMessageId,
     setLiveMessageId,
     streaming: streamingState,
+    runOwnership,
   })
 
   // ====================================================================

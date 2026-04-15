@@ -18,6 +18,9 @@ export interface MCPServer {
   url: string
   status: 'connected' | 'disconnected' | 'error' | 'connecting' | 'disabled'
   enabled: boolean
+  canToggle?: boolean
+  hasBackendIdentity?: boolean
+  hasSavedConfig?: boolean
   scope?: 'global' | 'local'
   toolCount?: number
   description?: string
@@ -28,6 +31,7 @@ export interface MCPServer {
 
 export interface MCPServersTabProps {
   servers: MCPServer[]
+  isLoading?: boolean
   onAdd?: () => void
   onEdit?: (id: string) => void
   onRemove?: (id: string) => void
@@ -101,6 +105,7 @@ export const MCPServersTab: Component<MCPServersTabProps> = (props) => {
             <button
               type="button"
               onClick={() => props.onRefresh?.()}
+              aria-label="Refresh MCP servers"
               class="flex items-center justify-center transition-colors"
               style={{
                 width: '32px',
@@ -144,6 +149,7 @@ export const MCPServersTab: Component<MCPServersTabProps> = (props) => {
         when={props.servers.length > 0}
         fallback={
           <p
+            aria-live="polite"
             style={{
               'font-size': '13px',
               color: '#48484A',
@@ -151,163 +157,180 @@ export const MCPServersTab: Component<MCPServersTabProps> = (props) => {
               padding: '24px 0',
             }}
           >
-            No MCP servers configured. MCP servers extend AVA with external tools.
+            {props.isLoading
+              ? 'Loading MCP servers…'
+              : 'No MCP servers configured. MCP servers extend AVA with external tools.'}
           </p>
         }
       >
         <div style={{ display: 'flex', 'flex-direction': 'column', gap: '12px' }}>
           <For each={props.servers}>
-            {(server) => (
-              <div
-                style={{
-                  'border-radius': '12px',
-                  background: '#111114',
-                  border: `1px solid ${server.status === 'error' ? '#FF453A18' : '#ffffff08'}`,
-                  padding: '16px',
-                  display: 'flex',
-                  'flex-direction': 'column',
-                  gap: '10px',
-                }}
-              >
-                <div class="flex items-center justify-between" style={{ width: '100%' }}>
-                  <div style={{ display: 'flex', 'flex-direction': 'column', gap: '4px' }}>
-                    <div class="flex items-center" style={{ gap: '8px' }}>
-                      <span
-                        style={{
-                          'font-family': 'Geist, sans-serif',
-                          'font-size': '13px',
-                          'font-weight': '500',
-                          color: server.enabled ? '#F5F5F7' : '#636366',
-                        }}
-                      >
-                        {server.name}
-                      </span>
-                      <Show when={server.scope}>
-                        <span
-                          style={{
-                            'font-family': 'Geist Mono, monospace',
-                            'font-size': '10px',
-                            color: '#48484A',
-                            background: '#ffffff08',
-                            padding: '1px 6px',
-                            'border-radius': '4px',
-                          }}
-                        >
-                          {server.scope}
-                        </span>
-                      </Show>
-                      <Show when={server.toolCount && server.toolCount > 0}>
-                        <span
-                          style={{
-                            'font-family': 'Geist Mono, monospace',
-                            'font-size': '10px',
-                            color: '#34C759',
-                          }}
-                        >
-                          {server.toolCount} tools
-                        </span>
-                      </Show>
+            {(server) =>
+              (() => {
+                const showsToggle = Boolean(props.onToggle && server.hasBackendIdentity)
+                const canToggle = showsToggle && (server.canToggle ?? true)
+                const showsRemove = Boolean(props.onRemove && server.hasSavedConfig)
+
+                return (
+                  <div
+                    style={{
+                      'border-radius': '12px',
+                      background: '#111114',
+                      border: `1px solid ${server.status === 'error' ? '#FF453A18' : '#ffffff08'}`,
+                      padding: '16px',
+                      display: 'flex',
+                      'flex-direction': 'column',
+                      gap: '10px',
+                    }}
+                  >
+                    <div class="flex items-center justify-between" style={{ width: '100%' }}>
+                      <div style={{ display: 'flex', 'flex-direction': 'column', gap: '4px' }}>
+                        <div class="flex items-center" style={{ gap: '8px' }}>
+                          <span
+                            style={{
+                              'font-family': 'Geist, sans-serif',
+                              'font-size': '13px',
+                              'font-weight': '500',
+                              color: server.enabled ? '#F5F5F7' : '#636366',
+                            }}
+                          >
+                            {server.name}
+                          </span>
+                          <Show when={server.scope}>
+                            <span
+                              style={{
+                                'font-family': 'Geist Mono, monospace',
+                                'font-size': '10px',
+                                color: '#48484A',
+                                background: '#ffffff08',
+                                padding: '1px 6px',
+                                'border-radius': '4px',
+                              }}
+                            >
+                              {server.scope}
+                            </span>
+                          </Show>
+                          <Show when={server.toolCount && server.toolCount > 0}>
+                            <span
+                              style={{
+                                'font-family': 'Geist Mono, monospace',
+                                'font-size': '10px',
+                                color: '#34C759',
+                              }}
+                            >
+                              {server.toolCount} tools
+                            </span>
+                          </Show>
+                        </div>
+                        <Show when={server.url}>
+                          <span
+                            style={{
+                              'font-family': 'Geist Mono, monospace',
+                              'font-size': '11px',
+                              color: '#48484A',
+                            }}
+                          >
+                            {server.url}
+                          </span>
+                        </Show>
+                      </div>
+                      <div class="flex items-center" style={{ gap: '12px' }}>
+                        {/* Status */}
+                        <div class="flex items-center" style={{ gap: '6px' }}>
+                          <div
+                            style={{
+                              width: '6px',
+                              height: '6px',
+                              'border-radius': '50%',
+                              background: statusDotColor[server.status],
+                            }}
+                          />
+                          <span
+                            style={{
+                              'font-family': 'Geist, sans-serif',
+                              'font-size': '11px',
+                              color: statusTextColor[server.status],
+                            }}
+                          >
+                            {statusLabel[server.status]}
+                          </span>
+                        </div>
+                        {/* Toggle */}
+                        <Show when={showsToggle}>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (!canToggle) return
+                              props.onToggle?.(server.name, !server.enabled)
+                            }}
+                            aria-label={`${server.enabled ? 'Disable' : 'Enable'} ${server.name} MCP server`}
+                            disabled={!canToggle}
+                            style={{
+                              width: '36px',
+                              height: '20px',
+                              'border-radius': '10px',
+                              background: server.enabled ? '#0A84FF' : '#38383A',
+                              border: 'none',
+                              cursor: canToggle ? 'pointer' : 'not-allowed',
+                              position: 'relative',
+                              transition: 'background 0.2s',
+                              'flex-shrink': '0',
+                              opacity: canToggle ? '1' : '0.5',
+                            }}
+                          >
+                            <div
+                              style={{
+                                width: '16px',
+                                height: '16px',
+                                'border-radius': '50%',
+                                background: '#FFFFFF',
+                                position: 'absolute',
+                                top: '2px',
+                                left: server.enabled ? '18px' : '2px',
+                                transition: 'left 0.2s',
+                              }}
+                            />
+                          </button>
+                        </Show>
+                        {/* Actions */}
+                        <div class="flex items-center" style={{ gap: '4px' }}>
+                          <Show when={showsRemove}>
+                            <button
+                              type="button"
+                              onClick={() => props.onRemove?.(server.id)}
+                              aria-label={`Remove ${server.name} MCP server`}
+                              class="transition-colors"
+                              style={{
+                                color: '#48484A',
+                                background: 'transparent',
+                                border: 'none',
+                                padding: '4px',
+                                cursor: 'pointer',
+                              }}
+                            >
+                              <Trash2 style={{ width: '14px', height: '14px' }} />
+                            </button>
+                          </Show>
+                        </div>
+                      </div>
                     </div>
-                    <Show when={server.url}>
+                    {/* Error message */}
+                    <Show when={server.status === 'error' && server.error}>
                       <span
                         style={{
                           'font-family': 'Geist Mono, monospace',
                           'font-size': '11px',
-                          color: '#48484A',
+                          color: '#FF453A',
+                          'word-break': 'break-all',
                         }}
                       >
-                        {server.url}
+                        {server.error}
                       </span>
                     </Show>
                   </div>
-                  <div class="flex items-center" style={{ gap: '12px' }}>
-                    {/* Status */}
-                    <div class="flex items-center" style={{ gap: '6px' }}>
-                      <div
-                        style={{
-                          width: '6px',
-                          height: '6px',
-                          'border-radius': '50%',
-                          background: statusDotColor[server.status],
-                        }}
-                      />
-                      <span
-                        style={{
-                          'font-family': 'Geist, sans-serif',
-                          'font-size': '11px',
-                          color: statusTextColor[server.status],
-                        }}
-                      >
-                        {statusLabel[server.status]}
-                      </span>
-                    </div>
-                    {/* Toggle */}
-                    <Show when={props.onToggle}>
-                      <button
-                        type="button"
-                        onClick={() => props.onToggle?.(server.name, !server.enabled)}
-                        style={{
-                          width: '36px',
-                          height: '20px',
-                          'border-radius': '10px',
-                          background: server.enabled ? '#0A84FF' : '#38383A',
-                          border: 'none',
-                          cursor: 'pointer',
-                          position: 'relative',
-                          transition: 'background 0.2s',
-                          'flex-shrink': '0',
-                        }}
-                      >
-                        <div
-                          style={{
-                            width: '16px',
-                            height: '16px',
-                            'border-radius': '50%',
-                            background: '#FFFFFF',
-                            position: 'absolute',
-                            top: '2px',
-                            left: server.enabled ? '18px' : '2px',
-                            transition: 'left 0.2s',
-                          }}
-                        />
-                      </button>
-                    </Show>
-                    {/* Actions */}
-                    <div class="flex items-center" style={{ gap: '4px' }}>
-                      <Show when={props.onRemove}>
-                        <button
-                          type="button"
-                          onClick={() => props.onRemove?.(server.id)}
-                          class="transition-colors"
-                          style={{
-                            color: '#48484A',
-                            background: 'transparent',
-                            border: 'none',
-                            padding: '4px',
-                            cursor: 'pointer',
-                          }}
-                        >
-                          <Trash2 style={{ width: '14px', height: '14px' }} />
-                        </button>
-                      </Show>
-                    </div>
-                  </div>
-                </div>
-                {/* Error message */}
-                <Show when={server.status === 'error' && server.error}>
-                  <span
-                    style={{
-                      'font-family': 'Geist Mono, monospace',
-                      'font-size': '11px',
-                      color: '#FF453A',
-                      'word-break': 'break-all',
-                    }}
-                  >
-                    {server.error}
-                  </span>
-                </Show>
-              </div>
-            )}
+                )
+              })()
+            }
           </For>
         </div>
       </Show>

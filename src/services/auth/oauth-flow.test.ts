@@ -55,14 +55,12 @@ describe('oauth flow reconnect/storage', () => {
   it('stores openai oauth with accountId and reports oauth as connected', async () => {
     const idToken = makeJwt({ chatgpt_account_id: 'acct-reconnect-1' })
 
-    storeOAuthCredentials('openai', {
+    await storeOAuthCredentials('openai', {
       accessToken: 'openai-token-1',
       refreshToken: 'openai-refresh-1',
       expiresAt: Date.now() + 3600_000,
       idToken,
     })
-
-    await Promise.resolve()
 
     expect(checkStoredOAuth('openai')).toBe(true)
     expect(mockSetStoredAuth).toHaveBeenCalledWith(
@@ -70,34 +68,46 @@ describe('oauth flow reconnect/storage', () => {
       expect.objectContaining({
         type: 'oauth',
         accessToken: 'openai-token-1',
+        refreshToken: 'openai-refresh-1',
         accountId: 'acct-reconnect-1',
       })
     )
   })
 
   it('supports clear and reconnect flow for openai', async () => {
-    storeOAuthCredentials('openai', {
+    await storeOAuthCredentials('openai', {
       accessToken: 'openai-token-1',
       refreshToken: 'openai-refresh-1',
       expiresAt: Date.now() + 3600_000,
       idToken: makeJwt({ organizations: [{ id: 'org-reconnect-1' }] }),
     })
-    await Promise.resolve()
     expect(checkStoredOAuth('openai')).toBe(true)
 
     clearProviderCredentials('openai')
     expect(checkStoredOAuth('openai')).toBe(false)
 
-    storeOAuthCredentials('openai', {
+    await storeOAuthCredentials('openai', {
       accessToken: 'openai-token-2',
       refreshToken: 'openai-refresh-2',
       expiresAt: Date.now() + 3600_000,
       idToken: makeJwt({ chatgpt_account_id: 'acct-reconnect-2' }),
     })
-    await Promise.resolve()
 
     expect(checkStoredOAuth('openai')).toBe(true)
     expect(mockSetStoredAuth).toHaveBeenCalledTimes(2)
+  })
+
+  it('surfaces native auth-store failures instead of claiming OAuth connected', async () => {
+    mockSetStoredAuth.mockRejectedValueOnce(new Error('native bridge write failed'))
+
+    await expect(
+      storeOAuthCredentials('openai', {
+        accessToken: 'openai-token-3',
+        refreshToken: 'openai-refresh-3',
+        expiresAt: Date.now() + 3600_000,
+      })
+    ).rejects.toThrow('native bridge write failed')
+    expect(checkStoredOAuth('openai')).toBe(false)
   })
 
   it('extractAccountId returns undefined for malformed organizations claim', () => {

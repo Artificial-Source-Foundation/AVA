@@ -10,10 +10,9 @@
 import { CheckCircle, Eye, EyeOff, Server } from 'lucide-solid'
 import { type Component, createSignal, For, Show } from 'solid-js'
 import {
+  type DeviceCodeResponse,
   isOAuthSupported,
-  type OAuthTokens,
   startOAuthFlow,
-  storeOAuthCredentials,
 } from '../../../services/auth/oauth'
 import type { LLMProvider } from '../../../types/llm'
 import {
@@ -25,6 +24,7 @@ import {
   OpenAILogo,
   OpenRouterLogo,
 } from '../../icons/provider-logos'
+import { DeviceCodeDialog } from '../../settings/DeviceCodeDialog'
 
 // ---------------------------------------------------------------------------
 // Data
@@ -122,7 +122,9 @@ export interface ProviderStepProps {
   onNext: () => void
   onSkip: () => void
   providerKeys: Record<string, string>
+  oauthProviders: string[]
   onSetProviderKey: (providerId: string, key: string) => void
+  onSetProviderConnected: (providerId: string, connected: boolean) => void
 }
 
 // ---------------------------------------------------------------------------
@@ -140,54 +142,106 @@ const ProviderCard: Component<{
   onToggleShowKey: () => void
   onSetKey: (key: string) => void
   onAuth: (provider: ProviderDef, type: string) => void
-}> = (cardProps) => (
-  <button
-    type="button"
-    onClick={() => {
-      const firstAuth = cardProps.provider.authOptions[0]
-      if (firstAuth) {
-        cardProps.onAuth(cardProps.provider, firstAuth.type)
-      }
-    }}
-    class="flex flex-col items-start p-3 rounded-xl transition-all text-left"
-    style={{
-      background: 'var(--surface)',
-      border: cardProps.isConnected ? '1px solid var(--accent)' : '1px solid var(--border-subtle)',
-      height: '90px',
-    }}
-  >
-    {/* Top row: logo + optional check */}
-    <div class="flex items-start justify-between w-full mb-auto">
-      <div
-        class="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0"
-        style={{ background: cardProps.provider.color }}
-      >
-        <Show when={cardProps.provider.logo} fallback={<Server class="w-3.5 h-3.5 text-white" />}>
-          {(() => {
-            const Logo = cardProps.provider.logo!
-            return <Logo class="w-3.5 h-3.5 text-white" />
-          })()}
-        </Show>
-      </div>
-      <Show when={cardProps.isConnected}>
-        <CheckCircle class="w-4 h-4" style={{ color: '#22C55E' }} />
-      </Show>
-    </div>
+}> = (cardProps) => {
+  const hasMultipleAuthOptions = () => cardProps.provider.authOptions.length > 1
+  const hasConfigureOption = () =>
+    cardProps.provider.authOptions.some((opt) => opt.type === 'configure')
 
-    {/* Name */}
-    <p class="text-xs font-medium text-[var(--text-primary)] mt-1">{cardProps.provider.name}</p>
-
-    {/* Auth text */}
-    <p
-      class="text-[10px] mt-0.5"
+  return (
+    <div
+      class="flex flex-col items-start p-3 rounded-xl transition-all text-left"
       style={{
-        color: cardProps.isConnected ? '#22C55E' : 'var(--text-muted)',
+        background: 'var(--surface)',
+        border: cardProps.isConnected
+          ? '1px solid var(--accent)'
+          : '1px solid var(--border-subtle)',
+        height: hasMultipleAuthOptions() || hasConfigureOption() ? 'auto' : '90px',
+        'min-height': '90px',
+        position: 'relative',
       }}
     >
-      {cardProps.isConnected ? `API Key \u00B7 Connected` : cardProps.provider.authText}
-    </p>
-  </button>
-)
+      {/* Top row: logo + optional check */}
+      <div class="flex items-start justify-between w-full mb-auto">
+        <div
+          class="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0"
+          style={{ background: cardProps.provider.color }}
+        >
+          <Show when={cardProps.provider.logo} fallback={<Server class="w-3.5 h-3.5 text-white" />}>
+            {(() => {
+              const Logo = cardProps.provider.logo!
+              return <Logo class="w-3.5 h-3.5 text-white" />
+            })()}
+          </Show>
+        </div>
+        <Show when={cardProps.isConnected}>
+          <CheckCircle class="w-4 h-4" style={{ color: '#22C55E' }} />
+        </Show>
+      </div>
+
+      {/* Name */}
+      <p class="text-xs font-medium text-[var(--text-primary)] mt-1">{cardProps.provider.name}</p>
+
+      {/* Auth text - only show when not expanded and no multiple options */}
+      <Show when={!hasMultipleAuthOptions() && !hasConfigureOption()}>
+        <p
+          class="text-[10px] mt-0.5"
+          style={{
+            color: cardProps.isConnected ? '#22C55E' : 'var(--text-muted)',
+          }}
+        >
+          {cardProps.isConnected ? `API Key · Connected` : cardProps.provider.authText}
+        </p>
+      </Show>
+
+      {/* Multiple auth options: show as buttons */}
+      <Show when={hasMultipleAuthOptions() && !cardProps.isConnected}>
+        <div class="flex flex-col gap-1 mt-1 w-full">
+          <For each={cardProps.provider.authOptions}>
+            {(option) => (
+              <button
+                type="button"
+                onClick={() => cardProps.onAuth(cardProps.provider, option.type)}
+                class="text-[10px] px-2 py-1 rounded bg-[var(--surface-sunken)] hover:bg-[var(--accent)] hover:text-white text-[var(--text-muted)] transition-colors text-left"
+              >
+                {option.label}
+              </button>
+            )}
+          </For>
+        </div>
+      </Show>
+
+      {/* Configure option (e.g., Ollama): show as disabled/unsupported in onboarding */}
+      <Show when={hasConfigureOption() && !cardProps.isConnected}>
+        <div class="flex flex-col gap-1 mt-1 w-full">
+          <button
+            type="button"
+            disabled
+            class="text-[10px] px-2 py-1 rounded bg-[var(--surface-sunken)] text-[var(--text-muted)] opacity-50 cursor-not-allowed text-left flex items-center gap-1"
+            title="Configure this provider in Settings after onboarding"
+          >
+            <span>Configure (Settings)</span>
+          </button>
+        </div>
+      </Show>
+
+      {/* Single auth option: clickable card */}
+      <Show when={!hasMultipleAuthOptions() && !hasConfigureOption() && !cardProps.isConnected}>
+        <button
+          type="button"
+          onClick={() => {
+            const firstAuth = cardProps.provider.authOptions[0]
+            if (firstAuth) {
+              cardProps.onAuth(cardProps.provider, firstAuth.type)
+            }
+          }}
+          class="absolute inset-0 w-full h-full cursor-pointer"
+          style={{ background: 'transparent', border: 'none' }}
+          aria-label={`Connect ${cardProps.provider.name}`}
+        />
+      </Show>
+    </div>
+  )
+}
 
 // ---------------------------------------------------------------------------
 // Component
@@ -196,12 +250,21 @@ const ProviderCard: Component<{
 export const ProviderStep: Component<ProviderStepProps> = (props) => {
   const [expandedProvider, setExpandedProvider] = createSignal<string | null>(null)
   const [showKey, setShowKey] = createSignal<Record<string, boolean>>({})
+  const [deviceCode, setDeviceCode] = createSignal<{
+    provider: LLMProvider
+    response: DeviceCodeResponse
+  } | null>(null)
 
   const toggleShowKey = (id: string): void => {
     setShowKey((prev) => ({ ...prev, [id]: !prev[id] }))
   }
 
   const [oauthLoading, setOauthLoading] = createSignal<string | null>(null)
+
+  const markProviderOAuthConnected = (providerId: string): void => {
+    props.onSetProviderKey(providerId, '')
+    props.onSetProviderConnected(providerId, true)
+  }
 
   const handleAuth = async (provider: ProviderDef, type: string): Promise<void> => {
     if (type === 'apikey') {
@@ -212,10 +275,14 @@ export const ProviderStep: Component<ProviderStepProps> = (props) => {
       setOauthLoading(provider.id)
       try {
         const result = await startOAuthFlow(provider.id as LLMProvider)
-        if ('accessToken' in result) {
-          await storeOAuthCredentials(provider.id as LLMProvider, result as OAuthTokens)
+        if (result.kind === 'pending') {
+          setDeviceCode({
+            provider: provider.id as LLMProvider,
+            response: result.deviceCode,
+          })
+          return
         }
-        props.onSetProviderKey(provider.id, '(oauth)')
+        markProviderOAuthConnected(provider.id)
       } catch (e) {
         console.error(`OAuth flow failed for ${provider.id}:`, e)
       } finally {
@@ -224,12 +291,31 @@ export const ProviderStep: Component<ProviderStepProps> = (props) => {
     }
   }
 
-  const isConnected = (id: string): boolean => Boolean(props.providerKeys[id])
+  const isConnected = (id: string): boolean =>
+    Boolean(props.providerKeys[id]) || props.oauthProviders.includes(id)
 
   return (
     <div class="flex flex-col items-center w-full max-w-[520px]">
+      <Show when={deviceCode()}>
+        {(current) => (
+          <DeviceCodeDialog
+            provider={current().provider}
+            deviceCode={current().response}
+            onClose={() => setDeviceCode(null)}
+            onSuccess={() => {
+              markProviderOAuthConnected(current().provider)
+              setDeviceCode(null)
+            }}
+          />
+        )}
+      </Show>
+
       {/* Header */}
-      <h2 class="text-2xl font-bold text-[var(--text-primary)] tracking-tight mb-2">
+      <h2
+        tabindex="-1"
+        data-onboarding-focus="true"
+        class="text-2xl font-bold text-[var(--text-primary)] tracking-tight mb-2"
+      >
         Connect a Provider
       </h2>
       <p class="text-sm text-[var(--text-muted)] mb-8">Sign in or add an API key</p>

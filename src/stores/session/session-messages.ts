@@ -39,6 +39,69 @@ import {
 const pendingInserts = new Map<string, Promise<void>>()
 const loadMessagesGate = createLatestRequestGate()
 
+function persistMessageInsert(message: Message): void {
+  // In web mode the Rust agent is the single source of truth for persistence.
+  // Skip the DB insert here — messages will be loaded from the backend API
+  // after the agent run completes. Only write to DB in Tauri (desktop) mode.
+  if (!isTauri()) {
+    return
+  }
+
+  const insertPromise = dbInsertMessages([message])
+    .catch((err: unknown) => logError('Session', 'Failed to persist message', err))
+    .finally(() => {
+      pendingInserts.delete(message.id)
+    })
+  pendingInserts.set(message.id, insertPromise)
+}
+
+function persistMessageUpdate(id: string, updates: Partial<Message>): void {
+  // In web mode the Rust agent is the single source of truth for persistence.
+  // Skip the DB update — the backend will have the authoritative state.
+  // Only write to DB in Tauri (desktop) mode.
+  if (!isTauri()) {
+    return
+  }
+
+  const pending = pendingInserts.get(id)
+  const persist = pending
+    ? pending.then(() =>
+        dbUpdateMessage(id, {
+          content: updates.content,
+          tokensUsed: updates.tokensUsed,
+          costUSD: updates.costUSD,
+          toolCalls: updates.toolCalls,
+          images: updates.images,
+          error: updates.error,
+          metadata: updates.metadata,
+        })
+      )
+    : dbUpdateMessage(id, {
+        content: updates.content,
+        tokensUsed: updates.tokensUsed,
+        costUSD: updates.costUSD,
+        toolCalls: updates.toolCalls,
+        images: updates.images,
+        error: updates.error,
+        metadata: updates.metadata,
+      })
+  persist.catch((err: unknown) => logError('Session', 'Failed to persist message update', err))
+}
+
+async function persistMessageDelete(id: string): Promise<void> {
+  if (!isTauri()) {
+    return
+  }
+
+  try {
+    const pending = pendingInserts.get(id)
+    if (pending) await pending
+    await dbDeleteMessage(id)
+  } catch (err) {
+    logError('Session', 'Failed to delete message from DB', err)
+  }
+}
+
 // ============================================================================
 // Message Management
 // ============================================================================
@@ -72,22 +135,7 @@ export function addMessage(message: Message): void {
     sessionId: message.sessionId,
   })
 
-  // In web mode the Rust agent is the single source of truth for persistence.
-  // Skip the DB insert here — messages will be loaded from the backend API
-  // after the agent run completes. Only write to DB in Tauri (desktop) mode.
-  if (isTauri()) {
-    // Persist to database (fire-and-forget, don't block UI).
-    // Track the promise so that updateMessage/deleteMessage can await it before
-    // issuing their own DB ops — preventing a race where the UPDATE/DELETE lands
-    // before the INSERT and becomes a silent no-op.
-    const insertPromise = dbInsertMessages([message])
-      .catch((err: unknown) => logError('Session', 'Failed to persist message', err))
-      .finally(() => {
-        // Clean up registry once the INSERT has settled (success or failure)
-        pendingInserts.delete(message.id)
-      })
-    pendingInserts.set(message.id, insertPromise)
-  }
+  persistMessageInsert(message)
 
   // Update frontend state immediately
   setMessages((prev) => [...prev, message])
@@ -107,6 +155,25 @@ export function addMessage(message: Message): void {
   )
 }
 
+/**
+ * Persist a message for a known session without mutating whichever session is
+ * currently active in the UI. Falls back to normal addMessage behavior when the
+ * target session is still active.
+ */
+export function addMessageToSession(message: Message): void {
+  if (currentSession()?.id === message.sessionId) {
+    addMessage(message)
+    return
+  }
+
+  log.debug('session', 'Persisting message for inactive session', {
+    id: message.id,
+    role: message.role,
+    sessionId: message.sessionId,
+  })
+  persistMessageInsert(message)
+}
+
 export function updateMessageContent(id: string, content: string): void {
   setMessages((prev) => prev.map((msg) => (msg.id === id ? { ...msg, content } : msg)))
 }
@@ -120,35 +187,25 @@ export function updateMessage(id: string, updates: Partial<Message>): void {
     return next
   })
 
-  // In web mode the Rust agent is the single source of truth for persistence.
-  // Skip the DB update — the backend will have the authoritative state.
-  // Only write to DB in Tauri (desktop) mode.
-  if (isTauri()) {
-    // Persist to database (fire-and-forget, same pattern as addMessage).
-    // Await any in-flight INSERT for this ID first so we never lose a race
-    // where the UPDATE reaches SQLite before the INSERT has committed.
-    const pending = pendingInserts.get(id)
-    const persist = pending
-      ? pending.then(() =>
-          dbUpdateMessage(id, {
-            content: updates.content,
-            tokensUsed: updates.tokensUsed,
-            costUSD: updates.costUSD,
-            toolCalls: updates.toolCalls,
-            error: updates.error,
-            metadata: updates.metadata,
-          })
-        )
-      : dbUpdateMessage(id, {
-          content: updates.content,
-          tokensUsed: updates.tokensUsed,
-          costUSD: updates.costUSD,
-          toolCalls: updates.toolCalls,
-          error: updates.error,
-          metadata: updates.metadata,
-        })
-    persist.catch((err: unknown) => logError('Session', 'Failed to persist message update', err))
+  persistMessageUpdate(id, updates)
+}
+
+/**
+ * Persist a message update for a known session without mutating the active UI
+ * session when the target session has already been switched away from.
+ */
+export function updateMessageInSession(
+  sessionId: string,
+  id: string,
+  updates: Partial<Message>
+): void {
+  if (currentSession()?.id === sessionId) {
+    updateMessage(id, updates)
+    return
   }
+
+  log.debug('session', 'Persisting message update for inactive session', { id, sessionId })
+  persistMessageUpdate(id, updates)
 }
 
 export function setMessageError(messageId: string, error: MessageError | null): void {
@@ -160,15 +217,21 @@ export function setMessageError(messageId: string, error: MessageError | null): 
 export async function deleteMessage(id: string): Promise<void> {
   log.debug('session', 'Message deleted', { id })
   setMessages((prev) => prev.filter((msg) => msg.id !== id))
-  try {
-    // Await any in-flight INSERT for this ID before issuing the DELETE so we
-    // don't silently delete nothing and then have the INSERT land afterwards.
-    const pending = pendingInserts.get(id)
-    if (pending) await pending
-    await dbDeleteMessage(id)
-  } catch (err) {
-    logError('Session', 'Failed to delete message from DB', err)
+  await persistMessageDelete(id)
+}
+
+/**
+ * Delete a message for a known session without mutating the currently active
+ * session's in-memory message list when the target session is no longer open.
+ */
+export async function deleteMessageInSession(sessionId: string, id: string): Promise<void> {
+  if (currentSession()?.id === sessionId) {
+    await deleteMessage(id)
+    return
   }
+
+  log.debug('session', 'Persisting message delete for inactive session', { id, sessionId })
+  await persistMessageDelete(id)
 }
 
 export function deleteMessagesAfter(messageId: string): void {

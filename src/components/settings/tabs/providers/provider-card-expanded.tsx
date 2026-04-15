@@ -33,6 +33,7 @@ interface ProviderCardExpandedProps {
   provider: LLMProviderConfig
   onSaveApiKey?: (key: string) => void
   onClearApiKey?: () => void
+  onOAuthConnected?: () => void
   onSetDefaultModel?: (modelId: string) => void
   onTestConnection?: () => void
   onUpdateModels?: (models: ProviderModel[]) => void
@@ -65,10 +66,11 @@ export const ProviderCardExpanded: Component<ProviderCardExpandedProps> = (props
     setIsOAuthLoading(true)
     try {
       const result = await startOAuthFlow(props.provider.id as LLMProvider)
-      if ('userCode' in result) {
-        setDeviceCode(result as DeviceCodeResponse)
+      if (result.kind === 'pending') {
+        setDeviceCode(result.deviceCode as DeviceCodeResponse)
       } else {
         setIsOAuthConnected(true)
+        props.onOAuthConnected?.()
       }
     } catch (err) {
       logError('providers', 'OAuth flow failed', err)
@@ -80,14 +82,16 @@ export const ProviderCardExpanded: Component<ProviderCardExpandedProps> = (props
 
   const handleClearAll = async () => {
     try {
-      await removeStoredAuth(props.provider.id as LLMProvider).catch(() => {})
+      await removeStoredAuth(props.provider.id as LLMProvider)
       clearProviderCredentials(props.provider.id)
       setIsOAuthConnected(false)
       setApiKey('')
       setShowClearConfirm(false)
+      setOauthError(null)
       props.onClearApiKey?.()
     } catch (err) {
       logError('providers', 'Clear credentials failed', err)
+      setOauthError(err instanceof Error ? err.message : 'Failed to clear stored credentials')
     }
   }
 
@@ -130,9 +134,10 @@ export const ProviderCardExpanded: Component<ProviderCardExpandedProps> = (props
           provider={props.provider.id as LLMProvider}
           deviceCode={deviceCode()!}
           onClose={() => setDeviceCode(null)}
-          onSuccess={(accessToken) => {
+          onSuccess={() => {
+            setIsOAuthConnected(true)
+            props.onOAuthConnected?.()
             setDeviceCode(null)
-            props.onSaveApiKey?.(accessToken)
           }}
         />
       </Show>

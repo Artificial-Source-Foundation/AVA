@@ -25,4 +25,58 @@ describe('apiInvoke', () => {
       { method: 'GET', headers: {} }
     )
   })
+
+  it('posts nested tool introspection context for list_agent_tools', async () => {
+    const json = vi.fn().mockResolvedValue([])
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: { get: () => 'application/json' },
+      json,
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await apiInvoke('list_agent_tools', {
+      context: {
+        sessionId: 'sess-2',
+        history: [{ role: 'user', content: 'show tools', agentVisible: false }],
+      },
+    })
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/tools/agent', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        context: {
+          session_id: 'sess-2',
+          history: [{ role: 'user', content: 'show tools', agent_visible: false }],
+        },
+      }),
+    })
+  })
+
+  it('maps resolve_plan to the shared web control-plane route', async () => {
+    const json = vi.fn().mockResolvedValue({ ok: true })
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: { get: () => 'application/json' },
+      json,
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await apiInvoke('resolve_plan', {
+      args: {
+        requestId: 'plan-1',
+        response: 'approved',
+        feedback: 'looks good',
+      },
+    })
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/agent/resolve-plan', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ request_id: 'plan-1', response: 'approved', feedback: 'looks good' }),
+    })
+  })
 })

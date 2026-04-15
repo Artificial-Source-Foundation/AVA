@@ -10,7 +10,9 @@ use ava_llm::provider::LLMProvider;
 use ava_llm::providers::mock::MockProvider;
 use ava_llm::RouteSource;
 use ava_llm::ThinkingConfig;
-use ava_types::{AvaError, Message, MessageTier, QueuedMessage, Result, StreamChunk, TokenUsage};
+use ava_types::{
+    AvaError, Message, MessageTier, QueuedMessage, Result, Role, StreamChunk, TokenUsage,
+};
 use futures::Stream;
 use tokio::sync::mpsc;
 use tokio::sync::Mutex;
@@ -42,6 +44,10 @@ fn completion_response(result: &str) -> String {
     format!(
         r#"{{"tool_calls":[{{"name":"attempt_completion","arguments":{{"result":"{result}"}}}}]}}"#
     )
+}
+
+fn subagent_response(prompt: &str) -> String {
+    format!(r#"{{"tool_calls":[{{"name":"subagent","arguments":{{"prompt":"{prompt}"}}}}]}}"#)
 }
 
 async fn write_credentials(dir: &tempfile::TempDir, providers: &[&str]) {
@@ -136,6 +142,144 @@ async fn agent_stack_run_with_mock_provider_completes() {
 
     assert!(result.success);
     assert!(result.turns >= 1);
+}
+
+#[tokio::test]
+async fn interactive_tool_introspection_matches_runtime_tool_surface() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let (stack, _question_rx, _approval_rx, _plan_rx) = AgentStack::new(AgentStackConfig {
+        data_dir: dir.path().to_path_buf(),
+        injected_provider: Some(Arc::new(MockProvider::new("test", vec![]))),
+        ..Default::default()
+    })
+    .await
+    .expect("stack init should succeed");
+
+    let persistent_names = stack
+        .tools
+        .read()
+        .await
+        .list_tools_with_source()
+        .into_iter()
+        .map(|(tool, _)| tool.name)
+        .collect::<Vec<_>>();
+    assert!(!persistent_names.iter().any(|name| name == "subagent"));
+
+    let history = vec![
+        Message::new(
+            Role::User,
+            "Use a scout subagent to inspect the repo, then review the final change.",
+        ),
+        Message::new(Role::Assistant, "I'll scout the repo first."),
+    ];
+
+    let delegated_follow_up = stack
+        .effective_tools_for_interactive_run("Now implement the fix.", &history, &[])
+        .await;
+    assert!(delegated_follow_up
+        .iter()
+        .any(|(tool, _)| tool.name == "subagent"));
+
+    let explicit_delegate_tools = stack
+        .effective_tools_for_interactive_run(
+            "Use a scout subagent to inspect the repo, then review the final change.",
+            &[],
+            &[],
+        )
+        .await;
+    assert!(explicit_delegate_tools
+        .iter()
+        .any(|(tool, _)| tool.name == "subagent"));
+
+    let read_only_tools = stack
+        .effective_tools_for_interactive_run(
+            "Read package.json in the current directory and reply with only the package name.",
+            &[],
+            &[],
+        )
+        .await;
+    let read_only_names = read_only_tools
+        .iter()
+        .map(|(tool, _)| tool.name.as_str())
+        .collect::<Vec<_>>();
+    assert!(read_only_names.contains(&"read"));
+    assert!(!read_only_names.contains(&"write"));
+    assert!(!read_only_names.contains(&"edit"));
+    assert!(!read_only_names.contains(&"bash"));
+
+    let answer_only_tools = stack
+        .effective_tools_for_interactive_run(
+            "Reply exactly with BENCHMARK_OK and nothing else.",
+            &[],
+            &[],
+        )
+        .await;
+    assert!(answer_only_tools.is_empty());
+
+    let default_tools = stack
+        .effective_tools_for_interactive_run("finish task", &[], &[])
+        .await;
+    assert!(!default_tools
+        .iter()
+        .any(|(tool, _)| tool.name == "subagent"));
+}
+
+#[tokio::test]
+async fn agent_stack_run_dispatches_subagent_when_enabled() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let provider = Arc::new(MockProvider::new(
+        "test-model",
+        vec![
+            subagent_response("Read AGENTS.md and summarize it."),
+            completion_response("scout summary"),
+            completion_response("done"),
+        ],
+    ));
+    let (stack, _question_rx, _approval_rx, _plan_rx) = AgentStack::new(AgentStackConfig {
+        data_dir: dir.path().to_path_buf(),
+        injected_provider: Some(provider),
+        ..Default::default()
+    })
+    .await
+    .expect("stack init should succeed");
+
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let result = stack
+        .run(
+            "Use a scout subagent to inspect the repo, then finish the task.",
+            5,
+            Some(tx),
+            CancellationToken::new(),
+            Vec::new(),
+            None,
+            Vec::new(),
+            None,
+        )
+        .await
+        .expect("run should succeed");
+
+    assert!(result.success);
+    assert!(result
+        .session
+        .messages
+        .iter()
+        .any(|m| m.tool_calls.iter().any(|tc| tc.name == "subagent")));
+    assert!(result
+        .session
+        .messages
+        .iter()
+        .any(|m| m.role == Role::Tool && m.content.contains("scout summary")));
+
+    let mut saw_subagent_complete = false;
+    while let Ok(event) = rx.try_recv() {
+        if let ava_agent::AgentEvent::SubAgentComplete { description, .. } = event {
+            if description.contains("Read AGENTS.md and summarize it.") {
+                saw_subagent_complete = true;
+                break;
+            }
+        }
+    }
+    assert!(saw_subagent_complete, "expected subagent completion event");
 }
 
 #[tokio::test]

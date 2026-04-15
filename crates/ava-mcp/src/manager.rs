@@ -46,6 +46,18 @@ pub struct McpManager {
     debounce_start: Option<std::time::Instant>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum McpServerInitStatus {
+    Connected,
+    Failed(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct McpServerInitReport {
+    pub name: String,
+    pub status: McpServerInitStatus,
+}
+
 impl McpManager {
     /// Create a new MCP manager (does not connect yet).
     pub fn new() -> Self {
@@ -62,6 +74,15 @@ impl McpManager {
     /// All servers connect in parallel — each with an independent 30 s timeout.
     /// One slow or failing server does NOT delay the others.
     pub async fn initialize(&mut self, configs: Vec<MCPServerConfig>) -> Result<()> {
+        let _ = self.initialize_with_report(configs).await;
+        Ok(())
+    }
+
+    /// Connect to all enabled servers and return per-server outcomes.
+    pub async fn initialize_with_report(
+        &mut self,
+        configs: Vec<MCPServerConfig>,
+    ) -> Vec<McpServerInitReport> {
         let enabled: Vec<MCPServerConfig> = configs
             .into_iter()
             .filter(|c| {
@@ -75,7 +96,7 @@ impl McpManager {
             .collect();
 
         if enabled.is_empty() {
-            return Ok(());
+            return Vec::new();
         }
 
         // Spawn all connections in parallel.
@@ -93,6 +114,7 @@ impl McpManager {
             .collect();
 
         let results = join_all(futures).await;
+        let mut reports = Vec::with_capacity(results.len());
 
         for (server_name, result) in results {
             match result {
@@ -101,27 +123,42 @@ impl McpManager {
                     for tool in &mcp_tools {
                         self.tools.push((server_name.clone(), tool.clone()));
                     }
+                    let report_name = server_name.clone();
                     self.clients
                         .insert(server_name, Arc::new(Mutex::new(client)));
+                    reports.push(McpServerInitReport {
+                        name: report_name,
+                        status: McpServerInitStatus::Connected,
+                    });
                 }
                 Ok(Err(e)) => {
+                    let error = e.to_string();
                     warn!(
                         server = %server_name,
-                        error = %e,
+                        error = %error,
                         "Failed to connect MCP server, skipping"
                     );
+                    reports.push(McpServerInitReport {
+                        name: server_name,
+                        status: McpServerInitStatus::Failed(error),
+                    });
                 }
                 Err(_elapsed) => {
+                    let error = format!("Connection timed out after {MCP_CONNECT_TIMEOUT_SECS}s");
                     warn!(
                         server = %server_name,
                         timeout_secs = MCP_CONNECT_TIMEOUT_SECS,
                         "MCP server connection timed out, skipping"
                     );
+                    reports.push(McpServerInitReport {
+                        name: server_name,
+                        status: McpServerInitStatus::Failed(error),
+                    });
                 }
             }
         }
 
-        Ok(())
+        reports
     }
 
     /// Get all discovered tools as `ava_types::Tool` definitions.

@@ -33,6 +33,7 @@ pub struct BudgetAlertState {
 #[derive(Debug, Clone)]
 pub struct SubAgentInfo {
     pub description: String,
+    pub background: bool,
     pub is_running: bool,
     pub tool_count: usize,
     pub current_tool: Option<String>,
@@ -541,8 +542,14 @@ impl AgentState {
     /// Get tool list with source info.
     pub async fn list_tools_with_source(
         &self,
+        goal: &str,
+        history: &[ava_types::Message],
+        images: &[ava_types::ImageContent],
     ) -> std::result::Result<Vec<(ava_types::Tool, ava_tools::registry::ToolSource)>, String> {
-        Ok(self.stack()?.tools.read().await.list_tools_with_source())
+        Ok(self
+            .stack()?
+            .effective_tools_for_interactive_run(goal, history, images)
+            .await)
     }
 
     /// Set thinking level and sync to agent stack.
@@ -812,6 +819,7 @@ mod tests {
         });
         state.sub_agents.push(SubAgentInfo {
             description: "demo".to_string(),
+            background: false,
             is_running: false,
             tool_count: 0,
             current_tool: None,

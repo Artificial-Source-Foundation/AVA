@@ -12,7 +12,11 @@ import { type Accessor, batch, type Setter } from 'solid-js'
 import { generateMessageId } from '../lib/ids'
 import { log } from '../lib/logger'
 import { checkAutoApproval as sharedCheckAutoApproval } from '../lib/tool-approval'
-import { getCoreBudget } from '../services/core-bridge'
+import {
+  ensureActiveSessionSynced,
+  getCoreBudget,
+  markActiveSessionSynced,
+} from '../services/core-bridge'
 import { registerBackendSessionId } from '../services/db-web-fallback'
 import { rustAgent as rustAgentBridge, rustBackend } from '../services/rust-bridge'
 import type { Message } from '../types'
@@ -57,6 +61,10 @@ export interface ActionDeps {
 
   // Streaming offsets
   streaming: StreamingOffsets
+  runOwnership: {
+    beginRun: () => number
+    isCurrentRun: (token: number) => boolean
+  }
 }
 
 // ── Action creators ─────────────────────────────────────────────────
@@ -86,7 +94,125 @@ export function createAgentActions(deps: ActionDeps) {
     liveMessageId,
     setLiveMessageId,
     streaming,
+    runOwnership,
   } = deps
+
+  function mergePlanFeedback(
+    feedback?: string,
+    stepComments?: Record<string, string>
+  ): string | undefined {
+    const commentLines = Object.entries(stepComments ?? {})
+      .filter(([, comment]) => comment.trim().length > 0)
+      .map(([stepId, comment]) => `${stepId}: ${comment.trim()}`)
+
+    if (commentLines.length === 0) {
+      return feedback?.trim() || undefined
+    }
+
+    const commentsBlock = `Step comments:\n${commentLines.join('\n')}`
+    return feedback?.trim() ? `${feedback.trim()}\n\n${commentsBlock}` : commentsBlock
+  }
+
+  function beginRunGuard(sessionId: string): {
+    runToken: number
+    runIsCurrent: () => boolean
+    ownsOriginSession: () => boolean
+    canMutateOriginSession: () => boolean
+    settleMessageId: (fallbackId: string) => string
+    updateMessage: (messageId: string, updates: Partial<Message>) => void
+    deleteMessage: (messageId: string) => Promise<void>
+    clearRunUiIfCurrent: () => void
+  } {
+    const runToken = runOwnership.beginRun()
+    const runIsCurrent = (): boolean => runOwnership.isCurrentRun(runToken)
+    const ownsOriginSession = (): boolean => session.currentSession()?.id === sessionId
+    const canMutateOriginSession = (): boolean => runIsCurrent() && ownsOriginSession()
+
+    return {
+      runToken,
+      runIsCurrent,
+      ownsOriginSession,
+      canMutateOriginSession,
+      settleMessageId: (fallbackId: string): string => {
+        if (runIsCurrent()) {
+          return liveMessageId() || fallbackId
+        }
+        return fallbackId
+      },
+      updateMessage: (messageId: string, updates: Partial<Message>): void => {
+        if (ownsOriginSession()) {
+          session.updateMessage(messageId, updates)
+          return
+        }
+        session.updateMessageInSession?.(sessionId, messageId, updates)
+      },
+      deleteMessage: async (messageId: string): Promise<void> => {
+        if (ownsOriginSession()) {
+          await session.deleteMessage(messageId)
+          return
+        }
+        await session.deleteMessageInSession?.(sessionId, messageId)
+      },
+      clearRunUiIfCurrent: (): void => {
+        if (!runIsCurrent()) {
+          return
+        }
+        batch(() => {
+          rustAgent.endRun()
+          setLiveMessageId(null)
+          setStreamingStartedAt(null)
+        })
+      },
+    }
+  }
+
+  async function ensureDesktopSessionReady(messageId: string): Promise<boolean> {
+    const sessionId = session.currentSession()?.id ?? ''
+    if (!sessionId || !isTauri()) {
+      return true
+    }
+
+    try {
+      await ensureActiveSessionSynced(sessionId)
+      return true
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      session.setMessageError(messageId, {
+        type: 'unknown',
+        message,
+        timestamp: Date.now(),
+      })
+      log.warn('agent', 'Desktop session action blocked by backend sync status', {
+        sessionId,
+        messageId,
+        error: message,
+      })
+      return false
+    }
+  }
+
+  function sessionOwnershipStillCurrent(
+    initiatingSessionId: string | null,
+    action: 'retry' | 'edit-and-resend' | 'regenerate',
+    messageId: string
+  ): boolean {
+    if (!initiatingSessionId) {
+      return true
+    }
+
+    const currentSessionId = session.currentSession()?.id ?? null
+    if (currentSessionId === initiatingSessionId) {
+      return true
+    }
+
+    log.info('agent', 'Desktop session action aborted after session switch', {
+      action,
+      messageId,
+      initiatingSessionId,
+      currentSessionId,
+    })
+    return false
+  }
 
   function cancel(): void {
     log.info('agent', 'Cancel requested by user')
@@ -190,26 +316,43 @@ export function createAgentActions(deps: ActionDeps) {
   function resolveApproval(approved: boolean, alwaysAllow?: boolean): void {
     log.info('tools', 'Approval resolved', { approved, alwaysAllow: alwaysAllow ?? false })
     const current = pendingApproval()
-    if (current) {
-      const decision: 'once' | 'always' | 'denied' = !approved
-        ? 'denied'
-        : alwaysAllow
-          ? 'always'
-          : 'once'
-      rustAgent.markToolApproval(current.toolName, decision, current.toolCallId)
+    if (!current) {
+      return
     }
-    setPendingApproval(null)
-    void rustAgentBridge.resolveApproval(approved, alwaysAllow ?? false).catch((err) => {
-      log.error('error', 'Failed to resolve approval', { error: String(err) })
-    })
+    const decision: 'once' | 'always' | 'denied' = !approved
+      ? 'denied'
+      : alwaysAllow
+        ? 'always'
+        : 'once'
+    void rustAgentBridge
+      .resolveApproval(current.id, approved, alwaysAllow ?? false)
+      .then(() => {
+        rustAgent.markToolApproval(current.toolName, decision, current.toolCallId)
+        if (pendingApproval()?.id === current.id) {
+          setPendingApproval(null)
+        }
+      })
+      .catch((err) => {
+        log.error('error', 'Failed to resolve approval', { error: String(err) })
+      })
   }
 
   function resolveQuestion(answer: string): void {
     log.info('agent', 'Question resolved', { answerLength: answer.length })
-    setPendingQuestion(null)
-    void rustAgentBridge.resolveQuestion(answer).catch((err) => {
-      log.error('error', 'Failed to resolve question', { error: String(err) })
-    })
+    const current = deps.pendingQuestion()
+    if (!current) {
+      return
+    }
+    void rustAgentBridge
+      .resolveQuestion(current.id, answer)
+      .then(() => {
+        if (deps.pendingQuestion()?.id === current.id) {
+          setPendingQuestion(null)
+        }
+      })
+      .catch((err) => {
+        log.error('error', 'Failed to resolve question', { error: String(err) })
+      })
   }
 
   function resolvePlan(
@@ -219,9 +362,28 @@ export function createAgentActions(deps: ActionDeps) {
     stepComments?: Record<string, string>
   ): void {
     log.info('agent', 'Plan resolved', { response, hasFeedback: !!feedback })
-    setPendingPlan(null)
+    const current = deps.pendingPlan()
+    if (!current) {
+      return
+    }
+    if (!current.requestId) {
+      log.error('error', 'Cannot resolve plan without requestId')
+      return
+    }
+    const sanitizedModifiedPlan = modifiedPlan
+      ? (() => {
+          const { requestId: _requestId, ...planWithoutRequestId } = modifiedPlan
+          return planWithoutRequestId
+        })()
+      : null
+    const mergedFeedback = mergePlanFeedback(feedback, stepComments)
     void rustAgentBridge
-      .resolvePlan(response, modifiedPlan ?? null, feedback ?? null, stepComments ?? null)
+      .resolvePlan(current.requestId, response, sanitizedModifiedPlan, mergedFeedback ?? null)
+      .then(() => {
+        if (deps.pendingPlan()?.requestId === current.requestId) {
+          setPendingPlan(null)
+        }
+      })
       .catch((err) => {
         log.error('error', 'Failed to resolve plan', { error: String(err) })
       })
@@ -276,6 +438,14 @@ export function createAgentActions(deps: ActionDeps) {
   async function retryMessage(assistantMessageId: string): Promise<void> {
     if (rustAgent.isRunning()) return
     log.info('agent', 'Retrying last message', { assistantMessageId })
+    const initiatingSessionId = session.currentSession()?.id ?? null
+
+    if (!(await ensureDesktopSessionReady(assistantMessageId))) {
+      return
+    }
+    if (!sessionOwnershipStillCurrent(initiatingSessionId, 'retry', assistantMessageId)) {
+      return
+    }
 
     // ── 1. Reset agent UI state ──────────────────────────────────────
     batch(() => {
@@ -292,6 +462,7 @@ export function createAgentActions(deps: ActionDeps) {
     // ── 2. Clear the error from the existing assistant message and reuse it ──
     const selectedModelId = session.selectedModel()
     const selectedProviderId = session.selectedProvider() || undefined
+    const runGuard = beginRunGuard(session.currentSession()?.id ?? '')
     session.updateMessage(assistantMessageId, {
       content: '',
       error: undefined,
@@ -315,8 +486,9 @@ export function createAgentActions(deps: ActionDeps) {
         if (isCancelled) {
           const partialContent = rustAgent.streamingContent()
           const elapsedMs = Date.now() - runStartedAt
+          const retryMsgId = runGuard.settleMessageId(assistantMessageId)
           if (partialContent) {
-            session.updateMessage(assistantMessageId, {
+            runGuard.updateMessage(retryMsgId, {
               content: partialContent,
               metadata: {
                 provider: selectedProviderId,
@@ -326,17 +498,17 @@ export function createAgentActions(deps: ActionDeps) {
               },
             })
           } else {
-            session.deleteMessage(assistantMessageId)
+            await runGuard.deleteMessage(retryMsgId)
           }
+          runGuard.clearRunUiIfCurrent()
           return
         }
-        batch(() => {
-          session.updateMessage(assistantMessageId, {
-            content: '',
-            error: { type: 'unknown', message: errorText, timestamp: Date.now() },
-          })
-          rustAgent.endRun()
+        const retryMsgId = runGuard.settleMessageId(assistantMessageId)
+        runGuard.updateMessage(retryMsgId, {
+          content: '',
+          error: { type: 'unknown', message: errorText, timestamp: Date.now() },
         })
+        runGuard.clearRunUiIfCurrent()
         return
       }
 
@@ -346,34 +518,34 @@ export function createAgentActions(deps: ActionDeps) {
       const thinking = rustAgent.thinkingContent()
       const segments = rustAgent.thinkingSegments()
 
-      batch(() => {
-        if (content) {
-          session.updateMessage(assistantMessageId, {
-            content,
-            tokensUsed: rustAgent.tokenUsage().output,
-            costUSD: rustAgent.tokenUsage().cost || undefined,
-            toolCalls: rustAgent.activeToolCalls(),
-            metadata: {
-              provider: selectedProviderId,
-              model: selectedModelId,
-              mode: isPlanMode() ? 'plan' : 'code',
-              elapsedMs,
-              ...(thinking ? { thinking } : {}),
-              ...(segments.length > 1 ? { thinkingSegments: segments } : {}),
-            },
-          })
-        } else {
-          session.deleteMessage(assistantMessageId)
-        }
-        rustAgent.endRun()
-        setLiveMessageId(null)
-        setStreamingStartedAt(null)
-      })
+      const retryMsgId = runGuard.settleMessageId(assistantMessageId)
+      if (content) {
+        runGuard.updateMessage(retryMsgId, {
+          content,
+          tokensUsed: rustAgent.tokenUsage().output,
+          costUSD: rustAgent.tokenUsage().cost || undefined,
+          toolCalls: rustAgent.activeToolCalls(),
+          metadata: {
+            provider: selectedProviderId,
+            model: selectedModelId,
+            mode: isPlanMode() ? 'plan' : 'code',
+            elapsedMs,
+            ...(thinking ? { thinking } : {}),
+            ...(segments.length > 1 ? { thinkingSegments: segments } : {}),
+          },
+        })
+      } else {
+        await runGuard.deleteMessage(retryMsgId)
+      }
+      runGuard.clearRunUiIfCurrent()
 
       // ── 5. Sync from backend in web mode ──────────────────────────
       const sessionId = session.currentSession()?.id ?? ''
       const backendSessionId = result?.sessionId || sessionId
-      if (!isTauri() && backendSessionId) {
+      if (backendSessionId && runGuard.canMutateOriginSession()) {
+        markActiveSessionSynced(backendSessionId)
+      }
+      if (!isTauri() && backendSessionId && runGuard.canMutateOriginSession()) {
         try {
           const apiBase = (import.meta.env.VITE_API_URL as string) || ''
           const res = await fetch(`${apiBase}/api/sessions/${backendSessionId}/messages`)
@@ -415,24 +587,40 @@ export function createAgentActions(deps: ActionDeps) {
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       log.error('agent', 'Unexpected error in retryMessage', { error: msg })
-      batch(() => {
-        session.updateMessage(assistantMessageId, {
-          content: '',
-          error: { type: 'unknown', message: msg, timestamp: Date.now() },
-        })
-        rustAgent.endRun()
+      const retryMsgId = runGuard.settleMessageId(assistantMessageId)
+      runGuard.updateMessage(retryMsgId, {
+        content: '',
+        error: { type: 'unknown', message: msg, timestamp: Date.now() },
       })
+      runGuard.clearRunUiIfCurrent()
     } finally {
-      batch(() => {
-        setStreamingStartedAt(null)
-        setLiveMessageId(null)
-      })
+      if (runGuard.runIsCurrent()) {
+        batch(() => {
+          setStreamingStartedAt(null)
+          setLiveMessageId(null)
+        })
+      }
     }
   }
 
   async function editAndResend(messageId: string, newContent: string): Promise<void> {
     if (rustAgent.isRunning()) return
     log.info('agent', 'Edit and resend', { messageId, contentLength: newContent.length })
+    const initiatingSessionId = session.currentSession()?.id ?? null
+    const originalMessages = !isTauri()
+      ? session.messages().map((message) => ({
+          ...message,
+          metadata: message.metadata ? { ...message.metadata } : undefined,
+          toolCalls: message.toolCalls ? [...message.toolCalls] : undefined,
+        }))
+      : null
+
+    if (!(await ensureDesktopSessionReady(messageId))) {
+      return
+    }
+    if (!sessionOwnershipStillCurrent(initiatingSessionId, 'edit-and-resend', messageId)) {
+      return
+    }
 
     // ── 1. Clean up in-memory messages (immediate UI update) ──────────
     batch(() => {
@@ -460,6 +648,7 @@ export function createAgentActions(deps: ActionDeps) {
       currentSess = session.currentSession()
     }
     const sessionId = currentSess?.id ?? ''
+    const runGuard = beginRunGuard(sessionId)
 
     // ── 3. Add user message + assistant placeholder ──────────────────
     const userMsg: Message = {
@@ -506,8 +695,9 @@ export function createAgentActions(deps: ActionDeps) {
         if (isCancelled) {
           const partialContent = rustAgent.streamingContent()
           const elapsedMs = Date.now() - runStartedAt
+          const finalMsgId = runGuard.settleMessageId(assistantMsgId)
           if (partialContent) {
-            session.updateMessage(assistantMsgId, {
+            runGuard.updateMessage(finalMsgId, {
               content: partialContent,
               metadata: {
                 provider: selectedProviderId,
@@ -517,17 +707,26 @@ export function createAgentActions(deps: ActionDeps) {
               },
             })
           } else {
-            session.deleteMessage(assistantMsgId)
+            await runGuard.deleteMessage(finalMsgId)
           }
+          runGuard.clearRunUiIfCurrent()
           return
         }
-        batch(() => {
-          session.updateMessage(assistantMsgId, {
+        const finalMsgId = runGuard.settleMessageId(assistantMsgId)
+        if (!isTauri() && originalMessages) {
+          session.setMessages(originalMessages)
+          session.setMessageError(messageId, {
+            type: 'unknown',
+            message: errorText,
+            timestamp: Date.now(),
+          })
+        } else {
+          runGuard.updateMessage(finalMsgId, {
             content: '',
             error: { type: 'unknown', message: errorText, timestamp: Date.now() },
           })
-          rustAgent.endRun()
-        })
+        }
+        runGuard.clearRunUiIfCurrent()
         return
       }
 
@@ -537,33 +736,33 @@ export function createAgentActions(deps: ActionDeps) {
       const thinking = rustAgent.thinkingContent()
       const segments = rustAgent.thinkingSegments()
 
-      batch(() => {
-        if (content) {
-          session.updateMessage(assistantMsgId, {
-            content,
-            tokensUsed: rustAgent.tokenUsage().output,
-            costUSD: rustAgent.tokenUsage().cost || undefined,
-            toolCalls: rustAgent.activeToolCalls(),
-            metadata: {
-              provider: selectedProviderId,
-              model: selectedModelId,
-              mode: isPlanMode() ? 'plan' : 'code',
-              elapsedMs,
-              ...(thinking ? { thinking } : {}),
-              ...(segments.length > 1 ? { thinkingSegments: segments } : {}),
-            },
-          })
-        } else {
-          session.deleteMessage(assistantMsgId)
-        }
-        rustAgent.endRun()
-        setLiveMessageId(null)
-        setStreamingStartedAt(null)
-      })
+      const finalMsgId = runGuard.settleMessageId(assistantMsgId)
+      if (content) {
+        runGuard.updateMessage(finalMsgId, {
+          content,
+          tokensUsed: rustAgent.tokenUsage().output,
+          costUSD: rustAgent.tokenUsage().cost || undefined,
+          toolCalls: rustAgent.activeToolCalls(),
+          metadata: {
+            provider: selectedProviderId,
+            model: selectedModelId,
+            mode: isPlanMode() ? 'plan' : 'code',
+            elapsedMs,
+            ...(thinking ? { thinking } : {}),
+            ...(segments.length > 1 ? { thinkingSegments: segments } : {}),
+          },
+        })
+      } else {
+        await runGuard.deleteMessage(finalMsgId)
+      }
+      runGuard.clearRunUiIfCurrent()
 
       // Sync from backend in web mode
       const backendSessionId = result?.sessionId || sessionId
-      if (!isTauri() && backendSessionId) {
+      if (backendSessionId && runGuard.canMutateOriginSession()) {
+        markActiveSessionSynced(backendSessionId)
+      }
+      if (!isTauri() && backendSessionId && runGuard.canMutateOriginSession()) {
         try {
           const apiBase = (import.meta.env.VITE_API_URL as string) || ''
           const res = await fetch(`${apiBase}/api/sessions/${backendSessionId}/messages`)
@@ -605,24 +804,42 @@ export function createAgentActions(deps: ActionDeps) {
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       log.error('agent', 'Unexpected error in editAndResend', { error: msg })
-      batch(() => {
-        session.updateMessage(assistantMsgId, {
+      if (!isTauri() && originalMessages) {
+        session.setMessages(originalMessages)
+        session.setMessageError(messageId, {
+          type: 'unknown',
+          message: msg,
+          timestamp: Date.now(),
+        })
+      } else {
+        const finalMsgId = runGuard.settleMessageId(assistantMsgId)
+        runGuard.updateMessage(finalMsgId, {
           content: `**Error:** ${msg}`,
           error: { type: 'unknown', message: msg, timestamp: Date.now() },
         })
-        rustAgent.endRun()
-      })
+      }
+      runGuard.clearRunUiIfCurrent()
     } finally {
-      batch(() => {
-        setStreamingStartedAt(null)
-        setLiveMessageId(null)
-      })
+      if (runGuard.runIsCurrent()) {
+        batch(() => {
+          setStreamingStartedAt(null)
+          setLiveMessageId(null)
+        })
+      }
     }
   }
 
   async function regenerateResponse(assistantMessageId: string): Promise<void> {
     if (rustAgent.isRunning()) return
     log.info('agent', 'Regenerating response', { assistantMessageId })
+    const initiatingSessionId = session.currentSession()?.id ?? null
+
+    if (!(await ensureDesktopSessionReady(assistantMessageId))) {
+      return
+    }
+    if (!sessionOwnershipStillCurrent(initiatingSessionId, 'regenerate', assistantMessageId)) {
+      return
+    }
 
     // ── 1. Reset agent UI state ──────────────────────────────────────
     batch(() => {
@@ -639,6 +856,7 @@ export function createAgentActions(deps: ActionDeps) {
     // ── 2. Clear the existing assistant message and reuse it ─────────
     const selectedModelId = session.selectedModel()
     const selectedProviderId = session.selectedProvider() || undefined
+    const runGuard = beginRunGuard(session.currentSession()?.id ?? '')
     session.updateMessage(assistantMessageId, {
       content: '',
       error: undefined,
@@ -662,8 +880,9 @@ export function createAgentActions(deps: ActionDeps) {
         if (isCancelled) {
           const partialContent = rustAgent.streamingContent()
           const elapsedMs = Date.now() - runStartedAt
+          const regenerateMsgId = runGuard.settleMessageId(assistantMessageId)
           if (partialContent) {
-            session.updateMessage(assistantMessageId, {
+            runGuard.updateMessage(regenerateMsgId, {
               content: partialContent,
               metadata: {
                 provider: selectedProviderId,
@@ -673,17 +892,17 @@ export function createAgentActions(deps: ActionDeps) {
               },
             })
           } else {
-            session.deleteMessage(assistantMessageId)
+            await runGuard.deleteMessage(regenerateMsgId)
           }
+          runGuard.clearRunUiIfCurrent()
           return
         }
-        batch(() => {
-          session.updateMessage(assistantMessageId, {
-            content: '',
-            error: { type: 'unknown', message: errorText, timestamp: Date.now() },
-          })
-          rustAgent.endRun()
+        const regenerateMsgId = runGuard.settleMessageId(assistantMessageId)
+        runGuard.updateMessage(regenerateMsgId, {
+          content: '',
+          error: { type: 'unknown', message: errorText, timestamp: Date.now() },
         })
+        runGuard.clearRunUiIfCurrent()
         return
       }
 
@@ -693,34 +912,34 @@ export function createAgentActions(deps: ActionDeps) {
       const thinking = rustAgent.thinkingContent()
       const segments = rustAgent.thinkingSegments()
 
-      batch(() => {
-        if (content) {
-          session.updateMessage(assistantMessageId, {
-            content,
-            tokensUsed: rustAgent.tokenUsage().output,
-            costUSD: rustAgent.tokenUsage().cost || undefined,
-            toolCalls: rustAgent.activeToolCalls(),
-            metadata: {
-              provider: selectedProviderId,
-              model: selectedModelId,
-              mode: isPlanMode() ? 'plan' : 'code',
-              elapsedMs,
-              ...(thinking ? { thinking } : {}),
-              ...(segments.length > 1 ? { thinkingSegments: segments } : {}),
-            },
-          })
-        } else {
-          session.deleteMessage(assistantMessageId)
-        }
-        rustAgent.endRun()
-        setLiveMessageId(null)
-        setStreamingStartedAt(null)
-      })
+      const regenerateMsgId = runGuard.settleMessageId(assistantMessageId)
+      if (content) {
+        runGuard.updateMessage(regenerateMsgId, {
+          content,
+          tokensUsed: rustAgent.tokenUsage().output,
+          costUSD: rustAgent.tokenUsage().cost || undefined,
+          toolCalls: rustAgent.activeToolCalls(),
+          metadata: {
+            provider: selectedProviderId,
+            model: selectedModelId,
+            mode: isPlanMode() ? 'plan' : 'code',
+            elapsedMs,
+            ...(thinking ? { thinking } : {}),
+            ...(segments.length > 1 ? { thinkingSegments: segments } : {}),
+          },
+        })
+      } else {
+        await runGuard.deleteMessage(regenerateMsgId)
+      }
+      runGuard.clearRunUiIfCurrent()
 
       // ── 5. Sync from backend in web mode ──────────────────────────
       const sessionId = session.currentSession()?.id ?? ''
       const backendSessionId = result?.sessionId || sessionId
-      if (!isTauri() && backendSessionId) {
+      if (backendSessionId && runGuard.canMutateOriginSession()) {
+        markActiveSessionSynced(backendSessionId)
+      }
+      if (!isTauri() && backendSessionId && runGuard.canMutateOriginSession()) {
         try {
           const apiBase = (import.meta.env.VITE_API_URL as string) || ''
           const res = await fetch(`${apiBase}/api/sessions/${backendSessionId}/messages`)
@@ -762,18 +981,19 @@ export function createAgentActions(deps: ActionDeps) {
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       log.error('agent', 'Unexpected error in regenerateResponse', { error: msg })
-      batch(() => {
-        session.updateMessage(assistantMessageId, {
-          content: '',
-          error: { type: 'unknown', message: msg, timestamp: Date.now() },
-        })
-        rustAgent.endRun()
+      const regenerateMsgId = runGuard.settleMessageId(assistantMessageId)
+      runGuard.updateMessage(regenerateMsgId, {
+        content: '',
+        error: { type: 'unknown', message: msg, timestamp: Date.now() },
       })
+      runGuard.clearRunUiIfCurrent()
     } finally {
-      batch(() => {
-        setStreamingStartedAt(null)
-        setLiveMessageId(null)
-      })
+      if (runGuard.runIsCurrent()) {
+        batch(() => {
+          setStreamingStartedAt(null)
+          setLiveMessageId(null)
+        })
+      }
     }
   }
 

@@ -9,7 +9,8 @@ import type { Component } from 'solid-js'
 
 export interface WelcomeStepProps {
   onNext: () => void
-  onImport?: () => void
+  onSkip?: () => void
+  dismissLabel?: string
 }
 
 export const WelcomeStep: Component<WelcomeStepProps> = (props) => (
@@ -26,7 +27,11 @@ export const WelcomeStep: Component<WelcomeStepProps> = (props) => (
     </div>
 
     {/* Title */}
-    <h1 class="text-2xl font-bold text-[var(--text-primary)] leading-tight tracking-tight mb-3">
+    <h1
+      tabindex="-1"
+      data-onboarding-focus="true"
+      class="text-2xl font-bold text-[var(--text-primary)] leading-tight tracking-tight mb-3"
+    >
       Welcome to AVA
     </h1>
 
@@ -47,13 +52,13 @@ export const WelcomeStep: Component<WelcomeStepProps> = (props) => (
       <span aria-hidden="true">&rarr;</span>
     </button>
 
-    {/* Import link - muted */}
+    {/* Skip link - muted */}
     <button
       type="button"
-      onClick={() => props.onImport?.()}
+      onClick={() => props.onSkip?.()}
       class="mt-6 text-xs text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors opacity-60 hover:opacity-80"
     >
-      Already have config? Import .ava/ folder
+      {props.dismissLabel ?? 'Skip setup for now'}
     </button>
   </div>
 )

@@ -87,3 +87,4 @@ local-whisper = ["voice", "dep:whisper-rs"]
 
 [dev-dependencies]
 insta = "1"
+tower = { version = "0.5", features = ["util"] }

@@ -42,7 +42,11 @@ export const CompleteStep: Component<CompleteStepProps> = (props) => (
     </div>
 
     {/* Title */}
-    <h2 class="text-[22px] font-bold text-[var(--text-primary)] tracking-tight mb-2">
+    <h2
+      tabindex="-1"
+      data-onboarding-focus="true"
+      class="text-[22px] font-bold text-[var(--text-primary)] tracking-tight mb-2"
+    >
       You're All Set
     </h2>
 

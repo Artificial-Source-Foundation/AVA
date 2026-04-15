@@ -53,6 +53,8 @@ AVA is a Rust-first AI coding assistant (CLI/TUI + Tauri desktop + web mode) wit
 
 **All new features MUST be Rust.** No TypeScript backend logic.
 
+Current workspace Rust baseline: `rust-version = 1.86`.
+
 ## Key Counts
 
 - 22 Rust crates in the root workspace (`src-tauri/` remains outside the workspace)
@@ -174,12 +176,18 @@ Docs must always reflect the current codebase. Never let them drift.
 7. `docs/benchmark/README.md` — benchmark architecture, workflows, reports, and prompt tuning
 8. `docs/testing/README.md` — testing and verification concepts across Rust, frontend, and benchmark flows
 9. `docs/operations/README.md` — maintainer runbooks and operational guidance
-10. `docs/architecture/plugin-boundary.md` — first concrete core-to-plugin migration checklist
-11. `docs/architecture/crate-map.md` — crate dependency map
-12. `CHANGELOG.md` — version history
+10. `docs/architecture/README.md` — architecture entrypoint, audits, and transition docs
+11. `docs/architecture/agent-backend-capability-audit-m1.md` — current coding-agent backend capability inventory
+12. `docs/architecture/agent-backend-capability-comparison-m2.md` — external comparison matrix for backend correction planning
+13. `docs/architecture/cross-surface-runtime-map-m4.md` — backend connection map across interactive TUI, headless CLI, desktop, and web
+14. `docs/architecture/cross-surface-behavior-audit-m5.md` — shared-vs-divergent runtime behavior audit across surfaces
+15. `docs/architecture/shared-backend-contract-m6.md` — canonical shared-backend contract
+16. `docs/architecture/backend-correction-roadmap-m7.md` — implementation-ready backend correction roadmap
+17. `docs/architecture/backend-contract-exceptions.md` — versioned adapter-exception registry for the shared backend contract
+18. `docs/architecture/plugin-boundary.md` — first concrete core-to-plugin migration checklist
+19. `docs/architecture/crate-map.md` — crate dependency map
+20. `CHANGELOG.md` — version history
 
 `AGENTS.md` owns workflow, conventions, and architectural guidance. `docs/project/roadmap.md` owns product direction.
 
 For the full docs index including reference material, see `README.md` and `docs/README.md`.
-
-Current workspace Rust baseline: `rust-version = 1.86`.

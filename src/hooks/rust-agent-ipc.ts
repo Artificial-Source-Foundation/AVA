@@ -28,6 +28,19 @@ interface IpcDeps {
   resetState: () => void
 }
 
+const TAURI_TERMINAL_GRACE_MS = 75
+
+interface TauriTerminalTracker {
+  runId: string
+  terminalSeen: boolean
+  terminalPromise: Promise<void>
+  resolveTerminal: (() => void) | null
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
 export interface AgentIpc {
   run: (
     goal: string,
@@ -77,9 +90,116 @@ export function createAgentIpc(deps: IpcDeps): AgentIpc {
   let unlisten: UnlistenFn | null = null
   let eventSocket: WebSocket | null = null
   let socketGeneration = 0
+  let tauriRunSequence = 0
+  let activeTauriRun: TauriTerminalTracker | null = null
 
   const isCurrentSocket = (ws: WebSocket, generation: number): boolean =>
     eventSocket === ws && socketGeneration === generation
+
+  const nextTauriRunId = (): string => {
+    tauriRunSequence += 1
+    const uniqueSuffix =
+      typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+        ? crypto.randomUUID()
+        : `${Date.now()}-${tauriRunSequence}`
+    return `desktop-run-${uniqueSuffix}`
+  }
+
+  const getTauriEventRunId = (event: AgentEvent): string | null => {
+    const terminalEvent = event as { run_id?: string; runId?: string }
+    return terminalEvent.runId ?? terminalEvent.run_id ?? null
+  }
+
+  const resetTauriTerminalTracking = (runId: string): TauriTerminalTracker => {
+    let resolveTerminalPromise: (() => void) | null = null
+    const tracker: TauriTerminalTracker = {
+      runId,
+      terminalSeen: false,
+      terminalPromise: new Promise<void>((resolve) => {
+        resolveTerminalPromise = resolve
+      }),
+      resolveTerminal: null,
+    }
+    tracker.resolveTerminal = () => {
+      tracker.terminalSeen = true
+      resolveTerminalPromise?.()
+      resolveTerminalPromise = null
+      tracker.resolveTerminal = null
+    }
+    activeTauriRun = tracker
+    return tracker
+  }
+
+  const clearTauriTerminalTracking = (tracker?: TauriTerminalTracker | null): void => {
+    if (tracker && activeTauriRun !== tracker) {
+      return
+    }
+    if (tracker) {
+      tracker.resolveTerminal = null
+    }
+    activeTauriRun = null
+  }
+
+  const shouldHandleTauriEvent = (event: AgentEvent): boolean => {
+    const activeRun = activeTauriRun
+    const eventRunId = getTauriEventRunId(event)
+    const isTerminalEvent = event.type === 'complete' || event.type === 'error'
+
+    if (!eventRunId) {
+      if (!isTerminalEvent) {
+        return true
+      }
+      log.warn('agent', 'Ignoring uncorrelated Tauri terminal event', {
+        eventType: event.type,
+        activeRunId: activeRun?.runId ?? null,
+      })
+      return false
+    }
+
+    if (!activeRun || eventRunId !== activeRun.runId) {
+      log.warn('agent', 'Ignoring stale Tauri run event', {
+        eventType: event.type,
+        eventRunId,
+        activeRunId: activeRun?.runId ?? null,
+      })
+      return false
+    }
+
+    if (isTerminalEvent) {
+      activeRun.resolveTerminal?.()
+    }
+
+    return true
+  }
+
+  const withTauriRunId = (
+    args: Record<string, unknown> | undefined,
+    runId: string | null
+  ): Record<string, unknown> | undefined => {
+    if (!runId) {
+      return args
+    }
+
+    if (!args) {
+      return { args: { runId } }
+    }
+
+    const nestedArgs = args.args
+    if (nestedArgs && typeof nestedArgs === 'object' && !Array.isArray(nestedArgs)) {
+      return {
+        ...args,
+        args: {
+          ...(nestedArgs as Record<string, unknown>),
+          runId,
+        },
+      }
+    }
+
+    return {
+      ...args,
+      runId,
+    }
+  }
 
   const attachListener = async (): Promise<void> => {
     if (isTauri()) {
@@ -89,6 +209,9 @@ export function createAgentIpc(deps: IpcDeps): AgentIpc {
         unlisten = null
       }
       unlisten = await listen<AgentEvent>('agent-event', (evt) => {
+        if (!shouldHandleTauriEvent(evt.payload)) {
+          return
+        }
         handleAgentEvent(evt.payload)
       })
     } else if (eventSocket && eventSocket.readyState === WebSocket.OPEN) {
@@ -173,6 +296,7 @@ export function createAgentIpc(deps: IpcDeps): AgentIpc {
       unlisten()
       unlisten = null
     }
+    clearTauriTerminalTracking()
     // Don't close eventSocket here — it's reused across runs.
     // Only closed on component cleanup (onCleanup).
   }
@@ -194,6 +318,84 @@ export function createAgentIpc(deps: IpcDeps): AgentIpc {
     metrics.runStartTime = Date.now()
     metrics.firstTokenLogged = false
     metrics.pendingToolNames = []
+  }
+
+  const createCompletionPromise = (): {
+    promise: Promise<SubmitGoalResult | null>
+    resolve: (result: SubmitGoalResult | null) => void
+  } => {
+    let resolvePromise!: (result: SubmitGoalResult | null) => void
+    const promise = new Promise<SubmitGoalResult | null>((resolve) => {
+      resolvePromise = resolve
+      completion.resolve = resolve
+    })
+    return { promise, resolve: resolvePromise }
+  }
+
+  const normalizeTauriSubmitResult = (result: SubmitGoalResult | null): SubmitGoalResult | null => {
+    if (!result) {
+      return null
+    }
+    return {
+      success: result.success,
+      turns: 0,
+      sessionId: result.sessionId,
+    }
+  }
+
+  const invokeStreamingCommand = async (
+    command: string,
+    args?: Record<string, unknown>
+  ): Promise<SubmitGoalResult | null> => {
+    const completionBinding = createCompletionPromise()
+    const completionPromise = completionBinding.promise
+    const tauriRunId = isTauri() ? nextTauriRunId() : null
+    const terminalTracker = tauriRunId ? resetTauriTerminalTracking(tauriRunId) : null
+    const invokePromise = invoke<SubmitGoalResult>(command, withTauriRunId(args, tauriRunId))
+
+    if (isTauri()) {
+      const guardedInvokePromise = invokePromise.catch((err) => {
+        if (completion.resolve !== completionBinding.resolve) {
+          log.warn('agent', 'Backend invoke rejected after terminal event', {
+            command,
+            error: err instanceof Error ? err.message : String(err),
+          })
+          return null
+        }
+        throw err
+      })
+
+      const winner = await Promise.race([
+        completionPromise.then((result) => ({ source: 'terminal' as const, result })),
+        guardedInvokePromise.then((result) => ({ source: 'invoke' as const, result })),
+      ])
+
+      let finalResult = winner.result
+      if (winner.source === 'invoke' && terminalTracker && !terminalTracker.terminalSeen) {
+        await Promise.race([terminalTracker.terminalPromise, delay(TAURI_TERMINAL_GRACE_MS)])
+        if (terminalTracker.terminalSeen) {
+          finalResult = await completionPromise
+        }
+      }
+
+      const normalizedResult = normalizeTauriSubmitResult(finalResult)
+      if (completion.resolve === completionBinding.resolve) {
+        completion.resolve = null
+      }
+      clearTauriTerminalTracking(terminalTracker)
+      if (normalizedResult) {
+        setLastResult(normalizedResult)
+      }
+      return normalizedResult
+    }
+
+    const submitResult = await invokePromise
+    const result = await completionPromise
+    const finalResult: SubmitGoalResult = result
+      ? { ...result, sessionId: result.sessionId || submitResult.sessionId }
+      : { success: false, turns: 0, sessionId: submitResult.sessionId }
+    setLastResult(finalResult)
+    return finalResult
   }
 
   const run = async (
@@ -231,34 +433,7 @@ export function createAgentIpc(deps: IpcDeps): AgentIpc {
         },
       }
 
-      if (isTauri()) {
-        // Tauri mode: invoke blocks until the agent finishes.
-        // Do NOT set isRunning(false) here — let the caller (useAgent) finalize
-        // the message content first, then call endRun() in a batch to avoid
-        // a flash where isActiveStreaming=false but the message is still empty.
-        const result = await invoke<SubmitGoalResult>('submit_goal', submitArgs)
-        setLastResult(result)
-        return result
-      }
-
-      // Web mode: the HTTP call returns immediately while the agent runs async.
-      // We need to wait for the complete/error event via WebSocket.
-      const completionPromise = new Promise<SubmitGoalResult | null>((resolve) => {
-        completion.resolve = resolve
-      })
-
-      // Fire the HTTP request (returns immediately with session ID)
-      const submitResult = await invoke<SubmitGoalResult>('submit_goal', submitArgs)
-
-      // Now wait for the WebSocket to deliver complete or error
-      const result = await completionPromise
-
-      // Merge session ID from the HTTP response if the WS event didn't provide one
-      const finalResult: SubmitGoalResult = result
-        ? { ...result, sessionId: result.sessionId || submitResult.sessionId }
-        : { success: false, turns: 0, sessionId: submitResult.sessionId }
-      setLastResult(finalResult)
-      return finalResult
+      return await invokeStreamingCommand('submit_goal', submitArgs)
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       log.error('error', 'IPC invoke failed', { command: 'submit_goal', error: message })
@@ -294,28 +469,7 @@ export function createAgentIpc(deps: IpcDeps): AgentIpc {
         },
       }
 
-      if (isTauri()) {
-        // Same as run(): don't set isRunning(false) here — let the caller
-        // finalize the message first, then call endRun() in a batch.
-        const result = await invoke<SubmitGoalResult>('edit_and_resend', editArgs)
-        setLastResult(result)
-        return result
-      }
-
-      // Web mode: HTTP call returns immediately, wait for WebSocket completion
-      const completionPromise = new Promise<SubmitGoalResult | null>((resolve) => {
-        completion.resolve = resolve
-      })
-
-      const submitResult = await invoke<SubmitGoalResult>('edit_and_resend', editArgs)
-
-      const result = await completionPromise
-
-      const finalResult: SubmitGoalResult = result
-        ? { ...result, sessionId: result.sessionId || submitResult.sessionId }
-        : { success: false, turns: 0, sessionId: submitResult.sessionId }
-      setLastResult(finalResult)
-      return finalResult
+      return await invokeStreamingCommand('edit_and_resend', editArgs)
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       log.error('error', 'IPC invoke failed', { command: 'edit_and_resend', error: message })
@@ -341,26 +495,7 @@ export function createAgentIpc(deps: IpcDeps): AgentIpc {
     try {
       await attachListener()
 
-      if (isTauri()) {
-        const result = await invoke<SubmitGoalResult>('retry_last_message')
-        setLastResult(result)
-        return result
-      }
-
-      // Web mode: HTTP call returns immediately, wait for WebSocket completion
-      const completionPromise = new Promise<SubmitGoalResult | null>((resolve) => {
-        completion.resolve = resolve
-      })
-
-      const submitResult = await invoke<SubmitGoalResult>('retry_last_message')
-
-      const result = await completionPromise
-
-      const finalResult: SubmitGoalResult = result
-        ? { ...result, sessionId: result.sessionId || submitResult.sessionId }
-        : { success: false, turns: 0, sessionId: submitResult.sessionId }
-      setLastResult(finalResult)
-      return finalResult
+      return await invokeStreamingCommand('retry_last_message')
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       log.error('error', 'IPC invoke failed', { command: 'retry_last_message', error: message })
@@ -385,26 +520,7 @@ export function createAgentIpc(deps: IpcDeps): AgentIpc {
     try {
       await attachListener()
 
-      if (isTauri()) {
-        const result = await invoke<SubmitGoalResult>('regenerate_response')
-        setLastResult(result)
-        return result
-      }
-
-      // Web mode: HTTP call returns immediately, wait for WebSocket completion
-      const completionPromise = new Promise<SubmitGoalResult | null>((resolve) => {
-        completion.resolve = resolve
-      })
-
-      const submitResult = await invoke<SubmitGoalResult>('regenerate_response')
-
-      const result = await completionPromise
-
-      const finalResult: SubmitGoalResult = result
-        ? { ...result, sessionId: result.sessionId || submitResult.sessionId }
-        : { success: false, turns: 0, sessionId: submitResult.sessionId }
-      setLastResult(finalResult)
-      return finalResult
+      return await invokeStreamingCommand('regenerate_response')
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       log.error('error', 'IPC invoke failed', { command: 'regenerate_response', error: message })
@@ -442,7 +558,7 @@ export function createAgentIpc(deps: IpcDeps): AgentIpc {
       setError('Agent run cancelled by user')
       setIsRunning(false)
     })
-    // Resolve the web-mode completion promise so run() can return
+    // Resolve any in-flight terminal completion promise so run() can return
     if (completion.resolve) {
       completion.resolve(null)
       completion.resolve = null

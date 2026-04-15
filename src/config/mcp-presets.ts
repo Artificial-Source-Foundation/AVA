@@ -57,6 +57,14 @@ export const MCP_PRESETS: MCPPreset[] = [
     category: 'Search',
   },
   {
+    name: 'playwright',
+    description: 'Browser automation and web app testing via Playwright',
+    type: 'stdio',
+    command: 'pnpm',
+    args: ['exec', 'playwright-mcp', '--headless', '--allowed-origins=*'],
+    category: 'Dev Tools',
+  },
+  {
     name: 'puppeteer',
     description: 'Browser automation and web scraping',
     type: 'stdio',

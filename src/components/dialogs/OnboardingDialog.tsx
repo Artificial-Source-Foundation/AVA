@@ -10,6 +10,7 @@ import {
   type OnboardingData as NewOnboardingData,
   OnboardingFlow,
   type OnboardingFlowProps,
+  type OnboardingProviderDraft,
 } from '../onboarding/OnboardingFlow'
 
 // ============================================================================
@@ -18,7 +19,7 @@ import {
 
 export interface OnboardingData {
   theme: string
-  mode: 'light' | 'dark'
+  mode: 'light' | 'dark' | 'system'
   anthropicKey?: string
   openrouterKey?: string
   /** Accent color selected during onboarding */
@@ -29,6 +30,8 @@ export interface OnboardingData {
   borderRadius?: string
   /** All provider keys entered (keyed by provider id) */
   providerKeys?: Record<string, string>
+  /** OAuth providers connected during onboarding */
+  oauthProviders?: string[]
   /** Workspace trust choice */
   workspaceChoice?: string
 }
@@ -36,6 +39,8 @@ export interface OnboardingData {
 export interface OnboardingProps {
   onComplete: (data: OnboardingData) => void
   onSkip?: () => void
+  onDismiss?: (data?: OnboardingProviderDraft) => void
+  mode?: 'first-run' | 'guide'
 }
 
 // ============================================================================
@@ -54,12 +59,20 @@ export const OnboardingScreen: Component<OnboardingProps> = (props) => {
       darkStyle: data.darkStyle,
       borderRadius: data.borderRadius,
       providerKeys: data.providerKeys,
+      oauthProviders: data.oauthProviders,
       workspaceChoice: data.workspaceChoice,
     }
     props.onComplete(legacy)
   }
 
-  return <OnboardingFlow onComplete={handleComplete} onSkip={props.onSkip} />
+  return (
+    <OnboardingFlow
+      onComplete={handleComplete}
+      onSkip={props.onSkip}
+      onDismiss={props.onDismiss}
+      mode={props.mode}
+    />
+  )
 }
 
 // Re-export for backwards compatibility

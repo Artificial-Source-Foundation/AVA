@@ -29,6 +29,7 @@ interface SettingsModalContentProps {
   onAddMcpServer: () => void
   onRefreshMcpServers?: () => void
   onToggleMcpServer?: (name: string, enabled: boolean) => void
+  isMcpLoading?: () => boolean
 }
 
 export const SettingsModalContent: Component<SettingsModalContentProps> = (props) => {
@@ -54,7 +55,19 @@ export const SettingsModalContent: Component<SettingsModalContentProps> = (props
               props.onUpdateProvider(id, { apiKey: key, status: 'connected', enabled: true })
             }
             onClearApiKey={(id) =>
-              props.onUpdateProvider(id, { apiKey: undefined, status: 'disconnected' })
+              props.onUpdateProvider(id, {
+                apiKey: undefined,
+                status: 'disconnected',
+                enabled: false,
+              })
+            }
+            onOAuthConnected={(id) =>
+              props.onUpdateProvider(id, {
+                apiKey: undefined,
+                status: 'connected',
+                enabled: true,
+                error: undefined,
+              })
             }
             onSetDefaultModel={(providerId, modelId) =>
               props.onUpdateProvider(providerId, { defaultModel: modelId })
@@ -85,6 +98,7 @@ export const SettingsModalContent: Component<SettingsModalContentProps> = (props
             onAdd={props.onAddMcpServer}
             onRefresh={props.onRefreshMcpServers}
             onToggle={props.onToggleMcpServer}
+            isLoading={props.isMcpLoading?.()}
           />
         )
       case 'plugins':

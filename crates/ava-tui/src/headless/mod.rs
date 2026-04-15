@@ -192,6 +192,24 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_json_accepts_canonical_queue_command_names() {
+        let steer =
+            input::parse_json_stdin_message(r#"{"tier": "steer_agent", "text": "pivot"}"#).unwrap();
+        assert_eq!(steer.tier, MessageTier::Steering);
+
+        let follow =
+            input::parse_json_stdin_message(r#"{"tier": "follow_up_agent", "text": "run tests"}"#)
+                .unwrap();
+        assert_eq!(follow.tier, MessageTier::FollowUp);
+
+        let post = input::parse_json_stdin_message(
+            r#"{"tier": "post_complete_agent", "text": "review", "group": 4}"#,
+        )
+        .unwrap();
+        assert_eq!(post.tier, MessageTier::PostComplete { group: 4 });
+    }
+
+    #[test]
     fn test_parse_json_post_complete_with_group() {
         let msg = input::parse_json_stdin_message(
             r#"{"tier": "post-complete", "text": "commit", "group": 3}"#,
@@ -206,6 +224,15 @@ mod tests {
         let msg = input::parse_json_stdin_message(r#"{"tier": "post-complete", "text": "review"}"#)
             .unwrap();
         assert_eq!(msg.tier, MessageTier::PostComplete { group: 1 });
+    }
+
+    #[test]
+    fn test_parse_json_accepts_group_zero() {
+        let msg = input::parse_json_stdin_message(
+            r#"{"tier": "post_complete_agent", "text": "review", "group": 0}"#,
+        )
+        .unwrap();
+        assert_eq!(msg.tier, MessageTier::PostComplete { group: 0 });
     }
 
     #[test]
@@ -227,6 +254,29 @@ mod tests {
     #[test]
     fn test_parse_json_missing_text_returns_none() {
         assert!(input::parse_json_stdin_message(r#"{"tier": "steering"}"#).is_none());
+    }
+
+    #[test]
+    fn test_parse_json_unknown_tier_returns_none() {
+        assert!(
+            input::parse_json_stdin_message(r#"{"tier": "unknown", "text": "hello"}"#).is_none()
+        );
+    }
+
+    #[test]
+    fn test_parse_json_invalid_group_returns_none() {
+        assert!(input::parse_json_stdin_message(
+            r#"{"tier": "post_complete_agent", "text": "hello", "group": "oops"}"#,
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn test_parse_json_overflow_group_returns_none() {
+        assert!(input::parse_json_stdin_message(
+            r#"{"tier": "post_complete_agent", "text": "hello", "group": 4294967296}"#,
+        )
+        .is_none());
     }
 
     #[test]

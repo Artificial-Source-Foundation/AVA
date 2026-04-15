@@ -12,6 +12,8 @@ import type {
   PlanCreatedEvent,
   PlanData,
   PlanStepCompleteEvent,
+  StreamingEditProgressEvent,
+  SubagentCompleteEvent,
   SubmitGoalResult,
   TodoItem,
   TodoUpdateEvent,
@@ -142,7 +144,18 @@ export function createAgentEventHandler(deps: EventHandlerDeps): (event: AgentEv
           | string
           | undefined
         setActiveToolCalls((prev) => {
-          if (prev.some((tc) => tc.id === newToolId)) return prev
+          const existingIdx = prev.findIndex((tc) => tc.id === newToolId)
+          if (existingIdx >= 0) {
+            const updated = [...prev]
+            updated[existingIdx] = {
+              ...updated[existingIdx]!,
+              name: timedEvent.name,
+              args,
+              filePath: filePath ?? updated[existingIdx]!.filePath,
+              status: 'running',
+            }
+            return updated
+          }
           return [
             ...prev,
             {
@@ -319,7 +332,8 @@ export function createAgentEventHandler(deps: EventHandlerDeps): (event: AgentEv
             return updated
           })
         })
-        // Resolve the web-mode completion promise so run() can finalize
+        // Resolve the terminal completion promise for both runtimes so the
+        // caller can settle as soon as the backend emits a terminal event.
         if (completion.resolve) {
           const completeEvent = timedEvent as CompleteEvent
           completion.resolve({
@@ -341,7 +355,7 @@ export function createAgentEventHandler(deps: EventHandlerDeps): (event: AgentEv
           setError(timedEvent.message)
           setIsRunning(false)
         })
-        // Resolve the web-mode completion promise on error too
+        // Resolve the terminal completion promise on error too
         if (completion.resolve) {
           completion.resolve(null)
           completion.resolve = null
@@ -351,7 +365,7 @@ export function createAgentEventHandler(deps: EventHandlerDeps): (event: AgentEv
       case 'plan_created': {
         debugLog('plan', 'plan_created event', (timedEvent as PlanCreatedEvent).plan?.summary)
         const planEvent = timedEvent as PlanCreatedEvent
-        setPendingPlan(planEvent.plan)
+        setPendingPlan({ ...planEvent.plan, requestId: planEvent.id })
         break
       }
 
@@ -379,6 +393,98 @@ export function createAgentEventHandler(deps: EventHandlerDeps): (event: AgentEv
             // Layout context may not be available in all environments
           }
         }
+        break
+      }
+
+      case 'streaming_edit_progress': {
+        const editEvent = timedEvent as StreamingEditProgressEvent
+        const callId = editEvent.call_id ?? editEvent.callId ?? null
+        const toolName = editEvent.tool_name ?? editEvent.toolName
+        const filePath = editEvent.file_path ?? editEvent.filePath ?? undefined
+        const bytesReceived = editEvent.bytes_received ?? editEvent.bytesReceived ?? 0
+        const streamingOutput = `Receiving ${toolName}${filePath ? ` for ${filePath}` : ''} (${bytesReceived} bytes)`
+
+        setActiveToolCalls((prev) => {
+          const matchIdx = callId
+            ? prev.findIndex((tc) => tc.id === callId)
+            : prev.findIndex((tc) => tc.status === 'running' && tc.name === toolName)
+
+          if (matchIdx >= 0) {
+            const updated = [...prev]
+            updated[matchIdx] = {
+              ...updated[matchIdx]!,
+              filePath: filePath ?? updated[matchIdx]!.filePath,
+              streamingOutput,
+            }
+            return updated
+          }
+
+          return [
+            ...prev,
+            {
+              id: callId ?? `${toolName}-${Date.now()}-${prev.length + 1}`,
+              name: toolName,
+              args: {},
+              status: 'running',
+              startedAt: Date.now(),
+              filePath,
+              streamingOutput,
+            },
+          ]
+        })
+        break
+      }
+
+      case 'subagent_complete': {
+        const subagentEvent = timedEvent as SubagentCompleteEvent
+        const callId = subagentEvent.call_id ?? subagentEvent.callId ?? null
+        const sessionId = subagentEvent.session_id ?? subagentEvent.sessionId
+        const inputTokens = subagentEvent.input_tokens ?? subagentEvent.inputTokens ?? 0
+        const outputTokens = subagentEvent.output_tokens ?? subagentEvent.outputTokens ?? 0
+        const costUsd = subagentEvent.cost_usd ?? subagentEvent.costUsd ?? 0
+        const agentType = subagentEvent.agent_type ?? subagentEvent.agentType ?? undefined
+        const summaryLines = [
+          subagentEvent.description,
+          `Session: ${sessionId}`,
+          `Tokens: ${inputTokens} in / ${outputTokens} out`,
+          `Cost: $${costUsd.toFixed(4)}`,
+          ...(agentType ? [`Agent: ${agentType}`] : []),
+          ...(subagentEvent.provider ? [`Provider: ${subagentEvent.provider}`] : []),
+          ...(subagentEvent.resumed ? ['Resumed existing delegated session'] : []),
+        ]
+
+        setActiveToolCalls((prev) => {
+          const matchIdx = callId ? prev.findIndex((tc) => tc.id === callId) : -1
+          const output = summaryLines.join('\n')
+          const completedAt = Date.now()
+
+          if (matchIdx >= 0) {
+            const updated = [...prev]
+            updated[matchIdx] = {
+              ...updated[matchIdx]!,
+              output,
+              status: updated[matchIdx]!.status === 'error' ? updated[matchIdx]!.status : 'success',
+              completedAt,
+            }
+            return updated
+          }
+
+          return [
+            ...prev,
+            {
+              id: callId ?? `subagent-${sessionId}`,
+              name: 'task',
+              args: {
+                description: subagentEvent.description,
+                ...(agentType ? { agent_type: agentType } : {}),
+              },
+              status: 'success',
+              startedAt: completedAt,
+              completedAt,
+              output,
+            },
+          ]
+        })
         break
       }
     }

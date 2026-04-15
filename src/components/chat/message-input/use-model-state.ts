@@ -6,6 +6,7 @@
  */
 
 import { type Accessor, createEffect, createMemo } from 'solid-js'
+import type { LLMProviderConfig } from '../../../config/defaults/provider-defaults'
 import { updateCoreBudgetLimit } from '../../../services/core-bridge'
 import { getModelFromCatalog } from '../../../services/providers/curated-model-catalog'
 import { useSession } from '../../../stores/session'
@@ -25,6 +26,47 @@ export interface ModelState {
   handleCycleReasoning: () => void
 }
 
+export interface ResolvedModelSelection {
+  modelId: string
+  providerId: string
+}
+
+export function resolveModelSelection(
+  providers: LLMProviderConfig[],
+  modelId: string,
+  providerId: string | null
+): ResolvedModelSelection | null {
+  const matchingProvider =
+    providers.find((provider) => {
+      return provider.id === providerId && provider.models.some((model) => model.id === modelId)
+    }) ?? providers.find((provider) => provider.models.some((model) => model.id === modelId))
+
+  if (matchingProvider) {
+    return {
+      modelId,
+      providerId: matchingProvider.id,
+    }
+  }
+
+  const fallbackProvider = providers[0]
+  if (!fallbackProvider) {
+    return null
+  }
+
+  const fallbackModelId =
+    fallbackProvider.models.find((model) => model.id === fallbackProvider.defaultModel)?.id ??
+    fallbackProvider.models[0]?.id
+
+  if (!fallbackModelId) {
+    return null
+  }
+
+  return {
+    modelId: fallbackModelId,
+    providerId: fallbackProvider.id,
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Hook
 // ---------------------------------------------------------------------------
@@ -41,13 +83,13 @@ export function useModelState(): ModelState {
   // Auto-select a valid model when current selection doesn't match any enabled provider
   createEffect(() => {
     const providers = enabledProviders()
-    if (providers.length === 0) return
-    const modelId = selectedModel()
-    const modelExists = providers.some((p) => p.models.some((m) => m.id === modelId))
-    if (!modelExists) {
-      const first = providers[0]
-      const defaultModel = first.defaultModel || first.models[0]?.id
-      if (defaultModel) setSelectedModel(defaultModel)
+    const resolved = resolveModelSelection(providers, selectedModel(), selectedProvider())
+
+    if (
+      resolved &&
+      (resolved.modelId !== selectedModel() || resolved.providerId !== selectedProvider())
+    ) {
+      setSelectedModel(resolved.modelId, resolved.providerId)
     }
   })
 

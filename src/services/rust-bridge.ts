@@ -2,6 +2,8 @@ import { isTauri, invoke as tauriInvoke } from '@tauri-apps/api/core'
 import { apiInvoke } from '../lib/api-client'
 import type { PluginHostInvokeResult, PluginMountRegistration } from '../types/plugin'
 import type {
+  ActiveSessionSyncResult,
+  ActiveSessionSyncSnapshot,
   AgentStatus,
   AgentToolInfo,
   BrowserToolResult,
@@ -44,6 +46,7 @@ import type {
   SessionSummary,
   SubmitGoalArgs,
   SubmitGoalResult,
+  ToolIntrospectionContext,
   ToolResult,
   UndoResult,
   WasmExtensionRegistration,
@@ -53,6 +56,20 @@ const DEFAULT_DB_PATH = 'ava.db'
 
 function toErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
+}
+
+function toSnakeCaseValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((entry) => toSnakeCaseValue(entry))
+  }
+  if (value && typeof value === 'object') {
+    const normalized: Record<string, unknown> = {}
+    for (const [key, entry] of Object.entries(value)) {
+      normalized[key.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`)] = toSnakeCaseValue(entry)
+    }
+    return normalized
+  }
+  return value
 }
 
 async function invokeCommand<T>(command: string, args?: Record<string, unknown>): Promise<T> {
@@ -126,22 +143,22 @@ export const rustAgent = {
     invokeCommand('submit_goal', { args: { goal } }),
   cancel: (): Promise<void> => invokeCommand('cancel_agent'),
   status: (): Promise<AgentStatus> => invokeCommand('get_agent_status'),
-  resolveApproval: (approved: boolean, alwaysAllow: boolean): Promise<void> =>
-    invokeCommand('resolve_approval', { args: { approved, alwaysAllow } }),
-  resolveQuestion: (answer: string): Promise<void> =>
-    invokeCommand('resolve_question', { args: { answer } }),
+  resolveApproval: (requestId: string, approved: boolean, alwaysAllow: boolean): Promise<void> =>
+    invokeCommand('resolve_approval', { args: { requestId, approved, alwaysAllow } }),
+  resolveQuestion: (requestId: string, answer: string): Promise<void> =>
+    invokeCommand('resolve_question', { args: { requestId, answer } }),
   resolvePlan: (
+    requestId: string,
     response: import('../types/rust-ipc').PlanResponse,
     modifiedPlan: import('../types/rust-ipc').PlanData | null,
-    feedback?: string | null,
-    stepComments?: Record<string, string> | null
+    feedback?: string | null
   ): Promise<void> =>
     invokeCommand('resolve_plan', {
       args: {
+        requestId,
         response,
-        modifiedPlan,
+        modifiedPlan: modifiedPlan ? toSnakeCaseValue(modifiedPlan as unknown) : null,
         feedback: feedback ?? null,
-        stepComments: stepComments ?? null,
       },
     }),
 }
@@ -250,6 +267,11 @@ export const rustBackend = {
   loadSession: (id: string): Promise<JsonValue> => invokeCommand('load_session', { id }),
   createSession: (): Promise<SessionSummary> => invokeCommand('create_session'),
   deleteSession: (id: string): Promise<void> => invokeCommand('delete_session', { id }),
+  setActiveSession: (
+    id: string,
+    snapshot?: ActiveSessionSyncSnapshot
+  ): Promise<ActiveSessionSyncResult> =>
+    invokeCommand('set_active_session', snapshot ? { id, snapshot } : { id }),
 
   listModels: (): Promise<ModelInfo[]> => invokeCommand('list_models'),
   getCurrentModel: (): Promise<CurrentModel> => invokeCommand('get_current_model'),
@@ -260,7 +282,8 @@ export const rustBackend = {
 
   getConfig: (): Promise<JsonValue> => invokeCommand('get_config'),
 
-  listAgentTools: (): Promise<AgentToolInfo[]> => invokeCommand('list_agent_tools'),
+  listAgentTools: (context?: ToolIntrospectionContext): Promise<AgentToolInfo[]> =>
+    invokeCommand('list_agent_tools', { context }),
 
   listMcpServers: (): Promise<McpServerInfo[]> => invokeCommand('list_mcp_servers'),
   reloadMcpServers: (): Promise<McpReloadResult> => invokeCommand('reload_mcp_servers'),

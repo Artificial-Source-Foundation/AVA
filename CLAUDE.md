@@ -10,8 +10,11 @@ Use these files instead:
 2. `docs/README.md` — docs entrypoint
 3. `docs/project/roadmap.md` — AVA 3.3 baseline and product direction
 4. `docs/project/backlog.md` — active work
-5. `docs/architecture/crate-map.md` — current crate map
-6. `docs/architecture/plugin-boundary.md` — current core-vs-plugin boundary work
+5. `docs/architecture/README.md` — architecture entrypoint and audits
+6. `docs/architecture/agent-backend-capability-audit-m1.md` — current coding-agent backend capability inventory
+7. `docs/architecture/agent-backend-capability-comparison-m2.md` — external comparison matrix for backend correction planning
+8. `docs/architecture/crate-map.md` — current crate map
+9. `docs/architecture/plugin-boundary.md` — current core-vs-plugin boundary work
 
 ## Quick Commands
 

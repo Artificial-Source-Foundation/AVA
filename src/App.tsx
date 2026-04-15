@@ -28,12 +28,67 @@ import {
   useSettings,
 } from './stores/settings'
 
+type ProviderUpdate = {
+  apiKey?: string
+  status: 'connected'
+  enabled: true
+}
+
+export function applyOnboardingProviderSelections(
+  data: Pick<OnboardingData, 'providerKeys' | 'oauthProviders' | 'anthropicKey' | 'openrouterKey'>,
+  updateProvider: (providerId: string, patch: ProviderUpdate) => void
+): void {
+  const oauthProviders = new Set(data.oauthProviders ?? [])
+
+  if (data.providerKeys) {
+    for (const [id, rawKey] of Object.entries(data.providerKeys)) {
+      const key = rawKey.trim()
+      if (!key) {
+        continue
+      }
+      oauthProviders.delete(id)
+      updateProvider(id, { apiKey: key, status: 'connected', enabled: true })
+    }
+  }
+
+  if (oauthProviders.size > 0) {
+    for (const id of oauthProviders) {
+      updateProvider(id, { apiKey: undefined, status: 'connected', enabled: true })
+    }
+  }
+
+  if (data.anthropicKey) {
+    updateProvider('anthropic', {
+      apiKey: data.anthropicKey,
+      status: 'connected',
+      enabled: true,
+    })
+  }
+
+  if (data.openrouterKey) {
+    updateProvider('openrouter', {
+      apiKey: data.openrouterKey,
+      status: 'connected',
+      enabled: true,
+    })
+  }
+}
+
 function App() {
+  type OnboardingMode = 'first-run' | 'guide'
+  type OpenOnboardingDetail = {
+    returnFocusSelector?: string
+  }
+
+  const GENERIC_ONBOARDING_FALLBACK_SELECTOR =
+    'textarea[aria-label="Message composer"], button[aria-label="New chat"], button[aria-label="Settings"]'
+  const SETTINGS_ONBOARDING_FALLBACK_SELECTOR = 'button[aria-label="Settings"]'
+
   const [isInitializing, setIsInitializing] = createSignal(true)
   const [initError, setInitError] = createSignal<string | null>(null)
   const [splashStatus, setSplashStatus] = createSignal('')
 
-  const { projectHubVisible, setProjectHubVisible } = useLayout()
+  const { closeSettings, projectHubVisible, setProjectHubVisible } = useLayout()
   const { settings, updateSettings, updateProvider, updateAppearance } = useSettings()
   const { info } = useNotification()
 
@@ -45,6 +100,55 @@ function App() {
   const [updateInfo, setUpdateInfo] = createSignal<UpdateInfo | null>(null)
   const [changelogOpen, setChangelogOpen] = createSignal(false)
   const [onboardingOpen, setOnboardingOpen] = createSignal(false)
+  const [onboardingMode, setOnboardingMode] = createSignal<OnboardingMode>('first-run')
+  const [pendingOnboardingFocusRestore, setPendingOnboardingFocusRestore] = createSignal(false)
+  let onboardingReturnFocus: HTMLElement | null = null
+  let onboardingReturnFocusFallbackSelector = GENERIC_ONBOARDING_FALLBACK_SELECTOR
+
+  const isActionableFocusTarget = (element: HTMLElement | null): element is HTMLElement => {
+    if (!element || !element.isConnected) return false
+    if (element === document.body || element === document.documentElement) return false
+    if (element.matches('[disabled], [aria-disabled="true"], [hidden], [inert]')) return false
+    if (element.getAttribute('tabindex') === '-1') return false
+
+    return typeof element.focus === 'function'
+  }
+
+  const getOnboardingFallbackFocusTarget = () =>
+    document.querySelector<HTMLElement>(onboardingReturnFocusFallbackSelector)
+
+  const rememberOnboardingReturnFocus = (
+    fallbackSelector = GENERIC_ONBOARDING_FALLBACK_SELECTOR
+  ) => {
+    onboardingReturnFocus =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null
+    onboardingReturnFocusFallbackSelector = fallbackSelector
+  }
+
+  const restoreOnboardingReturnFocus = () => {
+    setPendingOnboardingFocusRestore(true)
+  }
+
+  createEffect(() => {
+    if (onboardingOpen() || !pendingOnboardingFocusRestore()) return
+
+    const timer = window.setTimeout(() => {
+      window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(() => {
+          const focusTarget = isActionableFocusTarget(onboardingReturnFocus)
+            ? onboardingReturnFocus
+            : getOnboardingFallbackFocusTarget()
+
+          onboardingReturnFocus = null
+          onboardingReturnFocusFallbackSelector = GENERIC_ONBOARDING_FALLBACK_SELECTOR
+          setPendingOnboardingFocusRestore(false)
+          focusTarget?.focus()
+        })
+      })
+    }, 0)
+
+    onCleanup(() => window.clearTimeout(timer))
+  })
 
   // Show toast when env API keys are detected (fires after init completes)
   createEffect(
@@ -147,7 +251,16 @@ function App() {
     const cleanupTheme = setupSystemThemeListener()
     onCleanup(cleanupTheme)
 
-    const handleOpenOnboarding = () => setOnboardingOpen(true)
+    const handleOpenOnboarding = (event: Event) => {
+      const detail = (event as CustomEvent<OpenOnboardingDetail | undefined>).detail
+
+      rememberOnboardingReturnFocus(
+        detail?.returnFocusSelector ?? SETTINGS_ONBOARDING_FALLBACK_SELECTOR
+      )
+      closeSettings()
+      setOnboardingMode('guide')
+      setOnboardingOpen(true)
+    }
     window.addEventListener('ava:open-onboarding', handleOpenOnboarding)
     onCleanup(() => window.removeEventListener('ava:open-onboarding', handleOpenOnboarding))
 
@@ -155,13 +268,17 @@ function App() {
 
     const result = await runAppInit(setSplashStatus, setProjectHubVisible)
     if (result.error) setInitError(result.error)
-    if (!settings().onboardingComplete) setOnboardingOpen(true)
+    if (!settings().onboardingComplete) {
+      rememberOnboardingReturnFocus()
+      setOnboardingMode('first-run')
+      setOnboardingOpen(true)
+    }
     setIsInitializing(false)
   })
 
   const handleOnboardingComplete = (data: OnboardingData) => {
-    updateSettings({ onboardingComplete: true, theme: data.theme, mode: data.mode })
     setOnboardingOpen(false)
+    updateSettings({ onboardingComplete: true, theme: data.theme, mode: data.mode })
 
     // Apply appearance choices from the new onboarding flow
     if (data.accentColor || data.darkStyle || data.borderRadius) {
@@ -172,26 +289,25 @@ function App() {
       updateAppearance(patch)
     }
 
-    // Connect providers with API keys
-    if (data.providerKeys) {
-      for (const [id, key] of Object.entries(data.providerKeys)) {
-        if (key) {
-          updateProvider(id, { apiKey: key, status: 'connected', enabled: true })
-        }
-      }
+    applyOnboardingProviderSelections(data, updateProvider)
+
+    restoreOnboardingReturnFocus()
+  }
+
+  const handleOnboardingDismiss = (
+    draft?: Pick<OnboardingData, 'providerKeys' | 'oauthProviders'>
+  ) => {
+    setOnboardingOpen(false)
+
+    if (onboardingMode() === 'first-run') {
+      updateSettings({ onboardingComplete: true })
     }
 
-    // Legacy key support
-    if (data.anthropicKey) {
-      updateProvider('anthropic', { apiKey: data.anthropicKey, status: 'connected', enabled: true })
+    if (onboardingMode() === 'guide' && draft) {
+      applyOnboardingProviderSelections(draft, updateProvider)
     }
-    if (data.openrouterKey) {
-      updateProvider('openrouter', {
-        apiKey: data.openrouterKey,
-        status: 'connected',
-        enabled: true,
-      })
-    }
+
+    restoreOnboardingReturnFocus()
   }
 
   return (
@@ -243,10 +359,9 @@ function App() {
             <Show when={onboardingOpen()}>
               <OnboardingScreen
                 onComplete={handleOnboardingComplete}
-                onSkip={() => {
-                  updateSettings({ onboardingComplete: true })
-                  setOnboardingOpen(false)
-                }}
+                onSkip={handleOnboardingDismiss}
+                onDismiss={handleOnboardingDismiss}
+                mode={onboardingMode()}
               />
             </Show>
           </Show>

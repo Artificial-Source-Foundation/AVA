@@ -20,10 +20,14 @@ interface QuickModelPickerProps {
 
 export const QuickModelPicker: Component<QuickModelPickerProps> = (props) => {
   let inputRef: HTMLInputElement | undefined
-  const { selectedModel, setSelectedModel } = useSession()
+  const { selectedModel, selectedProvider, setSelectedModel } = useSession()
   const { settings } = useSettings()
   const [query, setQuery] = createSignal('')
   const [selectedIndex, setSelectedIndex] = createSignal(0)
+
+  const matchesCurrentSelection = (modelId: string, providerId: string): boolean => {
+    return modelId === selectedModel() && (!selectedProvider() || providerId === selectedProvider())
+  }
 
   const enabledProviders = createMemo(() =>
     Object.values(settings().providers).filter(
@@ -69,7 +73,7 @@ export const QuickModelPicker: Component<QuickModelPickerProps> = (props) => {
         if (open) {
           setQuery('')
           // Pre-select current model
-          const idx = allModels().findIndex((m) => m.id === selectedModel())
+          const idx = allModels().findIndex((m) => matchesCurrentSelection(m.id, m.providerId))
           setSelectedIndex(idx >= 0 ? idx : 0)
           requestAnimationFrame(() => inputRef?.focus())
         }
@@ -83,8 +87,8 @@ export const QuickModelPicker: Component<QuickModelPickerProps> = (props) => {
     })
   )
 
-  const handleSelect = (modelId: string) => {
-    setSelectedModel(modelId)
+  const handleSelect = (modelId: string, providerId: string) => {
+    setSelectedModel(modelId, providerId)
     props.onClose()
   }
 
@@ -100,7 +104,7 @@ export const QuickModelPicker: Component<QuickModelPickerProps> = (props) => {
     } else if (e.key === 'Enter') {
       e.preventDefault()
       const model = flatList()[selectedIndex()]
-      if (model) handleSelect(model.id)
+      if (model) handleSelect(model.id, model.providerId)
     }
   }
 
@@ -160,12 +164,15 @@ export const QuickModelPicker: Component<QuickModelPickerProps> = (props) => {
                     </div>
                     <For each={models}>
                       {(model) => {
-                        const flatIdx = () => flatList().findIndex((m) => m.id === model.id)
-                        const isCurrent = () => model.id === selectedModel()
+                        const flatIdx = () =>
+                          flatList().findIndex(
+                            (m) => m.id === model.id && m.providerId === model.providerId
+                          )
+                        const isCurrent = () => matchesCurrentSelection(model.id, model.providerId)
                         return (
                           <button
                             type="button"
-                            onClick={() => handleSelect(model.id)}
+                            onClick={() => handleSelect(model.id, model.providerId)}
                             class="
                               w-full flex items-center gap-3 px-3 py-1.5 text-left
                               transition-colors

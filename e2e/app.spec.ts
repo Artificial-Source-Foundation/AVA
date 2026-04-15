@@ -324,7 +324,7 @@ test.describe('Onboarding', () => {
 
     await expect(page.locator('h1:has-text("Welcome to AVA")')).toBeVisible({ timeout: 15000 })
     await expect(page.locator('button:has-text("Get Started")')).toBeVisible()
-    await expect(page.getByText('Your AI dev team — lean by default')).toBeVisible()
+    await expect(page.getByText('Your AI coding agent — lean by default,')).toBeVisible()
   })
 
   test('shows step dots indicator with 5 steps', async ({ page }) => {
@@ -349,12 +349,47 @@ test.describe('Onboarding', () => {
     await expect(page.locator('h1:has-text("Welcome to AVA")')).not.toBeVisible({ timeout: 3000 })
   })
 
-  test('has import config link on welcome step', async ({ page }) => {
+  test('keeps focus synced with onboarding steps and restores shell focus after reopen', async ({
+    page,
+  }) => {
     await resetForOnboarding(page)
     await page.goto('/')
 
-    await expect(page.locator('h1:has-text("Welcome to AVA")')).toBeVisible({ timeout: 15000 })
-    await expect(page.locator('button:has-text("Import")')).toBeVisible()
+    const welcomeHeading = page.getByRole('heading', { name: 'Welcome to AVA' })
+    await expect(welcomeHeading).toBeVisible({ timeout: 15000 })
+    await expect(welcomeHeading).toBeFocused()
+
+    await page.locator('button:has-text("Get Started")').click()
+
+    const providerHeading = page.getByRole('heading', { name: 'Connect a Provider' })
+    await expect(providerHeading).toBeVisible()
+    await expect(providerHeading).toBeFocused()
+
+    await page.getByRole('button', { name: 'Skip' }).click()
+
+    const themeHeading = page.getByRole('heading', { name: 'Make It Yours' })
+    await expect(themeHeading).toBeVisible()
+    await expect(themeHeading).toBeFocused()
+
+    await page.getByRole('button', { name: 'Continue' }).click()
+    await page.getByRole('button', { name: 'Continue' }).click()
+    await page.getByRole('button', { name: 'Start Coding' }).click()
+
+    const settingsButton = page.getByRole('button', { name: 'Settings' })
+    await expect(page.getByRole('dialog', { name: 'Onboarding' })).not.toBeVisible()
+    await expect(page.locator('textarea').first()).toBeVisible()
+
+    await page.keyboard.press('Control+,')
+    await expect(page.getByRole('button', { name: 'Back to Chat' })).toBeVisible({ timeout: 3000 })
+
+    await page.getByRole('button', { name: 'Open Guide' }).focus()
+    await page.keyboard.press('Enter')
+
+    await expect(page.getByRole('dialog', { name: 'Onboarding' })).toBeVisible()
+    await expect(welcomeHeading).toBeFocused()
+
+    await page.getByRole('button', { name: 'Close guide' }).click()
+    await expect(settingsButton).toBeFocused()
   })
 })
 

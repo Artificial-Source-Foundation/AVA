@@ -187,7 +187,19 @@ pub struct McpServerResponse {
     pub tool_count: usize,
     pub scope: String,
     pub enabled: bool,
+    pub can_toggle: bool,
     pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+fn map_mcp_status(status: &ava_agent::stack::McpServerStatus) -> (&'static str, Option<&str>) {
+    match status {
+        ava_agent::stack::McpServerStatus::Connected => ("connected", None),
+        ava_agent::stack::McpServerStatus::Disabled => ("disabled", None),
+        ava_agent::stack::McpServerStatus::Failed(error) => ("failed", Some(error.as_str())),
+        ava_agent::stack::McpServerStatus::Connecting => ("connecting", None),
+    }
 }
 
 /// List all configured MCP servers with their connection status and tool count.
@@ -196,19 +208,15 @@ pub(crate) async fn list_mcp_servers(State(state): State<WebState>) -> impl Into
     let response: Vec<McpServerResponse> = servers
         .into_iter()
         .map(|s| {
-            let status = match &s.status {
-                ava_agent::stack::McpServerStatus::Connected => "connected",
-                ava_agent::stack::McpServerStatus::Disabled => "disabled",
-                ava_agent::stack::McpServerStatus::Failed(_) => "failed",
-                ava_agent::stack::McpServerStatus::Connecting => "connecting",
-            }
-            .to_string();
+            let (status, error) = map_mcp_status(&s.status);
             McpServerResponse {
                 name: s.name,
                 tool_count: s.tool_count,
                 scope: s.scope.to_string(),
                 enabled: s.enabled,
-                status,
+                can_toggle: s.can_toggle,
+                status: status.to_string(),
+                error: error.map(str::to_string),
             }
         })
         .collect();

@@ -143,9 +143,28 @@ export async function refreshOAuthToken(
 // ============================================================================
 
 /**
- * Store OAuth credentials in both frontend store and core credential store.
+ * Store OAuth credentials in both frontend store and the Rust credential store.
  */
-export function storeOAuthCredentials(provider: LLMProvider, tokens: OAuthTokens): void {
+export async function storeOAuthCredentials(
+  provider: LLMProvider,
+  tokens: OAuthTokens
+): Promise<void> {
+  // Store as OAuth in core auth system first so desktop UI state only updates
+  // after the authoritative backend credential store is consistent.
+  const accountId = tokens.idToken ? extractAccountId(tokens.idToken) : undefined
+  logInfo(LOG_SRC, `Storing OAuth credentials for ${provider}`, {
+    hasAccountId: !!accountId,
+    hasRefreshToken: !!tokens.refreshToken,
+    expiresAt: tokens.expiresAt,
+  })
+  await setStoredAuth(provider, {
+    type: 'oauth',
+    accessToken: tokens.accessToken,
+    refreshToken: tokens.refreshToken,
+    expiresAt: tokens.expiresAt,
+    accountId,
+  })
+
   // Store in frontend credentials store (for UI state display)
   const credentials: Credentials = {
     provider,
@@ -166,22 +185,4 @@ export function storeOAuthCredentials(provider: LLMProvider, tokens: OAuthTokens
   const serialized = JSON.stringify(all)
   localStorage.setItem(AVA_CREDENTIALS_KEY, serialized)
   localStorage.setItem(STORAGE_KEYS.CREDENTIALS, serialized)
-
-  // Store as OAuth in core auth system so provider clients
-  // see auth.type === 'oauth' and route to the correct endpoint
-  const accountId = tokens.idToken ? extractAccountId(tokens.idToken) : undefined
-  logInfo(LOG_SRC, `Storing OAuth credentials for ${provider}`, {
-    hasAccountId: !!accountId,
-    hasRefreshToken: !!tokens.refreshToken,
-    expiresAt: tokens.expiresAt,
-  })
-  setStoredAuth(provider, {
-    type: 'oauth',
-    accessToken: tokens.accessToken,
-    refreshToken: tokens.refreshToken ?? '',
-    expiresAt: tokens.expiresAt ?? Date.now() + 3600_000,
-    accountId,
-  }).catch((e: unknown) => {
-    logError(LOG_SRC, `Failed to store OAuth auth for ${provider}`, { error: String(e) })
-  })
 }

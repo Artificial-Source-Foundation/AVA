@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import * as tauriCore from '@tauri-apps/api/core'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   rustAgent,
   rustBrowser,
@@ -23,6 +24,11 @@ describe('rust-bridge wrappers', () => {
   beforeEach(() => {
     ipc.reset()
     ipc.install()
+    vi.spyOn(tauriCore, 'isTauri').mockReturnValue(true)
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
   })
 
   it('serializes arguments and commands for all wrapper groups', async () => {
@@ -105,7 +111,6 @@ describe('rust-bridge wrappers', () => {
     await rustTools.list()
     await rustTools.execute('read_file', { path: 'x' })
     await rustAgent.run('goal')
-    await rustAgent.stream('goal')
     await rustCompute.grep('.', 'needle', { include: '*.ts', maxResults: 3 })
     await rustCompute.fuzzyReplace('a', 'a', 'b', true)
     await rustReflection.reflectAndFix({ output: 'x' })

@@ -129,14 +129,20 @@ impl App {
                 self.state.agent.activity = AgentActivity::ExecutingTool(call.name.clone());
                 self.state.agent.tool_start = Some(std::time::Instant::now());
 
-                // Track sub-agent spawns from the task tool
-                if call.name == "task" {
+                // Track sub-agent spawns from the subagent tool.
+                // Keep `task` as a compatibility alias for older sessions/tests.
+                if matches!(call.name.as_str(), "subagent" | "task") {
                     let description = call
                         .arguments
                         .get("prompt")
                         .and_then(|p| p.as_str())
                         .map(String::from)
                         .unwrap_or_else(|| "sub-agent task".to_string());
+                    let background = call
+                        .arguments
+                        .get("background")
+                        .and_then(|value| value.as_bool())
+                        .unwrap_or(false);
 
                     // Fire SubagentStart hook
                     {
@@ -146,6 +152,7 @@ impl App {
                     }
                     self.state.agent.sub_agents.push(SubAgentInfo {
                         description: description.clone(),
+                        background,
                         is_running: true,
                         tool_count: 0,
                         current_tool: None,
@@ -165,6 +172,7 @@ impl App {
                     msg.is_streaming = true;
                     msg.sub_agent = Some(crate::state::messages::SubAgentData {
                         description,
+                        background,
                         tool_count: 0,
                         current_tool: None,
                         duration: None,
@@ -187,7 +195,7 @@ impl App {
                         .sub_agents
                         .iter_mut()
                         .rev()
-                        .find(|s| s.is_running)
+                        .find(|s| s.is_running && !s.background)
                     {
                         sa.tool_count += 1;
                         sa.current_tool = Some(call.name.clone());
@@ -254,7 +262,7 @@ impl App {
                 self.state.agent.activity = AgentActivity::Thinking;
                 self.state.agent.tool_start = None;
 
-                // Check if this result belongs to a running sub-agent (task tool)
+                // Check if this result belongs to a running sub-agent tool call.
                 let is_sub_agent_result = self.state.messages.messages.iter().any(|m| {
                     matches!(m.kind, MessageKind::SubAgent)
                         && m.sub_agent
@@ -272,8 +280,11 @@ impl App {
                         .rev()
                         .find(|s| s.is_running)
                     {
-                        sa.is_running = false;
-                        sa.elapsed = Some(sa.started_at.elapsed());
+                        let completed = !sa.background;
+                        if completed {
+                            sa.is_running = false;
+                            sa.elapsed = Some(sa.started_at.elapsed());
+                        }
                         sa.current_tool = None;
                         (sa.tool_count, sa.elapsed)
                     } else {
@@ -289,10 +300,14 @@ impl App {
                                 .is_some_and(|d| d.call_id == result.call_id)
                     }) {
                         msg.content = result.content;
-                        msg.is_streaming = false;
+                        let keep_running = msg
+                            .sub_agent
+                            .as_ref()
+                            .is_some_and(|data| data.background && !result.is_error);
+                        msg.is_streaming = keep_running;
                         if let Some(data) = msg.sub_agent.as_mut() {
-                            data.is_running = false;
-                            data.failed = sa_failed;
+                            data.is_running = keep_running;
+                            data.failed = sa_failed && !keep_running;
                             data.tool_count = sa_tool_count.0;
                             data.current_tool = None;
                             data.duration = sa_tool_count.1;
@@ -306,7 +321,7 @@ impl App {
                         .sub_agents
                         .iter_mut()
                         .rev()
-                        .find(|s| s.is_running)
+                        .find(|s| s.is_running && !s.background)
                     {
                         sa.is_running = false;
                         sa.elapsed = Some(sa.started_at.elapsed());
@@ -404,6 +419,9 @@ impl App {
                     .rev()
                     .find(|s| subagent_descriptions_match(&s.description, &description))
                 {
+                    sa.is_running = false;
+                    sa.elapsed = Some(sa.started_at.elapsed());
+                    sa.current_tool = None;
                     sa.session_id = Some(session_id.clone());
                     sa.session_messages = ui_messages.clone();
                     sa.provider = provider.clone();
@@ -421,7 +439,17 @@ impl App {
                                 || subagent_descriptions_match(&d.description, &description)
                         })
                 }) {
+                    let final_summary = ui_messages
+                        .iter()
+                        .rev()
+                        .find(|message| matches!(message.kind, MessageKind::Assistant))
+                        .map(|message| message.content.clone());
+                    if let Some(summary) = final_summary {
+                        msg.content = summary;
+                    }
+                    msg.is_streaming = false;
                     if let Some(data) = msg.sub_agent.as_mut() {
+                        data.is_running = false;
                         data.session_id = Some(session_id);
                         data.session_messages = ui_messages;
                         data.current_tool = None;

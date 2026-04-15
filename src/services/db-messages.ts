@@ -15,12 +15,6 @@ export async function saveMessage(message: Omit<Message, 'id' | 'createdAt'>): P
   const id = crypto.randomUUID()
   const createdAt = Date.now()
 
-  // Merge toolCalls into metadata so they survive session restore
-  const metadataToSave = {
-    ...message.metadata,
-    ...(message.toolCalls && message.toolCalls.length > 0 ? { toolCalls: message.toolCalls } : {}),
-  }
-
   await database.execute(
     `INSERT INTO messages (id, session_id, role, content, agent_id, created_at, tokens_used, metadata, cost_usd, model)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -32,7 +26,7 @@ export async function saveMessage(message: Omit<Message, 'id' | 'createdAt'>): P
       message.agentId || null,
       createdAt,
       message.tokensUsed || 0,
-      JSON.stringify(metadataToSave),
+      JSON.stringify(buildPersistedMessageMetadata(message)),
       message.costUSD || null,
       message.model || null,
     ]
@@ -73,15 +67,18 @@ export async function duplicateSessionMessages(
 }
 
 /**
- * Update a message — supports content, tokensUsed, costUSD, toolCalls, error, and metadata.
+ * Update a message — supports content, tokensUsed, costUSD, toolCalls, images, error, and metadata.
  *
- * toolCalls are merged into the metadata JSON column (same convention as insertMessages) so
- * they survive session reload.  error is also stored in metadata under `_error`.
+ * toolCalls/images are merged into the metadata JSON column (same convention as insertMessages)
+ * so they survive session reload. error is also stored in metadata under `_error`.
  */
 export async function updateMessage(
   id: string,
   updates: Partial<
-    Pick<Message, 'content' | 'tokensUsed' | 'costUSD' | 'toolCalls' | 'error' | 'metadata'>
+    Pick<
+      Message,
+      'content' | 'tokensUsed' | 'costUSD' | 'toolCalls' | 'images' | 'error' | 'metadata'
+    >
   >
 ): Promise<void> {
   const database = await initDatabase()
@@ -102,10 +99,11 @@ export async function updateMessage(
     values.push(updates.costUSD)
   }
 
-  // toolCalls and error are stored inside the metadata JSON column
+  // toolCalls, images, and error are stored inside the metadata JSON column
   if (
     updates.metadata !== undefined ||
     updates.toolCalls !== undefined ||
+    updates.images !== undefined ||
     updates.error !== undefined
   ) {
     // We need to merge with existing metadata — fetch current metadata first
@@ -120,6 +118,9 @@ export async function updateMessage(
     const merged: Record<string, unknown> = { ...existing, ...updates.metadata }
     if (updates.toolCalls && updates.toolCalls.length > 0) {
       merged.toolCalls = updates.toolCalls
+    }
+    if (updates.images !== undefined) {
+      merged.images = updates.images
     }
     if (updates.error !== undefined) {
       merged._error = updates.error
@@ -173,11 +174,6 @@ export async function deleteSessionMessages(sessionId: string): Promise<void> {
 export async function insertMessages(msgs: Message[]): Promise<void> {
   const database = await initDatabase()
   for (const msg of msgs) {
-    // Merge toolCalls into metadata so they survive session restore
-    const metadataToSave = {
-      ...msg.metadata,
-      ...(msg.toolCalls && msg.toolCalls.length > 0 ? { toolCalls: msg.toolCalls } : {}),
-    }
     await database.execute(
       `INSERT INTO messages (id, session_id, role, content, agent_id, created_at, tokens_used, metadata, cost_usd, model)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -189,7 +185,7 @@ export async function insertMessages(msgs: Message[]): Promise<void> {
         msg.agentId || null,
         msg.createdAt,
         msg.tokensUsed || 0,
-        JSON.stringify(metadataToSave),
+        JSON.stringify(buildPersistedMessageMetadata(msg)),
         msg.costUSD || null,
         msg.model || null,
       ]
@@ -200,6 +196,16 @@ export async function insertMessages(msgs: Message[]): Promise<void> {
 // ============================================================================
 // Helpers
 // ============================================================================
+
+function buildPersistedMessageMetadata(
+  message: Pick<Message, 'metadata' | 'toolCalls' | 'images'>
+): Record<string, unknown> {
+  return {
+    ...message.metadata,
+    ...(message.toolCalls && message.toolCalls.length > 0 ? { toolCalls: message.toolCalls } : {}),
+    ...(message.images && message.images.length > 0 ? { images: message.images } : {}),
+  }
+}
 
 /** Map database rows to Message objects */
 function mapDbMessages(rows: Array<Record<string, unknown>>): Message[] {
@@ -223,6 +229,7 @@ function mapDbMessages(rows: Array<Record<string, unknown>>): Message[] {
       costUSD: (row.cost_usd as number | null) ?? undefined,
       model: (row.model as string | null) ?? undefined,
       metadata,
+      images: metadata?.images as Message['images'],
       toolCalls: metadata?.toolCalls as Message['toolCalls'],
     }
   })

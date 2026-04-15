@@ -175,12 +175,11 @@ pub fn create_provider(
             })?;
 
             // ChatGPT OAuth uses chatgpt.com/backend-api/codex with JWT access_token.
-            // When the user has an OAuth token but NO API key, route to the
-            // ChatGPT Responses API instead of api.openai.com.
-            let has_api_key = !entry.api_key.trim().is_empty();
+            // When OAuth is configured, prefer it over any stale desktop API-key
+            // value so reconnects immediately route through the ChatGPT backend.
             let has_oauth = entry.is_oauth_configured() && !entry.is_oauth_expired();
 
-            if !has_api_key && has_oauth {
+            if has_oauth {
                 let oauth_token = entry
                     .oauth_token
                     .as_deref()
@@ -679,6 +678,30 @@ mod tests {
         );
         let provider = create_provider("openai", "codex-mini", &store, default_pool())
             .expect("should create OpenAI provider with OAuth");
+        assert_eq!(provider.model_name(), "codex-mini");
+    }
+
+    #[test]
+    fn openai_oauth_is_preferred_over_stale_api_key() {
+        let mut store = CredentialStore::default();
+        store.set(
+            "openai",
+            ava_config::ProviderCredential {
+                api_key: "sk-stale-desktop-key".to_string(),
+                base_url: None,
+                org_id: None,
+                oauth_token: Some("oauth-access-token".to_string()),
+                oauth_refresh_token: Some("refresh-token".to_string()),
+                oauth_expires_at: Some(u64::MAX),
+                oauth_account_id: Some("acct-live".to_string()),
+                litellm_compatible: None,
+                loop_prone: None,
+            },
+        );
+
+        let provider = create_provider("openai", "codex-mini", &store, default_pool())
+            .expect("should prefer OAuth over stale API key");
+
         assert_eq!(provider.model_name(), "codex-mini");
     }
 

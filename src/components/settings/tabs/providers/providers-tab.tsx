@@ -14,6 +14,7 @@ export interface ProvidersTabProps {
   onToggle?: (id: string, enabled: boolean) => void
   onSaveApiKey?: (id: string, key: string) => void
   onClearApiKey?: (id: string) => void
+  onOAuthConnected?: (id: string) => void
   onSetDefaultModel?: (providerId: string, modelId: string) => void
   onTestConnection?: (id: string) => void
   onUpdateModels?: (providerId: string, models: ProviderModel[]) => void
@@ -70,6 +71,7 @@ export const ProvidersTab: Component<ProvidersTabProps> = (props) => {
         onToggle={props.onToggle}
         onSaveApiKey={props.onSaveApiKey}
         onClearApiKey={props.onClearApiKey}
+        onOAuthConnected={props.onOAuthConnected}
         onSetDefaultModel={props.onSetDefaultModel}
         onTestConnection={props.onTestConnection}
         onUpdateModels={props.onUpdateModels}

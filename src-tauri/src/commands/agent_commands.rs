@@ -8,8 +8,11 @@
 //! 4. The resolve command sends the response through the stored oneshot channel
 //! 5. The permission middleware receives it and continues or blocks the tool
 
+use ava_agent::control_plane::commands::{queue_message_tier, ControlPlaneCommand};
+use ava_agent::control_plane::interactive::{
+    InteractiveRequestStore, ResolveInteractiveRequestError, TerminalInteractiveRequest,
+};
 use ava_tools::permission_middleware::ToolApproval;
-use ava_types::MessageTier;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
 use tokio::sync::mpsc;
@@ -29,6 +32,54 @@ async fn save_session_checkpoint(
         .await
         .map_err(|e| format!("session checkpoint join error: {e}"))?
         .map_err(|e| e.to_string())
+}
+
+fn emit_interactive_request_cleared<R: tauri::Runtime>(
+    app: &AppHandle<R>,
+    request_id: &str,
+    request_kind: &str,
+    timed_out: bool,
+    run_id: Option<&str>,
+) {
+    if let Err(error) = app.emit(
+        "agent-event",
+        AgentEvent::InteractiveRequestCleared {
+            request_id: request_id.to_string(),
+            request_kind: request_kind.to_string(),
+            timed_out,
+            run_id: run_id.map(str::to_string),
+        },
+    ) {
+        tracing::error!("Failed to emit interactive_request_cleared event to frontend: {error}");
+    }
+}
+
+fn desktop_interactive_resolve_error(kind: &str, error: ResolveInteractiveRequestError) -> String {
+    match error {
+        ResolveInteractiveRequestError::MissingPendingRequest { .. } => {
+            format!("No pending {kind} request to resolve")
+        }
+        ResolveInteractiveRequestError::StaleRequestId { .. } => {
+            format!("No matching pending {kind} request to resolve")
+        }
+    }
+}
+
+fn missing_request_id_error(kind: &str) -> String {
+    format!("request_id is required to resolve pending {kind} request")
+}
+
+async fn take_resolved_desktop_interactive_request<T>(
+    store: &InteractiveRequestStore<T>,
+    kind: &str,
+    request_id: Option<&str>,
+) -> Result<TerminalInteractiveRequest<T>, String> {
+    let request_id = request_id.ok_or_else(|| missing_request_id_error(kind))?;
+
+    store
+        .resolve(Some(request_id))
+        .await
+        .map_err(|err| desktop_interactive_resolve_error(kind, err))
 }
 
 #[derive(Deserialize)]
@@ -54,6 +105,8 @@ pub struct SubmitGoalArgs {
     pub compaction_provider: Option<String>,
     #[serde(default)]
     pub compaction_model: Option<String>,
+    #[serde(default)]
+    pub run_id: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -70,7 +123,9 @@ async fn run_agent_inner(
     goal: &str,
     max_turns: usize,
     history: Vec<ava_types::Message>,
+    images: Vec<ava_types::ImageContent>,
     session_id: Option<Uuid>,
+    run_id: Option<String>,
     app: &AppHandle,
     bridge: &DesktopBridge,
 ) -> Result<SubmitGoalResult, String> {
@@ -98,6 +153,12 @@ async fn run_agent_inner(
     let todo_state = bridge.stack.todo_state.clone();
     let checkpoint_sm = bridge.stack.session_manager.clone();
     let checkpoint_last_id = bridge.last_session_id.clone();
+    let event_run_id = run_id.clone();
+    let todo_event_run_id = run_id.clone();
+    let plan_event_run_id = run_id.clone();
+    let approval_event_run_id = run_id.clone();
+    let question_event_run_id = run_id.clone();
+    let clear_event_run_id = run_id.clone();
     let forwarder = tokio::spawn(async move {
         let mut last_tool_was_todo_write = false;
         while let Some(event) = rx.recv().await {
@@ -152,8 +213,13 @@ async fn run_agent_inner(
                             priority: item.priority.to_string(),
                         })
                         .collect();
-                    if let Err(e) = app_clone.emit("agent-event", AgentEvent::TodoUpdate { todos })
-                    {
+                    if let Err(e) = app_clone.emit(
+                        "agent-event",
+                        AgentEvent::TodoUpdate {
+                            todos,
+                            run_id: todo_event_run_id.clone(),
+                        },
+                    ) {
                         tracing::error!("Failed to emit todo_update event: {e}");
                     }
                 }
@@ -166,7 +232,7 @@ async fn run_agent_inner(
                 // incorrectly reset last_tool_was_todo_write.
                 last_tool_was_todo_write = false;
             }
-            emit_backend_event(&app_clone, &event);
+            emit_backend_event(&app_clone, &event, event_run_id.as_deref());
         }
     });
 
@@ -196,13 +262,11 @@ async fn run_agent_inner(
     // If the frontend does not respond within the timeout, auto-deny the approval
     // so the agent doesn't hang forever.
     let app_approval = app.clone();
-    let approval_timeout = std::time::Duration::from_secs(5 * 60); // 5 minutes
     let approval_forwarder = tokio::spawn(async move {
         while let Some(req) = approval_rx.recv().await {
             let risk_level = format!("{:?}", req.inspection.risk_level).to_lowercase();
-            let id = format!("approval-{}", uuid::Uuid::new_v4());
-
-            *pending_approval.lock().await = Some(req.reply);
+            let handle = pending_approval.register(req.reply).await;
+            let id = handle.request_id.clone();
 
             if let Err(e) = app_approval.emit(
                 "agent-event",
@@ -214,6 +278,7 @@ async fn run_agent_inner(
                     risk_level: risk_level.clone(),
                     reason: req.inspection.reason.clone(),
                     warnings: req.inspection.warnings.clone(),
+                    run_id: approval_event_run_id.clone(),
                 },
             ) {
                 tracing::error!("Failed to emit approval_request event to frontend: {e}");
@@ -222,18 +287,26 @@ async fn run_agent_inner(
             // Spawn a timeout watchdog: if the frontend hasn't consumed the
             // pending reply within the timeout, auto-deny so the agent unblocks.
             let watchdog_pending = pending_approval.clone();
-            let watchdog_timeout = approval_timeout;
+            let watchdog_timeout = watchdog_pending.timeout();
+            let watchdog_id = id.clone();
+            let watchdog_app = app_approval.clone();
             tokio::spawn(async move {
                 tokio::time::sleep(watchdog_timeout).await;
-                let mut lock = watchdog_pending.lock().await;
-                if let Some(reply) = lock.take() {
+                if let Some(reply) = watchdog_pending.timeout_request(&watchdog_id).await {
                     tracing::warn!(
                         "Approval request {id} timed out after {}s — auto-denying to unblock agent",
                         watchdog_timeout.as_secs()
                     );
-                    let _ = reply.send(ToolApproval::Rejected(Some(
+                    let _ = reply.reply.send(ToolApproval::Rejected(Some(
                         "Timed out waiting for user approval in desktop UI".to_string(),
                     )));
+                    emit_interactive_request_cleared(
+                        &watchdog_app,
+                        &reply.handle.request_id,
+                        reply.handle.kind.as_str(),
+                        true,
+                        clear_event_run_id.as_deref(),
+                    );
                 }
             });
         }
@@ -241,12 +314,10 @@ async fn run_agent_inner(
 
     // Spawn question forwarder with timeout protection.
     let app_question = app.clone();
-    let question_timeout = std::time::Duration::from_secs(5 * 60); // 5 minutes
     let question_forwarder = tokio::spawn(async move {
         while let Some(req) = question_rx.recv().await {
-            let id = format!("question-{}", uuid::Uuid::new_v4());
-
-            *pending_question.lock().await = Some(req.reply);
+            let handle = pending_question.register(req.reply).await;
+            let id = handle.request_id.clone();
 
             if let Err(e) = app_question.emit(
                 "agent-event",
@@ -254,6 +325,7 @@ async fn run_agent_inner(
                     id: id.clone(),
                     question: req.question.clone(),
                     options: req.options.clone(),
+                    run_id: question_event_run_id.clone(),
                 },
             ) {
                 tracing::error!("Failed to emit question_request event to frontend: {e}");
@@ -261,26 +333,36 @@ async fn run_agent_inner(
 
             // Timeout watchdog for question responses
             let watchdog_pending = pending_question.clone();
-            let watchdog_timeout = question_timeout;
+            let watchdog_timeout = watchdog_pending.timeout();
+            let watchdog_id = id.clone();
+            let watchdog_app = app_question.clone();
             tokio::spawn(async move {
                 tokio::time::sleep(watchdog_timeout).await;
-                let mut lock = watchdog_pending.lock().await;
-                if let Some(reply) = lock.take() {
+                if let Some(reply) = watchdog_pending.timeout_request(&watchdog_id).await {
                     tracing::warn!(
                         "Question request {id} timed out after {}s — sending empty response to unblock agent",
                         watchdog_timeout.as_secs()
                     );
-                    let _ = reply.send(String::new());
+                    let _ = reply.reply.send(String::new());
+                    emit_interactive_request_cleared(
+                        &watchdog_app,
+                        &reply.handle.request_id,
+                        reply.handle.kind.as_str(),
+                        true,
+                        clear_event_run_id.as_deref(),
+                    );
                 }
             });
         }
     });
 
-    // Spawn plan forwarder
+    // Spawn plan forwarder with timeout protection.
     let app_plan = app.clone();
     let plan_forwarder = tokio::spawn(async move {
         use crate::events::{PlanPayload, PlanStepPayload};
         while let Some(req) = plan_rx.recv().await {
+            let handle = pending_plan.register(req.reply).await;
+            let id = handle.request_id.clone();
             let steps = req
                 .plan
                 .steps
@@ -302,20 +384,44 @@ async fn run_agent_inner(
                 })
                 .collect();
 
-            *pending_plan.lock().await = Some(req.reply);
-
             if let Err(e) = app_plan.emit(
                 "agent-event",
                 AgentEvent::PlanCreated {
+                    id: id.clone(),
                     plan: PlanPayload {
                         summary: req.plan.summary.clone(),
                         steps,
                         estimated_turns: req.plan.estimated_turns.unwrap_or(0) as usize,
                     },
+                    run_id: plan_event_run_id.clone(),
                 },
             ) {
                 tracing::error!("Failed to emit plan_created event to frontend: {e}");
             }
+
+            let watchdog_pending = pending_plan.clone();
+            let watchdog_timeout = watchdog_pending.timeout();
+            let watchdog_id = id.clone();
+            let watchdog_app = app_plan.clone();
+            tokio::spawn(async move {
+                tokio::time::sleep(watchdog_timeout).await;
+                if let Some(reply) = watchdog_pending.timeout_request(&watchdog_id).await {
+                    tracing::warn!(
+                        "Plan request {watchdog_id} timed out after {}s — auto-rejecting to unblock agent",
+                        watchdog_timeout.as_secs()
+                    );
+                    let _ = reply.reply.send(ava_types::PlanDecision::Rejected {
+                        feedback: "Timed out waiting for plan response in desktop UI".to_string(),
+                    });
+                    emit_interactive_request_cleared(
+                        &watchdog_app,
+                        &reply.handle.request_id,
+                        reply.handle.kind.as_str(),
+                        true,
+                        clear_event_run_id.as_deref(),
+                    );
+                }
+            });
         }
     });
 
@@ -330,7 +436,7 @@ async fn run_agent_inner(
             cancel,
             history,
             Some(message_queue),
-            vec![], // no images
+            images,
             session_id,
         )
         .await;
@@ -448,20 +554,45 @@ pub async fn submit_goal(
         &args.goal,
         args.max_turns,
         history,
+        vec![],
         requested_session_id,
+        args.run_id,
         &app,
         &bridge,
     )
     .await
 }
 
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct RunCorrelationArgs {
+    #[serde(default)]
+    pub run_id: Option<String>,
+}
+
 /// Cancel the currently-running agent.
 #[tauri::command]
-pub async fn cancel_agent(bridge: State<'_, DesktopBridge>) -> Result<(), String> {
+pub async fn cancel_agent(app: AppHandle, bridge: State<'_, DesktopBridge>) -> Result<(), String> {
     bridge.cancel().await;
-    let _ = bridge.pending_approval_reply.lock().await.take();
-    let _ = bridge.pending_question_reply.lock().await.take();
-    let _ = bridge.pending_plan_reply.lock().await.take();
+    if let Some(pending) = bridge.pending_approval_reply.cancel_pending().await {
+        let request_id = pending.handle.request_id.clone();
+        let _ = pending.reply.send(ToolApproval::Rejected(Some(
+            "Agent run cancelled from desktop UI".to_string(),
+        )));
+        emit_interactive_request_cleared(&app, &request_id, "approval", false, None);
+    }
+    if let Some(pending) = bridge.pending_question_reply.cancel_pending().await {
+        let request_id = pending.handle.request_id.clone();
+        let _ = pending.reply.send(String::new());
+        emit_interactive_request_cleared(&app, &request_id, "question", false, None);
+    }
+    if let Some(pending) = bridge.pending_plan_reply.cancel_pending().await {
+        let request_id = pending.handle.request_id.clone();
+        let _ = pending.reply.send(ava_types::PlanDecision::Rejected {
+            feedback: "Agent run cancelled from desktop UI".to_string(),
+        });
+        emit_interactive_request_cleared(&app, &request_id, "plan", false, None);
+    }
     Ok(())
 }
 
@@ -495,6 +626,8 @@ pub struct ResolveApprovalArgs {
     pub approved: bool,
     #[serde(default)]
     pub always_allow: bool,
+    #[serde(default)]
+    pub request_id: Option<String>,
 }
 
 /// Resolve a pending tool approval request.
@@ -502,13 +635,14 @@ pub struct ResolveApprovalArgs {
 pub async fn resolve_approval(
     args: ResolveApprovalArgs,
     bridge: State<'_, DesktopBridge>,
+    app: AppHandle,
 ) -> Result<(), String> {
-    let reply = bridge
-        .pending_approval_reply
-        .lock()
-        .await
-        .take()
-        .ok_or_else(|| "No pending approval request to resolve".to_string())?;
+    let reply = take_resolved_desktop_interactive_request(
+        &bridge.pending_approval_reply,
+        "approval",
+        args.request_id.as_deref(),
+    )
+    .await?;
 
     let approval = if args.approved {
         if args.always_allow {
@@ -520,9 +654,26 @@ pub async fn resolve_approval(
         ToolApproval::Rejected(Some("User denied via desktop UI".to_string()))
     };
 
-    reply.send(approval).map_err(|_| {
-        "Failed to send approval response — the agent may have already moved on".to_string()
-    })?;
+    if reply.reply.send(approval).is_err() {
+        emit_interactive_request_cleared(
+            &app,
+            &reply.handle.request_id,
+            reply.handle.kind.as_str(),
+            false,
+            None,
+        );
+        return Err(
+            "Failed to send approval response — the agent may have already moved on".to_string(),
+        );
+    }
+
+    emit_interactive_request_cleared(
+        &app,
+        &reply.handle.request_id,
+        reply.handle.kind.as_str(),
+        false,
+        None,
+    );
 
     Ok(())
 }
@@ -531,6 +682,8 @@ pub async fn resolve_approval(
 #[serde(rename_all = "camelCase")]
 pub struct ResolveQuestionArgs {
     pub answer: String,
+    #[serde(default)]
+    pub request_id: Option<String>,
 }
 
 /// Resolve a pending question request.
@@ -538,17 +691,35 @@ pub struct ResolveQuestionArgs {
 pub async fn resolve_question(
     args: ResolveQuestionArgs,
     bridge: State<'_, DesktopBridge>,
+    app: AppHandle,
 ) -> Result<(), String> {
-    let reply = bridge
-        .pending_question_reply
-        .lock()
-        .await
-        .take()
-        .ok_or_else(|| "No pending question request to resolve".to_string())?;
+    let reply = take_resolved_desktop_interactive_request(
+        &bridge.pending_question_reply,
+        "question",
+        args.request_id.as_deref(),
+    )
+    .await?;
 
-    reply.send(args.answer).map_err(|_| {
-        "Failed to send question response — the agent may have already moved on".to_string()
-    })?;
+    if reply.reply.send(args.answer).is_err() {
+        emit_interactive_request_cleared(
+            &app,
+            &reply.handle.request_id,
+            reply.handle.kind.as_str(),
+            false,
+            None,
+        );
+        return Err(
+            "Failed to send question response — the agent may have already moved on".to_string(),
+        );
+    }
+
+    emit_interactive_request_cleared(
+        &app,
+        &reply.handle.request_id,
+        reply.handle.kind.as_str(),
+        false,
+        None,
+    );
 
     Ok(())
 }
@@ -561,6 +732,8 @@ pub async fn resolve_question(
 #[serde(rename_all = "camelCase")]
 pub struct ResolvePlanArgs {
     pub response: String,
+    #[serde(default)]
+    pub request_id: Option<String>,
     #[serde(default)]
     pub modified_plan: Option<serde_json::Value>,
     #[serde(default)]
@@ -575,38 +748,37 @@ pub struct ResolvePlanArgs {
 pub async fn resolve_plan(
     args: ResolvePlanArgs,
     bridge: State<'_, DesktopBridge>,
+    app: AppHandle,
 ) -> Result<(), String> {
-    let reply = bridge
-        .pending_plan_reply
-        .lock()
-        .await
-        .take()
-        .ok_or_else(|| "No pending plan request to resolve".to_string())?;
+    let decision = parse_plan_decision(&args.response, args.modified_plan, args.feedback)?;
 
-    let feedback = args.feedback.unwrap_or_default();
+    let reply = take_resolved_desktop_interactive_request(
+        &bridge.pending_plan_reply,
+        "plan",
+        args.request_id.as_deref(),
+    )
+    .await?;
 
-    let decision = match args.response.as_str() {
-        "approved" => ava_types::PlanDecision::Approved,
-        "rejected" => ava_types::PlanDecision::Rejected { feedback },
-        "modified" => {
-            let plan: ava_types::Plan = args
-                .modified_plan
-                .ok_or_else(|| "Modified plan is required for 'modified' response".to_string())
-                .and_then(|v| {
-                    serde_json::from_value(v).map_err(|e| format!("Invalid modified plan: {e}"))
-                })?;
-            ava_types::PlanDecision::Modified { plan, feedback }
-        }
-        other => {
-            return Err(format!(
-                "Invalid plan response: '{other}'. Expected 'approved', 'rejected', or 'modified'"
-            ));
-        }
-    };
+    if reply.reply.send(decision).is_err() {
+        emit_interactive_request_cleared(
+            &app,
+            &reply.handle.request_id,
+            reply.handle.kind.as_str(),
+            false,
+            None,
+        );
+        return Err(
+            "Failed to send plan response — the agent may have already moved on".to_string(),
+        );
+    }
 
-    reply.send(decision).map_err(|_| {
-        "Failed to send plan response — the agent may have already moved on".to_string()
-    })?;
+    emit_interactive_request_cleared(
+        &app,
+        &reply.handle.request_id,
+        reply.handle.kind.as_str(),
+        false,
+        None,
+    );
 
     Ok(())
 }
@@ -621,7 +793,13 @@ pub async fn steer_agent(message: String, bridge: State<'_, DesktopBridge>) -> R
     if message.is_empty() {
         return Err("Steering message must not be empty.".to_string());
     }
-    bridge.send_message(message, MessageTier::Steering).await
+    bridge
+        .send_message(
+            message,
+            queue_message_tier(ControlPlaneCommand::SteerAgent, None)
+                .expect("steer command should map to a queue tier"),
+        )
+        .await
 }
 
 /// Queue a follow-up message (Tier 2).
@@ -633,7 +811,13 @@ pub async fn follow_up_agent(
     if message.is_empty() {
         return Err("Follow-up message must not be empty.".to_string());
     }
-    bridge.send_message(message, MessageTier::FollowUp).await
+    bridge
+        .send_message(
+            message,
+            queue_message_tier(ControlPlaneCommand::FollowUpAgent, None)
+                .expect("follow-up command should map to a queue tier"),
+        )
+        .await
 }
 
 #[derive(Deserialize)]
@@ -648,6 +832,106 @@ fn default_group() -> u32 {
     1
 }
 
+fn parse_plan_decision(
+    response: &str,
+    modified_plan: Option<serde_json::Value>,
+    feedback: Option<String>,
+) -> Result<ava_types::PlanDecision, String> {
+    let feedback = feedback.unwrap_or_default();
+
+    match response {
+        "approved" => Ok(ava_types::PlanDecision::Approved),
+        "rejected" => Ok(ava_types::PlanDecision::Rejected { feedback }),
+        "modified" => {
+            let plan: ava_types::Plan = modified_plan
+                .ok_or_else(|| "Modified plan is required for 'modified' response".to_string())
+                .and_then(|v| {
+                    serde_json::from_value(v).map_err(|e| format!("Invalid modified plan: {e}"))
+                })?;
+            Ok(ava_types::PlanDecision::Modified { plan, feedback })
+        }
+        other => Err(format!(
+            "Invalid plan response: '{other}'. Expected 'approved', 'rejected', or 'modified'"
+        )),
+    }
+}
+
+fn unsupported_queue_clear_error() -> String {
+    "Clearing follow-up or post-complete queues is not supported yet.".to_string()
+}
+
+fn retry_replay_input(
+    session: &ava_types::Session,
+) -> Result<
+    (
+        String,
+        Vec<ava_types::Message>,
+        Vec<ava_types::ImageContent>,
+    ),
+    String,
+> {
+    let last_user_msg = session
+        .messages
+        .iter()
+        .rev()
+        .find(|m| m.role == ava_types::Role::User)
+        .ok_or_else(|| "No user message found in session to retry".to_string())?;
+
+    Ok((
+        last_user_msg.content.clone(),
+        collect_history_before_last_user(&session.messages),
+        last_user_msg.images.clone(),
+    ))
+}
+
+fn edit_replay_input(
+    session: &ava_types::Session,
+    message_id: Uuid,
+    new_content: String,
+) -> Result<
+    (
+        String,
+        Vec<ava_types::Message>,
+        Vec<ava_types::ImageContent>,
+    ),
+    String,
+> {
+    let pos = session
+        .messages
+        .iter()
+        .position(|m| m.id == message_id)
+        .ok_or_else(|| format!("Message {message_id} not found in session"))?;
+
+    Ok((
+        new_content,
+        session.messages[..pos].to_vec(),
+        session.messages[pos].images.clone(),
+    ))
+}
+
+fn regenerate_replay_input(
+    session: &ava_types::Session,
+) -> Result<
+    (
+        String,
+        Vec<ava_types::Message>,
+        Vec<ava_types::ImageContent>,
+    ),
+    String,
+> {
+    let last_user_pos = session
+        .messages
+        .iter()
+        .rposition(|m| m.role == ava_types::Role::User)
+        .ok_or_else(|| "No user message found in session to regenerate from".to_string())?;
+
+    Ok((
+        session.messages[last_user_pos].content.clone(),
+        session.messages[..last_user_pos].to_vec(),
+        session.messages[last_user_pos].images.clone(),
+    ))
+}
+
 /// Queue a post-complete message (Tier 3).
 #[tauri::command]
 pub async fn post_complete_agent(
@@ -660,7 +944,8 @@ pub async fn post_complete_agent(
     bridge
         .send_message(
             args.message,
-            MessageTier::PostComplete { group: args.group },
+            queue_message_tier(ControlPlaneCommand::PostCompleteAgent, Some(args.group))
+                .expect("post-complete command should map to a queue tier"),
         )
         .await
 }
@@ -703,7 +988,7 @@ pub async fn clear_message_queue(
             bridge.cancel().await;
             Ok(())
         }
-        ClearTarget::FollowUp | ClearTarget::PostComplete => Ok(()),
+        ClearTarget::FollowUp | ClearTarget::PostComplete => Err(unsupported_queue_clear_error()),
     }
 }
 
@@ -714,6 +999,7 @@ pub async fn clear_message_queue(
 /// Retry the last user message.
 #[tauri::command]
 pub async fn retry_last_message(
+    args: RunCorrelationArgs,
     app: AppHandle,
     bridge: State<'_, DesktopBridge>,
 ) -> Result<SubmitGoalResult, String> {
@@ -730,18 +1016,20 @@ pub async fn retry_last_message(
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("Session {session_id} not found"))?;
 
-    let last_user_msg = session
-        .messages
-        .iter()
-        .rev()
-        .find(|m| m.role == ava_types::Role::User)
-        .ok_or_else(|| "No user message found in session to retry".to_string())?;
-
-    let goal = last_user_msg.content.clone();
-    let history = collect_history_before_last_user(&session.messages);
+    let (goal, history, images) = retry_replay_input(&session)?;
 
     info!(goal = %goal, session_id = %session_id, "retry_last_message");
-    run_agent_inner(&goal, 0, history, Some(session_id), &app, &bridge).await
+    run_agent_inner(
+        &goal,
+        0,
+        history,
+        images,
+        Some(session_id),
+        args.run_id,
+        &app,
+        &bridge,
+    )
+    .await
 }
 
 #[derive(Deserialize)]
@@ -749,6 +1037,8 @@ pub async fn retry_last_message(
 pub struct EditAndResendArgs {
     pub message_id: String,
     pub new_content: String,
+    #[serde(default)]
+    pub run_id: Option<String>,
 }
 
 /// Edit a specific message and re-run the agent from that point.
@@ -774,20 +1064,16 @@ pub async fn edit_and_resend(
     let target_id =
         Uuid::parse_str(&args.message_id).map_err(|e| format!("Invalid message ID: {e}"))?;
 
-    let pos = session
-        .messages
-        .iter()
-        .position(|m| m.id == target_id)
-        .ok_or_else(|| format!("Message {target_id} not found in session"))?;
+    let (goal, history, images) = edit_replay_input(&session, target_id, args.new_content)?;
 
-    let history: Vec<ava_types::Message> = session.messages[..pos].to_vec();
-
-    info!(new_content = %args.new_content, message_id = %args.message_id, "edit_and_resend");
+    info!(new_content = %goal, message_id = %args.message_id, "edit_and_resend");
     run_agent_inner(
-        &args.new_content,
+        &goal,
         0,
         history,
+        images,
         Some(session_id),
+        args.run_id,
         &app,
         &bridge,
     )
@@ -797,6 +1083,7 @@ pub async fn edit_and_resend(
 /// Regenerate the last assistant response.
 #[tauri::command]
 pub async fn regenerate_response(
+    args: RunCorrelationArgs,
     app: AppHandle,
     bridge: State<'_, DesktopBridge>,
 ) -> Result<SubmitGoalResult, String> {
@@ -813,17 +1100,20 @@ pub async fn regenerate_response(
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("Session {session_id} not found"))?;
 
-    let last_user_pos = session
-        .messages
-        .iter()
-        .rposition(|m| m.role == ava_types::Role::User)
-        .ok_or_else(|| "No user message found in session to regenerate from".to_string())?;
-
-    let goal = session.messages[last_user_pos].content.clone();
-    let history: Vec<ava_types::Message> = session.messages[..last_user_pos].to_vec();
+    let (goal, history, images) = regenerate_replay_input(&session)?;
 
     info!(goal = %goal, session_id = %session_id, "regenerate_response");
-    run_agent_inner(&goal, 0, history, Some(session_id), &app, &bridge).await
+    run_agent_inner(
+        &goal,
+        0,
+        history,
+        images,
+        Some(session_id),
+        args.run_id,
+        &app,
+        &bridge,
+    )
+    .await
 }
 
 #[derive(Serialize)]
@@ -863,5 +1153,209 @@ pub async fn undo_last_edit(bridge: State<'_, DesktopBridge>) -> Result<UndoResu
             message: "No file edits to undo".to_string(),
             file_path: None,
         }),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_image(label: &str) -> ava_types::ImageContent {
+        ava_types::ImageContent::new(label, ava_types::ImageMediaType::Png)
+    }
+
+    fn sample_user_message(
+        content: &str,
+        images: Vec<ava_types::ImageContent>,
+    ) -> ava_types::Message {
+        let mut message = ava_types::Message::new(ava_types::Role::User, content);
+        message.images = images;
+        message
+    }
+
+    #[tokio::test]
+    async fn take_matching_pending_reply_only_consumes_matching_request_ids() {
+        let (matching_tx, _matching_rx) = tokio::sync::oneshot::channel::<String>();
+        let store = crate::bridge::PendingQuestionReply::new(
+            ava_agent::control_plane::interactive::InteractiveRequestKind::Question,
+        );
+        let handle = store.register(matching_tx).await;
+
+        let error = match store.resolve(Some("request-2")).await {
+            Ok(_) => panic!("stale request should fail"),
+            Err(error) => error,
+        };
+        assert_eq!(
+            desktop_interactive_resolve_error("question", error),
+            "No matching pending question request to resolve"
+        );
+        assert_eq!(
+            store.current_request_id().await,
+            Some(handle.request_id.clone())
+        );
+        assert!(store.resolve(Some(&handle.request_id)).await.is_ok());
+        assert!(store.current_request_id().await.is_none());
+    }
+
+    #[test]
+    fn parse_plan_decision_rejects_modified_without_plan() {
+        let error = parse_plan_decision("modified", None, None).expect_err("missing plan");
+        assert!(error.contains("Modified plan is required"));
+    }
+
+    #[tokio::test]
+    async fn plan_timeout_cleanup_consumes_pending_reply_and_auto_rejects() {
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel::<ava_types::PlanDecision>();
+        let store = crate::bridge::PendingPlanReply::new(
+            ava_agent::control_plane::interactive::InteractiveRequestKind::Plan,
+        );
+        let handle = store.register(reply_tx).await;
+
+        let timeout_reply = store
+            .timeout_request(&handle.request_id)
+            .await
+            .expect("pending plan reply");
+
+        timeout_reply
+            .reply
+            .send(ava_types::PlanDecision::Rejected {
+                feedback: "Timed out waiting for plan response in desktop UI".to_string(),
+            })
+            .expect("timeout rejection should send");
+
+        assert_eq!(
+            timeout_reply.handle.phase,
+            ava_agent::control_plane::interactive::InteractiveRequestPhase::TimedOut
+        );
+        assert!(store.current_request_id().await.is_none());
+        match reply_rx.await.expect("timeout reply should arrive") {
+            ava_types::PlanDecision::Rejected { feedback } => {
+                assert!(feedback.contains("Timed out waiting for plan response in desktop UI"));
+            }
+            other => panic!("expected rejected timeout decision, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn stale_late_plan_responses_do_not_consume_newer_pending_requests() {
+        let store = crate::bridge::PendingPlanReply::new(
+            ava_agent::control_plane::interactive::InteractiveRequestKind::Plan,
+        );
+        let (first_tx, _first_rx) = tokio::sync::oneshot::channel::<ava_types::PlanDecision>();
+        let first = store.register(first_tx).await;
+
+        let _ = store
+            .resolve(Some(&first.request_id))
+            .await
+            .expect("first plan reply");
+
+        let (second_tx, _second_rx) = tokio::sync::oneshot::channel::<ava_types::PlanDecision>();
+        let second = store.register(second_tx).await;
+
+        let error = match store.resolve(Some(&first.request_id)).await {
+            Ok(_) => panic!("stale request should fail"),
+            Err(error) => error,
+        };
+        assert_eq!(
+            desktop_interactive_resolve_error("plan", error),
+            "No matching pending plan request to resolve"
+        );
+        assert_eq!(
+            store.current_request_id().await,
+            Some(second.request_id.clone())
+        );
+        assert!(store.resolve(Some(&second.request_id)).await.is_ok());
+        assert!(store.current_request_id().await.is_none());
+    }
+
+    #[test]
+    fn desktop_interactive_resolve_error_messages_preserve_missing_and_stale_text() {
+        assert_eq!(
+            desktop_interactive_resolve_error(
+                "approval",
+                ResolveInteractiveRequestError::MissingPendingRequest {
+                    kind: ava_agent::control_plane::interactive::InteractiveRequestKind::Approval,
+                },
+            ),
+            "No pending approval request to resolve"
+        );
+        assert_eq!(
+            desktop_interactive_resolve_error(
+                "approval",
+                ResolveInteractiveRequestError::StaleRequestId {
+                    kind: ava_agent::control_plane::interactive::InteractiveRequestKind::Approval,
+                    request_id: "approval-stale".to_string(),
+                    current_request_id: "approval-current".to_string(),
+                },
+            ),
+            "No matching pending approval request to resolve"
+        );
+    }
+
+    #[tokio::test]
+    async fn missing_request_ids_are_rejected_without_consuming_pending_requests() {
+        let store = crate::bridge::PendingApprovalReply::new(
+            ava_agent::control_plane::interactive::InteractiveRequestKind::Approval,
+        );
+        let (reply_tx, _reply_rx) = tokio::sync::oneshot::channel::<ToolApproval>();
+        let handle = store.register(reply_tx).await;
+
+        let error = match take_resolved_desktop_interactive_request(&store, "approval", None).await
+        {
+            Ok(_) => panic!("missing request_id should fail"),
+            Err(error) => error,
+        };
+
+        assert_eq!(
+            error,
+            "request_id is required to resolve pending approval request"
+        );
+        assert_eq!(
+            store.current_request_id().await,
+            Some(handle.request_id.clone())
+        );
+
+        let resolved =
+            take_resolved_desktop_interactive_request(&store, "approval", Some(&handle.request_id))
+                .await
+                .expect("current request should resolve after missing-id rejection");
+        assert_eq!(resolved.handle.request_id, handle.request_id);
+        assert!(store.current_request_id().await.is_none());
+    }
+
+    #[test]
+    fn unsupported_queue_clear_error_mentions_unimplemented_targets() {
+        assert!(unsupported_queue_clear_error().contains("not supported yet"));
+    }
+
+    #[test]
+    fn retry_replay_input_preserves_user_images() {
+        let mut session = ava_types::Session::new();
+        session.add_message(sample_user_message("describe", vec![sample_image("retry")]));
+
+        let (_, _, images) = retry_replay_input(&session).expect("retry replay input");
+        assert_eq!(images, vec![sample_image("retry")]);
+    }
+
+    #[test]
+    fn edit_replay_input_preserves_target_images() {
+        let mut session = ava_types::Session::new();
+        let target = sample_user_message("before", vec![sample_image("edit")]);
+        let target_id = target.id;
+        session.add_message(target);
+
+        let (_, _, images) =
+            edit_replay_input(&session, target_id, "after".to_string()).expect("edit input");
+        assert_eq!(images, vec![sample_image("edit")]);
+    }
+
+    #[test]
+    fn regenerate_replay_input_preserves_last_user_images() {
+        let mut session = ava_types::Session::new();
+        session.add_message(sample_user_message("before", vec![sample_image("regen")]));
+        session.add_message(ava_types::Message::new(ava_types::Role::Assistant, "done"));
+
+        let (_, _, images) = regenerate_replay_input(&session).expect("regen input");
+        assert_eq!(images, vec![sample_image("regen")]);
     }
 }

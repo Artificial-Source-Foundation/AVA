@@ -56,6 +56,25 @@ export interface RustToolInfo {
   name: string
   description: string
 }
+
+export interface ToolIntrospectionMessageContext {
+  role: 'user' | 'assistant' | 'system'
+  content: string
+  agentVisible?: boolean
+}
+
+export interface ToolIntrospectionImageContext {
+  data: string
+  mediaType: string
+}
+
+export interface ToolIntrospectionContext {
+  sessionId?: string
+  goal?: string
+  history?: ToolIntrospectionMessageContext[]
+  images?: ToolIntrospectionImageContext[]
+}
+
 export interface ToolResult {
   content: string
   is_error: boolean
@@ -68,11 +87,39 @@ export interface RustSession {
   completed: boolean
 }
 
+export interface ActiveSessionSyncResult {
+  sessionId: string
+  exists: boolean
+  messageCount: number
+}
+
+export interface ActiveSessionSyncMessageSnapshot {
+  id: string
+  role: 'user' | 'assistant' | 'system'
+  content: string
+  createdAt: number
+  images?: ActiveSessionSyncImageSnapshot[]
+}
+
+export interface ActiveSessionSyncImageSnapshot {
+  data: string
+  mediaType: string
+}
+
+export interface ActiveSessionSyncSnapshot {
+  title?: string
+  messages: ActiveSessionSyncMessageSnapshot[]
+}
+
 export interface TokenEvent {
+  run_id?: string
+  runId?: string
   type: 'token'
   content: string
 }
 export interface ToolCallEvent {
+  run_id?: string
+  runId?: string
   type: 'tool_call'
   id?: string
   name: string
@@ -80,6 +127,8 @@ export interface ToolCallEvent {
   arguments?: Record<string, JsonValue>
 }
 export interface ToolResultEvent {
+  run_id?: string
+  runId?: string
   type: 'tool_result'
   call_id?: string
   callId?: string
@@ -87,24 +136,34 @@ export interface ToolResultEvent {
   is_error: boolean
 }
 export interface ProgressEvent {
+  run_id?: string
+  runId?: string
   type: 'progress'
   message: string
 }
 export interface CompleteEvent {
   type: 'complete'
   session: RustSession
+  run_id?: string
+  runId?: string
 }
 export interface ErrorEvent {
   type: 'error'
   message: string
+  run_id?: string
+  runId?: string
 }
 
 export interface ThinkingEvent {
+  run_id?: string
+  runId?: string
   type: 'thinking'
   content: string
 }
 
 export interface TokenUsageEvent {
+  run_id?: string
+  runId?: string
   type: 'token_usage'
   inputTokens: number
   outputTokens: number
@@ -112,6 +171,8 @@ export interface TokenUsageEvent {
 }
 
 export interface BudgetWarningEvent {
+  run_id?: string
+  runId?: string
   type: 'budget_warning'
   thresholdPercent: number
   currentCostUsd: number
@@ -119,6 +180,8 @@ export interface BudgetWarningEvent {
 }
 
 export interface ContextCompactedEvent {
+  run_id?: string
+  runId?: string
   type: 'context_compacted'
   auto: boolean
   tokensBefore: number
@@ -151,6 +214,16 @@ export interface QuestionRequestEvent {
   options: string[]
 }
 
+export interface InteractiveRequestClearedEvent {
+  type: 'interactive_request_cleared'
+  request_id?: string
+  requestId?: string
+  request_kind?: 'approval' | 'question' | 'plan'
+  requestKind?: 'approval' | 'question' | 'plan'
+  timed_out?: boolean
+  timedOut?: boolean
+}
+
 // ── Plan events ──────────────────────────────────────────────────────
 
 export type PlanStepAction = 'research' | 'implement' | 'test' | 'review'
@@ -161,7 +234,7 @@ export interface PlanStep {
   files: string[]
   action: PlanStepAction
   dependsOn: string[]
-  approved: boolean
+  approved?: boolean
 }
 
 export interface PlanData {
@@ -170,6 +243,7 @@ export interface PlanData {
   estimatedTurns: number
   estimatedBudgetUsd?: number
   codename?: string
+  requestId?: string
 }
 
 export interface PlanSummary {
@@ -181,13 +255,53 @@ export interface PlanSummary {
 }
 
 export interface PlanCreatedEvent {
+  run_id?: string
+  runId?: string
   type: 'plan_created'
+  id?: string
   plan: PlanData
 }
 
 export interface PlanStepCompleteEvent {
+  run_id?: string
+  runId?: string
   type: 'plan_step_complete'
   step_id: string
+}
+
+export interface StreamingEditProgressEvent {
+  run_id?: string
+  runId?: string
+  type: 'streaming_edit_progress'
+  call_id?: string
+  callId?: string
+  tool_name: string
+  toolName?: string
+  file_path?: string | null
+  filePath?: string | null
+  bytes_received: number
+  bytesReceived?: number
+}
+
+export interface SubagentCompleteEvent {
+  run_id?: string
+  runId?: string
+  type: 'subagent_complete'
+  call_id?: string
+  callId?: string
+  session_id: string
+  sessionId?: string
+  description: string
+  input_tokens: number
+  inputTokens?: number
+  output_tokens: number
+  outputTokens?: number
+  cost_usd: number
+  costUsd?: number
+  agent_type?: string | null
+  agentType?: string | null
+  provider?: string | null
+  resumed: boolean
 }
 
 export type PlanResponse = 'approved' | 'rejected' | 'modified'
@@ -204,15 +318,17 @@ export interface TodoItem {
 }
 
 export interface TodoUpdateEvent {
+  run_id?: string
+  runId?: string
   type: 'todo_update'
   todos: TodoItem[]
 }
 
 export interface ResolvePlanArgs {
+  requestId: string
   response: PlanResponse
   modifiedPlan?: PlanData | null
   feedback?: string | null
-  stepComments?: Record<string, string> | null
 }
 
 export type AgentEvent =
@@ -228,8 +344,11 @@ export type AgentEvent =
   | ContextCompactedEvent
   | ApprovalRequestEvent
   | QuestionRequestEvent
+  | InteractiveRequestClearedEvent
   | PlanCreatedEvent
   | PlanStepCompleteEvent
+  | StreamingEditProgressEvent
+  | SubagentCompleteEvent
   | TodoUpdateEvent
 
 export interface ComputeGrepMatch {
@@ -350,6 +469,8 @@ export interface SubmitGoalArgs {
 }
 
 export interface SubmitGoalResult {
+  // In accepted-and-streaming paths this is only the accepted run handle shape.
+  // Terminal success/failure comes from streamed events, not these fields.
   success: boolean
   turns: number
   sessionId: string
@@ -410,8 +531,10 @@ export interface McpServerInfo {
   toolCount: number
   scope: string
   enabled: boolean
+  canToggle: boolean
   /** Connection status: "connected" | "disabled" | "failed" | "connecting" */
-  status?: string
+  status: string
+  error?: string
 }
 
 export interface McpReloadResult {

@@ -381,17 +381,23 @@ impl App {
                 bg.add_tokens(task_id, input_tokens, output_tokens, cost_usd);
             }
             ava_agent::AgentEvent::ToolCall(call) => {
-                if call.name == "task" {
+                if matches!(call.name.as_str(), "subagent" | "task") {
                     let description = call
                         .arguments
                         .get("prompt")
                         .and_then(|p| p.as_str())
                         .map(String::from)
                         .unwrap_or_else(|| "sub-agent task".to_string());
+                    let background = call
+                        .arguments
+                        .get("background")
+                        .and_then(|value| value.as_bool())
+                        .unwrap_or(false);
                     let mut msg = UiMessage::new(MessageKind::SubAgent, String::new());
                     msg.is_streaming = true;
                     msg.sub_agent = Some(crate::state::messages::SubAgentData {
                         description,
+                        background,
                         tool_count: 0,
                         current_tool: None,
                         duration: None,
@@ -426,15 +432,75 @@ impl App {
                                 .is_some_and(|d| d.is_running && d.call_id == result.call_id)
                     }) {
                         msg.content = result.content;
-                        msg.is_streaming = false;
+                        let keep_running = msg
+                            .sub_agent
+                            .as_ref()
+                            .is_some_and(|data| data.background && !result.is_error);
+                        msg.is_streaming = keep_running;
                         if let Some(data) = msg.sub_agent.as_mut() {
-                            data.is_running = false;
-                            data.failed = result.is_error;
+                            data.is_running = keep_running;
+                            data.failed = result.is_error && !keep_running;
                             data.current_tool = None;
                         }
                     } else {
                         task.messages
                             .push(UiMessage::new(MessageKind::ToolResult, result.content));
+                    }
+                }
+            }
+            ava_agent::AgentEvent::SubAgentComplete {
+                call_id,
+                session_id,
+                messages,
+                description,
+                input_tokens,
+                output_tokens,
+                cost_usd,
+                provider,
+                resumed,
+                ..
+            } => {
+                if let Some(task) = bg.tasks.iter_mut().find(|t| t.id == task_id) {
+                    let ui_messages: Vec<UiMessage> = messages
+                        .iter()
+                        .filter_map(|m| {
+                            let kind = match m.role {
+                                ava_types::Role::User => MessageKind::User,
+                                ava_types::Role::Assistant => MessageKind::Assistant,
+                                ava_types::Role::Tool => MessageKind::ToolResult,
+                                ava_types::Role::System => return None,
+                            };
+                            Some(UiMessage::new(kind, m.content.clone()))
+                        })
+                        .collect();
+
+                    if let Some(msg) = task.messages.iter_mut().rev().find(|m| {
+                        matches!(m.kind, MessageKind::SubAgent)
+                            && m.sub_agent.as_ref().is_some_and(|d| {
+                                (!call_id.is_empty() && d.call_id == call_id)
+                                    || d.description == description
+                            })
+                    }) {
+                        let final_summary = ui_messages
+                            .iter()
+                            .rev()
+                            .find(|message| matches!(message.kind, MessageKind::Assistant))
+                            .map(|message| message.content.clone());
+                        if let Some(summary) = final_summary {
+                            msg.content = summary;
+                        }
+                        msg.is_streaming = false;
+                        if let Some(data) = msg.sub_agent.as_mut() {
+                            data.is_running = false;
+                            data.session_id = Some(session_id);
+                            data.session_messages = ui_messages;
+                            data.current_tool = None;
+                            data.provider = provider;
+                            data.resumed = resumed;
+                            data.cost_usd = Some(cost_usd);
+                            data.input_tokens = Some(input_tokens);
+                            data.output_tokens = Some(output_tokens);
+                        }
                     }
                 }
             }

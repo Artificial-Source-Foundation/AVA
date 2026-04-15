@@ -101,10 +101,13 @@ export function useSession() {
     // Message Management
     loadSessionMessages: msg.loadSessionMessages,
     addMessage: msg.addMessage,
+    addMessageToSession: msg.addMessageToSession,
     updateMessageContent: msg.updateMessageContent,
     updateMessage: msg.updateMessage,
+    updateMessageInSession: msg.updateMessageInSession,
     setMessageError: msg.setMessageError,
     deleteMessage: msg.deleteMessage,
+    deleteMessageInSession: msg.deleteMessageInSession,
     deleteMessagesAfter: msg.deleteMessagesAfter,
     rollbackToMessage: msg.rollbackToMessage,
     replaceMessagesFromBackend: msg.replaceMessagesFromBackend,

@@ -63,11 +63,13 @@ pub use agent_commands::{
     resolve_question, retry_last_message, steer_agent, submit_goal, undo_last_edit,
 };
 pub use config_commands::{
-    get_config, get_feature_flags, load_credentials, sync_credentials, update_feature_flags,
-    update_llm_config,
+    delete_provider_auth, get_config, get_feature_flags, load_credentials, store_provider_auth,
+    sync_credentials, update_feature_flags, update_llm_config,
 };
 pub use context_commands::compact_context;
-pub use mcp_commands::{list_mcp_servers, reload_mcp_servers};
+pub use mcp_commands::{
+    disable_mcp_server, enable_mcp_server, list_mcp_servers, reload_mcp_servers,
+};
 pub use model_commands::{get_current_model, list_models, switch_model};
 pub use permission_commands::{
     get_permission_level, set_permission_level, toggle_permission_level,
@@ -75,6 +77,7 @@ pub use permission_commands::{
 pub use provider_commands::{discover_cli_agents, list_providers};
 pub use session_commands::{
     create_session, delete_session, list_sessions, load_session, rename_session, search_sessions,
+    set_active_session,
 };
 pub use tool_commands::list_agent_tools;
 pub use updater_commands::{check_desktop_update, install_desktop_update};

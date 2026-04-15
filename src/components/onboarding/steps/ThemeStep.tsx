@@ -6,7 +6,7 @@
  */
 
 import { Monitor, Moon, Sun } from 'lucide-solid'
-import { type Component, createSignal, For } from 'solid-js'
+import { type Component, For } from 'solid-js'
 import type { AccentColor } from '../../../stores/settings/settings-types'
 
 // ---------------------------------------------------------------------------
@@ -117,7 +117,7 @@ const ACCENT_SWATCHES: { id: AccentColor; color: string }[] = [
 // Color scheme mode type
 // ---------------------------------------------------------------------------
 
-type ColorSchemeMode = 'dark' | 'light' | 'system'
+export type ColorSchemeMode = 'dark' | 'light' | 'system'
 
 const COLOR_MODES = [
   { id: 'dark' as const, label: 'Dark', icon: Moon },
@@ -132,8 +132,10 @@ const COLOR_MODES = [
 export interface ThemeStepProps {
   selectedPreset: string
   selectedAccent: AccentColor
+  selectedMode: ColorSchemeMode
   onSelectPreset: (preset: OnboardingThemePreset) => void
   onSelectAccent: (accent: AccentColor) => void
+  onSelectMode: (mode: ColorSchemeMode) => void
   onPrev: () => void
   onNext: () => void
 }
@@ -143,12 +145,14 @@ export interface ThemeStepProps {
 // ---------------------------------------------------------------------------
 
 export const ThemeStep: Component<ThemeStepProps> = (props) => {
-  const [colorMode, setColorMode] = createSignal<ColorSchemeMode>('dark')
-
   return (
     <div class="flex flex-col items-center w-full max-w-[520px]">
       {/* Header */}
-      <h2 class="text-2xl font-bold text-[var(--text-primary)] tracking-tight mb-2">
+      <h2
+        tabindex="-1"
+        data-onboarding-focus="true"
+        class="text-2xl font-bold text-[var(--text-primary)] tracking-tight mb-2"
+      >
         Make It Yours
       </h2>
       <p class="text-sm text-[var(--text-muted)] mb-6">Choose a theme preset</p>
@@ -168,13 +172,14 @@ export const ThemeStep: Component<ThemeStepProps> = (props) => {
             return (
               <button
                 type="button"
-                onClick={() => setColorMode(mode.id)}
+                onClick={() => props.onSelectMode(mode.id)}
                 class="flex h-full items-center justify-center gap-2 text-sm font-medium transition-colors"
                 style={{
-                  color: colorMode() === mode.id ? 'var(--text-primary)' : 'var(--text-muted)',
-                  background: colorMode() === mode.id ? 'var(--background)' : 'transparent',
+                  color:
+                    props.selectedMode === mode.id ? 'var(--text-primary)' : 'var(--text-muted)',
+                  background: props.selectedMode === mode.id ? 'var(--background)' : 'transparent',
                   'border-right': mode.id !== 'system' ? '1px solid var(--border-subtle)' : 'none',
-                  ...(colorMode() === mode.id
+                  ...(props.selectedMode === mode.id
                     ? { 'box-shadow': 'inset 0 0 0 1px var(--accent)' }
                     : {}),
                 }}

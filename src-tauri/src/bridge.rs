@@ -9,26 +9,22 @@ use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use ava_agent::control_plane::interactive::{InteractiveRequestKind, InteractiveRequestStore};
 use ava_agent::message_queue::MessageQueue;
 use ava_agent::stack::{AgentStack, AgentStackConfig};
 use ava_tools::core::plan::PlanRequest;
 use ava_tools::core::question::QuestionRequest;
 use ava_tools::permission_middleware::{ApprovalRequest, ToolApproval};
 use ava_types::{MessageTier, QueuedMessage};
-use tokio::sync::{mpsc, oneshot, Mutex, RwLock};
+use tokio::sync::{mpsc, Mutex, RwLock};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-/// Pending reply channel for approval requests, shared between the forwarder
-/// task and the `resolve_approval` command.
-pub type PendingApprovalReply = Arc<Mutex<Option<oneshot::Sender<ToolApproval>>>>;
+pub type PendingApprovalReply = InteractiveRequestStore<ToolApproval>;
 
-/// Pending reply channel for question requests, shared between the forwarder
-/// task and the `resolve_question` command.
-pub type PendingQuestionReply = Arc<Mutex<Option<oneshot::Sender<String>>>>;
+pub type PendingQuestionReply = InteractiveRequestStore<String>;
 
-/// Pending reply channel for plan approval requests.
-pub type PendingPlanReply = Arc<Mutex<Option<oneshot::Sender<ava_types::PlanDecision>>>>;
+pub type PendingPlanReply = InteractiveRequestStore<ava_types::PlanDecision>;
 
 /// Tracks a file edit so that undo can restore the previous content.
 #[derive(Debug, Clone)]
@@ -94,9 +90,9 @@ impl DesktopBridge {
             approval_rx: Mutex::new(approval_rx),
             plan_rx: Mutex::new(plan_rx),
             running: RwLock::new(false),
-            pending_approval_reply: Arc::new(Mutex::new(None)),
-            pending_question_reply: Arc::new(Mutex::new(None)),
-            pending_plan_reply: Arc::new(Mutex::new(None)),
+            pending_approval_reply: InteractiveRequestStore::new(InteractiveRequestKind::Approval),
+            pending_question_reply: InteractiveRequestStore::new(InteractiveRequestKind::Question),
+            pending_plan_reply: InteractiveRequestStore::new(InteractiveRequestKind::Plan),
             last_session_id: Arc::new(RwLock::new(None)),
             edit_history: Arc::new(RwLock::new(VecDeque::new())),
         })

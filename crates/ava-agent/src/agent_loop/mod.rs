@@ -35,6 +35,24 @@ use repetition::RepetitionDetector;
 use tool_execution::has_validation_failure;
 pub use tool_execution::READ_ONLY_TOOLS;
 
+/// Tools allowed in Plan mode. The LLM only sees these — write/edit are hidden.
+/// Bash is included but restricted at execution time to read-only commands.
+pub(crate) const PLAN_MODE_ALLOWED_TOOLS: &[&str] = &[
+    "read",
+    "glob",
+    "grep",
+    "web_fetch",
+    "web_search",
+    "git",
+    "plan",
+    "todo_read",
+    "todo_write",
+    "question",
+    "codebase_search",
+    "memory_read",
+    "bash",
+];
+
 fn usage_cost_usd(model: &str, usage: &TokenUsage) -> f64 {
     let (in_rate, out_rate) = ava_llm::providers::common::model_pricing_usd_per_million(model);
     ava_llm::providers::common::estimate_cost_with_cache_usd(usage, in_rate, out_rate)

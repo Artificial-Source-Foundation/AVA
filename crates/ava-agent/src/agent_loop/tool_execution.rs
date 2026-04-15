@@ -418,6 +418,9 @@ impl AgentLoop {
                 is_error: true,
             },
         };
+        if result.call_id.is_empty() {
+            result.call_id = tool_call.id.clone();
+        }
         let tool_failed = result.is_error;
         self.append_post_edit_validation(tool_call, &mut result)
             .await;

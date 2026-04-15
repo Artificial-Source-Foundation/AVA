@@ -25,6 +25,7 @@ interface WorkspaceOption {
   iconBg: string
   title: string
   description: string
+  disabled?: boolean
   /** If true, show the current path under the title in mono */
   showPath?: boolean
 }
@@ -35,8 +36,9 @@ const WORKSPACE_OPTIONS: WorkspaceOption[] = [
     icon: FolderCheck,
     iconColor: '#22C55E',
     iconBg: 'rgba(34, 197, 94, 0.15)',
-    title: 'Trust Current Folder',
-    description: 'Load local config, MCP servers, and rules from this project',
+    title: 'Use Current Folder As-Is',
+    description:
+      'Stay in this project. Onboarding will not change trust, rules, or local config yet.',
     showPath: true,
   },
   {
@@ -45,15 +47,17 @@ const WORKSPACE_OPTIONS: WorkspaceOption[] = [
     iconColor: '#3B82F6',
     iconBg: 'rgba(59, 130, 246, 0.15)',
     title: 'Import Existing Config',
-    description: 'Load .ava/ folder from another project',
+    description:
+      "Not available in onboarding yet. Import another project's .ava folder manually later.",
+    disabled: true,
   },
   {
     id: 'fresh',
     icon: Sparkles,
     iconColor: '#8B5CF6',
     iconBg: 'rgba(139, 92, 246, 0.15)',
-    title: 'Start Fresh',
-    description: 'Clean slate \u2014 no local config, no inherited rules',
+    title: 'Keep AVA Defaults',
+    description: 'Finish setup without applying any project-specific workspace changes.',
   },
 ]
 
@@ -76,10 +80,16 @@ export interface WorkspaceStepProps {
 export const WorkspaceStep: Component<WorkspaceStepProps> = (props) => (
   <div class="flex flex-col items-center w-full max-w-[520px]">
     {/* Header */}
-    <h2 class="text-2xl font-bold text-[var(--text-primary)] tracking-tight mb-2">
+    <h2
+      tabindex="-1"
+      data-onboarding-focus="true"
+      class="text-2xl font-bold text-[var(--text-primary)] tracking-tight mb-2"
+    >
       Set Up Workspace
     </h2>
-    <p class="text-sm text-[var(--text-muted)] mb-8">How should AVA handle this project?</p>
+    <p class="text-sm text-[var(--text-muted)] mb-8">
+      This guide won&apos;t import or modify workspace config yet.
+    </p>
 
     {/* Option cards - vertical stack, 8px gap */}
     <div class="w-full flex flex-col gap-2 mb-10">
@@ -87,7 +97,8 @@ export const WorkspaceStep: Component<WorkspaceStepProps> = (props) => (
         {(option) => (
           <button
             type="button"
-            onClick={() => props.onSelect(option.id)}
+            onClick={() => !option.disabled && props.onSelect(option.id)}
+            disabled={option.disabled}
             class="rounded-xl p-4 text-left transition-all flex items-start gap-3"
             style={{
               background: 'var(--surface)',
@@ -95,6 +106,8 @@ export const WorkspaceStep: Component<WorkspaceStepProps> = (props) => (
                 props.selected === option.id
                   ? '1px solid var(--accent)'
                   : '1px solid var(--border-subtle)',
+              opacity: option.disabled ? '0.65' : '1',
+              cursor: option.disabled ? 'not-allowed' : 'pointer',
             }}
           >
             {/* Icon - 36px frame */}
@@ -108,6 +121,11 @@ export const WorkspaceStep: Component<WorkspaceStepProps> = (props) => (
             {/* Text */}
             <div class="flex-1 min-w-0">
               <p class="text-sm font-medium text-[var(--text-primary)]">{option.title}</p>
+              {option.disabled && (
+                <p class="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)] mt-0.5">
+                  Not available yet
+                </p>
+              )}
               {option.showPath && (
                 <p
                   class="text-xs mt-0.5"

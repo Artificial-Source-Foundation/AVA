@@ -52,6 +52,7 @@ pub(crate) use super::api_sessions::{
     list_session_files, list_session_memory, list_session_terminal, list_sessions,
     load_session_body, rename_session, rename_session_body, search_sessions, update_message,
 };
+pub(crate) use super::api_tools::list_agent_tools;
 
 // ============================================================================
 // Health
@@ -118,8 +119,14 @@ pub enum WebAgentEvent {
         question: String,
         options: Vec<String>,
     },
+    #[serde(rename = "interactive_request_cleared")]
+    InteractiveRequestCleared {
+        request_id: String,
+        request_kind: String,
+        timed_out: bool,
+    },
     #[serde(rename = "plan_created")]
-    PlanCreated { plan: PlanPayload },
+    PlanCreated { id: String, plan: PlanPayload },
     #[serde(rename = "todo_update")]
     TodoUpdate { todos: Vec<TodoItemFrontend> },
     #[serde(rename = "plan_step_complete")]
@@ -214,11 +221,22 @@ pub fn convert_web_event(event: &WebEvent) -> Option<WebAgentEvent> {
             question: question.clone(),
             options: options.clone(),
         }),
+        WebEvent::InteractiveRequestCleared {
+            request_id,
+            request_kind,
+            timed_out,
+        } => Some(WebAgentEvent::InteractiveRequestCleared {
+            request_id: request_id.clone(),
+            request_kind: request_kind.clone(),
+            timed_out: *timed_out,
+        }),
         WebEvent::PlanCreated {
+            id,
             summary,
             steps,
             estimated_turns,
         } => Some(WebAgentEvent::PlanCreated {
+            id: id.clone(),
             plan: PlanPayload {
                 summary: summary.clone(),
                 steps: steps

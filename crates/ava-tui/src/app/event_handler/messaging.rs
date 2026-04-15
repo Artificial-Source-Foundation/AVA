@@ -1,19 +1,13 @@
 use super::*;
+use ava_agent::control_plane::commands::{queue_command_from_tier, queue_command_label};
 use ava_types::{MessageTier, QueuedMessage};
 use tracing::info;
 
 impl App {
     /// Send a mid-stream message to the running agent via the message queue.
     pub(crate) fn send_queued_message(&mut self, text: String, tier: MessageTier) {
-        let label = match &tier {
-            MessageTier::Steering => "steering",
-            MessageTier::FollowUp => "follow-up",
-            MessageTier::PostComplete { group } => {
-                // Can't return a &str from format!, so we handle display below
-                let _ = group;
-                "post-complete"
-            }
-        };
+        let label = queue_command_label(queue_command_from_tier(&tier))
+            .expect("queue display label should exist for queue tier");
 
         if let Some(ref tx) = self.state.agent.message_tx {
             let msg = QueuedMessage {

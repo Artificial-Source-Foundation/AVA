@@ -308,18 +308,23 @@ export const rustBackend = {
 
   // Mid-stream messaging (3-tier)
   steerAgent: (message: string): Promise<void> => invokeCommand('steer_agent', { message }),
-  followUpAgent: (message: string): Promise<void> => invokeCommand('follow_up_agent', { message }),
-  postCompleteAgent: (message: string, group?: number): Promise<void> =>
-    invokeCommand('post_complete_agent', { args: { message, group: group ?? 1 } }),
+  followUpAgent: (message: string, sessionId?: string): Promise<void> =>
+    invokeCommand('follow_up_agent', { args: { message, sessionId: sessionId ?? null } }),
+  postCompleteAgent: (message: string, group?: number, sessionId?: string): Promise<void> =>
+    invokeCommand('post_complete_agent', {
+      args: { message, group: group ?? 1, sessionId: sessionId ?? null },
+    }),
   getMessageQueue: (): Promise<MessageQueueState> => invokeCommand('get_message_queue'),
   clearMessageQueue: (target: ClearTarget = 'all'): Promise<void> =>
     invokeCommand('clear_message_queue', { target }),
 
   // Retry / Edit+Resend / Regenerate / Undo
-  retryLastMessage: (): Promise<SubmitGoalResult> => invokeCommand('retry_last_message'),
+  retryLastMessage: (sessionId?: string): Promise<SubmitGoalResult> =>
+    invokeCommand('retry_last_message', { args: { sessionId: sessionId ?? null } }),
   editAndResend: (args: EditAndResendArgs): Promise<SubmitGoalResult> =>
     invokeCommand('edit_and_resend', { args }),
-  regenerateResponse: (): Promise<SubmitGoalResult> => invokeCommand('regenerate_response'),
+  regenerateResponse: (sessionId?: string): Promise<SubmitGoalResult> =>
+    invokeCommand('regenerate_response', { args: { sessionId: sessionId ?? null } }),
   undoLastEdit: (): Promise<UndoResult> => invokeCommand('undo_last_edit'),
 
   // Session rename/search

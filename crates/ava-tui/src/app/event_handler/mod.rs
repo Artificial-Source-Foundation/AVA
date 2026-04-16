@@ -1,6 +1,7 @@
 mod agent_events;
 mod goal;
 mod hooks;
+mod interactive;
 mod messaging;
 mod voice;
 

@@ -258,13 +258,62 @@ async fn shutdown_signal() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::web::api_agent::spawn_interactive_forwarders;
     use crate::web::state::WebEvent;
+    use ava_agent::control_plane::interactive::{
+        InteractiveRequestKind, InteractiveRequestStore, InteractiveTimeoutPolicy,
+    };
+    use ava_tools::core::question::QuestionRequest;
     use ava_tools::permission_middleware::ToolApproval;
     use ava_types::PlanDecision;
     use axum::body::{to_bytes, Body};
     use axum::http::{Request, StatusCode};
-    use tokio::sync::oneshot;
+    use std::collections::{HashMap, VecDeque};
+    use std::sync::Arc;
+    use std::time::Duration;
+    use tokio::sync::{broadcast, mpsc, oneshot, Mutex, RwLock};
+    use tokio_util::sync::CancellationToken;
     use tower::ServiceExt;
+
+    fn timeout_test_state(base: &WebState, timeout: Duration) -> WebState {
+        let (_, approval_rx) = mpsc::unbounded_channel();
+        let (_, question_rx) = mpsc::unbounded_channel();
+        let (_, plan_rx) = mpsc::unbounded_channel();
+        let (event_tx, _) = broadcast::channel(32);
+        let timeout_policy = InteractiveTimeoutPolicy::new(timeout, timeout, timeout);
+
+        WebState {
+            inner: Arc::new(crate::web::state::WebStateInner {
+                stack: base.inner.stack.clone(),
+                db: base.inner.db.clone(),
+                cancel: RwLock::new(CancellationToken::new()),
+                running: RwLock::new(false),
+                startup_lock: Mutex::new(()),
+                event_tx,
+                question_rx: Mutex::new(question_rx),
+                approval_rx: Mutex::new(approval_rx),
+                plan_rx: Mutex::new(plan_rx),
+                message_queue: RwLock::new(None),
+                pending_approval_reply: InteractiveRequestStore::with_timeout_policy(
+                    InteractiveRequestKind::Approval,
+                    timeout_policy,
+                ),
+                pending_question_reply: InteractiveRequestStore::with_timeout_policy(
+                    InteractiveRequestKind::Question,
+                    timeout_policy,
+                ),
+                pending_plan_reply: InteractiveRequestStore::with_timeout_policy(
+                    InteractiveRequestKind::Plan,
+                    timeout_policy,
+                ),
+                last_session_id: RwLock::new(None),
+                active_session_id: RwLock::new(None),
+                edit_history: Arc::new(RwLock::new(VecDeque::new())),
+                deferred_queue: Arc::new(RwLock::new(HashMap::new())),
+                in_flight_deferred: Arc::new(RwLock::new(HashMap::new())),
+            }),
+        }
+    }
 
     #[tokio::test]
     async fn resolve_plan_route_requires_request_id_and_preserves_pending_state() {
@@ -356,10 +405,12 @@ mod tests {
                 request_id,
                 request_kind,
                 timed_out,
+                run_id,
             } => {
                 assert_eq!(request_id, request.request_id);
                 assert_eq!(request_kind, "plan");
                 assert!(!timed_out);
+                assert_eq!(run_id, None);
             }
             other => panic!("expected interactive_request_cleared event, got {other:?}"),
         }
@@ -403,10 +454,12 @@ mod tests {
                 request_id,
                 request_kind,
                 timed_out,
+                run_id,
             } => {
                 assert_eq!(request_id, request.request_id);
                 assert_eq!(request_kind, "approval");
                 assert!(!timed_out);
+                assert_eq!(run_id, None);
             }
             other => panic!("expected interactive_request_cleared event, got {other:?}"),
         }
@@ -447,10 +500,12 @@ mod tests {
                 request_id,
                 request_kind,
                 timed_out,
+                run_id,
             } => {
                 assert_eq!(request_id, request.request_id);
                 assert_eq!(request_kind, "question");
                 assert!(!timed_out);
+                assert_eq!(run_id, None);
             }
             other => panic!("expected interactive_request_cleared event, got {other:?}"),
         }
@@ -633,10 +688,12 @@ mod tests {
                 request_id,
                 request_kind,
                 timed_out,
+                run_id,
             } => {
                 assert_eq!(request_id, request.request_id);
                 assert_eq!(request_kind, "plan");
                 assert!(!timed_out);
+                assert_eq!(run_id, None);
             }
             other => panic!("expected interactive_request_cleared event, got {other:?}"),
         }
@@ -651,7 +708,11 @@ mod tests {
         let mut events = state.inner.event_tx.subscribe();
 
         let (tx, rx) = oneshot::channel();
-        let request = state.inner.pending_approval_reply.register(tx).await;
+        let request = state
+            .inner
+            .pending_approval_reply
+            .register_with_run_id(tx, Some("web-run-cancel".to_string()))
+            .await;
 
         let app = build_router(state);
         let response = app
@@ -678,13 +739,176 @@ mod tests {
                 request_id,
                 request_kind,
                 timed_out,
+                run_id,
             } => {
                 assert_eq!(request_id, request.request_id);
                 assert_eq!(request_kind, "approval");
                 assert!(!timed_out);
+                assert_eq!(run_id.as_deref(), Some("web-run-cancel"));
             }
             other => panic!("expected interactive_request_cleared event, got {other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn websocket_question_timeout_emits_correlated_clear_event_with_timed_out_true() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let base_state = WebState::init(temp.path().to_path_buf())
+            .await
+            .expect("web state");
+        let state = timeout_test_state(&base_state, Duration::from_millis(5));
+        let mut events = state.inner.event_tx.subscribe();
+
+        let (question_tx, question_rx) = mpsc::unbounded_channel();
+        let (_, empty_approval_rx) = mpsc::unbounded_channel();
+        let (_, empty_plan_rx) = mpsc::unbounded_channel();
+
+        let (approval_forwarder, question_forwarder, plan_forwarder) = spawn_interactive_forwarders(
+            state.inner.clone(),
+            empty_approval_rx,
+            question_rx,
+            empty_plan_rx,
+            "web-run-timeout".to_string(),
+        );
+
+        let (_reply_tx, reply_rx) = oneshot::channel::<String>();
+        question_tx
+            .send(QuestionRequest {
+                run_id: None,
+                question: "Continue?".to_string(),
+                options: vec!["Yes".to_string(), "No".to_string()],
+                reply: _reply_tx,
+            })
+            .expect("question request should enqueue");
+        drop(question_tx);
+
+        match events.recv().await.expect("question request event") {
+            WebEvent::QuestionRequest { run_id, .. } => {
+                assert_eq!(run_id.as_deref(), Some("web-run-timeout"));
+            }
+            other => panic!("expected question_request event, got {other:?}"),
+        }
+
+        match events.recv().await.expect("timeout clear event") {
+            WebEvent::InteractiveRequestCleared {
+                request_kind,
+                timed_out,
+                run_id,
+                ..
+            } => {
+                assert_eq!(request_kind, "question");
+                assert!(timed_out);
+                assert_eq!(run_id.as_deref(), Some("web-run-timeout"));
+            }
+            other => panic!("expected interactive_request_cleared event, got {other:?}"),
+        }
+
+        assert_eq!(reply_rx.await.expect("timeout answer"), "");
+
+        approval_forwarder.abort();
+        question_forwarder.abort();
+        plan_forwarder.abort();
+    }
+
+    #[tokio::test]
+    async fn queued_same_kind_web_question_timeout_starts_after_promotion() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let base_state = WebState::init(temp.path().to_path_buf())
+            .await
+            .expect("web state");
+        let state = timeout_test_state(&base_state, Duration::from_millis(20));
+        let mut events = state.inner.event_tx.subscribe();
+
+        let (question_tx, question_rx) = mpsc::unbounded_channel();
+        let (_, empty_approval_rx) = mpsc::unbounded_channel();
+        let (_, empty_plan_rx) = mpsc::unbounded_channel();
+
+        let (approval_forwarder, question_forwarder, plan_forwarder) = spawn_interactive_forwarders(
+            state.inner.clone(),
+            empty_approval_rx,
+            question_rx,
+            empty_plan_rx,
+            "web-run-queued-timeout".to_string(),
+        );
+
+        let (first_reply_tx, first_reply_rx) = oneshot::channel::<String>();
+        let (second_reply_tx, second_reply_rx) = oneshot::channel::<String>();
+        question_tx
+            .send(QuestionRequest {
+                run_id: None,
+                question: "First queued question?".to_string(),
+                options: vec!["Yes".to_string(), "No".to_string()],
+                reply: first_reply_tx,
+            })
+            .expect("first question should enqueue");
+        question_tx
+            .send(QuestionRequest {
+                run_id: None,
+                question: "Second queued question?".to_string(),
+                options: vec!["Yes".to_string(), "No".to_string()],
+                reply: second_reply_tx,
+            })
+            .expect("second question should enqueue");
+        drop(question_tx);
+
+        let mut question_request_ids = Vec::new();
+        for _ in 0..2 {
+            match events.recv().await.expect("question request event") {
+                WebEvent::QuestionRequest { id, .. } => question_request_ids.push(id),
+                other => panic!("expected question_request event, got {other:?}"),
+            }
+        }
+
+        let first_request_id = question_request_ids
+            .first()
+            .cloned()
+            .expect("first request id");
+        let second_request_id = question_request_ids
+            .get(1)
+            .cloned()
+            .expect("second request id");
+
+        match events.recv().await.expect("first timeout clear event") {
+            WebEvent::InteractiveRequestCleared {
+                request_id,
+                request_kind,
+                timed_out,
+                ..
+            } => {
+                assert_eq!(request_id, first_request_id);
+                assert_eq!(request_kind, "question");
+                assert!(timed_out);
+            }
+            other => panic!("expected interactive_request_cleared event, got {other:?}"),
+        }
+
+        assert!(
+            tokio::time::timeout(Duration::from_millis(8), events.recv())
+                .await
+                .is_err(),
+            "promoted queued question should not inherit the stale registration-time timeout"
+        );
+
+        match events.recv().await.expect("second timeout clear event") {
+            WebEvent::InteractiveRequestCleared {
+                request_id,
+                request_kind,
+                timed_out,
+                ..
+            } => {
+                assert_eq!(request_id, second_request_id);
+                assert_eq!(request_kind, "question");
+                assert!(timed_out);
+            }
+            other => panic!("expected interactive_request_cleared event, got {other:?}"),
+        }
+
+        assert_eq!(first_reply_rx.await.expect("first timeout answer"), "");
+        assert_eq!(second_reply_rx.await.expect("second timeout answer"), "");
+
+        approval_forwarder.abort();
+        question_forwarder.abort();
+        plan_forwarder.abort();
     }
 
     #[tokio::test]
@@ -716,12 +940,156 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn compact_context_without_session_id_does_not_use_last_session_fallback() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let state = WebState::init(temp.path().to_path_buf())
+            .await
+            .expect("web state");
+
+        let stale_session_id = uuid::Uuid::new_v4();
+        let mut stale_session = ava_types::Session::new().with_id(stale_session_id);
+        stale_session.add_message(ava_types::Message::new(
+            ava_types::Role::User,
+            "legacy context",
+        ));
+        state
+            .inner
+            .stack
+            .session_manager
+            .save(&stale_session)
+            .expect("save stale session");
+        *state.inner.last_session_id.write().await = Some(stale_session_id);
+
+        let app = build_router(state);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/context/compact")
+                    .header("content-type", "application/json")
+                    .body(Body::from("{}"))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = to_bytes(response.into_body(), 8 * 1024)
+            .await
+            .expect("body");
+        let payload: serde_json::Value =
+            serde_json::from_slice(&body).expect("compact response json");
+
+        assert_eq!(
+            payload["summary"].as_str().expect("summary string"),
+            "Nothing to compact -- conversation is empty."
+        );
+        assert!(payload["messages"]
+            .as_array()
+            .expect("messages array")
+            .is_empty());
+    }
+
+    #[tokio::test]
+    async fn submit_route_without_session_id_does_not_use_last_session_fallback() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let state = WebState::init(temp.path().to_path_buf())
+            .await
+            .expect("web state");
+
+        let stale_session_id = uuid::Uuid::new_v4();
+        let mut stale_session = ava_types::Session::new().with_id(stale_session_id);
+        stale_session.add_message(ava_types::Message::new(
+            ava_types::Role::User,
+            "legacy context",
+        ));
+        state
+            .inner
+            .stack
+            .session_manager
+            .save(&stale_session)
+            .expect("save stale session");
+        *state.inner.last_session_id.write().await = Some(stale_session_id);
+
+        let app = build_router(state.clone());
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/agent/submit")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"goal":"fresh task","run_id":"web-test-submit"}"#,
+                    ))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = to_bytes(response.into_body(), 8 * 1024)
+            .await
+            .expect("body");
+        let payload: serde_json::Value = serde_json::from_slice(&body).expect("submit response");
+        let returned_session_id = payload["sessionId"]
+            .as_str()
+            .expect("sessionId string")
+            .to_string();
+
+        assert_ne!(returned_session_id, stale_session_id.to_string());
+
+        state.cancel().await;
+    }
+
+    #[tokio::test]
+    async fn retry_route_requires_explicit_session_id_in_web_mode() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let state = WebState::init(temp.path().to_path_buf())
+            .await
+            .expect("web state");
+
+        let stale_session_id = uuid::Uuid::new_v4();
+        let mut stale_session = ava_types::Session::new().with_id(stale_session_id);
+        stale_session.add_message(ava_types::Message::new(ava_types::Role::User, "hello"));
+        state
+            .inner
+            .stack
+            .session_manager
+            .save(&stale_session)
+            .expect("save session");
+        *state.inner.last_session_id.write().await = Some(stale_session_id);
+
+        let app = build_router(state);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/agent/retry")
+                    .header("content-type", "application/json")
+                    .body(Body::from("{}"))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+        let body = to_bytes(response.into_body(), 8 * 1024)
+            .await
+            .expect("body");
+        assert!(String::from_utf8_lossy(&body).contains("session_id is required"));
+    }
+
+    #[tokio::test]
     async fn edit_resend_route_rejects_invalid_message_targets() {
         let temp = tempfile::tempdir().expect("tempdir");
         let state = WebState::init(temp.path().to_path_buf())
             .await
             .expect("web state");
 
+        let stale_session_id = uuid::Uuid::new_v4();
         let session_id = uuid::Uuid::new_v4();
         let mut session = ava_types::Session::new().with_id(session_id);
         session.add_message(ava_types::Message::new(ava_types::Role::User, "hello"));
@@ -731,7 +1099,50 @@ mod tests {
             .session_manager
             .save(&session)
             .expect("save session");
-        *state.inner.last_session_id.write().await = Some(session_id);
+        *state.inner.last_session_id.write().await = Some(stale_session_id);
+
+        let app = build_router(state);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/agent/edit-resend")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        format!(
+                            r#"{{"session_id":"{session_id}","message_id":"not-a-uuid","new_content":"retry this"}}"#
+                        ),
+                    ))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+
+        let body = to_bytes(response.into_body(), 8 * 1024)
+            .await
+            .expect("body");
+        assert!(String::from_utf8_lossy(&body).contains("Invalid message ID"));
+    }
+
+    #[tokio::test]
+    async fn edit_resend_route_requires_explicit_session_id_in_web_mode() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let state = WebState::init(temp.path().to_path_buf())
+            .await
+            .expect("web state");
+
+        let stale_session_id = uuid::Uuid::new_v4();
+        let mut stale_session = ava_types::Session::new().with_id(stale_session_id);
+        stale_session.add_message(ava_types::Message::new(ava_types::Role::User, "hello"));
+        state
+            .inner
+            .stack
+            .session_manager
+            .save(&stale_session)
+            .expect("save session");
+        *state.inner.last_session_id.write().await = Some(stale_session_id);
 
         let app = build_router(state);
         let response = app
@@ -748,12 +1159,12 @@ mod tests {
             .await
             .expect("response");
 
-        assert_eq!(response.status(), StatusCode::CONFLICT);
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 
         let body = to_bytes(response.into_body(), 8 * 1024)
             .await
             .expect("body");
-        assert!(String::from_utf8_lossy(&body).contains("Invalid message ID"));
+        assert!(String::from_utf8_lossy(&body).contains("session_id is required"));
     }
 
     #[tokio::test]
@@ -763,6 +1174,7 @@ mod tests {
             .await
             .expect("web state");
 
+        let stale_session_id = uuid::Uuid::new_v4();
         let session_id = uuid::Uuid::new_v4();
         let mut session = ava_types::Session::new().with_id(session_id);
         let assistant = ava_types::Message::new(ava_types::Role::Assistant, "done");
@@ -774,7 +1186,7 @@ mod tests {
             .session_manager
             .save(&session)
             .expect("save session");
-        *state.inner.last_session_id.write().await = Some(session_id);
+        *state.inner.last_session_id.write().await = Some(stale_session_id);
 
         let app = build_router(state);
         let response = app
@@ -784,7 +1196,7 @@ mod tests {
                     .uri("/api/agent/edit-resend")
                     .header("content-type", "application/json")
                     .body(Body::from(format!(
-                        r#"{{"message_id":"{assistant_id}","new_content":"retry this"}}"#
+                        r#"{{"session_id":"{session_id}","message_id":"{assistant_id}","new_content":"retry this"}}"#
                     )))
                     .expect("request"),
             )
@@ -797,5 +1209,45 @@ mod tests {
             .await
             .expect("body");
         assert!(String::from_utf8_lossy(&body).contains("Only user messages can be edited"));
+    }
+
+    #[tokio::test]
+    async fn regenerate_route_requires_explicit_session_id_in_web_mode() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let state = WebState::init(temp.path().to_path_buf())
+            .await
+            .expect("web state");
+
+        let stale_session_id = uuid::Uuid::new_v4();
+        let mut stale_session = ava_types::Session::new().with_id(stale_session_id);
+        stale_session.add_message(ava_types::Message::new(ava_types::Role::User, "hello"));
+        stale_session.add_message(ava_types::Message::new(ava_types::Role::Assistant, "done"));
+        state
+            .inner
+            .stack
+            .session_manager
+            .save(&stale_session)
+            .expect("save session");
+        *state.inner.last_session_id.write().await = Some(stale_session_id);
+
+        let app = build_router(state);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/agent/regenerate")
+                    .header("content-type", "application/json")
+                    .body(Body::from("{}"))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+        let body = to_bytes(response.into_body(), 8 * 1024)
+            .await
+            .expect("body");
+        assert!(String::from_utf8_lossy(&body).contains("session_id is required"));
     }
 }

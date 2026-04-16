@@ -1023,6 +1023,16 @@ impl AgentStack {
         crate::message_queue::MessageQueue::new()
     }
 
+    pub fn create_message_queue_with_control(
+        &self,
+    ) -> (
+        crate::message_queue::MessageQueue,
+        mpsc::UnboundedSender<QueuedMessage>,
+        crate::message_queue::MessageQueueControl,
+    ) {
+        crate::message_queue::MessageQueue::new_with_control()
+    }
+
     pub async fn current_model(&self) -> (String, String) {
         let cfg = self.config.get().await;
         let provider = self
@@ -1566,6 +1576,7 @@ mod tests {
                     Vec::new(),
                     None,
                     Vec::new(),
+                    None,
                     None,
                 )
                 .await

@@ -1,9 +1,19 @@
 //! Agent-related HTTP API handlers: submit, cancel, status, retry, edit-resend,
 //! regenerate, mid-stream messaging (steer/follow-up/post-complete), queue.
 
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 
 use ava_agent::control_plane::commands::{queue_message_tier, ControlPlaneCommand};
+use ava_agent::control_plane::queue::{
+    clear_queue_semantics, parse_clear_queue_target, resolve_deferred_queue_session,
+    QueueClearSemantics, UNSUPPORTED_QUEUE_CLEAR_ERROR,
+};
+use ava_agent::control_plane::sessions::{
+    build_edit_replay_payload, build_regenerate_replay_payload, build_retry_replay_payload,
+    resolve_existing_session, resolve_session_precedence, SessionPromptContext, SessionSelection,
+    SessionSelectionSource,
+};
 use ava_tools::core::plan::PlanRequest;
 use ava_tools::core::question::QuestionRequest;
 use ava_tools::permission_middleware::{ApprovalRequest, ToolApproval};
@@ -12,6 +22,7 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::Json;
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::Ordering;
 use tokio::sync::{broadcast, mpsc};
 use tokio::task::JoinHandle;
 use tracing::info;
@@ -35,9 +46,13 @@ pub struct SubmitGoalRequest {
     pub provider: Option<String>,
     #[serde(default)]
     pub model: Option<String>,
-    /// Optional session ID to continue an existing session.
+    /// Optional explicit session ID. When omitted, the shared session
+    /// For web-backed sessions, omitting `session_id` now creates a new
+    /// session rather than inheriting the process-wide last active session.
     #[serde(default)]
     pub session_id: Option<String>,
+    #[serde(default)]
+    pub run_id: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -49,16 +64,216 @@ pub struct SubmitGoalResponse {
     pub session_id: String,
 }
 
+fn ensure_web_run_id(run_id: Option<String>) -> String {
+    run_id.unwrap_or_else(|| format!("web-run-{}", uuid::Uuid::new_v4()))
+}
+
+fn queued_post_complete_group(progress: &str) -> Option<u32> {
+    progress
+        .strip_prefix("post-complete group ")?
+        .split(':')
+        .next()?
+        .parse()
+        .ok()
+}
+
+async fn cancel_active_run(state: &WebState) {
+    state
+        .inner
+        .interactive_revoked
+        .store(true, Ordering::SeqCst);
+    state.revoke_queue_dispatch(true).await;
+    state.cancel().await;
+
+    while let Some(cancelled) = state.inner.pending_approval_reply.cancel_pending().await {
+        let request_id = cancelled.handle.request_id.clone();
+        let _ = cancelled.reply.send(ToolApproval::Rejected(Some(
+            "Agent run cancelled from web UI".to_string(),
+        )));
+        emit_interactive_request_cleared(
+            &state.inner.event_tx,
+            &request_id,
+            "approval",
+            false,
+            cancelled.handle.run_id.as_deref(),
+        );
+    }
+    while let Some(cancelled) = state.inner.pending_question_reply.cancel_pending().await {
+        let request_id = cancelled.handle.request_id.clone();
+        let _ = cancelled.reply.send(String::new());
+        emit_interactive_request_cleared(
+            &state.inner.event_tx,
+            &request_id,
+            "question",
+            false,
+            cancelled.handle.run_id.as_deref(),
+        );
+    }
+    while let Some(cancelled) = state.inner.pending_plan_reply.cancel_pending().await {
+        let request_id = cancelled.handle.request_id.clone();
+        let _ = cancelled.reply.send(ava_types::PlanDecision::Rejected {
+            feedback: "Agent run cancelled from web UI".to_string(),
+        });
+        emit_interactive_request_cleared(
+            &state.inner.event_tx,
+            &request_id,
+            "plan",
+            false,
+            cancelled.handle.run_id.as_deref(),
+        );
+    }
+}
+
+fn move_follow_up_to_in_flight(
+    deferred: &mut std::collections::VecDeque<ava_types::QueuedMessage>,
+    in_flight: &mut std::collections::VecDeque<ava_types::QueuedMessage>,
+    text: &str,
+) {
+    in_flight.retain(|message| !matches!(message.tier, ava_types::MessageTier::FollowUp));
+    if let Some(index) = deferred.iter().position(|queued| {
+        queued.text == text && matches!(queued.tier, ava_types::MessageTier::FollowUp)
+    }) {
+        if let Some(message) = deferred.remove(index) {
+            in_flight.push_back(message);
+        }
+    }
+}
+
+fn move_post_complete_group_to_in_flight(
+    deferred: &mut std::collections::VecDeque<ava_types::QueuedMessage>,
+    in_flight: &mut std::collections::VecDeque<ava_types::QueuedMessage>,
+    group_id: u32,
+) {
+    in_flight
+        .retain(|message| !matches!(message.tier, ava_types::MessageTier::PostComplete { .. }));
+    let mut retained = std::collections::VecDeque::new();
+    while let Some(message) = deferred.pop_front() {
+        if matches!(message.tier, ava_types::MessageTier::PostComplete { group } if group == group_id)
+        {
+            in_flight.push_back(message);
+        } else {
+            retained.push_back(message);
+        }
+    }
+    *deferred = retained;
+}
+
+async fn restore_in_flight_deferred(
+    session_id: uuid::Uuid,
+    deferred: &tokio::sync::RwLock<HashMap<uuid::Uuid, VecDeque<ava_types::QueuedMessage>>>,
+    in_flight: &tokio::sync::RwLock<HashMap<uuid::Uuid, VecDeque<ava_types::QueuedMessage>>>,
+) {
+    let mut in_flight_guard = in_flight.write().await;
+    let Some(mut session_in_flight) = in_flight_guard.remove(&session_id) else {
+        return;
+    };
+    drop(in_flight_guard);
+
+    if session_in_flight.is_empty() {
+        return;
+    }
+
+    let mut deferred_guard = deferred.write().await;
+    let session_deferred = deferred_guard.entry(session_id).or_default();
+    while let Some(message) = session_in_flight.pop_back() {
+        session_deferred.push_front(message);
+    }
+}
+
+async fn clear_preserved_deferred(
+    session_id: uuid::Uuid,
+    deferred: &tokio::sync::RwLock<HashMap<uuid::Uuid, VecDeque<ava_types::QueuedMessage>>>,
+    in_flight: &tokio::sync::RwLock<HashMap<uuid::Uuid, VecDeque<ava_types::QueuedMessage>>>,
+) {
+    deferred.write().await.remove(&session_id);
+    in_flight.write().await.remove(&session_id);
+}
+
+fn resolve_web_submit_session(requested_session_id: Option<uuid::Uuid>) -> SessionSelection {
+    resolve_session_precedence(requested_session_id, None, uuid::Uuid::new_v4)
+}
+
+fn resolve_web_compaction_session(
+    requested_session_id: Option<uuid::Uuid>,
+) -> Option<SessionSelection> {
+    resolve_existing_session(requested_session_id, None)
+}
+
+fn resolve_web_replay_session(
+    requested_session_id: Option<uuid::Uuid>,
+) -> Option<SessionSelection> {
+    resolve_existing_session(requested_session_id, None)
+}
+
+fn parse_optional_session_id(
+    session_id: Option<&str>,
+) -> Result<Option<uuid::Uuid>, (StatusCode, Json<ErrorResponse>)> {
+    session_id
+        .map(uuid::Uuid::parse_str)
+        .transpose()
+        .map_err(|e| error_response(StatusCode::BAD_REQUEST, &format!("Invalid session_id: {e}")))
+}
+
+async fn resolve_requested_deferred_session(
+    state: &WebState,
+    session_id: Option<&str>,
+) -> Result<uuid::Uuid, (StatusCode, Json<ErrorResponse>)> {
+    let requested_session_id = parse_optional_session_id(session_id)?;
+    let snapshot = state.queue_dispatch_snapshot().await;
+    if !snapshot.accepting || snapshot.tx.is_none() {
+        return Err(error_response(
+            StatusCode::CONFLICT,
+            "Agent queue is unavailable",
+        ));
+    }
+
+    resolve_deferred_queue_session(requested_session_id, snapshot.active_session_id)
+        .map_err(|error| error_response(StatusCode::CONFLICT, &error.to_string()))
+}
+
+async fn load_owned_replay_session(
+    state: &WebState,
+    session_id: Option<&str>,
+    missing_message: &str,
+) -> Result<(uuid::Uuid, ava_types::Session), (StatusCode, Json<ErrorResponse>)> {
+    let requested_session_id = parse_optional_session_id(session_id)?;
+    let session_selection = resolve_web_replay_session(requested_session_id)
+        .ok_or_else(|| error_response(StatusCode::BAD_REQUEST, missing_message))?;
+    let session_id = session_selection.session_id;
+
+    let session = state
+        .inner
+        .stack
+        .session_manager
+        .get(session_id)
+        .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?
+        .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "Session not found"))?;
+
+    Ok((session_id, session))
+}
+
+fn resolve_web_queue_clear_semantics(target_str: &str) -> Result<QueueClearSemantics, String> {
+    let target = parse_clear_queue_target(target_str)
+        .ok_or_else(|| format!("Unsupported clear target '{target_str}'"))?;
+
+    match clear_queue_semantics(target) {
+        semantics @ QueueClearSemantics::CancelRunAndClearSteering => Ok(semantics),
+        QueueClearSemantics::Unsupported => Err(UNSUPPORTED_QUEUE_CLEAR_ERROR.to_string()),
+    }
+}
+
 fn emit_interactive_request_cleared(
     event_tx: &broadcast::Sender<WebEvent>,
     request_id: &str,
     request_kind: &str,
     timed_out: bool,
+    run_id: Option<&str>,
 ) {
     let _ = event_tx.send(WebEvent::InteractiveRequestCleared {
         request_id: request_id.to_string(),
         request_kind: request_kind.to_string(),
         timed_out,
+        run_id: run_id.map(str::to_string),
     });
 }
 
@@ -83,39 +298,49 @@ fn plan_step_payloads(plan: &ava_types::Plan) -> Vec<PlanStepPayload> {
         .collect()
 }
 
-fn spawn_interactive_forwarders(
+pub(super) fn spawn_interactive_forwarders(
     inner: Arc<WebStateInner>,
     mut approval_rx: mpsc::UnboundedReceiver<ApprovalRequest>,
     mut question_rx: mpsc::UnboundedReceiver<QuestionRequest>,
     mut plan_rx: mpsc::UnboundedReceiver<PlanRequest>,
+    run_id: String,
 ) -> (JoinHandle<()>, JoinHandle<()>, JoinHandle<()>) {
+    let approval_run_id = run_id.clone();
     let approval_inner = inner.clone();
     let approval_forwarder = tokio::spawn(async move {
         while let Some(req) = approval_rx.recv().await {
+            if approval_inner.interactive_revoked.load(Ordering::SeqCst) {
+                let _ = req.reply.send(ToolApproval::Rejected(Some(
+                    "Agent run cancelled from web UI".to_string(),
+                )));
+                continue;
+            }
             let risk_level = format!("{:?}", req.inspection.risk_level).to_lowercase();
             let handle = approval_inner
                 .pending_approval_reply
-                .register(req.reply)
+                .register_with_run_id(req.reply, Some(approval_run_id.clone()))
                 .await;
             let request_id = handle.request_id.clone();
 
             let _ = approval_inner.event_tx.send(WebEvent::ApprovalRequest {
                 id: request_id.clone(),
+                tool_call_id: req.call.id.clone(),
                 tool_name: req.call.name.clone(),
                 args: req.call.arguments.clone(),
                 risk_level,
                 reason: req.inspection.reason.clone(),
                 warnings: req.inspection.warnings.clone(),
+                run_id: handle.run_id.clone(),
             });
 
             let pending = approval_inner.pending_approval_reply.clone();
             let event_tx = approval_inner.event_tx.clone();
             tokio::spawn(async move {
-                tokio::time::sleep(pending.timeout()).await;
-                if let Some(timed_out) = pending.timeout_request(&request_id).await {
+                let timeout = pending.timeout();
+                if let Some(timed_out) = pending.await_timeout_request(&request_id).await {
                     tracing::warn!(
                         request_id = %timed_out.handle.request_id,
-                        timeout_secs = pending.timeout().as_secs(),
+                        timeout_secs = timeout.as_secs(),
                         "Web approval request timed out — auto-denying to unblock agent"
                     );
                     let _ = timed_out.reply.send(ToolApproval::Rejected(Some(
@@ -126,18 +351,24 @@ fn spawn_interactive_forwarders(
                         &timed_out.handle.request_id,
                         timed_out.handle.kind.as_str(),
                         true,
+                        timed_out.handle.run_id.as_deref(),
                     );
                 }
             });
         }
     });
 
+    let question_run_id = run_id.clone();
     let question_inner = inner.clone();
     let question_forwarder = tokio::spawn(async move {
         while let Some(req) = question_rx.recv().await {
+            if question_inner.interactive_revoked.load(Ordering::SeqCst) {
+                let _ = req.reply.send(String::new());
+                continue;
+            }
             let handle = question_inner
                 .pending_question_reply
-                .register(req.reply)
+                .register_with_run_id(req.reply, Some(question_run_id.clone()))
                 .await;
             let request_id = handle.request_id.clone();
 
@@ -145,16 +376,17 @@ fn spawn_interactive_forwarders(
                 id: request_id.clone(),
                 question: req.question.clone(),
                 options: req.options.clone(),
+                run_id: handle.run_id.clone(),
             });
 
             let pending = question_inner.pending_question_reply.clone();
             let event_tx = question_inner.event_tx.clone();
             tokio::spawn(async move {
-                tokio::time::sleep(pending.timeout()).await;
-                if let Some(timed_out) = pending.timeout_request(&request_id).await {
+                let timeout = pending.timeout();
+                if let Some(timed_out) = pending.await_timeout_request(&request_id).await {
                     tracing::warn!(
                         request_id = %timed_out.handle.request_id,
-                        timeout_secs = pending.timeout().as_secs(),
+                        timeout_secs = timeout.as_secs(),
                         "Web question request timed out — sending empty response to unblock agent"
                     );
                     let _ = timed_out.reply.send(String::new());
@@ -163,15 +395,26 @@ fn spawn_interactive_forwarders(
                         &timed_out.handle.request_id,
                         timed_out.handle.kind.as_str(),
                         true,
+                        timed_out.handle.run_id.as_deref(),
                     );
                 }
             });
         }
     });
 
+    let plan_run_id = run_id;
     let plan_forwarder = tokio::spawn(async move {
         while let Some(req) = plan_rx.recv().await {
-            let handle = inner.pending_plan_reply.register(req.reply).await;
+            if inner.interactive_revoked.load(Ordering::SeqCst) {
+                let _ = req.reply.send(ava_types::PlanDecision::Rejected {
+                    feedback: "Agent run cancelled from web UI".to_string(),
+                });
+                continue;
+            }
+            let handle = inner
+                .pending_plan_reply
+                .register_with_run_id(req.reply, Some(plan_run_id.clone()))
+                .await;
             let request_id = handle.request_id.clone();
 
             let _ = inner.event_tx.send(WebEvent::PlanCreated {
@@ -179,16 +422,17 @@ fn spawn_interactive_forwarders(
                 summary: req.plan.summary.clone(),
                 steps: plan_step_payloads(&req.plan),
                 estimated_turns: req.plan.estimated_turns.unwrap_or(0) as usize,
+                run_id: handle.run_id.clone(),
             });
 
             let pending = inner.pending_plan_reply.clone();
             let event_tx = inner.event_tx.clone();
             tokio::spawn(async move {
-                tokio::time::sleep(pending.timeout()).await;
-                if let Some(timed_out) = pending.timeout_request(&request_id).await {
+                let timeout = pending.timeout();
+                if let Some(timed_out) = pending.await_timeout_request(&request_id).await {
                     tracing::warn!(
                         request_id = %timed_out.handle.request_id,
-                        timeout_secs = pending.timeout().as_secs(),
+                        timeout_secs = timeout.as_secs(),
                         "Web plan request timed out — auto-rejecting to unblock agent"
                     );
                     let _ = timed_out.reply.send(ava_types::PlanDecision::Rejected {
@@ -199,6 +443,7 @@ fn spawn_interactive_forwarders(
                         &timed_out.handle.request_id,
                         timed_out.handle.kind.as_str(),
                         true,
+                        timed_out.handle.run_id.as_deref(),
                     );
                 }
             });
@@ -217,6 +462,9 @@ pub(crate) async fn submit_goal(
     State(state): State<WebState>,
     Json(req): Json<SubmitGoalRequest>,
 ) -> Result<Json<SubmitGoalResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let run_id = ensure_web_run_id(req.run_id);
+    let _startup_guard = state.inner.startup_lock.lock().await;
+
     // Prevent concurrent runs
     {
         let running = state.inner.running.read().await;
@@ -227,7 +475,6 @@ pub(crate) async fn submit_goal(
             ));
         }
     }
-    *state.inner.running.write().await = true;
 
     // Apply model override if requested
     if let (Some(ref provider), Some(ref model)) = (&req.provider, &req.model) {
@@ -239,26 +486,34 @@ pub(crate) async fn submit_goal(
             .map_err(|e| error_response(StatusCode::BAD_REQUEST, &e.to_string()))?;
     }
 
-    // If a session_id was provided, use it so frontend and backend share the same ID.
-    // Also load that session's messages as history if it already exists in the DB.
-    let (session_uuid, history) =
-        if let Some(ref sid) = req.session_id {
-            let uuid = uuid::Uuid::parse_str(sid).map_err(|e| {
-                error_response(StatusCode::BAD_REQUEST, &format!("Invalid session_id: {e}"))
-            })?;
-            let session =
-                state.inner.stack.session_manager.get(uuid).map_err(|e| {
-                    error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string())
-                })?;
-            let msgs = session.map(|s| s.messages).unwrap_or_default();
-            (uuid, msgs)
-        } else {
-            (uuid::Uuid::new_v4(), vec![])
-        };
+    let requested_session_id = req
+        .session_id
+        .as_deref()
+        .map(uuid::Uuid::parse_str)
+        .transpose()
+        .map_err(|e| {
+            error_response(StatusCode::BAD_REQUEST, &format!("Invalid session_id: {e}"))
+        })?;
+    let session_selection = resolve_web_submit_session(requested_session_id);
+    let session_uuid = session_selection.session_id;
+    let history = if session_selection.source == SessionSelectionSource::New {
+        vec![]
+    } else {
+        state
+            .inner
+            .stack
+            .session_manager
+            .get(session_uuid)
+            .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?
+            .map(|s| s.messages)
+            .unwrap_or_default()
+    };
     let session_id_str = session_uuid.to_string();
 
-    let cancel = state.new_cancel_token().await;
     let inner = state.inner.clone();
+    let cancel = state.new_cancel_token().await;
+    inner.interactive_revoked.store(false, Ordering::SeqCst);
+    *inner.active_session_id.write().await = Some(session_uuid);
     let stack = inner.stack.clone();
 
     let max_turns = if req.max_turns > 0 { req.max_turns } else { 0 };
@@ -267,8 +522,16 @@ pub(crate) async fn submit_goal(
     info!(goal = %goal, max_turns, "Web: starting agent (async)");
 
     // Create message queue for mid-stream messaging (3-tier)
-    let (msg_queue, msg_queue_tx) = stack.create_message_queue();
-    *state.inner.message_queue.write().await = Some(msg_queue_tx);
+    let (msg_queue, msg_queue_tx, msg_queue_control) = stack.create_message_queue_with_control();
+    if let Some(messages) = inner.deferred_queue.read().await.get(&session_uuid) {
+        for message in messages.iter().cloned() {
+            let _ = msg_queue_tx.send(message);
+        }
+    }
+    state
+        .activate_message_queue(session_uuid, msg_queue_tx, msg_queue_control)
+        .await;
+    *state.inner.running.write().await = true;
 
     // Take approval/question/plan receivers out of the state for this run
     let mut approval_rx = {
@@ -299,7 +562,12 @@ pub(crate) async fn submit_goal(
 
         // Forward raw agent events to the WS broadcast channel, tracking edits and todos
         let checkpoint_stack = stack.clone();
+        let checkpoint_last_id = inner.clone();
+        let deferred_queue = inner.deferred_queue.clone();
+        let in_flight_deferred = inner.in_flight_deferred.clone();
+        let deferred_session_id = session_uuid;
         let todo_state = stack.todo_state.clone();
+        let forwarder_run_id = run_id.clone();
         let forwarder = tokio::spawn(async move {
             let mut last_tool_was_todo_write = false;
             while let Some(event) = rx.recv().await {
@@ -310,6 +578,7 @@ pub(crate) async fn submit_goal(
                     let _ = checkpoint_stack
                         .session_manager
                         .add_messages(session.id, &session.messages);
+                    *checkpoint_last_id.last_session_id.write().await = Some(session.id);
                     continue; // Don't forward checkpoint events to WebSocket clients
                 }
                 // Track write/edit tool calls for undo support, and detect todo_write
@@ -342,17 +611,47 @@ pub(crate) async fn submit_goal(
                                 priority: item.priority.to_string(),
                             })
                             .collect();
-                        let _ = event_broadcast.send(WebEvent::TodoUpdate { todos });
+                        let _ = event_broadcast.send(WebEvent::TodoUpdate {
+                            todos,
+                            run_id: Some(forwarder_run_id.clone()),
+                        });
                     }
                 } else {
                     last_tool_was_todo_write = false;
                 }
-                let _ = event_broadcast.send(WebEvent::Agent(event));
+                if let ava_agent::agent_loop::AgentEvent::Progress(ref message) = event {
+                    if let Some(text) = message.strip_prefix("follow-up: ") {
+                        let mut deferred = deferred_queue.write().await;
+                        let mut in_flight = in_flight_deferred.write().await;
+                        move_follow_up_to_in_flight(
+                            deferred.entry(deferred_session_id).or_default(),
+                            in_flight.entry(deferred_session_id).or_default(),
+                            text,
+                        );
+                    } else if let Some(group_id) = queued_post_complete_group(message) {
+                        let mut deferred = deferred_queue.write().await;
+                        let mut in_flight = in_flight_deferred.write().await;
+                        move_post_complete_group_to_in_flight(
+                            deferred.entry(deferred_session_id).or_default(),
+                            in_flight.entry(deferred_session_id).or_default(),
+                            group_id,
+                        );
+                    }
+                }
+                let _ = event_broadcast.send(WebEvent::Agent {
+                    event,
+                    run_id: Some(forwarder_run_id.clone()),
+                });
             }
         });
 
-        let (approval_forwarder, question_forwarder, plan_forwarder) =
-            spawn_interactive_forwarders(inner.clone(), approval_rx, question_rx, plan_rx);
+        let (approval_forwarder, question_forwarder, plan_forwarder) = spawn_interactive_forwarders(
+            inner.clone(),
+            approval_rx,
+            question_rx,
+            plan_rx,
+            run_id.clone(),
+        );
 
         let result = stack
             .run(
@@ -364,8 +663,11 @@ pub(crate) async fn submit_goal(
                 Some(msg_queue),
                 vec![],             // no images
                 Some(session_uuid), // use frontend's session ID
+                Some(run_id.clone()),
             )
             .await;
+
+        state.clear_message_queue_dispatch().await;
 
         // Wait for the forwarder to drain; abort the interactive forwarders
         let _ = forwarder.await;
@@ -374,11 +676,16 @@ pub(crate) async fn submit_goal(
         plan_forwarder.abort();
 
         // Clear the message queue sender and mark as not running
-        *inner.message_queue.write().await = None;
         *inner.running.write().await = false;
 
         match result {
             Ok(run_result) => {
+                clear_preserved_deferred(
+                    session_uuid,
+                    &inner.deferred_queue,
+                    &inner.in_flight_deferred,
+                )
+                .await;
                 match stack.session_manager.save(&run_result.session) {
                     Ok(()) => {
                         *inner.last_session_id.write().await = Some(run_result.session.id);
@@ -394,6 +701,12 @@ pub(crate) async fn submit_goal(
                 }
             }
             Err(e) => {
+                restore_in_flight_deferred(
+                    session_uuid,
+                    &inner.deferred_queue,
+                    &inner.in_flight_deferred,
+                )
+                .await;
                 let is_cancelled = matches!(e, ava_types::AvaError::Cancelled);
                 if is_cancelled {
                     tracing::info!("Agent run cancelled by user (session {session_uuid})");
@@ -402,17 +715,19 @@ pub(crate) async fn submit_goal(
                     *inner.last_session_id.write().await = Some(session_uuid);
                     // Send an error event so the frontend knows the agent was cancelled
                     // and can preserve partial streaming content.
-                    let _ = inner.event_tx.send(WebEvent::Agent(
-                        ava_agent::agent_loop::AgentEvent::Error(
+                    let _ = inner.event_tx.send(WebEvent::Agent {
+                        event: ava_agent::agent_loop::AgentEvent::Error(
                             "Agent run cancelled by user".to_string(),
                         ),
-                    ));
+                        run_id: Some(run_id.clone()),
+                    });
                 } else {
                     tracing::error!("Agent run failed: {e}");
                     // Send an error event so the frontend's completion promise resolves
-                    let _ = inner.event_tx.send(WebEvent::Agent(
-                        ava_agent::agent_loop::AgentEvent::Error(e.to_string()),
-                    ));
+                    let _ = inner.event_tx.send(WebEvent::Agent {
+                        event: ava_agent::agent_loop::AgentEvent::Error(e.to_string()),
+                        run_id: Some(run_id.clone()),
+                    });
                 }
             }
         }
@@ -425,106 +740,9 @@ pub(crate) async fn submit_goal(
     }))
 }
 
-fn retry_replay_payload(
-    session: &ava_types::Session,
-) -> Result<
-    (
-        String,
-        Vec<ava_types::Message>,
-        Vec<ava_types::ImageContent>,
-    ),
-    String,
-> {
-    let last_user_msg = session
-        .messages
-        .iter()
-        .rev()
-        .find(|message| message.role == ava_types::Role::User)
-        .ok_or_else(|| "No user message found in session".to_string())?;
-
-    Ok((
-        last_user_msg.content.clone(),
-        collect_history_before_last_user(&session.messages),
-        last_user_msg.images.clone(),
-    ))
-}
-
-fn edit_replay_payload(
-    session: &ava_types::Session,
-    message_id: Option<uuid::Uuid>,
-    new_content: String,
-) -> Result<
-    (
-        String,
-        Vec<ava_types::Message>,
-        Vec<ava_types::ImageContent>,
-    ),
-    String,
-> {
-    let target_id = message_id.ok_or_else(|| "Invalid message ID for edit-resend".to_string())?;
-    let pos = session
-        .messages
-        .iter()
-        .position(|message| message.id == target_id)
-        .ok_or_else(|| format!("Message {target_id} not found in session"))?;
-
-    if session.messages[pos].role != ava_types::Role::User {
-        return Err("Only user messages can be edited".to_string());
-    }
-
-    Ok((
-        new_content,
-        session.messages[..pos].to_vec(),
-        session.messages[pos].images.clone(),
-    ))
-}
-
-fn regenerate_replay_payload(
-    session: &ava_types::Session,
-) -> Result<
-    (
-        String,
-        Vec<ava_types::Message>,
-        Vec<ava_types::ImageContent>,
-    ),
-    String,
-> {
-    let last_user_pos = session
-        .messages
-        .iter()
-        .rposition(|message| message.role == ava_types::Role::User)
-        .ok_or_else(|| "No user message found in session to regenerate from".to_string())?;
-
-    Ok((
-        session.messages[last_user_pos].content.clone(),
-        session.messages[..last_user_pos].to_vec(),
-        session.messages[last_user_pos].images.clone(),
-    ))
-}
-
 /// Cancel the currently-running agent.
 pub(crate) async fn cancel_agent(State(state): State<WebState>) -> impl IntoResponse {
-    state.cancel().await;
-
-    if let Some(cancelled) = state.inner.pending_approval_reply.cancel_pending().await {
-        let request_id = cancelled.handle.request_id.clone();
-        let _ = cancelled.reply.send(ToolApproval::Rejected(Some(
-            "Agent run cancelled from web UI".to_string(),
-        )));
-        emit_interactive_request_cleared(&state.inner.event_tx, &request_id, "approval", false);
-    }
-    if let Some(cancelled) = state.inner.pending_question_reply.cancel_pending().await {
-        let request_id = cancelled.handle.request_id.clone();
-        let _ = cancelled.reply.send(String::new());
-        emit_interactive_request_cleared(&state.inner.event_tx, &request_id, "question", false);
-    }
-    if let Some(cancelled) = state.inner.pending_plan_reply.cancel_pending().await {
-        let request_id = cancelled.handle.request_id.clone();
-        let _ = cancelled.reply.send(ava_types::PlanDecision::Rejected {
-            feedback: "Agent run cancelled from web UI".to_string(),
-        });
-        emit_interactive_request_cleared(&state.inner.event_tx, &request_id, "plan", false);
-    }
+    cancel_active_run(&state).await;
 
     Json(serde_json::json!({ "cancelled": true }))
 }
@@ -559,14 +777,18 @@ pub(crate) async fn run_agent_from_history(
     goal: String,
     history: Vec<ava_types::Message>,
     images: Vec<ava_types::ImageContent>,
+    run_id: Option<String>,
 ) -> Result<Json<SubmitGoalResponse>, (StatusCode, Json<ErrorResponse>)> {
     // Build a fake SubmitGoalRequest and reuse submit_goal logic
+    let run_id = ensure_web_run_id(run_id);
+    let _startup_guard = state.inner.startup_lock.lock().await;
     let req = SubmitGoalRequest {
         goal,
         max_turns: 0,
         provider: None,
         model: None,
         session_id: Some(session_id.to_string()),
+        run_id: Some(run_id.clone()),
     };
     // We override the history by temporarily injecting it via a one-shot path.
     // Since submit_goal loads history from session_id, we instead call the inner
@@ -580,17 +802,25 @@ pub(crate) async fn run_agent_from_history(
             ));
         }
     }
-    *state.inner.running.write().await = true;
 
     let session_id_str = session_id.to_string();
-    let cancel = state.new_cancel_token().await;
     let inner = state.inner.clone();
+    let cancel = state.new_cancel_token().await;
+    inner.interactive_revoked.store(false, Ordering::SeqCst);
     let stack = inner.stack.clone();
     let max_turns = 0usize;
     let goal = req.goal.clone();
 
-    let (msg_queue, msg_queue_tx) = stack.create_message_queue();
-    *state.inner.message_queue.write().await = Some(msg_queue_tx);
+    let (msg_queue, msg_queue_tx, msg_queue_control) = stack.create_message_queue_with_control();
+    if let Some(messages) = inner.deferred_queue.read().await.get(&session_id) {
+        for message in messages.iter().cloned() {
+            let _ = msg_queue_tx.send(message);
+        }
+    }
+    state
+        .activate_message_queue(session_id, msg_queue_tx, msg_queue_control)
+        .await;
+    *state.inner.running.write().await = true;
 
     let mut approval_rx = {
         let mut lock = inner.approval_rx.lock().await;
@@ -614,9 +844,24 @@ pub(crate) async fn run_agent_from_history(
         let (tx, mut rx) = mpsc::unbounded_channel();
         let event_broadcast = inner.event_tx.clone();
         let edit_hist = edit_history.clone();
+        let checkpoint_stack = stack.clone();
+        let checkpoint_last_id = inner.clone();
+        let deferred_queue = inner.deferred_queue.clone();
+        let in_flight_deferred = inner.in_flight_deferred.clone();
+        let deferred_session_id = session_id;
+        let forwarder_run_id = run_id.clone();
+        let interactive_forwarder_run_id = forwarder_run_id.clone();
+        let event_forwarder_run_id = interactive_forwarder_run_id.clone();
 
         let forwarder = tokio::spawn(async move {
             while let Some(event) = rx.recv().await {
+                if let ava_agent::agent_loop::AgentEvent::Checkpoint(ref session) = event {
+                    let _ = checkpoint_stack
+                        .session_manager
+                        .add_messages(session.id, &session.messages);
+                    *checkpoint_last_id.last_session_id.write().await = Some(session.id);
+                    continue;
+                }
                 if let ava_agent::agent_loop::AgentEvent::ToolCall(ref tc) = event {
                     if tc.name == "edit" || tc.name == "write" {
                         if let Some(path) = tc.arguments.get("file_path").and_then(|v| v.as_str()) {
@@ -633,12 +878,39 @@ pub(crate) async fn run_agent_from_history(
                         }
                     }
                 }
-                let _ = event_broadcast.send(WebEvent::Agent(event));
+                if let ava_agent::agent_loop::AgentEvent::Progress(ref message) = event {
+                    if let Some(text) = message.strip_prefix("follow-up: ") {
+                        let mut deferred = deferred_queue.write().await;
+                        let mut in_flight = in_flight_deferred.write().await;
+                        move_follow_up_to_in_flight(
+                            deferred.entry(deferred_session_id).or_default(),
+                            in_flight.entry(deferred_session_id).or_default(),
+                            text,
+                        );
+                    } else if let Some(group_id) = queued_post_complete_group(message) {
+                        let mut deferred = deferred_queue.write().await;
+                        let mut in_flight = in_flight_deferred.write().await;
+                        move_post_complete_group_to_in_flight(
+                            deferred.entry(deferred_session_id).or_default(),
+                            in_flight.entry(deferred_session_id).or_default(),
+                            group_id,
+                        );
+                    }
+                }
+                let _ = event_broadcast.send(WebEvent::Agent {
+                    event,
+                    run_id: Some(event_forwarder_run_id.clone()),
+                });
             }
         });
 
-        let (approval_forwarder, question_forwarder, plan_forwarder) =
-            spawn_interactive_forwarders(inner.clone(), approval_rx, question_rx, plan_rx);
+        let (approval_forwarder, question_forwarder, plan_forwarder) = spawn_interactive_forwarders(
+            inner.clone(),
+            approval_rx,
+            question_rx,
+            plan_rx,
+            forwarder_run_id,
+        );
 
         let result = stack
             .run(
@@ -650,19 +922,27 @@ pub(crate) async fn run_agent_from_history(
                 Some(msg_queue),
                 images,
                 Some(session_id),
+                Some(interactive_forwarder_run_id.clone()),
             )
             .await;
+
+        state.clear_message_queue_dispatch().await;
 
         let _ = forwarder.await;
         approval_forwarder.abort();
         question_forwarder.abort();
         plan_forwarder.abort();
 
-        *inner.message_queue.write().await = None;
         *inner.running.write().await = false;
 
         match result {
             Ok(run_result) => {
+                clear_preserved_deferred(
+                    session_id,
+                    &inner.deferred_queue,
+                    &inner.in_flight_deferred,
+                )
+                .await;
                 if let Err(e) = stack.session_manager.save(&run_result.session) {
                     tracing::error!(
                         "Failed to persist session {} (retry/regen): {e}",
@@ -672,7 +952,31 @@ pub(crate) async fn run_agent_from_history(
                 *inner.last_session_id.write().await = Some(run_result.session.id);
             }
             Err(e) => {
-                tracing::error!("Agent run (retry/regen) failed: {e}");
+                restore_in_flight_deferred(
+                    session_id,
+                    &inner.deferred_queue,
+                    &inner.in_flight_deferred,
+                )
+                .await;
+                let is_cancelled = matches!(e, ava_types::AvaError::Cancelled);
+                if is_cancelled {
+                    tracing::info!(
+                        "Agent run (retry/regen) cancelled by user (session {session_id})"
+                    );
+                    *inner.last_session_id.write().await = Some(session_id);
+                    let _ = inner.event_tx.send(WebEvent::Agent {
+                        event: ava_agent::agent_loop::AgentEvent::Error(
+                            "Agent run cancelled by user".to_string(),
+                        ),
+                        run_id: Some(run_id.clone()),
+                    });
+                } else {
+                    tracing::error!("Agent run (retry/regen) failed: {e}");
+                    let _ = inner.event_tx.send(WebEvent::Agent {
+                        event: ava_agent::agent_loop::AgentEvent::Error(e.to_string()),
+                        run_id: Some(run_id.clone()),
+                    });
+                }
             }
         }
     });
@@ -684,36 +988,46 @@ pub(crate) async fn run_agent_from_history(
     }))
 }
 
+#[derive(Deserialize, Default)]
+pub struct RunCorrelationRequest {
+    #[serde(default)]
+    pub run_id: Option<String>,
+    #[serde(default)]
+    pub session_id: Option<String>,
+}
+
 /// Retry the last user message.
 pub(crate) async fn retry_last_message(
     State(state): State<WebState>,
+    maybe_req: Option<Json<RunCorrelationRequest>>,
 ) -> Result<Json<SubmitGoalResponse>, (StatusCode, Json<ErrorResponse>)> {
-    let session_id = state
-        .inner
-        .last_session_id
-        .read()
-        .await
-        .ok_or_else(|| error_response(StatusCode::CONFLICT, "No previous session to retry"))?;
+    let req = maybe_req.map(|Json(req)| req).unwrap_or_default();
+    let (session_id, session) = load_owned_replay_session(
+        &state,
+        req.session_id.as_deref(),
+        "session_id is required for web retry requests",
+    )
+    .await?;
 
-    let session = state
-        .inner
-        .stack
-        .session_manager
-        .get(session_id)
-        .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?
-        .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "Session not found"))?;
-
-    let (goal, history, images) = retry_replay_payload(&session)
-        .map_err(|error| error_response(StatusCode::CONFLICT, &error))?;
+    let SessionPromptContext {
+        goal,
+        history,
+        images,
+    } = build_retry_replay_payload(&session)
+        .map_err(|error| error_response(StatusCode::CONFLICT, &error.to_string()))?;
 
     info!(goal = %goal, %session_id, "Web: retry_last_message");
-    run_agent_from_history(&state, session_id, goal, history, images).await
+    run_agent_from_history(&state, session_id, goal, history, images, req.run_id).await
 }
 
 #[derive(Deserialize)]
 pub struct EditAndResendRequest {
     pub message_id: String,
     pub new_content: String,
+    #[serde(default)]
+    pub run_id: Option<String>,
+    #[serde(default)]
+    pub session_id: Option<String>,
 }
 
 /// Edit a specific user message and re-run the agent from that point.
@@ -726,76 +1040,47 @@ pub(crate) async fn edit_and_resend(
     State(state): State<WebState>,
     Json(req): Json<EditAndResendRequest>,
 ) -> Result<Json<SubmitGoalResponse>, (StatusCode, Json<ErrorResponse>)> {
-    let session_id = *state.inner.last_session_id.read().await;
-
-    let (goal, history, images): (
-        String,
-        Vec<ava_types::Message>,
-        Vec<ava_types::ImageContent>,
-    ) = if let Some(sid) = session_id {
-        let session = state.inner.stack.session_manager.get(sid).ok().flatten();
-
-        if let Some(session) = session {
-            let target_id = uuid::Uuid::parse_str(&req.message_id).ok();
-            edit_replay_payload(&session, target_id, req.new_content)
-                .map_err(|error| error_response(StatusCode::CONFLICT, &error))?
-        } else {
-            return Err(error_response(StatusCode::NOT_FOUND, "Session not found"));
-        }
-    } else {
-        return Err(error_response(
-            StatusCode::CONFLICT,
-            "No previous session to edit",
-        ));
-    };
-    info!(new_content = %goal, message_id = %req.message_id, "Web: edit_and_resend");
-    run_agent_from_history(
+    let (session_id, session) = load_owned_replay_session(
         &state,
-        session_id
-            .ok_or_else(|| error_response(StatusCode::CONFLICT, "No previous session to edit"))?,
+        req.session_id.as_deref(),
+        "session_id is required for web edit-resend requests",
+    )
+    .await?;
+    let SessionPromptContext {
         goal,
         history,
         images,
-    )
-    .await
+    } = {
+        let target_id = uuid::Uuid::parse_str(&req.message_id).ok();
+        build_edit_replay_payload(&session, target_id, req.new_content)
+            .map_err(|error| error_response(StatusCode::CONFLICT, &error.to_string()))?
+    };
+    info!(new_content = %goal, message_id = %req.message_id, "Web: edit_and_resend");
+    run_agent_from_history(&state, session_id, goal, history, images, req.run_id).await
 }
 
 /// Regenerate the last assistant response.
 pub(crate) async fn regenerate_response(
     State(state): State<WebState>,
+    maybe_req: Option<Json<RunCorrelationRequest>>,
 ) -> Result<Json<SubmitGoalResponse>, (StatusCode, Json<ErrorResponse>)> {
-    let session_id = state.inner.last_session_id.read().await.ok_or_else(|| {
-        error_response(
-            StatusCode::CONFLICT,
-            "No previous session to regenerate from",
-        )
-    })?;
+    let req = maybe_req.map(|Json(req)| req).unwrap_or_default();
+    let (session_id, session) = load_owned_replay_session(
+        &state,
+        req.session_id.as_deref(),
+        "session_id is required for web regenerate requests",
+    )
+    .await?;
 
-    let session = state
-        .inner
-        .stack
-        .session_manager
-        .get(session_id)
-        .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?
-        .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "Session not found"))?;
-
-    let (goal, history, images) = regenerate_replay_payload(&session)
-        .map_err(|error| error_response(StatusCode::CONFLICT, &error))?;
+    let SessionPromptContext {
+        goal,
+        history,
+        images,
+    } = build_regenerate_replay_payload(&session)
+        .map_err(|error| error_response(StatusCode::CONFLICT, &error.to_string()))?;
 
     info!(goal = %goal, %session_id, "Web: regenerate_response");
-    run_agent_from_history(&state, session_id, goal, history, images).await
-}
-
-/// Collect all messages before the last user message (for retry/regenerate).
-fn collect_history_before_last_user(messages: &[ava_types::Message]) -> Vec<ava_types::Message> {
-    if let Some(pos) = messages
-        .iter()
-        .rposition(|m| m.role == ava_types::Role::User)
-    {
-        messages[..pos].to_vec()
-    } else {
-        vec![]
-    }
+    run_agent_from_history(&state, session_id, goal, history, images, req.run_id).await
 }
 
 // ============================================================================
@@ -812,23 +1097,36 @@ pub(crate) async fn steer_agent(
     State(state): State<WebState>,
     Json(req): Json<SteerRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ErrorResponse>)> {
-    let running = *state.inner.running.read().await;
-    if !running {
+    let snapshot = state.queue_dispatch_snapshot().await;
+    if !snapshot.accepting {
         return Err(error_response(StatusCode::CONFLICT, "Agent is not running"));
     }
-    if let Some(ref tx) = *state.inner.message_queue.read().await {
-        let _ = tx.send(ava_types::QueuedMessage {
-            text: req.message,
-            tier: queue_message_tier(ControlPlaneCommand::SteerAgent, None)
-                .expect("steer command should map to a queue tier"),
-        });
+    if snapshot.tx.is_none() {
+        return Err(error_response(
+            StatusCode::CONFLICT,
+            "Agent queue is unavailable",
+        ));
     }
+    state
+        .enqueue_message(
+            ava_types::QueuedMessage {
+                text: req.message,
+                tier: queue_message_tier(ControlPlaneCommand::SteerAgent, None)
+                    .expect("steer command should map to a queue tier"),
+            },
+            None,
+            false,
+        )
+        .await
+        .map_err(|message| error_response(StatusCode::CONFLICT, &message))?;
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 
 #[derive(Deserialize)]
 pub struct FollowUpRequest {
     pub message: String,
+    #[serde(default)]
+    pub session_id: Option<String>,
 }
 
 /// Queue a follow-up message (Tier 2) for after the current task.
@@ -836,17 +1134,16 @@ pub(crate) async fn follow_up_agent(
     State(state): State<WebState>,
     Json(req): Json<FollowUpRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ErrorResponse>)> {
-    let running = *state.inner.running.read().await;
-    if !running {
-        return Err(error_response(StatusCode::CONFLICT, "Agent is not running"));
-    }
-    if let Some(ref tx) = *state.inner.message_queue.read().await {
-        let _ = tx.send(ava_types::QueuedMessage {
-            text: req.message,
-            tier: queue_message_tier(ControlPlaneCommand::FollowUpAgent, None)
-                .expect("follow-up command should map to a queue tier"),
-        });
-    }
+    let requested_session_id = parse_optional_session_id(req.session_id.as_deref())?;
+    let message = ava_types::QueuedMessage {
+        text: req.message,
+        tier: queue_message_tier(ControlPlaneCommand::FollowUpAgent, None)
+            .expect("follow-up command should map to a queue tier"),
+    };
+    state
+        .enqueue_message(message, requested_session_id, true)
+        .await
+        .map_err(|message| error_response(StatusCode::CONFLICT, &message))?;
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 
@@ -855,6 +1152,8 @@ pub struct PostCompleteRequest {
     pub message: String,
     #[serde(default = "default_group")]
     pub group: u32,
+    #[serde(default)]
+    pub session_id: Option<String>,
 }
 
 fn default_group() -> u32 {
@@ -866,34 +1165,24 @@ pub(crate) async fn post_complete_agent(
     State(state): State<WebState>,
     Json(req): Json<PostCompleteRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ErrorResponse>)> {
-    let running = *state.inner.running.read().await;
-    if !running {
-        return Err(error_response(StatusCode::CONFLICT, "Agent is not running"));
-    }
-    if let Some(ref tx) = *state.inner.message_queue.read().await {
-        let _ = tx.send(ava_types::QueuedMessage {
-            text: req.message,
-            tier: queue_message_tier(ControlPlaneCommand::PostCompleteAgent, Some(req.group))
-                .expect("post-complete command should map to a queue tier"),
-        });
-    }
+    let requested_session_id = parse_optional_session_id(req.session_id.as_deref())?;
+    let message = ava_types::QueuedMessage {
+        text: req.message,
+        tier: queue_message_tier(ControlPlaneCommand::PostCompleteAgent, Some(req.group))
+            .expect("post-complete command should map to a queue tier"),
+    };
+    state
+        .enqueue_message(message, requested_session_id, true)
+        .await
+        .map_err(|message| error_response(StatusCode::CONFLICT, &message))?;
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 
 /// Get current message queue state.
 pub(crate) async fn get_message_queue(State(state): State<WebState>) -> impl IntoResponse {
-    let has_queue = state.inner.message_queue.read().await.is_some();
+    let snapshot = state.queue_dispatch_snapshot().await;
     let running = *state.inner.running.read().await;
-    Json(serde_json::json!({ "active": running && has_queue }))
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum ClearTarget {
-    All,
-    Steering,
-    FollowUp,
-    PostComplete,
+    Json(serde_json::json!({ "active": running && snapshot.accepting && snapshot.tx.is_some() }))
 }
 
 // ============================================================================
@@ -1008,13 +1297,16 @@ pub(crate) async fn compact_context(
     State(state): State<WebState>,
     Json(req): Json<CompactContextRequest>,
 ) -> Result<Json<CompactContextResponse>, (StatusCode, Json<ErrorResponse>)> {
-    let session_uuid = req
+    let requested_session_id = req
         .session_id
         .as_deref()
         .map(uuid::Uuid::parse_str)
         .transpose()
-        .map_err(|e| error_response(StatusCode::BAD_REQUEST, &format!("invalid session id: {e}")))?
-        .or(*state.inner.last_session_id.read().await);
+        .map_err(|e| {
+            error_response(StatusCode::BAD_REQUEST, &format!("invalid session id: {e}"))
+        })?;
+    let session_uuid =
+        resolve_web_compaction_session(requested_session_id).map(|selection| selection.session_id);
 
     let existing_session =
         session_uuid.and_then(|id| state.inner.stack.session_manager.get(id).ok().flatten());
@@ -1207,20 +1499,16 @@ pub(crate) async fn clear_message_queue(
         .and_then(|b| b.get("target").and_then(|v| v.as_str()).map(String::from))
         .unwrap_or_else(|| "all".to_string());
 
-    match target_str.as_str() {
-        "all" | "steering" | "All" | "Steering" => {
-            state.cancel().await;
+    match resolve_web_queue_clear_semantics(&target_str)
+        .map_err(|message| error_response(StatusCode::BAD_REQUEST, &message))?
+    {
+        QueueClearSemantics::CancelRunAndClearSteering => {
+            cancel_active_run(&state).await;
             Ok(Json(serde_json::json!({ "ok": true })))
         }
-        "followUp" | "follow_up" | "follow-up" | "FollowUp" | "postComplete" | "post_complete"
-        | "post-complete" | "PostComplete" => Err(error_response(
-            StatusCode::BAD_REQUEST,
-            "Clearing follow-up or post-complete queues is not supported yet.",
-        )),
-        _ => Err(error_response(
-            StatusCode::BAD_REQUEST,
-            &format!("Unsupported clear target '{target_str}'"),
-        )),
+        QueueClearSemantics::Unsupported => {
+            unreachable!("unsupported targets should have been rejected before execution")
+        }
     }
 }
 
@@ -1230,6 +1518,94 @@ mod tests {
 
     fn sample_image(label: &str) -> ava_types::ImageContent {
         ava_types::ImageContent::new(label, ava_types::ImageMediaType::Png)
+    }
+
+    #[test]
+    fn ensure_web_run_id_generates_stable_prefixed_id() {
+        let generated = ensure_web_run_id(None);
+        assert!(generated.starts_with("web-run-"));
+        assert_eq!(
+            ensure_web_run_id(Some("web-run-existing".to_string())),
+            "web-run-existing"
+        );
+    }
+
+    #[test]
+    fn web_submit_session_precedence_prefers_requested_session() {
+        let requested = uuid::Uuid::new_v4();
+
+        assert_eq!(
+            resolve_web_submit_session(Some(requested)),
+            SessionSelection {
+                session_id: requested,
+                source: SessionSelectionSource::Requested,
+            }
+        );
+    }
+
+    #[test]
+    fn web_submit_session_no_requested_session_starts_new_session() {
+        assert_eq!(
+            resolve_web_submit_session(None).source,
+            SessionSelectionSource::New,
+        );
+    }
+
+    #[test]
+    fn web_compaction_session_without_request_does_not_fallback_to_last_active() {
+        assert!(
+            resolve_web_compaction_session(None).is_none(),
+            "omitted compaction session_id should not resolve to last_session_id fallback"
+        );
+    }
+
+    #[test]
+    fn web_compaction_session_precedence_prefers_requested_session() {
+        let requested = uuid::Uuid::new_v4();
+
+        assert_eq!(
+            resolve_web_compaction_session(Some(requested)),
+            Some(SessionSelection {
+                session_id: requested,
+                source: SessionSelectionSource::Requested,
+            })
+        );
+    }
+
+    #[test]
+    fn web_replay_session_without_request_does_not_fallback_to_last_active() {
+        assert!(
+            resolve_web_replay_session(None).is_none(),
+            "omitted replay session_id should not resolve to last_session_id fallback"
+        );
+    }
+
+    #[test]
+    fn web_replay_session_precedence_prefers_requested_session() {
+        let requested = uuid::Uuid::new_v4();
+
+        assert_eq!(
+            resolve_web_replay_session(Some(requested)),
+            Some(SessionSelection {
+                session_id: requested,
+                source: SessionSelectionSource::Requested,
+            })
+        );
+    }
+
+    #[test]
+    fn web_queue_clear_supports_all_target() {
+        assert_eq!(
+            resolve_web_queue_clear_semantics("all").expect("all target should be supported"),
+            QueueClearSemantics::CancelRunAndClearSteering
+        );
+    }
+
+    #[test]
+    fn web_queue_clear_rejects_unimplemented_targets() {
+        let error = resolve_web_queue_clear_semantics("followUp")
+            .expect_err("follow-up target should be rejected");
+        assert_eq!(error, UNSUPPORTED_QUEUE_CLEAR_ERROR);
     }
 
     fn sample_user_message(
@@ -1246,7 +1622,8 @@ mod tests {
         let mut session = ava_types::Session::new();
         session.add_message(sample_user_message("describe", vec![sample_image("retry")]));
 
-        let (_, _, images) = retry_replay_payload(&session).expect("retry payload");
+        let SessionPromptContext { images, .. } =
+            build_retry_replay_payload(&session).expect("retry payload");
         assert_eq!(images, vec![sample_image("retry")]);
     }
 
@@ -1257,8 +1634,9 @@ mod tests {
         let target_id = target.id;
         session.add_message(target);
 
-        let (_, _, images) = edit_replay_payload(&session, Some(target_id), "after".to_string())
-            .expect("edit payload");
+        let SessionPromptContext { images, .. } =
+            build_edit_replay_payload(&session, Some(target_id), "after".to_string())
+                .expect("edit payload");
         assert_eq!(images, vec![sample_image("edit")]);
     }
 
@@ -1266,9 +1644,9 @@ mod tests {
     fn edit_replay_payload_rejects_missing_targets() {
         let session = ava_types::Session::new();
 
-        let error = edit_replay_payload(&session, None, "after".to_string())
+        let error = build_edit_replay_payload(&session, None, "after".to_string())
             .expect_err("missing target should fail");
-        assert!(error.contains("Invalid message ID"));
+        assert!(error.to_string().contains("Invalid message ID"));
     }
 
     #[test]
@@ -1278,9 +1656,9 @@ mod tests {
         let assistant_id = assistant.id;
         session.add_message(assistant);
 
-        let error = edit_replay_payload(&session, Some(assistant_id), "after".to_string())
+        let error = build_edit_replay_payload(&session, Some(assistant_id), "after".to_string())
             .expect_err("assistant target should fail");
-        assert!(error.contains("Only user messages"));
+        assert!(error.to_string().contains("Only user messages"));
     }
 
     #[test]
@@ -1289,7 +1667,8 @@ mod tests {
         session.add_message(sample_user_message("before", vec![sample_image("regen")]));
         session.add_message(ava_types::Message::new(ava_types::Role::Assistant, "done"));
 
-        let (_, _, images) = regenerate_replay_payload(&session).expect("regen payload");
+        let SessionPromptContext { images, .. } =
+            build_regenerate_replay_payload(&session).expect("regen payload");
         assert_eq!(images, vec![sample_image("regen")]);
     }
 }

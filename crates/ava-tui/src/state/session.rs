@@ -66,10 +66,11 @@ impl SessionState {
     /// Incrementally persist messages without DELETE-all + INSERT-all.
     ///
     /// Used by the checkpoint handler to save progress crash-safely.
-    pub fn checkpoint_session(&self, session: &Session) {
+    pub fn checkpoint_session(&mut self, session: &Session) {
         if let Err(e) = self.manager.add_messages(session.id, &session.messages) {
             tracing::warn!("Failed to checkpoint session: {}", e);
         }
+        self.current_session = Some(session.clone());
     }
 
     // ── Bookmark operations (BG-13) ──────────────────────────────────
@@ -106,5 +107,40 @@ impl SessionState {
             .as_ref()
             .ok_or_else(|| eyre!("No active session"))?;
         Ok(self.manager.clear_bookmarks(session.id)?)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tempfile::tempdir;
+
+    use super::*;
+
+    #[test]
+    fn checkpoint_session_refreshes_current_session_snapshot() {
+        let temp = tempdir().expect("tempdir");
+        let db_path = temp.path().join("sessions.db");
+        let mut state = SessionState::new(&db_path).expect("session state");
+
+        let mut session = Session::new();
+        session.add_message(ava_types::Message::new(
+            ava_types::Role::User,
+            "checkpointed",
+        ));
+
+        state.checkpoint_session(&session);
+
+        assert_eq!(
+            state.current_session.as_ref().map(|s| s.id),
+            Some(session.id)
+        );
+        assert_eq!(
+            state
+                .current_session
+                .as_ref()
+                .expect("current session")
+                .messages,
+            session.messages
+        );
     }
 }

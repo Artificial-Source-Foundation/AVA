@@ -39,6 +39,7 @@ vi.mock('./use-rust-agent', () => {
       const [activeToolCalls] = createSignal<unknown[]>([])
       const [thinkingSegments] = createSignal<unknown[]>([])
       const [lastResult, setLastResult] = createSignal<unknown>(null)
+      const [currentRunId] = createSignal<string | null>(null)
       const [tokenUsage] = createSignal({ input: 0, output: 0, cost: 0 })
       const [thinkingContent] = createSignal('')
 
@@ -69,6 +70,7 @@ vi.mock('./use-rust-agent', () => {
         activeToolCalls,
         error,
         lastResult,
+        currentRunId,
         tokenUsage,
         events,
         run,
@@ -197,7 +199,7 @@ describe('useAgent integration queue/steer/cancel', () => {
     vi.clearAllMocks()
   })
 
-  it('queues follow-up messages while streaming and clears queue on cancel', async () => {
+  it('preserves queued follow-up messages across cancel', async () => {
     const ctx = createRoot((dispose) => ({ agent: useAgent(), dispose }))
 
     // Start a run that will hang (pending promise)
@@ -211,11 +213,11 @@ describe('useAgent integration queue/steer/cancel', () => {
     void ctx.agent.run('queued follow-up')
     expect(ctx.agent.queuedCount()).toBe(1)
 
-    // Cancel should clear queue
+    // Cancel should preserve follow-up queue state
     ctx.agent.cancel()
     await flushMicrotasks()
     expect(ctx.agent.isRunning()).toBe(false)
-    expect(ctx.agent.queuedCount()).toBe(0)
+    expect(ctx.agent.queuedCount()).toBe(1)
 
     ctx.dispose()
   })
@@ -240,7 +242,7 @@ describe('useAgent integration queue/steer/cancel', () => {
 
     ctx.agent.cancel()
     await flushMicrotasks()
-    expect(ctx.agent.queuedCount()).toBe(0)
+    expect(ctx.agent.queuedCount()).toBe(1)
 
     ctx.dispose()
   })

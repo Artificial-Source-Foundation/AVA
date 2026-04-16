@@ -294,6 +294,7 @@ pub(super) async fn run_single_agent(cli: CliArgs, goal: &str) -> Result<()> {
                 Some(message_queue),
                 cli_images,
                 None,
+                None,
             )
             .await
     });
@@ -589,6 +590,7 @@ pub(super) async fn run_single_agent(cli: CliArgs, goal: &str) -> Result<()> {
                         Vec::new(),
                         None,
                         Vec::new(),
+                        None,
                         None,
                     )
                     .await

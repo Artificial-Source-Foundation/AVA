@@ -536,8 +536,7 @@ impl App {
             }
             ava_agent::AgentEvent::PlanStepComplete { step_id } => {
                 debug!(step_id = %step_id, "Plan step completed");
-                // Progress tracking is handled by the web frontend via
-                // WebSocket events. The TUI logs the event for diagnostics.
+                self.set_status(format!("Plan step completed: {step_id}"), StatusLevel::Info);
             }
             ava_agent::AgentEvent::StreamingEditProgress {
                 tool_name,

@@ -46,6 +46,10 @@ impl App {
             self.state.agent.abort();
             self.state.input.queue_display.clear_steering();
             self.cancel_all_agents();
+            self.cancel_foreground_interactive_requests(
+                app_tx.clone(),
+                "Agent run cancelled from TUI",
+            );
             self.is_streaming
                 .store(false, std::sync::atomic::Ordering::Relaxed);
             return false;
@@ -82,6 +86,10 @@ impl App {
 
                         // UX-34: Cancel ALL running agents — background + sub-agents
                         self.cancel_all_agents();
+                        self.cancel_foreground_interactive_requests(
+                            app_tx.clone(),
+                            "Agent run cancelled from TUI",
+                        );
 
                         self.is_streaming
                             .store(false, std::sync::atomic::Ordering::Relaxed);

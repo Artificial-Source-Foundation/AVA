@@ -176,6 +176,7 @@ impl AgentStack {
         message_queue: Option<crate::message_queue::MessageQueue>,
         images: Vec<ava_types::ImageContent>,
         session_id: Option<uuid::Uuid>,
+        interactive_run_id: Option<String>,
     ) -> Result<AgentRunResult> {
         let raw_goal = goal.to_string();
 
@@ -439,14 +440,17 @@ impl AgentStack {
                     self.platform.clone(),
                     Arc::clone(&self.permission_inspector),
                     Arc::clone(&self.permission_context),
-                    self.approval_bridge.clone(),
+                    self.approval_bridge.with_run_id(interactive_run_id.clone()),
                     Some(Arc::clone(&self.plugin_manager)),
                 );
             register_todo_tools(&mut registry, self.todo_state.clone());
-            register_question_tool(&mut registry, self.question_bridge.clone());
+            register_question_tool(
+                &mut registry,
+                self.question_bridge.with_run_id(interactive_run_id.clone()),
+            );
             register_plan_tool(
                 &mut registry,
-                self.plan_bridge.clone(),
+                self.plan_bridge.with_run_id(interactive_run_id.clone()),
                 self.plan_state.clone(),
             );
             register_custom_tools_with_plugins(

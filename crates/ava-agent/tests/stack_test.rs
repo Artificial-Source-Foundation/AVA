@@ -136,6 +136,7 @@ async fn agent_stack_run_with_mock_provider_completes() {
             None,
             Vec::new(),
             None,
+            None,
         )
         .await
         .expect("run should succeed");
@@ -254,6 +255,7 @@ async fn agent_stack_run_dispatches_subagent_when_enabled() {
             None,
             Vec::new(),
             None,
+            None,
         )
         .await
         .expect("run should succeed");
@@ -313,6 +315,7 @@ async fn agent_stack_run_honors_cancellation() {
             Vec::new(),
             None,
             Vec::new(),
+            None,
             None,
         )
         .await
@@ -449,6 +452,7 @@ async fn streaming_run_emits_budget_warning_and_persists_cost_summary() {
             None,
             Vec::new(),
             None,
+            None,
         )
         .await
         .expect("run should succeed");
@@ -526,6 +530,7 @@ async fn follow_up_budget_uses_cumulative_spend() {
             Vec::new(),
             Some(queue),
             Vec::new(),
+            None,
             None,
         )
         .await
@@ -753,6 +758,7 @@ instructions: []
             None,
             Vec::new(),
             None,
+            None,
         )
         .await
         .expect("run should succeed");
@@ -864,6 +870,7 @@ async fn plugin_hooks_fire_without_crash_on_run() {
             Vec::new(),
             None,
             Vec::new(),
+            None,
             None,
         )
         .await

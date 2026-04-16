@@ -187,6 +187,7 @@ impl App {
                     None,
                     Vec::new(),
                     None,
+                    Some(run_id.to_string()),
                 )
                 .await;
 
@@ -503,6 +504,31 @@ impl App {
                         }
                     }
                 }
+            }
+            ava_agent::AgentEvent::PlanStepComplete { step_id } => {
+                bg.append_message(
+                    task_id,
+                    UiMessage::new(
+                        MessageKind::System,
+                        format!("Plan step completed: {step_id}"),
+                    ),
+                );
+            }
+            ava_agent::AgentEvent::StreamingEditProgress {
+                tool_name,
+                file_path,
+                bytes_received,
+                ..
+            } => {
+                let summary = if let Some(path) = file_path {
+                    format!("{tool_name} {path}... ({bytes_received} bytes)")
+                } else {
+                    format!("{tool_name}... ({bytes_received} bytes)")
+                };
+                bg.append_message(task_id, UiMessage::new(MessageKind::System, summary));
+            }
+            ava_agent::AgentEvent::Complete(_) => {
+                bg.append_message(task_id, UiMessage::new(MessageKind::System, "Run complete"));
             }
             ava_agent::AgentEvent::Error(err) => {
                 bg.append_message(task_id, UiMessage::new(MessageKind::Error, err));

@@ -2,7 +2,6 @@ use ava_permissions::tags::{RiskLevel, SafetyTag};
 pub use ava_tools::permission_middleware::ToolApproval;
 use ava_types::ToolCall;
 use std::collections::{HashSet, VecDeque};
-use tokio::sync::oneshot;
 
 /// Optional inspection result attached to approval requests for UI display.
 #[derive(Debug, Clone)]
@@ -14,8 +13,9 @@ pub struct InspectionInfo {
 
 #[derive(Debug)]
 pub struct ApprovalRequest {
+    pub request_id: String,
+    pub run_id: Option<String>,
     pub call: ToolCall,
-    pub approve_tx: oneshot::Sender<ToolApproval>,
     pub inspection: Option<InspectionInfo>,
 }
 
@@ -83,30 +83,33 @@ impl PermissionState {
         self.queue.push_back(request);
     }
 
-    pub fn approve_current_once(&mut self) {
-        if let Some(req) = self.queue.pop_front() {
-            let _ = req.approve_tx.send(ToolApproval::Allowed);
-        }
-        self.reset();
+    pub fn approve_current_once(&mut self) -> Option<ApprovalRequest> {
+        let request = self.queue.pop_front();
+        self.reset_modal_state();
+        request
     }
 
-    pub fn approve_current_for_session(&mut self) {
-        if let Some(req) = self.queue.pop_front() {
+    pub fn approve_current_for_session(&mut self) -> Option<ApprovalRequest> {
+        let request = self.queue.pop_front();
+        if let Some(req) = request.as_ref() {
             self.session_approved.insert(req.call.name.clone());
-            let _ = req.approve_tx.send(ToolApproval::AllowedForSession);
         }
-        self.reset();
+        self.reset_modal_state();
+        request
     }
 
-    pub fn reject_current(&mut self) {
-        if let Some(req) = self.queue.pop_front() {
-            let reason = if self.rejection_input.trim().is_empty() {
-                None
-            } else {
-                Some(self.rejection_input.trim().to_string())
-            };
-            let _ = req.approve_tx.send(ToolApproval::Rejected(reason));
-        }
+    pub fn reject_current(&mut self) -> Option<(ApprovalRequest, Option<String>)> {
+        let request = self.queue.pop_front();
+        let reason = if self.rejection_input.trim().is_empty() {
+            None
+        } else {
+            Some(self.rejection_input.trim().to_string())
+        };
+        self.reset();
+        request.map(|request| (request, reason))
+    }
+
+    pub fn reset_modal_state(&mut self) {
         self.reset();
     }
 

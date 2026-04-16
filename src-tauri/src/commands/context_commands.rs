@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use ava_agent::control_plane::sessions::resolve_existing_session;
 use ava_context::{estimate_tokens_for_message, CondenserConfig, HybridCondenser};
 use ava_llm::provider::LLMProvider;
 use ava_types::{Message, Role, Session};
@@ -229,12 +230,14 @@ pub async fn compact_context(
     compaction_model: Option<String>,
     bridge: State<'_, DesktopBridge>,
 ) -> Result<CompactContextResult, String> {
-    let session_uuid = session_id
+    let requested_session_id = session_id
         .as_deref()
         .map(Uuid::parse_str)
         .transpose()
-        .map_err(|e| format!("invalid session id: {e}"))?
-        .or(*bridge.last_session_id.read().await);
+        .map_err(|e| format!("invalid session id: {e}"))?;
+    let session_uuid =
+        resolve_existing_session(requested_session_id, *bridge.last_session_id.read().await)
+            .map(|selection| selection.session_id);
 
     let existing_session =
         session_uuid.and_then(|id| bridge.stack.session_manager.get(id).ok().flatten());

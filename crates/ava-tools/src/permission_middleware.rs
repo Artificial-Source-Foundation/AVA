@@ -9,7 +9,7 @@ use tokio::sync::{mpsc, oneshot, RwLock};
 
 use crate::registry::Middleware;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ToolApproval {
     Allowed,
     AllowedForSession,
@@ -20,6 +20,7 @@ pub enum ToolApproval {
 
 #[derive(Debug)]
 pub struct ApprovalRequest {
+    pub run_id: Option<String>,
     pub call: ToolCall,
     pub inspection: InspectionResult,
     pub reply: oneshot::Sender<ToolApproval>,
@@ -28,12 +29,20 @@ pub struct ApprovalRequest {
 #[derive(Clone)]
 pub struct ApprovalBridge {
     tx: mpsc::UnboundedSender<ApprovalRequest>,
+    run_id: Option<String>,
 }
 
 impl ApprovalBridge {
     pub fn new() -> (Self, mpsc::UnboundedReceiver<ApprovalRequest>) {
         let (tx, rx) = mpsc::unbounded_channel();
-        (Self { tx }, rx)
+        (Self { tx, run_id: None }, rx)
+    }
+
+    pub fn with_run_id(&self, run_id: Option<String>) -> Self {
+        Self {
+            tx: self.tx.clone(),
+            run_id,
+        }
     }
 
     async fn request_approval(
@@ -44,6 +53,7 @@ impl ApprovalBridge {
         let (reply_tx, reply_rx) = oneshot::channel();
         self.tx
             .send(ApprovalRequest {
+                run_id: self.run_id.clone(),
                 call,
                 inspection,
                 reply: reply_tx,

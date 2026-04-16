@@ -3,20 +3,34 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { AgentEvent } from '../types/rust-ipc'
 
+vi.mock('@tauri-apps/api/core', () => ({
+  isTauri: () => false,
+}))
+
 const h = vi.hoisted(() => {
   let appendEvent: ((event: AgentEvent) => void) | null = null
   let resetEvents: (() => void) | null = null
+  let setCurrentRunId: ((runId: string | null) => void) | null = null
 
   return {
-    bind(nextAppendEvent: (event: AgentEvent) => void, nextResetEvents: () => void): void {
+    bind(
+      nextAppendEvent: (event: AgentEvent) => void,
+      nextResetEvents: () => void,
+      nextSetCurrentRunId: (runId: string | null) => void
+    ): void {
       appendEvent = nextAppendEvent
       resetEvents = nextResetEvents
+      setCurrentRunId = nextSetCurrentRunId
     },
     emit(event: AgentEvent): void {
       appendEvent?.(event)
     },
+    setRunId(runId: string | null): void {
+      setCurrentRunId?.(runId)
+    },
     reset(): void {
       resetEvents?.()
+      setCurrentRunId?.(null)
     },
   }
 })
@@ -34,11 +48,13 @@ vi.mock('./use-rust-agent', async () => {
       const [activeToolCalls] = createSignal([])
       const [error, setError] = createSignal<string | null>(null)
       const [lastResult] = createSignal(null)
+      const [currentRunId, setCurrentRunId] = createSignal<string | null>(null)
       const [tokenUsage] = createSignal({ input: 0, output: 0, cost: 0 })
 
       h.bind(
         (event) => setEvents((prev) => [...prev, event]),
-        () => setEvents([])
+        () => setEvents([]),
+        setCurrentRunId
       )
 
       return {
@@ -49,6 +65,7 @@ vi.mock('./use-rust-agent', async () => {
         activeToolCalls,
         error,
         lastResult,
+        currentRunId,
         tokenUsage,
         events,
         run: vi.fn(async () => null),
@@ -215,6 +232,233 @@ describe('useAgent interactive request clearing', () => {
     expect(ctx.agent.pendingApproval()).toBeNull()
     expect(ctx.agent.pendingQuestion()).toBeNull()
     expect(ctx.agent.pendingPlan()).toBeNull()
+
+    ctx.dispose()
+  })
+
+  it('queues same-kind interactive requests by request id and promotes the next visible request on clear', async () => {
+    const ctx = createRoot((dispose) => ({ agent: useAgent(), dispose }))
+
+    h.emit({
+      type: 'approval_request',
+      id: 'approval-1',
+      tool_call_id: 'call-1',
+      tool_name: 'bash',
+      args: { command: 'pwd' },
+      risk_level: 'low',
+      reason: 'read cwd',
+      warnings: [],
+    })
+    h.emit({
+      type: 'approval_request',
+      id: 'approval-2',
+      tool_call_id: 'call-2',
+      tool_name: 'bash',
+      args: { command: 'ls' },
+      risk_level: 'low',
+      reason: 'list cwd',
+      warnings: [],
+    })
+    h.emit({
+      type: 'question_request',
+      id: 'question-1',
+      question: 'First question?',
+      options: ['Yes', 'No'],
+    })
+    h.emit({
+      type: 'question_request',
+      id: 'question-2',
+      question: 'Second question?',
+      options: ['Yes', 'No'],
+    })
+    h.emit({
+      type: 'plan_created',
+      id: 'plan-1',
+      plan: { summary: 'First plan', steps: [], estimatedTurns: 1 },
+    })
+    h.emit({
+      type: 'plan_created',
+      id: 'plan-2',
+      plan: { summary: 'Second plan', steps: [], estimatedTurns: 2 },
+    })
+    await flushEffects()
+
+    expect(ctx.agent.pendingApproval()?.id).toBe('approval-1')
+    expect(ctx.agent.pendingQuestion()?.id).toBe('question-1')
+    expect(ctx.agent.pendingPlan()?.requestId).toBe('plan-1')
+
+    h.emit({
+      type: 'interactive_request_cleared',
+      request_id: 'approval-1',
+      request_kind: 'approval',
+      timed_out: false,
+    })
+    h.emit({
+      type: 'interactive_request_cleared',
+      request_id: 'question-1',
+      request_kind: 'question',
+      timed_out: false,
+    })
+    h.emit({
+      type: 'interactive_request_cleared',
+      request_id: 'plan-1',
+      request_kind: 'plan',
+      timed_out: false,
+    })
+    await flushEffects()
+
+    expect(ctx.agent.pendingApproval()?.id).toBe('approval-2')
+    expect(ctx.agent.pendingQuestion()?.id).toBe('question-2')
+    expect(ctx.agent.pendingPlan()?.requestId).toBe('plan-2')
+
+    h.emit({
+      type: 'interactive_request_cleared',
+      request_id: 'approval-2',
+      request_kind: 'approval',
+      timed_out: false,
+    })
+    h.emit({
+      type: 'interactive_request_cleared',
+      request_id: 'question-2',
+      request_kind: 'question',
+      timed_out: false,
+    })
+    h.emit({
+      type: 'interactive_request_cleared',
+      request_id: 'plan-2',
+      request_kind: 'plan',
+      timed_out: false,
+    })
+    await flushEffects()
+
+    expect(ctx.agent.pendingApproval()).toBeNull()
+    expect(ctx.agent.pendingQuestion()).toBeNull()
+    expect(ctx.agent.pendingPlan()).toBeNull()
+
+    ctx.dispose()
+  })
+
+  it('ignores stale correlated interactive events from an older run', async () => {
+    const ctx = createRoot((dispose) => ({ agent: useAgent(), dispose }))
+    h.setRunId('desktop-run-current')
+
+    h.emit({
+      type: 'approval_request',
+      id: 'approval-stale',
+      tool_call_id: 'call-stale',
+      tool_name: 'bash',
+      args: { command: 'rm -rf /tmp/demo' },
+      risk_level: 'high',
+      reason: 'destructive command',
+      warnings: [],
+      run_id: 'desktop-run-old',
+    })
+    h.emit({
+      type: 'question_request',
+      id: 'question-current',
+      question: 'Continue?',
+      options: ['Yes', 'No'],
+      run_id: 'desktop-run-current',
+    })
+    h.emit({
+      type: 'plan_created',
+      id: 'plan-stale',
+      plan: { summary: 'Ship polish', steps: [], estimatedTurns: 2 },
+      run_id: 'desktop-run-old',
+    })
+    await flushEffects()
+
+    expect(ctx.agent.pendingApproval()).toBeNull()
+    expect(ctx.agent.pendingQuestion()?.id).toBe('question-current')
+    expect(ctx.agent.pendingPlan()).toBeNull()
+
+    h.emit({
+      type: 'interactive_request_cleared',
+      request_id: 'question-current',
+      request_kind: 'question',
+      timed_out: false,
+      run_id: 'desktop-run-old',
+    })
+    await flushEffects()
+
+    expect(ctx.agent.pendingQuestion()?.id).toBe('question-current')
+
+    h.emit({
+      type: 'interactive_request_cleared',
+      request_id: 'question-current',
+      request_kind: 'question',
+      timed_out: false,
+      run_id: 'desktop-run-current',
+    })
+    await flushEffects()
+
+    expect(ctx.agent.pendingQuestion()).toBeNull()
+
+    ctx.dispose()
+  })
+
+  it('ignores uncorrelated interactive events while a web run is active', async () => {
+    const ctx = createRoot((dispose) => ({ agent: useAgent(), dispose }))
+    h.setRunId('web-run-current')
+
+    h.emit({
+      type: 'approval_request',
+      id: 'approval-uncorrelated',
+      tool_call_id: 'call-1',
+      tool_name: 'bash',
+      args: { command: 'pwd' },
+      risk_level: 'low',
+      reason: 'read cwd',
+      warnings: [],
+    })
+    h.emit({
+      type: 'question_request',
+      id: 'question-uncorrelated',
+      question: 'Continue?',
+      options: ['Yes', 'No'],
+    })
+    h.emit({
+      type: 'plan_created',
+      id: 'plan-uncorrelated',
+      plan: { summary: 'Ship polish', steps: [], estimatedTurns: 2 },
+    })
+    await flushEffects()
+
+    expect(ctx.agent.pendingApproval()).toBeNull()
+    expect(ctx.agent.pendingQuestion()).toBeNull()
+    expect(ctx.agent.pendingPlan()).toBeNull()
+
+    h.emit({
+      type: 'question_request',
+      id: 'question-current',
+      question: 'Continue?',
+      options: ['Yes', 'No'],
+      run_id: 'web-run-current',
+    })
+    await flushEffects()
+
+    expect(ctx.agent.pendingQuestion()?.id).toBe('question-current')
+
+    h.emit({
+      type: 'interactive_request_cleared',
+      request_id: 'question-current',
+      request_kind: 'question',
+      timed_out: false,
+    })
+    await flushEffects()
+
+    expect(ctx.agent.pendingQuestion()?.id).toBe('question-current')
+
+    h.emit({
+      type: 'interactive_request_cleared',
+      request_id: 'question-current',
+      request_kind: 'question',
+      timed_out: false,
+      run_id: 'web-run-current',
+    })
+    await flushEffects()
+
+    expect(ctx.agent.pendingQuestion()).toBeNull()
 
     ctx.dispose()
   })

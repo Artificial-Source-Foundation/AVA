@@ -23,7 +23,6 @@ mod validation;
 pub mod agent_commands;
 pub mod config_commands;
 pub mod context_commands;
-mod helpers;
 pub mod mcp_commands;
 pub mod model_commands;
 pub mod permission_commands;

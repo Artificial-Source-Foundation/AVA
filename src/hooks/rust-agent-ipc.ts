@@ -23,6 +23,7 @@ interface IpcDeps {
   setIsRunning: Setter<boolean>
   setError: Setter<string | null>
   setLastResult: Setter<SubmitGoalResult | null>
+  setCurrentRunId: Setter<string | null>
   setActiveToolCalls: Setter<ToolCall[]>
   handleAgentEvent: (event: AgentEvent) => void
   resetState: () => void
@@ -56,13 +57,17 @@ export interface AgentIpc {
       compactionModel?: string
     }
   ) => Promise<SubmitGoalResult | null>
-  editAndResendRun: (messageId: string, newContent: string) => Promise<SubmitGoalResult | null>
-  retryRun: () => Promise<SubmitGoalResult | null>
-  regenerateRun: () => Promise<SubmitGoalResult | null>
+  editAndResendRun: (
+    messageId: string,
+    newContent: string,
+    sessionId?: string
+  ) => Promise<SubmitGoalResult | null>
+  retryRun: (sessionId?: string) => Promise<SubmitGoalResult | null>
+  regenerateRun: (sessionId?: string) => Promise<SubmitGoalResult | null>
   cancel: () => Promise<void>
   steer: (message: string) => Promise<void>
-  followUp: (message: string) => Promise<void>
-  postComplete: (message: string, group?: number) => Promise<void>
+  followUp: (message: string, sessionId?: string) => Promise<void>
+  postComplete: (message: string, group?: number, sessionId?: string) => Promise<void>
   endRun: () => void
   resetState: () => void
   attachListener: () => Promise<void>
@@ -82,6 +87,7 @@ export function createAgentIpc(deps: IpcDeps): AgentIpc {
     setIsRunning,
     setError,
     setLastResult,
+    setCurrentRunId,
     setActiveToolCalls,
     handleAgentEvent,
     resetState,
@@ -92,6 +98,7 @@ export function createAgentIpc(deps: IpcDeps): AgentIpc {
   let socketGeneration = 0
   let tauriRunSequence = 0
   let activeTauriRun: TauriTerminalTracker | null = null
+  let activeRunId: string | null = null
 
   const isCurrentSocket = (ws: WebSocket, generation: number): boolean =>
     eventSocket === ws && socketGeneration === generation
@@ -126,6 +133,8 @@ export function createAgentIpc(deps: IpcDeps): AgentIpc {
       resolveTerminalPromise = null
       tracker.resolveTerminal = null
     }
+    activeRunId = runId
+    setCurrentRunId(runId)
     activeTauriRun = tracker
     return tracker
   }
@@ -138,9 +147,11 @@ export function createAgentIpc(deps: IpcDeps): AgentIpc {
       tracker.resolveTerminal = null
     }
     activeTauriRun = null
+    activeRunId = null
+    setCurrentRunId(null)
   }
 
-  const shouldHandleTauriEvent = (event: AgentEvent): boolean => {
+  const shouldHandleCorrelatedEvent = (event: AgentEvent): boolean => {
     const activeRun = activeTauriRun
     const eventRunId = getTauriEventRunId(event)
     const isTerminalEvent = event.type === 'complete' || event.type === 'error'
@@ -149,24 +160,29 @@ export function createAgentIpc(deps: IpcDeps): AgentIpc {
       if (!isTerminalEvent) {
         return true
       }
-      log.warn('agent', 'Ignoring uncorrelated Tauri terminal event', {
+
+      if (!isTauri() && !activeRunId) {
+        return true
+      }
+
+      log.warn('agent', 'Ignoring uncorrelated terminal event', {
         eventType: event.type,
-        activeRunId: activeRun?.runId ?? null,
+        activeRunId: activeRunId ?? activeRun?.runId ?? null,
       })
       return false
     }
 
-    if (!activeRun || eventRunId !== activeRun.runId) {
-      log.warn('agent', 'Ignoring stale Tauri run event', {
+    if (!activeRunId || eventRunId !== activeRunId) {
+      log.warn('agent', 'Ignoring stale correlated run event', {
         eventType: event.type,
         eventRunId,
-        activeRunId: activeRun?.runId ?? null,
+        activeRunId,
       })
       return false
     }
 
     if (isTerminalEvent) {
-      activeRun.resolveTerminal?.()
+      activeRun?.resolveTerminal?.()
     }
 
     return true
@@ -209,7 +225,7 @@ export function createAgentIpc(deps: IpcDeps): AgentIpc {
         unlisten = null
       }
       unlisten = await listen<AgentEvent>('agent-event', (evt) => {
-        if (!shouldHandleTauriEvent(evt.payload)) {
+        if (!shouldHandleCorrelatedEvent(evt.payload)) {
           return
         }
         handleAgentEvent(evt.payload)
@@ -233,6 +249,9 @@ export function createAgentIpc(deps: IpcDeps): AgentIpc {
         if (!isCurrentSocket(ws, generation)) return
         try {
           const event = JSON.parse(evt.data as string) as AgentEvent
+          if (!shouldHandleCorrelatedEvent(event)) {
+            return
+          }
           log.debug('ws', 'Message received', { type: event.type })
           handleAgentEvent(event)
         } catch {
@@ -349,9 +368,11 @@ export function createAgentIpc(deps: IpcDeps): AgentIpc {
   ): Promise<SubmitGoalResult | null> => {
     const completionBinding = createCompletionPromise()
     const completionPromise = completionBinding.promise
-    const tauriRunId = isTauri() ? nextTauriRunId() : null
-    const terminalTracker = tauriRunId ? resetTauriTerminalTracking(tauriRunId) : null
-    const invokePromise = invoke<SubmitGoalResult>(command, withTauriRunId(args, tauriRunId))
+    const runId = nextTauriRunId()
+    activeRunId = runId
+    setCurrentRunId(runId)
+    const terminalTracker = isTauri() ? resetTauriTerminalTracking(runId) : null
+    const invokePromise = invoke<SubmitGoalResult>(command, withTauriRunId(args, runId))
 
     if (isTauri()) {
       const guardedInvokePromise = invokePromise.catch((err) => {
@@ -390,10 +411,23 @@ export function createAgentIpc(deps: IpcDeps): AgentIpc {
     }
 
     const submitResult = await invokePromise
+    if (!submitResult.success) {
+      activeRunId = null
+      setCurrentRunId(null)
+      if (completion.resolve === completionBinding.resolve) {
+        completion.resolve = null
+      }
+      setIsRunning(false)
+      setLastResult(submitResult)
+      return submitResult
+    }
+
     const result = await completionPromise
     const finalResult: SubmitGoalResult = result
       ? { ...result, sessionId: result.sessionId || submitResult.sessionId }
       : { success: false, turns: 0, sessionId: submitResult.sessionId }
+    activeRunId = null
+    setCurrentRunId(null)
     setLastResult(finalResult)
     return finalResult
   }
@@ -454,7 +488,8 @@ export function createAgentIpc(deps: IpcDeps): AgentIpc {
    */
   const editAndResendRun = async (
     messageId: string,
-    newContent: string
+    newContent: string,
+    sessionId?: string
   ): Promise<SubmitGoalResult | null> => {
     resetState()
     setIsRunning(true)
@@ -466,6 +501,7 @@ export function createAgentIpc(deps: IpcDeps): AgentIpc {
         args: {
           messageId,
           newContent,
+          sessionId: sessionId ?? null,
         },
       }
 
@@ -487,7 +523,7 @@ export function createAgentIpc(deps: IpcDeps): AgentIpc {
    * Uses the same streaming infrastructure as run() so events are properly
    * captured and the caller can settle the response into a placeholder message.
    */
-  const retryRun = async (): Promise<SubmitGoalResult | null> => {
+  const retryRun = async (sessionId?: string): Promise<SubmitGoalResult | null> => {
     resetState()
     setIsRunning(true)
     resetMetrics()
@@ -495,7 +531,10 @@ export function createAgentIpc(deps: IpcDeps): AgentIpc {
     try {
       await attachListener()
 
-      return await invokeStreamingCommand('retry_last_message')
+      return await invokeStreamingCommand(
+        'retry_last_message',
+        sessionId ? { args: { sessionId } } : undefined
+      )
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       log.error('error', 'IPC invoke failed', { command: 'retry_last_message', error: message })
@@ -512,7 +551,7 @@ export function createAgentIpc(deps: IpcDeps): AgentIpc {
    * Regenerate the last assistant response via the backend regenerate endpoint.
    * Same streaming infrastructure as retryRun().
    */
-  const regenerateRun = async (): Promise<SubmitGoalResult | null> => {
+  const regenerateRun = async (sessionId?: string): Promise<SubmitGoalResult | null> => {
     resetState()
     setIsRunning(true)
     resetMetrics()
@@ -520,7 +559,10 @@ export function createAgentIpc(deps: IpcDeps): AgentIpc {
     try {
       await attachListener()
 
-      return await invokeStreamingCommand('regenerate_response')
+      return await invokeStreamingCommand(
+        'regenerate_response',
+        sessionId ? { args: { sessionId } } : undefined
+      )
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       log.error('error', 'IPC invoke failed', { command: 'regenerate_response', error: message })
@@ -595,13 +637,13 @@ export function createAgentIpc(deps: IpcDeps): AgentIpc {
   }
 
   /** Queue a message for next turn. Agent finishes current turn, then processes this. */
-  const followUp = async (message: string): Promise<void> => {
+  const followUp = async (message: string, sessionId?: string): Promise<void> => {
     if (!isRunning()) {
       log.warn('agent', 'Cannot queue follow-up: agent is not running')
-      return
+      throw new Error('Agent is not running')
     }
     try {
-      await invoke('follow_up_agent', { message })
+      await invoke('follow_up_agent', { args: { message, sessionId: sessionId ?? null } })
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       log.error('agent', 'Failed to queue follow-up', { error: msg })
@@ -611,13 +653,19 @@ export function createAgentIpc(deps: IpcDeps): AgentIpc {
   }
 
   /** Queue a post-complete message (Tier 3). Runs in grouped pipeline after agent stops. */
-  const postComplete = async (message: string, group?: number): Promise<void> => {
+  const postComplete = async (
+    message: string,
+    group?: number,
+    sessionId?: string
+  ): Promise<void> => {
     if (!isRunning()) {
       log.warn('agent', 'Cannot queue post-complete: agent is not running')
-      return
+      throw new Error('Agent is not running')
     }
     try {
-      await invoke('post_complete_agent', { args: { message, group: group ?? 1 } })
+      await invoke('post_complete_agent', {
+        args: { message, group: group ?? 1, sessionId: sessionId ?? null },
+      })
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       log.error('agent', 'Failed to queue post-complete', { error: msg })

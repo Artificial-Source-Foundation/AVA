@@ -38,6 +38,11 @@ use crate::widgets::select_list::{SelectItem, SelectListState};
 use crate::widgets::session_list::SessionListState;
 use crate::widgets::token_buffer::TokenBuffer;
 use crate::widgets::tool_list::ToolListState;
+use ava_agent::control_plane::interactive::{
+    InteractiveRequestKind, InteractiveRequestStore, InteractiveTimeoutPolicy,
+};
+use ava_tools::permission_middleware::ToolApproval;
+use ava_types::PlanDecision;
 use color_eyre::eyre::Result;
 use crossterm::event::{KeyCode, KeyEventKind, KeyModifiers};
 use crossterm::execute;
@@ -46,7 +51,7 @@ use crossterm::terminal::{
 };
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::io::stdout;
 use std::path::PathBuf;
 use std::process::Command;
@@ -209,6 +214,10 @@ pub struct CopyPickerState {
 
 /// State for the question modal shown when the agent uses the question tool.
 pub struct QuestionState {
+    /// Correlation ID owned by the shared interactive lifecycle store.
+    pub request_id: String,
+    /// Optional run correlation for the originating agent run.
+    pub run_id: Option<String>,
     /// The question text from the agent.
     pub question: String,
     /// Optional selectable choices.
@@ -217,8 +226,12 @@ pub struct QuestionState {
     pub selected: usize,
     /// Free-text input buffer (when no options are present).
     pub input: String,
-    /// Channel to send the user's answer back to the tool.
-    pub reply: Option<tokio::sync::oneshot::Sender<String>>,
+}
+
+enum QueuedInteractiveModal {
+    Approval(String),
+    Question(QuestionState),
+    PlanApproval(crate::state::plan_approval::PlanApprovalState),
 }
 
 /// Determines which conversation is displayed in the message list.
@@ -294,6 +307,10 @@ pub struct App {
     >,
     /// Receiver for plan proposal requests from the agent's plan tool.
     plan_rx: Option<tokio::sync::mpsc::UnboundedReceiver<ava_tools::core::plan::PlanRequest>>,
+    pending_question_reply: InteractiveRequestStore<String>,
+    pending_approval_reply: InteractiveRequestStore<ToolApproval>,
+    pending_plan_reply: InteractiveRequestStore<PlanDecision>,
+    queued_interactive_modals: VecDeque<QueuedInteractiveModal>,
     /// Timestamp of the last Esc press, for double-Esc detection.
     last_esc_time: Option<std::time::Instant>,
     /// Pending background goal from `/bg` command (consumed in submit_goal).
@@ -469,6 +486,10 @@ impl App {
             question_rx: Some(question_rx),
             approval_rx: Some(approval_rx),
             plan_rx: Some(plan_rx),
+            pending_question_reply: InteractiveRequestStore::new(InteractiveRequestKind::Question),
+            pending_approval_reply: InteractiveRequestStore::new(InteractiveRequestKind::Approval),
+            pending_plan_reply: InteractiveRequestStore::new(InteractiveRequestKind::Plan),
+            queued_interactive_modals: VecDeque::new(),
             last_esc_time: None,
             pending_bg_goal: None,
             pending_images: Vec::new(),
@@ -663,13 +684,13 @@ impl App {
             tokio::select! {
                 Some(event) = app_rx.recv() => self.handle_event(event, app_tx.clone(), agent_tx.clone()),
                 Some(req) = async { match question_rx.as_mut() { Some(rx) => rx.recv().await, None => None } } => {
-                    self.handle_event(AppEvent::Question(req), app_tx.clone(), agent_tx.clone());
+                    self.receive_question_request(req, app_tx.clone()).await;
                 },
                 Some(req) = async { match approval_rx.as_mut() { Some(rx) => rx.recv().await, None => None } } => {
-                    self.handle_event(AppEvent::ToolApproval(req), app_tx.clone(), agent_tx.clone());
+                    self.receive_tool_approval_request(req, app_tx.clone()).await;
                 },
                 Some(req) = async { match plan_rx.as_mut() { Some(rx) => rx.recv().await, None => None } } => {
-                    self.handle_event(AppEvent::PlanProposal(req), app_tx.clone(), agent_tx.clone());
+                    self.receive_plan_request(req, app_tx.clone()).await;
                 },
                 else => break,
             }
@@ -1102,6 +1123,10 @@ impl App {
             question_rx: None,
             approval_rx: None,
             plan_rx: None,
+            pending_question_reply: InteractiveRequestStore::new(InteractiveRequestKind::Question),
+            pending_approval_reply: InteractiveRequestStore::new(InteractiveRequestKind::Approval),
+            pending_plan_reply: InteractiveRequestStore::new(InteractiveRequestKind::Plan),
+            queued_interactive_modals: VecDeque::new(),
             last_esc_time: None,
             pending_bg_goal: None,
             pending_images: Vec::new(),
@@ -1120,6 +1145,22 @@ impl App {
         let (app_tx, _) = mpsc::unbounded_channel();
         let (agent_tx, _) = mpsc::unbounded_channel();
         self.handle_key(key, app_tx, agent_tx)
+    }
+
+    pub fn set_interactive_timeout_for_test(&mut self, timeout: std::time::Duration) {
+        let timeout_policy = InteractiveTimeoutPolicy::new(timeout, timeout, timeout);
+        self.pending_question_reply = InteractiveRequestStore::with_timeout_policy(
+            InteractiveRequestKind::Question,
+            timeout_policy,
+        );
+        self.pending_approval_reply = InteractiveRequestStore::with_timeout_policy(
+            InteractiveRequestKind::Approval,
+            timeout_policy,
+        );
+        self.pending_plan_reply = InteractiveRequestStore::with_timeout_policy(
+            InteractiveRequestKind::Plan,
+            timeout_policy,
+        );
     }
 
     /// Public wrapper around `handle_slash_command` for integration tests.

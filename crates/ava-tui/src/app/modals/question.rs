@@ -1,29 +1,26 @@
 use super::*;
 
 impl App {
-    pub(crate) fn handle_question_key(&mut self, key: crossterm::event::KeyEvent) -> bool {
+    pub(crate) fn handle_question_key(
+        &mut self,
+        key: crossterm::event::KeyEvent,
+        app_tx: mpsc::UnboundedSender<AppEvent>,
+    ) -> bool {
         let Some(ref mut q) = self.state.question else {
             self.state.active_modal = None;
             return false;
         };
 
+        let mut resolution: Option<(String, Option<String>, String)> = None;
+
         if q.options.is_empty() {
             // Free-text input mode
             match key.code {
                 KeyCode::Enter => {
-                    let answer = q.input.clone();
-                    if let Some(reply) = q.reply.take() {
-                        let _ = reply.send(answer);
-                    }
-                    self.state.question = None;
-                    self.state.active_modal = None;
+                    resolution = Some((q.request_id.clone(), q.run_id.clone(), q.input.clone()));
                 }
                 KeyCode::Esc => {
-                    if let Some(reply) = q.reply.take() {
-                        let _ = reply.send(String::new());
-                    }
-                    self.state.question = None;
-                    self.state.active_modal = None;
+                    resolution = Some((q.request_id.clone(), q.run_id.clone(), String::new()));
                 }
                 KeyCode::Char(ch) => {
                     q.input.push(ch);
@@ -46,22 +43,22 @@ impl App {
                 }
                 KeyCode::Enter => {
                     let answer = q.options.get(q.selected).cloned().unwrap_or_default();
-                    if let Some(reply) = q.reply.take() {
-                        let _ = reply.send(answer);
-                    }
-                    self.state.question = None;
-                    self.state.active_modal = None;
+                    resolution = Some((q.request_id.clone(), q.run_id.clone(), answer));
                 }
                 KeyCode::Esc => {
-                    if let Some(reply) = q.reply.take() {
-                        let _ = reply.send(String::new());
-                    }
-                    self.state.question = None;
-                    self.state.active_modal = None;
+                    resolution = Some((q.request_id.clone(), q.run_id.clone(), String::new()));
                 }
                 _ => {}
             }
         }
+
+        if let Some((request_id, run_id, answer)) = resolution {
+            self.state.question = None;
+            self.state.active_modal = None;
+            self.promote_next_queued_interactive_modal(app_tx.clone());
+            self.resolve_question_request(request_id, run_id, answer, app_tx);
+        }
+
         false
     }
 }

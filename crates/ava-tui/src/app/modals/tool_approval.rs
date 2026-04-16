@@ -1,8 +1,13 @@
 use super::*;
 
 impl App {
-    pub(crate) fn handle_tool_approval_key(&mut self, key: crossterm::event::KeyEvent) -> bool {
+    pub(crate) fn handle_tool_approval_key(
+        &mut self,
+        key: crossterm::event::KeyEvent,
+        app_tx: mpsc::UnboundedSender<AppEvent>,
+    ) -> bool {
         use crate::state::permission::ApprovalStage;
+        use ava_tools::permission_middleware::ToolApproval;
 
         if self.state.permission.queue.is_empty() {
             self.state.active_modal = None;
@@ -15,15 +20,23 @@ impl App {
             }
             ApprovalStage::ActionSelect => match key.code {
                 KeyCode::Char('a') => {
-                    self.state.permission.approve_current_once();
-                    if self.state.permission.queue.is_empty() {
-                        self.state.active_modal = None;
+                    if let Some(req) = self.state.permission.approve_current_once() {
+                        self.resolve_tool_approval_request(
+                            req.request_id,
+                            req.run_id,
+                            ToolApproval::Allowed,
+                            app_tx.clone(),
+                        );
                     }
                 }
                 KeyCode::Char('s') => {
-                    self.state.permission.approve_current_for_session();
-                    if self.state.permission.queue.is_empty() {
-                        self.state.active_modal = None;
+                    if let Some(req) = self.state.permission.approve_current_for_session() {
+                        self.resolve_tool_approval_request(
+                            req.request_id,
+                            req.run_id,
+                            ToolApproval::AllowedForSession,
+                            app_tx.clone(),
+                        );
                     }
                 }
                 KeyCode::Char('r') => {
@@ -32,25 +45,37 @@ impl App {
                 KeyCode::Char('y') => {
                     self.state.permission.permission_level =
                         crate::state::permission::PermissionLevel::AutoApprove;
-                    while !self.state.permission.queue.is_empty() {
-                        self.state.permission.approve_current_once();
+                    while let Some(req) = self.state.permission.approve_current_once() {
+                        self.resolve_tool_approval_request(
+                            req.request_id,
+                            req.run_id,
+                            ToolApproval::Allowed,
+                            app_tx.clone(),
+                        );
                     }
-                    self.state.active_modal = None;
                     self.set_status("Auto-approve enabled", StatusLevel::Info);
                 }
                 KeyCode::Esc => {
-                    self.state.permission.reject_current();
-                    if self.state.permission.queue.is_empty() {
-                        self.state.active_modal = None;
+                    if let Some((req, reason)) = self.state.permission.reject_current() {
+                        self.resolve_tool_approval_request(
+                            req.request_id,
+                            req.run_id,
+                            ToolApproval::Rejected(reason),
+                            app_tx.clone(),
+                        );
                     }
                 }
                 _ => {}
             },
             ApprovalStage::RejectionReason => match key.code {
                 KeyCode::Enter => {
-                    self.state.permission.reject_current();
-                    if self.state.permission.queue.is_empty() {
-                        self.state.active_modal = None;
+                    if let Some((req, reason)) = self.state.permission.reject_current() {
+                        self.resolve_tool_approval_request(
+                            req.request_id,
+                            req.run_id,
+                            ToolApproval::Rejected(reason),
+                            app_tx.clone(),
+                        );
                     }
                 }
                 KeyCode::Esc => {

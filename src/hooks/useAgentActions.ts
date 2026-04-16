@@ -43,11 +43,15 @@ export interface ActionDeps {
   toolActivity: Accessor<ToolActivity[]>
   setToolActivity: Setter<ToolActivity[]>
   pendingApproval: Accessor<ApprovalRequest | null>
-  setPendingApproval: Setter<ApprovalRequest | null>
   pendingQuestion: Accessor<QuestionRequest | null>
-  setPendingQuestion: Setter<QuestionRequest | null>
   pendingPlan: Accessor<PlanData | null>
-  setPendingPlan: Setter<PlanData | null>
+  setPendingApproval?: Setter<ApprovalRequest | null>
+  setPendingQuestion?: Setter<QuestionRequest | null>
+  setPendingPlan?: Setter<PlanData | null>
+  removePendingApproval?: (requestId: string | null | undefined) => void
+  removePendingQuestion?: (requestId: string | null | undefined) => void
+  removePendingPlan?: (requestId: string | null | undefined) => void
+  clearPendingInteractiveRequests?: () => void
   doomLoopDetected: Accessor<boolean>
   setDoomLoopDetected: Setter<boolean>
   streamingTokenEstimate: Accessor<number>
@@ -86,6 +90,10 @@ export function createAgentActions(deps: ActionDeps) {
     setPendingApproval,
     setPendingQuestion,
     setPendingPlan,
+    removePendingApproval,
+    removePendingQuestion,
+    removePendingPlan,
+    clearPendingInteractiveRequests,
     doomLoopDetected,
     setDoomLoopDetected,
     setStreamingTokenEstimate,
@@ -96,6 +104,57 @@ export function createAgentActions(deps: ActionDeps) {
     streaming,
     runOwnership,
   } = deps
+  const clearAllPendingInteractiveRequests = (): void => {
+    if (clearPendingInteractiveRequests) {
+      clearPendingInteractiveRequests()
+      return
+    }
+
+    setPendingApproval?.(null)
+    setPendingQuestion?.(null)
+    setPendingPlan?.(null)
+  }
+  const clearResolvedApproval = (requestId: string | null | undefined): void => {
+    if (removePendingApproval) {
+      removePendingApproval(requestId)
+      return
+    }
+
+    if (requestId && pendingApproval()?.id === requestId) {
+      setPendingApproval?.(null)
+    }
+  }
+  const clearResolvedQuestion = (requestId: string | null | undefined): void => {
+    if (removePendingQuestion) {
+      removePendingQuestion(requestId)
+      return
+    }
+
+    if (requestId && deps.pendingQuestion()?.id === requestId) {
+      setPendingQuestion?.(null)
+    }
+  }
+  const clearResolvedPlan = (requestId: string | null | undefined): void => {
+    if (removePendingPlan) {
+      removePendingPlan(requestId)
+      return
+    }
+
+    if (requestId && deps.pendingPlan()?.requestId === requestId) {
+      setPendingPlan?.(null)
+    }
+  }
+
+  const visibleQueueIndicesForCurrentSession = (queue: QueuedMessage[]): number[] => {
+    const currentSessionId = session.currentSession()?.id
+
+    return queue.reduce<number[]>((indices, item, index) => {
+      if (!item.sessionId || item.sessionId === currentSessionId) {
+        indices.push(index)
+      }
+      return indices
+    }, [])
+  }
 
   function mergePlanFeedback(
     feedback?: string,
@@ -218,7 +277,10 @@ export function createAgentActions(deps: ActionDeps) {
     log.info('agent', 'Cancel requested by user')
     void rustAgent.cancel()
     batch(() => {
-      setMessageQueue([])
+      setMessageQueue((prev) =>
+        prev.filter((message) => message.tier !== 'steering' && message.tier !== 'interrupt')
+      )
+      clearAllPendingInteractiveRequests()
       setStreamingStartedAt(null)
     })
   }
@@ -281,23 +343,35 @@ export function createAgentActions(deps: ActionDeps) {
     void rustAgent.steer(content)
   }
 
-  function followUp(content: string): void {
-    void rustAgent.followUp(content).then(
-      () => setMessageQueue((prev) => [...prev, { content, tier: 'queued' }]),
-      () => {
-        log.warn('agent', 'Queue rejected by backend', { content: content.slice(0, 80) })
-      }
-    )
+  async function followUp(content: string, sessionId?: string): Promise<void> {
+    const queueSessionId = sessionId ?? session.currentSession()?.id
+
+    await rustAgent.followUp(content, queueSessionId)
+    setMessageQueue((prev) => [
+      ...prev,
+      {
+        content,
+        tier: 'follow-up',
+        backendManaged: true,
+        sessionId: queueSessionId,
+      },
+    ])
   }
 
-  function postComplete(content: string, group?: number): void {
-    void rustAgent.postComplete(content, group).then(
-      () =>
-        setMessageQueue((prev) => [...prev, { content, tier: 'post-complete', group: group ?? 1 }]),
-      () => {
-        log.warn('agent', 'Post-complete rejected by backend', { content: content.slice(0, 80) })
-      }
-    )
+  async function postComplete(content: string, group?: number, sessionId?: string): Promise<void> {
+    const queueSessionId = sessionId ?? session.currentSession()?.id
+
+    await rustAgent.postComplete(content, group, queueSessionId)
+    setMessageQueue((prev) => [
+      ...prev,
+      {
+        content,
+        tier: 'post-complete',
+        group: group ?? 1,
+        backendManaged: true,
+        sessionId: queueSessionId,
+      },
+    ])
   }
 
   function togglePlanMode(): void {
@@ -328,9 +402,7 @@ export function createAgentActions(deps: ActionDeps) {
       .resolveApproval(current.id, approved, alwaysAllow ?? false)
       .then(() => {
         rustAgent.markToolApproval(current.toolName, decision, current.toolCallId)
-        if (pendingApproval()?.id === current.id) {
-          setPendingApproval(null)
-        }
+        clearResolvedApproval(current.id)
       })
       .catch((err) => {
         log.error('error', 'Failed to resolve approval', { error: String(err) })
@@ -346,9 +418,7 @@ export function createAgentActions(deps: ActionDeps) {
     void rustAgentBridge
       .resolveQuestion(current.id, answer)
       .then(() => {
-        if (deps.pendingQuestion()?.id === current.id) {
-          setPendingQuestion(null)
-        }
+        clearResolvedQuestion(current.id)
       })
       .catch((err) => {
         log.error('error', 'Failed to resolve question', { error: String(err) })
@@ -380,9 +450,7 @@ export function createAgentActions(deps: ActionDeps) {
     void rustAgentBridge
       .resolvePlan(current.requestId, response, sanitizedModifiedPlan, mergedFeedback ?? null)
       .then(() => {
-        if (deps.pendingPlan()?.requestId === current.requestId) {
-          setPendingPlan(null)
-        }
+        clearResolvedPlan(current.requestId)
       })
       .catch((err) => {
         log.error('error', 'Failed to resolve plan', { error: String(err) })
@@ -410,29 +478,66 @@ export function createAgentActions(deps: ActionDeps) {
   }
 
   function removeFromQueue(index: number): void {
-    setMessageQueue((prev) => prev.filter((_, i) => i !== index))
+    setMessageQueue((prev) => {
+      const visibleIndices = visibleQueueIndicesForCurrentSession(prev)
+      if (index < 0 || index >= visibleIndices.length) return prev
+
+      const fullIndex = visibleIndices[index]
+      if (fullIndex === undefined || prev[fullIndex]?.backendManaged) return prev
+
+      return prev.filter((_, i) => i !== fullIndex)
+    })
   }
 
   function reorderInQueue(fromIndex: number, toIndex: number): void {
     setMessageQueue((prev) => {
-      if (fromIndex < 0 || fromIndex >= prev.length) return prev
-      if (toIndex < 0 || toIndex >= prev.length) return prev
+      const visibleIndices = visibleQueueIndicesForCurrentSession(prev)
+      if (fromIndex < 0 || fromIndex >= visibleIndices.length) return prev
+      if (toIndex < 0 || toIndex >= visibleIndices.length) return prev
+
+      const fromFullIndex = visibleIndices[fromIndex]
+      const toFullIndex = visibleIndices[toIndex]
+      if (fromFullIndex === undefined || toFullIndex === undefined) return prev
+      if (prev[fromFullIndex]?.backendManaged || prev[toFullIndex]?.backendManaged) return prev
+
+      const reorderedVisibleItems = visibleIndices.map((fullIndex) => prev[fullIndex]!)
+      const [item] = reorderedVisibleItems.splice(fromIndex, 1)
+      if (!item) return prev
+      reorderedVisibleItems.splice(toIndex, 0, item)
+
       const next = [...prev]
-      const [item] = next.splice(fromIndex, 1)
-      next.splice(toIndex, 0, item)
+      visibleIndices.forEach((fullIndex, visibleIndex) => {
+        next[fullIndex] = reorderedVisibleItems[visibleIndex]!
+      })
+
       return next
     })
   }
 
   function editInQueue(index: number, newContent: string): void {
     setMessageQueue((prev) => {
-      if (index < 0 || index >= prev.length) return prev
-      return prev.map((item, i) => (i === index ? { ...item, content: newContent } : item))
+      const visibleIndices = visibleQueueIndicesForCurrentSession(prev)
+      if (index < 0 || index >= visibleIndices.length) return prev
+
+      const fullIndex = visibleIndices[index]
+      if (fullIndex === undefined || prev[fullIndex]?.backendManaged) return prev
+
+      return prev.map((item, i) => (i === fullIndex ? { ...item, content: newContent } : item))
     })
   }
 
-  function clearQueue(): void {
-    setMessageQueue([])
+  function clearQueue(force?: boolean, sessionId?: string): void {
+    const targetSessionId = sessionId ?? session.currentSession()?.id
+    const matchesTargetSession = (item: QueuedMessage): boolean =>
+      !targetSessionId || !item.sessionId || item.sessionId === targetSessionId
+
+    setMessageQueue((prev) => {
+      if (force) {
+        return prev.filter((item) => !matchesTargetSession(item))
+      }
+
+      return prev.filter((item) => !matchesTargetSession(item) || item.backendManaged === true)
+    })
   }
 
   async function retryMessage(assistantMessageId: string): Promise<void> {
@@ -444,6 +549,11 @@ export function createAgentActions(deps: ActionDeps) {
       return
     }
     if (!sessionOwnershipStillCurrent(initiatingSessionId, 'retry', assistantMessageId)) {
+      return
+    }
+
+    const replaySessionId = session.currentSession()?.id
+    if (!replaySessionId) {
       return
     }
 
@@ -477,7 +587,7 @@ export function createAgentActions(deps: ActionDeps) {
     // ── 3. Call the backend's retry API via the streaming IPC layer ──
     try {
       const runStartedAt = Date.now()
-      const result = await rustAgent.retryRun()
+      const result = await rustAgent.retryRun(replaySessionId)
       const errorText = rustAgent.error()
 
       if (errorText) {
@@ -648,6 +758,9 @@ export function createAgentActions(deps: ActionDeps) {
       currentSess = session.currentSession()
     }
     const sessionId = currentSess?.id ?? ''
+    if (!sessionId) {
+      return
+    }
     const runGuard = beginRunGuard(sessionId)
 
     // ── 3. Add user message + assistant placeholder ──────────────────
@@ -686,7 +799,11 @@ export function createAgentActions(deps: ActionDeps) {
     // ── 4. Call the backend's edit-resend API ─────────────────────────
     try {
       const runStartedAt = Date.now()
-      const result = await rustAgent.editAndResendRun(messageId, newContent)
+      const replaySessionId = session.currentSession()?.id
+      if (!replaySessionId) {
+        throw new Error('No active session for edit and resend')
+      }
+      const result = await rustAgent.editAndResendRun(messageId, newContent, replaySessionId)
       const errorText = rustAgent.error()
 
       if (errorText) {
@@ -841,6 +958,11 @@ export function createAgentActions(deps: ActionDeps) {
       return
     }
 
+    const replaySessionId = session.currentSession()?.id
+    if (!replaySessionId) {
+      return
+    }
+
     // ── 1. Reset agent UI state ──────────────────────────────────────
     batch(() => {
       setCurrentThought('')
@@ -871,7 +993,7 @@ export function createAgentActions(deps: ActionDeps) {
     // ── 3. Call the backend's regenerate API via the streaming IPC layer ──
     try {
       const runStartedAt = Date.now()
-      const result = await rustAgent.regenerateRun()
+      const result = await rustAgent.regenerateRun(replaySessionId)
       const errorText = rustAgent.error()
 
       if (errorText) {

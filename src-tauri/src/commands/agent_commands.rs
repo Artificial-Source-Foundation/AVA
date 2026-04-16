@@ -12,17 +12,155 @@ use ava_agent::control_plane::commands::{queue_message_tier, ControlPlaneCommand
 use ava_agent::control_plane::interactive::{
     InteractiveRequestStore, ResolveInteractiveRequestError, TerminalInteractiveRequest,
 };
+use ava_agent::control_plane::queue::{
+    clear_queue_semantics, ClearQueueTarget, QueueClearSemantics, UNSUPPORTED_QUEUE_CLEAR_ERROR,
+};
+use ava_agent::control_plane::sessions::{
+    build_edit_replay_payload, build_regenerate_replay_payload, build_retry_replay_payload,
+    resolve_session_precedence, SessionPromptContext, SessionSelectionSource,
+};
 use ava_tools::permission_middleware::ToolApproval;
 use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, VecDeque};
+use std::sync::atomic::Ordering;
 use tauri::{AppHandle, Emitter, State};
 use tokio::sync::mpsc;
 use tokio::task;
 use tracing::info;
 use uuid::Uuid;
 
-use super::helpers::collect_history_before_last_user;
 use crate::bridge::DesktopBridge;
 use crate::events::{emit_backend_event, AgentEvent};
+
+fn ensure_desktop_run_id(run_id: Option<String>) -> String {
+    run_id.unwrap_or_else(|| format!("desktop-run-{}", Uuid::new_v4()))
+}
+
+fn queued_post_complete_group(progress: &str) -> Option<u32> {
+    progress
+        .strip_prefix("post-complete group ")?
+        .split(':')
+        .next()?
+        .parse()
+        .ok()
+}
+
+fn move_follow_up_to_in_flight(
+    deferred: &mut VecDeque<ava_types::QueuedMessage>,
+    in_flight: &mut VecDeque<ava_types::QueuedMessage>,
+    text: &str,
+) {
+    in_flight.retain(|message| !matches!(message.tier, ava_types::MessageTier::FollowUp));
+    if let Some(index) = deferred.iter().position(|queued| {
+        queued.text == text && matches!(queued.tier, ava_types::MessageTier::FollowUp)
+    }) {
+        if let Some(message) = deferred.remove(index) {
+            in_flight.push_back(message);
+        }
+    }
+}
+
+fn move_post_complete_group_to_in_flight(
+    deferred: &mut VecDeque<ava_types::QueuedMessage>,
+    in_flight: &mut VecDeque<ava_types::QueuedMessage>,
+    group_id: u32,
+) {
+    in_flight
+        .retain(|message| !matches!(message.tier, ava_types::MessageTier::PostComplete { .. }));
+    let mut retained = VecDeque::new();
+    while let Some(message) = deferred.pop_front() {
+        if matches!(message.tier, ava_types::MessageTier::PostComplete { group } if group == group_id)
+        {
+            in_flight.push_back(message);
+        } else {
+            retained.push_back(message);
+        }
+    }
+    *deferred = retained;
+}
+
+async fn restore_in_flight_deferred(
+    session_id: Option<Uuid>,
+    deferred: &tokio::sync::RwLock<HashMap<Uuid, VecDeque<ava_types::QueuedMessage>>>,
+    in_flight: &tokio::sync::RwLock<HashMap<Uuid, VecDeque<ava_types::QueuedMessage>>>,
+) {
+    let Some(session_id) = session_id else {
+        return;
+    };
+
+    let mut in_flight_guard = in_flight.write().await;
+    let Some(mut session_in_flight) = in_flight_guard.remove(&session_id) else {
+        return;
+    };
+    drop(in_flight_guard);
+
+    if session_in_flight.is_empty() {
+        return;
+    }
+
+    let mut deferred_guard = deferred.write().await;
+    let session_deferred = deferred_guard.entry(session_id).or_default();
+    while let Some(message) = session_in_flight.pop_back() {
+        session_deferred.push_front(message);
+    }
+}
+
+async fn clear_preserved_deferred(
+    session_id: Option<Uuid>,
+    deferred: &tokio::sync::RwLock<HashMap<Uuid, VecDeque<ava_types::QueuedMessage>>>,
+    in_flight: &tokio::sync::RwLock<HashMap<Uuid, VecDeque<ava_types::QueuedMessage>>>,
+) {
+    let Some(session_id) = session_id else {
+        return;
+    };
+
+    deferred.write().await.remove(&session_id);
+    in_flight.write().await.remove(&session_id);
+}
+
+async fn cancel_active_run(app: &AppHandle, bridge: &DesktopBridge) {
+    let _interactive_guard = bridge.interactive_lifecycle_lock.lock().await;
+    bridge.interactive_revoked.store(true, Ordering::SeqCst);
+    bridge.revoke_queue_dispatch(true).await;
+    bridge.cancel().await;
+    while let Some(pending) = bridge.pending_approval_reply.cancel_pending().await {
+        let request_id = pending.handle.request_id.clone();
+        let _ = pending.reply.send(ToolApproval::Rejected(Some(
+            "Agent run cancelled from desktop UI".to_string(),
+        )));
+        emit_interactive_request_cleared(
+            app,
+            &request_id,
+            "approval",
+            false,
+            pending.handle.run_id.as_deref(),
+        );
+    }
+    while let Some(pending) = bridge.pending_question_reply.cancel_pending().await {
+        let request_id = pending.handle.request_id.clone();
+        let _ = pending.reply.send(String::new());
+        emit_interactive_request_cleared(
+            app,
+            &request_id,
+            "question",
+            false,
+            pending.handle.run_id.as_deref(),
+        );
+    }
+    while let Some(pending) = bridge.pending_plan_reply.cancel_pending().await {
+        let request_id = pending.handle.request_id.clone();
+        let _ = pending.reply.send(ava_types::PlanDecision::Rejected {
+            feedback: "Agent run cancelled from desktop UI".to_string(),
+        });
+        emit_interactive_request_cleared(
+            app,
+            &request_id,
+            "plan",
+            false,
+            pending.handle.run_id.as_deref(),
+        );
+    }
+}
 
 async fn save_session_checkpoint(
     session_manager: std::sync::Arc<ava_session::SessionManager>,
@@ -41,16 +179,23 @@ fn emit_interactive_request_cleared<R: tauri::Runtime>(
     timed_out: bool,
     run_id: Option<&str>,
 ) {
-    if let Err(error) = app.emit(
-        "agent-event",
-        AgentEvent::InteractiveRequestCleared {
-            request_id: request_id.to_string(),
-            request_kind: request_kind.to_string(),
-            timed_out,
-            run_id: run_id.map(str::to_string),
-        },
-    ) {
+    let payload = interactive_request_cleared_event(request_id, request_kind, timed_out, run_id);
+    if let Err(error) = app.emit("agent-event", payload) {
         tracing::error!("Failed to emit interactive_request_cleared event to frontend: {error}");
+    }
+}
+
+fn interactive_request_cleared_event(
+    request_id: &str,
+    request_kind: &str,
+    timed_out: bool,
+    run_id: Option<&str>,
+) -> AgentEvent {
+    AgentEvent::InteractiveRequestCleared {
+        request_id: request_id.to_string(),
+        request_kind: request_kind.to_string(),
+        timed_out,
+        run_id: run_id.map(str::to_string),
     }
 }
 
@@ -129,6 +274,8 @@ async fn run_agent_inner(
     app: &AppHandle,
     bridge: &DesktopBridge,
 ) -> Result<SubmitGoalResult, String> {
+    let _startup_guard = bridge.startup_lock.lock().await;
+
     // Prevent concurrent runs
     {
         let running = bridge.running.read().await;
@@ -136,12 +283,13 @@ async fn run_agent_inner(
             return Err("Agent is already running. Cancel first.".to_string());
         }
     }
-    *bridge.running.write().await = true;
 
     let cancel = bridge.new_cancel_token().await;
+    bridge.interactive_revoked.store(false, Ordering::SeqCst);
 
     // Create a message queue for mid-stream messaging
-    let message_queue = bridge.new_message_queue().await;
+    let message_queue = bridge.new_message_queue(session_id).await;
+    *bridge.running.write().await = true;
 
     // Create an event channel; spawn a forwarder that emits to all Tauri windows
     let (tx, mut rx) = mpsc::unbounded_channel();
@@ -153,12 +301,14 @@ async fn run_agent_inner(
     let todo_state = bridge.stack.todo_state.clone();
     let checkpoint_sm = bridge.stack.session_manager.clone();
     let checkpoint_last_id = bridge.last_session_id.clone();
+    let deferred_queue = bridge.deferred_queue.clone();
+    let in_flight_deferred = bridge.in_flight_deferred.clone();
+    let deferred_session_id = session_id;
     let event_run_id = run_id.clone();
     let todo_event_run_id = run_id.clone();
     let plan_event_run_id = run_id.clone();
     let approval_event_run_id = run_id.clone();
     let question_event_run_id = run_id.clone();
-    let clear_event_run_id = run_id.clone();
     let forwarder = tokio::spawn(async move {
         let mut last_tool_was_todo_write = false;
         while let Some(event) = rx.recv().await {
@@ -232,6 +382,27 @@ async fn run_agent_inner(
                 // incorrectly reset last_tool_was_todo_write.
                 last_tool_was_todo_write = false;
             }
+            if let ava_agent::agent_loop::AgentEvent::Progress(ref message) = event {
+                if let Some(session_id) = deferred_session_id {
+                    if let Some(text) = message.strip_prefix("follow-up: ") {
+                        let mut deferred = deferred_queue.write().await;
+                        let mut in_flight = in_flight_deferred.write().await;
+                        move_follow_up_to_in_flight(
+                            deferred.entry(session_id).or_default(),
+                            in_flight.entry(session_id).or_default(),
+                            text,
+                        );
+                    } else if let Some(group_id) = queued_post_complete_group(message) {
+                        let mut deferred = deferred_queue.write().await;
+                        let mut in_flight = in_flight_deferred.write().await;
+                        move_post_complete_group_to_in_flight(
+                            deferred.entry(session_id).or_default(),
+                            in_flight.entry(session_id).or_default(),
+                            group_id,
+                        );
+                    }
+                }
+            }
             emit_backend_event(&app_clone, &event, event_run_id.as_deref());
         }
     });
@@ -257,6 +428,12 @@ async fn run_agent_inner(
     let pending_approval = bridge.pending_approval_reply.clone();
     let pending_question = bridge.pending_question_reply.clone();
     let pending_plan = bridge.pending_plan_reply.clone();
+    let approval_revoked = bridge.interactive_revoked.clone();
+    let question_revoked = bridge.interactive_revoked.clone();
+    let plan_revoked = bridge.interactive_revoked.clone();
+    let approval_lifecycle_lock = bridge.interactive_lifecycle_lock.clone();
+    let question_lifecycle_lock = bridge.interactive_lifecycle_lock.clone();
+    let plan_lifecycle_lock = bridge.interactive_lifecycle_lock.clone();
 
     // Spawn approval forwarder with timeout protection.
     // If the frontend does not respond within the timeout, auto-deny the approval
@@ -264,8 +441,17 @@ async fn run_agent_inner(
     let app_approval = app.clone();
     let approval_forwarder = tokio::spawn(async move {
         while let Some(req) = approval_rx.recv().await {
+            let _interactive_guard = approval_lifecycle_lock.lock().await;
+            if approval_revoked.load(Ordering::SeqCst) {
+                let _ = req.reply.send(ToolApproval::Rejected(Some(
+                    "Agent run cancelled from desktop UI".to_string(),
+                )));
+                continue;
+            }
             let risk_level = format!("{:?}", req.inspection.risk_level).to_lowercase();
-            let handle = pending_approval.register(req.reply).await;
+            let handle = pending_approval
+                .register_with_run_id(req.reply, approval_event_run_id.clone())
+                .await;
             let id = handle.request_id.clone();
 
             if let Err(e) = app_approval.emit(
@@ -278,7 +464,7 @@ async fn run_agent_inner(
                     risk_level: risk_level.clone(),
                     reason: req.inspection.reason.clone(),
                     warnings: req.inspection.warnings.clone(),
-                    run_id: approval_event_run_id.clone(),
+                    run_id: handle.run_id.clone(),
                 },
             ) {
                 tracing::error!("Failed to emit approval_request event to frontend: {e}");
@@ -287,12 +473,11 @@ async fn run_agent_inner(
             // Spawn a timeout watchdog: if the frontend hasn't consumed the
             // pending reply within the timeout, auto-deny so the agent unblocks.
             let watchdog_pending = pending_approval.clone();
-            let watchdog_timeout = watchdog_pending.timeout();
             let watchdog_id = id.clone();
             let watchdog_app = app_approval.clone();
             tokio::spawn(async move {
-                tokio::time::sleep(watchdog_timeout).await;
-                if let Some(reply) = watchdog_pending.timeout_request(&watchdog_id).await {
+                let watchdog_timeout = watchdog_pending.timeout();
+                if let Some(reply) = watchdog_pending.await_timeout_request(&watchdog_id).await {
                     tracing::warn!(
                         "Approval request {id} timed out after {}s — auto-denying to unblock agent",
                         watchdog_timeout.as_secs()
@@ -305,7 +490,7 @@ async fn run_agent_inner(
                         &reply.handle.request_id,
                         reply.handle.kind.as_str(),
                         true,
-                        clear_event_run_id.as_deref(),
+                        reply.handle.run_id.as_deref(),
                     );
                 }
             });
@@ -316,7 +501,14 @@ async fn run_agent_inner(
     let app_question = app.clone();
     let question_forwarder = tokio::spawn(async move {
         while let Some(req) = question_rx.recv().await {
-            let handle = pending_question.register(req.reply).await;
+            let _interactive_guard = question_lifecycle_lock.lock().await;
+            if question_revoked.load(Ordering::SeqCst) {
+                let _ = req.reply.send(String::new());
+                continue;
+            }
+            let handle = pending_question
+                .register_with_run_id(req.reply, question_event_run_id.clone())
+                .await;
             let id = handle.request_id.clone();
 
             if let Err(e) = app_question.emit(
@@ -325,7 +517,7 @@ async fn run_agent_inner(
                     id: id.clone(),
                     question: req.question.clone(),
                     options: req.options.clone(),
-                    run_id: question_event_run_id.clone(),
+                    run_id: handle.run_id.clone(),
                 },
             ) {
                 tracing::error!("Failed to emit question_request event to frontend: {e}");
@@ -333,12 +525,11 @@ async fn run_agent_inner(
 
             // Timeout watchdog for question responses
             let watchdog_pending = pending_question.clone();
-            let watchdog_timeout = watchdog_pending.timeout();
             let watchdog_id = id.clone();
             let watchdog_app = app_question.clone();
             tokio::spawn(async move {
-                tokio::time::sleep(watchdog_timeout).await;
-                if let Some(reply) = watchdog_pending.timeout_request(&watchdog_id).await {
+                let watchdog_timeout = watchdog_pending.timeout();
+                if let Some(reply) = watchdog_pending.await_timeout_request(&watchdog_id).await {
                     tracing::warn!(
                         "Question request {id} timed out after {}s — sending empty response to unblock agent",
                         watchdog_timeout.as_secs()
@@ -349,7 +540,7 @@ async fn run_agent_inner(
                         &reply.handle.request_id,
                         reply.handle.kind.as_str(),
                         true,
-                        clear_event_run_id.as_deref(),
+                        reply.handle.run_id.as_deref(),
                     );
                 }
             });
@@ -361,7 +552,16 @@ async fn run_agent_inner(
     let plan_forwarder = tokio::spawn(async move {
         use crate::events::{PlanPayload, PlanStepPayload};
         while let Some(req) = plan_rx.recv().await {
-            let handle = pending_plan.register(req.reply).await;
+            let _interactive_guard = plan_lifecycle_lock.lock().await;
+            if plan_revoked.load(Ordering::SeqCst) {
+                let _ = req.reply.send(ava_types::PlanDecision::Rejected {
+                    feedback: "Agent run cancelled from desktop UI".to_string(),
+                });
+                continue;
+            }
+            let handle = pending_plan
+                .register_with_run_id(req.reply, plan_event_run_id.clone())
+                .await;
             let id = handle.request_id.clone();
             let steps = req
                 .plan
@@ -393,19 +593,18 @@ async fn run_agent_inner(
                         steps,
                         estimated_turns: req.plan.estimated_turns.unwrap_or(0) as usize,
                     },
-                    run_id: plan_event_run_id.clone(),
+                    run_id: handle.run_id.clone(),
                 },
             ) {
                 tracing::error!("Failed to emit plan_created event to frontend: {e}");
             }
 
             let watchdog_pending = pending_plan.clone();
-            let watchdog_timeout = watchdog_pending.timeout();
             let watchdog_id = id.clone();
             let watchdog_app = app_plan.clone();
             tokio::spawn(async move {
-                tokio::time::sleep(watchdog_timeout).await;
-                if let Some(reply) = watchdog_pending.timeout_request(&watchdog_id).await {
+                let watchdog_timeout = watchdog_pending.timeout();
+                if let Some(reply) = watchdog_pending.await_timeout_request(&watchdog_id).await {
                     tracing::warn!(
                         "Plan request {watchdog_id} timed out after {}s — auto-rejecting to unblock agent",
                         watchdog_timeout.as_secs()
@@ -418,7 +617,7 @@ async fn run_agent_inner(
                         &reply.handle.request_id,
                         reply.handle.kind.as_str(),
                         true,
-                        clear_event_run_id.as_deref(),
+                        reply.handle.run_id.as_deref(),
                     );
                 }
             });
@@ -438,8 +637,12 @@ async fn run_agent_inner(
             Some(message_queue),
             images,
             session_id,
+            run_id.clone(),
         )
         .await;
+
+    // Stop accepting queue mutations as soon as the run reaches a terminal state.
+    bridge.clear_message_tx().await;
 
     // Wait for the forwarder to drain; abort the approval/question/plan forwarders
     let _ = forwarder.await;
@@ -448,7 +651,6 @@ async fn run_agent_inner(
     plan_forwarder.abort();
 
     // Clean up
-    bridge.clear_message_tx().await;
     *bridge.running.write().await = false;
     match &result {
         Ok(run) => info!(
@@ -462,6 +664,12 @@ async fn run_agent_inner(
 
     match result {
         Ok(run_result) => {
+            clear_preserved_deferred(
+                session_id,
+                &bridge.deferred_queue,
+                &bridge.in_flight_deferred,
+            )
+            .await;
             let _ = save_session_checkpoint(
                 bridge.stack.session_manager.clone(),
                 run_result.session.clone(),
@@ -474,7 +682,15 @@ async fn run_agent_inner(
                 session_id: run_result.session.id.to_string(),
             })
         }
-        Err(e) => Err(e.to_string()),
+        Err(e) => {
+            restore_in_flight_deferred(
+                session_id,
+                &bridge.deferred_queue,
+                &bridge.in_flight_deferred,
+            )
+            .await;
+            Err(e.to_string())
+        }
     }
 }
 
@@ -533,30 +749,34 @@ pub async fn submit_goal(
         .map(Uuid::parse_str)
         .transpose()
         .map_err(|e| format!("invalid session id: {e}"))?;
+    let last_session_id = *bridge.last_session_id.read().await;
+    let run_session =
+        resolve_session_precedence(requested_session_id, last_session_id, Uuid::new_v4);
 
     // Load conversation history from the previous session (if any) so the
     // agent has context from prior turns in this desktop session.
-    let history_session_id = requested_session_id.or(*bridge.last_session_id.read().await);
-    let history = if let Some(session_id) = history_session_id {
+    let history = if run_session.source == SessionSelectionSource::New {
+        vec![]
+    } else {
         bridge
             .stack
             .session_manager
-            .get(session_id)
+            .get(run_session.session_id)
             .ok()
             .flatten()
             .map(|s| s.messages)
             .unwrap_or_default()
-    } else {
-        vec![]
     };
+
+    let run_id = ensure_desktop_run_id(args.run_id);
 
     run_agent_inner(
         &args.goal,
         args.max_turns,
         history,
         vec![],
-        requested_session_id,
-        args.run_id,
+        Some(run_session.session_id),
+        Some(run_id),
         &app,
         &bridge,
     )
@@ -568,31 +788,14 @@ pub async fn submit_goal(
 pub struct RunCorrelationArgs {
     #[serde(default)]
     pub run_id: Option<String>,
+    #[serde(default)]
+    pub session_id: Option<String>,
 }
 
 /// Cancel the currently-running agent.
 #[tauri::command]
 pub async fn cancel_agent(app: AppHandle, bridge: State<'_, DesktopBridge>) -> Result<(), String> {
-    bridge.cancel().await;
-    if let Some(pending) = bridge.pending_approval_reply.cancel_pending().await {
-        let request_id = pending.handle.request_id.clone();
-        let _ = pending.reply.send(ToolApproval::Rejected(Some(
-            "Agent run cancelled from desktop UI".to_string(),
-        )));
-        emit_interactive_request_cleared(&app, &request_id, "approval", false, None);
-    }
-    if let Some(pending) = bridge.pending_question_reply.cancel_pending().await {
-        let request_id = pending.handle.request_id.clone();
-        let _ = pending.reply.send(String::new());
-        emit_interactive_request_cleared(&app, &request_id, "question", false, None);
-    }
-    if let Some(pending) = bridge.pending_plan_reply.cancel_pending().await {
-        let request_id = pending.handle.request_id.clone();
-        let _ = pending.reply.send(ava_types::PlanDecision::Rejected {
-            feedback: "Agent run cancelled from desktop UI".to_string(),
-        });
-        emit_interactive_request_cleared(&app, &request_id, "plan", false, None);
-    }
+    cancel_active_run(&app, &bridge).await;
     Ok(())
 }
 
@@ -660,7 +863,7 @@ pub async fn resolve_approval(
             &reply.handle.request_id,
             reply.handle.kind.as_str(),
             false,
-            None,
+            reply.handle.run_id.as_deref(),
         );
         return Err(
             "Failed to send approval response — the agent may have already moved on".to_string(),
@@ -672,7 +875,7 @@ pub async fn resolve_approval(
         &reply.handle.request_id,
         reply.handle.kind.as_str(),
         false,
-        None,
+        reply.handle.run_id.as_deref(),
     );
 
     Ok(())
@@ -706,7 +909,7 @@ pub async fn resolve_question(
             &reply.handle.request_id,
             reply.handle.kind.as_str(),
             false,
-            None,
+            reply.handle.run_id.as_deref(),
         );
         return Err(
             "Failed to send question response — the agent may have already moved on".to_string(),
@@ -718,7 +921,7 @@ pub async fn resolve_question(
         &reply.handle.request_id,
         reply.handle.kind.as_str(),
         false,
-        None,
+        reply.handle.run_id.as_deref(),
     );
 
     Ok(())
@@ -765,7 +968,7 @@ pub async fn resolve_plan(
             &reply.handle.request_id,
             reply.handle.kind.as_str(),
             false,
-            None,
+            reply.handle.run_id.as_deref(),
         );
         return Err(
             "Failed to send plan response — the agent may have already moved on".to_string(),
@@ -777,7 +980,7 @@ pub async fn resolve_plan(
         &reply.handle.request_id,
         reply.handle.kind.as_str(),
         false,
-        None,
+        reply.handle.run_id.as_deref(),
     );
 
     Ok(())
@@ -798,24 +1001,36 @@ pub async fn steer_agent(message: String, bridge: State<'_, DesktopBridge>) -> R
             message,
             queue_message_tier(ControlPlaneCommand::SteerAgent, None)
                 .expect("steer command should map to a queue tier"),
+            None,
         )
         .await
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FollowUpArgs {
+    pub message: String,
+    #[serde(default)]
+    pub session_id: Option<String>,
 }
 
 /// Queue a follow-up message (Tier 2).
 #[tauri::command]
 pub async fn follow_up_agent(
-    message: String,
+    args: FollowUpArgs,
     bridge: State<'_, DesktopBridge>,
 ) -> Result<(), String> {
-    if message.is_empty() {
+    if args.message.is_empty() {
         return Err("Follow-up message must not be empty.".to_string());
     }
+    let requested_session_id = parse_optional_queue_session_id(args.session_id.as_deref())?;
+
     bridge
         .send_message(
-            message,
+            args.message,
             queue_message_tier(ControlPlaneCommand::FollowUpAgent, None)
                 .expect("follow-up command should map to a queue tier"),
+            requested_session_id,
         )
         .await
 }
@@ -826,10 +1041,19 @@ pub struct PostCompleteArgs {
     pub message: String,
     #[serde(default = "default_group")]
     pub group: u32,
+    #[serde(default)]
+    pub session_id: Option<String>,
 }
 
 fn default_group() -> u32 {
     1
+}
+
+fn parse_optional_queue_session_id(session_id: Option<&str>) -> Result<Option<Uuid>, String> {
+    session_id
+        .map(Uuid::parse_str)
+        .transpose()
+        .map_err(|error| format!("Invalid session id: {error}"))
 }
 
 fn parse_plan_decision(
@@ -856,82 +1080,6 @@ fn parse_plan_decision(
     }
 }
 
-fn unsupported_queue_clear_error() -> String {
-    "Clearing follow-up or post-complete queues is not supported yet.".to_string()
-}
-
-fn retry_replay_input(
-    session: &ava_types::Session,
-) -> Result<
-    (
-        String,
-        Vec<ava_types::Message>,
-        Vec<ava_types::ImageContent>,
-    ),
-    String,
-> {
-    let last_user_msg = session
-        .messages
-        .iter()
-        .rev()
-        .find(|m| m.role == ava_types::Role::User)
-        .ok_or_else(|| "No user message found in session to retry".to_string())?;
-
-    Ok((
-        last_user_msg.content.clone(),
-        collect_history_before_last_user(&session.messages),
-        last_user_msg.images.clone(),
-    ))
-}
-
-fn edit_replay_input(
-    session: &ava_types::Session,
-    message_id: Uuid,
-    new_content: String,
-) -> Result<
-    (
-        String,
-        Vec<ava_types::Message>,
-        Vec<ava_types::ImageContent>,
-    ),
-    String,
-> {
-    let pos = session
-        .messages
-        .iter()
-        .position(|m| m.id == message_id)
-        .ok_or_else(|| format!("Message {message_id} not found in session"))?;
-
-    Ok((
-        new_content,
-        session.messages[..pos].to_vec(),
-        session.messages[pos].images.clone(),
-    ))
-}
-
-fn regenerate_replay_input(
-    session: &ava_types::Session,
-) -> Result<
-    (
-        String,
-        Vec<ava_types::Message>,
-        Vec<ava_types::ImageContent>,
-    ),
-    String,
-> {
-    let last_user_pos = session
-        .messages
-        .iter()
-        .rposition(|m| m.role == ava_types::Role::User)
-        .ok_or_else(|| "No user message found in session to regenerate from".to_string())?;
-
-    Ok((
-        session.messages[last_user_pos].content.clone(),
-        session.messages[..last_user_pos].to_vec(),
-        session.messages[last_user_pos].images.clone(),
-    ))
-}
-
 /// Queue a post-complete message (Tier 3).
 #[tauri::command]
 pub async fn post_complete_agent(
@@ -941,11 +1089,14 @@ pub async fn post_complete_agent(
     if args.message.is_empty() {
         return Err("Post-complete message must not be empty.".to_string());
     }
+    let requested_session_id = parse_optional_queue_session_id(args.session_id.as_deref())?;
+
     bridge
         .send_message(
             args.message,
             queue_message_tier(ControlPlaneCommand::PostCompleteAgent, Some(args.group))
                 .expect("post-complete command should map to a queue tier"),
+            requested_session_id,
         )
         .await
 }
@@ -962,33 +1113,25 @@ pub async fn get_message_queue(
     bridge: State<'_, DesktopBridge>,
 ) -> Result<MessageQueueState, String> {
     let running = *bridge.running.read().await;
-    let has_tx = bridge.message_tx.read().await.is_some();
+    let snapshot = bridge.queue_dispatch_snapshot().await;
     Ok(MessageQueueState {
-        active: running && has_tx,
+        active: running && snapshot.accepting && snapshot.tx.is_some(),
     })
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum ClearTarget {
-    All,
-    Steering,
-    FollowUp,
-    PostComplete,
 }
 
 /// Clear messages from the queue.
 #[tauri::command]
 pub async fn clear_message_queue(
-    target: ClearTarget,
+    target: ClearQueueTarget,
+    app: AppHandle,
     bridge: State<'_, DesktopBridge>,
 ) -> Result<(), String> {
-    match target {
-        ClearTarget::All | ClearTarget::Steering => {
-            bridge.cancel().await;
+    match clear_queue_semantics(target) {
+        QueueClearSemantics::CancelRunAndClearSteering => {
+            cancel_active_run(&app, &bridge).await;
             Ok(())
         }
-        ClearTarget::FollowUp | ClearTarget::PostComplete => Err(unsupported_queue_clear_error()),
+        QueueClearSemantics::Unsupported => Err(UNSUPPORTED_QUEUE_CLEAR_ERROR.to_string()),
     }
 }
 
@@ -1003,10 +1146,13 @@ pub async fn retry_last_message(
     app: AppHandle,
     bridge: State<'_, DesktopBridge>,
 ) -> Result<SubmitGoalResult, String> {
-    let session_id = bridge
-        .last_session_id
-        .read()
-        .await
+    let session_id = args
+        .session_id
+        .as_deref()
+        .map(Uuid::parse_str)
+        .transpose()
+        .map_err(|e| format!("Invalid session id: {e}"))?
+        .or(*bridge.last_session_id.read().await)
         .ok_or_else(|| "No previous session to retry".to_string())?;
 
     let session = bridge
@@ -1016,16 +1162,22 @@ pub async fn retry_last_message(
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("Session {session_id} not found"))?;
 
-    let (goal, history, images) = retry_replay_input(&session)?;
+    let SessionPromptContext {
+        goal,
+        history,
+        images,
+    } = build_retry_replay_payload(&session).map_err(|error| error.to_string())?;
 
     info!(goal = %goal, session_id = %session_id, "retry_last_message");
+    let run_id = ensure_desktop_run_id(args.run_id);
+
     run_agent_inner(
         &goal,
         0,
         history,
         images,
         Some(session_id),
-        args.run_id,
+        Some(run_id),
         &app,
         &bridge,
     )
@@ -1039,6 +1191,8 @@ pub struct EditAndResendArgs {
     pub new_content: String,
     #[serde(default)]
     pub run_id: Option<String>,
+    #[serde(default)]
+    pub session_id: Option<String>,
 }
 
 /// Edit a specific message and re-run the agent from that point.
@@ -1048,10 +1202,13 @@ pub async fn edit_and_resend(
     app: AppHandle,
     bridge: State<'_, DesktopBridge>,
 ) -> Result<SubmitGoalResult, String> {
-    let session_id = bridge
-        .last_session_id
-        .read()
-        .await
+    let session_id = args
+        .session_id
+        .as_deref()
+        .map(Uuid::parse_str)
+        .transpose()
+        .map_err(|e| format!("Invalid session id: {e}"))?
+        .or(*bridge.last_session_id.read().await)
         .ok_or_else(|| "No previous session to edit".to_string())?;
 
     let session = bridge
@@ -1064,16 +1221,23 @@ pub async fn edit_and_resend(
     let target_id =
         Uuid::parse_str(&args.message_id).map_err(|e| format!("Invalid message ID: {e}"))?;
 
-    let (goal, history, images) = edit_replay_input(&session, target_id, args.new_content)?;
+    let SessionPromptContext {
+        goal,
+        history,
+        images,
+    } = build_edit_replay_payload(&session, Some(target_id), args.new_content)
+        .map_err(|error| error.to_string())?;
 
     info!(new_content = %goal, message_id = %args.message_id, "edit_and_resend");
+    let run_id = ensure_desktop_run_id(args.run_id);
+
     run_agent_inner(
         &goal,
         0,
         history,
         images,
         Some(session_id),
-        args.run_id,
+        Some(run_id),
         &app,
         &bridge,
     )
@@ -1087,10 +1251,13 @@ pub async fn regenerate_response(
     app: AppHandle,
     bridge: State<'_, DesktopBridge>,
 ) -> Result<SubmitGoalResult, String> {
-    let session_id = bridge
-        .last_session_id
-        .read()
-        .await
+    let session_id = args
+        .session_id
+        .as_deref()
+        .map(Uuid::parse_str)
+        .transpose()
+        .map_err(|e| format!("Invalid session id: {e}"))?
+        .or(*bridge.last_session_id.read().await)
         .ok_or_else(|| "No previous session to regenerate".to_string())?;
 
     let session = bridge
@@ -1100,16 +1267,22 @@ pub async fn regenerate_response(
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("Session {session_id} not found"))?;
 
-    let (goal, history, images) = regenerate_replay_input(&session)?;
+    let SessionPromptContext {
+        goal,
+        history,
+        images,
+    } = build_regenerate_replay_payload(&session).map_err(|error| error.to_string())?;
 
     info!(goal = %goal, session_id = %session_id, "regenerate_response");
+    let run_id = ensure_desktop_run_id(args.run_id);
+
     run_agent_inner(
         &goal,
         0,
         history,
         images,
         Some(session_id),
-        args.run_id,
+        Some(run_id),
         &app,
         &bridge,
     )
@@ -1162,6 +1335,16 @@ mod tests {
 
     fn sample_image(label: &str) -> ava_types::ImageContent {
         ava_types::ImageContent::new(label, ava_types::ImageMediaType::Png)
+    }
+
+    #[test]
+    fn ensure_desktop_run_id_generates_stable_prefixed_id() {
+        let generated = ensure_desktop_run_id(None);
+        assert!(generated.starts_with("desktop-run-"));
+        assert_eq!(
+            ensure_desktop_run_id(Some("desktop-run-existing".to_string())),
+            "desktop-run-existing"
+        );
     }
 
     fn sample_user_message(
@@ -1324,8 +1507,64 @@ mod tests {
     }
 
     #[test]
+    fn interactive_request_cleared_event_preserves_timeout_and_run_correlation() {
+        let payload = interactive_request_cleared_event(
+            "question-1",
+            "question",
+            true,
+            Some("desktop-run-42"),
+        );
+
+        match payload {
+            AgentEvent::InteractiveRequestCleared {
+                request_id,
+                request_kind,
+                timed_out,
+                run_id,
+            } => {
+                assert_eq!(request_id, "question-1");
+                assert_eq!(request_kind, "question");
+                assert!(timed_out);
+                assert_eq!(run_id.as_deref(), Some("desktop-run-42"));
+            }
+            _ => panic!("expected interactive clear payload"),
+        }
+    }
+
+    #[tokio::test]
+    async fn interactive_request_cleared_event_smokes_run_id_from_registered_handle() {
+        let (reply_tx, _reply_rx) = tokio::sync::oneshot::channel::<String>();
+        let store = crate::bridge::PendingQuestionReply::new(
+            ava_agent::control_plane::interactive::InteractiveRequestKind::Question,
+        );
+        let handle = store
+            .register_with_run_id(reply_tx, Some("desktop-run-smoke".to_string()))
+            .await;
+
+        match interactive_request_cleared_event(
+            &handle.request_id,
+            handle.kind.as_str(),
+            false,
+            handle.run_id.as_deref(),
+        ) {
+            AgentEvent::InteractiveRequestCleared {
+                request_id,
+                request_kind,
+                timed_out,
+                run_id,
+            } => {
+                assert_eq!(request_id, handle.request_id);
+                assert_eq!(request_kind, "question");
+                assert!(!timed_out);
+                assert_eq!(run_id.as_deref(), Some("desktop-run-smoke"));
+            }
+            _ => panic!("expected interactive clear payload"),
+        }
+    }
+
+    #[test]
     fn unsupported_queue_clear_error_mentions_unimplemented_targets() {
-        assert!(unsupported_queue_clear_error().contains("not supported yet"));
+        assert!(UNSUPPORTED_QUEUE_CLEAR_ERROR.contains("not supported yet"));
     }
 
     #[test]
@@ -1333,7 +1572,8 @@ mod tests {
         let mut session = ava_types::Session::new();
         session.add_message(sample_user_message("describe", vec![sample_image("retry")]));
 
-        let (_, _, images) = retry_replay_input(&session).expect("retry replay input");
+        let SessionPromptContext { images, .. } =
+            build_retry_replay_payload(&session).expect("retry replay input");
         assert_eq!(images, vec![sample_image("retry")]);
     }
 
@@ -1344,9 +1584,22 @@ mod tests {
         let target_id = target.id;
         session.add_message(target);
 
-        let (_, _, images) =
-            edit_replay_input(&session, target_id, "after".to_string()).expect("edit input");
+        let SessionPromptContext { images, .. } =
+            build_edit_replay_payload(&session, Some(target_id), "after".to_string())
+                .expect("edit input");
         assert_eq!(images, vec![sample_image("edit")]);
+    }
+
+    #[test]
+    fn edit_replay_input_rejects_non_user_targets() {
+        let mut session = ava_types::Session::new();
+        let assistant = ava_types::Message::new(ava_types::Role::Assistant, "done");
+        let assistant_id = assistant.id;
+        session.add_message(assistant);
+
+        let error = build_edit_replay_payload(&session, Some(assistant_id), "after".to_string())
+            .expect_err("assistant target should fail");
+        assert_eq!(error.to_string(), "Only user messages can be edited");
     }
 
     #[test]
@@ -1355,7 +1608,8 @@ mod tests {
         session.add_message(sample_user_message("before", vec![sample_image("regen")]));
         session.add_message(ava_types::Message::new(ava_types::Role::Assistant, "done"));
 
-        let (_, _, images) = regenerate_replay_input(&session).expect("regen input");
+        let SessionPromptContext { images, .. } =
+            build_regenerate_replay_payload(&session).expect("regen input");
         assert_eq!(images, vec![sample_image("regen")]);
     }
 }

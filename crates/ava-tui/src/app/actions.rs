@@ -195,11 +195,13 @@ Commands
         // Save checkpoint
         self.state.btw.checkpoint_messages = self.state.messages.messages.clone();
         self.state.btw.checkpoint_scroll = self.state.messages.scroll_offset;
+        self.state.btw.checkpoint_session = self.state.session.current_session.clone();
         self.state.btw.active = true;
 
         // Clear the chat for the branch conversation
         self.state.messages.messages.clear();
         self.state.messages.reset_scroll();
+        self.state.session.current_session = None;
 
         self.set_status(
             "Entered /btw branch \u{2014} use /btw end or Ctrl+Z to restore",
@@ -230,6 +232,7 @@ Commands
         // Restore checkpoint
         self.state.messages.messages = std::mem::take(&mut self.state.btw.checkpoint_messages);
         self.state.messages.scroll_offset = self.state.btw.checkpoint_scroll;
+        self.state.session.current_session = self.state.btw.checkpoint_session.take();
         self.state.btw.active = false;
 
         // Inject summary so the main conversation retains a trace
@@ -302,6 +305,7 @@ Commands
         let msg_index = checkpoint.message_index;
         let preview: String = crate::text_utils::truncate_display(&checkpoint.message_preview, 50);
         let snapshot_hash = checkpoint.snapshot_hash.clone();
+        let checkpoint_session = checkpoint.session_snapshot.clone();
 
         match option {
             RewindOption::RestoreCodeAndConversation => {
@@ -312,6 +316,7 @@ Commands
                 }
                 self.state.messages.reset_scroll();
                 self.state.rewind.truncate_after(checkpoint_idx);
+                self.state.session.current_session = checkpoint_session.clone();
 
                 let mut status = format!("Rewound to before: '{preview}'");
                 if file_count > 0 {
@@ -336,6 +341,7 @@ Commands
                 }
                 self.state.messages.reset_scroll();
                 self.state.rewind.truncate_after(checkpoint_idx);
+                self.state.session.current_session = checkpoint_session.clone();
 
                 let status = format!("Rewound conversation to before: '{preview}'");
                 self.state

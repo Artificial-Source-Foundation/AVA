@@ -1,3 +1,4 @@
+use ava_agent::control_plane::events::backend_event_requires_interactive_projection;
 use serde::Serialize;
 use serde_json::Value;
 use tauri::{Emitter, Window};
@@ -439,10 +440,18 @@ pub fn from_backend_event(
         // representation yet. Log at debug level so we can diagnose if important events
         // are being silently dropped.
         other => {
-            tracing::debug!(
-                "from_backend_event: no frontend mapping for event type {:?} — dropping",
-                std::mem::discriminant(other)
-            );
+            let discriminant = std::mem::discriminant(other);
+            if backend_event_requires_interactive_projection(other) {
+                tracing::warn!(
+                    "from_backend_event: required control-plane event {:?} has no desktop projection",
+                    discriminant
+                );
+            } else {
+                tracing::debug!(
+                    "from_backend_event: no frontend mapping for event type {:?} — dropping",
+                    discriminant
+                );
+            }
             None
         }
     }
@@ -463,6 +472,9 @@ pub fn emit_backend_event<R: tauri::Runtime>(
 
 #[cfg(test)]
 mod tests {
+    use ava_agent::control_plane::events::{
+        canonical_event_spec, required_backend_event_kinds, CanonicalEventKind,
+    };
     use serde_json::json;
 
     use super::AgentEvent;
@@ -500,11 +512,13 @@ mod tests {
             risk_level: "high".to_string(),
             reason: "destructive command".to_string(),
             warnings: vec!["uses rm -rf".to_string()],
+            run_id: Some("desktop-run-approval".to_string()),
         };
         let as_json = serde_json::to_value(event).expect("event to serialize");
         assert_eq!(as_json["type"], "approval_request");
         assert_eq!(as_json["tool_name"], "bash");
         assert_eq!(as_json["risk_level"], "high");
+        assert_eq!(as_json["run_id"], "desktop-run-approval");
     }
 
     #[test]
@@ -550,10 +564,12 @@ mod tests {
             id: "q-1".to_string(),
             question: "Which framework?".to_string(),
             options: vec!["React".to_string(), "SolidJS".to_string()],
+            run_id: Some("desktop-run-question".to_string()),
         };
         let as_json = serde_json::to_value(event).expect("event to serialize");
         assert_eq!(as_json["type"], "question_request");
         assert_eq!(as_json["question"], "Which framework?");
+        assert_eq!(as_json["run_id"], "desktop-run-question");
     }
 
     #[test]
@@ -562,12 +578,14 @@ mod tests {
             request_id: "approval-1".to_string(),
             request_kind: "approval".to_string(),
             timed_out: true,
+            run_id: Some("desktop-run-clear".to_string()),
         };
         let as_json = serde_json::to_value(event).expect("event to serialize");
         assert_eq!(as_json["type"], "interactive_request_cleared");
         assert_eq!(as_json["request_id"], "approval-1");
         assert_eq!(as_json["request_kind"], "approval");
         assert_eq!(as_json["timed_out"], true);
+        assert_eq!(as_json["run_id"], "desktop-run-clear");
     }
 
     #[test]
@@ -603,5 +621,65 @@ mod tests {
         assert_eq!(subagent_json["session_id"], "child-session");
         assert_eq!(subagent_json["run_id"], "desktop-run-4");
         assert_eq!(subagent_json["agent_type"], "reviewer");
+    }
+
+    #[test]
+    fn desktop_control_plane_event_shapes_follow_shared_requirements() {
+        for kind in required_backend_event_kinds() {
+            let backend_event = sample_backend_event(*kind);
+            let projected = super::from_backend_event(&backend_event, Some("desktop-run"))
+                .expect("required backend event should project");
+            let projected_json = serde_json::to_value(projected).expect("serialize projected");
+            let requirement = canonical_event_spec(kind.type_tag()).expect("event requirement");
+
+            assert_eq!(projected_json["type"], kind.type_tag());
+            for field in requirement.required_fields {
+                assert!(
+                    projected_json.get(field.json_key()).is_some(),
+                    "desktop projection missing field {} for {}",
+                    field.json_key(),
+                    kind.type_tag()
+                );
+            }
+        }
+    }
+
+    fn sample_backend_event(kind: CanonicalEventKind) -> ava_agent::agent_loop::AgentEvent {
+        match kind {
+            CanonicalEventKind::PlanStepComplete => {
+                ava_agent::agent_loop::AgentEvent::PlanStepComplete {
+                    step_id: "step-1".to_string(),
+                }
+            }
+            CanonicalEventKind::Complete => {
+                ava_agent::agent_loop::AgentEvent::Complete(ava_types::Session::new())
+            }
+            CanonicalEventKind::Error => {
+                ava_agent::agent_loop::AgentEvent::Error("boom".to_string())
+            }
+            CanonicalEventKind::SubagentComplete => {
+                ava_agent::agent_loop::AgentEvent::SubAgentComplete {
+                    call_id: "call-1".to_string(),
+                    session_id: "session-1".to_string(),
+                    messages: Vec::new(),
+                    description: "Investigate parser bug".to_string(),
+                    input_tokens: 10,
+                    output_tokens: 5,
+                    cost_usd: 0.1,
+                    agent_type: Some("reviewer".to_string()),
+                    provider: Some("openai".to_string()),
+                    resumed: false,
+                }
+            }
+            CanonicalEventKind::StreamingEditProgress => {
+                ava_agent::agent_loop::AgentEvent::StreamingEditProgress {
+                    call_id: "call-2".to_string(),
+                    tool_name: "apply_patch".to_string(),
+                    file_path: Some("src/main.rs".to_string()),
+                    bytes_received: 256,
+                }
+            }
+            other => panic!("unsupported backend-only sample kind: {other:?}"),
+        }
     }
 }

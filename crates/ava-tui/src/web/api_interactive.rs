@@ -16,6 +16,7 @@ fn emit_interactive_request_cleared(
     request_id: &str,
     request_kind: &str,
     timed_out: bool,
+    run_id: Option<&str>,
 ) {
     let _ = state
         .inner
@@ -24,6 +25,7 @@ fn emit_interactive_request_cleared(
             request_id: request_id.to_string(),
             request_kind: request_kind.to_string(),
             timed_out,
+            run_id: run_id.map(str::to_string),
         });
 }
 
@@ -84,6 +86,7 @@ pub(crate) async fn resolve_approval(
             &reply.handle.request_id,
             reply.handle.kind.as_str(),
             false,
+            reply.handle.run_id.as_deref(),
         );
         return Err(error_response(
             StatusCode::GONE,
@@ -96,6 +99,7 @@ pub(crate) async fn resolve_approval(
         &reply.handle.request_id,
         reply.handle.kind.as_str(),
         false,
+        reply.handle.run_id.as_deref(),
     );
 
     Ok(Json(serde_json::json!({ "ok": true })))
@@ -131,6 +135,7 @@ pub(crate) async fn resolve_question(
             &reply.handle.request_id,
             reply.handle.kind.as_str(),
             false,
+            reply.handle.run_id.as_deref(),
         );
         return Err(error_response(
             StatusCode::GONE,
@@ -143,6 +148,7 @@ pub(crate) async fn resolve_question(
         &reply.handle.request_id,
         reply.handle.kind.as_str(),
         false,
+        reply.handle.run_id.as_deref(),
     );
 
     Ok(Json(serde_json::json!({ "ok": true })))
@@ -217,6 +223,7 @@ pub(crate) async fn resolve_plan(
             &reply.handle.request_id,
             reply.handle.kind.as_str(),
             false,
+            reply.handle.run_id.as_deref(),
         );
         return Err(error_response(
             StatusCode::GONE,
@@ -229,6 +236,7 @@ pub(crate) async fn resolve_plan(
         &reply.handle.request_id,
         reply.handle.kind.as_str(),
         false,
+        reply.handle.run_id.as_deref(),
     );
 
     Ok(Json(serde_json::json!({ "ok": true })))

@@ -128,20 +128,63 @@ export function useInputState(): InputState {
     })
   }
 
+  const appendQueuedUserMessage = (
+    tier: 'queued' | 'post-complete',
+    message: string,
+    sessionId: string
+  ): void => {
+    sessionStore.addMessage({
+      id: generateMessageId(tier === 'queued' ? 'queue' : 'post'),
+      sessionId,
+      role: 'user',
+      content: message,
+      createdAt: Date.now(),
+      metadata: { tier },
+    })
+  }
+
+  const handleQueuedRequestFailure = (message: string, error: unknown): void => {
+    const detail = error instanceof Error ? error.message : String(error)
+    setInput(message)
+    queueMicrotask(() => {
+      autoResize()
+      focusTextarea()
+    })
+    notify.error('Queue failed', detail)
+  }
+
+  const queueFollowUpMessage = async (message: string, sessionId: string): Promise<void> => {
+    await agent.followUp(message, sessionId)
+    appendQueuedUserMessage('queued', message, sessionId)
+    setInput('')
+    setHistoryIndex(-1)
+    if (textareaRef) textareaRef.style.height = 'auto'
+  }
+
+  const queuePostCompleteMessage = async (message: string, sessionId: string): Promise<void> => {
+    await agent.postComplete(message, undefined, sessionId)
+    appendQueuedUserMessage('post-complete', message, sessionId)
+    setInput('')
+    setHistoryIndex(-1)
+    if (textareaRef) textareaRef.style.height = 'auto'
+  }
+
   // Elapsed timer during streaming
   const elapsedSecondsFromTimer = useElapsedTimer(() => agent.streamingStartedAt())
 
-  // Clear queue on session change
+  // Clear only local, non-backend-managed queue items on session change.
   createEffect(
     on(
       () => sessionStore.currentSession()?.id,
-      () => {
-        agent.clearQueue()
+      (_, previousSessionId) => {
+        if (!previousSessionId) return
+        agent.clearQueue(false, previousSessionId)
         queueMicrotask(() => {
           if (!textareaRef || document.activeElement === textareaRef) return
           textareaRef.focus()
         })
-      }
+      },
+      { defer: true }
     )
   )
 
@@ -217,11 +260,17 @@ export function useInputState(): InputState {
       if (parsed.name === 'later') {
         const laterMsg = parsed.args.trim()
         if (laterMsg) {
-          agent.postComplete(laterMsg)
+          const sessionId = sessionStore.currentSession()?.id ?? ''
+          try {
+            await queuePostCompleteMessage(laterMsg, sessionId)
+          } catch (error) {
+            handleQueuedRequestFailure(laterMsg, error)
+          }
+        } else {
+          setInput('')
+          setHistoryIndex(-1)
+          if (textareaRef) textareaRef.style.height = 'auto'
         }
-        setInput('')
-        setHistoryIndex(-1)
-        if (textareaRef) textareaRef.style.height = 'auto'
         return
       }
       if (parsed.name === 'queue') {
@@ -410,21 +459,10 @@ export function useInputState(): InputState {
 
     // Mid-stream messaging: queue for next turn when agent is running (Enter)
     if (isProcessing()) {
-      setInput('')
-      setHistoryIndex(-1)
-      if (textareaRef) textareaRef.style.height = 'auto'
-      // Add the queued message to chat so the user sees what they sent
       const sessionId = sessionStore.currentSession()?.id ?? ''
-      sessionStore.addMessage({
-        id: generateMessageId('queue'),
-        sessionId,
-        role: 'user',
-        content: message,
-        createdAt: Date.now(),
-        metadata: { tier: 'queued' },
+      void queueFollowUpMessage(message, sessionId).catch((error) => {
+        handleQueuedRequestFailure(message, error)
       })
-      // Queue: agent finishes current turn, then processes message as new turn
-      agent.followUp(message)
       return
     }
 
@@ -586,35 +624,19 @@ export function useInputState(): InputState {
       if (e.altKey) {
         // Alt+Enter: post-complete — queued for after agent fully stops
         e.preventDefault()
-        setInput('')
-        if (textareaRef) textareaRef.style.height = 'auto'
         const sessionId = sessionStore.currentSession()?.id ?? ''
-        sessionStore.addMessage({
-          id: generateMessageId('post'),
-          sessionId,
-          role: 'user',
-          content: message,
-          createdAt: Date.now(),
-          metadata: { tier: 'post-complete' },
+        void queuePostCompleteMessage(message, sessionId).catch((error) => {
+          handleQueuedRequestFailure(message, error)
         })
-        agent.postComplete(message)
         return
       }
       if (!e.shiftKey) {
         // Enter (no modifiers): queue — agent finishes current turn, then processes
         e.preventDefault()
-        setInput('')
-        if (textareaRef) textareaRef.style.height = 'auto'
         const sessionId = sessionStore.currentSession()?.id ?? ''
-        sessionStore.addMessage({
-          id: generateMessageId('queue'),
-          sessionId,
-          role: 'user',
-          content: message,
-          createdAt: Date.now(),
-          metadata: { tier: 'queued' },
+        void queueFollowUpMessage(message, sessionId).catch((error) => {
+          handleQueuedRequestFailure(message, error)
         })
-        agent.followUp(message)
         return
       }
       // Shift+Enter: newline (fall through)
@@ -641,18 +663,10 @@ export function useInputState(): InputState {
   const handleQueueFromMenu = (): void => {
     const message = input().trim()
     if (!message || !isProcessing()) return
-    setInput('')
-    if (textareaRef) textareaRef.style.height = 'auto'
     const sessionId = sessionStore.currentSession()?.id ?? ''
-    sessionStore.addMessage({
-      id: generateMessageId('queue'),
-      sessionId,
-      role: 'user',
-      content: message,
-      createdAt: Date.now(),
-      metadata: { tier: 'queued' },
+    void queueFollowUpMessage(message, sessionId).catch((error) => {
+      handleQueuedRequestFailure(message, error)
     })
-    agent.followUp(message)
   }
 
   const handleInterruptFromMenu = (): void => {
@@ -675,18 +689,10 @@ export function useInputState(): InputState {
   const handlePostCompleteFromMenu = (): void => {
     const message = input().trim()
     if (!message || !isProcessing()) return
-    setInput('')
-    if (textareaRef) textareaRef.style.height = 'auto'
     const sessionId = sessionStore.currentSession()?.id ?? ''
-    sessionStore.addMessage({
-      id: generateMessageId('post'),
-      sessionId,
-      role: 'user',
-      content: message,
-      createdAt: Date.now(),
-      metadata: { tier: 'post-complete' },
+    void queuePostCompleteMessage(message, sessionId).catch((error) => {
+      handleQueuedRequestFailure(message, error)
     })
-    agent.postComplete(message)
   }
   const handleExternalEditor = async (): Promise<void> => {
     try {

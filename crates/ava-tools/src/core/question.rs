@@ -8,6 +8,8 @@ use crate::registry::Tool;
 /// A request from the agent to ask the user a question.
 #[derive(Debug)]
 pub struct QuestionRequest {
+    /// Optional run correlation for the originating agent run.
+    pub run_id: Option<String>,
     /// The question text to display.
     pub question: String,
     /// Optional selectable choices. If empty, show a free-text input.
@@ -24,13 +26,21 @@ pub struct QuestionRequest {
 #[derive(Clone)]
 pub struct QuestionBridge {
     tx: mpsc::UnboundedSender<QuestionRequest>,
+    run_id: Option<String>,
 }
 
 impl QuestionBridge {
     /// Create a new bridge, returning the bridge handle and the receiving end.
     pub fn new() -> (Self, mpsc::UnboundedReceiver<QuestionRequest>) {
         let (tx, rx) = mpsc::unbounded_channel();
-        (Self { tx }, rx)
+        (Self { tx, run_id: None }, rx)
+    }
+
+    pub fn with_run_id(&self, run_id: Option<String>) -> Self {
+        Self {
+            tx: self.tx.clone(),
+            run_id,
+        }
     }
 }
 
@@ -104,6 +114,7 @@ impl Tool for QuestionTool {
         self.bridge
             .tx
             .send(QuestionRequest {
+                run_id: self.bridge.run_id.clone(),
                 question: question.clone(),
                 options,
                 reply: reply_tx,

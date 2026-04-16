@@ -35,6 +35,7 @@ export const MessageInput: Component<{ adapter?: MessageInputAdapter }> = (props
       content: msg.content,
       tier: (msg.tier as QueuedItem['tier']) ?? 'queued',
       group: msg.group,
+      backendManaged: msg.backendManaged,
     }))
   )
 

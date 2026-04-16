@@ -9,6 +9,7 @@ use std::time::Instant;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing::warn;
+use uuid::Uuid;
 
 #[derive(Debug, Default, Clone)]
 pub struct TokenUsage {
@@ -110,7 +111,7 @@ impl AgentMode {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum AgentActivity {
     #[default]
     Idle,
@@ -294,7 +295,7 @@ impl AgentState {
         max_turns: usize,
         app_tx: mpsc::UnboundedSender<AppEvent>,
         history: Vec<ava_types::Message>,
-        parent_session_id: Option<String>,
+        session_id: Option<Uuid>,
         images: Vec<ava_types::ImageContent>,
     ) {
         let Some(stack) = self.stack.as_ref().map(Arc::clone) else {
@@ -328,8 +329,8 @@ impl AgentState {
             });
 
             // Set parent session ID so sub-agents can link back to this session
-            if let Some(pid) = parent_session_id {
-                *stack.parent_session_id.write().await = Some(pid);
+            if let Some(session_id) = session_id {
+                *stack.parent_session_id.write().await = Some(session_id.to_string());
             }
             let result = stack
                 .run(
@@ -340,7 +341,8 @@ impl AgentState {
                     history,
                     Some(message_queue),
                     images,
-                    None,
+                    session_id,
+                    Some(run_id.to_string()),
                 )
                 .await;
             let _ = relay.await;

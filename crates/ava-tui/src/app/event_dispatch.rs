@@ -520,36 +520,18 @@ impl App {
                     pc.message = Some(format!("Failed: {error}"));
                 }
             }
-            AppEvent::Question(req) => {
-                self.state.question = Some(QuestionState {
-                    question: req.question,
-                    options: req.options.clone(),
-                    selected: 0,
-                    input: String::new(),
-                    reply: Some(req.reply),
-                });
-                self.state.active_modal = Some(ModalType::Question);
-            }
-            AppEvent::ToolApproval(req) => {
-                let inspection = Some(crate::state::permission::InspectionInfo {
-                    risk_level: req.inspection.risk_level,
-                    tags: req.inspection.tags,
-                    warnings: req.inspection.warnings,
-                });
-                self.state
-                    .permission
-                    .enqueue(crate::state::permission::ApprovalRequest {
-                        call: req.call,
-                        approve_tx: req.reply,
-                        inspection,
-                    });
-                self.state.active_modal = Some(ModalType::ToolApproval);
-            }
-            AppEvent::PlanProposal(req) => {
-                self.state.plan_approval = Some(
-                    crate::state::plan_approval::PlanApprovalState::new(req.plan, req.reply),
+            AppEvent::InteractiveRequestCleared {
+                request_id,
+                request_kind,
+                timed_out,
+                ..
+            } => {
+                self.handle_interactive_request_cleared(
+                    &request_id,
+                    request_kind,
+                    timed_out,
+                    app_tx.clone(),
                 );
-                self.state.active_modal = Some(ModalType::PlanApproval);
             }
             AppEvent::HookResult {
                 event,

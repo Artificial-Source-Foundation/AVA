@@ -227,10 +227,84 @@ describe('createAgentActions session sync preflight', () => {
 
     expect(ensureActiveSessionSyncedMock).toHaveBeenCalledWith('session-123')
     expect(retryRun).toHaveBeenCalledTimes(1)
+    expect(retryRun).toHaveBeenCalledWith('session-123')
     expect(ensureActiveSessionSyncedMock.mock.invocationCallOrder[0]).toBeLessThan(
       retryRun.mock.invocationCallOrder[0]
     )
     expect(markActiveSessionSyncedMock).toHaveBeenCalledWith('session-123')
+  })
+
+  it('forwards current web session id on retry replays', async () => {
+    isTauriRuntime = false
+    const retryRun = vi
+      .fn()
+      .mockResolvedValue({ success: true, turns: 1, sessionId: 'session-123' })
+    const actions = createAgentActions({
+      rustAgent: {
+        isRunning: () => false,
+        retryRun,
+        error: () => null,
+        streamingContent: () => 'final answer',
+        thinkingContent: () => '',
+        thinkingSegments: () => [],
+        tokenUsage: () => ({ output: 0, cost: 0 }),
+        activeToolCalls: () => [],
+        endRun: vi.fn(),
+      },
+      session: {
+        currentSession: () => ({ id: 'session-web' }),
+        setMessageError: vi.fn(),
+        selectedModel: () => 'gpt-5.4',
+        selectedProvider: () => 'openai',
+        updateMessage: vi.fn(),
+        deleteMessage: vi.fn(),
+      },
+      settingsRef: { settings: () => ({}) },
+      isPlanMode: () => false,
+      setIsPlanMode: vi.fn(),
+      currentTurn: () => 0,
+      tokensUsed: () => 0,
+      currentThought: () => '',
+      setCurrentThought: vi.fn(),
+      toolActivity: () => [],
+      setToolActivity: vi.fn(),
+      pendingApproval: () => null,
+      setPendingApproval: vi.fn(),
+      pendingQuestion: () => null,
+      setPendingQuestion: vi.fn(),
+      pendingPlan: () => null,
+      setPendingPlan: vi.fn(),
+      doomLoopDetected: () => false,
+      setDoomLoopDetected: vi.fn(),
+      streamingTokenEstimate: () => 0,
+      setStreamingTokenEstimate: vi.fn(),
+      streamingStartedAt: () => null,
+      setStreamingStartedAt: vi.fn(),
+      messageQueue: () => [],
+      setMessageQueue: vi.fn(),
+      liveMessageId: () => null,
+      setLiveMessageId: vi.fn(),
+      streaming: {
+        streamingContentOffset: () => 0,
+        setStreamingContentOffset: vi.fn(),
+        toolCallsOffset: () => 0,
+        setToolCallsOffset: vi.fn(),
+        thinkingSegmentsOffset: () => 0,
+        setThinkingSegmentsOffset: vi.fn(),
+      },
+      runOwnership: {
+        beginRun: (() => {
+          let token = 0
+          return () => ++token
+        })(),
+        isCurrentRun: () => true,
+      },
+    } as unknown as Parameters<typeof createAgentActions>[0])
+
+    await actions.retryMessage('assistant-1')
+
+    expect(retryRun).toHaveBeenCalledTimes(1)
+    expect(retryRun).toHaveBeenCalledWith('session-web')
   })
 
   it('waits for desktop session sync before regenerate continues on the happy path', async () => {
@@ -308,10 +382,84 @@ describe('createAgentActions session sync preflight', () => {
 
     expect(ensureActiveSessionSyncedMock).toHaveBeenCalledWith('session-123')
     expect(regenerateRun).toHaveBeenCalledTimes(1)
+    expect(regenerateRun).toHaveBeenCalledWith('session-123')
     expect(ensureActiveSessionSyncedMock.mock.invocationCallOrder[0]).toBeLessThan(
       regenerateRun.mock.invocationCallOrder[0]
     )
     expect(markActiveSessionSyncedMock).toHaveBeenCalledWith('session-123')
+  })
+
+  it('forwards current web session id on regenerate replays', async () => {
+    isTauriRuntime = false
+    const regenerateRun = vi
+      .fn()
+      .mockResolvedValue({ success: true, turns: 1, sessionId: 'session-web' })
+    const actions = createAgentActions({
+      rustAgent: {
+        isRunning: () => false,
+        regenerateRun,
+        error: () => null,
+        streamingContent: () => 'final answer',
+        thinkingContent: () => '',
+        thinkingSegments: () => [],
+        tokenUsage: () => ({ output: 0, cost: 0 }),
+        activeToolCalls: () => [],
+        endRun: vi.fn(),
+      },
+      session: {
+        currentSession: () => ({ id: 'session-web' }),
+        setMessageError: vi.fn(),
+        selectedModel: () => 'gpt-5.4',
+        selectedProvider: () => 'openai',
+        updateMessage: vi.fn(),
+        deleteMessage: vi.fn(),
+      },
+      settingsRef: { settings: () => ({}) },
+      isPlanMode: () => false,
+      setIsPlanMode: vi.fn(),
+      currentTurn: () => 0,
+      tokensUsed: () => 0,
+      currentThought: () => '',
+      setCurrentThought: vi.fn(),
+      toolActivity: () => [],
+      setToolActivity: vi.fn(),
+      pendingApproval: () => null,
+      setPendingApproval: vi.fn(),
+      pendingQuestion: () => null,
+      setPendingQuestion: vi.fn(),
+      pendingPlan: () => null,
+      setPendingPlan: vi.fn(),
+      doomLoopDetected: () => false,
+      setDoomLoopDetected: vi.fn(),
+      streamingTokenEstimate: () => 0,
+      setStreamingTokenEstimate: vi.fn(),
+      streamingStartedAt: () => null,
+      setStreamingStartedAt: vi.fn(),
+      messageQueue: () => [],
+      setMessageQueue: vi.fn(),
+      liveMessageId: () => null,
+      setLiveMessageId: vi.fn(),
+      streaming: {
+        streamingContentOffset: () => 0,
+        setStreamingContentOffset: vi.fn(),
+        toolCallsOffset: () => 0,
+        setToolCallsOffset: vi.fn(),
+        thinkingSegmentsOffset: () => 0,
+        setThinkingSegmentsOffset: vi.fn(),
+      },
+      runOwnership: {
+        beginRun: (() => {
+          let token = 0
+          return () => ++token
+        })(),
+        isCurrentRun: () => true,
+      },
+    } as unknown as Parameters<typeof createAgentActions>[0])
+
+    await actions.regenerateResponse('assistant-2')
+
+    expect(regenerateRun).toHaveBeenCalledTimes(1)
+    expect(regenerateRun).toHaveBeenCalledWith('session-web')
   })
 
   it('abandons retry after preflight if the initiating session is no longer current', async () => {
@@ -489,12 +637,13 @@ describe('createAgentActions session sync preflight', () => {
     ]
     const setMessages = vi.fn()
     const setMessageError = vi.fn()
+    const editAndResendRun = vi
+      .fn()
+      .mockRejectedValue(new Error('Invalid message ID for edit-resend'))
     const actions = createAgentActions({
       rustAgent: {
         isRunning: () => false,
-        editAndResendRun: vi
-          .fn()
-          .mockRejectedValue(new Error('Invalid message ID for edit-resend')),
+        editAndResendRun,
         error: () => null,
         streamingContent: () => '',
         thinkingContent: () => '',
@@ -560,6 +709,7 @@ describe('createAgentActions session sync preflight', () => {
 
     await actions.editAndResend('user-1', 'retry this')
 
+    expect(editAndResendRun).toHaveBeenCalledWith('user-1', 'retry this', 'session-123')
     expect(setMessages).toHaveBeenCalledWith(originalMessages)
     expect(setMessageError).toHaveBeenCalledWith(
       'user-1',

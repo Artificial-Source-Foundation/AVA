@@ -27,6 +27,7 @@ export interface QueuedItem {
   content: string
   tier: 'queued' | 'interrupt' | 'post-complete' | 'follow-up' | 'steering'
   group?: number
+  backendManaged?: boolean
 }
 
 export interface MessageQueueWidgetProps {
@@ -152,6 +153,8 @@ interface QueueRowProps {
   item: QueuedItem
   index: number
   total: number
+  canMoveUp: boolean
+  canMoveDown: boolean
   isEditing: boolean
   onStartEdit: () => void
   onSaveEdit: (newContent: string) => void
@@ -189,8 +192,8 @@ const QueueRow: Component<QueueRowProps> = (props) => (
       </span>
     </Show>
 
-    {/* Action buttons — visible on hover */}
-    <Show when={!props.isEditing}>
+    {/* Action buttons — visible on hover, hidden for backend-managed items */}
+    <Show when={!props.isEditing && !props.item.backendManaged}>
       <div class="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
         <button
           type="button"
@@ -200,7 +203,7 @@ const QueueRow: Component<QueueRowProps> = (props) => (
         >
           <Pencil class="w-3 h-3" />
         </button>
-        <Show when={props.index > 0}>
+        <Show when={props.canMoveUp}>
           <button
             type="button"
             onClick={() => props.onMoveUp()}
@@ -210,7 +213,7 @@ const QueueRow: Component<QueueRowProps> = (props) => (
             <ArrowUp class="w-3 h-3" />
           </button>
         </Show>
-        <Show when={props.index < props.total - 1}>
+        <Show when={props.canMoveDown}>
           <button
             type="button"
             onClick={() => props.onMoveDown()}
@@ -251,6 +254,11 @@ export const MessageQueueWidget: Component<MessageQueueWidgetProps> = (props) =>
     props.queuedMessages().filter((m) => m.tier === 'post-complete')
   )
 
+  // Count of user-managed items (non-backend-managed) for conditional UI
+  const userManagedCount = createMemo(
+    () => props.queuedMessages().filter((m) => !m.backendManaged).length
+  )
+
   // Get absolute index in the full list for a given item
   const absoluteIndex = (item: QueuedItem): number =>
     props.queuedMessages().findIndex((m) => m.id === item.id)
@@ -274,13 +282,15 @@ export const MessageQueueWidget: Component<MessageQueueWidgetProps> = (props) =>
             </span>
           </button>
 
-          <button
-            type="button"
-            onClick={() => props.onClearAll()}
-            class="text-[var(--text-2xs)] text-[var(--text-muted)] hover:text-[var(--error)] transition-colors cursor-pointer px-1.5 py-0.5 rounded hover:bg-[var(--alpha-white-5)]"
-          >
-            Clear all
-          </button>
+          <Show when={userManagedCount() > 0}>
+            <button
+              type="button"
+              onClick={() => props.onClearAll()}
+              class="text-[var(--text-2xs)] text-[var(--text-muted)] hover:text-[var(--error)] transition-colors cursor-pointer px-1.5 py-0.5 rounded hover:bg-[var(--alpha-white-5)]"
+            >
+              Clear local
+            </button>
+          </Show>
         </div>
 
         {/* Expanded message list */}
@@ -296,6 +306,14 @@ export const MessageQueueWidget: Component<MessageQueueWidgetProps> = (props) =>
                       item={item}
                       index={localIdx()}
                       total={regularItems().length}
+                      canMoveUp={
+                        absIdx() > 0 &&
+                        props.queuedMessages()[absIdx() - 1]?.backendManaged !== true
+                      }
+                      canMoveDown={
+                        absIdx() < props.queuedMessages().length - 1 &&
+                        props.queuedMessages()[absIdx() + 1]?.backendManaged !== true
+                      }
                       isEditing={editingIndex() === absIdx()}
                       onStartEdit={() => setEditingIndex(absIdx())}
                       onSaveEdit={(newContent) => {
@@ -333,6 +351,8 @@ export const MessageQueueWidget: Component<MessageQueueWidgetProps> = (props) =>
                           item={item}
                           index={0}
                           total={1}
+                          canMoveUp={false}
+                          canMoveDown={false}
                           isEditing={editingIndex() === absIdx()}
                           onStartEdit={() => setEditingIndex(absIdx())}
                           onSaveEdit={(newContent) => {

@@ -1,4 +1,6 @@
 use super::*;
+use ava_agent::control_plane::sessions::resolve_session_precedence;
+use uuid::Uuid;
 
 impl App {
     pub(crate) fn submit_goal(
@@ -131,27 +133,18 @@ impl App {
             self.fire_hooks_async(HookEvent::UserPromptSubmit, ctx, app_tx.clone());
         }
 
-        // Build conversation history from previous UI messages for LLM context.
-        // Only include User and Assistant messages (tool calls/results/system are internal).
-        let history: Vec<ava_types::Message> = self
-            .state
-            .messages
-            .messages
-            .iter()
-            .filter(|ui_msg| !ui_msg.transient)
-            .filter_map(|ui_msg| {
-                let role = match ui_msg.kind {
-                    MessageKind::User => ava_types::Role::User,
-                    MessageKind::Assistant => ava_types::Role::Assistant,
-                    _ => return None,
-                };
-                Some(ava_types::Message::new(role, ui_msg.content.clone()))
-            })
-            .collect();
+        let history = foreground_history_for_run(
+            self.state.session.current_session.as_ref(),
+            &self.state.messages.messages,
+        );
 
         // Create a rewind checkpoint at the current message position
         let msg_index = self.state.messages.messages.len();
-        self.state.rewind.create_checkpoint(msg_index, &goal);
+        self.state.rewind.create_checkpoint(
+            msg_index,
+            &goal,
+            self.state.session.current_session.as_ref(),
+        );
 
         // BUG-41: Track where this turn's messages start so that
         // mark_interrupted_messages only affects the current turn.
@@ -160,15 +153,20 @@ impl App {
         self.state
             .messages
             .push(UiMessage::new(MessageKind::User, goal.clone()));
+        self.cancel_foreground_interactive_requests(app_tx.clone(), "Superseded by a new TUI run");
         self.is_streaming.store(true, Ordering::Relaxed);
         self.state.agent.activity = AgentActivity::Thinking;
         self.state.agent.loop_started_at = Some(std::time::Instant::now());
-        let parent_session_id = self
-            .state
-            .session
-            .current_session
-            .as_ref()
-            .map(|s| s.id.to_string());
+        let session_id = resolve_session_precedence(
+            None,
+            self.state
+                .session
+                .current_session
+                .as_ref()
+                .map(|session| session.id),
+            Uuid::new_v4,
+        )
+        .session_id;
         let run_id = self.allocate_run_id();
         self.foreground_run_id = Some(run_id);
         self.state.agent.start(
@@ -177,11 +175,33 @@ impl App {
             self.state.agent.max_turns,
             app_tx,
             history,
-            parent_session_id,
+            Some(session_id),
             std::mem::take(&mut self.pending_images),
         );
         self.state.pending_image_count = 0;
     }
+}
+
+fn foreground_history_for_run(
+    current_session: Option<&ava_types::Session>,
+    messages: &[UiMessage],
+) -> Vec<ava_types::Message> {
+    if let Some(session) = current_session {
+        return session.messages.clone();
+    }
+
+    messages
+        .iter()
+        .filter(|ui_msg| !ui_msg.transient)
+        .filter_map(|ui_msg| {
+            let role = match ui_msg.kind {
+                MessageKind::User => ava_types::Role::User,
+                MessageKind::Assistant => ava_types::Role::Assistant,
+                _ => return None,
+            };
+            Some(ava_types::Message::new(role, ui_msg.content.clone()))
+        })
+        .collect()
 }
 
 /// Resolve context attachments into a text block to prepend to the goal.
@@ -313,4 +333,45 @@ pub(super) fn resolve_attachments(attachments: &[ava_types::ContextAttachment]) 
     }
 
     blocks.join("\n\n")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn foreground_history_prefers_canonical_session_messages() {
+        let mut session = ava_types::Session::new();
+        let mut user = ava_types::Message::new(ava_types::Role::User, "persisted");
+        user.images = vec![ava_types::ImageContent::new(
+            "img",
+            ava_types::ImageMediaType::Png,
+        )];
+        session.add_message(user.clone());
+
+        let history = foreground_history_for_run(
+            Some(&session),
+            &[UiMessage::new(MessageKind::User, "ui-only")],
+        );
+
+        assert_eq!(history, vec![user]);
+    }
+
+    #[test]
+    fn foreground_history_falls_back_to_user_and_assistant_ui_messages() {
+        let history = foreground_history_for_run(
+            None,
+            &[
+                UiMessage::new(MessageKind::System, "ignore"),
+                UiMessage::new(MessageKind::User, "goal"),
+                UiMessage::new(MessageKind::Assistant, "done"),
+            ],
+        );
+
+        assert_eq!(history.len(), 2);
+        assert_eq!(history[0].role, ava_types::Role::User);
+        assert_eq!(history[0].content, "goal");
+        assert_eq!(history[1].role, ava_types::Role::Assistant);
+        assert_eq!(history[1].content, "done");
+    }
 }

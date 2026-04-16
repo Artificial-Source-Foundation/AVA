@@ -17,6 +17,8 @@ use crate::registry::Tool;
 /// A request from the agent to present a plan for user review.
 #[derive(Debug)]
 pub struct PlanRequest {
+    /// Optional run correlation for the originating agent run.
+    pub run_id: Option<String>,
     /// The proposed plan.
     pub plan: Plan,
     /// Channel to send the user's decision back to the tool.
@@ -31,13 +33,21 @@ pub struct PlanRequest {
 #[derive(Clone)]
 pub struct PlanBridge {
     tx: mpsc::UnboundedSender<PlanRequest>,
+    run_id: Option<String>,
 }
 
 impl PlanBridge {
     /// Create a new bridge, returning the bridge handle and the receiving end.
     pub fn new() -> (Self, mpsc::UnboundedReceiver<PlanRequest>) {
         let (tx, rx) = mpsc::unbounded_channel();
-        (Self { tx }, rx)
+        (Self { tx, run_id: None }, rx)
+    }
+
+    pub fn with_run_id(&self, run_id: Option<String>) -> Self {
+        Self {
+            tx: self.tx.clone(),
+            run_id,
+        }
     }
 }
 
@@ -405,6 +415,7 @@ impl Tool for PlanTool {
             .bridge
             .tx
             .send(PlanRequest {
+                run_id: self.bridge.run_id.clone(),
                 plan: plan.clone(),
                 reply: reply_tx,
             })

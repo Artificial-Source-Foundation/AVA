@@ -220,14 +220,14 @@ fn tool_approval_shows_risk() {
     let (mut app, _tmp) = make_app();
 
     // Enqueue a high-risk approval request
-    let (tx, _rx) = tokio::sync::oneshot::channel();
     let request = ApprovalRequest {
+        request_id: "approval-test-1".to_string(),
+        run_id: None,
         call: ava_types::ToolCall {
             id: "test-1".to_string(),
             name: "bash".to_string(),
             arguments: serde_json::json!({"command": "rm -rf /"}),
         },
-        approve_tx: tx,
         inspection: Some(InspectionInfo {
             risk_level: RiskLevel::High,
             tags: vec![SafetyTag::Destructive],

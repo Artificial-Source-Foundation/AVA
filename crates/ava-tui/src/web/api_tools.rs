@@ -1,5 +1,6 @@
 //! HTTP API handlers for tool visibility/introspection.
 
+use ava_agent::control_plane::sessions::{load_prompt_context, SessionPromptContext};
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
@@ -96,17 +97,6 @@ fn map_context_images(images: Vec<ToolIntrospectionImageContext>) -> Vec<ava_typ
         .collect()
 }
 
-fn collect_history_before_last_user(messages: &[ava_types::Message]) -> Vec<ava_types::Message> {
-    if let Some(pos) = messages
-        .iter()
-        .rposition(|message| message.role == ava_types::Role::User)
-    {
-        messages[..pos].to_vec()
-    } else {
-        vec![]
-    }
-}
-
 async fn derive_context_from_session(
     state: &WebState,
     session_id: &str,
@@ -129,21 +119,11 @@ async fn derive_context_from_session(
         .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
 
     Ok(session.map(|session| {
-        let goal = session
-            .messages
-            .iter()
-            .rev()
-            .find(|message| message.role == ava_types::Role::User)
-            .map(|message| message.content.clone())
-            .unwrap_or_default();
-        let images = session
-            .messages
-            .iter()
-            .rev()
-            .find(|message| message.role == ava_types::Role::User)
-            .map(|message| message.images.clone())
-            .unwrap_or_default();
-        let history = collect_history_before_last_user(&session.messages);
+        let SessionPromptContext {
+            goal,
+            history,
+            images,
+        } = load_prompt_context(&session);
         (goal, history, images)
     }))
 }
@@ -205,8 +185,8 @@ pub(crate) async fn list_agent_tools(
 #[cfg(test)]
 mod tests {
     use super::{
-        map_context_history, map_context_images, ListAgentToolsRequest,
-        ToolIntrospectionImageContext, ToolIntrospectionMessageContext,
+        load_prompt_context, map_context_history, map_context_images, ListAgentToolsRequest,
+        SessionPromptContext, ToolIntrospectionImageContext, ToolIntrospectionMessageContext,
     };
     use ava_types::{ImageMediaType, Role};
     use serde_json::json;
@@ -240,6 +220,28 @@ mod tests {
         assert_eq!(images.len(), 1);
         assert_eq!(images[0].data, "abc");
         assert_eq!(images[0].media_type, ImageMediaType::Png);
+    }
+
+    #[test]
+    fn session_prompt_context_uses_latest_user_turn() {
+        let mut session = ava_types::Session::new();
+        session.add_message(ava_types::Message::new(ava_types::Role::System, "system"));
+        session.add_message(ava_types::Message::new(ava_types::Role::User, "first"));
+        session.add_message(ava_types::Message::new(ava_types::Role::Assistant, "reply"));
+        let final_user =
+            ava_types::Message::new(ava_types::Role::User, "latest").with_images(vec![
+                ava_types::ImageContent::new("img", ava_types::ImageMediaType::Png),
+            ]);
+        session.add_message(final_user.clone());
+
+        assert_eq!(
+            load_prompt_context(&session),
+            SessionPromptContext {
+                goal: "latest".to_string(),
+                history: session.messages[..3].to_vec(),
+                images: final_user.images,
+            }
+        );
     }
 
     #[test]

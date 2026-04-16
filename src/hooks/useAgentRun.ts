@@ -76,8 +76,9 @@ export function createAgentRun(deps: RunDeps) {
     goal: string,
     config?: { model?: string; provider?: string }
   ): Promise<unknown> {
+    const activeSessionId = session.currentSession()?.id
     if (rustAgent.isRunning()) {
-      setMessageQueue((prev) => [...prev, { content: goal }])
+      setMessageQueue((prev) => [...prev, { content: goal, sessionId: activeSessionId }])
       return null
     }
 
@@ -381,7 +382,7 @@ export function createAgentRun(deps: RunDeps) {
         log.info('agent', 'Backend session ID registered', { backendSessionId })
       }
 
-      ranSuccessfully = canMutateOriginSession()
+      ranSuccessfully = result?.success === true
       return result
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
@@ -402,14 +403,38 @@ export function createAgentRun(deps: RunDeps) {
       }
       // Auto-submit queued messages only after successful runs.
       // Don't drain on cancel/error — the user should decide what to do.
+      if (ranSuccessfully) {
+        setMessageQueue((prev) =>
+          prev.filter(
+            (message) => !(message.sessionId === sessionId && message.backendManaged === true)
+          )
+        )
+      }
+
       if (ranSuccessfully && canMutateOriginSession()) {
         const queue = messageQueue()
-        if (queue.length > 0) {
-          const next = queue[0]!
-          setMessageQueue((prev) => prev.slice(1))
+        const currentSessionId = session.currentSession()?.id
+        const nextIndex = queue.findIndex(
+          (message) => message.backendManaged !== true && message.sessionId === currentSessionId
+        )
+        if (nextIndex >= 0) {
+          const next = queue[nextIndex]!
+          setMessageQueue((prev) =>
+            prev.filter(
+              (message, index) =>
+                !(
+                  message.sessionId === currentSessionId &&
+                  (message.backendManaged === true || index === nextIndex)
+                )
+            )
+          )
           log.info('agent', 'Auto-submitting queued message', {
             content: next.content.slice(0, 80),
-            remaining: queue.length - 1,
+            remaining:
+              queue.filter(
+                (message) =>
+                  message.sessionId === currentSessionId && message.backendManaged !== true
+              ).length - 1,
           })
           // In web mode, the backend clears its `running` flag asynchronously
           // after sending the `complete` WebSocket event.  A small delay prevents
@@ -419,6 +444,13 @@ export function createAgentRun(deps: RunDeps) {
           } else {
             void run(next.content)
           }
+        } else {
+          setMessageQueue((prev) =>
+            prev.filter(
+              (message) =>
+                !(message.sessionId === currentSessionId && message.backendManaged === true)
+            )
+          )
         }
       }
     }

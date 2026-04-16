@@ -295,7 +295,6 @@ export function createAgentEventHandler(deps: EventHandlerDeps): (event: AgentEv
         break
       }
       case 'token_usage': {
-        // Rust serializes as snake_case (input_tokens), TS types say camelCase
         const tu = timedEvent as unknown as Record<string, number>
         const input = tu.input_tokens ?? tu.inputTokens ?? 0
         const output = tu.output_tokens ?? tu.outputTokens ?? 0
@@ -398,10 +397,10 @@ export function createAgentEventHandler(deps: EventHandlerDeps): (event: AgentEv
 
       case 'streaming_edit_progress': {
         const editEvent = timedEvent as StreamingEditProgressEvent
-        const callId = editEvent.call_id ?? editEvent.callId ?? null
-        const toolName = editEvent.tool_name ?? editEvent.toolName
-        const filePath = editEvent.file_path ?? editEvent.filePath ?? undefined
-        const bytesReceived = editEvent.bytes_received ?? editEvent.bytesReceived ?? 0
+        const callId = editEvent.call_id ?? null
+        const toolName = editEvent.tool_name
+        const filePath = editEvent.file_path ?? undefined
+        const bytesReceived = editEvent.bytes_received
         const streamingOutput = `Receiving ${toolName}${filePath ? ` for ${filePath}` : ''} (${bytesReceived} bytes)`
 
         setActiveToolCalls((prev) => {
@@ -437,12 +436,12 @@ export function createAgentEventHandler(deps: EventHandlerDeps): (event: AgentEv
 
       case 'subagent_complete': {
         const subagentEvent = timedEvent as SubagentCompleteEvent
-        const callId = subagentEvent.call_id ?? subagentEvent.callId ?? null
-        const sessionId = subagentEvent.session_id ?? subagentEvent.sessionId
-        const inputTokens = subagentEvent.input_tokens ?? subagentEvent.inputTokens ?? 0
-        const outputTokens = subagentEvent.output_tokens ?? subagentEvent.outputTokens ?? 0
-        const costUsd = subagentEvent.cost_usd ?? subagentEvent.costUsd ?? 0
-        const agentType = subagentEvent.agent_type ?? subagentEvent.agentType ?? undefined
+        const callId = subagentEvent.call_id ?? null
+        const sessionId = subagentEvent.session_id
+        const inputTokens = subagentEvent.input_tokens
+        const outputTokens = subagentEvent.output_tokens
+        const costUsd = subagentEvent.cost_usd
+        const agentType = subagentEvent.agent_type ?? undefined
         const summaryLines = [
           subagentEvent.description,
           `Session: ${sessionId}`,

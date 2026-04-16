@@ -1,5 +1,4 @@
-use ava_types::{Plan, PlanDecision};
-use tokio::sync::oneshot;
+use ava_types::Plan;
 
 /// Stages of the plan approval flow.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -13,30 +12,26 @@ pub enum PlanApprovalStage {
 
 /// State for an active plan approval request.
 pub struct PlanApprovalState {
+    /// Correlation ID owned by the shared interactive lifecycle store.
+    pub request_id: String,
+    /// Optional run correlation for the originating agent run.
+    pub run_id: Option<String>,
     /// The proposed plan.
     pub plan: Plan,
     /// Current stage of the approval flow.
     pub stage: PlanApprovalStage,
     /// Rejection feedback text input.
     pub feedback_input: String,
-    /// Channel to send the decision back to the agent.
-    pub reply: Option<oneshot::Sender<PlanDecision>>,
 }
 
 impl PlanApprovalState {
-    pub fn new(plan: Plan, reply: oneshot::Sender<PlanDecision>) -> Self {
+    pub fn new(request_id: String, run_id: Option<String>, plan: Plan) -> Self {
         Self {
+            request_id,
+            run_id,
             plan,
             stage: PlanApprovalStage::ActionSelect,
             feedback_input: String::new(),
-            reply: Some(reply),
-        }
-    }
-
-    /// Resolve the plan with the given decision and consume the reply channel.
-    pub fn resolve(&mut self, decision: PlanDecision) {
-        if let Some(reply) = self.reply.take() {
-            let _ = reply.send(decision);
         }
     }
 }

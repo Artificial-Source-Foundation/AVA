@@ -5,6 +5,7 @@ use crate::ui::status_bar::StatusLevel;
 use crate::widgets::model_selector::ModelSelectorState;
 use crate::widgets::provider_connect::ProviderConnectState;
 use crate::widgets::tool_list::ToolListItem;
+use ava_agent::control_plane::interactive::InteractiveRequestKind;
 use ava_agent::stack::MCPServerInfo;
 use ava_agent::AgentEvent;
 
@@ -119,12 +120,13 @@ pub enum AppEvent {
         provider: String,
         error: String,
     },
-    /// Agent is asking the user a question via the question tool.
-    Question(ava_tools::core::question::QuestionRequest),
-    /// Agent is requesting interactive approval for a tool call.
-    ToolApproval(ava_tools::permission_middleware::ApprovalRequest),
-    /// Agent is proposing a plan for user review via the plan tool.
-    PlanProposal(ava_tools::core::plan::PlanRequest),
+    /// Terminal cleanup for a correlated approval/question/plan request.
+    InteractiveRequestCleared {
+        request_id: String,
+        request_kind: InteractiveRequestKind,
+        timed_out: bool,
+        run_id: Option<String>,
+    },
     /// A hook execution completed (fired asynchronously).
     HookResult {
         event: crate::hooks::HookEvent,
@@ -190,17 +192,17 @@ impl std::fmt::Debug for AppEvent {
                 .field("provider", provider)
                 .field("error", error)
                 .finish(),
-            Self::Question(req) => f
-                .debug_struct("Question")
-                .field("question", &req.question)
-                .finish(),
-            Self::ToolApproval(req) => f
-                .debug_struct("ToolApproval")
-                .field("tool", &req.call.name)
-                .finish(),
-            Self::PlanProposal(req) => f
-                .debug_struct("PlanProposal")
-                .field("summary", &req.plan.summary)
+            Self::InteractiveRequestCleared {
+                request_id,
+                request_kind,
+                timed_out,
+                run_id,
+            } => f
+                .debug_struct("InteractiveRequestCleared")
+                .field("request_id", request_id)
+                .field("request_kind", request_kind)
+                .field("timed_out", timed_out)
+                .field("run_id", run_id)
                 .finish(),
             Self::HookResult {
                 event, description, ..

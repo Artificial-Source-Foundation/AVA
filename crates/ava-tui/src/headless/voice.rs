@@ -108,6 +108,7 @@ pub(super) async fn run_voice_loop(cli: CliArgs) -> Result<()> {
                     None,
                     Vec::new(),
                     None,
+                    None,
                 )
                 .await
         });

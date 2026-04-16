@@ -59,6 +59,7 @@ async fn full_agent_run_with_tool_calls() {
             None,
             Vec::new(),
             None,
+            None,
         )
         .await
         .expect("run should succeed");
@@ -105,6 +106,7 @@ async fn agent_run_with_bash_tool() {
             None,
             Vec::new(),
             None,
+            None,
         )
         .await
         .expect("run should succeed");
@@ -146,6 +148,7 @@ async fn agent_run_cancellation() {
             Vec::new(),
             None,
             Vec::new(),
+            None,
             None,
         )
         .await

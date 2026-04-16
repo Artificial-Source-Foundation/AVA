@@ -8,6 +8,10 @@
 //! - **Post-complete** (Tier 3): grouped pipeline stages that run after the agent is fully done.
 
 use std::collections::{BTreeMap, VecDeque};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 use tokio::sync::mpsc;
 
 use ava_types::{MessageTier, QueuedMessage};
@@ -27,12 +31,34 @@ pub struct MessageQueue {
     /// Whether a post-complete group is currently executing.
     group_running: bool,
     rx: mpsc::UnboundedReceiver<QueuedMessage>,
+    clear_steering_requested: Arc<AtomicBool>,
+}
+
+#[derive(Clone, Default)]
+pub struct MessageQueueControl {
+    clear_steering_requested: Arc<AtomicBool>,
+}
+
+impl MessageQueueControl {
+    pub fn clear_steering(&self) {
+        self.clear_steering_requested.store(true, Ordering::SeqCst);
+    }
 }
 
 impl MessageQueue {
     /// Create a new queue, returning the queue and the sender for the TUI.
     pub fn new() -> (Self, mpsc::UnboundedSender<QueuedMessage>) {
+        let (queue, tx, _) = Self::new_with_control();
+        (queue, tx)
+    }
+
+    pub fn new_with_control() -> (
+        Self,
+        mpsc::UnboundedSender<QueuedMessage>,
+        MessageQueueControl,
+    ) {
         let (tx, rx) = mpsc::unbounded_channel();
+        let clear_steering_requested = Arc::new(AtomicBool::new(false));
         (
             Self {
                 steering: VecDeque::new(),
@@ -41,18 +67,32 @@ impl MessageQueue {
                 current_post_group: 1,
                 group_running: false,
                 rx,
+                clear_steering_requested: clear_steering_requested.clone(),
             },
             tx,
+            MessageQueueControl {
+                clear_steering_requested,
+            },
         )
     }
 
     /// Drain the channel and route each message to the correct internal queue.
     /// Call this frequently (e.g., between tool executions).
     pub fn poll(&mut self) {
+        if self.clear_steering_requested.swap(false, Ordering::SeqCst) {
+            self.steering.clear();
+        }
+
         while let Ok(msg) = self.rx.try_recv() {
+            if self.clear_steering_requested.swap(false, Ordering::SeqCst) {
+                self.steering.clear();
+            }
+
             match msg.tier {
                 MessageTier::Steering => {
-                    self.steering.push_back(msg.text);
+                    if !self.clear_steering_requested.load(Ordering::SeqCst) {
+                        self.steering.push_back(msg.text);
+                    }
                 }
                 MessageTier::FollowUp => {
                     self.follow_up.push_back(msg.text);
@@ -128,6 +168,7 @@ impl MessageQueue {
 
     /// Clear the steering queue (called on hard abort / Ctrl+C).
     pub fn clear_steering(&mut self) {
+        self.clear_steering_requested.store(false, Ordering::SeqCst);
         self.steering.clear();
     }
 }

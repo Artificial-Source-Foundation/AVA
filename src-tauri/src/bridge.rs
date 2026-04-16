@@ -5,12 +5,13 @@
 //! cancellation token, message queue sender, and question/approval receivers
 //! so that the desktop frontend can participate in the interactive agent loop.
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{atomic::AtomicBool, Arc};
 
 use ava_agent::control_plane::interactive::{InteractiveRequestKind, InteractiveRequestStore};
-use ava_agent::message_queue::MessageQueue;
+use ava_agent::control_plane::queue::resolve_deferred_queue_session;
+use ava_agent::message_queue::{MessageQueue, MessageQueueControl};
 use ava_agent::stack::{AgentStack, AgentStackConfig};
 use ava_tools::core::plan::PlanRequest;
 use ava_tools::core::question::QuestionRequest;
@@ -25,6 +26,13 @@ pub type PendingApprovalReply = InteractiveRequestStore<ToolApproval>;
 pub type PendingQuestionReply = InteractiveRequestStore<String>;
 
 pub type PendingPlanReply = InteractiveRequestStore<ava_types::PlanDecision>;
+
+#[derive(Clone, Default)]
+pub struct QueueDispatchSnapshot {
+    pub accepting: bool,
+    pub active_session_id: Option<Uuid>,
+    pub tx: Option<mpsc::UnboundedSender<QueuedMessage>>,
+}
 
 /// Tracks a file edit so that undo can restore the previous content.
 #[derive(Debug, Clone)]
@@ -54,6 +62,12 @@ pub struct DesktopBridge {
     pub plan_rx: Mutex<mpsc::UnboundedReceiver<PlanRequest>>,
     /// Whether an agent task is currently running.
     pub running: RwLock<bool>,
+    /// Serializes run startup so only one run can claim ownership at a time.
+    pub startup_lock: Mutex<()>,
+    /// Serializes queue enqueue and revocation boundaries.
+    pub queue_lifecycle_lock: Mutex<()>,
+    /// Serializes interactive prompt registration with cancel drainage.
+    pub interactive_lifecycle_lock: Mutex<()>,
     /// Pending approval reply channel. Set when an approval request is forwarded
     /// to the frontend; consumed when the frontend calls `resolve_approval`.
     pub pending_approval_reply: PendingApprovalReply,
@@ -66,9 +80,21 @@ pub struct DesktopBridge {
     /// The session ID of the last completed (or checkpointed) agent run.
     /// Used for retry/regenerate and to load history for the next run.
     pub last_session_id: Arc<RwLock<Option<Uuid>>>,
+    /// Session ID for the currently-running agent.
+    pub active_session_id: Arc<RwLock<Option<Uuid>>>,
     /// Stack of file edits made by the agent, most recent last.
     /// Used by `undo_last_edit` to restore the previous content.
     pub edit_history: Arc<RwLock<VecDeque<FileEditRecord>>>,
+    /// Follow-up and post-complete items preserved across cancellation, by session.
+    pub deferred_queue: Arc<RwLock<HashMap<Uuid, VecDeque<QueuedMessage>>>>,
+    /// Deferred items that started execution and must be restored on cancel, by session.
+    pub in_flight_deferred: Arc<RwLock<HashMap<Uuid, VecDeque<QueuedMessage>>>>,
+    /// Atomic queue acceptance and ownership snapshot for queue commands.
+    pub queue_dispatch: Mutex<QueueDispatchSnapshot>,
+    /// Live queue control used to clear pending steering before cancel returns.
+    pub queue_control: Mutex<Option<MessageQueueControl>>,
+    /// Blocks new interactive prompts from being forwarded once cancellation starts.
+    pub interactive_revoked: Arc<AtomicBool>,
 }
 
 impl DesktopBridge {
@@ -90,11 +116,20 @@ impl DesktopBridge {
             approval_rx: Mutex::new(approval_rx),
             plan_rx: Mutex::new(plan_rx),
             running: RwLock::new(false),
+            startup_lock: Mutex::new(()),
+            queue_lifecycle_lock: Mutex::new(()),
+            interactive_lifecycle_lock: Mutex::new(()),
             pending_approval_reply: InteractiveRequestStore::new(InteractiveRequestKind::Approval),
             pending_question_reply: InteractiveRequestStore::new(InteractiveRequestKind::Question),
             pending_plan_reply: InteractiveRequestStore::new(InteractiveRequestKind::Plan),
             last_session_id: Arc::new(RwLock::new(None)),
+            active_session_id: Arc::new(RwLock::new(None)),
             edit_history: Arc::new(RwLock::new(VecDeque::new())),
+            deferred_queue: Arc::new(RwLock::new(HashMap::new())),
+            in_flight_deferred: Arc::new(RwLock::new(HashMap::new())),
+            queue_dispatch: Mutex::new(QueueDispatchSnapshot::default()),
+            queue_control: Mutex::new(None),
+            interactive_revoked: Arc::new(AtomicBool::new(false)),
         })
     }
 
@@ -112,26 +147,105 @@ impl DesktopBridge {
 
     /// Create a new `MessageQueue` and store the sender half.
     /// Returns the `MessageQueue` to be passed to `AgentStack::run()`.
-    pub async fn new_message_queue(&self) -> MessageQueue {
-        let (queue, tx) = MessageQueue::new();
+    pub async fn new_message_queue(&self, session_id: Option<Uuid>) -> MessageQueue {
+        let (queue, tx, control) = MessageQueue::new_with_control();
+        if let Some(session_id) = session_id {
+            if let Some(messages) = self.deferred_queue.read().await.get(&session_id) {
+                for message in messages.iter().cloned() {
+                    let _ = tx.send(message);
+                }
+            }
+        }
+        {
+            let mut dispatch = self.queue_dispatch.lock().await;
+            dispatch.accepting = true;
+            dispatch.active_session_id = session_id;
+            dispatch.tx = Some(tx.clone());
+        }
+        *self.queue_control.lock().await = Some(control);
         *self.message_tx.write().await = Some(tx);
+        *self.active_session_id.write().await = session_id;
         queue
     }
 
     /// Send a message to the agent's message queue.
     /// Returns `Err` if the agent is not running or the channel is closed.
-    pub async fn send_message(&self, text: String, tier: MessageTier) -> Result<(), String> {
-        let guard = self.message_tx.read().await;
-        let tx = guard
+    pub async fn send_message(
+        &self,
+        text: String,
+        tier: MessageTier,
+        requested_session_id: Option<Uuid>,
+    ) -> Result<(), String> {
+        let _queue_guard = self.queue_lifecycle_lock.lock().await;
+        let dispatch = self.queue_dispatch.lock().await;
+        if !dispatch.accepting {
+            return Err("Agent queue is unavailable".to_string());
+        }
+
+        let deferred_owner = if matches!(tier, MessageTier::Steering) {
+            None
+        } else {
+            Some(
+                resolve_deferred_queue_session(requested_session_id, dispatch.active_session_id)
+                    .map_err(|error| error.to_string())?,
+            )
+        };
+
+        let tx = dispatch
+            .tx
             .as_ref()
-            .ok_or_else(|| "Agent is not running. No message queue available.".to_string())?;
-        tx.send(QueuedMessage { text, tier })
-            .map_err(|_| "Message queue channel closed. Agent may have finished.".to_string())
+            .ok_or_else(|| "Agent queue is unavailable".to_string())?;
+        let queued = QueuedMessage {
+            text: text.clone(),
+            tier: tier.clone(),
+        };
+        tx.send(queued.clone())
+            .map_err(|_| "Message queue channel closed. Agent may have finished.".to_string())?;
+        drop(dispatch);
+        if let Some(session_id) = deferred_owner {
+            self.deferred_queue
+                .write()
+                .await
+                .entry(session_id)
+                .or_default()
+                .push_back(queued);
+        }
+        Ok(())
     }
 
     /// Clear the message sender when the agent finishes.
     pub async fn clear_message_tx(&self) {
+        *self.queue_control.lock().await = None;
+        let mut dispatch = self.queue_dispatch.lock().await;
+        dispatch.accepting = false;
+        dispatch.active_session_id = None;
+        dispatch.tx = None;
+        drop(dispatch);
         *self.message_tx.write().await = None;
+        *self.active_session_id.write().await = None;
+    }
+
+    pub async fn queue_dispatch_snapshot(&self) -> QueueDispatchSnapshot {
+        self.queue_dispatch.lock().await.clone()
+    }
+
+    pub async fn revoke_queue_dispatch(&self, clear_steering: bool) {
+        let _queue_guard = self.queue_lifecycle_lock.lock().await;
+        let control = self.queue_control.lock().await.take();
+        {
+            let mut dispatch = self.queue_dispatch.lock().await;
+            dispatch.accepting = false;
+            dispatch.active_session_id = None;
+            dispatch.tx = None;
+        }
+        *self.message_tx.write().await = None;
+        *self.active_session_id.write().await = None;
+
+        if clear_steering {
+            if let Some(control) = control {
+                control.clear_steering();
+            }
+        }
     }
 
     /// Pop the most recent file edit record from the undo stack.

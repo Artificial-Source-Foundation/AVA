@@ -196,10 +196,11 @@ export interface ContextCompactedEvent {
 }
 
 export interface ApprovalRequestEvent {
+  run_id?: string
+  runId?: string
   type: 'approval_request'
   id: string
   tool_call_id?: string
-  toolCallId?: string
   tool_name: string
   args: Record<string, JsonValue>
   risk_level: string
@@ -208,6 +209,8 @@ export interface ApprovalRequestEvent {
 }
 
 export interface QuestionRequestEvent {
+  run_id?: string
+  runId?: string
   type: 'question_request'
   id: string
   question: string
@@ -215,13 +218,12 @@ export interface QuestionRequestEvent {
 }
 
 export interface InteractiveRequestClearedEvent {
+  run_id?: string
+  runId?: string
   type: 'interactive_request_cleared'
   request_id?: string
-  requestId?: string
   request_kind?: 'approval' | 'question' | 'plan'
-  requestKind?: 'approval' | 'question' | 'plan'
   timed_out?: boolean
-  timedOut?: boolean
 }
 
 // ── Plan events ──────────────────────────────────────────────────────
@@ -274,13 +276,9 @@ export interface StreamingEditProgressEvent {
   runId?: string
   type: 'streaming_edit_progress'
   call_id?: string
-  callId?: string
   tool_name: string
-  toolName?: string
   file_path?: string | null
-  filePath?: string | null
   bytes_received: number
-  bytesReceived?: number
 }
 
 export interface SubagentCompleteEvent {
@@ -288,18 +286,12 @@ export interface SubagentCompleteEvent {
   runId?: string
   type: 'subagent_complete'
   call_id?: string
-  callId?: string
   session_id: string
-  sessionId?: string
   description: string
   input_tokens: number
-  inputTokens?: number
   output_tokens: number
-  outputTokens?: number
   cost_usd: number
-  costUsd?: number
   agent_type?: string | null
-  agentType?: string | null
   provider?: string | null
   resumed: boolean
 }
@@ -457,6 +449,7 @@ export type ExtensionRegistrationResult =
 
 export interface SubmitGoalArgs {
   goal: string
+  runId?: string
   maxTurns?: number
   provider?: string
   model?: string
@@ -575,6 +568,8 @@ export type ClearTarget = 'all' | 'steering' | 'followUp' | 'postComplete'
 export interface EditAndResendArgs {
   messageId: string
   newContent: string
+  runId?: string
+  sessionId?: string
 }
 
 export interface UndoResult {

@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -6,6 +7,8 @@ use tokio::sync::{oneshot, Mutex};
 use uuid::Uuid;
 
 pub const DEFAULT_INTERACTIVE_REQUEST_TIMEOUT: Duration = Duration::from_secs(5 * 60);
+const MIN_TIMEOUT_WATCHDOG_POLL_INTERVAL: Duration = Duration::from_millis(1);
+const MAX_TIMEOUT_WATCHDOG_POLL_INTERVAL: Duration = Duration::from_secs(1);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -87,14 +90,17 @@ pub struct InteractiveRequestHandle {
     pub request_id: String,
     pub kind: InteractiveRequestKind,
     pub phase: InteractiveRequestPhase,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub run_id: Option<String>,
 }
 
 impl InteractiveRequestHandle {
-    fn pending(kind: InteractiveRequestKind) -> Self {
+    fn pending(kind: InteractiveRequestKind, run_id: Option<String>) -> Self {
         Self {
             request_id: format!("{}-{}", kind.request_id_prefix(), Uuid::new_v4()),
             kind,
             phase: InteractiveRequestPhase::Pending,
+            run_id,
         }
     }
 
@@ -131,7 +137,7 @@ pub enum ResolveInteractiveRequestError {
 pub struct InteractiveRequestStore<T> {
     kind: InteractiveRequestKind,
     timeout_policy: InteractiveTimeoutPolicy,
-    pending: Arc<Mutex<Option<PendingInteractiveRequest<T>>>>,
+    pending: Arc<Mutex<VecDeque<PendingInteractiveRequest<T>>>>,
 }
 
 impl<T> InteractiveRequestStore<T> {
@@ -146,7 +152,7 @@ impl<T> InteractiveRequestStore<T> {
         Self {
             kind,
             timeout_policy,
-            pending: Arc::new(Mutex::new(None)),
+            pending: Arc::new(Mutex::new(VecDeque::new())),
         }
     }
 
@@ -159,11 +165,22 @@ impl<T> InteractiveRequestStore<T> {
     }
 
     pub async fn register(&self, reply: oneshot::Sender<T>) -> InteractiveRequestHandle {
-        let handle = InteractiveRequestHandle::pending(self.kind);
-        *self.pending.lock().await = Some(PendingInteractiveRequest {
-            handle: handle.clone(),
-            reply,
-        });
+        self.register_with_run_id(reply, None).await
+    }
+
+    pub async fn register_with_run_id(
+        &self,
+        reply: oneshot::Sender<T>,
+        run_id: Option<String>,
+    ) -> InteractiveRequestHandle {
+        let handle = InteractiveRequestHandle::pending(self.kind, run_id);
+        self.pending
+            .lock()
+            .await
+            .push_back(PendingInteractiveRequest {
+                handle: handle.clone(),
+                reply,
+            });
         handle
     }
 
@@ -172,37 +189,91 @@ impl<T> InteractiveRequestStore<T> {
         request_id: Option<&str>,
     ) -> Result<TerminalInteractiveRequest<T>, ResolveInteractiveRequestError> {
         let mut pending = self.pending.lock().await;
-        match pending.take() {
-            Some(entry) => {
-                if request_id.is_none_or(|expected| entry.handle.request_id == expected) {
-                    Ok(TerminalInteractiveRequest {
-                        handle: entry
-                            .handle
-                            .into_terminal(InteractiveRequestPhase::Resolved),
-                        reply: entry.reply,
-                    })
-                } else {
-                    let current_request_id = entry.handle.request_id.clone();
-                    *pending = Some(entry);
-                    Err(ResolveInteractiveRequestError::StaleRequestId {
+        let entry = match request_id {
+            Some(expected_request_id) => match pending.front() {
+                Some(current) if current.handle.request_id == expected_request_id => pending
+                    .pop_front()
+                    .expect("front pending request should exist"),
+                Some(current) => {
+                    return Err(ResolveInteractiveRequestError::StaleRequestId {
                         kind: self.kind,
-                        request_id: request_id.expect("request_id checked above").to_string(),
-                        current_request_id,
-                    })
+                        request_id: expected_request_id.to_string(),
+                        current_request_id: current.handle.request_id.clone(),
+                    });
                 }
-            }
-            None => Err(ResolveInteractiveRequestError::MissingPendingRequest { kind: self.kind }),
-        }
+                None => {
+                    return Err(ResolveInteractiveRequestError::MissingPendingRequest {
+                        kind: self.kind,
+                    });
+                }
+            },
+            None => match pending.pop_front() {
+                Some(entry) => entry,
+                None => {
+                    return Err(ResolveInteractiveRequestError::MissingPendingRequest {
+                        kind: self.kind,
+                    });
+                }
+            },
+        };
+
+        Ok(TerminalInteractiveRequest {
+            handle: entry
+                .handle
+                .into_terminal(InteractiveRequestPhase::Resolved),
+            reply: entry.reply,
+        })
     }
 
     pub async fn timeout_request(&self, request_id: &str) -> Option<TerminalInteractiveRequest<T>> {
-        self.take_terminal(request_id, InteractiveRequestPhase::TimedOut)
-            .await
+        let mut pending = self.pending.lock().await;
+        match pending.front() {
+            Some(current) if current.handle.request_id == request_id => {
+                pending.pop_front().map(|entry| TerminalInteractiveRequest {
+                    handle: entry
+                        .handle
+                        .into_terminal(InteractiveRequestPhase::TimedOut),
+                    reply: entry.reply,
+                })
+            }
+            _ => None,
+        }
+    }
+
+    pub async fn await_timeout_request(
+        &self,
+        request_id: &str,
+    ) -> Option<TerminalInteractiveRequest<T>> {
+        let timeout = self.timeout();
+        let poll_interval = timeout_watchdog_poll_interval(timeout);
+
+        loop {
+            let state = {
+                let pending = self.pending.lock().await;
+                match pending
+                    .iter()
+                    .position(|entry| entry.handle.request_id == request_id)
+                {
+                    Some(0) => PendingTimeoutState::Current,
+                    Some(_) => PendingTimeoutState::Queued,
+                    None => PendingTimeoutState::Missing,
+                }
+            };
+
+            match state {
+                PendingTimeoutState::Current => {
+                    tokio::time::sleep(timeout).await;
+                    return self.timeout_request(request_id).await;
+                }
+                PendingTimeoutState::Queued => tokio::time::sleep(poll_interval).await,
+                PendingTimeoutState::Missing => return None,
+            }
+        }
     }
 
     pub async fn cancel_pending(&self) -> Option<TerminalInteractiveRequest<T>> {
         let mut pending = self.pending.lock().await;
-        pending.take().map(|entry| TerminalInteractiveRequest {
+        pending.pop_front().map(|entry| TerminalInteractiveRequest {
             handle: entry
                 .handle
                 .into_terminal(InteractiveRequestPhase::Cancelled),
@@ -210,38 +281,118 @@ impl<T> InteractiveRequestStore<T> {
         })
     }
 
+    pub async fn cancel_pending_for_run(
+        &self,
+        run_id: &str,
+    ) -> Option<TerminalInteractiveRequest<T>> {
+        self.take_terminal(
+            |entry| entry.handle.run_id.as_deref() == Some(run_id),
+            InteractiveRequestPhase::Cancelled,
+        )
+        .await
+    }
+
     pub async fn current_request_id(&self) -> Option<String> {
         self.pending
             .lock()
             .await
-            .as_ref()
+            .front()
             .map(|entry| entry.handle.request_id.clone())
     }
 
-    async fn take_terminal(
+    async fn take_terminal<F>(
         &self,
-        request_id: &str,
+        predicate: F,
         phase: InteractiveRequestPhase,
-    ) -> Option<TerminalInteractiveRequest<T>> {
+    ) -> Option<TerminalInteractiveRequest<T>>
+    where
+        F: FnMut(&PendingInteractiveRequest<T>) -> bool,
+    {
         let mut pending = self.pending.lock().await;
-        if pending
-            .as_ref()
-            .is_some_and(|entry| entry.handle.request_id == request_id)
-        {
-            pending.take().map(|entry| TerminalInteractiveRequest {
+        let index = pending.iter().position(predicate)?;
+        pending
+            .remove(index)
+            .map(|entry| TerminalInteractiveRequest {
                 handle: entry.handle.into_terminal(phase),
                 reply: entry.reply,
             })
-        } else {
-            None
-        }
     }
+}
+
+#[derive(Clone, Copy)]
+enum PendingTimeoutState {
+    Current,
+    Queued,
+    Missing,
+}
+
+fn timeout_watchdog_poll_interval(timeout: Duration) -> Duration {
+    let candidate = timeout.checked_div(10).unwrap_or(timeout);
+    candidate.clamp(
+        MIN_TIMEOUT_WATCHDOG_POLL_INTERVAL,
+        MAX_TIMEOUT_WATCHDOG_POLL_INTERVAL,
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use tokio::sync::oneshot;
+
+    fn short_timeout_policy() -> InteractiveTimeoutPolicy {
+        InteractiveTimeoutPolicy::new(
+            Duration::from_millis(25),
+            Duration::from_millis(25),
+            Duration::from_millis(25),
+        )
+    }
+
+    async fn assert_hidden_queued_request_does_not_timeout_before_promotion(
+        kind: InteractiveRequestKind,
+    ) {
+        let store =
+            InteractiveRequestStore::<String>::with_timeout_policy(kind, short_timeout_policy());
+        let (first_tx, _first_rx) = oneshot::channel();
+        let first = store.register(first_tx).await;
+        let (second_tx, _second_rx) = oneshot::channel();
+        let second = store.register(second_tx).await;
+
+        tokio::time::sleep(store.timeout()).await;
+
+        assert!(
+            store.timeout_request(&second.request_id).await.is_none(),
+            "hidden queued request should stay pending until promotion"
+        );
+        assert_eq!(
+            store.current_request_id().await,
+            Some(first.request_id.clone())
+        );
+
+        let timed_out_first = store
+            .timeout_request(&first.request_id)
+            .await
+            .expect("front request should time out once threshold elapses");
+        assert_eq!(
+            timed_out_first.handle.phase,
+            InteractiveRequestPhase::TimedOut
+        );
+        assert_eq!(timed_out_first.handle.request_id, first.request_id);
+        assert_eq!(
+            store.current_request_id().await,
+            Some(second.request_id.clone())
+        );
+
+        let timed_out_second = store
+            .timeout_request(&second.request_id)
+            .await
+            .expect("promoted request should time out when targeted after promotion");
+        assert_eq!(
+            timed_out_second.handle.phase,
+            InteractiveRequestPhase::TimedOut
+        );
+        assert_eq!(timed_out_second.handle.request_id, second.request_id);
+        assert!(store.current_request_id().await.is_none());
+    }
 
     #[tokio::test]
     async fn request_ids_are_kind_prefixed_and_correlatable() {
@@ -297,6 +448,50 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn resolve_requires_matching_front_request_id_when_multiple_requests_are_queued() {
+        let store = InteractiveRequestStore::<String>::new(InteractiveRequestKind::Approval);
+        let (first_tx, _first_rx) = oneshot::channel();
+        let first = store.register(first_tx).await;
+        let (second_tx, _second_rx) = oneshot::channel();
+        let second = store.register(second_tx).await;
+
+        let error = store
+            .resolve(Some(&second.request_id))
+            .await
+            .expect_err("hidden queued request should not resolve out of order");
+
+        assert_eq!(
+            error,
+            ResolveInteractiveRequestError::StaleRequestId {
+                kind: InteractiveRequestKind::Approval,
+                request_id: second.request_id.clone(),
+                current_request_id: first.request_id.clone(),
+            }
+        );
+        assert_eq!(
+            store.current_request_id().await,
+            Some(first.request_id.clone())
+        );
+
+        let resolved_first = store
+            .resolve(Some(&first.request_id))
+            .await
+            .expect("front request should resolve first");
+        assert_eq!(resolved_first.handle.request_id, first.request_id);
+        assert_eq!(
+            store.current_request_id().await,
+            Some(second.request_id.clone())
+        );
+
+        let resolved_second = store
+            .resolve(Some(&second.request_id))
+            .await
+            .expect("second request should resolve after promotion");
+        assert_eq!(resolved_second.handle.request_id, second.request_id);
+        assert!(store.current_request_id().await.is_none());
+    }
+
+    #[tokio::test]
     async fn timeout_only_consumes_matching_current_request() {
         let store = InteractiveRequestStore::<String>::new(InteractiveRequestKind::Question);
         let (tx, _rx) = oneshot::channel();
@@ -318,6 +513,77 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn queued_hidden_approval_timeout_waits_until_request_is_promoted() {
+        assert_hidden_queued_request_does_not_timeout_before_promotion(
+            InteractiveRequestKind::Approval,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn queued_hidden_question_timeout_waits_until_request_is_promoted() {
+        assert_hidden_queued_request_does_not_timeout_before_promotion(
+            InteractiveRequestKind::Question,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn queued_hidden_plan_timeout_waits_until_request_is_promoted() {
+        assert_hidden_queued_request_does_not_timeout_before_promotion(
+            InteractiveRequestKind::Plan,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn watchdog_timeout_window_starts_after_hidden_request_is_promoted() {
+        let store = InteractiveRequestStore::<String>::with_timeout_policy(
+            InteractiveRequestKind::Question,
+            short_timeout_policy(),
+        );
+        let (first_tx, _first_rx) = oneshot::channel();
+        let first = store.register(first_tx).await;
+        let (second_tx, _second_rx) = oneshot::channel();
+        let second = store.register(second_tx).await;
+
+        let timeout_task = {
+            let store = store.clone();
+            let request_id = second.request_id.clone();
+            tokio::spawn(async move {
+                store
+                    .await_timeout_request(&request_id)
+                    .await
+                    .map(|reply| reply.handle.request_id)
+            })
+        };
+
+        tokio::time::sleep(store.timeout() + Duration::from_millis(10)).await;
+        assert!(
+            !timeout_task.is_finished(),
+            "hidden queued request watchdog should keep waiting for promotion"
+        );
+
+        let _ = store
+            .resolve(Some(&first.request_id))
+            .await
+            .expect("front request should resolve before the hidden watchdog fires");
+
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        assert!(
+            !timeout_task.is_finished(),
+            "promoted request should receive a fresh timeout window"
+        );
+
+        let timed_out_request_id = timeout_task
+            .await
+            .expect("watchdog task should finish")
+            .expect("promoted request should eventually time out");
+        assert_eq!(timed_out_request_id, second.request_id);
+        assert!(store.current_request_id().await.is_none());
+    }
+
+    #[tokio::test]
     async fn cancel_cleanup_clears_pending_request() {
         let store = InteractiveRequestStore::<String>::new(InteractiveRequestKind::Approval);
         let (tx, _rx) = oneshot::channel();
@@ -330,6 +596,42 @@ mod tests {
         assert_eq!(cancelled.handle.phase, InteractiveRequestPhase::Cancelled);
         assert_eq!(cancelled.handle.request_id, handle.request_id);
         assert!(store.current_request_id().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn run_correlation_survives_timeout_and_cancel_cleanup() {
+        let timeout_store =
+            InteractiveRequestStore::<String>::new(InteractiveRequestKind::Question);
+        let (timeout_tx, _timeout_rx) = oneshot::channel();
+        let timeout_handle = timeout_store
+            .register_with_run_id(timeout_tx, Some("desktop-run-timeout".to_string()))
+            .await;
+
+        let timed_out = timeout_store
+            .timeout_request(&timeout_handle.request_id)
+            .await
+            .expect("matching request should time out");
+        assert_eq!(timed_out.handle.phase, InteractiveRequestPhase::TimedOut);
+        assert_eq!(
+            timed_out.handle.run_id.as_deref(),
+            Some("desktop-run-timeout")
+        );
+
+        let cancel_store = InteractiveRequestStore::<String>::new(InteractiveRequestKind::Plan);
+        let (cancel_tx, _cancel_rx) = oneshot::channel();
+        cancel_store
+            .register_with_run_id(cancel_tx, Some("desktop-run-cancel".to_string()))
+            .await;
+
+        let cancelled = cancel_store
+            .cancel_pending()
+            .await
+            .expect("pending request should be cancelled");
+        assert_eq!(cancelled.handle.phase, InteractiveRequestPhase::Cancelled);
+        assert_eq!(
+            cancelled.handle.run_id.as_deref(),
+            Some("desktop-run-cancel")
+        );
     }
 
     #[test]

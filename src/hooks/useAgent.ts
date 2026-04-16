@@ -11,7 +11,8 @@
  * - useAgentActions.ts — steer, cancel, retry, regenerate, editAndResend, etc.
  */
 
-import { createEffect, createSignal, on } from 'solid-js'
+import { isTauri } from '@tauri-apps/api/core'
+import { type Accessor, batch, createEffect, createSignal, on, type Setter } from 'solid-js'
 
 import { debugLog } from '../lib/debug-log'
 import { log } from '../lib/logger'
@@ -42,6 +43,11 @@ export interface QuestionRequest {
   id: string
   question: string
   options: string[]
+}
+
+type PendingRequestWithId = {
+  id?: string
+  requestId?: string
 }
 
 // ============================================================================
@@ -90,9 +96,16 @@ function createAgentStore() {
   const [tokensUsed, _setTokensUsed] = createSignal(0)
   const [currentThought, setCurrentThought] = createSignal('')
   const [toolActivity, setToolActivity] = createSignal<ToolActivity[]>([])
-  const [pendingApproval, setPendingApproval] = createSignal<ApprovalRequest | null>(null)
-  const [pendingQuestion, setPendingQuestion] = createSignal<QuestionRequest | null>(null)
-  const [pendingPlan, setPendingPlan] = createSignal<PlanData | null>(null)
+  const [visiblePendingApproval, setVisiblePendingApproval] = createSignal<ApprovalRequest | null>(
+    null
+  )
+  const [, setQueuedPendingApprovals] = createSignal<ApprovalRequest[]>([])
+  const [visiblePendingQuestion, setVisiblePendingQuestion] = createSignal<QuestionRequest | null>(
+    null
+  )
+  const [, setQueuedPendingQuestions] = createSignal<QuestionRequest[]>([])
+  const [visiblePendingPlan, setVisiblePendingPlan] = createSignal<PlanData | null>(null)
+  const [, setQueuedPendingPlans] = createSignal<PlanData[]>([])
   const [doomLoopDetected, setDoomLoopDetected] = createSignal(false)
   const [currentAgentId, _setCurrentAgentId] = createSignal<string | null>(null)
   const [streamingTokenEstimate, setStreamingTokenEstimate] = createSignal(0)
@@ -111,6 +124,154 @@ function createAgentStore() {
 
   // ── Forward agent events into UI signals ─────────────────────────────
   let lastEventIdx = 0
+  const requestKey = <T extends PendingRequestWithId>(request: T | null): string | null =>
+    request?.id ?? request?.requestId ?? null
+  const upsertPendingRequest = <T extends PendingRequestWithId>(
+    nextRequest: T,
+    current: Accessor<T | null>,
+    setCurrent: Setter<T | null>,
+    setQueue: Setter<T[]>
+  ): void => {
+    const nextRequestId = requestKey(nextRequest)
+    if (!nextRequestId) {
+      return
+    }
+
+    if (requestKey(current()) === nextRequestId) {
+      setCurrent(() => nextRequest)
+      return
+    }
+
+    let updatedQueuedRequest = false
+    setQueue((prev) => {
+      const existingIndex = prev.findIndex((request) => requestKey(request) === nextRequestId)
+      if (existingIndex === -1) {
+        return prev
+      }
+
+      updatedQueuedRequest = true
+      const next = [...prev]
+      next[existingIndex] = nextRequest
+      return next
+    })
+
+    if (updatedQueuedRequest) {
+      return
+    }
+
+    if (!current()) {
+      setCurrent(() => nextRequest)
+      return
+    }
+
+    setQueue((prev) => [...prev, nextRequest])
+  }
+  const removePendingRequest = <T extends PendingRequestWithId>(
+    requestId: string | null | undefined,
+    current: Accessor<T | null>,
+    setCurrent: Setter<T | null>,
+    setQueue: Setter<T[]>
+  ): void => {
+    if (!requestId) {
+      return
+    }
+
+    if (requestKey(current()) === requestId) {
+      let nextVisible: T | null = null
+      setQueue((prev) => {
+        if (prev.length === 0) {
+          return prev
+        }
+
+        const [nextRequest, ...remaining] = prev
+        nextVisible = nextRequest ?? null
+        return remaining
+      })
+      setCurrent(() => nextVisible)
+      if (!nextVisible) {
+        setCurrent(null)
+      }
+      return
+    }
+
+    setQueue((prev) => prev.filter((request) => requestKey(request) !== requestId))
+  }
+  const clearPendingRequests = <T extends PendingRequestWithId>(
+    setCurrent: Setter<T | null>,
+    setQueue: Setter<T[]>
+  ): void => {
+    setCurrent(null)
+    setQueue([])
+  }
+  const pendingApproval = (): ApprovalRequest | null => visiblePendingApproval()
+  const pendingQuestion = (): QuestionRequest | null => visiblePendingQuestion()
+  const pendingPlan = (): PlanData | null => visiblePendingPlan()
+  const removePendingApproval = (requestId: string | null | undefined): void => {
+    removePendingRequest(
+      requestId,
+      visiblePendingApproval,
+      setVisiblePendingApproval,
+      setQueuedPendingApprovals
+    )
+  }
+  const removePendingQuestion = (requestId: string | null | undefined): void => {
+    removePendingRequest(
+      requestId,
+      visiblePendingQuestion,
+      setVisiblePendingQuestion,
+      setQueuedPendingQuestions
+    )
+  }
+  const removePendingPlan = (requestId: string | null | undefined): void => {
+    removePendingRequest(
+      requestId,
+      visiblePendingPlan,
+      setVisiblePendingPlan,
+      setQueuedPendingPlans
+    )
+  }
+  const clearPendingInteractiveRequests = (): void => {
+    batch(() => {
+      clearPendingRequests(setVisiblePendingApproval, setQueuedPendingApprovals)
+      clearPendingRequests(setVisiblePendingQuestion, setQueuedPendingQuestions)
+      clearPendingRequests(setVisiblePendingPlan, setQueuedPendingPlans)
+    })
+  }
+  const eventRunId = (event: { run_id?: string; runId?: string }): string | null =>
+    event.runId ?? event.run_id ?? null
+  const shouldHandleInteractiveEvent = (
+    event:
+      | ApprovalRequestEvent
+      | QuestionRequestEvent
+      | InteractiveRequestClearedEvent
+      | PlanCreatedEvent
+  ): boolean => {
+    const correlatedRunId = eventRunId(event)
+    const activeRunId = rustAgent.currentRunId()
+
+    if (!correlatedRunId) {
+      if (activeRunId && !isTauri()) {
+        log.warn('agent', 'Ignoring uncorrelated interactive event during active web run', {
+          eventType: event.type,
+          activeRunId,
+        })
+        return false
+      }
+
+      return true
+    }
+
+    if (!activeRunId || correlatedRunId !== activeRunId) {
+      log.warn('agent', 'Ignoring stale interactive event', {
+        eventType: event.type,
+        eventRunId: correlatedRunId,
+        activeRunId,
+      })
+      return false
+    }
+
+    return true
+  }
 
   createEffect(
     on(rustAgent.events, (allEvents) => {
@@ -172,11 +333,14 @@ function createAgentStore() {
           )
         }
         if (event.type === 'approval_request') {
-          log.info('tools', 'Approval requested', {
-            tool: (event as ApprovalRequestEvent).tool_name,
-            risk: (event as ApprovalRequestEvent).risk_level,
-          })
           const approvalEvent = event as ApprovalRequestEvent
+          if (!shouldHandleInteractiveEvent(approvalEvent)) {
+            continue
+          }
+          log.info('tools', 'Approval requested', {
+            tool: approvalEvent.tool_name,
+            risk: approvalEvent.risk_level,
+          })
           const riskLevel = (
             ['low', 'medium', 'high', 'critical'].includes(approvalEvent.risk_level)
               ? approvalEvent.risk_level
@@ -191,49 +355,73 @@ function createAgentStore() {
                 ? ('mcp' as const)
                 : ('file' as const)
 
-          setPendingApproval({
-            id: approvalEvent.id,
-            toolCallId: approvalEvent.tool_call_id ?? approvalEvent.toolCallId,
-            type: toolType,
-            toolName,
-            args: approvalEvent.args as Record<string, unknown>,
-            description: approvalEvent.reason,
-            riskLevel,
-            resolve: () => {}, // not used — resolution goes through IPC
-          })
+          upsertPendingRequest(
+            {
+              id: approvalEvent.id,
+              toolCallId: approvalEvent.tool_call_id,
+              type: toolType,
+              toolName,
+              args: approvalEvent.args as Record<string, unknown>,
+              description: approvalEvent.reason,
+              riskLevel,
+              resolve: () => {}, // not used — resolution goes through IPC
+            },
+            visiblePendingApproval,
+            setVisiblePendingApproval,
+            setQueuedPendingApprovals
+          )
         }
         if (event.type === 'question_request') {
-          log.info('agent', 'Question requested', {
-            question: (event as QuestionRequestEvent).question?.slice(0, 80),
-          })
           const questionEvent = event as QuestionRequestEvent
-          setPendingQuestion({
-            id: questionEvent.id,
-            question: questionEvent.question,
-            options: questionEvent.options,
+          if (!shouldHandleInteractiveEvent(questionEvent)) {
+            continue
+          }
+          log.info('agent', 'Question requested', {
+            question: questionEvent.question?.slice(0, 80),
           })
+          upsertPendingRequest(
+            {
+              id: questionEvent.id,
+              question: questionEvent.question,
+              options: questionEvent.options,
+            },
+            visiblePendingQuestion,
+            setVisiblePendingQuestion,
+            setQueuedPendingQuestions
+          )
         }
         if (event.type === 'interactive_request_cleared') {
           const clearedEvent = event as InteractiveRequestClearedEvent
-          const requestId = clearedEvent.requestId ?? clearedEvent.request_id ?? null
-          const requestKind = clearedEvent.requestKind ?? clearedEvent.request_kind
+          if (!shouldHandleInteractiveEvent(clearedEvent)) {
+            continue
+          }
+          const requestId = clearedEvent.request_id ?? null
+          const requestKind = clearedEvent.request_kind
 
-          if (requestKind === 'approval' && pendingApproval()?.id === requestId) {
-            setPendingApproval(null)
+          if (requestKind === 'approval') {
+            removePendingApproval(requestId)
           }
-          if (requestKind === 'question' && pendingQuestion()?.id === requestId) {
-            setPendingQuestion(null)
+          if (requestKind === 'question') {
+            removePendingQuestion(requestId)
           }
-          if (requestKind === 'plan' && pendingPlan()?.requestId === requestId) {
-            setPendingPlan(null)
+          if (requestKind === 'plan') {
+            removePendingPlan(requestId)
           }
         }
         if (event.type === 'plan_created') {
           const planEvent = event as PlanCreatedEvent
-          setPendingPlan({
-            ...planEvent.plan,
-            requestId: planEvent.id ?? planEvent.plan.requestId,
-          })
+          if (!shouldHandleInteractiveEvent(planEvent)) {
+            continue
+          }
+          upsertPendingRequest(
+            {
+              ...planEvent.plan,
+              requestId: planEvent.id,
+            },
+            visiblePendingPlan,
+            setVisiblePendingPlan,
+            setQueuedPendingPlans
+          )
         }
       }
       lastEventIdx = allEvents.length
@@ -241,6 +429,13 @@ function createAgentStore() {
   )
 
   // ── Compose sub-modules ─────────────────────────────────────────────
+
+  const visibleMessageQueue = (): QueuedMessage[] => {
+    const currentSessionId = session.currentSession()?.id
+    return messageQueue().filter(
+      (message) => !message.sessionId || message.sessionId === currentSessionId
+    )
+  }
 
   const actions = createAgentActions({
     rustAgent,
@@ -255,11 +450,12 @@ function createAgentStore() {
     toolActivity,
     setToolActivity,
     pendingApproval,
-    setPendingApproval,
     pendingQuestion,
-    setPendingQuestion,
     pendingPlan,
-    setPendingPlan,
+    removePendingApproval,
+    removePendingQuestion,
+    removePendingPlan,
+    clearPendingInteractiveRequests,
     doomLoopDetected,
     setDoomLoopDetected,
     streamingTokenEstimate,
@@ -323,8 +519,8 @@ function createAgentStore() {
     streamingTokenEstimate,
     streamingStartedAt,
     error: streamingState.error,
-    messageQueue,
-    queuedCount: () => messageQueue().length,
+    messageQueue: visibleMessageQueue,
+    queuedCount: () => visibleMessageQueue().length,
     /**
      * ID of the placeholder message that was pre-added to the session store at the
      * start of the current run.  The MessageList uses this to identify which message

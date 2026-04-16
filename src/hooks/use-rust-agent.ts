@@ -38,6 +38,7 @@ export function useRustAgent() {
   const [activeToolCalls, setActiveToolCalls] = createSignal<ToolCall[]>([])
   const [error, setError] = createSignal<string | null>(null)
   const [lastResult, setLastResult] = createSignal<SubmitGoalResult | null>(null)
+  const [currentRunId, setCurrentRunId] = createSignal<string | null>(null)
   const [tokenUsage, setTokenUsage] = createSignal({ input: 0, output: 0, cost: 0 })
   const eventHistory = createBoundedEventHistory<AgentEvent>(MAX_EVENT_HISTORY)
   const [progressMessage, setProgressMessage] = createSignal<string | null>(null)
@@ -87,6 +88,7 @@ export function useRustAgent() {
       setActiveToolCalls([])
       setError(null)
       setLastResult(null)
+      setCurrentRunId(null)
       setTokenUsage({ input: 0, output: 0, cost: 0 })
       setProgressMessage(null)
       setBudgetWarning(null)
@@ -104,6 +106,7 @@ export function useRustAgent() {
     setIsRunning,
     setError,
     setLastResult,
+    setCurrentRunId,
     setActiveToolCalls,
     handleAgentEvent,
     resetState,
@@ -153,6 +156,7 @@ export function useRustAgent() {
     thinkingSegments,
     error,
     lastResult,
+    currentRunId,
     tokenUsage,
     events: eventHistory.events,
     progressMessage,

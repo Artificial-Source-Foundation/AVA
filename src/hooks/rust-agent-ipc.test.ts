@@ -91,6 +91,7 @@ function createIpcHarness() {
     const [isRunning, setIsRunning] = createSignal(false)
     const [error, setError] = createSignal<string | null>(null)
     const [lastResult, setLastResult] = createSignal<SubmitGoalResult | null>(null)
+    const [currentRunId, setCurrentRunId] = createSignal<string | null>(null)
     const [activeToolCalls, setActiveToolCalls] = createSignal<ToolCall[]>([])
     const handledEvents: AgentEvent[] = []
     const completion = { resolve: null as ((result: SubmitGoalResult | null) => void) | null }
@@ -108,6 +109,7 @@ function createIpcHarness() {
       setIsRunning,
       setError,
       setLastResult,
+      setCurrentRunId,
       setActiveToolCalls,
       handleAgentEvent: (event) => {
         handledEvents.push(event)
@@ -134,6 +136,7 @@ function createIpcHarness() {
       setIsRunning,
       error,
       lastResult,
+      currentRunId,
       activeToolCalls,
       handledEvents,
       completion,
@@ -195,6 +198,241 @@ describe('createAgentIpc', () => {
 
     expect(harness.handledEvents).toHaveLength(1)
     expect(harness.handledEvents[0]).toMatchObject({ type: 'progress', message: 'fresh' })
+
+    harness.dispose()
+  })
+
+  it('drops stale correlated websocket interactive events from earlier runs', async () => {
+    const socket = new FakeWebSocket()
+    createEventSocketMock.mockReturnValueOnce(socket as unknown as WebSocket)
+    apiInvokeMock.mockResolvedValueOnce({ success: true, turns: 1, sessionId: 'session-web' })
+
+    const harness = createIpcHarness()
+    const runPromise = harness.ipc.run('ship web')
+
+    socket.emitOpen()
+    await flushPromises()
+
+    const runId = (harness.currentRunId() ?? '').trim()
+    expect(runId).not.toBe('')
+
+    socket.emitMessage({
+      type: 'approval_request',
+      id: 'approval-stale',
+      tool_name: 'bash',
+      args: { command: 'rm -rf /tmp/demo' },
+      risk_level: 'high',
+      reason: 'destructive command',
+      warnings: [],
+      run_id: 'web-run-old',
+    })
+    socket.emitMessage({
+      type: 'approval_request',
+      id: 'approval-fresh',
+      tool_name: 'bash',
+      args: { command: 'pwd' },
+      risk_level: 'low',
+      reason: 'read cwd',
+      warnings: [],
+      run_id: runId,
+    })
+    socket.emitMessage({
+      type: 'interactive_request_cleared',
+      request_id: 'approval-fresh',
+      request_kind: 'approval',
+      timed_out: true,
+      run_id: 'web-run-old',
+    })
+    socket.emitMessage({
+      type: 'complete',
+      run_id: runId,
+      session: { id: 'session-web', messages: [], completed: true },
+    })
+
+    await expect(runPromise).resolves.toEqual({
+      success: true,
+      turns: 0,
+      sessionId: 'session-web',
+    })
+
+    expect(harness.handledEvents).toEqual([
+      {
+        type: 'approval_request',
+        id: 'approval-fresh',
+        tool_name: 'bash',
+        args: { command: 'pwd' },
+        risk_level: 'low',
+        reason: 'read cwd',
+        warnings: [],
+        run_id: runId,
+      },
+      {
+        type: 'complete',
+        run_id: runId,
+        session: { id: 'session-web', messages: [], completed: true },
+      },
+    ])
+
+    harness.dispose()
+  })
+
+  it('ignores uncorrelated websocket terminal events while a web run is active', async () => {
+    const socket = new FakeWebSocket()
+    createEventSocketMock.mockReturnValueOnce(socket as unknown as WebSocket)
+    apiInvokeMock.mockResolvedValueOnce({ success: true, turns: 1, sessionId: 'session-web' })
+
+    const harness = createIpcHarness()
+    const runPromise = harness.ipc.run('ship web')
+
+    socket.emitOpen()
+    await flushPromises()
+
+    const runId = (harness.currentRunId() ?? '').trim()
+    expect(runId).not.toBe('')
+
+    let runSettled = false
+    void runPromise.then(() => {
+      runSettled = true
+    })
+
+    socket.emitMessage({
+      type: 'complete',
+      session: { id: 'stale-session', messages: [], completed: true },
+    })
+    await flushPromises()
+
+    expect(runSettled).toBe(false)
+    expect(harness.handledEvents).toHaveLength(0)
+
+    socket.emitMessage({
+      type: 'complete',
+      run_id: runId,
+      session: { id: 'fresh-session', messages: [], completed: true },
+    })
+
+    await expect(runPromise).resolves.toEqual({
+      success: true,
+      turns: 0,
+      sessionId: 'fresh-session',
+    })
+
+    expect(harness.handledEvents).toEqual([
+      {
+        type: 'complete',
+        run_id: runId,
+        session: { id: 'fresh-session', messages: [], completed: true },
+      },
+    ])
+
+    harness.dispose()
+  })
+
+  it('returns early and clears running state when submit_goal is rejected in web mode before stream events', async () => {
+    const socket = new FakeWebSocket()
+    createEventSocketMock.mockReturnValueOnce(socket as unknown as WebSocket)
+    apiInvokeMock.mockResolvedValueOnce({
+      success: false,
+      turns: 2,
+      sessionId: 'session-web-invalid',
+    })
+
+    const harness = createIpcHarness()
+    const submitPromise = harness.ipc.run('ship web')
+
+    socket.emitOpen()
+    await flushPromises()
+
+    await expect(submitPromise).resolves.toEqual({
+      success: false,
+      turns: 2,
+      sessionId: 'session-web-invalid',
+    })
+
+    expect(harness.isRunning()).toBe(false)
+    expect(harness.currentRunId()).toBeNull()
+    expect(harness.lastResult()).toEqual({
+      success: false,
+      turns: 2,
+      sessionId: 'session-web-invalid',
+    })
+    expect(harness.handledEvents).toHaveLength(0)
+
+    harness.dispose()
+  })
+
+  it('forwards explicit session ownership through browser replay commands', async () => {
+    const socket = new FakeWebSocket()
+    createEventSocketMock.mockReturnValue(socket as unknown as WebSocket)
+    const harness = createIpcHarness()
+
+    apiInvokeMock.mockResolvedValueOnce({ success: true, turns: 1, sessionId: 'session-web' })
+    const retryPromise = harness.ipc.retryRun('session-front')
+    socket.emitOpen()
+    await flushPromises()
+
+    expect(apiInvokeMock).toHaveBeenNthCalledWith(1, 'retry_last_message', {
+      args: expect.objectContaining({
+        sessionId: 'session-front',
+        runId: expect.any(String),
+      }),
+    })
+
+    socket.emitMessage({
+      type: 'complete',
+      run_id: harness.currentRunId() ?? undefined,
+      session: { id: 'session-web', messages: [], completed: true },
+    })
+    await expect(retryPromise).resolves.toEqual({
+      success: true,
+      turns: 0,
+      sessionId: 'session-web',
+    })
+
+    apiInvokeMock.mockResolvedValueOnce({ success: true, turns: 1, sessionId: 'session-web' })
+    const editPromise = harness.ipc.editAndResendRun('user-1', 'retry this', 'session-front')
+    await flushPromises()
+
+    expect(apiInvokeMock).toHaveBeenNthCalledWith(2, 'edit_and_resend', {
+      args: expect.objectContaining({
+        messageId: 'user-1',
+        newContent: 'retry this',
+        sessionId: 'session-front',
+        runId: expect.any(String),
+      }),
+    })
+
+    socket.emitMessage({
+      type: 'complete',
+      run_id: harness.currentRunId() ?? undefined,
+      session: { id: 'session-web', messages: [], completed: true },
+    })
+    await expect(editPromise).resolves.toEqual({
+      success: true,
+      turns: 0,
+      sessionId: 'session-web',
+    })
+
+    apiInvokeMock.mockResolvedValueOnce({ success: true, turns: 1, sessionId: 'session-web' })
+    const regeneratePromise = harness.ipc.regenerateRun('session-front')
+    await flushPromises()
+
+    expect(apiInvokeMock).toHaveBeenNthCalledWith(3, 'regenerate_response', {
+      args: expect.objectContaining({
+        sessionId: 'session-front',
+        runId: expect.any(String),
+      }),
+    })
+
+    socket.emitMessage({
+      type: 'complete',
+      run_id: harness.currentRunId() ?? undefined,
+      session: { id: 'session-web', messages: [], completed: true },
+    })
+    await expect(regeneratePromise).resolves.toEqual({
+      success: true,
+      turns: 0,
+      sessionId: 'session-web',
+    })
 
     harness.dispose()
   })
@@ -551,6 +789,23 @@ describe('createAgentIpc', () => {
     })
 
     secondInvoke.resolve({ success: true, turns: 2, sessionId: 'fresh-session' })
+    harness.dispose()
+  })
+
+  it('forwards session ownership on deferred queue commands', async () => {
+    const harness = createIpcHarness()
+    harness.setIsRunning(true)
+
+    await harness.ipc.followUp('queued follow-up', 'session-owned')
+    await harness.ipc.postComplete('queued later', 3, 'session-owned')
+
+    expect(apiInvokeMock).toHaveBeenNthCalledWith(1, 'follow_up_agent', {
+      args: { message: 'queued follow-up', sessionId: 'session-owned' },
+    })
+    expect(apiInvokeMock).toHaveBeenNthCalledWith(2, 'post_complete_agent', {
+      args: { message: 'queued later', group: 3, sessionId: 'session-owned' },
+    })
+
     harness.dispose()
   })
 

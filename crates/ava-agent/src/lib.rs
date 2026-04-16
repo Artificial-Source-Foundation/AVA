@@ -43,11 +43,24 @@ pub use {
         CommandSpec, CompletionMode, ControlPlaneCommand, CorrelationIdKey,
         CorrelationIdRequirements, ResponseEnvelope, TerminalClosureSignal,
     },
+    control_plane::events::{
+        backend_event_requires_interactive_projection, canonical_event_spec, canonical_event_specs,
+        required_backend_event_kind, required_backend_event_kinds, CanonicalEventField,
+        CanonicalEventKind, CanonicalEventSpec,
+    },
     control_plane::interactive::{
         canonical_interactive_timeout_policy, InteractiveRequestHandle, InteractiveRequestKind,
         InteractiveRequestPhase, InteractiveRequestStore, InteractiveTimeoutPolicy,
         ResolveInteractiveRequestError, TerminalInteractiveRequest,
         DEFAULT_INTERACTIVE_REQUEST_TIMEOUT,
+    },
+    control_plane::queue::{
+        clear_queue_semantics, parse_clear_queue_target, ClearQueueTarget, QueueClearSemantics,
+        UNSUPPORTED_QUEUE_CLEAR_ERROR,
+    },
+    control_plane::sessions::{
+        resolve_existing_session, resolve_session_precedence, SessionSelection,
+        SessionSelectionSource,
     },
     llm_trait::{LLMProvider, LLMResponse},
 };

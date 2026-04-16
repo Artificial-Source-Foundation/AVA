@@ -37,6 +37,8 @@ pub struct Checkpoint {
     /// When present, enables full project-state restore via the shadow repo
     /// instead of per-file content restore.
     pub snapshot_hash: Option<String>,
+    /// Session snapshot before the next turn started.
+    pub session_snapshot: Option<ava_types::Session>,
 }
 
 /// The 5 rewind options presented to the user.
@@ -100,7 +102,12 @@ pub struct RewindState {
 
 impl RewindState {
     /// Create a new checkpoint for a user message.
-    pub fn create_checkpoint(&mut self, message_index: usize, message_content: &str) {
+    pub fn create_checkpoint(
+        &mut self,
+        message_index: usize,
+        message_content: &str,
+        session_snapshot: Option<&ava_types::Session>,
+    ) {
         let preview = crate::text_utils::truncate_display(message_content, 80);
         // Replace newlines with spaces for the preview
         let preview = preview.replace('\n', " ");
@@ -111,6 +118,7 @@ impl RewindState {
             timestamp: chrono::Local::now().format("%H:%M:%S").to_string(),
             file_changes: Vec::new(),
             snapshot_hash: None,
+            session_snapshot: session_snapshot.cloned(),
         });
     }
 
@@ -239,4 +247,28 @@ impl RewindState {
 /// Returns `None` if the file doesn't exist (meaning a write would create it).
 pub fn snapshot_file(path: &str) -> Option<String> {
     std::fs::read_to_string(path).ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn create_checkpoint_preserves_session_snapshot() {
+        let mut rewind = RewindState::default();
+        let mut session = ava_types::Session::new();
+        session.add_message(ava_types::Message::new(ava_types::Role::User, "before"));
+
+        rewind.create_checkpoint(3, "ship it", Some(&session));
+
+        let checkpoint = rewind.latest_checkpoint().expect("checkpoint");
+        assert_eq!(checkpoint.message_index, 3);
+        assert_eq!(
+            checkpoint
+                .session_snapshot
+                .as_ref()
+                .map(|saved| saved.messages.clone()),
+            Some(session.messages)
+        );
+    }
 }

@@ -14,4 +14,6 @@ pub struct BtwState {
     pub checkpoint_messages: Vec<UiMessage>,
     /// Saved scroll offset from before the branch started.
     pub checkpoint_scroll: usize,
+    /// Saved session snapshot from before the branch started.
+    pub checkpoint_session: Option<ava_types::Session>,
 }

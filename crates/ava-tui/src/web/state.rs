@@ -134,7 +134,7 @@ pub struct WebStateInner {
     /// Serializes queue enqueue and revocation boundaries.
     pub queue_lifecycle_lock: Mutex<()>,
     /// Serializes interactive prompt registration with cancel drainage.
-    pub interactive_lifecycle_lock: Mutex<()>,
+    pub interactive_lifecycle_lock: Arc<Mutex<()>>,
     /// Broadcast channel for agent events — all WebSocket clients subscribe.
     pub event_tx: broadcast::Sender<WebEvent>,
     /// Question receiver — drained each run to forward question_request WS events.
@@ -190,7 +190,7 @@ impl WebState {
                 running: RwLock::new(false),
                 startup_lock: Mutex::new(()),
                 queue_lifecycle_lock: Mutex::new(()),
-                interactive_lifecycle_lock: Mutex::new(()),
+                interactive_lifecycle_lock: Arc::new(Mutex::new(())),
                 event_tx,
                 question_rx: Mutex::new(question_rx),
                 approval_rx: Mutex::new(approval_rx),

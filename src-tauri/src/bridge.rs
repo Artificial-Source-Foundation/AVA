@@ -67,7 +67,7 @@ pub struct DesktopBridge {
     /// Serializes queue enqueue and revocation boundaries.
     pub queue_lifecycle_lock: Mutex<()>,
     /// Serializes interactive prompt registration with cancel drainage.
-    pub interactive_lifecycle_lock: Mutex<()>,
+    pub interactive_lifecycle_lock: Arc<Mutex<()>>,
     /// Pending approval reply channel. Set when an approval request is forwarded
     /// to the frontend; consumed when the frontend calls `resolve_approval`.
     pub pending_approval_reply: PendingApprovalReply,
@@ -118,7 +118,7 @@ impl DesktopBridge {
             running: RwLock::new(false),
             startup_lock: Mutex::new(()),
             queue_lifecycle_lock: Mutex::new(()),
-            interactive_lifecycle_lock: Mutex::new(()),
+            interactive_lifecycle_lock: Arc::new(Mutex::new(())),
             pending_approval_reply: InteractiveRequestStore::new(InteractiveRequestKind::Approval),
             pending_question_reply: InteractiveRequestStore::new(InteractiveRequestKind::Question),
             pending_plan_reply: InteractiveRequestStore::new(InteractiveRequestKind::Plan),

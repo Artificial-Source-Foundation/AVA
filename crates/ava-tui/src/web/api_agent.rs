@@ -78,6 +78,7 @@ fn queued_post_complete_group(progress: &str) -> Option<u32> {
 }
 
 async fn cancel_active_run(state: &WebState) {
+    let _interactive_guard = state.inner.interactive_lifecycle_lock.lock().await;
     state
         .inner
         .interactive_revoked
@@ -309,6 +310,7 @@ pub(super) fn spawn_interactive_forwarders(
     let approval_inner = inner.clone();
     let approval_forwarder = tokio::spawn(async move {
         while let Some(req) = approval_rx.recv().await {
+            let _interactive_guard = approval_inner.interactive_lifecycle_lock.lock().await;
             if approval_inner.interactive_revoked.load(Ordering::SeqCst) {
                 let _ = req.reply.send(ToolApproval::Rejected(Some(
                     "Agent run cancelled from web UI".to_string(),
@@ -362,6 +364,7 @@ pub(super) fn spawn_interactive_forwarders(
     let question_inner = inner.clone();
     let question_forwarder = tokio::spawn(async move {
         while let Some(req) = question_rx.recv().await {
+            let _interactive_guard = question_inner.interactive_lifecycle_lock.lock().await;
             if question_inner.interactive_revoked.load(Ordering::SeqCst) {
                 let _ = req.reply.send(String::new());
                 continue;
@@ -405,6 +408,7 @@ pub(super) fn spawn_interactive_forwarders(
     let plan_run_id = run_id;
     let plan_forwarder = tokio::spawn(async move {
         while let Some(req) = plan_rx.recv().await {
+            let _interactive_guard = inner.interactive_lifecycle_lock.lock().await;
             if inner.interactive_revoked.load(Ordering::SeqCst) {
                 let _ = req.reply.send(ava_types::PlanDecision::Rejected {
                     feedback: "Agent run cancelled from web UI".to_string(),
@@ -1097,6 +1101,12 @@ pub(crate) async fn steer_agent(
     State(state): State<WebState>,
     Json(req): Json<SteerRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ErrorResponse>)> {
+    if req.message.is_empty() {
+        return Err(error_response(
+            StatusCode::BAD_REQUEST,
+            "Steering message must not be empty.",
+        ));
+    }
     let snapshot = state.queue_dispatch_snapshot().await;
     if !snapshot.accepting {
         return Err(error_response(StatusCode::CONFLICT, "Agent is not running"));
@@ -1134,6 +1144,12 @@ pub(crate) async fn follow_up_agent(
     State(state): State<WebState>,
     Json(req): Json<FollowUpRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ErrorResponse>)> {
+    if req.message.is_empty() {
+        return Err(error_response(
+            StatusCode::BAD_REQUEST,
+            "Follow-up message must not be empty.",
+        ));
+    }
     let requested_session_id = parse_optional_session_id(req.session_id.as_deref())?;
     let message = ava_types::QueuedMessage {
         text: req.message,
@@ -1165,6 +1181,12 @@ pub(crate) async fn post_complete_agent(
     State(state): State<WebState>,
     Json(req): Json<PostCompleteRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ErrorResponse>)> {
+    if req.message.is_empty() {
+        return Err(error_response(
+            StatusCode::BAD_REQUEST,
+            "Post-complete message must not be empty.",
+        ));
+    }
     let requested_session_id = parse_optional_session_id(req.session_id.as_deref())?;
     let message = ava_types::QueuedMessage {
         text: req.message,

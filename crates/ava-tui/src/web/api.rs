@@ -183,11 +183,7 @@ pub enum WebAgentEvent {
         run_id: Option<String>,
     },
     #[serde(rename = "plan_step_complete")]
-    PlanStepComplete {
-        step_id: String,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        run_id: Option<String>,
-    },
+    PlanStepComplete { step_id: String, run_id: String },
     #[serde(rename = "plugin_event")]
     PluginEvent {
         plugin: String,
@@ -205,8 +201,7 @@ pub enum WebAgentEvent {
         agent_type: Option<String>,
         provider: Option<String>,
         resumed: bool,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        run_id: Option<String>,
+        run_id: String,
     },
     #[serde(rename = "streaming_edit_progress")]
     StreamingEditProgress {
@@ -214,8 +209,7 @@ pub enum WebAgentEvent {
         tool_name: String,
         file_path: Option<String>,
         bytes_received: usize,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        run_id: Option<String>,
+        run_id: String,
     },
 }
 
@@ -338,7 +332,7 @@ pub fn convert_web_event(event: &WebEvent) -> Option<WebAgentEvent> {
         }),
         WebEvent::PlanStepComplete { step_id, run_id } => Some(WebAgentEvent::PlanStepComplete {
             step_id: step_id.clone(),
-            run_id: run_id.clone(),
+            run_id: run_id.clone()?,
         }),
     }
 }
@@ -408,7 +402,7 @@ pub fn convert_agent_event(
         }),
         BE::PlanStepComplete { step_id } => Some(WebAgentEvent::PlanStepComplete {
             step_id: step_id.clone(),
-            run_id: run_id.map(str::to_string),
+            run_id: run_id?.to_string(),
         }),
         BE::StreamingEditProgress {
             call_id,
@@ -421,7 +415,7 @@ pub fn convert_agent_event(
             tool_name: tool_name.clone(),
             file_path: file_path.clone(),
             bytes_received: *bytes_received,
-            run_id: run_id.map(str::to_string),
+            run_id: run_id?.to_string(),
         }),
         BE::SubAgentComplete {
             call_id,
@@ -444,7 +438,7 @@ pub fn convert_agent_event(
             agent_type: agent_type.clone(),
             provider: provider.clone(),
             resumed: *resumed,
-            run_id: run_id.map(str::to_string),
+            run_id: run_id?.to_string(),
         }),
         // ToolStats and DiffPreview have no direct frontend representation.
         other => {

@@ -327,6 +327,63 @@ describe('createAgentIpc', () => {
     harness.dispose()
   })
 
+  it('drops required correlated backend events when run_id is missing', async () => {
+    const socket = new FakeWebSocket()
+    createEventSocketMock.mockReturnValueOnce(socket as unknown as WebSocket)
+    apiInvokeMock.mockResolvedValueOnce({ success: true, turns: 1, sessionId: 'session-web' })
+
+    const harness = createIpcHarness()
+    const runPromise = harness.ipc.run('ship web')
+
+    socket.emitOpen()
+    await flushPromises()
+
+    const runId = (harness.currentRunId() ?? '').trim()
+    expect(runId).not.toBe('')
+
+    socket.emitMessage({
+      type: 'plan_step_complete',
+      step_id: 'step-stale',
+    } as AgentEvent)
+    socket.emitMessage({
+      type: 'streaming_edit_progress',
+      call_id: 'edit-1',
+      tool_name: 'apply_patch',
+      bytes_received: 128,
+    } as AgentEvent)
+    socket.emitMessage({
+      type: 'subagent_complete',
+      call_id: 'task-1',
+      session_id: 'child-session',
+      description: 'delegate',
+      input_tokens: 1,
+      output_tokens: 2,
+      cost_usd: 0.1,
+      resumed: false,
+    } as AgentEvent)
+    socket.emitMessage({
+      type: 'complete',
+      run_id: runId,
+      session: { id: 'fresh-session', messages: [], completed: true },
+    })
+
+    await expect(runPromise).resolves.toEqual({
+      success: true,
+      turns: 0,
+      sessionId: 'fresh-session',
+    })
+
+    expect(harness.handledEvents).toEqual([
+      {
+        type: 'complete',
+        run_id: runId,
+        session: { id: 'fresh-session', messages: [], completed: true },
+      },
+    ])
+
+    harness.dispose()
+  })
+
   it('returns early and clears running state when submit_goal is rejected in web mode before stream events', async () => {
     const socket = new FakeWebSocket()
     createEventSocketMock.mockReturnValueOnce(socket as unknown as WebSocket)

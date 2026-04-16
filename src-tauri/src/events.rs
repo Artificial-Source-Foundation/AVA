@@ -145,11 +145,7 @@ pub enum AgentEvent {
         run_id: Option<String>,
     },
     #[serde(rename = "plan_step_complete")]
-    PlanStepComplete {
-        step_id: String,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        run_id: Option<String>,
-    },
+    PlanStepComplete { step_id: String, run_id: String },
     #[serde(rename = "subagent_complete")]
     SubagentComplete {
         call_id: String,
@@ -161,8 +157,7 @@ pub enum AgentEvent {
         agent_type: Option<String>,
         provider: Option<String>,
         resumed: bool,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        run_id: Option<String>,
+        run_id: String,
     },
     #[serde(rename = "streaming_edit_progress")]
     StreamingEditProgress {
@@ -170,8 +165,7 @@ pub enum AgentEvent {
         tool_name: String,
         file_path: Option<String>,
         bytes_received: usize,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        run_id: Option<String>,
+        run_id: String,
     },
 }
 
@@ -399,7 +393,7 @@ pub fn from_backend_event(
         })),
         BE::PlanStepComplete { step_id } => Some(AgentEvent::PlanStepComplete {
             step_id: step_id.clone(),
-            run_id: run_id.map(str::to_string),
+            run_id: run_id?.to_string(),
         }),
         BE::SubAgentComplete {
             call_id,
@@ -422,7 +416,7 @@ pub fn from_backend_event(
             agent_type: agent_type.clone(),
             provider: provider.clone(),
             resumed: *resumed,
-            run_id: run_id.map(str::to_string),
+            run_id: run_id?.to_string(),
         }),
         BE::StreamingEditProgress {
             call_id,
@@ -434,7 +428,7 @@ pub fn from_backend_event(
             tool_name: tool_name.clone(),
             file_path: file_path.clone(),
             bytes_received: *bytes_received,
-            run_id: run_id.map(str::to_string),
+            run_id: run_id?.to_string(),
         }),
         // ToolStats, DiffPreview, SnapshotTaken etc. don't have a direct frontend
         // representation yet. Log at debug level so we can diagnose if important events
@@ -595,7 +589,7 @@ mod tests {
             tool_name: "apply_patch".to_string(),
             file_path: Some("src/main.rs".to_string()),
             bytes_received: 512,
-            run_id: Some("desktop-run-3".to_string()),
+            run_id: "desktop-run-3".to_string(),
         };
         let progress_json = serde_json::to_value(progress).expect("event to serialize");
         assert_eq!(progress_json["type"], "streaming_edit_progress");
@@ -613,7 +607,7 @@ mod tests {
             agent_type: Some("reviewer".to_string()),
             provider: Some("openai".to_string()),
             resumed: true,
-            run_id: Some("desktop-run-4".to_string()),
+            run_id: "desktop-run-4".to_string(),
         };
         let subagent_json = serde_json::to_value(subagent).expect("event to serialize");
         assert_eq!(subagent_json["type"], "subagent_complete");

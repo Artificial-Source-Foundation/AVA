@@ -269,7 +269,7 @@ mod tests {
     use axum::body::{to_bytes, Body};
     use axum::http::{Request, StatusCode};
     use std::collections::{HashMap, VecDeque};
-    use std::sync::Arc;
+    use std::sync::{atomic::AtomicBool, Arc};
     use std::time::Duration;
     use tokio::sync::{broadcast, mpsc, oneshot, Mutex, RwLock};
     use tokio_util::sync::CancellationToken;
@@ -289,6 +289,8 @@ mod tests {
                 cancel: RwLock::new(CancellationToken::new()),
                 running: RwLock::new(false),
                 startup_lock: Mutex::new(()),
+                queue_lifecycle_lock: Mutex::new(()),
+                interactive_lifecycle_lock: Arc::new(Mutex::new(())),
                 event_tx,
                 question_rx: Mutex::new(question_rx),
                 approval_rx: Mutex::new(approval_rx),
@@ -311,6 +313,9 @@ mod tests {
                 edit_history: Arc::new(RwLock::new(VecDeque::new())),
                 deferred_queue: Arc::new(RwLock::new(HashMap::new())),
                 in_flight_deferred: Arc::new(RwLock::new(HashMap::new())),
+                queue_dispatch: Mutex::new(crate::web::state::QueueDispatchSnapshot::default()),
+                queue_control: Mutex::new(None),
+                interactive_revoked: Arc::new(AtomicBool::new(false)),
             }),
         }
     }

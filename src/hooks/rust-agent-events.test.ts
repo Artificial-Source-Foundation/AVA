@@ -161,6 +161,7 @@ describe('createAgentEventHandler', () => {
 
     harness.handler({
       type: 'streaming_edit_progress',
+      run_id: 'run-1',
       call_id: 'edit-1',
       tool_name: 'apply_patch',
       file_path: 'src/main.rs',
@@ -212,6 +213,7 @@ describe('createAgentEventHandler', () => {
     })
     harness.handler({
       type: 'subagent_complete',
+      run_id: 'run-1',
       call_id: 'delegate-1',
       session_id: 'child-session',
       description: 'Investigate parser bug',
@@ -237,10 +239,114 @@ describe('createAgentEventHandler', () => {
 
     harness.handler({
       type: 'plan_step_complete',
+      run_id: 'run-1',
       step_id: 'step-2',
     })
 
     expect(markStepCompleteMock).toHaveBeenCalledWith('step-2')
+
+    harness.dispose()
+  })
+
+  it('drops malformed delegation events without call ids', () => {
+    const harness = createHandlerHarness()
+
+    harness.handler({
+      type: 'streaming_edit_progress',
+      run_id: 'run-1',
+      call_id: '' as unknown as string,
+      tool_name: 'apply_patch',
+      file_path: 'src/main.rs',
+      bytes_received: 256,
+    })
+    harness.handler({
+      type: 'subagent_complete',
+      run_id: 'run-1',
+      call_id: '' as unknown as string,
+      session_id: 'child-session',
+      description: 'delegate',
+      input_tokens: 1,
+      output_tokens: 2,
+      cost_usd: 0.1,
+      resumed: false,
+    })
+
+    expect(harness.activeToolCalls()).toHaveLength(0)
+
+    harness.dispose()
+  })
+
+  it('drops malformed delegation events missing other required fields', () => {
+    const harness = createHandlerHarness()
+
+    harness.handler({
+      type: 'streaming_edit_progress',
+      run_id: 'run-1',
+      call_id: 'edit-1',
+      tool_name: '' as unknown as string,
+      file_path: 'src/main.rs',
+      bytes_received: 256,
+    })
+    harness.handler({
+      type: 'streaming_edit_progress',
+      run_id: 'run-1',
+      call_id: 'edit-2',
+      tool_name: 'apply_patch',
+      file_path: 'src/main.rs',
+      bytes_received: undefined as unknown as number,
+    })
+    harness.handler({
+      type: 'subagent_complete',
+      run_id: 'run-1',
+      call_id: 'delegate-1',
+      session_id: '' as unknown as string,
+      description: 'delegate',
+      input_tokens: 1,
+      output_tokens: 2,
+      cost_usd: 0.1,
+      resumed: false,
+    })
+    harness.handler({
+      type: 'subagent_complete',
+      run_id: 'run-1',
+      call_id: 'delegate-2',
+      session_id: 'child-session',
+      description: '' as unknown as string,
+      input_tokens: 1,
+      output_tokens: 2,
+      cost_usd: 0.1,
+      resumed: false,
+    })
+    harness.handler({
+      type: 'subagent_complete',
+      run_id: 'run-1',
+      call_id: 'delegate-3',
+      session_id: 'child-session',
+      description: 'delegate',
+      input_tokens: undefined as unknown as number,
+      output_tokens: 2,
+      cost_usd: 0.1,
+      resumed: false,
+    })
+    harness.handler({
+      type: 'subagent_complete',
+      run_id: 'run-1',
+      call_id: 'delegate-4',
+      session_id: 'child-session',
+      description: 'delegate',
+      input_tokens: 1,
+      output_tokens: 2,
+      cost_usd: undefined as unknown as number,
+      resumed: false,
+    })
+    harness.handler({
+      type: 'plan_step_complete',
+      run_id: 'run-1',
+      step_id: '' as unknown as string,
+    })
+
+    expect(harness.activeToolCalls()).toHaveLength(0)
+    expect(markStepCompleteMock).not.toHaveBeenCalled()
 
     harness.dispose()
   })

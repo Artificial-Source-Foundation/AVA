@@ -265,27 +265,27 @@ export interface PlanCreatedEvent {
 }
 
 export interface PlanStepCompleteEvent {
-  run_id?: string
+  run_id: string
   runId?: string
   type: 'plan_step_complete'
   step_id: string
 }
 
 export interface StreamingEditProgressEvent {
-  run_id?: string
+  run_id: string
   runId?: string
   type: 'streaming_edit_progress'
-  call_id?: string
+  call_id: string
   tool_name: string
   file_path?: string | null
   bytes_received: number
 }
 
 export interface SubagentCompleteEvent {
-  run_id?: string
+  run_id: string
   runId?: string
   type: 'subagent_complete'
-  call_id?: string
+  call_id: string
   session_id: string
   description: string
   input_tokens: number

@@ -370,6 +370,10 @@ export function createAgentEventHandler(deps: EventHandlerDeps): (event: AgentEv
 
       case 'plan_step_complete': {
         const stepEvent = timedEvent as PlanStepCompleteEvent
+        if (!stepEvent.step_id) {
+          log.warn('agent', 'Ignoring malformed plan_step_complete without step_id')
+          break
+        }
         debugLog('plan', 'plan_step_complete event', stepEvent.step_id)
         usePlanOverlay().markStepComplete(stepEvent.step_id)
         break
@@ -397,16 +401,22 @@ export function createAgentEventHandler(deps: EventHandlerDeps): (event: AgentEv
 
       case 'streaming_edit_progress': {
         const editEvent = timedEvent as StreamingEditProgressEvent
-        const callId = editEvent.call_id ?? null
+        const callId = editEvent.call_id
         const toolName = editEvent.tool_name
-        const filePath = editEvent.file_path ?? undefined
         const bytesReceived = editEvent.bytes_received
+        if (!callId || !toolName || typeof bytesReceived !== 'number') {
+          log.warn('agent', 'Ignoring malformed streaming_edit_progress event', {
+            hasCallId: !!callId,
+            hasToolName: !!toolName,
+            hasBytesReceived: typeof bytesReceived === 'number',
+          })
+          break
+        }
+        const filePath = editEvent.file_path ?? undefined
         const streamingOutput = `Receiving ${toolName}${filePath ? ` for ${filePath}` : ''} (${bytesReceived} bytes)`
 
         setActiveToolCalls((prev) => {
-          const matchIdx = callId
-            ? prev.findIndex((tc) => tc.id === callId)
-            : prev.findIndex((tc) => tc.status === 'running' && tc.name === toolName)
+          const matchIdx = prev.findIndex((tc) => tc.id === callId)
 
           if (matchIdx >= 0) {
             const updated = [...prev]
@@ -421,7 +431,7 @@ export function createAgentEventHandler(deps: EventHandlerDeps): (event: AgentEv
           return [
             ...prev,
             {
-              id: callId ?? `${toolName}-${Date.now()}-${prev.length + 1}`,
+              id: callId,
               name: toolName,
               args: {},
               status: 'running',
@@ -436,14 +446,33 @@ export function createAgentEventHandler(deps: EventHandlerDeps): (event: AgentEv
 
       case 'subagent_complete': {
         const subagentEvent = timedEvent as SubagentCompleteEvent
-        const callId = subagentEvent.call_id ?? null
+        const callId = subagentEvent.call_id
         const sessionId = subagentEvent.session_id
+        const description = subagentEvent.description
         const inputTokens = subagentEvent.input_tokens
         const outputTokens = subagentEvent.output_tokens
         const costUsd = subagentEvent.cost_usd
+        if (
+          !callId ||
+          !sessionId ||
+          !description ||
+          typeof inputTokens !== 'number' ||
+          typeof outputTokens !== 'number' ||
+          typeof costUsd !== 'number'
+        ) {
+          log.warn('agent', 'Ignoring malformed subagent_complete event', {
+            hasCallId: !!callId,
+            hasSessionId: !!sessionId,
+            hasDescription: !!description,
+            hasInputTokens: typeof inputTokens === 'number',
+            hasOutputTokens: typeof outputTokens === 'number',
+            hasCostUsd: typeof costUsd === 'number',
+          })
+          break
+        }
         const agentType = subagentEvent.agent_type ?? undefined
         const summaryLines = [
-          subagentEvent.description,
+          description,
           `Session: ${sessionId}`,
           `Tokens: ${inputTokens} in / ${outputTokens} out`,
           `Cost: $${costUsd.toFixed(4)}`,
@@ -453,7 +482,7 @@ export function createAgentEventHandler(deps: EventHandlerDeps): (event: AgentEv
         ]
 
         setActiveToolCalls((prev) => {
-          const matchIdx = callId ? prev.findIndex((tc) => tc.id === callId) : -1
+          const matchIdx = prev.findIndex((tc) => tc.id === callId)
           const output = summaryLines.join('\n')
           const completedAt = Date.now()
 
@@ -471,10 +500,10 @@ export function createAgentEventHandler(deps: EventHandlerDeps): (event: AgentEv
           return [
             ...prev,
             {
-              id: callId ?? `subagent-${sessionId}`,
+              id: callId,
               name: 'task',
               args: {
-                description: subagentEvent.description,
+                description,
                 ...(agentType ? { agent_type: agentType } : {}),
               },
               status: 'success',

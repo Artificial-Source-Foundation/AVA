@@ -840,6 +840,7 @@ pub async fn resolve_approval(
     bridge: State<'_, DesktopBridge>,
     app: AppHandle,
 ) -> Result<(), String> {
+    let _interactive_guard = bridge.interactive_lifecycle_lock.lock().await;
     let reply = take_resolved_desktop_interactive_request(
         &bridge.pending_approval_reply,
         "approval",
@@ -896,6 +897,7 @@ pub async fn resolve_question(
     bridge: State<'_, DesktopBridge>,
     app: AppHandle,
 ) -> Result<(), String> {
+    let _interactive_guard = bridge.interactive_lifecycle_lock.lock().await;
     let reply = take_resolved_desktop_interactive_request(
         &bridge.pending_question_reply,
         "question",
@@ -954,6 +956,7 @@ pub async fn resolve_plan(
     app: AppHandle,
 ) -> Result<(), String> {
     let decision = parse_plan_decision(&args.response, args.modified_plan, args.feedback)?;
+    let _interactive_guard = bridge.interactive_lifecycle_lock.lock().await;
 
     let reply = take_resolved_desktop_interactive_request(
         &bridge.pending_plan_reply,

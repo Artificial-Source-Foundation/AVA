@@ -114,7 +114,7 @@ export function createAgentIpc(deps: IpcDeps): AgentIpc {
 
   const getTauriEventRunId = (event: AgentEvent): string | null => {
     const terminalEvent = event as { run_id?: string; runId?: string }
-    return terminalEvent.runId ?? terminalEvent.run_id ?? null
+    return terminalEvent.run_id ?? terminalEvent.runId ?? null
   }
 
   const resetTauriTerminalTracking = (runId: string): TauriTerminalTracker => {
@@ -155,8 +155,19 @@ export function createAgentIpc(deps: IpcDeps): AgentIpc {
     const activeRun = activeTauriRun
     const eventRunId = getTauriEventRunId(event)
     const isTerminalEvent = event.type === 'complete' || event.type === 'error'
+    const requiresRunCorrelation =
+      event.type === 'plan_step_complete' ||
+      event.type === 'subagent_complete' ||
+      event.type === 'streaming_edit_progress'
 
     if (!eventRunId) {
+      if (requiresRunCorrelation) {
+        log.warn('agent', 'Ignoring malformed correlated event missing run_id', {
+          eventType: event.type,
+        })
+        return false
+      }
+
       if (!isTerminalEvent) {
         return true
       }

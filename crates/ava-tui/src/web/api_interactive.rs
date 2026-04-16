@@ -58,6 +58,8 @@ pub(crate) async fn resolve_approval(
 ) -> Result<impl IntoResponse, (StatusCode, Json<ErrorResponse>)> {
     use ava_tools::permission_middleware::ToolApproval;
 
+    let _interactive_guard = state.inner.interactive_lifecycle_lock.lock().await;
+
     let request_id = req
         .request_id
         .as_deref()
@@ -117,6 +119,7 @@ pub(crate) async fn resolve_question(
     State(state): State<WebState>,
     Json(req): Json<ResolveQuestionRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ErrorResponse>)> {
+    let _interactive_guard = state.inner.interactive_lifecycle_lock.lock().await;
     let request_id = req
         .request_id
         .as_deref()
@@ -172,6 +175,7 @@ pub(crate) async fn resolve_plan(
     State(state): State<WebState>,
     Json(req): Json<ResolvePlanRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ErrorResponse>)> {
+    let _interactive_guard = state.inner.interactive_lifecycle_lock.lock().await;
     let request_id = req
         .request_id
         .as_deref()

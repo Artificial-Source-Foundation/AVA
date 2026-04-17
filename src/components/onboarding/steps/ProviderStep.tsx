@@ -19,7 +19,8 @@ import {
   AlibabaCloudLogo,
   AnthropicLogo,
   CopilotLogo,
-  GoogleLogo,
+  GeminiLogo,
+  InceptionLogo,
   OllamaLogo,
   OpenAILogo,
   OpenRouterLogo,
@@ -65,7 +66,7 @@ const POPULAR_PROVIDERS: ProviderDef[] = [
     name: 'Gemini',
     authText: 'API Key',
     color: '#4285F4',
-    logo: GoogleLogo,
+    logo: GeminiLogo,
     authOptions: [{ label: 'API Key', type: 'apikey' }],
   },
   {
@@ -100,7 +101,7 @@ const MORE_PROVIDERS: ProviderDef[] = [
     name: 'Inception',
     authText: 'API Key',
     color: '#FF6B35',
-    logo: null,
+    logo: InceptionLogo,
     authOptions: [{ label: 'API Key', type: 'apikey' }],
   },
   {

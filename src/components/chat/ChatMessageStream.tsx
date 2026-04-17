@@ -65,7 +65,9 @@ const ChatMessageStreamRow: Component<{
 
 export const ChatMessageStream: Component<ChatMessageStreamProps> = (props) => {
   const classes = () =>
-    ['chat-scroll-viewport flex-1 overflow-y-auto', props.class].filter(Boolean).join(' ')
+    ['chat-scroll-viewport scroll-smooth flex-1 overflow-y-auto', props.class]
+      .filter(Boolean)
+      .join(' ')
   const handleScroll: JSX.EventHandler<HTMLDivElement, Event> = (event) => props.onScroll?.(event)
   const messageCount = createMemo(() => props.messages().length)
 
@@ -74,7 +76,13 @@ export const ChatMessageStream: Component<ChatMessageStreamProps> = (props) => {
       <div
         ref={props.containerRef}
         class={classes()}
-        style={{ ...props.style, 'min-height': '0', flex: '1 1 0' }}
+        style={{
+          ...props.style,
+          'min-height': '0',
+          flex: '1 1 0',
+          'overscroll-behavior': 'contain',
+          'scrollbar-gutter': 'stable',
+        }}
         onScroll={handleScroll}
         role="log"
         aria-live="polite"
@@ -88,7 +96,10 @@ export const ChatMessageStream: Component<ChatMessageStreamProps> = (props) => {
         <Show when={!props.loading?.() && messageCount() === 0}>{props.emptyState}</Show>
 
         <Show when={!props.loading?.() && messageCount() > 0}>
-          <div class="max-w-[min(94%,1400px)] mx-auto w-full">
+          <div
+            class="max-w-[min(94%,1400px)] mx-auto w-full"
+            style={{ 'content-visibility': 'auto' }}
+          >
             <For each={props.messages()}>
               {(message, index) => (
                 <ChatMessageStreamRow

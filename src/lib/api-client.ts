@@ -55,7 +55,6 @@ const COMMAND_TO_ENDPOINT: Record<string, { path: string; method: 'GET' | 'POST'
 
   // Providers
   list_providers: { path: '/api/providers', method: 'GET' },
-  get_subscription_usage: { path: '/api/usage', method: 'GET' },
   discover_cli_agents: { path: '/api/cli-agents', method: 'GET' },
 
   // Config

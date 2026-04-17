@@ -179,7 +179,7 @@ export function aggregateModels(providers: LLMProviderConfig[]): BrowsableModel[
         name: model.name,
         providerId: provider.id,
         providerName: provider.name,
-        contextWindow: model.contextWindow,
+        contextWindow: normalizeContextWindow(model.contextWindow),
         isDefault: model.isDefault,
         pricing: model.pricing ?? lookupPricing(model.id),
         capabilities: mergeCapabilities(model.id, provider.id, model.capabilities),
@@ -290,7 +290,9 @@ export function sortModels(models: BrowsableModel[], sort: SortOption): Browsabl
       sorted.sort((a, b) => a.name.localeCompare(b.name))
       break
     case 'context':
-      sorted.sort((a, b) => b.contextWindow - a.contextWindow)
+      sorted.sort(
+        (a, b) => getContextSortValue(b.contextWindow) - getContextSortValue(a.contextWindow)
+      )
       break
     case 'price':
       sorted.sort((a, b) => (a.pricing?.input ?? 999) - (b.pricing?.input ?? 999))
@@ -299,11 +301,21 @@ export function sortModels(models: BrowsableModel[], sort: SortOption): Browsabl
   return sorted
 }
 
+function normalizeContextWindow(value: number | null | undefined): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return null
+  return value
+}
+
+function getContextSortValue(value: number | null | undefined): number {
+  return normalizeContextWindow(value) ?? -1
+}
+
 // ============================================================================
 // Formatting
 // ============================================================================
 
-export function formatContextWindow(tokens: number): string {
+export function formatContextWindow(tokens: number | null | undefined): string {
+  if (typeof tokens !== 'number' || !Number.isFinite(tokens)) return 'N/A'
   if (tokens >= 1000000) return `${(tokens / 1000000).toFixed(1)}M`
   if (tokens >= 1000) return `${Math.round(tokens / 1000)}K`
   return tokens.toString()

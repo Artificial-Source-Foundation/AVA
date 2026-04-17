@@ -1509,7 +1509,10 @@ button {
 .chat-message-shell,
 .chat-tool-shell,
 .chat-user-bubble {
-  contain: content;
+  contain: layout paint style;
+  /* Enable content-visibility for off-screen messages to reduce layout cost */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 120px;
 }
 
 .chat-message-shell {

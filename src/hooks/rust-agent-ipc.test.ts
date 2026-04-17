@@ -1,7 +1,7 @@
 import { createRoot, createSignal } from 'solid-js'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ToolCall } from '../types'
-import type { AgentEvent, SubmitGoalResult } from '../types/rust-ipc'
+import type { AgentEvent, AgentStatus, SubmitGoalResult } from '../types/rust-ipc'
 import { createAgentIpc } from './rust-agent-ipc'
 
 let isTauriRuntime = false
@@ -149,6 +149,241 @@ describe('createAgentIpc', () => {
     isTauriRuntime = false
     vi.clearAllMocks()
     vi.useRealTimers()
+  })
+
+  it('rehydrates frontend running state from backend status', async () => {
+    const socket = new FakeWebSocket()
+    createEventSocketMock.mockReturnValueOnce(socket as unknown as WebSocket)
+    apiInvokeMock
+      .mockResolvedValueOnce({
+        running: true,
+        provider: 'openai',
+        model: 'gpt-5',
+        runId: 'web-run-rehydrate',
+      })
+      .mockResolvedValueOnce({
+        running: true,
+        provider: 'openai',
+        model: 'gpt-5',
+        runId: 'web-run-rehydrate',
+      })
+
+    const harness = createIpcHarness()
+    const rehydratePromise = harness.ipc.rehydrateStatus('session-front')
+    await flushPromises()
+    socket.emitOpen()
+    await rehydratePromise
+
+    expect(apiInvokeMock).toHaveBeenNthCalledWith(1, 'get_agent_status', {
+      sessionId: 'session-front',
+    })
+    expect(apiInvokeMock).toHaveBeenNthCalledWith(2, 'get_agent_status', {
+      sessionId: 'session-front',
+      runId: 'web-run-rehydrate',
+    })
+    expect(harness.isRunning()).toBe(true)
+    expect(harness.currentRunId()).toBe('web-run-rehydrate')
+
+    harness.dispose()
+  })
+
+  it('does not rehydrate running state when backend runId is missing', async () => {
+    apiInvokeMock.mockResolvedValueOnce({
+      running: true,
+      provider: 'openai',
+      model: 'gpt-5',
+      runId: null,
+    })
+
+    const harness = createIpcHarness()
+    await harness.ipc.rehydrateStatus('session-front')
+
+    expect(harness.isRunning()).toBe(false)
+    expect(harness.currentRunId()).toBeNull()
+
+    harness.dispose()
+  })
+
+  it('keeps browser rehydration scoped to the requested session', async () => {
+    apiInvokeMock.mockResolvedValueOnce({
+      running: false,
+      provider: 'openai',
+      model: 'gpt-5',
+      runId: null,
+    })
+
+    const harness = createIpcHarness()
+    await harness.ipc.rehydrateStatus('session-front')
+
+    expect(apiInvokeMock).toHaveBeenCalledWith('get_agent_status', {
+      sessionId: 'session-front',
+    })
+    expect(harness.isRunning()).toBe(false)
+    expect(harness.currentRunId()).toBeNull()
+
+    harness.dispose()
+  })
+
+  it('keeps the latest browser rehydration result when an older session rehydrate resolves late', async () => {
+    const staleStatus = createDeferred<AgentStatus>()
+    const socket = new FakeWebSocket()
+
+    createEventSocketMock.mockReturnValueOnce(socket as unknown as WebSocket)
+    apiInvokeMock
+      .mockImplementationOnce(() => staleStatus.promise)
+      .mockResolvedValueOnce({
+        running: true,
+        provider: 'openai',
+        model: 'gpt-5',
+        runId: 'web-run-fresh',
+      })
+      .mockResolvedValueOnce({
+        running: true,
+        provider: 'openai',
+        model: 'gpt-5',
+        runId: 'web-run-fresh',
+      })
+
+    const harness = createIpcHarness()
+
+    const staleRehydrate = harness.ipc.rehydrateStatus('session-old')
+    const freshRehydrate = harness.ipc.rehydrateStatus('session-fresh')
+
+    await flushPromises()
+    socket.emitOpen()
+    await flushPromises()
+
+    await freshRehydrate
+
+    expect(harness.isRunning()).toBe(true)
+    expect(harness.currentRunId()).toBe('web-run-fresh')
+
+    staleStatus.resolve({
+      running: true,
+      provider: 'openai',
+      model: 'gpt-5',
+      runId: 'web-run-stale',
+    })
+
+    await staleRehydrate
+
+    expect(harness.isRunning()).toBe(true)
+    expect(harness.currentRunId()).toBe('web-run-fresh')
+
+    expect(apiInvokeMock).toHaveBeenCalledTimes(3)
+    expect(apiInvokeMock).toHaveBeenNthCalledWith(1, 'get_agent_status', {
+      sessionId: 'session-old',
+    })
+    expect(apiInvokeMock).toHaveBeenNthCalledWith(2, 'get_agent_status', {
+      sessionId: 'session-fresh',
+    })
+    expect(apiInvokeMock).toHaveBeenNthCalledWith(3, 'get_agent_status', {
+      sessionId: 'session-fresh',
+      runId: 'web-run-fresh',
+    })
+
+    harness.dispose()
+  })
+
+  it('accepts only matching correlated websocket events after status rehydration', async () => {
+    const socket = new FakeWebSocket()
+    createEventSocketMock.mockReturnValueOnce(socket as unknown as WebSocket)
+    apiInvokeMock
+      .mockResolvedValueOnce({
+        running: true,
+        provider: 'openai',
+        model: 'gpt-5',
+        runId: 'web-run-rehydrate',
+      })
+      .mockResolvedValueOnce({
+        running: true,
+        provider: 'openai',
+        model: 'gpt-5',
+        runId: 'web-run-rehydrate',
+      })
+
+    const harness = createIpcHarness()
+    const rehydratePromise = harness.ipc.rehydrateStatus('session-front')
+    await flushPromises()
+    socket.emitOpen()
+    await rehydratePromise
+
+    socket.emitMessage({
+      type: 'progress',
+      message: 'stale',
+      run_id: 'web-run-old',
+    })
+    socket.emitMessage({
+      type: 'progress',
+      message: 'fresh',
+      run_id: 'web-run-rehydrate',
+    })
+
+    expect(harness.handledEvents).toEqual([
+      { type: 'progress', message: 'fresh', run_id: 'web-run-rehydrate' },
+    ])
+
+    harness.dispose()
+  })
+
+  it('clears stale running state when a rehydrated Tauri run finishes before listener attach completes', async () => {
+    isTauriRuntime = true
+
+    listenMock.mockImplementationOnce(async () => () => {})
+    tauriInvokeMock
+      .mockResolvedValueOnce({
+        running: true,
+        provider: 'openai',
+        model: 'gpt-5',
+        runId: 'tauri-run-rehydrate',
+      })
+      .mockResolvedValueOnce({
+        running: false,
+        provider: 'openai',
+        model: 'gpt-5',
+        runId: null,
+      })
+
+    const harness = createIpcHarness()
+    await harness.ipc.rehydrateStatus()
+
+    expect(tauriInvokeMock).toHaveBeenNthCalledWith(1, 'get_agent_status')
+    expect(tauriInvokeMock).toHaveBeenNthCalledWith(2, 'get_agent_status')
+    expect(harness.isRunning()).toBe(false)
+    expect(harness.currentRunId()).toBeNull()
+
+    harness.dispose()
+  })
+
+  it('rolls back optimistic running state when rehydrate reconcile fails after listener attach', async () => {
+    const socket = new FakeWebSocket()
+    createEventSocketMock.mockReturnValueOnce(socket as unknown as WebSocket)
+    apiInvokeMock
+      .mockResolvedValueOnce({
+        running: true,
+        provider: 'openai',
+        model: 'gpt-5',
+        runId: 'web-run-rehydrate',
+      })
+      .mockRejectedValueOnce(new Error('reconcile failed'))
+
+    const harness = createIpcHarness()
+    const rehydratePromise = harness.ipc.rehydrateStatus('session-front')
+    await flushPromises()
+    socket.emitOpen()
+    await rehydratePromise
+
+    expect(apiInvokeMock).toHaveBeenNthCalledWith(1, 'get_agent_status', {
+      sessionId: 'session-front',
+    })
+    expect(apiInvokeMock).toHaveBeenNthCalledWith(2, 'get_agent_status', {
+      sessionId: 'session-front',
+      runId: 'web-run-rehydrate',
+    })
+    expect(harness.isRunning()).toBe(false)
+    expect(harness.currentRunId()).toBeNull()
+
+    harness.dispose()
   })
 
   it('ignores stale websocket closes during reconnect', async () => {
@@ -863,6 +1098,38 @@ describe('createAgentIpc', () => {
       args: { message: 'queued later', group: 3, sessionId: 'session-owned' },
     })
 
+    harness.dispose()
+  })
+
+  it('routes web cancel and steer with active run correlation', async () => {
+    const socket = new FakeWebSocket()
+    createEventSocketMock.mockReturnValueOnce(socket as unknown as WebSocket)
+    apiInvokeMock.mockResolvedValueOnce({ success: true, turns: 1, sessionId: 'session-web' })
+
+    const harness = createIpcHarness()
+    const runPromise = harness.ipc.run('ship web')
+    socket.emitOpen()
+    await flushPromises()
+
+    const runId = harness.currentRunId()
+    expect(runId).toBeTruthy()
+
+    await harness.ipc.steer('nudge')
+    await harness.ipc.cancel()
+
+    expect(apiInvokeMock).toHaveBeenNthCalledWith(2, 'steer_agent', {
+      message: 'nudge',
+      runId,
+    })
+    expect(apiInvokeMock).toHaveBeenNthCalledWith(3, 'cancel_agent', {
+      runId,
+    })
+
+    await expect(runPromise).resolves.toEqual({
+      success: false,
+      turns: 0,
+      sessionId: 'session-web',
+    })
     harness.dispose()
   })
 

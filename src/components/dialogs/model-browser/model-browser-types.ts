@@ -16,7 +16,7 @@ export interface BrowsableModel {
   name: string
   providerId: string
   providerName: string
-  contextWindow: number
+  contextWindow: number | null
   isDefault?: boolean
   pricing?: ModelPricing
   capabilities: ModelCapability[]

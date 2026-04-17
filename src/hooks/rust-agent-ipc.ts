@@ -5,7 +5,7 @@ import { batch } from 'solid-js'
 import { apiInvoke, createEventSocket } from '../lib/api-client'
 import { log } from '../lib/logger'
 import type { ToolCall } from '../types'
-import type { AgentEvent, SubmitGoalResult } from '../types/rust-ipc'
+import type { AgentEvent, AgentStatus, SubmitGoalResult } from '../types/rust-ipc'
 import type { CompletionResolver, StreamingMetrics } from './rust-agent-events'
 
 /** Invoke the backend — Tauri IPC or HTTP API depending on runtime. */
@@ -73,6 +73,7 @@ export interface AgentIpc {
   attachListener: () => Promise<void>
   detachListener: () => void
   destroyListener: () => void
+  rehydrateStatus: (sessionId?: string | null) => Promise<void>
 }
 
 /**
@@ -99,6 +100,7 @@ export function createAgentIpc(deps: IpcDeps): AgentIpc {
   let tauriRunSequence = 0
   let activeTauriRun: TauriTerminalTracker | null = null
   let activeRunId: string | null = null
+  let rehydrateGeneration = 0
 
   const isCurrentSocket = (ws: WebSocket, generation: number): boolean =>
     eventSocket === ws && socketGeneration === generation
@@ -226,6 +228,64 @@ export function createAgentIpc(deps: IpcDeps): AgentIpc {
       ...args,
       runId,
     }
+  }
+
+  const withWebRunCorrelation = (
+    payload?: Record<string, unknown>,
+    sessionId?: string | null
+  ): Record<string, unknown> | undefined => {
+    if (isTauri()) {
+      return payload
+    }
+
+    const runId = activeRunId
+    if (!runId && !sessionId) {
+      return payload
+    }
+
+    const correlation: Record<string, unknown> = {}
+    if (runId) {
+      correlation.runId = runId
+    }
+    if (sessionId) {
+      correlation.sessionId = sessionId
+    }
+
+    const base = payload ?? {}
+    const nestedArgs = base.args
+    if (nestedArgs && typeof nestedArgs === 'object' && !Array.isArray(nestedArgs)) {
+      return {
+        ...base,
+        args: {
+          ...(nestedArgs as Record<string, unknown>),
+          ...correlation,
+        },
+      }
+    }
+
+    return {
+      ...base,
+      ...correlation,
+    }
+  }
+
+  const webStatusCorrelation = (
+    sessionId?: string | null,
+    runId?: string | null
+  ): Record<string, unknown> | undefined => {
+    if (isTauri()) {
+      return undefined
+    }
+
+    const correlation: Record<string, unknown> = {}
+    if (sessionId) {
+      correlation.sessionId = sessionId
+    }
+    if (runId) {
+      correlation.runId = runId
+    }
+
+    return Object.keys(correlation).length > 0 ? correlation : undefined
   }
 
   const attachListener = async (): Promise<void> => {
@@ -491,6 +551,106 @@ export function createAgentIpc(deps: IpcDeps): AgentIpc {
     }
   }
 
+  const rehydrateStatus = async (sessionId?: string | null): Promise<void> => {
+    const requestGeneration = ++rehydrateGeneration
+    let optimisticStateApplied = false
+
+    try {
+      const status = await invoke<AgentStatus>(
+        'get_agent_status',
+        webStatusCorrelation(sessionId ?? null, null)
+      )
+
+      if (requestGeneration !== rehydrateGeneration) {
+        return
+      }
+
+      if (!status.running) {
+        if (!isTauri() && sessionId) {
+          activeRunId = null
+          batch(() => {
+            setIsRunning(false)
+            setCurrentRunId(null)
+          })
+        }
+        return
+      }
+
+      const runId =
+        typeof status.runId === 'string' && status.runId.trim().length > 0 ? status.runId : null
+
+      if (!runId) {
+        activeRunId = null
+        batch(() => {
+          setIsRunning(false)
+          setCurrentRunId(null)
+        })
+        log.info('agent', 'Rehydrate ignored invalid backend run status', {
+          runId: status.runId,
+        })
+        return
+      }
+
+      if (requestGeneration !== rehydrateGeneration) {
+        return
+      }
+
+      activeRunId = runId
+      batch(() => {
+        setIsRunning(true)
+        setCurrentRunId(runId)
+      })
+      optimisticStateApplied = true
+
+      await attachListener()
+
+      if (requestGeneration !== rehydrateGeneration) {
+        return
+      }
+
+      const reconciledStatus = await invoke<AgentStatus>(
+        'get_agent_status',
+        webStatusCorrelation(sessionId ?? null, runId)
+      )
+
+      if (requestGeneration !== rehydrateGeneration) {
+        return
+      }
+
+      const reconciledRunId =
+        typeof reconciledStatus.runId === 'string' && reconciledStatus.runId.trim().length > 0
+          ? reconciledStatus.runId
+          : null
+
+      if (!reconciledStatus.running || !reconciledRunId) {
+        activeRunId = null
+        batch(() => {
+          setIsRunning(false)
+          setCurrentRunId(null)
+        })
+        log.info('agent', 'Cleared stale rehydrated run after listener attach')
+        return
+      }
+      activeRunId = reconciledRunId
+      setCurrentRunId(reconciledRunId)
+      log.info('agent', 'Rehydrated active backend run state', {
+        runId: reconciledRunId,
+      })
+    } catch (err) {
+      if (optimisticStateApplied && requestGeneration === rehydrateGeneration) {
+        activeRunId = null
+        batch(() => {
+          setIsRunning(false)
+          setCurrentRunId(null)
+        })
+      }
+
+      log.warn('agent', 'Failed to rehydrate agent status', {
+        error: err instanceof Error ? err.message : String(err),
+      })
+    }
+  }
+
   /**
    * Run the agent via the edit-and-resend backend endpoint.
    * Same streaming infrastructure as run(), but calls edit_and_resend instead
@@ -589,7 +749,7 @@ export function createAgentIpc(deps: IpcDeps): AgentIpc {
   const cancel = async (): Promise<void> => {
     log.info('agent', 'Agent cancel requested')
     try {
-      await invoke('cancel_agent')
+      await invoke('cancel_agent', withWebRunCorrelation(undefined))
     } catch {
       /* ignore */
     }
@@ -638,7 +798,7 @@ export function createAgentIpc(deps: IpcDeps): AgentIpc {
     }
     log.info('agent', 'Steering message injected', { length: message.length })
     try {
-      await invoke('steer_agent', { message })
+      await invoke('steer_agent', withWebRunCorrelation({ message }))
       log.info('agent', 'Steering message delivered successfully')
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
@@ -654,7 +814,13 @@ export function createAgentIpc(deps: IpcDeps): AgentIpc {
       throw new Error('Agent is not running')
     }
     try {
-      await invoke('follow_up_agent', { args: { message, sessionId: sessionId ?? null } })
+      await invoke(
+        'follow_up_agent',
+        withWebRunCorrelation(
+          { args: { message, sessionId: sessionId ?? null } },
+          sessionId ?? null
+        )
+      )
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       log.error('agent', 'Failed to queue follow-up', { error: msg })
@@ -674,9 +840,15 @@ export function createAgentIpc(deps: IpcDeps): AgentIpc {
       throw new Error('Agent is not running')
     }
     try {
-      await invoke('post_complete_agent', {
-        args: { message, group: group ?? 1, sessionId: sessionId ?? null },
-      })
+      await invoke(
+        'post_complete_agent',
+        withWebRunCorrelation(
+          {
+            args: { message, group: group ?? 1, sessionId: sessionId ?? null },
+          },
+          sessionId ?? null
+        )
+      )
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       log.error('agent', 'Failed to queue post-complete', { error: msg })
@@ -699,5 +871,6 @@ export function createAgentIpc(deps: IpcDeps): AgentIpc {
     attachListener,
     detachListener,
     destroyListener,
+    rehydrateStatus,
   }
 }

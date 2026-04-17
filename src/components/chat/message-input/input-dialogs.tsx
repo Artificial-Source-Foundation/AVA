@@ -57,16 +57,18 @@ export const InputDialogs: Component<InputDialogsProps> = (props) => {
 
   return (
     <>
-      <ModelBrowserDialog
-        open={modelBrowserOpen}
-        onOpenChange={(open) => {
-          if (!open) closeModelBrowser()
-        }}
-        selectedModel={sessionStore.selectedModel}
-        selectedProvider={sessionStore.selectedProvider}
-        onSelect={(modelId, providerId) => sessionStore.setSelectedModel(modelId, providerId)}
-        enabledProviders={props.enabledProviders}
-      />
+      <Show when={modelBrowserOpen()}>
+        <ModelBrowserDialog
+          open={modelBrowserOpen}
+          onOpenChange={(open) => {
+            if (!open) closeModelBrowser()
+          }}
+          selectedModel={sessionStore.selectedModel}
+          selectedProvider={sessionStore.selectedProvider}
+          onSelect={(modelId, providerId) => sessionStore.setSelectedModel(modelId, providerId)}
+          enabledProviders={props.enabledProviders}
+        />
+      </Show>
       <Show when={expandedEditorOpen()}>
         <ExpandedEditor
           open={true}

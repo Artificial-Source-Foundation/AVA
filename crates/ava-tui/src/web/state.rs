@@ -12,20 +12,41 @@ use ava_agent::control_plane::interactive::{InteractiveRequestKind, InteractiveR
 use ava_agent::control_plane::queue::resolve_deferred_queue_session;
 use ava_agent::message_queue::MessageQueueControl;
 use ava_agent::stack::{AgentStack, AgentStackConfig};
-use ava_tools::core::plan::PlanRequest;
-use ava_tools::core::question::QuestionRequest;
-use ava_tools::permission_middleware::{ApprovalRequest, ToolApproval};
+use ava_tools::permission_middleware::ToolApproval;
 use ava_types::{PlanDecision, QueuedMessage};
 use color_eyre::Result;
 use serde_json::Value;
 use tokio::sync::{broadcast, mpsc, Mutex, RwLock};
 use tokio_util::sync::CancellationToken;
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct QueueDispatchSnapshot {
     pub accepting: bool,
-    pub active_session_id: Option<uuid::Uuid>,
+    pub run_id: String,
+    pub session_id: uuid::Uuid,
     pub tx: Option<mpsc::UnboundedSender<QueuedMessage>>,
+}
+
+pub struct WebRunState {
+    pub run_id: String,
+    pub session_id: uuid::Uuid,
+    pub cancel: CancellationToken,
+    pub queue_dispatch: Mutex<Option<QueueDispatchSnapshot>>,
+    pub queue_control: Mutex<Option<MessageQueueControl>>,
+    pub interactive_revoked: AtomicBool,
+}
+
+impl WebRunState {
+    fn new(run_id: String, session_id: uuid::Uuid) -> Self {
+        Self {
+            run_id,
+            session_id,
+            cancel: CancellationToken::new(),
+            queue_dispatch: Mutex::new(None),
+            queue_control: Mutex::new(None),
+            interactive_revoked: AtomicBool::new(false),
+        }
+    }
 }
 
 pub type PendingApprovalReply = InteractiveRequestStore<ToolApproval>;
@@ -125,49 +146,38 @@ pub struct WebState {
 pub struct WebStateInner {
     pub stack: Arc<AgentStack>,
     pub db: Arc<ava_db::Database>,
-    /// Cancellation token for the current agent run.
-    pub cancel: RwLock<CancellationToken>,
-    /// Whether the agent is currently running.
-    pub running: RwLock<bool>,
-    /// Serializes run startup so only one run can claim ownership at a time.
+    /// Serializes run startup so session/run ownership checks stay atomic.
     pub startup_lock: Mutex<()>,
     /// Serializes queue enqueue and revocation boundaries.
     pub queue_lifecycle_lock: Mutex<()>,
     /// Serializes interactive prompt registration with cancel drainage.
     pub interactive_lifecycle_lock: Arc<Mutex<()>>,
+    /// Active runs keyed by web-owned run ID.
+    pub runs: RwLock<HashMap<String, Arc<WebRunState>>>,
+    /// Reverse lookup from session ID to active run ID.
+    pub session_runs: RwLock<HashMap<uuid::Uuid, String>>,
     /// Broadcast channel for agent events — all WebSocket clients subscribe.
     pub event_tx: broadcast::Sender<WebEvent>,
-    /// Question receiver — drained each run to forward question_request WS events.
-    pub question_rx: Mutex<mpsc::UnboundedReceiver<QuestionRequest>>,
-    /// Approval receiver — drained each run to forward approval_request WS events.
-    pub approval_rx: Mutex<mpsc::UnboundedReceiver<ApprovalRequest>>,
-    /// Plan receiver — drained each run to forward plan_created WS events.
-    pub plan_rx: Mutex<mpsc::UnboundedReceiver<PlanRequest>>,
-    /// Message queue sender for mid-stream messaging (3-tier).
-    /// `None` when no agent is running; set before each run.
-    pub message_queue: RwLock<Option<mpsc::UnboundedSender<QueuedMessage>>>,
     /// Pending approval reply; set by the approval forwarder, consumed by resolve_approval.
     pub pending_approval_reply: PendingApprovalReply,
     /// Pending question reply; set by the question forwarder, consumed by resolve_question.
     pub pending_question_reply: PendingQuestionReply,
     /// Pending plan reply; set by the plan forwarder, consumed by resolve_plan.
     pub pending_plan_reply: PendingPlanReply,
+    /// Deferred interactive request events keyed by request_id.
+    ///
+    /// Same-kind interactive prompts are only actionable in FIFO order. When a
+    /// later same-kind prompt is registered while another is still pending, we
+    /// stage its event here and only emit it once it reaches the front.
+    pub deferred_interactive_events: Mutex<HashMap<String, WebEvent>>,
     /// Session ID from the last completed run, used for retry/regenerate/undo.
     pub last_session_id: RwLock<Option<uuid::Uuid>>,
-    /// Session ID for the currently-running agent.
-    pub active_session_id: RwLock<Option<uuid::Uuid>>,
     /// Stack of file edits for undo support.
     pub edit_history: Arc<RwLock<VecDeque<FileEditRecord>>>,
     /// Follow-up and post-complete items preserved across cancellation, by session.
     pub deferred_queue: Arc<RwLock<HashMap<uuid::Uuid, VecDeque<QueuedMessage>>>>,
     /// Deferred items that started execution and must be restored on cancel, by session.
     pub in_flight_deferred: Arc<RwLock<HashMap<uuid::Uuid, VecDeque<QueuedMessage>>>>,
-    /// Atomic queue acceptance and ownership snapshot for queue endpoints.
-    pub queue_dispatch: Mutex<QueueDispatchSnapshot>,
-    /// Live queue control used to clear pending steering before cancel returns.
-    pub queue_control: Mutex<Option<MessageQueueControl>>,
-    /// Blocks new interactive prompts from being forwarded once cancellation starts.
-    pub interactive_revoked: Arc<AtomicBool>,
 }
 
 impl WebState {
@@ -182,106 +192,217 @@ impl WebState {
         // Broadcast channel: 256-event buffer. Slow readers drop old events.
         let (event_tx, _) = broadcast::channel(256);
 
-        Ok(Self {
-            inner: Arc::new(WebStateInner {
-                stack: Arc::new(stack),
-                db: Arc::new(db),
-                cancel: RwLock::new(CancellationToken::new()),
-                running: RwLock::new(false),
-                startup_lock: Mutex::new(()),
-                queue_lifecycle_lock: Mutex::new(()),
-                interactive_lifecycle_lock: Arc::new(Mutex::new(())),
-                event_tx,
-                question_rx: Mutex::new(question_rx),
-                approval_rx: Mutex::new(approval_rx),
-                plan_rx: Mutex::new(plan_rx),
-                message_queue: RwLock::new(None),
-                pending_approval_reply: InteractiveRequestStore::new(
-                    InteractiveRequestKind::Approval,
-                ),
-                pending_question_reply: InteractiveRequestStore::new(
-                    InteractiveRequestKind::Question,
-                ),
-                pending_plan_reply: InteractiveRequestStore::new(InteractiveRequestKind::Plan),
-                last_session_id: RwLock::new(None),
-                active_session_id: RwLock::new(None),
-                edit_history: Arc::new(RwLock::new(VecDeque::new())),
-                deferred_queue: Arc::new(RwLock::new(HashMap::new())),
-                in_flight_deferred: Arc::new(RwLock::new(HashMap::new())),
-                queue_dispatch: Mutex::new(QueueDispatchSnapshot::default()),
-                queue_control: Mutex::new(None),
-                interactive_revoked: Arc::new(AtomicBool::new(false)),
-            }),
+        let inner = Arc::new(WebStateInner {
+            stack: Arc::new(stack),
+            db: Arc::new(db),
+            startup_lock: Mutex::new(()),
+            queue_lifecycle_lock: Mutex::new(()),
+            interactive_lifecycle_lock: Arc::new(Mutex::new(())),
+            runs: RwLock::new(HashMap::new()),
+            session_runs: RwLock::new(HashMap::new()),
+            event_tx,
+            pending_approval_reply: InteractiveRequestStore::new(InteractiveRequestKind::Approval),
+            pending_question_reply: InteractiveRequestStore::new(InteractiveRequestKind::Question),
+            pending_plan_reply: InteractiveRequestStore::new(InteractiveRequestKind::Plan),
+            deferred_interactive_events: Mutex::new(HashMap::new()),
+            last_session_id: RwLock::new(None),
+            edit_history: Arc::new(RwLock::new(VecDeque::new())),
+            deferred_queue: Arc::new(RwLock::new(HashMap::new())),
+            in_flight_deferred: Arc::new(RwLock::new(HashMap::new())),
+        });
+
+        super::api_agent::spawn_interactive_forwarders(
+            inner.clone(),
+            approval_rx,
+            question_rx,
+            plan_rx,
+        );
+
+        Ok(Self { inner })
+    }
+
+    pub async fn register_run(
+        &self,
+        run_id: String,
+        session_id: uuid::Uuid,
+    ) -> Result<Arc<WebRunState>, String> {
+        {
+            let runs = self.inner.runs.read().await;
+            if runs.contains_key(&run_id) {
+                return Err(format!("Run {run_id} is already active"));
+            }
+        }
+
+        {
+            let session_runs = self.inner.session_runs.read().await;
+            if let Some(existing_run_id) = session_runs.get(&session_id) {
+                return Err(format!(
+                    "Session {session_id} already has an active run ({existing_run_id})"
+                ));
+            }
+        }
+
+        let run = Arc::new(WebRunState::new(run_id.clone(), session_id));
+        self.inner
+            .runs
+            .write()
+            .await
+            .insert(run_id.clone(), run.clone());
+        self.inner
+            .session_runs
+            .write()
+            .await
+            .insert(session_id, run_id);
+        Ok(run)
+    }
+
+    pub async fn finish_run(&self, run_id: &str) {
+        let removed = self.inner.runs.write().await.remove(run_id);
+        if let Some(run) = removed {
+            self.inner
+                .session_runs
+                .write()
+                .await
+                .remove(&run.session_id);
+        }
+    }
+
+    pub async fn active_run_count(&self) -> usize {
+        self.inner.runs.read().await.len()
+    }
+
+    pub async fn resolve_run(
+        &self,
+        run_id: Option<&str>,
+        session_id: Option<uuid::Uuid>,
+    ) -> Result<Arc<WebRunState>, String> {
+        let runs = self.inner.runs.read().await;
+        let session_runs = self.inner.session_runs.read().await;
+
+        match (run_id, session_id) {
+            (Some(run_id), Some(session_id)) => {
+                let run = runs
+                    .get(run_id)
+                    .cloned()
+                    .ok_or_else(|| format!("Run {run_id} is not active"))?;
+                if run.session_id != session_id {
+                    return Err(format!("Run {run_id} does not own session {session_id}"));
+                }
+                Ok(run)
+            }
+            (Some(run_id), None) => runs
+                .get(run_id)
+                .cloned()
+                .ok_or_else(|| format!("Run {run_id} is not active")),
+            (None, Some(session_id)) => {
+                let run_id = session_runs
+                    .get(&session_id)
+                    .ok_or_else(|| format!("Session {session_id} does not have an active run"))?;
+                runs.get(run_id)
+                    .cloned()
+                    .ok_or_else(|| format!("Run {run_id} is not active"))
+            }
+            (None, None) => match runs.len() {
+                0 => Err("No active web runs".to_string()),
+                1 => runs
+                    .values()
+                    .next()
+                    .cloned()
+                    .ok_or_else(|| "No active web runs".to_string()),
+                _ => Err("Multiple web runs are active; provide run_id or session_id".to_string()),
+            },
+        }
+    }
+
+    pub async fn single_active_run_id(&self) -> Option<String> {
+        let runs = self.inner.runs.read().await;
+        (runs.len() == 1)
+            .then(|| runs.values().next().map(|run| run.run_id.clone()))
+            .flatten()
+    }
+
+    pub async fn cancel(&self) {
+        let runs = self.inner.runs.read().await;
+        for run in runs.values() {
+            run.cancel.cancel();
+        }
+    }
+
+    pub async fn is_run_interactive_revoked(&self, run_id: Option<&str>) -> bool {
+        let Some(run_id) = run_id else {
+            return false;
+        };
+        self.inner.runs.read().await.get(run_id).is_some_and(|run| {
+            run.interactive_revoked
+                .load(std::sync::atomic::Ordering::SeqCst)
         })
     }
 
-    /// Replace the cancellation token and return the new one.
-    pub async fn new_cancel_token(&self) -> CancellationToken {
-        let token = CancellationToken::new();
-        *self.inner.cancel.write().await = token.clone();
-        token
-    }
-
-    /// Cancel the currently-running agent.
-    pub async fn cancel(&self) {
-        self.inner.cancel.read().await.cancel();
+    pub async fn has_active_runs(&self) -> bool {
+        self.active_run_count().await > 0
     }
 
     pub async fn activate_message_queue(
         &self,
-        session_id: uuid::Uuid,
+        run_id: &str,
         tx: mpsc::UnboundedSender<QueuedMessage>,
         control: MessageQueueControl,
-    ) {
-        let mut dispatch = self.inner.queue_dispatch.lock().await;
-        dispatch.accepting = true;
-        dispatch.active_session_id = Some(session_id);
-        dispatch.tx = Some(tx.clone());
-        drop(dispatch);
-
-        *self.inner.queue_control.lock().await = Some(control);
-        *self.inner.active_session_id.write().await = Some(session_id);
-        *self.inner.message_queue.write().await = Some(tx);
+    ) -> Result<(), String> {
+        let run = self.resolve_run(Some(run_id), None).await?;
+        *run.queue_dispatch.lock().await = Some(QueueDispatchSnapshot {
+            accepting: true,
+            run_id: run.run_id.clone(),
+            session_id: run.session_id,
+            tx: Some(tx),
+        });
+        *run.queue_control.lock().await = Some(control);
+        Ok(())
     }
 
-    pub async fn clear_message_queue_dispatch(&self) {
-        *self.inner.queue_control.lock().await = None;
-        let mut dispatch = self.inner.queue_dispatch.lock().await;
-        dispatch.accepting = false;
-        dispatch.active_session_id = None;
-        dispatch.tx = None;
-        drop(dispatch);
-
-        *self.inner.active_session_id.write().await = None;
-        *self.inner.message_queue.write().await = None;
+    pub async fn clear_message_queue_dispatch(&self, run_id: &str) {
+        if let Ok(run) = self.resolve_run(Some(run_id), None).await {
+            *run.queue_control.lock().await = None;
+            *run.queue_dispatch.lock().await = None;
+        }
     }
 
-    pub async fn queue_dispatch_snapshot(&self) -> QueueDispatchSnapshot {
-        self.inner.queue_dispatch.lock().await.clone()
+    pub async fn queue_dispatch_snapshot(
+        &self,
+        run_id: Option<&str>,
+        session_id: Option<uuid::Uuid>,
+    ) -> Result<Option<QueueDispatchSnapshot>, String> {
+        let run = self.resolve_run(run_id, session_id).await?;
+        let snapshot = run.queue_dispatch.lock().await.clone();
+        Ok(snapshot)
     }
 
     pub async fn enqueue_message(
         &self,
         message: QueuedMessage,
+        run_id: Option<&str>,
         requested_session_id: Option<uuid::Uuid>,
         persist_deferred: bool,
     ) -> Result<(), String> {
         let _queue_guard = self.inner.queue_lifecycle_lock.lock().await;
-        let dispatch = self.inner.queue_dispatch.lock().await;
-        if !dispatch.accepting {
+        let run = self.resolve_run(run_id, requested_session_id).await?;
+        let dispatch = run.queue_dispatch.lock().await;
+        let snapshot = dispatch
+            .clone()
+            .ok_or_else(|| "Agent queue is unavailable".to_string())?;
+        if !snapshot.accepting {
             return Err("Agent queue is unavailable".to_string());
         }
 
         let deferred_owner = if persist_deferred {
             Some(
-                resolve_deferred_queue_session(requested_session_id, dispatch.active_session_id)
+                resolve_deferred_queue_session(requested_session_id, Some(run.session_id))
                     .map_err(|error| error.to_string())?,
             )
         } else {
             None
         };
 
-        let tx = dispatch
+        let tx = snapshot
             .tx
             .as_ref()
             .ok_or_else(|| "Agent queue is unavailable".to_string())?;
@@ -302,17 +423,13 @@ impl WebState {
         Ok(())
     }
 
-    pub async fn revoke_queue_dispatch(&self, clear_steering: bool) {
+    pub async fn revoke_queue_dispatch(&self, run_id: &str, clear_steering: bool) {
         let _queue_guard = self.inner.queue_lifecycle_lock.lock().await;
-        let control = self.inner.queue_control.lock().await.take();
-        {
-            let mut dispatch = self.inner.queue_dispatch.lock().await;
-            dispatch.accepting = false;
-            dispatch.active_session_id = None;
-            dispatch.tx = None;
-        }
-        *self.inner.active_session_id.write().await = None;
-        *self.inner.message_queue.write().await = None;
+        let Ok(run) = self.resolve_run(Some(run_id), None).await else {
+            return;
+        };
+        let control = run.queue_control.lock().await.take();
+        *run.queue_dispatch.lock().await = None;
 
         if clear_steering {
             if let Some(control) = control {

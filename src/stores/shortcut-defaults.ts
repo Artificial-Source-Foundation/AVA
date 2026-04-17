@@ -73,8 +73,8 @@ export const DEFAULT_SHORTCUTS: ShortcutDef[] = [
   {
     id: 'quick-model-picker',
     keys: ['ctrl', 'm'],
-    label: 'Quick Model Picker',
-    description: 'Quick model selection with search',
+    label: 'Model Browser',
+    description: 'Open the model browser dialog',
     category: 'Chat',
   },
   {

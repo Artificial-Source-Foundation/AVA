@@ -324,7 +324,7 @@ export function useInputState(): InputState {
         if (parsed.args.trim()) {
           // If args provided, let the agent handle model switching
         } else {
-          layout.toggleQuickModelPicker()
+          layout.openModelBrowser()
           clearInput()
           return
         }
@@ -431,7 +431,7 @@ export function useInputState(): InputState {
             '| `Ctrl+/` or `Ctrl+K` | Command palette |',
             '| `Ctrl+N` | New chat |',
             '| `Ctrl+L` | Session switcher |',
-            '| `Ctrl+M` | Quick model picker |',
+            '| `Ctrl+M` | Model browser |',
             '| `Ctrl+Shift+M` | Model browser |',
             '| `Ctrl+S` | Toggle sidebar |',
             '| `Ctrl+T` | Cycle thinking level |',

@@ -2,13 +2,13 @@
  * Inception Provider
  */
 
-import { OpenAILogo } from '../../../components/icons/provider-logos'
+import { InceptionLogo } from '../../../components/icons/provider-logos'
 import type { LLMProviderConfig } from '../provider-defaults'
 
 export const inception: LLMProviderConfig = {
   id: 'inception',
   name: 'Inception',
-  icon: OpenAILogo,
+  icon: InceptionLogo,
   description: 'Inception Labs coding models',
   enabled: false,
   status: 'disconnected',

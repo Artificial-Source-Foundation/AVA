@@ -174,6 +174,7 @@ export function useRustAgent() {
     steer: ipc.steer,
     followUp: ipc.followUp,
     postComplete: ipc.postComplete,
+    rehydrateStatus: ipc.rehydrateStatus,
     markToolApproval,
     // Aliases for compatibility
     stop: ipc.cancel,

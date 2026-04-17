@@ -62,6 +62,8 @@ pub struct DesktopBridge {
     pub plan_rx: Mutex<mpsc::UnboundedReceiver<PlanRequest>>,
     /// Whether an agent task is currently running.
     pub running: RwLock<bool>,
+    /// Run ID for the currently-running agent, when present.
+    pub active_run_id: RwLock<Option<String>>,
     /// Serializes run startup so only one run can claim ownership at a time.
     pub startup_lock: Mutex<()>,
     /// Serializes queue enqueue and revocation boundaries.
@@ -116,6 +118,7 @@ impl DesktopBridge {
             approval_rx: Mutex::new(approval_rx),
             plan_rx: Mutex::new(plan_rx),
             running: RwLock::new(false),
+            active_run_id: RwLock::new(None),
             startup_lock: Mutex::new(()),
             queue_lifecycle_lock: Mutex::new(()),
             interactive_lifecycle_lock: Arc::new(Mutex::new(())),

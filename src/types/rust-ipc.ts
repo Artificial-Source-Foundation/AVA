@@ -473,6 +473,12 @@ export interface AgentStatus {
   running: boolean
   provider: string
   model: string
+  runId?: string | null
+}
+
+export interface RunCorrelationArgs {
+  runId?: string
+  sessionId?: string
 }
 
 export interface SessionSummary {
@@ -600,37 +606,4 @@ export interface CompactContextResult {
   summary: string
   contextSummary: string
   usageBeforePercent: number
-}
-
-// Subscription usage types
-
-export interface UsageWindow {
-  label: string
-  usedPercent: number
-  resetsAt: string | null
-}
-
-export interface CreditsInfo {
-  hasCredits: boolean
-  unlimited: boolean
-  balance: string | null
-}
-
-export interface CopilotQuota {
-  remaining: number
-  limit: number
-  percentRemaining: number
-  resetTime: string | null
-  completionsRemaining: number | null
-  completionsLimit: number | null
-}
-
-export interface SubscriptionUsage {
-  provider: string
-  displayName: string
-  planType: string | null
-  usageWindows: UsageWindow[]
-  credits: CreditsInfo | null
-  copilotQuota: CopilotQuota | null
-  error: string | null
 }

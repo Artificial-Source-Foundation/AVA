@@ -9,6 +9,9 @@ use serde::{Deserialize, Serialize};
 use tracing::info;
 
 use super::api::{error_response, ErrorResponse};
+use super::api_agent::{
+    discard_deferred_interactive_request_event, emit_promoted_interactive_request_event,
+};
 use super::state::WebState;
 
 fn emit_interactive_request_cleared(
@@ -83,6 +86,7 @@ pub(crate) async fn resolve_approval(
     };
 
     if reply.reply.send(approval).is_err() {
+        discard_deferred_interactive_request_event(&state.inner, &reply.handle.request_id).await;
         emit_interactive_request_cleared(
             &state,
             &reply.handle.request_id,
@@ -90,6 +94,12 @@ pub(crate) async fn resolve_approval(
             false,
             reply.handle.run_id.as_deref(),
         );
+        emit_promoted_interactive_request_event(
+            &state.inner,
+            reply.handle.kind,
+            reply.handle.run_id.as_deref(),
+        )
+        .await;
         return Err(error_response(
             StatusCode::GONE,
             "Failed to send approval — the agent may have already moved on",
@@ -103,6 +113,12 @@ pub(crate) async fn resolve_approval(
         false,
         reply.handle.run_id.as_deref(),
     );
+    emit_promoted_interactive_request_event(
+        &state.inner,
+        reply.handle.kind,
+        reply.handle.run_id.as_deref(),
+    )
+    .await;
 
     Ok(Json(serde_json::json!({ "ok": true })))
 }
@@ -133,6 +149,7 @@ pub(crate) async fn resolve_question(
         .map_err(|err| interactive_resolve_error_response("question", err))?;
 
     if reply.reply.send(req.answer).is_err() {
+        discard_deferred_interactive_request_event(&state.inner, &reply.handle.request_id).await;
         emit_interactive_request_cleared(
             &state,
             &reply.handle.request_id,
@@ -140,6 +157,12 @@ pub(crate) async fn resolve_question(
             false,
             reply.handle.run_id.as_deref(),
         );
+        emit_promoted_interactive_request_event(
+            &state.inner,
+            reply.handle.kind,
+            reply.handle.run_id.as_deref(),
+        )
+        .await;
         return Err(error_response(
             StatusCode::GONE,
             "Failed to send answer — the agent may have already moved on",
@@ -153,6 +176,12 @@ pub(crate) async fn resolve_question(
         false,
         reply.handle.run_id.as_deref(),
     );
+    emit_promoted_interactive_request_event(
+        &state.inner,
+        reply.handle.kind,
+        reply.handle.run_id.as_deref(),
+    )
+    .await;
 
     Ok(Json(serde_json::json!({ "ok": true })))
 }
@@ -222,6 +251,7 @@ pub(crate) async fn resolve_plan(
         .map_err(|err| interactive_resolve_error_response("plan", err))?;
 
     if reply.reply.send(decision).is_err() {
+        discard_deferred_interactive_request_event(&state.inner, &reply.handle.request_id).await;
         emit_interactive_request_cleared(
             &state,
             &reply.handle.request_id,
@@ -229,6 +259,12 @@ pub(crate) async fn resolve_plan(
             false,
             reply.handle.run_id.as_deref(),
         );
+        emit_promoted_interactive_request_event(
+            &state.inner,
+            reply.handle.kind,
+            reply.handle.run_id.as_deref(),
+        )
+        .await;
         return Err(error_response(
             StatusCode::GONE,
             "Failed to send plan decision — the agent may have already moved on",
@@ -242,6 +278,12 @@ pub(crate) async fn resolve_plan(
         false,
         reply.handle.run_id.as_deref(),
     );
+    emit_promoted_interactive_request_event(
+        &state.inner,
+        reply.handle.kind,
+        reply.handle.run_id.as_deref(),
+    )
+    .await;
 
     Ok(Json(serde_json::json!({ "ok": true })))
 }

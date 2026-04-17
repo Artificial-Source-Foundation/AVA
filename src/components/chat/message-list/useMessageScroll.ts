@@ -66,16 +66,32 @@ export function useMessageScroll(opts: UseMessageScrollOptions): MessageScrollAP
 
   const setupResizeObserver = (): void => {
     if (!containerRef) return
-    resizeObserver = new ResizeObserver(() => {
+    let resizeCount = 0
+    resizeObserver = new ResizeObserver((entries) => {
       if (!containerRef || !opts.autoScrollEnabled()) return
       if (userScrolledUp) return
       if (!shouldAutoScroll()) return
+
+      // Skip resize observations that don't meaningfully change content height
+      // This reduces thrash in WebKitGTK during streaming
+      const entry = entries[0]
+      if (!entry) return
+
       // Coalesce rapid resize events (streaming) into a single rAF
-      if (resizeRaf !== undefined) return
+      if (resizeRaf !== undefined) {
+        resizeCount++
+        return
+      }
+
       resizeRaf = requestAnimationFrame(() => {
         resizeRaf = undefined
         if (!containerRef) return
-        scrollToEdge(opts.isStreaming() ? 'auto' : 'smooth')
+
+        // If we skipped many frames during streaming, force 'auto' behavior
+        const behavior =
+          opts.isStreaming() && resizeCount > 2 ? 'auto' : opts.isStreaming() ? 'auto' : 'smooth'
+        resizeCount = 0
+        scrollToEdge(behavior)
       })
     })
     // Observe the scrollable content (first child) — its resize = content growth
@@ -142,9 +158,16 @@ export function useMessageScroll(opts: UseMessageScrollOptions): MessageScrollAP
       if (containerRef) {
         scrollToEdge('auto')
         // Passive listener — critical for smooth scrolling in WebKitGTK.
-        containerRef.addEventListener('scroll', handleScroll, { passive: true })
-        containerRef.addEventListener('pointerover', handlePointerOver, { passive: true })
-        containerRef.addEventListener('pointerout', handlePointerOut, { passive: true })
+        // capture: false ensures we're not blocking native scroll handling.
+        containerRef.addEventListener('scroll', handleScroll, { passive: true, capture: false })
+        containerRef.addEventListener('pointerover', handlePointerOver, {
+          passive: true,
+          capture: false,
+        })
+        containerRef.addEventListener('pointerout', handlePointerOut, {
+          passive: true,
+          capture: false,
+        })
         setupResizeObserver()
       }
     })
@@ -152,9 +175,9 @@ export function useMessageScroll(opts: UseMessageScrollOptions): MessageScrollAP
     onCleanup(() => {
       if (scrollRaf !== undefined) cancelAnimationFrame(scrollRaf)
       if (resizeRaf !== undefined) cancelAnimationFrame(resizeRaf)
-      containerRef?.removeEventListener('scroll', handleScroll)
-      containerRef?.removeEventListener('pointerover', handlePointerOver)
-      containerRef?.removeEventListener('pointerout', handlePointerOut)
+      containerRef?.removeEventListener('scroll', handleScroll, { capture: false })
+      containerRef?.removeEventListener('pointerover', handlePointerOver, { capture: false })
+      containerRef?.removeEventListener('pointerout', handlePointerOut, { capture: false })
       resizeObserver?.disconnect()
     })
   }

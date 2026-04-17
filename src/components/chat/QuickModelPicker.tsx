@@ -11,7 +11,10 @@ import { type Component, createEffect, createMemo, createSignal, For, on, Show }
 import type { LLMProviderConfig } from '../../config/defaults/provider-defaults'
 import { useSession } from '../../stores/session'
 import { useSettings } from '../../stores/settings'
-import { aggregateModels } from '../dialogs/model-browser/model-browser-helpers'
+import {
+  aggregateModels,
+  formatContextWindow,
+} from '../dialogs/model-browser/model-browser-helpers'
 
 interface QuickModelPickerProps {
   open: boolean
@@ -113,7 +116,7 @@ export const QuickModelPicker: Component<QuickModelPickerProps> = (props) => {
       <Dialog.Portal>
         <Dialog.Overlay
           class="fixed inset-0 z-[var(--z-modal)]"
-          style={{ background: 'var(--modal-overlay)' }}
+          style={{ background: 'rgba(0,0,0,0.25)' }}
         />
         <Dialog.Content
           class="
@@ -186,11 +189,9 @@ export const QuickModelPicker: Component<QuickModelPickerProps> = (props) => {
                           >
                             <div class="flex-1 min-w-0">
                               <span class="text-xs text-[var(--text-primary)]">{model.name}</span>
-                              <Show when={model.contextWindow}>
+                              <Show when={model.contextWindow !== null}>
                                 <span class="ml-2 text-[10px] text-[var(--text-muted)]">
-                                  {model.contextWindow >= 1_000_000
-                                    ? `${(model.contextWindow / 1_000_000).toFixed(1)}M`
-                                    : `${Math.round(model.contextWindow / 1000)}K`}
+                                  {formatContextWindow(model.contextWindow)}
                                 </span>
                               </Show>
                             </div>

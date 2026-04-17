@@ -9,6 +9,7 @@
  */
 
 import {
+  AlertTriangle,
   Archive,
   ArchiveRestore,
   LayoutDashboard,
@@ -26,8 +27,9 @@ import {
   buildSessionContextMenuItems,
   type ContextMenuState,
 } from '../sidebar/sessions/session-context-menu'
-import { ConfirmDialog } from '../ui/ConfirmDialog'
+import { Button } from '../ui/Button'
 import { ContextMenu } from '../ui/ContextMenu'
+import { Dialog } from '../ui/Dialog'
 import { PanelErrorBoundary } from '../ui/PanelErrorBoundary'
 
 const MAX_VISIBLE_SESSIONS = 15
@@ -384,24 +386,48 @@ export const SidebarPanel: Component = () => {
         />
       </Show>
 
-      {/* Delete Confirmation Dialog */}
-      <ConfirmDialog
+      <Dialog
         open={deleteConfirmId() !== null}
         onOpenChange={(open) => {
           if (!open) setDeleteConfirmId(null)
         }}
-        title="Delete session?"
-        message="This session and all its messages will be permanently deleted. This cannot be undone."
-        confirmText="Delete"
-        variant="danger"
-        onConfirm={() => {
-          const id = deleteConfirmId()
-          if (id) {
-            runActionSafely(() => deleteSessionPermanently(id))
-          }
-          setDeleteConfirmId(null)
-        }}
-      />
+        size="sm"
+        showCloseButton={false}
+        bodyClass="p-0"
+      >
+        <div class="p-5">
+          <div class="flex items-start gap-3">
+            <div class="mt-0.5 flex h-10 w-10 items-center justify-center rounded-full bg-[var(--error-subtle)] text-[var(--error)]">
+              <AlertTriangle class="h-5 w-5" />
+            </div>
+
+            <div class="min-w-0 flex-1">
+              <h3 class="text-[15px] font-semibold text-[var(--text-primary)]">Delete session</h3>
+              <p class="mt-1 text-sm leading-6 text-[var(--text-secondary)]">
+                This removes the session and its messages permanently.
+              </p>
+            </div>
+          </div>
+
+          <div class="mt-5 flex items-center justify-end gap-2">
+            <Button variant="secondary" onClick={() => setDeleteConfirmId(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="danger"
+              onClick={() => {
+                const id = deleteConfirmId()
+                if (id) {
+                  runActionSafely(() => deleteSessionPermanently(id))
+                }
+                setDeleteConfirmId(null)
+              }}
+            >
+              Delete
+            </Button>
+          </div>
+        </div>
+      </Dialog>
     </aside>
   )
 }

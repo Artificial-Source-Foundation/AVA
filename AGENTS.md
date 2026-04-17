@@ -1,4 +1,4 @@
-<!-- Last verified: 2026-04-08 -->
+<!-- Last verified: 2026-04-16 -->
 # AI Coding Agent Instructions (v3)
 
 > Instructions for AI assistants working on AVA. This file is auto-injected into the AVA agent's system prompt.
@@ -175,18 +175,19 @@ Docs must always reflect the current codebase. Never let them drift.
 6. `docs/extend/README.md` — plugin, MCP, command, skill, and custom-tool reference
 7. `docs/benchmark/README.md` — benchmark architecture, workflows, reports, and prompt tuning
 8. `docs/testing/README.md` — testing and verification concepts across Rust, frontend, and benchmark flows
-9. `docs/operations/README.md` — maintainer runbooks and operational guidance
-10. `docs/architecture/README.md` — architecture entrypoint, audits, and transition docs
-11. `docs/architecture/agent-backend-capability-audit-m1.md` — current coding-agent backend capability inventory
-12. `docs/architecture/agent-backend-capability-comparison-m2.md` — external comparison matrix for backend correction planning
-13. `docs/architecture/cross-surface-runtime-map-m4.md` — backend connection map across interactive TUI, headless CLI, desktop, and web
-14. `docs/architecture/cross-surface-behavior-audit-m5.md` — shared-vs-divergent runtime behavior audit across surfaces
-15. `docs/architecture/shared-backend-contract-m6.md` — canonical shared-backend contract
-16. `docs/architecture/backend-correction-roadmap-m7.md` — implementation-ready backend correction roadmap
-17. `docs/architecture/backend-contract-exceptions.md` — versioned adapter-exception registry for the shared backend contract
-18. `docs/architecture/plugin-boundary.md` — first concrete core-to-plugin migration checklist
-19. `docs/architecture/crate-map.md` — crate dependency map
-20. `CHANGELOG.md` — version history
+9. `docs/testing/desktop-testing.md` — practical desktop regression workflow for the desktop shell
+10. `docs/operations/README.md` — maintainer runbooks and operational guidance
+11. `docs/architecture/README.md` — architecture entrypoint, audits, and transition docs
+12. `docs/architecture/agent-backend-capability-audit-m1.md` — current coding-agent backend capability inventory
+13. `docs/architecture/agent-backend-capability-comparison-m2.md` — external comparison matrix for backend correction planning
+14. `docs/architecture/cross-surface-runtime-map-m4.md` — backend connection map across interactive TUI, headless CLI, desktop, and web
+15. `docs/architecture/cross-surface-behavior-audit-m5.md` — shared-vs-divergent runtime behavior audit across surfaces
+16. `docs/architecture/shared-backend-contract-m6.md` — canonical shared-backend contract
+17. `docs/architecture/backend-correction-roadmap-m7.md` — implementation-ready backend correction roadmap
+18. `docs/architecture/backend-contract-exceptions.md` — versioned adapter-exception registry for the shared backend contract
+19. `docs/architecture/plugin-boundary.md` — first concrete core-to-plugin migration checklist
+20. `docs/architecture/crate-map.md` — crate dependency map
+21. `CHANGELOG.md` — version history
 
 `AGENTS.md` owns workflow, conventions, and architectural guidance. `docs/project/roadmap.md` owns product direction.
 

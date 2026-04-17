@@ -77,6 +77,23 @@ function createAgentStore() {
   const rustAgent = useRustAgent()
   const settingsRef = useSettings()
   const session = useSession()
+  // Startup rehydration must stay on the singleton path so multiple
+  // useRustAgent()-only consumers cannot duplicate listener side effects.
+  if (isTauri()) {
+    void rustAgent.rehydrateStatus()
+  } else {
+    createEffect(
+      on(
+        () => session.currentSession()?.id ?? null,
+        (sessionId) => {
+          if (!sessionId) {
+            return
+          }
+          void rustAgent.rehydrateStatus(sessionId)
+        }
+      )
+    )
+  }
   let nextRunToken = 0
   let activeRunToken = 0
 
@@ -496,6 +513,8 @@ function createAgentStore() {
   return {
     // ── Agent signals (mapped from Rust agent) ───────────────────────
     isRunning: rustAgent.isRunning,
+    currentRunId: rustAgent.currentRunId,
+    progressMessage: rustAgent.progressMessage,
     isPlanMode,
     currentTurn,
     tokensUsed,

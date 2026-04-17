@@ -33,6 +33,7 @@ import { createLatestRequestGate } from './request-gate'
 import {
   archivedSessions,
   currentSession,
+  messages,
   sessions,
   setAgents,
   setArchivedSessions,
@@ -70,6 +71,52 @@ export const getSessionTree = createMemo(() => {
 
 const sessionListGate = createLatestRequestGate()
 const sessionSwitchGate = createLatestRequestGate()
+const createSessionInFlightByKey = new Map<string, Promise<Session>>()
+const CANCEL_CONFIRM_RETRIES = 6
+const CANCEL_CONFIRM_DELAY_MS = 50
+const ACTIVE_RUN_TRANSITION_BLOCKED_MESSAGE =
+  'Cannot change sessions while the backend run remains active after cancel confirmation'
+
+const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
+
+interface SessionTransitionOptions {
+  preserveActiveRun?: boolean
+}
+
+async function bestEffortCancelActiveRun(
+  reason: 'create-session' | 'switch-session'
+): Promise<boolean> {
+  const sessionId = currentSession()?.id
+  const correlation = sessionId ? { sessionId } : undefined
+
+  try {
+    const status = await rustAgent.status(correlation)
+    if (!status.running) {
+      return true
+    }
+
+    await rustAgent.cancel(correlation).catch(() => {})
+
+    for (let attempt = 0; attempt < CANCEL_CONFIRM_RETRIES; attempt += 1) {
+      await delay(CANCEL_CONFIRM_DELAY_MS)
+      const refreshed = await rustAgent.status(correlation).catch(() => null)
+      if (!refreshed?.running) {
+        return true
+      }
+    }
+
+    log.warn('session', 'Backend run still active after cancel confirmation window', { reason })
+    return false
+  } catch (error) {
+    rustAgent.cancel(correlation).catch(() => {})
+    log.warn('session', 'Best-effort cancel status check failed during session transition', {
+      reason,
+      sessionId,
+      error: error instanceof Error ? error.message : String(error),
+    })
+    return true
+  }
+}
 
 function resetSessionArtifacts(): void {
   batch(() => {
@@ -145,13 +192,15 @@ export async function loadSessionsForCurrentProject(): Promise<void> {
   }
 }
 
-export async function restoreForCurrentProject(): Promise<void> {
+export async function restoreForCurrentProject(
+  options: SessionTransitionOptions = {}
+): Promise<void> {
   const { currentProject } = useProject()
   const projectId = currentProject()?.id
   const projectSessions = sessions()
 
   if (projectSessions.length === 0) {
-    await createNewSession()
+    await createNewSession(undefined, undefined, options)
     return
   }
 
@@ -163,48 +212,89 @@ export async function restoreForCurrentProject(): Promise<void> {
     projectSessions[0]
 
   if (!restoreTarget) {
-    await createNewSession()
+    await createNewSession(undefined, undefined, options)
     return
   }
-  await switchSession(restoreTarget.id)
+  await switchSession(restoreTarget.id, options)
 }
 
 export async function createNewSession(
   name?: string,
-  projectIdOverride?: string
+  projectIdOverride?: string,
+  options: SessionTransitionOptions = {}
 ): Promise<Session> {
-  // Fire-and-forget cancel so a running agent from the previous session
-  // doesn't block the new session with a 409 conflict.
-  rustAgent.cancel().catch(() => {})
+  const requestedName = name || DEFAULTS.SESSION_NAME
+  const requestedProjectId = projectIdOverride ?? useProject().currentProject()?.id
+  const requestKey = `${requestedProjectId ?? '<no-project>'}::${requestedName}`
 
-  const { currentProject } = useProject()
-  const project = currentProject()
-  const projectId = projectIdOverride ?? project?.id
-  const session = await dbCreateSession(name || DEFAULTS.SESSION_NAME, projectId)
-  const sessionWithStats: SessionWithStats = { ...session, messageCount: 0, totalTokens: 0 }
-
-  setSessions((prev) => [sessionWithStats, ...prev])
-  setCurrentSession(session)
-  resetSessionArtifacts()
-  log.info('session', 'Session created', { id: session.id, name: session.name })
-  logInfo('session', 'Session created', {
-    id: session.id,
-    name: session.name,
-    project: project?.name ?? 'unknown',
-  })
-
-  const { currentProject: getProject } = useProject()
-  const cwd = getProject()?.directory || '.'
-  await notifySessionOpened(session.id, cwd, buildDesktopSessionSnapshot(session, []))
-  if (currentSession()?.id !== session.id) {
-    return session
+  const inFlightForKey = createSessionInFlightByKey.get(requestKey)
+  if (inFlightForKey) {
+    return inFlightForKey
   }
-  localStorage.setItem(STORAGE_KEYS.LAST_SESSION, session.id)
-  setLastSessionForProject(projectId, session.id)
-  return session
+
+  const existing = currentSession()
+  const existingStillPresent =
+    !!existing && sessions().some((session) => session.id === existing.id)
+  if (
+    existing &&
+    existingStillPresent &&
+    existing.name === DEFAULTS.SESSION_NAME &&
+    requestedName === DEFAULTS.SESSION_NAME &&
+    existing.projectId === requestedProjectId &&
+    messages().length === 0
+  ) {
+    return existing
+  }
+
+  const createPromise = (async () => {
+    if (!options.preserveActiveRun) {
+      const cancelConfirmed = await bestEffortCancelActiveRun('create-session')
+      if (!cancelConfirmed) {
+        throw new Error(ACTIVE_RUN_TRANSITION_BLOCKED_MESSAGE)
+      }
+    }
+
+    const { currentProject } = useProject()
+    const project = currentProject()
+    const projectId = projectIdOverride ?? requestedProjectId ?? project?.id
+    const session = await dbCreateSession(requestedName, projectId)
+    const sessionWithStats: SessionWithStats = { ...session, messageCount: 0, totalTokens: 0 }
+
+    setSessions((prev) => [sessionWithStats, ...prev])
+    setCurrentSession(session)
+    resetSessionArtifacts()
+    log.info('session', 'Session created', { id: session.id, name: session.name })
+    logInfo('session', 'Session created', {
+      id: session.id,
+      name: session.name,
+      project: project?.name ?? 'unknown',
+    })
+
+    const { currentProject: getProject } = useProject()
+    const cwd = getProject()?.directory || '.'
+    await notifySessionOpened(session.id, cwd, buildDesktopSessionSnapshot(session, []))
+    if (currentSession()?.id !== session.id) {
+      return session
+    }
+    localStorage.setItem(STORAGE_KEYS.LAST_SESSION, session.id)
+    setLastSessionForProject(projectId, session.id)
+    return session
+  })()
+  createSessionInFlightByKey.set(requestKey, createPromise)
+
+  try {
+    return await createPromise
+  } finally {
+    if (createSessionInFlightByKey.get(requestKey) === createPromise) {
+      createSessionInFlightByKey.delete(requestKey)
+    }
+  }
 }
 
-export async function switchSession(id: string): Promise<void> {
+export async function switchSession(
+  id: string,
+  options: SessionTransitionOptions = {}
+): Promise<void> {
   const fromSessionId = currentSession()?.id
   const session = sessions().find((s) => s.id === id)
   if (!session) {
@@ -212,9 +302,12 @@ export async function switchSession(id: string): Promise<void> {
     return
   }
 
-  // Fire-and-forget cancel so a running agent from the previous session
-  // doesn't block the new session with a 409 conflict.
-  rustAgent.cancel().catch(() => {})
+  if (!options.preserveActiveRun) {
+    const cancelConfirmed = await bestEffortCancelActiveRun('switch-session')
+    if (!cancelConfirmed) {
+      return
+    }
+  }
 
   const requestToken = sessionSwitchGate.begin()
   let loadedMessages: Awaited<ReturnType<typeof getMessages>> = []

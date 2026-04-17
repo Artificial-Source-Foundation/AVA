@@ -5,7 +5,7 @@
  * export, changelog, update) and command palette with its handlers.
  */
 
-import type { Component } from 'solid-js'
+import { type Component, Show } from 'solid-js'
 import { useNotification } from '../contexts/notification'
 import { type ExportOptions, exportConversation } from '../lib/export-conversation'
 import type { UpdateInfo } from '../services/auto-updater'
@@ -56,11 +56,18 @@ export const AppDialogs: Component<AppDialogsProps> = (props) => {
 
   return (
     <>
-      <QuickModelPicker
-        open={quickModelPickerOpen()}
-        onClose={() => setQuickModelPickerOpen(false)}
-      />
-      <SessionSwitcher open={sessionSwitcherOpen()} onClose={() => setSessionSwitcherOpen(false)} />
+      <Show when={quickModelPickerOpen()}>
+        <QuickModelPicker
+          open={quickModelPickerOpen()}
+          onClose={() => setQuickModelPickerOpen(false)}
+        />
+      </Show>
+      <Show when={sessionSwitcherOpen()}>
+        <SessionSwitcher
+          open={sessionSwitcherOpen()}
+          onClose={() => setSessionSwitcherOpen(false)}
+        />
+      </Show>
       <CommandPalette
         commands={createDefaultCommands({
           newChat: async () => {
@@ -124,43 +131,55 @@ export const AppDialogs: Component<AppDialogsProps> = (props) => {
           },
         })}
       />
-      <WorkflowDialog
-        open={props.workflowDialogOpen}
-        onClose={() => props.setWorkflowDialogOpen(false)}
-      />
-      <CheckpointDialog
-        open={props.checkpointDialogOpen}
-        onClose={() => props.setCheckpointDialogOpen(false)}
-        onSave={(desc) => {
-          void createCheckpoint(desc).then((id) => {
-            if (id) info('Checkpoint saved', desc)
-          })
-        }}
-      />
-      <ExportOptionsDialog
-        open={props.exportDialogOpen}
-        onClose={() => props.setExportDialogOpen(false)}
-        onExport={(opts: ExportOptions) => {
-          exportConversation(messages(), currentSession()?.name, opts)
-        }}
-      />
-      <ChangelogDialog
-        open={props.changelogOpen}
-        onClose={() => {
-          props.setChangelogOpen(false)
-          markChangelogSeen()
-        }}
-      />
-      <UpdateDialog
-        open={props.updateDialogOpen}
-        updateInfo={props.updateInfo}
-        onClose={() => props.setUpdateDialogOpen(false)}
-        onInstall={props.onInstallUpdate}
-      />
-      <ToolListDialog
-        open={props.toolListDialogOpen}
-        onClose={() => props.setToolListDialogOpen(false)}
-      />
+      <Show when={props.workflowDialogOpen}>
+        <WorkflowDialog
+          open={props.workflowDialogOpen}
+          onClose={() => props.setWorkflowDialogOpen(false)}
+        />
+      </Show>
+      <Show when={props.checkpointDialogOpen}>
+        <CheckpointDialog
+          open={props.checkpointDialogOpen}
+          onClose={() => props.setCheckpointDialogOpen(false)}
+          onSave={(desc) => {
+            void createCheckpoint(desc).then((id) => {
+              if (id) info('Checkpoint saved', desc)
+            })
+          }}
+        />
+      </Show>
+      <Show when={props.exportDialogOpen}>
+        <ExportOptionsDialog
+          open={props.exportDialogOpen}
+          onClose={() => props.setExportDialogOpen(false)}
+          onExport={(opts: ExportOptions) => {
+            exportConversation(messages(), currentSession()?.name, opts)
+          }}
+        />
+      </Show>
+      <Show when={props.changelogOpen}>
+        <ChangelogDialog
+          open={props.changelogOpen}
+          onClose={() => {
+            props.setChangelogOpen(false)
+            markChangelogSeen()
+          }}
+        />
+      </Show>
+      <Show when={props.updateDialogOpen}>
+        <UpdateDialog
+          open={props.updateDialogOpen}
+          updateInfo={props.updateInfo}
+          onClose={() => props.setUpdateDialogOpen(false)}
+          onInstall={props.onInstallUpdate}
+        />
+      </Show>
+      <Show when={props.toolListDialogOpen}>
+        <ToolListDialog
+          open={props.toolListDialogOpen}
+          onClose={() => props.setToolListDialogOpen(false)}
+        />
+      </Show>
     </>
   )
 }

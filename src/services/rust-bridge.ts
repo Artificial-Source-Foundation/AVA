@@ -39,6 +39,7 @@ import type {
   RepoMapInputFile,
   RepoMapResult,
   RetryOutcome,
+  RunCorrelationArgs,
   RustMemoryEntry,
   RustSession,
   RustToolInfo,
@@ -141,8 +142,10 @@ export const rustAgent = {
   // The return value is only the final session summary; real-time output arrives via events.
   run: (goal: string): Promise<SubmitGoalResult> =>
     invokeCommand('submit_goal', { args: { goal } }),
-  cancel: (): Promise<void> => invokeCommand('cancel_agent'),
-  status: (): Promise<AgentStatus> => invokeCommand('get_agent_status'),
+  cancel: (correlation?: RunCorrelationArgs): Promise<void> =>
+    invokeCommand('cancel_agent', correlation ? { args: correlation } : undefined),
+  status: (correlation?: RunCorrelationArgs): Promise<AgentStatus> =>
+    invokeCommand('get_agent_status', correlation ? { args: correlation } : undefined),
   resolveApproval: (requestId: string, approved: boolean, alwaysAllow: boolean): Promise<void> =>
     invokeCommand('resolve_approval', { args: { requestId, approved, alwaysAllow } }),
   resolveQuestion: (requestId: string, answer: string): Promise<void> =>
@@ -259,8 +262,10 @@ export const rustExtensions = {
 export const rustBackend = {
   submitGoal: (args: SubmitGoalArgs): Promise<SubmitGoalResult> =>
     invokeCommand('submit_goal', { args }),
-  cancelAgent: (): Promise<void> => invokeCommand('cancel_agent'),
-  getAgentStatus: (): Promise<AgentStatus> => invokeCommand('get_agent_status'),
+  cancelAgent: (correlation?: RunCorrelationArgs): Promise<void> =>
+    invokeCommand('cancel_agent', correlation ? { args: correlation } : undefined),
+  getAgentStatus: (correlation?: RunCorrelationArgs): Promise<AgentStatus> =>
+    invokeCommand('get_agent_status', correlation ? { args: correlation } : undefined),
 
   listSessions: (limit?: number): Promise<SessionSummary[]> =>
     invokeCommand('list_sessions', { limit }),
@@ -307,16 +312,31 @@ export const rustBackend = {
     invokeCommand('toggle_permission_level'),
 
   // Mid-stream messaging (3-tier)
-  steerAgent: (message: string): Promise<void> => invokeCommand('steer_agent', { message }),
-  followUpAgent: (message: string, sessionId?: string): Promise<void> =>
-    invokeCommand('follow_up_agent', { args: { message, sessionId: sessionId ?? null } }),
-  postCompleteAgent: (message: string, group?: number, sessionId?: string): Promise<void> =>
-    invokeCommand('post_complete_agent', {
-      args: { message, group: group ?? 1, sessionId: sessionId ?? null },
+  steerAgent: (message: string, correlation?: RunCorrelationArgs): Promise<void> =>
+    invokeCommand('steer_agent', correlation ? { message, ...correlation } : { message }),
+  followUpAgent: (
+    message: string,
+    sessionId?: string,
+    correlation?: RunCorrelationArgs
+  ): Promise<void> =>
+    invokeCommand('follow_up_agent', {
+      args: { message, sessionId: sessionId ?? null, ...(correlation ?? {}) },
     }),
-  getMessageQueue: (): Promise<MessageQueueState> => invokeCommand('get_message_queue'),
-  clearMessageQueue: (target: ClearTarget = 'all'): Promise<void> =>
-    invokeCommand('clear_message_queue', { target }),
+  postCompleteAgent: (
+    message: string,
+    group?: number,
+    sessionId?: string,
+    correlation?: RunCorrelationArgs
+  ): Promise<void> =>
+    invokeCommand('post_complete_agent', {
+      args: { message, group: group ?? 1, sessionId: sessionId ?? null, ...(correlation ?? {}) },
+    }),
+  getMessageQueue: (correlation?: RunCorrelationArgs): Promise<MessageQueueState> =>
+    invokeCommand('get_message_queue', correlation ? { args: correlation } : undefined),
+  clearMessageQueue: (
+    target: ClearTarget = 'all',
+    correlation?: RunCorrelationArgs
+  ): Promise<void> => invokeCommand('clear_message_queue', { target, ...(correlation ?? {}) }),
 
   // Retry / Edit+Resend / Regenerate / Undo
   retryLastMessage: (sessionId?: string): Promise<SubmitGoalResult> =>
@@ -350,8 +370,4 @@ export const rustBackend = {
       compactionProvider: compactionProvider ?? null,
       compactionModel: compactionModel ?? null,
     }),
-
-  // Subscription usage
-  getSubscriptionUsage: (): Promise<import('../types/rust-ipc').SubscriptionUsage[]> =>
-    invokeCommand('get_subscription_usage'),
 }

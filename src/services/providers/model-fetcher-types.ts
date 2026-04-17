@@ -74,6 +74,7 @@ export interface OpenAICompatConfig {
 export interface FetchModelsOptions {
   apiKey?: string
   baseUrl?: string
+  authType?: 'api-key' | 'oauth-token'
 }
 
 // ============================================================================

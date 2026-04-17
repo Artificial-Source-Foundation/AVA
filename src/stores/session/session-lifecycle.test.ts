@@ -13,6 +13,7 @@ const getTerminalExecutionsMock = vi.fn()
 const getMemoryItemsMock = vi.fn()
 const getCheckpointsMock = vi.fn()
 const cancelMock = vi.fn().mockResolvedValue(undefined)
+const statusMock = vi.fn().mockResolvedValue({ running: false, provider: 'openai', model: 'gpt-5' })
 let mockProject = {
   id: 'project-1',
   name: 'Workspace',
@@ -65,6 +66,7 @@ vi.mock('../../services/logger', () => ({
 vi.mock('../../services/rust-bridge', () => ({
   rustAgent: {
     cancel: (...args: unknown[]) => cancelMock(...args),
+    status: (...args: unknown[]) => statusMock(...args),
   },
 }))
 
@@ -79,7 +81,13 @@ vi.mock('../session-persistence', () => ({
   setLastSessionForProject: vi.fn(),
 }))
 
-import { archiveSession, deleteSessionPermanently, switchSession } from './session-lifecycle'
+import {
+  archiveSession,
+  createNewSession,
+  deleteSessionPermanently,
+  restoreForCurrentProject,
+  switchSession,
+} from './session-lifecycle'
 import {
   currentSession,
   sessions,
@@ -162,6 +170,7 @@ describe('session removal fallback rebinding', () => {
     getMemoryItemsMock.mockResolvedValue([])
     getCheckpointsMock.mockResolvedValue([])
     dbDeleteSessionMock.mockResolvedValue(undefined)
+    statusMock.mockResolvedValue({ running: false, provider: 'openai', model: 'gpt-5' })
   })
 
   afterEach(() => {
@@ -344,5 +353,265 @@ describe('session removal fallback rebinding', () => {
         },
       ],
     })
+  })
+
+  it('best-effort cancels an active run before switching sessions', async () => {
+    const source = makeSessionWithStats('session-active', 'Active')
+    const target = makeSessionWithStats('session-target', 'Target')
+
+    setSessions([source, target])
+    setCurrentSession(source)
+
+    statusMock
+      .mockResolvedValueOnce({ running: true, provider: 'openai', model: 'gpt-5' })
+      .mockResolvedValueOnce({ running: false, provider: 'openai', model: 'gpt-5' })
+
+    await switchSession(target.id)
+
+    expect(cancelMock).toHaveBeenCalledTimes(1)
+    expect(statusMock).toHaveBeenNthCalledWith(1, { sessionId: source.id })
+    expect(cancelMock).toHaveBeenCalledWith({ sessionId: source.id })
+    expect(statusMock).toHaveBeenNthCalledWith(2, { sessionId: source.id })
+    expect(currentSession()?.id).toBe(target.id)
+  })
+
+  it('preserves an active backend run during startup restore', async () => {
+    const restored = makeSessionWithStats('session-restored', 'Restored')
+
+    setSessions([restored])
+    localStorage.setItem(STORAGE_KEYS.LAST_SESSION, restored.id)
+    statusMock.mockResolvedValue({ running: true, provider: 'openai', model: 'gpt-5' })
+    notifySessionOpenedMock.mockResolvedValue({
+      sessionId: restored.id,
+      exists: true,
+      messageCount: 0,
+    })
+
+    await restoreForCurrentProject({ preserveActiveRun: true })
+
+    expect(cancelMock).not.toHaveBeenCalled()
+    expect(currentSession()?.id).toBe(restored.id)
+    expect(notifySessionOpenedMock).toHaveBeenCalledWith(
+      restored.id,
+      '/workspace',
+      expect.objectContaining({ title: restored.name, messages: [] })
+    )
+  })
+
+  it('does not switch sessions when the backend stays running after cancel confirmation', async () => {
+    vi.useFakeTimers()
+
+    const source = makeSessionWithStats('session-active', 'Active')
+    const target = makeSessionWithStats('session-target', 'Target')
+
+    setSessions([source, target])
+    setCurrentSession(source)
+    statusMock.mockResolvedValue({ running: true, provider: 'openai', model: 'gpt-5' })
+
+    const switchPromise = switchSession(target.id)
+    await vi.runAllTimersAsync()
+    await switchPromise
+
+    expect(cancelMock).toHaveBeenCalledTimes(1)
+    expect(statusMock).toHaveBeenCalledWith({ sessionId: source.id })
+    expect(cancelMock).toHaveBeenCalledWith({ sessionId: source.id })
+    expect(currentSession()?.id).toBe(source.id)
+    expect(getMessagesMock).not.toHaveBeenCalled()
+    expect(notifySessionOpenedMock).not.toHaveBeenCalled()
+
+    vi.useRealTimers()
+  })
+
+  it('does not create a new session when the backend stays running after cancel confirmation', async () => {
+    vi.useFakeTimers()
+
+    const existing = makeSession('session-active', 'Active')
+
+    setCurrentSession(existing)
+    setSessions([makeSessionWithStats(existing.id, existing.name)])
+    statusMock.mockResolvedValue({ running: true, provider: 'openai', model: 'gpt-5' })
+
+    const createPromise = expect(createNewSession('Another session')).rejects.toThrow(
+      'Cannot change sessions while the backend run remains active after cancel confirmation'
+    )
+    await vi.runAllTimersAsync()
+
+    await createPromise
+    expect(cancelMock).toHaveBeenCalledTimes(1)
+    expect(statusMock).toHaveBeenCalledWith({ sessionId: existing.id })
+    expect(cancelMock).toHaveBeenCalledWith({ sessionId: existing.id })
+    expect(dbCreateSessionMock).not.toHaveBeenCalled()
+    expect(currentSession()?.id).toBe(existing.id)
+    expect(notifySessionOpenedMock).not.toHaveBeenCalled()
+
+    vi.useRealTimers()
+  })
+
+  it('reuses the current empty untitled session instead of creating duplicates', async () => {
+    const existing = makeSession('session-empty', 'New Chat')
+
+    setCurrentSession(existing)
+    setSessions([makeSessionWithStats(existing.id, existing.name)])
+    setMessages([])
+
+    const result = await createNewSession()
+
+    expect(result.id).toBe(existing.id)
+    expect(dbCreateSessionMock).not.toHaveBeenCalled()
+    expect(notifySessionOpenedMock).not.toHaveBeenCalled()
+  })
+
+  it('does not reuse stale current empty session when it is no longer in session list', async () => {
+    const stale = makeSession('session-stale', 'New Chat')
+    const created = makeSession('session-created', 'New Chat')
+
+    dbCreateSessionMock.mockResolvedValue(created)
+    notifySessionOpenedMock.mockResolvedValue({
+      sessionId: created.id,
+      exists: true,
+      messageCount: 0,
+    })
+
+    setCurrentSession(stale)
+    setSessions([])
+    setMessages([])
+
+    const result = await createNewSession()
+
+    expect(result.id).toBe(created.id)
+    expect(dbCreateSessionMock).toHaveBeenCalledTimes(1)
+    expect(dbCreateSessionMock).toHaveBeenCalledWith('New Chat', 'project-1')
+    expect(notifySessionOpenedMock).toHaveBeenCalledWith(
+      created.id,
+      '/workspace',
+      expect.objectContaining({ title: created.name, messages: [] })
+    )
+  })
+
+  it('deduplicates concurrent new-session requests', async () => {
+    const created = makeSession('session-new', 'New Chat')
+    let resolveCreate: ((value: Session) => void) | undefined
+
+    dbCreateSessionMock.mockImplementation(
+      () =>
+        new Promise<Session>((resolve) => {
+          resolveCreate = resolve
+        })
+    )
+    notifySessionOpenedMock.mockResolvedValue({
+      sessionId: created.id,
+      exists: true,
+      messageCount: 0,
+    })
+
+    const first = createNewSession()
+    const second = createNewSession()
+
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(dbCreateSessionMock).toHaveBeenCalledTimes(1)
+
+    resolveCreate?.(created)
+
+    const [firstResult, secondResult] = await Promise.all([first, second])
+    expect(firstResult.id).toBe(created.id)
+    expect(secondResult.id).toBe(created.id)
+  })
+
+  it('creates separate sessions when creation targets differ', async () => {
+    const createdProject1 = makeSession('session-project-1', 'New Chat', 'project-1')
+    const createdProject2 = makeSession('session-project-2', 'New Chat', 'project-2')
+    let resolveProject1: ((value: Session) => void) | undefined
+    let resolveProject2: ((value: Session) => void) | undefined
+
+    dbCreateSessionMock
+      .mockImplementationOnce(
+        () =>
+          new Promise<Session>((resolve) => {
+            resolveProject1 = resolve
+          })
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise<Session>((resolve) => {
+            resolveProject2 = resolve
+          })
+      )
+
+    notifySessionOpenedMock.mockResolvedValue({
+      sessionId: createdProject1.id,
+      exists: true,
+      messageCount: 0,
+    })
+
+    const first = createNewSession('New Chat', 'project-1')
+    const second = createNewSession('New Chat', 'project-2')
+
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(dbCreateSessionMock).toHaveBeenCalledTimes(2)
+    expect(dbCreateSessionMock).toHaveBeenNthCalledWith(1, 'New Chat', 'project-1')
+    expect(dbCreateSessionMock).toHaveBeenNthCalledWith(2, 'New Chat', 'project-2')
+
+    resolveProject1?.(createdProject1)
+    resolveProject2?.(createdProject2)
+
+    const [firstResult, secondResult] = await Promise.all([first, second])
+
+    expect(firstResult.id).toBe(createdProject1.id)
+    expect(secondResult.id).toBe(createdProject2.id)
+  })
+
+  it('deduplicates by request key even while another key is in flight', async () => {
+    const createdProject1 = makeSession('session-project-1', 'New Chat', 'project-1')
+    const createdProject2 = makeSession('session-project-2', 'New Chat', 'project-2')
+    let resolveProject1: ((value: Session) => void) | undefined
+    let resolveProject2: ((value: Session) => void) | undefined
+
+    dbCreateSessionMock
+      .mockImplementationOnce(
+        () =>
+          new Promise<Session>((resolve) => {
+            resolveProject1 = resolve
+          })
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise<Session>((resolve) => {
+            resolveProject2 = resolve
+          })
+      )
+
+    notifySessionOpenedMock.mockResolvedValue({
+      sessionId: createdProject1.id,
+      exists: true,
+      messageCount: 0,
+    })
+
+    const firstProject1 = createNewSession('New Chat', 'project-1')
+    const firstProject2 = createNewSession('New Chat', 'project-2')
+    const secondProject1 = createNewSession('New Chat', 'project-1')
+
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(dbCreateSessionMock).toHaveBeenCalledTimes(2)
+    expect(dbCreateSessionMock).toHaveBeenNthCalledWith(1, 'New Chat', 'project-1')
+    expect(dbCreateSessionMock).toHaveBeenNthCalledWith(2, 'New Chat', 'project-2')
+
+    resolveProject1?.(createdProject1)
+    resolveProject2?.(createdProject2)
+
+    const [firstProject1Result, firstProject2Result, secondProject1Result] = await Promise.all([
+      firstProject1,
+      firstProject2,
+      secondProject1,
+    ])
+
+    expect(firstProject1Result.id).toBe(createdProject1.id)
+    expect(secondProject1Result.id).toBe(createdProject1.id)
+    expect(firstProject2Result.id).toBe(createdProject2.id)
   })
 })

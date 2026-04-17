@@ -197,7 +197,7 @@ export async function runAppInit(
     if (currentProject()) {
       setProjectHubVisible(false)
       await loadSessionsForCurrentProject()
-      await restoreForCurrentProject()
+      await restoreForCurrentProject({ preserveActiveRun: true })
       await loadWorkflows(currentProject()?.id)
 
       const scheduled = getScheduledWorkflows()
@@ -274,7 +274,8 @@ async function runWebInit(
     if (!health) {
       log.error('app', 'Backend health check failed')
       return {
-        error: 'Cannot reach the AVA backend. Make sure `ava serve` is running.',
+        error:
+          'Cannot reach the AVA web backend. Start `cargo run --bin ava -- serve` or `ava serve`, then reload.',
         notTauri: true,
       }
     }
@@ -351,7 +352,7 @@ async function runWebInit(
     setSplashStatus('Restoring session...')
     const { loadSessionsForCurrentProject, restoreForCurrentProject } = useSession()
     await loadSessionsForCurrentProject()
-    await restoreForCurrentProject()
+    await restoreForCurrentProject({ preserveActiveRun: true })
     log.info('app', 'Web sessions restored')
 
     const initDuration = Date.now() - splashStart

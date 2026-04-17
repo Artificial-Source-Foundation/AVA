@@ -1,4 +1,4 @@
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -111,8 +111,84 @@ impl InteractiveRequestHandle {
 }
 
 struct PendingInteractiveRequest<T> {
+    seq: u64,
     handle: InteractiveRequestHandle,
     reply: oneshot::Sender<T>,
+}
+
+struct PendingInteractiveQueues<T> {
+    next_seq: u64,
+    by_owner: HashMap<String, VecDeque<PendingInteractiveRequest<T>>>,
+}
+
+impl<T> Default for PendingInteractiveQueues<T> {
+    fn default() -> Self {
+        Self {
+            next_seq: 0,
+            by_owner: HashMap::new(),
+        }
+    }
+}
+
+impl<T> PendingInteractiveQueues<T> {
+    fn global_front(&self) -> Option<(&str, &PendingInteractiveRequest<T>)> {
+        self.by_owner
+            .iter()
+            .filter_map(|(owner, queue)| queue.front().map(|entry| (owner.as_str(), entry)))
+            .min_by_key(|(_, entry)| entry.seq)
+    }
+
+    fn current_request_id(&self) -> Option<String> {
+        self.global_front()
+            .map(|(_, entry)| entry.handle.request_id.clone())
+    }
+
+    fn current_request_id_for_run(&self, run_id: Option<&str>) -> Option<String> {
+        self.by_owner
+            .get(&owner_key(run_id))
+            .and_then(|queue| queue.front())
+            .map(|entry| entry.handle.request_id.clone())
+    }
+
+    fn locate_request(&self, request_id: &str) -> Option<(&str, usize)> {
+        self.by_owner.iter().find_map(|(owner, queue)| {
+            queue
+                .iter()
+                .position(|entry| entry.handle.request_id == request_id)
+                .map(|index| (owner.as_str(), index))
+        })
+    }
+
+    fn locate_request_owned(&self, request_id: &str) -> Option<(String, usize)> {
+        self.locate_request(request_id)
+            .map(|(owner, index)| (owner.to_string(), index))
+    }
+
+    fn remove_at(
+        &mut self,
+        owner: &str,
+        index: usize,
+        phase: InteractiveRequestPhase,
+    ) -> Option<TerminalInteractiveRequest<T>> {
+        let queue = self.by_owner.get_mut(owner)?;
+        let entry = queue.remove(index)?;
+        let should_cleanup = queue.is_empty();
+        if should_cleanup {
+            self.by_owner.remove(owner);
+        }
+        Some(TerminalInteractiveRequest {
+            handle: entry.handle.into_terminal(phase),
+            reply: entry.reply,
+        })
+    }
+
+    fn pop_global_front(
+        &mut self,
+        phase: InteractiveRequestPhase,
+    ) -> Option<TerminalInteractiveRequest<T>> {
+        let owner = self.global_front().map(|(owner, _)| owner.to_string())?;
+        self.remove_at(&owner, 0, phase)
+    }
 }
 
 #[derive(Debug)]
@@ -137,7 +213,7 @@ pub enum ResolveInteractiveRequestError {
 pub struct InteractiveRequestStore<T> {
     kind: InteractiveRequestKind,
     timeout_policy: InteractiveTimeoutPolicy,
-    pending: Arc<Mutex<VecDeque<PendingInteractiveRequest<T>>>>,
+    pending: Arc<Mutex<PendingInteractiveQueues<T>>>,
 }
 
 impl<T> InteractiveRequestStore<T> {
@@ -152,7 +228,7 @@ impl<T> InteractiveRequestStore<T> {
         Self {
             kind,
             timeout_policy,
-            pending: Arc::new(Mutex::new(VecDeque::new())),
+            pending: Arc::new(Mutex::new(PendingInteractiveQueues::default())),
         }
     }
 
@@ -174,10 +250,15 @@ impl<T> InteractiveRequestStore<T> {
         run_id: Option<String>,
     ) -> InteractiveRequestHandle {
         let handle = InteractiveRequestHandle::pending(self.kind, run_id);
-        self.pending
-            .lock()
-            .await
+        let mut pending = self.pending.lock().await;
+        let seq = pending.next_seq;
+        pending.next_seq = pending.next_seq.wrapping_add(1);
+        pending
+            .by_owner
+            .entry(owner_key(handle.run_id.as_deref()))
+            .or_default()
             .push_back(PendingInteractiveRequest {
+                seq,
                 handle: handle.clone(),
                 reply,
             });
@@ -190,24 +271,39 @@ impl<T> InteractiveRequestStore<T> {
     ) -> Result<TerminalInteractiveRequest<T>, ResolveInteractiveRequestError> {
         let mut pending = self.pending.lock().await;
         let entry = match request_id {
-            Some(expected_request_id) => match pending.front() {
-                Some(current) if current.handle.request_id == expected_request_id => pending
-                    .pop_front()
-                    .expect("front pending request should exist"),
-                Some(current) => {
-                    return Err(ResolveInteractiveRequestError::StaleRequestId {
-                        kind: self.kind,
-                        request_id: expected_request_id.to_string(),
-                        current_request_id: current.handle.request_id.clone(),
-                    });
+            Some(expected_request_id) => {
+                let located = pending.locate_request_owned(expected_request_id);
+                match located {
+                    Some((owner, 0)) => pending
+                        .remove_at(&owner, 0, InteractiveRequestPhase::Resolved)
+                        .expect("front pending request should exist"),
+                    Some((owner, _)) => {
+                        let current_request_id = pending
+                            .current_request_id_for_run(owner_run_id(&owner))
+                            .expect("owner queue should have a front request");
+                        return Err(ResolveInteractiveRequestError::StaleRequestId {
+                            kind: self.kind,
+                            request_id: expected_request_id.to_string(),
+                            current_request_id,
+                        });
+                    }
+                    None => match pending.current_request_id() {
+                        Some(current_request_id) => {
+                            return Err(ResolveInteractiveRequestError::StaleRequestId {
+                                kind: self.kind,
+                                request_id: expected_request_id.to_string(),
+                                current_request_id,
+                            });
+                        }
+                        None => {
+                            return Err(ResolveInteractiveRequestError::MissingPendingRequest {
+                                kind: self.kind,
+                            });
+                        }
+                    },
                 }
-                None => {
-                    return Err(ResolveInteractiveRequestError::MissingPendingRequest {
-                        kind: self.kind,
-                    });
-                }
-            },
-            None => match pending.pop_front() {
+            }
+            None => match pending.pop_global_front(InteractiveRequestPhase::Resolved) {
                 Some(entry) => entry,
                 None => {
                     return Err(ResolveInteractiveRequestError::MissingPendingRequest {
@@ -217,25 +313,14 @@ impl<T> InteractiveRequestStore<T> {
             },
         };
 
-        Ok(TerminalInteractiveRequest {
-            handle: entry
-                .handle
-                .into_terminal(InteractiveRequestPhase::Resolved),
-            reply: entry.reply,
-        })
+        Ok(entry)
     }
 
     pub async fn timeout_request(&self, request_id: &str) -> Option<TerminalInteractiveRequest<T>> {
         let mut pending = self.pending.lock().await;
-        match pending.front() {
-            Some(current) if current.handle.request_id == request_id => {
-                pending.pop_front().map(|entry| TerminalInteractiveRequest {
-                    handle: entry
-                        .handle
-                        .into_terminal(InteractiveRequestPhase::TimedOut),
-                    reply: entry.reply,
-                })
-            }
+        let located = pending.locate_request_owned(request_id);
+        match located {
+            Some((owner, 0)) => pending.remove_at(&owner, 0, InteractiveRequestPhase::TimedOut),
             _ => None,
         }
     }
@@ -250,12 +335,9 @@ impl<T> InteractiveRequestStore<T> {
         loop {
             let state = {
                 let pending = self.pending.lock().await;
-                match pending
-                    .iter()
-                    .position(|entry| entry.handle.request_id == request_id)
-                {
-                    Some(0) => PendingTimeoutState::Current,
-                    Some(_) => PendingTimeoutState::Queued,
+                match pending.locate_request(request_id) {
+                    Some((_, 0)) => PendingTimeoutState::Current,
+                    Some((_, _)) => PendingTimeoutState::Queued,
                     None => PendingTimeoutState::Missing,
                 }
             };
@@ -272,50 +354,29 @@ impl<T> InteractiveRequestStore<T> {
     }
 
     pub async fn cancel_pending(&self) -> Option<TerminalInteractiveRequest<T>> {
-        let mut pending = self.pending.lock().await;
-        pending.pop_front().map(|entry| TerminalInteractiveRequest {
-            handle: entry
-                .handle
-                .into_terminal(InteractiveRequestPhase::Cancelled),
-            reply: entry.reply,
-        })
+        self.pending
+            .lock()
+            .await
+            .pop_global_front(InteractiveRequestPhase::Cancelled)
     }
 
     pub async fn cancel_pending_for_run(
         &self,
         run_id: &str,
     ) -> Option<TerminalInteractiveRequest<T>> {
-        self.take_terminal(
-            |entry| entry.handle.run_id.as_deref() == Some(run_id),
-            InteractiveRequestPhase::Cancelled,
-        )
-        .await
-    }
-
-    pub async fn current_request_id(&self) -> Option<String> {
+        let owner = owner_key(Some(run_id));
         self.pending
             .lock()
             .await
-            .front()
-            .map(|entry| entry.handle.request_id.clone())
+            .remove_at(&owner, 0, InteractiveRequestPhase::Cancelled)
     }
 
-    async fn take_terminal<F>(
-        &self,
-        predicate: F,
-        phase: InteractiveRequestPhase,
-    ) -> Option<TerminalInteractiveRequest<T>>
-    where
-        F: FnMut(&PendingInteractiveRequest<T>) -> bool,
-    {
-        let mut pending = self.pending.lock().await;
-        let index = pending.iter().position(predicate)?;
-        pending
-            .remove(index)
-            .map(|entry| TerminalInteractiveRequest {
-                handle: entry.handle.into_terminal(phase),
-                reply: entry.reply,
-            })
+    pub async fn current_request_id(&self) -> Option<String> {
+        self.pending.lock().await.current_request_id()
+    }
+
+    pub async fn current_request_id_for_run(&self, run_id: Option<&str>) -> Option<String> {
+        self.pending.lock().await.current_request_id_for_run(run_id)
     }
 }
 
@@ -332,6 +393,16 @@ fn timeout_watchdog_poll_interval(timeout: Duration) -> Duration {
         MIN_TIMEOUT_WATCHDOG_POLL_INTERVAL,
         MAX_TIMEOUT_WATCHDOG_POLL_INTERVAL,
     )
+}
+
+const GLOBAL_INTERACTIVE_OWNER: &str = "__interactive_global__";
+
+fn owner_key(run_id: Option<&str>) -> String {
+    run_id.unwrap_or(GLOBAL_INTERACTIVE_OWNER).to_string()
+}
+
+fn owner_run_id(owner: &str) -> Option<&str> {
+    (owner != GLOBAL_INTERACTIVE_OWNER).then_some(owner)
 }
 
 #[cfg(test)]
@@ -492,6 +563,45 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn different_runs_can_resolve_same_kind_requests_independently() {
+        let store = InteractiveRequestStore::<String>::new(InteractiveRequestKind::Question);
+        let (run_a_tx, _run_a_rx) = oneshot::channel();
+        let run_a = store
+            .register_with_run_id(run_a_tx, Some("web-run-a".to_string()))
+            .await;
+        let (run_b_tx, _run_b_rx) = oneshot::channel();
+        let run_b = store
+            .register_with_run_id(run_b_tx, Some("web-run-b".to_string()))
+            .await;
+
+        assert_eq!(
+            store.current_request_id_for_run(Some("web-run-a")).await,
+            Some(run_a.request_id.clone())
+        );
+        assert_eq!(
+            store.current_request_id_for_run(Some("web-run-b")).await,
+            Some(run_b.request_id.clone())
+        );
+
+        let resolved_run_b = store
+            .resolve(Some(&run_b.request_id))
+            .await
+            .expect("other run's front request should resolve without waiting for run A");
+        assert_eq!(resolved_run_b.handle.request_id, run_b.request_id);
+        assert_eq!(
+            store.current_request_id_for_run(Some("web-run-a")).await,
+            Some(run_a.request_id.clone())
+        );
+
+        let resolved_run_a = store
+            .resolve(Some(&run_a.request_id))
+            .await
+            .expect("run A request should still resolve afterwards");
+        assert_eq!(resolved_run_a.handle.request_id, run_a.request_id);
+        assert!(store.current_request_id().await.is_none());
+    }
+
+    #[tokio::test]
     async fn timeout_only_consumes_matching_current_request() {
         let store = InteractiveRequestStore::<String>::new(InteractiveRequestKind::Question);
         let (tx, _rx) = oneshot::channel();
@@ -581,6 +691,43 @@ mod tests {
             .expect("promoted request should eventually time out");
         assert_eq!(timed_out_request_id, second.request_id);
         assert!(store.current_request_id().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn watchdog_timeout_for_one_run_does_not_wait_for_other_runs() {
+        let store = InteractiveRequestStore::<String>::with_timeout_policy(
+            InteractiveRequestKind::Approval,
+            short_timeout_policy(),
+        );
+        let (run_a_tx, _run_a_rx) = oneshot::channel();
+        let run_a = store
+            .register_with_run_id(run_a_tx, Some("web-run-a".to_string()))
+            .await;
+        let (run_b_tx, _run_b_rx) = oneshot::channel();
+        let run_b = store
+            .register_with_run_id(run_b_tx, Some("web-run-b".to_string()))
+            .await;
+
+        let timeout_task = {
+            let store = store.clone();
+            let request_id = run_b.request_id.clone();
+            tokio::spawn(async move {
+                store
+                    .await_timeout_request(&request_id)
+                    .await
+                    .map(|reply| reply.handle.request_id)
+            })
+        };
+
+        let timed_out_request_id = timeout_task
+            .await
+            .expect("watchdog task should finish")
+            .expect("run B request should time out independently");
+        assert_eq!(timed_out_request_id, run_b.request_id);
+        assert_eq!(
+            store.current_request_id_for_run(Some("web-run-a")).await,
+            Some(run_a.request_id)
+        );
     }
 
     #[tokio::test]

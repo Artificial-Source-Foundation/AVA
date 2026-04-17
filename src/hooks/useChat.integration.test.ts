@@ -79,6 +79,7 @@ vi.mock('./use-rust-agent', () => {
         steer: vi.fn(async () => {}),
         followUp: vi.fn(async () => {}),
         postComplete: vi.fn(async () => {}),
+        rehydrateStatus: vi.fn(async () => {}),
         clearError: () => {
           setError(null)
           h.clearErrorMock()

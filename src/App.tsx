@@ -6,6 +6,7 @@
  * Access the design system preview at: http://localhost:1420/?preview=true
  */
 
+import { AlertTriangle, RefreshCw } from 'lucide-solid'
 import { createEffect, createSignal, on, onCleanup, onMount, Show } from 'solid-js'
 import { AppDialogs } from './components/AppDialogs'
 import { shouldShowChangelog } from './components/dialogs/ChangelogDialog'
@@ -86,6 +87,7 @@ function App() {
 
   const [isInitializing, setIsInitializing] = createSignal(true)
   const [initError, setInitError] = createSignal<string | null>(null)
+  const [isWebInitError, setIsWebInitError] = createSignal(false)
   const [splashStatus, setSplashStatus] = createSignal('')
 
   const { closeSettings, projectHubVisible, setProjectHubVisible } = useLayout()
@@ -267,7 +269,10 @@ function App() {
     registerAppShortcuts(setExportDialogOpen, setCheckpointDialogOpen, setProjectHubVisible)
 
     const result = await runAppInit(setSplashStatus, setProjectHubVisible)
-    if (result.error) setInitError(result.error)
+    if (result.error) {
+      setInitError(result.error)
+      setIsWebInitError(result.notTauri)
+    }
     if (!settings().onboardingComplete) {
       rememberOnboardingReturnFocus()
       setOnboardingMode('first-run')
@@ -317,22 +322,58 @@ function App() {
         <Show
           when={!initError()}
           fallback={
-            <div class="flex h-screen items-center justify-center bg-[var(--background)]">
-              <div class="text-center max-w-md p-6">
-                <div class="text-[var(--error)] text-6xl mb-4">!</div>
-                <h1 class="text-xl font-bold text-[var(--text-primary)] mb-2">
-                  Initialization Error
-                </h1>
-                <pre class="text-[var(--text-secondary)] mb-4 text-left text-xs whitespace-pre-wrap max-w-lg overflow-auto max-h-64 bg-[var(--surface-raised)] p-3 rounded">
-                  {initError()}
-                </pre>
-                <button
-                  type="button"
-                  onClick={() => window.location.reload()}
-                  class="px-4 py-2 bg-[var(--accent)] text-white rounded-[var(--radius-lg)] hover:bg-[var(--accent-hover)] transition-colors"
-                >
-                  Retry
-                </button>
+            <div class="relative flex min-h-screen items-center justify-center overflow-hidden bg-[var(--background)] px-6 py-10">
+              <div class="pointer-events-none absolute inset-0 opacity-80">
+                <div class="absolute left-1/2 top-1/2 h-[26rem] w-[26rem] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--error-subtle)] blur-3xl" />
+                <div class="absolute left-1/2 top-1/2 h-[18rem] w-[18rem] -translate-x-1/2 -translate-y-1/2 rounded-full border border-[var(--border-subtle)]" />
+              </div>
+
+              <div class="relative w-full max-w-xl rounded-[28px] border border-[var(--border-default)] bg-[color:var(--glass-bg-strong)] p-8 shadow-[var(--shadow-lg)]">
+                <div class="mb-6 flex items-start gap-4">
+                  <div class="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border border-[var(--error-border)] bg-[var(--error-subtle)] text-[var(--error)] shadow-[var(--shadow-md)]">
+                    <AlertTriangle size={24} strokeWidth={2.2} />
+                  </div>
+
+                  <div class="min-w-0 flex-1">
+                    <div class="mb-2 inline-flex items-center rounded-full border border-[var(--border-subtle)] bg-[var(--alpha-white-3)] px-3 py-1 text-[11px] font-medium uppercase tracking-[0.18em] text-[var(--text-tertiary)]">
+                      {isWebInitError() ? 'Web Mode Issue' : 'Startup Issue'}
+                    </div>
+                    <h1 class="mb-2 text-2xl font-semibold text-[var(--text-primary)]">
+                      {isWebInitError()
+                        ? 'AVA web backend is not running'
+                        : 'Desktop backend is not ready yet'}
+                    </h1>
+                    <p class="text-sm leading-6 text-[var(--text-secondary)]">
+                      {isWebInitError()
+                        ? 'This browser view expects the HTTP backend. Start AVA in web mode, then reload this page.'
+                        : 'AVA could not complete initialization. If Cargo is still building the backend, this screen can appear briefly before everything comes online.'}
+                    </p>
+                  </div>
+                </div>
+
+                <div class="mb-5 rounded-2xl border border-[var(--border-subtle)] bg-[color:var(--surface-glass)] p-4 text-sm text-[var(--text-secondary)]">
+                  <div class="mb-2 font-medium text-[var(--text-primary)]">Details</div>
+                  <pre class="max-h-56 overflow-auto whitespace-pre-wrap break-words bg-transparent p-0 text-xs leading-6 text-[var(--text-secondary)]">
+                    {initError()}
+                  </pre>
+                </div>
+
+                <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <p class="text-xs leading-5 text-[var(--text-tertiary)]">
+                    {isWebInitError()
+                      ? 'For desktop testing, use `pnpm tauri dev`. `ava serve` is only for browser-based web mode.'
+                      : 'First launch or post-refactor rebuilds can take a little longer while the Rust side starts up.'}
+                  </p>
+
+                  <button
+                    type="button"
+                    onClick={() => window.location.reload()}
+                    class="inline-flex items-center justify-center gap-2 rounded-[var(--radius-xl)] border border-[var(--accent-border)] bg-[var(--accent)] px-4 py-2.5 text-sm font-medium text-[var(--text-on-accent)] shadow-[var(--shadow-glow)] transition-all hover:-translate-y-0.5 hover:bg-[var(--accent-hover)]"
+                  >
+                    <RefreshCw size={16} strokeWidth={2} />
+                    Retry
+                  </button>
+                </div>
               </div>
             </div>
           }

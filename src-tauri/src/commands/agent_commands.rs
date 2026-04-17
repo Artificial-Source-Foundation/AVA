@@ -289,6 +289,7 @@ async fn run_agent_inner(
 
     // Create a message queue for mid-stream messaging
     let message_queue = bridge.new_message_queue(session_id).await;
+    *bridge.active_run_id.write().await = run_id.clone();
     *bridge.running.write().await = true;
 
     // Create an event channel; spawn a forwarder that emits to all Tauri windows
@@ -650,8 +651,6 @@ async fn run_agent_inner(
     question_forwarder.abort();
     plan_forwarder.abort();
 
-    // Clean up
-    *bridge.running.write().await = false;
     match &result {
         Ok(run) => info!(
             success = run.success,
@@ -662,7 +661,7 @@ async fn run_agent_inner(
         Err(error) => tracing::warn!(error = %error, "run_agent_inner: agent failed"),
     }
 
-    match result {
+    let run_result: Result<SubmitGoalResult, String> = match result {
         Ok(run_result) => {
             clear_preserved_deferred(
                 session_id,
@@ -691,7 +690,13 @@ async fn run_agent_inner(
             .await;
             Err(e.to_string())
         }
-    }
+    };
+
+    // Clean up
+    *bridge.running.write().await = false;
+    *bridge.active_run_id.write().await = None;
+
+    run_result
 }
 
 /// Submit a goal to the agent. Streams events via `agent-event` and returns
@@ -805,17 +810,26 @@ pub struct AgentStatus {
     pub running: bool,
     pub provider: String,
     pub model: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub run_id: Option<String>,
 }
 
 /// Get current agent status (running, provider, model).
 #[tauri::command]
 pub async fn get_agent_status(bridge: State<'_, DesktopBridge>) -> Result<AgentStatus, String> {
     let running = *bridge.running.read().await;
+    let run_id = bridge
+        .active_run_id
+        .read()
+        .await
+        .clone()
+        .filter(|id| !id.trim().is_empty());
     let (provider, model) = bridge.stack.current_model().await;
     Ok(AgentStatus {
-        running,
+        running: running && run_id.is_some(),
         provider,
         model,
+        run_id,
     })
 }
 

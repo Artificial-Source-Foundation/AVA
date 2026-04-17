@@ -6,38 +6,42 @@
  */
 
 import { Bot } from 'lucide-solid'
-import type { Component } from 'solid-js'
+import type { Component, JSX } from 'solid-js'
 import {
   AlibabaCloudLogo,
   AnthropicLogo,
   CopilotLogo,
+  GeminiLogo,
   GLMLogo,
-  GoogleLogo,
+  InceptionLogo,
   KimiLogo,
+  MiniMaxLogo,
   OllamaLogo,
   OpenAILogo,
   OpenRouterLogo,
+  ZAILogo,
 } from './provider-logos'
 
-type IconComponent = Component<{ class?: string }>
+type IconComponent = Component<{ class?: string; style?: JSX.CSSProperties }>
 
 export const PROVIDER_LOGOS: Record<string, IconComponent> = {
   anthropic: AnthropicLogo,
   openai: OpenAILogo,
   chatgpt: OpenAILogo,
-  gemini: GoogleLogo,
-  google: GoogleLogo,
+  gemini: GeminiLogo,
+  google: GeminiLogo,
   copilot: CopilotLogo,
   openrouter: OpenRouterLogo,
-  inception: OpenAILogo,
+  inception: InceptionLogo,
   alibaba: AlibabaCloudLogo,
   'alibaba-cn': AlibabaCloudLogo,
-  zai: GLMLogo,
-  'zai-coding-plan': GLMLogo,
+  zai: ZAILogo,
+  'zai-coding-plan': ZAILogo,
   'zhipuai-coding-plan': GLMLogo,
   kimi: KimiLogo,
   'kimi-for-coding': KimiLogo,
   glm: GLMLogo,
+  minimax: MiniMaxLogo,
   ollama: OllamaLogo,
 }
 

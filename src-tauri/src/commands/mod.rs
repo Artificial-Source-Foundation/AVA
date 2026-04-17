@@ -30,7 +30,6 @@ pub mod provider_commands;
 pub mod session_commands;
 pub mod tool_commands;
 pub mod updater_commands;
-pub mod usage_commands;
 
 pub use agent_integration::{agent_run, agent_stream, execute_tool, list_tools, ToolInfo};
 pub use compute_fuzzy::compute_fuzzy_replace;
@@ -80,4 +79,3 @@ pub use session_commands::{
 };
 pub use tool_commands::list_agent_tools;
 pub use updater_commands::{check_desktop_update, install_desktop_update};
-pub use usage_commands::get_subscription_usage;

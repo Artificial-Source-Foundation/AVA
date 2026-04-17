@@ -11,6 +11,7 @@ const h = vi.hoisted(() => {
   let appendEvent: ((event: AgentEvent) => void) | null = null
   let resetEvents: (() => void) | null = null
   let setCurrentRunId: ((runId: string | null) => void) | null = null
+  const rehydrateStatus = vi.fn(async () => {})
 
   return {
     bind(
@@ -31,7 +32,9 @@ const h = vi.hoisted(() => {
     reset(): void {
       resetEvents?.()
       setCurrentRunId?.(null)
+      rehydrateStatus.mockClear()
     },
+    rehydrateStatus,
   }
 })
 
@@ -78,6 +81,7 @@ vi.mock('./use-rust-agent', async () => {
         steer: vi.fn(async () => {}),
         followUp: vi.fn(async () => {}),
         postComplete: vi.fn(async () => {}),
+        rehydrateStatus: h.rehydrateStatus,
         markToolApproval: vi.fn(),
         stop: vi.fn(async () => {}),
         isStreaming: isRunning,
@@ -234,6 +238,18 @@ describe('useAgent interactive request clearing', () => {
     expect(ctx.agent.pendingPlan()).toBeNull()
 
     ctx.dispose()
+  })
+
+  it('rehydrates backend status only once through the singleton agent store', () => {
+    const first = createRoot((dispose) => ({ agent: useAgent(), dispose }))
+    const second = createRoot((dispose) => ({ agent: useAgent(), dispose }))
+
+    expect(first.agent).toBe(second.agent)
+    expect(h.rehydrateStatus).toHaveBeenCalledTimes(1)
+    expect(h.rehydrateStatus).toHaveBeenCalledWith('session-1')
+
+    first.dispose()
+    second.dispose()
   })
 
   it('queues same-kind interactive requests by request id and promotes the next visible request on clear', async () => {

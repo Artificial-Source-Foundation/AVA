@@ -44,6 +44,7 @@ vi.mock('./use-rust-agent', async () => {
         steer: vi.fn(async () => {}),
         followUp: vi.fn(async () => {}),
         postComplete: vi.fn(async () => {}),
+        rehydrateStatus: vi.fn(async () => {}),
         markToolApproval: vi.fn(),
         stop: vi.fn(async () => {}),
         isStreaming: () => h.isRunning,

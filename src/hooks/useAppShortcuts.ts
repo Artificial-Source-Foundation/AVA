@@ -27,7 +27,7 @@ export function registerAppShortcuts(
     toggleModelBrowser,
     toggleChatSearch,
     toggleSessionSwitcher,
-    toggleQuickModelPicker,
+    openModelBrowser,
     toggleExpandedEditor,
     bottomPanelTab,
     switchBottomPanelTab,
@@ -44,7 +44,7 @@ export function registerAppShortcuts(
   registerAction('toggle-settings', toggleSettings)
   registerAction('toggle-bottom-panel', toggleBottomPanel)
   registerAction('model-browser', toggleModelBrowser)
-  registerAction('quick-model-picker', toggleQuickModelPicker)
+  registerAction('quick-model-picker', openModelBrowser)
   registerAction('session-switcher', toggleSessionSwitcher)
   registerAction('search-chat', toggleChatSearch)
   registerAction('expanded-editor', toggleExpandedEditor)

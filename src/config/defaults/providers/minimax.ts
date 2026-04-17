@@ -2,13 +2,13 @@
  * MiniMax Coding Plan provider
  */
 
-import { Bot } from 'lucide-solid'
+import { MiniMaxLogo } from '../../../components/icons/provider-logos'
 import type { LLMProviderConfig } from '../provider-defaults'
 
 export const minimax: LLMProviderConfig = {
   id: 'minimax',
   name: 'MiniMax',
-  icon: Bot,
+  icon: MiniMaxLogo,
   description: 'MiniMax coding plan',
   enabled: false,
   status: 'disconnected',

@@ -6,10 +6,9 @@
  */
 
 import { type Accessor, type Component, createMemo } from 'solid-js'
-import { Dynamic } from 'solid-js/web'
 import { useSession } from '../../../stores/session'
 import { useSettings } from '../../../stores/settings'
-import { getProviderLogo } from '../../icons/provider-logo-map'
+import { ProviderLogo } from '../../icons/ProviderLogo'
 
 // ---------------------------------------------------------------------------
 // Props
@@ -49,8 +48,6 @@ export const ModelSelector: Component<ModelSelectorProps> = (props) => {
     return 'anthropic'
   })
 
-  const logo = createMemo(() => getProviderLogo(providerId()))
-
   return (
     <button
       type="button"
@@ -68,7 +65,7 @@ export const ModelSelector: Component<ModelSelectorProps> = (props) => {
         padding: '4px 8px',
       }}
     >
-      <Dynamic component={logo()} class="w-[12px] h-[12px] shrink-0" />
+      <ProviderLogo providerId={providerId()} class="w-[11px] h-[11px] shrink-0" />
       <span
         class="truncate max-w-[160px]"
         style={{

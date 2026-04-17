@@ -167,4 +167,31 @@ describe('rustBackend set/list argument shaping', () => {
       context,
     })
   })
+
+  it('threads run/session correlation through web control-plane helpers', async () => {
+    await rustBackend.getAgentStatus({ runId: 'web-run-1' })
+    await rustBackend.cancelAgent({ runId: 'web-run-1', sessionId: 'session-1' })
+    await rustBackend.steerAgent('nudge', { runId: 'web-run-1' })
+    await rustBackend.getMessageQueue({ sessionId: 'session-1' })
+    await rustBackend.clearMessageQueue('all', { runId: 'web-run-1', sessionId: 'session-1' })
+
+    expect(invokeMock).toHaveBeenNthCalledWith(1, 'get_agent_status', {
+      args: { runId: 'web-run-1' },
+    })
+    expect(invokeMock).toHaveBeenNthCalledWith(2, 'cancel_agent', {
+      args: { runId: 'web-run-1', sessionId: 'session-1' },
+    })
+    expect(invokeMock).toHaveBeenNthCalledWith(3, 'steer_agent', {
+      message: 'nudge',
+      runId: 'web-run-1',
+    })
+    expect(invokeMock).toHaveBeenNthCalledWith(4, 'get_message_queue', {
+      args: { sessionId: 'session-1' },
+    })
+    expect(invokeMock).toHaveBeenNthCalledWith(5, 'clear_message_queue', {
+      target: 'all',
+      runId: 'web-run-1',
+      sessionId: 'session-1',
+    })
+  })
 })

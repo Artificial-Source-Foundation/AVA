@@ -2,6 +2,7 @@ mod app_state;
 mod bridge;
 mod commands;
 mod events;
+mod logging;
 mod pty;
 
 use app_state::AppState;
@@ -14,17 +15,17 @@ use commands::{
     execute_browser_tool, execute_git_tool, execute_tool, extensions_register_native,
     extensions_register_wasm, follow_up_agent, get_agent_status, get_config, get_current_model,
     get_cwd, get_env_var, get_feature_flags, get_message_queue, get_permission_level,
-    get_plugins_state, get_subscription_usage, greet, install_desktop_update, install_plugin,
-    list_agent_tools, list_mcp_servers, list_models, list_plugin_mounts, list_providers,
-    list_sessions, list_tools, load_credentials, load_session, memory_recall, memory_recent,
-    memory_remember, memory_search, oauth_copilot_device_poll, oauth_copilot_device_start,
-    oauth_listen, plugin_host_invoke, post_complete_agent, pty_kill, pty_resize, pty_spawn,
-    pty_write, read_latest_logs, reflection_reflect_and_fix, regenerate_response,
-    reload_mcp_servers, rename_session, resolve_approval, resolve_plan, resolve_question,
-    retry_last_message, sandbox_apply_landlock, search_sessions, set_active_session, set_cwd,
-    set_permission_level, set_plugin_enabled, set_plugins_state, steer_agent, store_provider_auth,
-    submit_goal, switch_model, sync_credentials, toggle_permission_level, undo_last_edit,
-    uninstall_plugin, update_feature_flags, update_llm_config, validation_validate_edit,
+    get_plugins_state, greet, install_desktop_update, install_plugin, list_agent_tools,
+    list_mcp_servers, list_models, list_plugin_mounts, list_providers, list_sessions, list_tools,
+    load_credentials, load_session, memory_recall, memory_recent, memory_remember, memory_search,
+    oauth_copilot_device_poll, oauth_copilot_device_start, oauth_listen, plugin_host_invoke,
+    post_complete_agent, pty_kill, pty_resize, pty_spawn, pty_write, read_latest_logs,
+    reflection_reflect_and_fix, regenerate_response, reload_mcp_servers, rename_session,
+    resolve_approval, resolve_plan, resolve_question, retry_last_message, sandbox_apply_landlock,
+    search_sessions, set_active_session, set_cwd, set_permission_level, set_plugin_enabled,
+    set_plugins_state, steer_agent, store_provider_auth, submit_goal, switch_model,
+    sync_credentials, toggle_permission_level, undo_last_edit, uninstall_plugin,
+    update_feature_flags, update_llm_config, validation_validate_edit,
     validation_validate_with_retry,
 };
 use pty::PtyManager;
@@ -48,6 +49,17 @@ pub fn run() {
                 .path()
                 .app_data_dir()
                 .map_err(|error| format!("failed to resolve app data directory: {error}"))?;
+
+            match logging::init_backend_logging(&app_data_dir) {
+                Ok(backend_logging) => {
+                    app.manage(backend_logging);
+                }
+                Err(error) => {
+                    eprintln!(
+                        "[ava-desktop] backend logging initialization failed; continuing startup: {error}"
+                    );
+                }
+            }
 
             // Legacy AppState (used by existing commands)
             let state = tauri::async_runtime::block_on(AppState::new(app_data_dir.clone()))
@@ -158,7 +170,6 @@ pub fn run() {
             compact_context,
             check_desktop_update,
             install_desktop_update,
-            get_subscription_usage,
         ])
         .run(context)
         .expect("error while running tauri application");

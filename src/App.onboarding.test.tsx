@@ -90,7 +90,7 @@ vi.mock('./contexts/notification', () => ({
 }))
 
 vi.mock('./hooks/useAppInit', () => ({
-  runAppInit: vi.fn(async () => ({ error: null })),
+  runAppInit: vi.fn(async () => ({ error: null, notTauri: false })),
 }))
 
 vi.mock('./hooks/useAppShortcuts', () => ({
@@ -159,6 +159,7 @@ vi.mock('./stores/settings', async () => {
 })
 
 import App, { applyOnboardingProviderSelections } from './App'
+import { runAppInit } from './hooks/useAppInit'
 import { useLayout } from './stores/layout'
 import * as settingsStore from './stores/settings'
 
@@ -209,6 +210,7 @@ async function flushApp(): Promise<void> {
 
 describe('App onboarding flow', () => {
   let dispose: (() => void) | undefined
+  const runAppInitMock = vi.mocked(runAppInit)
 
   beforeEach(() => {
     ;(
@@ -218,6 +220,7 @@ describe('App onboarding flow', () => {
     const layout = useLayout()
     layout.closeSettings()
     layout.setProjectHubVisible(false)
+    runAppInitMock.mockResolvedValue({ error: null, notTauri: false })
   })
 
   afterEach(() => {
@@ -557,5 +560,59 @@ describe('App onboarding flow', () => {
       status: 'connected',
       enabled: true,
     })
+  })
+
+  it('renders web-mode init error copy and details', async () => {
+    ;(
+      settingsStore as typeof settingsStore & { __resetSettingsMock: (patch?: object) => void }
+    ).__resetSettingsMock({ onboardingComplete: true })
+    runAppInitMock.mockResolvedValueOnce({
+      error: 'Cannot reach backend: ECONNREFUSED',
+      notTauri: true,
+    })
+
+    const container = document.createElement('div')
+    document.body.append(container)
+    dispose = render(() => <App />, container)
+
+    await flushApp()
+
+    expect(document.body.textContent).toContain('Web Mode Issue')
+    expect(document.body.textContent).toContain('AVA web backend is not running')
+    expect(document.body.textContent).toContain(
+      'This browser view expects the HTTP backend. Start AVA in web mode, then reload this page.'
+    )
+    expect(document.body.textContent).toContain('Cannot reach backend: ECONNREFUSED')
+    expect(document.body.textContent).toContain(
+      'For desktop testing, use `pnpm tauri dev`. `ava serve` is only for browser-based web mode.'
+    )
+    expect(getButtonByText(document.body, 'Retry')).toBeInstanceOf(HTMLButtonElement)
+  })
+
+  it('renders desktop startup error copy and details', async () => {
+    ;(
+      settingsStore as typeof settingsStore & { __resetSettingsMock: (patch?: object) => void }
+    ).__resetSettingsMock({ onboardingComplete: true })
+    runAppInitMock.mockResolvedValueOnce({
+      error: 'Rust backend initialization timed out',
+      notTauri: false,
+    })
+
+    const container = document.createElement('div')
+    document.body.append(container)
+    dispose = render(() => <App />, container)
+
+    await flushApp()
+
+    expect(document.body.textContent).toContain('Startup Issue')
+    expect(document.body.textContent).toContain('Desktop backend is not ready yet')
+    expect(document.body.textContent).toContain(
+      'AVA could not complete initialization. If Cargo is still building the backend, this screen can appear briefly before everything comes online.'
+    )
+    expect(document.body.textContent).toContain('Rust backend initialization timed out')
+    expect(document.body.textContent).toContain(
+      'First launch or post-refactor rebuilds can take a little longer while the Rust side starts up.'
+    )
+    expect(getButtonByText(document.body, 'Retry')).toBeInstanceOf(HTMLButtonElement)
   })
 })

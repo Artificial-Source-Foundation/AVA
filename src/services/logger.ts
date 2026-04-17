@@ -68,6 +68,7 @@ interface LoggerInitMeta {
 const FLUSH_INTERVAL_MS = 2000
 const LOG_RETENTION_DAYS = 7
 const MAX_BUFFER_ENTRIES = 1000
+const BACKEND_LOG_FILE_NAME = 'desktop-backend.log'
 
 // ============================================================================
 // State
@@ -192,6 +193,10 @@ export function getLogDirectory(): string {
   return logDirPath
 }
 
+export function getBackendLogFilePath(): string {
+  return logDirPath ? `${logDirPath}/${BACKEND_LOG_FILE_NAME}` : ''
+}
+
 /** Log a debug message */
 export function logDebug(source: string, message: string, data?: unknown): void {
   pushEntry('debug', source, message, data)
@@ -249,6 +254,16 @@ export async function readLatestLogs(lines: number): Promise<string> {
     return await invoke<string>('read_latest_logs', { path: logFilePath, lines })
   } catch {
     return '(failed to read latest logs)'
+  }
+}
+
+export async function readLatestBackendLogs(lines: number): Promise<string> {
+  const backendLogPath = getBackendLogFilePath()
+  if (!backendLogPath) return '(backend logger not initialized)'
+  try {
+    return await invoke<string>('read_latest_logs', { path: backendLogPath, lines })
+  } catch {
+    return '(failed to read backend logs)'
   }
 }
 

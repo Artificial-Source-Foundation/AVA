@@ -31,7 +31,7 @@ import {
   getAnthropicModels,
   OPENAI_COMPAT_CONFIGS,
 } from './model-fetcher-providers'
-import type { FetchedModel } from './model-fetcher-types'
+import type { FetchedModel, FetchModelsOptions } from './model-fetcher-types'
 
 // ============================================================================
 // Main Export
@@ -42,16 +42,16 @@ import type { FetchedModel } from './model-fetcher-types'
  */
 export async function fetchModels(
   provider: AnyLLMProvider,
-  options: { apiKey?: string; baseUrl?: string } = {}
+  options: FetchModelsOptions = {}
 ): Promise<FetchedModel[]> {
   const normalizedProvider = normalizeProviderId(provider) as AnyLLMProvider
 
   switch (normalizedProvider) {
     case 'openai':
-      if (options.apiKey) {
+      if (options.apiKey && options.authType !== 'oauth-token') {
         return enrichWithCatalog('openai', await fetchOpenAIModels(options.apiKey))
       }
-      // OAuth users have no API key — use the curated catalog as fallback
+      // OAuth-backed OpenAI sessions should use the curated catalog, not /v1/models.
       return catalogModelsToFetched(getModelsDevModels('openai'))
 
     case 'copilot':

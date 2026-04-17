@@ -1,3 +1,4 @@
+import { isTauri } from '@tauri-apps/api/core'
 import type { LucideProps } from 'lucide-solid'
 import { Brain, ScrollText, Terminal, X } from 'lucide-solid'
 import { type Component, For, type JSX, lazy, Show } from 'solid-js'
@@ -60,7 +61,9 @@ export const AppShell: Component = () => {
 
   return (
     <div class="h-screen flex flex-col text-[var(--text-primary)] overflow-hidden">
-      <TitleBar />
+      <Show when={isTauri()}>
+        <TitleBar />
+      </Show>
 
       <div
         class="flex-1 flex overflow-hidden"

@@ -2,13 +2,13 @@
  * Gemini Provider
  */
 
-import { GoogleLogo } from '../../../components/icons/provider-logos'
+import { GeminiLogo } from '../../../components/icons/provider-logos'
 import type { LLMProviderConfig } from '../provider-defaults'
 
 export const gemini: LLMProviderConfig = {
   id: 'gemini',
   name: 'Gemini',
-  icon: GoogleLogo,
+  icon: GeminiLogo,
   description: 'Google Gemini models with large context',
   enabled: false,
   status: 'disconnected',

@@ -7,6 +7,7 @@
 import { Loader2, RefreshCw } from 'lucide-solid'
 import { type Component, For, Show } from 'solid-js'
 import type { ProviderModel } from '../../../../config/defaults/provider-defaults'
+import { SettingsSelect } from '../../shared-settings-components'
 import { formatContextWindow } from '../providers-tab-utils'
 
 interface ModelsListSectionProps {
@@ -15,6 +16,7 @@ interface ModelsListSectionProps {
   isLoading: boolean
   error: string | null
   onRefresh: () => void
+  onSelectDefault?: (modelId: string) => void
 }
 
 export const ModelsListSection: Component<ModelsListSectionProps> = (props) => {
@@ -58,6 +60,14 @@ export const ModelsListSection: Component<ModelsListSectionProps> = (props) => {
           </span>
         </Show>
       </div>
+      <Show when={props.models.length > 0 && props.onSelectDefault}>
+        <SettingsSelect
+          value={props.defaultModel || props.models[0]?.id || ''}
+          onChange={(value) => props.onSelectDefault?.(value)}
+          options={props.models.map((model) => ({ value: model.id, label: model.name }))}
+          label="Default model"
+        />
+      </Show>
       <Show when={props.error}>
         <p class="text-[var(--settings-text-badge)] text-[var(--error)] px-1">{props.error}</p>
       </Show>

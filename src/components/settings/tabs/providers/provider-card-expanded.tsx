@@ -1,16 +1,12 @@
 /**
  * Provider Card Expanded
  *
- * Expanded configuration: OAuth, API key, base URL, test, docs, model count.
- * Port of the logic from provider-row-expanded.tsx into the card layout.
+ * Expanded configuration with auth, models, base URL, and test controls.
  */
 
-import { ExternalLink, Server, Trash2 } from 'lucide-solid'
+import { Loader2, Server, TestTube2, Trash2 } from 'lucide-solid'
 import { type Component, createEffect, createSignal, Show } from 'solid-js'
-import type {
-  LLMProviderConfig,
-  ProviderModel,
-} from '../../../../config/defaults/provider-defaults'
+import type { LLMProviderConfig } from '../../../../config/defaults/provider-defaults'
 import { removeStoredAuth } from '../../../../lib/auth-helpers'
 import {
   type DeviceCodeResponse,
@@ -18,14 +14,14 @@ import {
   startOAuthFlow,
 } from '../../../../services/auth/oauth'
 import { logError } from '../../../../services/logger'
-import { fetchModels } from '../../../../services/providers/model-fetcher'
 import type { LLMProvider } from '../../../../types/llm'
 import { DeviceCodeDialog } from '../../DeviceCodeDialog'
 import { OllamaModelBrowser } from '../../OllamaModelBrowser'
+import { SettingsInput } from '../../shared-settings-components'
 import { ProviderRowApiKeyInput } from '../provider-row-api-key-input'
 import { ProviderRowClearConfirm } from '../provider-row-clear-confirm'
 import { checkStoredOAuth, clearProviderCredentials } from '../providers-tab-helpers'
-import { getProviderDocsUrl, oauthButtonText } from '../providers-tab-utils'
+import { oauthButtonText } from '../providers-tab-utils'
 import { ModelsListSection } from './ModelsListSection'
 import { OAuthSection } from './OAuthSection'
 
@@ -34,20 +30,17 @@ interface ProviderCardExpandedProps {
   onSaveApiKey?: (key: string) => void
   onClearApiKey?: () => void
   onOAuthConnected?: () => void
-  onSetDefaultModel?: (modelId: string) => void
   onTestConnection?: () => void
-  onUpdateModels?: (models: ProviderModel[]) => void
+  onUpdateModels?: (models: LLMProviderConfig['models']) => void
   onSaveBaseUrl?: (url: string) => void
+  onSetDefaultModel?: (modelId: string) => void
 }
 
 export const ProviderCardExpanded: Component<ProviderCardExpandedProps> = (props) => {
   const [apiKey, setApiKey] = createSignal('')
   const [showKey, setShowKey] = createSignal(false)
-  const [baseUrl, setBaseUrl] = createSignal('')
-  const [isLoadingModels, setIsLoadingModels] = createSignal(false)
   const [isOAuthLoading, setIsOAuthLoading] = createSignal(false)
   const [isOAuthConnected, setIsOAuthConnected] = createSignal(false)
-  const [modelError, setModelError] = createSignal<string | null>(null)
   const [oauthError, setOauthError] = createSignal<string | null>(null)
   const [deviceCode, setDeviceCode] = createSignal<DeviceCodeResponse | null>(null)
   const [showClearConfirm, setShowClearConfirm] = createSignal(false)
@@ -55,7 +48,6 @@ export const ProviderCardExpanded: Component<ProviderCardExpandedProps> = (props
 
   createEffect(() => {
     setApiKey(props.provider.apiKey ? '••••••••••••' : '')
-    setBaseUrl(props.provider.baseUrl || '')
     setIsOAuthConnected(checkStoredOAuth(props.provider.id))
   })
 
@@ -95,40 +87,51 @@ export const ProviderCardExpanded: Component<ProviderCardExpandedProps> = (props
     }
   }
 
-  const handleRefreshModels = async () => {
-    setIsLoadingModels(true)
-    setModelError(null)
-    try {
-      const key = apiKey().includes('••••') ? props.provider.apiKey : apiKey()
-      const fetched = await fetchModels(props.provider.id as LLMProvider, {
-        apiKey: key,
-        baseUrl: props.provider.baseUrl,
-      })
-      if (fetched.length > 0) {
-        const models: ProviderModel[] = fetched.map((m, idx) => ({
-          id: m.id,
-          name: m.name,
-          contextWindow: m.contextWindow,
-          isDefault: idx === 0,
-        }))
-        props.onUpdateModels?.(models)
-      }
-    } catch (err) {
-      logError('providers', 'Failed to fetch models', err)
-      setModelError(err instanceof Error ? err.message : 'Failed to fetch models')
-    } finally {
-      setIsLoadingModels(false)
-    }
-  }
-
   const handleSaveKey = () => {
     if (apiKey() && !apiKey().includes('••••')) {
       props.onSaveApiKey?.(apiKey())
     }
   }
 
+  const [baseUrl, setBaseUrl] = createSignal(props.provider.baseUrl || '')
+  const [isTesting, setIsTesting] = createSignal(false)
+  const [isRefreshingModels, setIsRefreshingModels] = createSignal(false)
+  const [modelsError, setModelsError] = createSignal<string | null>(null)
+
+  createEffect(() => {
+    setBaseUrl(props.provider.baseUrl || '')
+  })
+
+  const handleSaveBaseUrl = () => {
+    if (baseUrl() !== (props.provider.baseUrl || '')) {
+      props.onSaveBaseUrl?.(baseUrl())
+    }
+  }
+
+  const handleTest = async () => {
+    setIsTesting(true)
+    try {
+      await props.onTestConnection?.()
+    } finally {
+      setIsTesting(false)
+    }
+  }
+
+  const handleRefreshModels = async () => {
+    setIsRefreshingModels(true)
+    setModelsError(null)
+    try {
+      // Models refresh happens via onTestConnection which updates provider state
+      await props.onTestConnection?.()
+    } catch (err) {
+      setModelsError(err instanceof Error ? err.message : 'Failed to refresh models')
+    } finally {
+      setIsRefreshingModels(false)
+    }
+  }
+
   return (
-    <div class="px-3 pb-3 space-y-3 border-t border-[var(--border-subtle)]">
+    <div class="rounded-[10px] border border-[var(--border-subtle)] bg-[var(--surface-sunken)]/40 px-3 py-3 space-y-3">
       <Show when={deviceCode()}>
         <DeviceCodeDialog
           provider={props.provider.id as LLMProvider}
@@ -155,7 +158,7 @@ export const ProviderCardExpanded: Component<ProviderCardExpandedProps> = (props
       </Show>
 
       {/* API Key input */}
-      <div class="pt-2">
+      <div>
         <ProviderRowApiKeyInput
           providerName={props.provider.name}
           hasStoredApiKey={!!props.provider.apiKey}
@@ -168,19 +171,32 @@ export const ProviderCardExpanded: Component<ProviderCardExpandedProps> = (props
         />
       </div>
 
-      {/* Base URL for local providers */}
-      <Show when={props.provider.id === 'ollama' || props.provider.id === 'custom'}>
-        <input
-          type="url"
-          value={baseUrl()}
-          onInput={(e) => setBaseUrl(e.currentTarget.value)}
-          onBlur={() => props.onSaveBaseUrl?.(baseUrl())}
-          placeholder="http://localhost:11434"
-          class="w-full px-3 py-2 bg-[var(--input-background)] text-xs text-[var(--text-primary)] placeholder:text-[var(--input-placeholder)] border border-[var(--input-border)] rounded-[var(--radius-md)] focus:outline-none focus:border-[var(--input-border-focus)] transition-colors"
-        />
+      {/* Base URL input (for providers that support it) */}
+      <Show
+        when={
+          props.provider.id === 'ollama' ||
+          props.provider.id === 'openrouter' ||
+          props.provider.baseUrl
+        }
+      >
+        <div class="space-y-1">
+          <SettingsInput
+            value={baseUrl()}
+            onInput={(v) => setBaseUrl(v)}
+            placeholder="https://api.example.com/v1"
+            label="Base URL"
+          />
+          <button
+            type="button"
+            onClick={handleSaveBaseUrl}
+            disabled={baseUrl() === (props.provider.baseUrl || '')}
+            class="text-[var(--settings-text-badge)] text-[var(--accent)] hover:text-[var(--accent-hover)] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            Save Base URL
+          </button>
+        </div>
       </Show>
 
-      {/* Ollama model browser */}
       <Show when={props.provider.id === 'ollama'}>
         <button
           type="button"
@@ -193,20 +209,37 @@ export const ProviderCardExpanded: Component<ProviderCardExpandedProps> = (props
         <OllamaModelBrowser
           open={showOllamaBrowser()}
           onClose={() => setShowOllamaBrowser(false)}
-          baseUrl={props.provider.baseUrl}
+          baseUrl={baseUrl() || props.provider.baseUrl}
         />
       </Show>
 
-      {/* Models list */}
-      <Show when={props.provider.models.length > 0}>
+      {/* Models list with refresh */}
+      <Show when={props.provider.models.length > 0 || hasAnyCredentials()}>
         <ModelsListSection
           models={props.provider.models}
           defaultModel={props.provider.defaultModel}
-          isLoading={isLoadingModels()}
-          error={modelError()}
+          isLoading={isRefreshingModels()}
+          error={modelsError()}
           onRefresh={handleRefreshModels}
+          onSelectDefault={props.onSetDefaultModel}
         />
       </Show>
+
+      {/* Test connection button */}
+      <div class="flex items-center justify-between pt-1">
+        <button
+          type="button"
+          onClick={handleTest}
+          disabled={isTesting() || !hasAnyCredentials()}
+          class="flex items-center gap-1.5 px-2.5 py-1.5 text-[var(--settings-text-button)] bg-[var(--surface-raised)] hover:bg-[var(--alpha-white-5)] disabled:opacity-50 disabled:cursor-not-allowed rounded-[var(--radius-md)] transition-colors"
+          title="Test connection and refresh models"
+        >
+          <Show when={isTesting()} fallback={<TestTube2 class="w-3.5 h-3.5" />}>
+            <Loader2 class="w-3.5 h-3.5 animate-spin" />
+          </Show>
+          Test Connection
+        </button>
+      </div>
 
       {/* Clear confirm */}
       <Show when={showClearConfirm()}>
@@ -219,39 +252,18 @@ export const ProviderCardExpanded: Component<ProviderCardExpandedProps> = (props
         />
       </Show>
 
-      {/* Footer actions */}
-      <div class="flex items-center justify-between pt-1">
-        <div class="flex items-center gap-3">
-          <Show when={props.provider.apiKey}>
-            <button
-              type="button"
-              onClick={() => props.onTestConnection?.()}
-              class="text-[var(--settings-text-badge)] text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors"
-            >
-              Test connection
-            </button>
-          </Show>
-          <Show when={hasAnyCredentials() && !showClearConfirm()}>
-            <button
-              type="button"
-              onClick={() => setShowClearConfirm(true)}
-              class="flex items-center gap-1 text-[var(--settings-text-badge)] text-[var(--text-muted)] hover:text-[var(--error)] transition-colors"
-              title="Clear all credentials"
-            >
-              <Trash2 class="w-2.5 h-2.5" />
-              Clear
-            </button>
-          </Show>
-        </div>
-        <a
-          href={getProviderDocsUrl(props.provider.id)}
-          target="_blank"
-          rel="noopener noreferrer"
-          class="flex items-center gap-1 text-[var(--settings-text-badge)] text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors"
-        >
-          Docs
-          <ExternalLink class="w-2.5 h-2.5" />
-        </a>
+      <div class="flex items-center justify-end pt-1">
+        <Show when={hasAnyCredentials() && !showClearConfirm()}>
+          <button
+            type="button"
+            onClick={() => setShowClearConfirm(true)}
+            class="flex items-center gap-1 text-[var(--settings-text-badge)] text-[var(--text-muted)] hover:text-[var(--error)] transition-colors"
+            title="Clear all credentials"
+          >
+            <Trash2 class="w-2.5 h-2.5" />
+            {isOAuthConnected() ? 'Log out' : 'Clear'}
+          </button>
+        </Show>
       </div>
 
       <Show when={props.provider.status === 'error' && props.provider.error}>

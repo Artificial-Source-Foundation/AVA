@@ -12,6 +12,7 @@ import {
   type OllamaModel,
   pullOllamaModel,
 } from './ollama/ollama-helpers'
+import { useSettingsDialogEscape } from './settings-dialog-utils'
 
 interface OllamaModelBrowserProps {
   open: boolean
@@ -28,6 +29,13 @@ export const OllamaModelBrowser: Component<OllamaModelBrowserProps> = (props) =>
   const [pullStatus, setPullStatus] = createSignal('')
   const [deleting, setDeleting] = createSignal<string | null>(null)
   const [confirmDelete, setConfirmDelete] = createSignal<string | null>(null)
+  let dialogRef: HTMLDivElement | undefined
+
+  useSettingsDialogEscape({
+    onEscape: props.onClose,
+    isOpen: () => props.open,
+    getDialogElement: () => dialogRef,
+  })
 
   const baseUrl = () => props.baseUrl || 'http://localhost:11434'
 
@@ -85,9 +93,16 @@ export const OllamaModelBrowser: Component<OllamaModelBrowserProps> = (props) =>
 
   return (
     <Show when={props.open}>
+      {/* biome-ignore lint/a11y/noStaticElementInteractions: modal wrapper needs Escape handling */}
       <div
-        class="fixed inset-0 z-50 flex items-center justify-center"
-        style={{ background: 'var(--modal-overlay)' }}
+        ref={dialogRef}
+        data-settings-nested-dialog="true"
+        class="fixed inset-0 z-50 flex items-center justify-center outline-none"
+        style={{ background: 'rgba(0,0,0,0.25)' }}
+        tabindex="-1"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Ollama Local Models"
       >
         <div
           class="p-5 max-w-lg w-full space-y-3 max-h-[80vh] flex flex-col"

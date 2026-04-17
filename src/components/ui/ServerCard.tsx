@@ -74,7 +74,11 @@ export const ServerCard: Component<ServerCardProps> = (props) => {
         </div>
 
         <div class="flex items-center gap-2">
-          <Toggle checked={props.enabled} onChange={props.onToggle} />
+          <Toggle
+            checked={props.enabled}
+            onChange={props.onToggle}
+            aria-label={`Enable ${props.name}`}
+          />
           <Show when={props.onDelete}>
             <button
               type="button"

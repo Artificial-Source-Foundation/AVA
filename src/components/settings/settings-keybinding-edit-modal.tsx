@@ -1,5 +1,6 @@
 import { X } from 'lucide-solid'
 import { type Component, createSignal, For, Show } from 'solid-js'
+import { useSettingsDialogEscape } from './settings-dialog-utils'
 import { FieldGroup } from './settings-field-group'
 import type { Keybinding } from './tabs/KeybindingsTab'
 
@@ -13,6 +14,13 @@ export const KeybindingEditModal: Component<KeybindingEditModalProps> = (props) 
   // eslint-disable-next-line solid/reactivity -- initial value for editing
   const [keys, setKeys] = createSignal<string[]>([...props.keybinding.keys])
   const [recording, setRecording] = createSignal(false)
+  let dialogRef: HTMLDivElement | undefined
+
+  useSettingsDialogEscape({
+    onEscape: props.onClose,
+    isOpen: () => true,
+    getDialogElement: () => dialogRef,
+  })
 
   const startRecording = () => {
     setRecording(true)
@@ -77,11 +85,19 @@ export const KeybindingEditModal: Component<KeybindingEditModalProps> = (props) 
 
   return (
     <div
+      ref={dialogRef}
       role="dialog"
-      class="fixed inset-0 flex items-center justify-center z-[60] p-4"
+      data-settings-nested-dialog="true"
+      class="fixed inset-0 flex items-center justify-center z-[60] p-4 outline-none"
       style={{ background: 'var(--modal-overlay)' }}
+      tabindex="-1"
       onClick={(e) => e.target === e.currentTarget && props.onClose()}
-      onKeyDown={(e) => e.key === 'Escape' && props.onClose()}
+      onKeyDown={(e) => {
+        if (e.key !== 'Escape') return
+        e.preventDefault()
+        e.stopPropagation()
+        props.onClose()
+      }}
     >
       <div
         style={{

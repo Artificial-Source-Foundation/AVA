@@ -57,7 +57,11 @@ export const ProviderCard: Component<ProviderCardProps> = (props) => {
             <div class="flex items-center gap-1">{props.badges}</div>
           </Show>
         </div>
-        <Toggle checked={props.enabled} onChange={props.onToggle} />
+        <Toggle
+          checked={props.enabled}
+          onChange={props.onToggle}
+          aria-label={`Enable ${props.name}`}
+        />
       </div>
 
       {/* Status text */}

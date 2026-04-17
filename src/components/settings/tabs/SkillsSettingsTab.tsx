@@ -42,13 +42,18 @@ const SKILL_SOURCES = [
 // Toggle
 // ============================================================================
 
-const Toggle: Component<{ checked: boolean; onChange: () => void }> = (props) => (
+const Toggle: Component<{ checked: boolean; onChange: () => void; ariaLabel: string }> = (
+  props
+) => (
   <button
     type="button"
     onClick={(e) => {
       e.stopPropagation()
       props.onChange()
     }}
+    role="switch"
+    aria-checked={props.checked}
+    aria-label={props.ariaLabel}
     style={{
       width: '44px',
       height: '24px',
@@ -60,7 +65,6 @@ const Toggle: Component<{ checked: boolean; onChange: () => void }> = (props) =>
       'flex-shrink': '0',
       transition: 'background 0.15s',
     }}
-    aria-label="Toggle"
   >
     <span
       style={{
@@ -101,6 +105,9 @@ export const SkillsSettingsTab: Component = () => {
   )
   const pureCustom = createMemo(() =>
     (settings().customSkills ?? []).filter((s) => !BUILT_IN_SKILLS.some((b) => b.id === s.id))
+  )
+  const hiddenBuiltIns = createMemo(() =>
+    BUILT_IN_SKILLS.filter((skill) => hiddenSet().has(skill.id) && !customMap().has(skill.id))
   )
 
   const allSkills = createMemo(() => [...overrides(), ...visibleBuiltIn(), ...pureCustom()])
@@ -154,6 +161,23 @@ export const SkillsSettingsTab: Component = () => {
     const existing = settings().customSkills ?? []
     updateSettings({ customSkills: existing.filter((s) => s.id !== id) })
     updateSettings({ enabledSkills: settings().enabledSkills.filter((s) => s !== id) })
+  }
+
+  const restoreHiddenBuiltIn = (id: string) => {
+    updateSettings({
+      hiddenBuiltInSkills: (settings().hiddenBuiltInSkills ?? []).filter(
+        (hiddenId) => hiddenId !== id
+      ),
+    })
+  }
+
+  const restoreAllHiddenBuiltIns = () => {
+    const restoreIds = new Set(hiddenBuiltIns().map((skill) => skill.id))
+    updateSettings({
+      hiddenBuiltInSkills: (settings().hiddenBuiltInSkills ?? []).filter(
+        (hiddenId) => !restoreIds.has(hiddenId)
+      ),
+    })
   }
 
   return (
@@ -281,6 +305,121 @@ export const SkillsSettingsTab: Component = () => {
               setEditingSkill(null)
             }}
           />
+        </Show>
+
+        <Show when={hiddenBuiltIns().length > 0}>
+          <div
+            style={{
+              padding: '12px',
+              'border-radius': '8px',
+              background: '#0A84FF08',
+              border: '1px solid #0A84FF15',
+              display: 'flex',
+              'flex-direction': 'column',
+              gap: '10px',
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                'align-items': 'center',
+                'justify-content': 'space-between',
+                gap: '12px',
+              }}
+            >
+              <div style={{ display: 'flex', 'flex-direction': 'column', gap: '2px' }}>
+                <span
+                  style={{
+                    'font-family': 'Geist, sans-serif',
+                    'font-size': '12px',
+                    'font-weight': '500',
+                    color: '#F5F5F7',
+                  }}
+                >
+                  Hidden built-in skills
+                </span>
+                <span
+                  style={{
+                    'font-family': 'Geist, sans-serif',
+                    'font-size': '11px',
+                    color: '#636366',
+                  }}
+                >
+                  Restore any built-ins that were migrated into a hidden state.
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={restoreAllHiddenBuiltIns}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  color: '#0A84FF',
+                  'font-family': 'Geist, sans-serif',
+                  'font-size': '11px',
+                  'font-weight': '500',
+                  padding: '0',
+                  'flex-shrink': '0',
+                }}
+              >
+                Restore all
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', 'flex-direction': 'column', gap: '6px' }}>
+              <For each={hiddenBuiltIns()}>
+                {(skill) => (
+                  <div
+                    style={{
+                      display: 'flex',
+                      'align-items': 'center',
+                      'justify-content': 'space-between',
+                      gap: '12px',
+                    }}
+                  >
+                    <div style={{ display: 'flex', 'flex-direction': 'column', gap: '2px' }}>
+                      <span
+                        style={{
+                          'font-family': 'Geist, sans-serif',
+                          'font-size': '12px',
+                          color: '#F5F5F7',
+                        }}
+                      >
+                        {skill.name}
+                      </span>
+                      <span
+                        style={{
+                          'font-family': 'Geist, sans-serif',
+                          'font-size': '11px',
+                          color: '#636366',
+                        }}
+                      >
+                        {skill.description}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => restoreHiddenBuiltIn(skill.id)}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        cursor: 'pointer',
+                        color: '#0A84FF',
+                        'font-family': 'Geist, sans-serif',
+                        'font-size': '11px',
+                        'font-weight': '500',
+                        padding: '0',
+                        'flex-shrink': '0',
+                      }}
+                    >
+                      Restore
+                    </button>
+                  </div>
+                )}
+              </For>
+            </div>
+          </div>
         </Show>
 
         {/* Skill rows */}
@@ -480,7 +619,11 @@ export const SkillsSettingsTab: Component = () => {
                           Delete
                         </button>
                       </Show>
-                      <Toggle checked={isEnabled()} onChange={() => toggleSkill(skill.id)} />
+                      <Toggle
+                        checked={isEnabled()}
+                        onChange={() => toggleSkill(skill.id)}
+                        ariaLabel={`Enable ${skillName()} skill`}
+                      />
                     </div>
                   </div>
                 )

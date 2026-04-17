@@ -11,6 +11,10 @@ vi.mock('./tabs/AdvancedTab', () => ({
   AdvancedTab: () => null,
 }))
 
+vi.mock('./tabs/AgentsTab', () => ({
+  AgentsTab: () => null,
+}))
+
 vi.mock('./tabs/AppearanceTab', () => ({
   AppearanceTab: () => null,
 }))
@@ -33,10 +37,6 @@ vi.mock('./tabs/PluginsTab', () => ({
 
 vi.mock('./tabs/SkillsSettingsTab', () => ({
   SkillsSettingsTab: () => null,
-}))
-
-vi.mock('./tabs/UsageTab', () => ({
-  UsageTab: () => null,
 }))
 
 vi.mock('./tabs/providers/providers-tab', () => ({

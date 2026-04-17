@@ -1,8 +1,13 @@
 /**
- * Plugins Tab — Pencil design revamp
+ * Plugins Tab — Partial migration to shared components
  *
- * Single card with header (icon + title + description + Create Plugin button),
- * search bar, status line, and plugin rows with Installed/Install badges.
+ * Key sections migrated to theme tokens:
+ * - Page title using SettingsPageTitle
+ * - Card headers using SettingsActionHeader
+ * - Search input using SettingsInput
+ * - Status/error text using theme colors
+ *
+ * Plugin rows remain specialized due to complex interactions.
  */
 
 import { Package, Plus, Search } from 'lucide-solid'
@@ -27,7 +32,14 @@ import {
 import { PluginDetailPanel } from '../../plugins'
 import { PluginWizard } from '../../plugins/PluginWizard'
 import { PublishDialog } from '../../plugins/PublishDialog'
-import { SETTINGS_CARD_GAP } from '../settings-constants'
+import {
+  SETTINGS_CARD_GAP,
+  SettingsActionHeader,
+  SettingsButton,
+  SettingsCardSimple,
+  SettingsInput,
+  SettingsPageTitle,
+} from '../shared-settings-components'
 import {
   type DevModeStatus,
   formatSyncTime,
@@ -186,125 +198,38 @@ export const PluginsTab: Component = () => {
   return (
     <div style={{ display: 'flex', 'flex-direction': 'column', gap: SETTINGS_CARD_GAP }}>
       {/* Page title */}
-      <h1
-        style={{
-          'font-family': 'Geist, sans-serif',
-          'font-size': '22px',
-          'font-weight': '600',
-          color: '#F5F5F7',
-        }}
-      >
-        Plugins
-      </h1>
+      <SettingsPageTitle>Plugins</SettingsPageTitle>
 
       {/* Plugins Card */}
-      <div
-        style={{
-          background: '#111114',
-          border: '1px solid #ffffff08',
-          'border-radius': '12px',
-          padding: '20px',
-          display: 'flex',
-          'flex-direction': 'column',
-          gap: '16px',
-        }}
-      >
+      <SettingsCardSimple>
         {/* Card header */}
-        <div
-          style={{
-            display: 'flex',
-            'align-items': 'center',
-            'justify-content': 'space-between',
-          }}
-        >
-          <div style={{ display: 'flex', 'align-items': 'center', gap: '10px' }}>
-            <Package size={16} style={{ color: '#C8C8CC' }} />
-            <div style={{ display: 'flex', 'flex-direction': 'column', gap: '2px' }}>
-              <span
-                style={{
-                  'font-family': 'Geist, sans-serif',
-                  'font-size': '14px',
-                  'font-weight': '500',
-                  color: '#F5F5F7',
-                }}
-              >
-                Plugins
-              </span>
-              <span
-                style={{
-                  'font-family': 'Geist, sans-serif',
-                  'font-size': '12px',
-                  color: '#48484A',
-                }}
-              >
-                Extend AVA with community and custom plugins
-              </span>
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={() => setShowWizard(true)}
-            style={{
-              display: 'flex',
-              'align-items': 'center',
-              gap: '6px',
-              padding: '6px 12px',
-              background: '#0A84FF',
-              'border-radius': '8px',
-              border: 'none',
-              cursor: 'pointer',
-            }}
-          >
-            <Plus size={12} style={{ color: '#FFFFFF' }} />
-            <span
-              style={{
-                'font-family': 'Geist, sans-serif',
-                'font-size': '12px',
-                'font-weight': '500',
-                color: '#FFFFFF',
-              }}
-            >
+        <SettingsActionHeader
+          icon={Package}
+          title="Plugins"
+          description="Extend AVA with community and custom plugins"
+          action={
+            <SettingsButton variant="primary" onClick={() => setShowWizard(true)} icon={Plus}>
               Create Plugin
-            </span>
-          </button>
-        </div>
+            </SettingsButton>
+          }
+        />
 
         {/* Search bar */}
-        <div
-          style={{
-            display: 'flex',
-            'align-items': 'center',
-            gap: '8px',
-            padding: '8px 12px',
-            background: '#ffffff08',
-            border: '1px solid #ffffff0a',
-            'border-radius': '8px',
-          }}
-        >
-          <Search size={12} style={{ color: '#48484A', 'flex-shrink': '0' }} />
-          <input
-            type="text"
-            placeholder="Search plugins..."
-            value={plugins.search()}
-            onInput={(e) => plugins.setSearch(e.currentTarget.value)}
-            style={{
-              background: 'transparent',
-              border: 'none',
-              outline: 'none',
-              'font-family': 'Geist, sans-serif',
-              'font-size': '12px',
-              color: '#F5F5F7',
-              width: '100%',
-            }}
-          />
-        </div>
+        <SettingsInput
+          type="search"
+          placeholder="Search plugins..."
+          value={plugins.search()}
+          onInput={(v) => plugins.setSearch(v)}
+          icon={Search}
+          ariaLabel="Search plugins"
+        />
 
         {/* Status line */}
         <span
           style={{
-            'font-family': 'Geist, sans-serif',
+            'font-family': 'var(--font-sans)',
             'font-size': '11px',
-            color: '#48484A',
+            color: 'var(--text-muted)',
           }}
         >
           Status: {plugins.catalogStatus()} &middot; Last sync:{' '}
@@ -314,9 +239,9 @@ export const PluginsTab: Component = () => {
         <Show when={plugins.catalogError()}>
           <span
             style={{
-              'font-family': 'Geist, sans-serif',
+              'font-family': 'var(--font-sans)',
               'font-size': '11px',
-              color: '#FF453A',
+              color: 'var(--error)',
             }}
           >
             {plugins.catalogError()}
@@ -470,7 +395,7 @@ export const PluginsTab: Component = () => {
             }}
           </For>
         </Show>
-      </div>
+      </SettingsCardSimple>
 
       {/* Plugin Details card */}
       <Show when={selectedPlugin()}>

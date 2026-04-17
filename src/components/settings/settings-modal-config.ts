@@ -1,5 +1,5 @@
 import {
-  BarChart3,
+  Bot,
   Code2,
   Cpu,
   Monitor,
@@ -16,13 +16,13 @@ export type SettingsTab =
   | 'general'
   | 'appearance'
   | 'providers'
+  | 'agents'
   | 'advanced'
   | 'permissions-trust'
   | 'mcp'
   | 'plugins'
   | 'skills'
   | 'llm'
-  | 'usage'
 
 export interface TabConfig {
   id: SettingsTab
@@ -65,13 +65,20 @@ export const tabGroups: TabGroup[] = [
         id: 'providers',
         label: 'Providers',
         icon: Zap,
-        keywords: ['api', 'key', 'openai', 'anthropic', 'gemini', 'connection'],
-      },
-      {
-        id: 'usage',
-        label: 'Usage',
-        icon: BarChart3,
-        keywords: ['usage', 'quota', 'subscription', 'credits', 'plan', 'limit', 'balance'],
+        keywords: [
+          'api',
+          'key',
+          'oauth',
+          'auth',
+          'credential',
+          'credentials',
+          'token',
+          'sign in',
+          'openai',
+          'anthropic',
+          'gemini',
+          'connection',
+        ],
       },
       {
         id: 'llm',
@@ -97,6 +104,21 @@ export const tabGroups: TabGroup[] = [
   {
     label: 'Tools',
     tabs: [
+      {
+        id: 'agents',
+        label: 'Agents',
+        icon: Bot,
+        keywords: [
+          'agent',
+          'agents',
+          'preset',
+          'presets',
+          'custom-agent',
+          'import',
+          'export',
+          'toolset',
+        ],
+      },
       {
         id: 'skills',
         label: 'Skills & Rules',
@@ -168,15 +190,13 @@ export const tabGroups: TabGroup[] = [
         icon: Code2,
         keywords: [
           'advanced',
-          'agent',
-          'preset',
-          'capability',
-          'assistant',
-          'automation',
           'debug',
           'logs',
+          'diagnostics',
           'devtools',
           'developer',
+          'runtime',
+          'about',
           'version',
           'license',
           'credits',
@@ -208,32 +228,22 @@ export interface SettingsSearchEntry {
 
 export const settingsSearchIndex: SettingsSearchEntry[] = [
   // General
-  { label: 'Show memory panel on start', tab: 'general', tabLabel: 'General' },
-  { label: 'Show agent activity panel', tab: 'general', tabLabel: 'General' },
-  { label: 'Compact message layout', tab: 'general', tabLabel: 'General' },
+  { label: 'Show memory panel', tab: 'general', tabLabel: 'General' },
+  { label: 'Show activity panel', tab: 'general', tabLabel: 'General' },
+  { label: 'Compact layout', tab: 'general', tabLabel: 'General' },
   { label: 'Show token count', tab: 'general', tabLabel: 'General' },
-  { label: 'Show model in title bar', tab: 'general', tabLabel: 'General' },
   {
-    label: 'Auto-fix lint errors',
-    description: 'Run linter after file changes',
-    tab: 'general',
-    tabLabel: 'General',
-  },
-  {
-    label: 'Git integration',
+    label: 'Enable git integration',
     description: 'Auto-commit, commit prefix',
     tab: 'general',
     tabLabel: 'General',
   },
-  { label: 'Auto-commit AI edits', tab: 'general', tabLabel: 'General' },
+  { label: 'Auto-commit', tab: 'general', tabLabel: 'General' },
   { label: 'Commit prefix', tab: 'general', tabLabel: 'General' },
-  { label: 'Watch for AI comments', tab: 'general', tabLabel: 'General' },
-  { label: 'Clipboard watcher', tab: 'general', tabLabel: 'General' },
-  { label: 'Export settings', tab: 'general', tabLabel: 'General' },
-  { label: 'Import settings', tab: 'general', tabLabel: 'General' },
-  { label: 'Clear all data', tab: 'general', tabLabel: 'General' },
+  { label: 'Export Data', tab: 'general', tabLabel: 'General' },
+  { label: 'Import Data', tab: 'general', tabLabel: 'General' },
   {
-    label: 'Onboarding guide',
+    label: 'Reopen onboarding guide',
     description: 'Reopen the in-app quick start flow',
     tab: 'general',
     tabLabel: 'General',
@@ -242,20 +252,20 @@ export const settingsSearchIndex: SettingsSearchEntry[] = [
   // Appearance
   {
     label: 'Color mode',
-    description: 'Dark, light theme variant',
+    description: 'Dark, light, or system theme',
     tab: 'appearance',
     tabLabel: 'Appearance',
   },
   { label: 'Theme presets', tab: 'appearance', tabLabel: 'Appearance' },
   { label: 'Accent color', tab: 'appearance', tabLabel: 'Appearance' },
   {
-    label: 'Thinking display',
-    description: 'Bubble, preview, hidden',
+    label: 'Show thinking',
+    description: 'Show assistant reasoning previews in chat',
     tab: 'appearance',
     tabLabel: 'Appearance',
   },
   {
-    label: 'Agent activity display',
+    label: 'Activity display',
     description: 'Collapsed, expanded, hidden',
     tab: 'appearance',
     tabLabel: 'Appearance',
@@ -279,9 +289,10 @@ export const settingsSearchIndex: SettingsSearchEntry[] = [
     tabLabel: 'Appearance',
   },
   { label: 'Font size', tab: 'appearance', tabLabel: 'Appearance' },
+  { label: 'UI font', tab: 'appearance', tabLabel: 'Appearance' },
   {
-    label: 'Font family',
-    description: 'UI and monospace fonts',
+    label: 'Monospace font',
+    description: 'Font for code blocks and terminal',
     tab: 'appearance',
     tabLabel: 'Appearance',
   },
@@ -332,9 +343,9 @@ export const settingsSearchIndex: SettingsSearchEntry[] = [
     tab: 'general',
     tabLabel: 'General',
   },
-  { label: 'Desktop notifications', tab: 'general', tabLabel: 'General' },
+  { label: 'Desktop notification on completion', tab: 'general', tabLabel: 'General' },
   { label: 'Sound on completion', tab: 'general', tabLabel: 'General' },
-  { label: 'Notification volume', tab: 'general', tabLabel: 'General' },
+  { label: 'Volume', tab: 'general', tabLabel: 'General' },
 
   // General shortcuts
   {
@@ -348,31 +359,45 @@ export const settingsSearchIndex: SettingsSearchEntry[] = [
 
   // Skills
   {
+    label: 'Agents',
+    description: 'Built-in and custom agent presets',
+    tab: 'agents',
+    tabLabel: 'Agents',
+  },
+  {
+    label: 'Import agents',
+    description: 'Load agent presets from JSON',
+    tab: 'agents',
+    tabLabel: 'Agents',
+  },
+  {
+    label: 'Export agents',
+    description: 'Save agent presets to JSON',
+    tab: 'agents',
+    tabLabel: 'Agents',
+  },
+
+  // Skills
+  {
     label: 'Skills',
     description: 'Context-aware instruction modules',
     tab: 'skills',
     tabLabel: 'Skills & Rules',
   },
   {
-    label: 'Built-in skills',
-    description: 'Language-specific prompt modules',
+    label: 'Active Skills',
+    description: 'Toggle built-in and custom skills',
     tab: 'skills',
     tabLabel: 'Skills & Rules',
   },
   {
-    label: 'Custom skills',
-    description: 'User-defined instruction modules',
+    label: 'Create Skill',
+    description: 'Add a new custom skill',
     tab: 'skills',
     tabLabel: 'Skills & Rules',
   },
   {
-    label: 'Skill file globs',
-    description: 'File patterns that activate skills',
-    tab: 'skills',
-    tabLabel: 'Skills & Rules',
-  },
-  {
-    label: 'Skill sources',
+    label: 'Skill Sources',
     description: 'Directories where skills are loaded from',
     tab: 'skills',
     tabLabel: 'Skills & Rules',
@@ -384,20 +409,8 @@ export const settingsSearchIndex: SettingsSearchEntry[] = [
     tabLabel: 'Skills & Rules',
   },
   {
-    label: 'Custom commands',
+    label: 'Custom Commands',
     description: '/slash command templates and parameters',
-    tab: 'skills',
-    tabLabel: 'Skills & Rules',
-  },
-  {
-    label: 'Allowed tools for commands',
-    description: 'Restrict tool access per command',
-    tab: 'skills',
-    tabLabel: 'Skills & Rules',
-  },
-  {
-    label: 'Command mode',
-    description: 'Normal vs plan mode',
     tab: 'skills',
     tabLabel: 'Skills & Rules',
   },
@@ -416,8 +429,14 @@ export const settingsSearchIndex: SettingsSearchEntry[] = [
     tabLabel: 'Providers',
   },
   {
-    label: 'Provider connection test',
+    label: 'Test connection',
     description: 'Validate provider credentials and available models',
+    tab: 'providers',
+    tabLabel: 'Providers',
+  },
+  {
+    label: 'OAuth sign-in',
+    description: 'Connect supported providers without an API key',
     tab: 'providers',
     tabLabel: 'Providers',
   },
@@ -473,12 +492,6 @@ export const settingsSearchIndex: SettingsSearchEntry[] = [
     tabLabel: 'Generation',
   },
   {
-    label: 'Editor model',
-    description: 'Model for file edits and code generation',
-    tab: 'llm',
-    tabLabel: 'Generation',
-  },
-  {
     label: 'Max turns',
     description: 'Maximum turns per agent run',
     tab: 'llm',
@@ -523,35 +536,11 @@ export const settingsSearchIndex: SettingsSearchEntry[] = [
     tab: 'permissions-trust',
     tabLabel: 'Permissions & Trust',
   },
-  { label: 'Always-approved tools', tab: 'permissions-trust', tabLabel: 'Permissions & Trust' },
   {
     label: 'Trusted folders',
     description: 'Allowed and denied directories',
     tab: 'permissions-trust',
     tabLabel: 'Permissions & Trust',
-  },
-  { label: 'Allowed directories', tab: 'permissions-trust', tabLabel: 'Permissions & Trust' },
-  { label: 'Denied directories', tab: 'permissions-trust', tabLabel: 'Permissions & Trust' },
-
-  // Usage
-  {
-    label: 'Subscription usage',
-    description: 'Plan tiers, quotas, credits',
-    tab: 'usage',
-    tabLabel: 'Usage',
-  },
-  { label: 'OpenAI quota', description: 'ChatGPT Pro/Plus usage', tab: 'usage', tabLabel: 'Usage' },
-  {
-    label: 'Copilot quota',
-    description: 'GitHub Copilot premium requests',
-    tab: 'usage',
-    tabLabel: 'Usage',
-  },
-  {
-    label: 'OpenRouter credits',
-    description: 'Balance remaining',
-    tab: 'usage',
-    tabLabel: 'Usage',
   },
 
   // Advanced
@@ -574,8 +563,8 @@ export const settingsSearchIndex: SettingsSearchEntry[] = [
     tabLabel: 'Advanced',
   },
   {
-    label: 'File logs',
-    description: 'Persistent logs across sessions',
+    label: 'Backend log file',
+    description: 'Persistent backend log path',
     tab: 'advanced',
     tabLabel: 'Advanced',
   },

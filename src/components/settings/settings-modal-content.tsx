@@ -3,6 +3,7 @@ import type { AppSettings } from '../../stores/settings'
 import { GeneralSection } from './settings-general-section'
 import type { SettingsTab } from './settings-modal-config'
 import { AdvancedTab } from './tabs/AdvancedTab'
+import { AgentsTab } from './tabs/AgentsTab'
 import { AppearanceTab } from './tabs/AppearanceTab'
 import type { Keybinding } from './tabs/KeybindingsTab'
 import { LLMTab } from './tabs/LLMTab'
@@ -11,7 +12,6 @@ import { PermissionsAndTrustTab } from './tabs/PermissionsAndTrustTab'
 import { PluginsTab } from './tabs/PluginsTab'
 import { ProvidersTab } from './tabs/providers/providers-tab'
 import { SkillsSettingsTab } from './tabs/SkillsSettingsTab'
-import { UsageTab } from './tabs/UsageTab'
 
 interface SettingsModalContentProps {
   activeTab: () => SettingsTab
@@ -46,6 +46,8 @@ export const SettingsModalContent: Component<SettingsModalContentProps> = (props
         )
       case 'appearance':
         return <AppearanceTab />
+      case 'agents':
+        return <AgentsTab />
       case 'providers':
         return (
           <ProvidersTab
@@ -82,8 +84,6 @@ export const SettingsModalContent: Component<SettingsModalContentProps> = (props
             onSaveBaseUrl={(id, url) => props.onUpdateProvider(id, { baseUrl: url || undefined })}
           />
         )
-      case 'usage':
-        return <UsageTab />
       case 'permissions-trust':
         return <PermissionsAndTrustTab />
       case 'advanced':

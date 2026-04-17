@@ -9,6 +9,7 @@ import { Portal } from 'solid-js/web'
 import { THEME_PRESETS, type ThemePreset } from '../../../../config/theme-presets'
 import type { AccentColor, DarkStyle } from '../../../../stores/settings'
 import { isDarkMode, useSettings } from '../../../../stores/settings'
+import { useSettingsDialogEscape } from '../../settings-dialog-utils'
 import { SectionHeader, segmentedBtn } from './appearance-utils'
 
 // ---------------------------------------------------------------------------
@@ -230,6 +231,18 @@ interface ThemeBrowserModalProps {
 const ThemeBrowserModal: Component<ThemeBrowserModalProps> = (props) => {
   const { previewAppearance, restoreAppearance } = useSettings()
   const [search, setSearch] = createSignal('')
+  let dialogRef: HTMLDivElement | undefined
+
+  const handleClose = () => {
+    restoreAppearance()
+    props.onClose()
+  }
+
+  useSettingsDialogEscape({
+    onEscape: handleClose,
+    isOpen: () => props.open,
+    getDialogElement: () => dialogRef,
+  })
 
   const builtInThemes = createMemo(() => {
     const q = search().toLowerCase().trim()
@@ -262,17 +275,21 @@ const ThemeBrowserModal: Component<ThemeBrowserModalProps> = (props) => {
   return (
     <Show when={props.open}>
       <Portal>
+        {/* biome-ignore lint/a11y/noStaticElementInteractions: modal wrapper needs Escape handling */}
         <div
-          class="fixed inset-0 z-50 flex items-center justify-center"
+          ref={dialogRef}
+          data-settings-nested-dialog="true"
+          class="fixed inset-0 z-50 flex items-center justify-center outline-none"
           style={{ background: 'rgba(0, 0, 0, 0.6)' }}
+          tabindex="-1"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Theme Browser"
         >
           <button
             type="button"
             class="absolute inset-0 h-full w-full border-none bg-transparent p-0"
-            onClick={() => {
-              restoreAppearance()
-              props.onClose()
-            }}
+            onClick={handleClose}
             aria-label="Close theme browser"
           />
           <div
@@ -301,10 +318,7 @@ const ThemeBrowserModal: Component<ThemeBrowserModalProps> = (props) => {
               <span class="text-base font-semibold text-[var(--text-primary)]">Theme Browser</span>
               <button
                 type="button"
-                onClick={() => {
-                  restoreAppearance()
-                  props.onClose()
-                }}
+                onClick={handleClose}
                 style={{
                   background: 'none',
                   border: 'none',

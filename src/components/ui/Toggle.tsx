@@ -21,6 +21,14 @@ export interface ToggleProps {
   disabled?: boolean
   /** Additional CSS classes */
   class?: string
+  /** Optional id forwarded to the switch root */
+  id?: string
+  /** Accessible name when no visible label is associated */
+  'aria-label'?: string
+  /** ID reference for an external visible label */
+  'aria-labelledby'?: string
+  /** ID reference for supporting description text */
+  'aria-describedby'?: string
 }
 
 export const Toggle: Component<ToggleProps> = (props) => {

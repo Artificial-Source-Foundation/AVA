@@ -6,20 +6,28 @@
  * 2. Console Output — colored log lines with Copy All / Clear buttons
  */
 
-import { ChevronDown, Code, Terminal } from 'lucide-solid'
+import { ChevronDown, Code, Copy, RefreshCw, Terminal } from 'lucide-solid'
 import {
   type Component,
   createEffect,
   createMemo,
   createSignal,
   For,
+  mergeProps,
   on,
   onCleanup,
   Show,
 } from 'solid-js'
+import { useAgent } from '../../../hooks/useAgent'
 import { setDebugDevMode } from '../../../lib/debug-log'
 import { clearDevLogs, getDevLogs } from '../../../services/dev-console'
+import {
+  getBackendLogFilePath,
+  getLogDirectory,
+  readLatestBackendLogs,
+} from '../../../services/logger'
 import { useSettings } from '../../../stores/settings'
+import type { AgentEvent } from '../../../types/rust-ipc'
 import { SETTINGS_CARD_GAP } from '../settings-constants'
 import { formatTime, levelLabel } from './developer/dev-helpers'
 
@@ -31,15 +39,108 @@ const PENCIL_LEVEL_COLORS: Record<string, string> = {
   error: '#FF453A',
 }
 
-export const DeveloperTab: Component = () => {
+export const DeveloperTab: Component<{ showToggle?: boolean }> = (props) => {
+  const merged = mergeProps({ showToggle: true }, props)
   const { settings, updateSettings } = useSettings()
+  const agent = useAgent()
   const logs = getDevLogs()
   const [copied, setCopied] = createSignal(false)
+  const [copiedDiagnostics, setCopiedDiagnostics] = createSignal(false)
   const [stickToBottom, setStickToBottom] = createSignal(true)
   const [showLevelDropdown, setShowLevelDropdown] = createSignal(false)
+  const [backendLogTail, setBackendLogTail] = createSignal('')
+  const [isRefreshingBackendLogs, setIsRefreshingBackendLogs] = createSignal(false)
+  let latestBackendLogRefreshRequestId = 0
   let scrollRef: HTMLDivElement | undefined
 
   const filteredLogs = createMemo(() => logs())
+  const currentRunId = createMemo(() => agent.currentRunId())
+  const currentError = createMemo(() => agent.lastError())
+  const progressMessage = createMemo(() => agent.progressMessage())
+  const allEvents = createMemo(() => agent.eventTimeline())
+  const eventCount = createMemo(() => allEvents().length)
+  const recentEvents = createMemo(() => allEvents().slice(-12))
+  const logDirectory = createMemo(() => getLogDirectory() || '(logger not initialized yet)')
+  const backendLogFilePath = createMemo(
+    () => getBackendLogFilePath() || '(backend logger not initialized yet)'
+  )
+  const runState = createMemo(() => {
+    if (agent.isRunning()) return 'running'
+    if (agent.pendingApproval()) return 'waiting-for-approval'
+    if (agent.pendingQuestion()) return 'waiting-for-question'
+    if (agent.pendingPlan()) return 'waiting-for-plan'
+    if (currentError()) return 'error'
+    return 'idle'
+  })
+
+  const formatAgentEvent = (event: AgentEvent): string => {
+    const parts: string[] = [event.type]
+    const correlatedRunId = event.runId ?? event.run_id
+    if (correlatedRunId) parts.push(`run=${correlatedRunId}`)
+    if ('message' in event && typeof event.message === 'string' && event.message) {
+      parts.push(event.message)
+    }
+    if ('tool_name' in event && typeof event.tool_name === 'string') {
+      parts.push(`tool=${event.tool_name}`)
+    }
+    if ('name' in event && typeof event.name === 'string') {
+      parts.push(`tool=${event.name}`)
+    }
+    return parts.join(' | ')
+  }
+
+  const summarizeAgentEvent = (event: AgentEvent) => {
+    const eventWithTimestamp = event as AgentEvent & { timestamp?: number }
+    return {
+      type: event.type,
+      runId: event.runId ?? event.run_id ?? null,
+      timestamp: eventWithTimestamp.timestamp ?? null,
+      summary: formatAgentEvent(event),
+    }
+  }
+
+  const diagnosticsPayload = createMemo(() =>
+    JSON.stringify(
+      {
+        runId: currentRunId(),
+        runState: runState(),
+        isRunning: agent.isRunning(),
+        progressMessage: progressMessage(),
+        lastError: currentError(),
+        eventCount: eventCount(),
+        logDirectory: logDirectory(),
+        backendLogFile: backendLogFilePath(),
+        recentAgentEvents: recentEvents().map((event) => summarizeAgentEvent(event)),
+        backendLogTail: backendLogTail() || null,
+      },
+      null,
+      2
+    )
+  )
+
+  const refreshBackendLogTail = async (): Promise<void> => {
+    const refreshRequestId = ++latestBackendLogRefreshRequestId
+    setIsRefreshingBackendLogs(true)
+    const nextBackendLogTail = await readLatestBackendLogs(120).catch(
+      () => '(failed to read backend logs)'
+    )
+
+    if (refreshRequestId === latestBackendLogRefreshRequestId) {
+      setBackendLogTail(nextBackendLogTail)
+      setIsRefreshingBackendLogs(false)
+    }
+  }
+
+  createEffect(
+    on(
+      () => settings().devMode,
+      (enabled) => {
+        if (enabled) {
+          void refreshBackendLogTail()
+        }
+      }
+    )
+  )
 
   // Auto-scroll
   createEffect(
@@ -67,14 +168,11 @@ export const DeveloperTab: Component = () => {
     if (scrollRaf) cancelAnimationFrame(scrollRaf)
   })
 
-  const handleCopy = async () => {
-    const text = filteredLogs()
-      .map((e) => `[${formatTime(e.timestamp)}] ${levelLabel[e.level]} ${e.message}`)
-      .join('\n')
+  const copyText = async (text: string, onCopied: () => void) => {
     try {
       await navigator.clipboard.writeText(text)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 1500)
+      onCopied()
+      return
     } catch {
       const ta = document.createElement('textarea')
       ta.value = text
@@ -82,9 +180,25 @@ export const DeveloperTab: Component = () => {
       ta.select()
       document.execCommand('copy')
       document.body.removeChild(ta)
+      onCopied()
+    }
+  }
+
+  const handleCopy = async () => {
+    const text = filteredLogs()
+      .map((e) => `[${formatTime(e.timestamp)}] ${levelLabel[e.level]} ${e.message}`)
+      .join('\n')
+    await copyText(text, () => {
       setCopied(true)
       setTimeout(() => setCopied(false), 1500)
-    }
+    })
+  }
+
+  const handleCopyDiagnostics = async () => {
+    await copyText(diagnosticsPayload(), () => {
+      setCopiedDiagnostics(true)
+      setTimeout(() => setCopiedDiagnostics(false), 1500)
+    })
   }
 
   const logLevelOptions = ['debug', 'info', 'warn', 'error'] as const
@@ -137,7 +251,7 @@ export const DeveloperTab: Component = () => {
               style={{
                 'font-family': 'Geist, sans-serif',
                 'font-size': '12px',
-                color: '#48484A',
+                color: '#8E8E93',
               }}
             >
               Toggle developer console and configure log verbosity
@@ -145,68 +259,72 @@ export const DeveloperTab: Component = () => {
           </div>
         </div>
 
-        {/* Enable developer console row */}
-        <div
-          style={{
-            display: 'flex',
-            'align-items': 'center',
-            'justify-content': 'space-between',
-          }}
-        >
-          <div style={{ display: 'flex', 'flex-direction': 'column', gap: '2px' }}>
-            <span
-              style={{
-                'font-family': 'Geist, sans-serif',
-                'font-size': '13px',
-                color: '#C8C8CC',
-              }}
-            >
-              Enable developer console
-            </span>
-            <span
-              style={{
-                'font-family': 'Geist, sans-serif',
-                'font-size': '12px',
-                color: '#48484A',
-              }}
-            >
-              Enables additional developer diagnostics and console output
-            </span>
-          </div>
-          <button
-            type="button"
-            onClick={() => {
-              const next = !(settings().devMode ?? false)
-              updateSettings({ devMode: next })
-              setDebugDevMode(next)
-            }}
+        {/* Enable developer console row - hidden when rendered inside AdvancedTab */}
+        <Show when={merged.showToggle}>
+          <div
             style={{
-              width: '44px',
-              height: '24px',
-              'border-radius': '12px',
-              background: settings().devMode ? '#0A84FF' : '#2C2C2E',
-              border: 'none',
-              cursor: 'pointer',
-              position: 'relative',
-              'flex-shrink': '0',
-              transition: 'background 0.15s',
+              display: 'flex',
+              'align-items': 'center',
+              'justify-content': 'space-between',
             }}
-            aria-label="Toggle developer console"
           >
-            <span
-              style={{
-                position: 'absolute',
-                width: '20px',
-                height: '20px',
-                'border-radius': '50%',
-                background: '#FFFFFF',
-                top: '2px',
-                left: settings().devMode ? '22px' : '2px',
-                transition: 'left 0.15s',
+            <div style={{ display: 'flex', 'flex-direction': 'column', gap: '2px' }}>
+              <span
+                style={{
+                  'font-family': 'Geist, sans-serif',
+                  'font-size': '13px',
+                  color: '#C8C8CC',
+                }}
+              >
+                Enable developer console
+              </span>
+              <span
+                style={{
+                  'font-family': 'Geist, sans-serif',
+                  'font-size': '12px',
+                  color: '#8E8E93',
+                }}
+              >
+                Enables additional developer diagnostics and console output
+              </span>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={settings().devMode ?? false}
+              onClick={() => {
+                const next = !(settings().devMode ?? false)
+                updateSettings({ devMode: next })
+                setDebugDevMode(next)
               }}
-            />
-          </button>
-        </div>
+              style={{
+                width: '44px',
+                height: '24px',
+                'border-radius': '12px',
+                background: settings().devMode ? '#0A84FF' : '#2C2C2E',
+                border: 'none',
+                cursor: 'pointer',
+                position: 'relative',
+                'flex-shrink': '0',
+                transition: 'background 0.15s',
+              }}
+              aria-label="Developer console"
+            >
+              <span
+                style={{
+                  position: 'absolute',
+                  width: '20px',
+                  height: '20px',
+                  'border-radius': '50%',
+                  background: '#FFFFFF',
+                  top: '2px',
+                  left: settings().devMode ? '22px' : '2px',
+                  transition: 'left 0.15s',
+                }}
+              />
+            </button>
+          </div>
+        </Show>
 
         {/* Log level row */}
         <div
@@ -230,7 +348,7 @@ export const DeveloperTab: Component = () => {
               style={{
                 'font-family': 'Geist, sans-serif',
                 'font-size': '12px',
-                color: '#48484A',
+                color: '#8E8E93',
               }}
             >
               DEBUG shows middleware + verbose internals
@@ -240,6 +358,9 @@ export const DeveloperTab: Component = () => {
           <div style={{ position: 'relative' }}>
             <button
               type="button"
+              aria-haspopup="listbox"
+              aria-expanded={showLevelDropdown()}
+              aria-label={`Log level ${logLevelDisplayMap[settings().logLevel] ?? 'INFO'}`}
               onClick={(e) => {
                 e.stopPropagation()
                 setShowLevelDropdown(!showLevelDropdown())
@@ -264,7 +385,7 @@ export const DeveloperTab: Component = () => {
               >
                 {logLevelDisplayMap[settings().logLevel] ?? 'INFO'}
               </span>
-              <ChevronDown size={12} style={{ color: '#48484A' }} />
+              <ChevronDown size={12} style={{ color: '#8E8E93' }} aria-hidden="true" />
             </button>
             <Show when={showLevelDropdown()}>
               <div
@@ -323,6 +444,347 @@ export const DeveloperTab: Component = () => {
             padding: '20px',
             display: 'flex',
             'flex-direction': 'column',
+            gap: '14px',
+          }}
+        >
+          <div
+            style={{ display: 'flex', 'align-items': 'center', 'justify-content': 'space-between' }}
+          >
+            <div style={{ display: 'flex', 'align-items': 'center', gap: '10px' }}>
+              <Code size={16} style={{ color: '#C8C8CC' }} />
+              <span
+                style={{
+                  'font-family': 'Geist, sans-serif',
+                  'font-size': '14px',
+                  'font-weight': '500',
+                  color: '#F5F5F7',
+                }}
+              >
+                Run Diagnostics
+              </span>
+            </div>
+            <div style={{ display: 'flex', 'align-items': 'center', gap: '8px' }}>
+              <button
+                type="button"
+                onClick={() => void refreshBackendLogTail()}
+                style={{
+                  display: 'inline-flex',
+                  'align-items': 'center',
+                  gap: '6px',
+                  padding: '4px 8px',
+                  background: 'transparent',
+                  border: '1px solid #ffffff0a',
+                  'border-radius': '6px',
+                  cursor: 'pointer',
+                  'font-family': 'Geist, sans-serif',
+                  'font-size': '11px',
+                  color: '#8E8E93',
+                }}
+              >
+                <RefreshCw size={12} classList={{ 'animate-spin': isRefreshingBackendLogs() }} />
+                Refresh
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleCopyDiagnostics()}
+                style={{
+                  display: 'inline-flex',
+                  'align-items': 'center',
+                  gap: '6px',
+                  padding: '4px 8px',
+                  background: 'transparent',
+                  border: '1px solid #ffffff0a',
+                  'border-radius': '6px',
+                  cursor: 'pointer',
+                  'font-family': 'Geist, sans-serif',
+                  'font-size': '11px',
+                  color: '#8E8E93',
+                }}
+              >
+                <Copy size={12} />
+                {copiedDiagnostics() ? 'Copied!' : 'Copy Diagnostics'}
+              </button>
+            </div>
+          </div>
+
+          <div
+            style={{
+              display: 'grid',
+              'grid-template-columns': 'repeat(2, minmax(0, 1fr))',
+              gap: '10px',
+            }}
+          >
+            <div
+              style={{
+                background: '#0A0A0C',
+                border: '1px solid #ffffff0a',
+                'border-radius': '8px',
+                padding: '10px',
+              }}
+            >
+              <div style={{ 'font-size': '11px', color: '#8E8E93', 'margin-bottom': '4px' }}>
+                Current run
+              </div>
+              <div
+                style={{
+                  'font-family': 'Geist Mono, monospace',
+                  'font-size': '11px',
+                  color: '#F5F5F7',
+                  'word-break': 'break-all',
+                }}
+              >
+                {currentRunId() ?? 'none'}
+              </div>
+            </div>
+            <div
+              style={{
+                background: '#0A0A0C',
+                border: '1px solid #ffffff0a',
+                'border-radius': '8px',
+                padding: '10px',
+              }}
+            >
+              <div style={{ 'font-size': '11px', color: '#8E8E93', 'margin-bottom': '4px' }}>
+                Run state
+              </div>
+              <div
+                style={{
+                  'font-family': 'Geist Mono, monospace',
+                  'font-size': '11px',
+                  color: runState() === 'running' ? '#0A84FF' : '#C8C8CC',
+                }}
+              >
+                {runState()}
+              </div>
+            </div>
+            <div
+              style={{
+                background: '#0A0A0C',
+                border: '1px solid #ffffff0a',
+                'border-radius': '8px',
+                padding: '10px',
+              }}
+            >
+              <div style={{ 'font-size': '11px', color: '#8E8E93', 'margin-bottom': '4px' }}>
+                Progress
+              </div>
+              <div
+                style={{
+                  'font-family': 'Geist Mono, monospace',
+                  'font-size': '11px',
+                  color: '#C8C8CC',
+                  'word-break': 'break-word',
+                }}
+              >
+                {progressMessage() ?? 'none'}
+              </div>
+            </div>
+            <div
+              style={{
+                background: '#0A0A0C',
+                border: '1px solid #ffffff0a',
+                'border-radius': '8px',
+                padding: '10px',
+              }}
+            >
+              <div style={{ 'font-size': '11px', color: '#8E8E93', 'margin-bottom': '4px' }}>
+                Last error
+              </div>
+              <div
+                style={{
+                  'font-family': 'Geist Mono, monospace',
+                  'font-size': '11px',
+                  color: currentError() ? '#FF453A' : '#C8C8CC',
+                  'word-break': 'break-word',
+                }}
+              >
+                {currentError() ?? 'none'}
+              </div>
+            </div>
+          </div>
+
+          <div
+            style={{
+              background: '#0A0A0C',
+              border: '1px solid #ffffff0a',
+              'border-radius': '8px',
+              padding: '10px',
+            }}
+          >
+            <div style={{ 'font-size': '11px', color: '#8E8E93', 'margin-bottom': '4px' }}>
+              Log directory
+            </div>
+            <div
+              style={{
+                'font-family': 'Geist Mono, monospace',
+                'font-size': '11px',
+                color: '#C8C8CC',
+                'word-break': 'break-all',
+              }}
+            >
+              {logDirectory()}
+            </div>
+          </div>
+
+          <div
+            style={{
+              display: 'grid',
+              'grid-template-columns': 'repeat(2, minmax(0, 1fr))',
+              gap: '10px',
+            }}
+          >
+            <div
+              style={{
+                background: '#0A0A0C',
+                border: '1px solid #ffffff0a',
+                'border-radius': '8px',
+                padding: '10px',
+                'min-height': '180px',
+              }}
+            >
+              <div style={{ 'font-size': '11px', color: '#8E8E93', 'margin-bottom': '8px' }}>
+                Recent agent events ({eventCount()})
+              </div>
+              <Show
+                when={recentEvents().length > 0}
+                fallback={
+                  <div style={{ 'font-size': '10px', color: '#8E8E93' }}>
+                    No agent events captured yet.
+                  </div>
+                }
+              >
+                <div
+                  style={{
+                    display: 'flex',
+                    'flex-direction': 'column',
+                    gap: '4px',
+                    'max-height': '220px',
+                    overflow: 'auto',
+                  }}
+                >
+                  <For each={recentEvents()}>
+                    {(event: AgentEvent) => (
+                      <div
+                        style={{
+                          'font-family': 'Geist Mono, monospace',
+                          'font-size': '10px',
+                          color: '#C8C8CC',
+                          'white-space': 'pre-wrap',
+                          'word-break': 'break-word',
+                        }}
+                      >
+                        {formatAgentEvent(event)}
+                      </div>
+                    )}
+                  </For>
+                </div>
+              </Show>
+            </div>
+
+            <div
+              style={{
+                background: '#0A0A0C',
+                border: '1px solid #ffffff0a',
+                'border-radius': '8px',
+                padding: '10px',
+                'min-height': '180px',
+              }}
+            >
+              <div style={{ 'font-size': '11px', color: '#8E8E93', 'margin-bottom': '8px' }}>
+                Latest backend log tail
+              </div>
+              <div
+                style={{
+                  'max-height': '220px',
+                  overflow: 'auto',
+                }}
+              >
+                <pre
+                  style={{
+                    margin: '0',
+                    padding: '0',
+                    background: 'transparent',
+                    'font-family': 'Geist Mono, monospace',
+                    'font-size': '10px',
+                    color: '#C8C8CC',
+                    overflow: 'visible',
+                    'white-space': 'pre-wrap',
+                    'word-break': 'break-word',
+                  }}
+                >
+                  {backendLogTail() || '(no backend log data loaded)'}
+                </pre>
+              </div>
+            </div>
+          </div>
+
+          <div
+            style={{
+              background: '#0A0A0C',
+              border: '1px solid #ffffff0a',
+              'border-radius': '8px',
+              padding: '10px',
+            }}
+          >
+            <div style={{ 'font-size': '11px', color: '#8E8E93', 'margin-bottom': '4px' }}>
+              Backend log file
+            </div>
+            <div
+              style={{
+                'font-family': 'Geist Mono, monospace',
+                'font-size': '11px',
+                color: '#C8C8CC',
+                'word-break': 'break-all',
+              }}
+            >
+              {backendLogFilePath()}
+            </div>
+          </div>
+
+          <div
+            style={{
+              background: '#0A0A0C',
+              border: '1px solid #ffffff0a',
+              'border-radius': '8px',
+              padding: '10px',
+            }}
+          >
+            <div style={{ 'font-size': '11px', color: '#8E8E93', 'margin-bottom': '8px' }}>
+              Diagnostics payload
+            </div>
+            <div
+              style={{
+                'max-height': '180px',
+                overflow: 'auto',
+              }}
+            >
+              <pre
+                style={{
+                  margin: '0',
+                  padding: '0',
+                  background: 'transparent',
+                  'font-family': 'Geist Mono, monospace',
+                  'font-size': '10px',
+                  color: '#C8C8CC',
+                  overflow: 'visible',
+                  'white-space': 'pre-wrap',
+                  'word-break': 'break-word',
+                }}
+              >
+                {diagnosticsPayload()}
+              </pre>
+            </div>
+          </div>
+        </div>
+
+        <div
+          style={{
+            background: '#111114',
+            border: '1px solid #ffffff08',
+            'border-radius': '12px',
+            padding: '20px',
+            display: 'flex',
+            'flex-direction': 'column',
             gap: '12px',
           }}
         >
@@ -362,7 +824,7 @@ export const DeveloperTab: Component = () => {
                   cursor: 'pointer',
                   'font-family': 'Geist, sans-serif',
                   'font-size': '11px',
-                  color: '#48484A',
+                  color: '#8E8E93',
                 }}
               >
                 {copied() ? 'Copied!' : 'Copy All'}
@@ -381,7 +843,7 @@ export const DeveloperTab: Component = () => {
                   cursor: 'pointer',
                   'font-family': 'Geist, sans-serif',
                   'font-size': '11px',
-                  color: '#48484A',
+                  color: '#8E8E93',
                 }}
               >
                 Clear
@@ -416,7 +878,7 @@ export const DeveloperTab: Component = () => {
                     height: '100%',
                     'font-family': 'Geist Mono, monospace',
                     'font-size': '11px',
-                    color: '#48484A',
+                    color: '#8E8E93',
                   }}
                 >
                   No log entries yet.
@@ -438,7 +900,7 @@ export const DeveloperTab: Component = () => {
                         style={{
                           'font-family': 'Geist Mono, monospace',
                           'font-size': '10px',
-                          color: '#48484A',
+                          color: '#8E8E93',
                           'flex-shrink': '0',
                         }}
                       >
@@ -480,7 +942,7 @@ export const DeveloperTab: Component = () => {
             style={{
               'font-family': 'Geist, sans-serif',
               'font-size': '11px',
-              color: '#48484A',
+              color: '#8E8E93',
             }}
           >
             Tip: Copy all logs and paste them when reporting issues.

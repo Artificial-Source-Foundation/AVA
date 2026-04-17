@@ -84,4 +84,27 @@ describe('DeviceCodeDialog', () => {
       onSuccess.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY
     )
   })
+
+  it('adds accessible names to icon-only action buttons', () => {
+    dispose = render(
+      () => (
+        <DeviceCodeDialog
+          provider="copilot"
+          deviceCode={{
+            deviceCode: 'device-code',
+            userCode: 'user-code',
+            verificationUri: 'https://github.com/login/device',
+            expiresIn: 900,
+            interval: 5,
+          }}
+          onClose={vi.fn()}
+          onSuccess={vi.fn()}
+        />
+      ),
+      container
+    )
+
+    expect(container.querySelector('button[aria-label="Close device code dialog"]')).toBeTruthy()
+    expect(container.querySelector('button[aria-label="Copy device code"]')).toBeTruthy()
+  })
 })

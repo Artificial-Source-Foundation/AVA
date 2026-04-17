@@ -13,6 +13,7 @@ import {
   type PluginCatalogItem,
   type PluginPermission,
 } from '../../../../types/plugin'
+import { useSettingsDialogEscape } from '../../settings-dialog-utils'
 import { permissionColor } from './plugin-utils'
 
 // ---------------------------------------------------------------------------
@@ -29,6 +30,13 @@ export const GitInstallDialog: Component<GitInstallDialogProps> = (props) => {
   const [gitUrl, setGitUrl] = createSignal('')
   const [gitInstalling, setGitInstalling] = createSignal(false)
   const [gitError, setGitError] = createSignal<string | null>(null)
+  let dialogRef: HTMLDivElement | undefined
+
+  useSettingsDialogEscape({
+    onEscape: props.onClose,
+    isOpen: props.open,
+    getDialogElement: () => dialogRef,
+  })
 
   const handleGitInstall = async (): Promise<void> => {
     const url = gitUrl().trim()
@@ -50,9 +58,16 @@ export const GitInstallDialog: Component<GitInstallDialogProps> = (props) => {
 
   return (
     <Show when={props.open()}>
+      {/* biome-ignore lint/a11y/noStaticElementInteractions: modal wrapper needs Escape handling */}
       <div
-        class="fixed inset-0 z-50 flex items-center justify-center"
+        ref={dialogRef}
+        data-settings-nested-dialog="true"
+        class="fixed inset-0 z-50 flex items-center justify-center outline-none"
         style={{ background: 'var(--modal-overlay)' }}
+        tabindex="-1"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Install from Git"
       >
         <div
           class="p-6 max-w-md w-full space-y-4"
@@ -122,6 +137,13 @@ export const LinkLocalDialog: Component<LinkLocalDialogProps> = (props) => {
   const [linkPath, setLinkPath] = createSignal('')
   const [linkInstalling, setLinkInstalling] = createSignal(false)
   const [linkError, setLinkError] = createSignal<string | null>(null)
+  let dialogRef: HTMLDivElement | undefined
+
+  useSettingsDialogEscape({
+    onEscape: props.onClose,
+    isOpen: props.open,
+    getDialogElement: () => dialogRef,
+  })
 
   const handleLinkLocal = async (): Promise<void> => {
     const path = linkPath().trim()
@@ -143,9 +165,16 @@ export const LinkLocalDialog: Component<LinkLocalDialogProps> = (props) => {
 
   return (
     <Show when={props.open()}>
+      {/* biome-ignore lint/a11y/noStaticElementInteractions: modal wrapper needs Escape handling */}
       <div
-        class="fixed inset-0 z-50 flex items-center justify-center"
+        ref={dialogRef}
+        data-settings-nested-dialog="true"
+        class="fixed inset-0 z-50 flex items-center justify-center outline-none"
         style={{ background: 'var(--modal-overlay)' }}
+        tabindex="-1"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Link Local Extension"
       >
         <div
           class="p-6 max-w-md w-full space-y-4"
@@ -212,12 +241,27 @@ export interface PermissionConfirmDialogProps {
 }
 
 export const PermissionConfirmDialog: Component<PermissionConfirmDialogProps> = (props) => {
+  let dialogRef: HTMLDivElement | undefined
+
+  useSettingsDialogEscape({
+    onEscape: props.onCancel,
+    isOpen: () => props.plugin() !== null,
+    getDialogElement: () => dialogRef,
+  })
+
   return (
     <Show when={props.plugin()}>
       {(plugin) => (
+        /* biome-ignore lint/a11y/noStaticElementInteractions: modal wrapper needs Escape handling */
         <div
-          class="fixed inset-0 z-50 flex items-center justify-center"
+          ref={dialogRef}
+          data-settings-nested-dialog="true"
+          class="fixed inset-0 z-50 flex items-center justify-center outline-none"
           style={{ background: 'var(--modal-overlay)' }}
+          tabindex="-1"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Sensitive Permissions Required"
         >
           <div
             class="p-6 max-w-md w-full space-y-4"

@@ -25,10 +25,6 @@ export const ProvidersTab: Component<ProvidersTabProps> = (props) => {
   const [expandedIds, setExpandedIds] = createSignal<Set<string>>(new Set())
   const [searchQuery, setSearchQuery] = createSignal('')
 
-  const connectedCount = createMemo(
-    () => props.providers.filter((p) => p.status === 'connected').length
-  )
-
   const filteredProviders = createMemo(() => {
     const q = searchQuery().toLowerCase()
     if (!q) return props.providers
@@ -51,11 +47,7 @@ export const ProvidersTab: Component<ProvidersTabProps> = (props) => {
         Providers
       </h1>
 
-      <ProvidersTabHeader
-        connectedCount={connectedCount}
-        searchQuery={searchQuery}
-        onSearchChange={setSearchQuery}
-      />
+      <ProvidersTabHeader searchQuery={searchQuery} onSearchChange={setSearchQuery} />
 
       <ProvidersTabGrid
         providers={filteredProviders()}

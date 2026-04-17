@@ -1,157 +1,128 @@
-import { Bot, Code2, Info, Puzzle, Server } from 'lucide-solid'
+import { Code2, Info } from 'lucide-solid'
 import { type Component, Show } from 'solid-js'
-import { Dynamic } from 'solid-js/web'
+import { setDebugDevMode } from '../../../lib/debug-log'
 import { useSettings } from '../../../stores/settings'
+import { SettingsCard } from '../SettingsCard'
 import { AboutSection } from '../settings-about-section'
-import { SETTINGS_CARD_GAP } from '../settings-constants'
 import type { SettingsTab } from '../settings-modal-config'
-import { AgentsTab } from './AgentsTab'
 import { DeveloperTab } from './DeveloperTab'
 
-function AdvancedSectionHeader(props: { icon: typeof Bot; title: string; description: string }) {
-  return (
-    <div style={{ display: 'flex', 'flex-direction': 'column', gap: '4px' }}>
-      <div style={{ display: 'flex', 'align-items': 'center', gap: '10px' }}>
-        <Dynamic component={props.icon} size={16} style={{ color: '#C8C8CC' }} />
-        <span
-          style={{
-            'font-family': 'Geist, sans-serif',
-            'font-size': '14px',
-            'font-weight': '600',
-            color: '#F5F5F7',
-          }}
-        >
-          {props.title}
-        </span>
-      </div>
-      <p
-        style={{
-          'font-family': 'Geist, sans-serif',
-          'font-size': '12px',
-          color: '#86868B',
-          margin: '0',
-        }}
-      >
-        {props.description}
-      </p>
-    </div>
-  )
+interface AdvancedTabProps {
+  onSelectTab?: (tab: SettingsTab) => void
 }
 
-export const AdvancedTab: Component<{ onSelectTab?: (tab: SettingsTab) => void }> = (props) => {
-  const { settings } = useSettings()
-
-  const navButtonStyle = {
-    gap: '6px',
-    'border-radius': '8px',
-    border: '1px solid #ffffff0a',
-    height: '32px',
-    padding: '0 14px',
-    color: '#C8C8CC',
-    'font-family': 'Geist, sans-serif',
-    'font-size': '13px',
-    background: 'transparent',
-    cursor: 'pointer',
-  } satisfies Record<string, string>
+export const AdvancedTab: Component<AdvancedTabProps> = (props) => {
+  const { settings, updateSettings } = useSettings()
+  void props
 
   return (
-    <div style={{ display: 'flex', 'flex-direction': 'column', gap: SETTINGS_CARD_GAP }}>
-      <h1
+    <div class="flex flex-col" style={{ gap: '24px' }}>
+      {/* Page title */}
+      <h2
         style={{
           'font-family': 'Geist, sans-serif',
           'font-size': '22px',
           'font-weight': '600',
-          color: '#F5F5F7',
+          color: 'var(--text-primary)',
           margin: '0',
         }}
       >
         Advanced
-      </h1>
+      </h2>
 
-      <div style={{ display: 'flex', 'flex-direction': 'column', gap: '12px' }}>
-        <AdvancedSectionHeader
-          icon={Info}
-          title="About"
-          description="Version details, runtime information, and project links."
-        />
+      {/* About Section */}
+      <SettingsCard
+        icon={Info}
+        title="About"
+        description="Version details, runtime information, and project links"
+      >
         <AboutSection />
-      </div>
+      </SettingsCard>
 
-      <div style={{ display: 'flex', 'flex-direction': 'column', gap: '12px' }}>
-        <AdvancedSectionHeader
-          icon={Bot}
-          title="Agents"
-          description="Manage built-in and custom agent presets used by the desktop app."
-        />
-        <div style={{ 'min-height': '420px', 'max-height': '720px', overflow: 'hidden' }}>
-          <AgentsTab />
-        </div>
-      </div>
-
-      <div style={{ display: 'flex', 'flex-direction': 'column', gap: '12px' }}>
-        <AdvancedSectionHeader
-          icon={Puzzle}
-          title="Extension Surfaces"
-          description="Plugins and MCP stay available, but they now live under Advanced by default."
-        />
+      {/* Developer Section */}
+      <SettingsCard
+        icon={Code2}
+        title="Developer"
+        description="Diagnostics, logging, and debugging tools"
+      >
         <div
           style={{
             display: 'flex',
-            gap: '12px',
-            'flex-wrap': 'wrap',
-            padding: '20px',
-            background: '#111114',
-            border: '1px solid #ffffff08',
-            'border-radius': '12px',
+            'flex-direction': 'column',
+            gap: '16px',
           }}
         >
-          <button
-            type="button"
-            onClick={() => props.onSelectTab?.('plugins')}
-            class="flex items-center transition-colors"
-            style={navButtonStyle}
+          {/* Primary Developer Mode toggle - always visible for predictable focus */}
+          <div
+            style={{
+              display: 'flex',
+              'align-items': 'center',
+              'justify-content': 'space-between',
+            }}
           >
-            <Puzzle size={14} />
-            Plugins
-          </button>
-          <button
-            type="button"
-            onClick={() => props.onSelectTab?.('mcp')}
-            class="flex items-center transition-colors"
-            style={navButtonStyle}
-          >
-            <Server size={14} />
-            MCP Servers
-          </button>
-        </div>
-      </div>
-
-      <div style={{ display: 'flex', 'flex-direction': 'column', gap: '12px' }}>
-        <AdvancedSectionHeader
-          icon={Code2}
-          title="Developer"
-          description="Developer diagnostics, logging, and advanced debugging tools."
-        />
-        <Show
-          when={settings().devMode}
-          fallback={
-            <div
-              style={{
-                background: '#111114',
-                border: '1px solid #ffffff08',
-                'border-radius': '12px',
-                padding: '20px',
-                color: '#86868B',
-                'font-size': '13px',
-              }}
-            >
-              Enable Developer Mode below to access live console output and debug controls.
+            <div style={{ display: 'flex', 'flex-direction': 'column', gap: '4px' }}>
+              <span
+                style={{
+                  'font-family': 'Geist, sans-serif',
+                  'font-size': '13px',
+                  color: 'var(--text-secondary)',
+                }}
+              >
+                Developer Mode
+              </span>
+              <span
+                style={{
+                  'font-family': 'Geist, sans-serif',
+                  'font-size': '12px',
+                  color: 'var(--text-muted)',
+                }}
+              >
+                Enable to access live console output and debug controls
+              </span>
             </div>
-          }
-        >
-          <DeveloperTab />
-        </Show>
-      </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={settings().devMode ?? false}
+              onClick={() => {
+                const next = !(settings().devMode ?? false)
+                updateSettings({ devMode: next })
+                setDebugDevMode(next)
+              }}
+              style={{
+                width: '44px',
+                height: '24px',
+                'border-radius': '12px',
+                background: settings().devMode ? 'var(--accent)' : 'var(--surface-overlay)',
+                border: 'none',
+                cursor: 'pointer',
+                position: 'relative',
+                'flex-shrink': '0',
+                transition: 'background 0.15s',
+              }}
+              aria-label="Developer mode"
+            >
+              <span
+                style={{
+                  position: 'absolute',
+                  width: '20px',
+                  height: '20px',
+                  'border-radius': '50%',
+                  background: '#FFFFFF',
+                  top: '2px',
+                  left: settings().devMode ? '22px' : '2px',
+                  transition: 'left 0.15s',
+                }}
+              />
+            </button>
+          </div>
+
+          {/* Developer tools - shown only when enabled (toggle hidden since AdvancedTab provides it) */}
+          <Show when={settings().devMode}>
+            <DeveloperTab showToggle={false} />
+          </Show>
+        </div>
+      </SettingsCard>
     </div>
   )
 }

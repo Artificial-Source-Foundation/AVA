@@ -3,11 +3,13 @@
  */
 
 import { type Component, createEffect, createSignal, on, onCleanup, Show } from 'solid-js'
+import { defaultProviders, type ProviderModel } from '../../config/defaults/provider-defaults'
 import { useNotification } from '../../contexts/notification'
-import { fetchModels } from '../../services/providers/model-fetcher'
+import { enrichWithCatalog, fetchModels } from '../../services/providers/model-fetcher'
 import { rustBackend } from '../../services/rust-bridge'
 import { useLayout } from '../../stores/layout'
 import { useSettings } from '../../stores/settings'
+import { getProviderCredentialInfo } from '../../stores/settings/settings-mutators'
 import type { MCPServerConfig } from '../../stores/settings/settings-types'
 import { useShortcuts } from '../../stores/shortcuts'
 import type { LLMProvider } from '../../types/llm'
@@ -253,18 +255,69 @@ export const SettingsModal: Component = () => {
 
   const handleTestProvider = async (id: string) => {
     const provider = settings().providers.find((p) => p.id === id)
-    if (!provider?.apiKey) return
+    const credential = provider ? getProviderCredentialInfo(provider.id) : undefined
+    if (!provider || !credential) return
 
     try {
-      const models = await fetchModels(id as LLMProvider, {
-        apiKey: provider.apiKey,
+      const rawModels = await fetchModels(id as LLMProvider, {
+        apiKey: credential.value,
+        authType: credential.type,
         baseUrl: provider.baseUrl,
       })
+      const fetchedModels = enrichWithCatalog(id as LLMProvider, rawModels)
+      let nextModels: ProviderModel[] = []
+      let nextDefaultModel = provider.defaultModel
+
+      if (fetchedModels.length > 0) {
+        const defaults = defaultProviders.find((defaultProvider) => defaultProvider.id === id)
+        const defaultMap = new Map<string, ProviderModel>()
+        for (const model of defaults?.models ?? []) defaultMap.set(model.id, model)
+
+        const fetchedMap = new Map<string, ProviderModel>()
+        for (const model of fetchedModels) {
+          const fallback = defaultMap.get(model.id)
+          const pricing = model.pricing
+            ? { input: model.pricing.prompt, output: model.pricing.completion }
+            : fallback?.pricing
+          const capabilities = [
+            ...new Set([...(model.capabilities ?? []), ...(fallback?.capabilities ?? [])]),
+          ]
+
+          fetchedMap.set(model.id, {
+            id: model.id,
+            name: model.name,
+            contextWindow: model.contextWindow,
+            ...(pricing && { pricing }),
+            ...(capabilities.length > 0 && { capabilities }),
+          })
+        }
+
+        for (const [defaultId, defaultModel] of defaultMap) {
+          if (!fetchedMap.has(defaultId)) {
+            fetchedMap.set(defaultId, defaultModel)
+          }
+        }
+
+        nextModels = [...fetchedMap.values()]
+        const keepDefault =
+          provider.defaultModel && nextModels.some((model) => model.id === provider.defaultModel)
+        const preferredDefaultModel = keepDefault ? provider.defaultModel : defaults?.defaultModel
+        nextDefaultModel =
+          preferredDefaultModel && nextModels.some((model) => model.id === preferredDefaultModel)
+            ? preferredDefaultModel
+            : nextModels[0]?.id
+
+        for (const model of nextModels) {
+          model.isDefault = model.id === nextDefaultModel
+        }
+      }
+
       updateProvider(id, {
-        status: models.length > 0 ? 'connected' : 'disconnected',
+        ...(nextModels.length > 0 ? { models: nextModels, defaultModel: nextDefaultModel } : {}),
+        status: nextModels.length > 0 ? 'connected' : 'disconnected',
         error: undefined,
       })
-      notification.success('Provider connected', `${models.length} models available`)
+      notification.success('Provider connected', `${nextModels.length} models available`)
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Connection failed'
       updateProvider(id, {
@@ -279,7 +332,19 @@ export const SettingsModal: Component = () => {
     if (!settingsOpen()) return
 
     const onEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') closeSettings()
+      if (event.key !== 'Escape') return
+      if (event.defaultPrevented) return
+
+      if (document.querySelector('[data-settings-nested-dialog="true"]')) {
+        return
+      }
+
+      const target = event.target
+      if (target instanceof Element && target.closest('[data-settings-nested-dialog="true"]')) {
+        return
+      }
+
+      closeSettings()
     }
 
     const onSettingsTab = (event: Event) => {

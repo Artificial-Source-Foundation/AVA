@@ -1,5 +1,5 @@
 import { ArrowLeft, Search, X } from 'lucide-solid'
-import { type Accessor, type Component, createEffect, createMemo, For, Show } from 'solid-js'
+import { type Accessor, type Component, createEffect, createMemo, For, on, Show } from 'solid-js'
 import {
   type SettingsSearchEntry,
   type SettingsTab,
@@ -17,8 +17,10 @@ interface SettingsModalSidebarProps {
 }
 
 export const SettingsModalSidebar: Component<SettingsModalSidebarProps> = (props) => {
+  const normalizedQuery = createMemo(() => props.search().toLowerCase().trim())
+
   const filteredGroups = createMemo((): TabGroup[] => {
-    const q = props.search().toLowerCase().trim()
+    const q = normalizedQuery()
     const base = tabGroups
 
     if (!q) return base.filter((group) => group.tabs.length > 0)
@@ -49,7 +51,7 @@ export const SettingsModalSidebar: Component<SettingsModalSidebarProps> = (props
 
   /** Deep search results — individual settings matching the query */
   const searchResults = createMemo((): SettingsSearchEntry[] => {
-    const q = props.search().toLowerCase().trim()
+    const q = normalizedQuery()
     if (!q || q.length < 2) return []
 
     return settingsSearchIndex
@@ -61,24 +63,30 @@ export const SettingsModalSidebar: Component<SettingsModalSidebarProps> = (props
       .slice(0, 8)
   })
 
-  // Auto-switch to first matching tab when search filters results
-  createEffect(() => {
-    const q = props.search().toLowerCase().trim()
-    if (!q) return
+  // Auto-switch only when the query itself changes.
+  // This keeps manual tab changes sticky while a search is still active.
+  createEffect(
+    on(normalizedQuery, (q) => {
+      if (!q) return
 
-    // Prefer deep search results
-    const results = searchResults()
-    if (results.length > 0 && results[0].tab !== props.activeTab()) {
-      props.onSelectTab(results[0].tab)
-      return
-    }
+      const results = searchResults()
+      if (results.some((result) => result.tab === props.activeTab())) return
 
-    const groups = filteredGroups()
-    const allMatchingTabs = groups.flatMap((g) => g.tabs)
-    if (allMatchingTabs.length > 0 && !allMatchingTabs.some((t) => t.id === props.activeTab())) {
-      props.onSelectTab(allMatchingTabs[0].id)
-    }
-  })
+      // Prefer deep search results
+      if (results.length > 0) {
+        props.onSelectTab(results[0].tab)
+        return
+      }
+
+      const groups = filteredGroups()
+      const allMatchingTabs = groups.flatMap((g) => g.tabs)
+      if (allMatchingTabs.some((tab) => tab.id === props.activeTab())) return
+
+      if (allMatchingTabs.length > 0) {
+        props.onSelectTab(allMatchingTabs[0].id)
+      }
+    })
+  )
 
   const namedGroups = createMemo(() => filteredGroups())
 

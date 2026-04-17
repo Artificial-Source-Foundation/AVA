@@ -7,10 +7,9 @@
 
 import { Puzzle } from 'lucide-solid'
 import { type Component, Show } from 'solid-js'
-import { Dynamic } from 'solid-js/web'
 import type { LLMProviderConfig } from '../../../../config/defaults/provider-defaults'
 import { defaultProviders } from '../../../../config/defaults/provider-defaults'
-import { getProviderLogo } from '../../../icons/provider-logo-map'
+import { ProviderLogo } from '../../../icons/ProviderLogo'
 import { Toggle } from '../../../ui/Toggle'
 import { checkStoredOAuth } from '../providers-tab-helpers'
 import { ProviderCardExpanded } from './provider-card-expanded'
@@ -66,8 +65,8 @@ export const ProviderCard: Component<ProviderCardProps> = (props) => {
         border: `1px solid ${props.isExpanded ? '#0A84FF40' : '#ffffff08'}`,
         display: 'flex',
         'flex-direction': 'column',
-        gap: '12px',
-        padding: '16px',
+        gap: props.isExpanded ? '12px' : '8px',
+        padding: '14px 16px',
         transition: 'border-color 150ms',
         contain: 'layout style paint',
       }}
@@ -100,11 +99,11 @@ export const ProviderCard: Component<ProviderCardProps> = (props) => {
               when={!isPlugin()}
               fallback={<Puzzle style={{ width: '14px', height: '14px', color: '#0A84FF' }} />}
             >
-              <Dynamic component={getProviderLogo(props.provider.id)} class="w-4 h-4" />
+              <ProviderLogo providerId={props.provider.id} class="w-4 h-4" />
             </Show>
           </div>
 
-          {/* Name + model */}
+          {/* Name */}
           <div class="min-w-0 flex-1">
             <span
               style={{
@@ -117,58 +116,53 @@ export const ProviderCard: Component<ProviderCardProps> = (props) => {
             >
               {props.provider.name}
             </span>
-            <span
-              style={{
-                'font-family': 'Geist Mono, monospace',
-                'font-size': '11px',
-                color: '#48484A',
-                display: 'block',
-                'margin-top': '1px',
-              }}
-            >
-              {props.provider.defaultModel || 'Not configured'}
-            </span>
           </div>
         </button>
 
-        {/* Status */}
-        <div class="flex items-center" style={{ gap: '6px' }}>
-          <div
-            style={{
-              width: '6px',
-              height: '6px',
-              'border-radius': '50%',
-              background:
-                effectiveStatus() === 'connected'
-                  ? '#34C759'
-                  : effectiveStatus() === 'error'
-                    ? '#FF453A'
-                    : '#48484A',
-            }}
+        <div class="flex items-center flex-shrink-0" style={{ gap: '12px' }}>
+          {/* Status */}
+          <div class="flex items-center" style={{ gap: '6px' }}>
+            <div
+              style={{
+                width: '6px',
+                height: '6px',
+                'border-radius': '50%',
+                background:
+                  effectiveStatus() === 'connected'
+                    ? '#34C759'
+                    : effectiveStatus() === 'error'
+                      ? '#FF453A'
+                      : '#48484A',
+              }}
+            />
+            <span
+              style={{
+                'font-family': 'Geist, sans-serif',
+                'font-size': '11px',
+                color:
+                  effectiveStatus() === 'connected'
+                    ? '#34C759'
+                    : effectiveStatus() === 'error'
+                      ? '#FF453A'
+                      : '#48484A',
+                'white-space': 'nowrap',
+              }}
+            >
+              {effectiveStatus() === 'connected'
+                ? 'Connected'
+                : effectiveStatus() === 'error'
+                  ? 'Error'
+                  : 'Disconnected'}
+            </span>
+          </div>
+
+          <Toggle
+            checked={props.provider.enabled}
+            onChange={(v) => props.onToggle?.(v)}
+            aria-label={`Enable ${props.provider.name}`}
           />
-          <span
-            style={{
-              'font-family': 'Geist, sans-serif',
-              'font-size': '11px',
-              color:
-                effectiveStatus() === 'connected'
-                  ? '#34C759'
-                  : effectiveStatus() === 'error'
-                    ? '#FF453A'
-                    : '#48484A',
-            }}
-          >
-            {effectiveStatus() === 'connected'
-              ? 'Connected'
-              : effectiveStatus() === 'error'
-                ? 'Error'
-                : 'Disconnected'}
-          </span>
         </div>
       </div>
-
-      {/* Toggle */}
-      <Toggle checked={props.provider.enabled} onChange={(v) => props.onToggle?.(v)} />
 
       {/* Expanded configuration */}
       <div class="tool-card-body-grid" data-expanded={props.isExpanded ? 'true' : 'false'}>
@@ -179,10 +173,10 @@ export const ProviderCard: Component<ProviderCardProps> = (props) => {
               onSaveApiKey={props.onSaveApiKey}
               onClearApiKey={props.onClearApiKey}
               onOAuthConnected={props.onOAuthConnected}
-              onSetDefaultModel={props.onSetDefaultModel}
               onTestConnection={props.onTestConnection}
               onUpdateModels={props.onUpdateModels}
               onSaveBaseUrl={props.onSaveBaseUrl}
+              onSetDefaultModel={props.onSetDefaultModel}
             />
           </Show>
         </div>

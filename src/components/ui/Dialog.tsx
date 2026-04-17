@@ -32,6 +32,14 @@ export interface DialogProps {
   closeOnEscape?: boolean
   /** Additional CSS classes for content */
   class?: string
+  /** Additional CSS classes for overlay */
+  overlayClass?: string
+  /** Optional overlay style overrides */
+  overlayStyle?: JSX.CSSProperties
+  /** Optional content style overrides */
+  contentStyle?: JSX.CSSProperties
+  /** Additional CSS classes for body (scrollable area) */
+  bodyClass?: string
 }
 
 const sizeStyles: Record<string, string> = {
@@ -56,6 +64,10 @@ export const Dialog: Component<DialogProps> = (props) => {
     'closeOnOverlayClick',
     'closeOnEscape',
     'class',
+    'overlayClass',
+    'overlayStyle',
+    'contentStyle',
+    'bodyClass',
   ])
 
   const size = () => local.size ?? 'md'
@@ -68,12 +80,13 @@ export const Dialog: Component<DialogProps> = (props) => {
       <KobalteDialog.Portal>
         {/* Overlay */}
         <KobalteDialog.Overlay
-          class="
+          class={`
             fixed inset-0 z-50
             data-[expanded]:animate-in data-[expanded]:fade-in-0
             data-[closed]:animate-out data-[closed]:fade-out-0
-          "
-          style={{ background: 'var(--modal-overlay)' }}
+            ${local.overlayClass ?? ''}
+          `}
+          style={{ background: 'var(--modal-overlay)', ...local.overlayStyle }}
         />
 
         {/* Content */}
@@ -100,6 +113,7 @@ export const Dialog: Component<DialogProps> = (props) => {
             border: '1px solid var(--modal-border)',
             'border-radius': 'var(--modal-radius-lg)',
             'box-shadow': 'var(--modal-shadow)',
+            ...local.contentStyle,
           }}
         >
           {/* Header */}
@@ -138,7 +152,7 @@ export const Dialog: Component<DialogProps> = (props) => {
 
           {/* Body */}
           <div
-            class="p-4 overflow-y-auto max-h-[70vh]"
+            class={`p-4 overflow-y-auto max-h-[70vh] ${local.bodyClass ?? ''}`}
             style={{ 'will-change': 'scroll-position', '-webkit-overflow-scrolling': 'touch' }}
           >
             {local.children}

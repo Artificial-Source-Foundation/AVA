@@ -1,6 +1,7 @@
 import { normalizeProviderId } from '../../../types/llm'
 
-export const formatContextWindow = (tokens: number): string => {
+export const formatContextWindow = (tokens: number | null | undefined): string => {
+  if (typeof tokens !== 'number' || !Number.isFinite(tokens)) return 'N/A'
   if (tokens >= 1000000) return `${(tokens / 1000000).toFixed(1)}M`
   if (tokens >= 1000) return `${Math.round(tokens / 1000)}K`
   return tokens.toString()

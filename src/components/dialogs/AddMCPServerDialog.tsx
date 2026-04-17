@@ -5,9 +5,10 @@
  */
 
 import { Plus, Server } from 'lucide-solid'
-import { type Component, createSignal, For, Show } from 'solid-js'
+import { type Component, createEffect, createSignal, For, on, Show } from 'solid-js'
 import { MCP_CATEGORIES, MCP_PRESETS, type MCPPreset } from '../../config/mcp-presets'
 import type { MCPServerConfig, MCPTransportType } from '../../stores/settings/settings-types'
+import { useSettingsDialogEscape } from '../settings/settings-dialog-utils'
 import { MCPManualForm } from './mcp/MCPManualForm'
 
 interface AddMCPServerDialogProps {
@@ -28,8 +29,21 @@ export const AddMCPServerDialog: Component<AddMCPServerDialogProps> = (props) =>
   const [cwd, setCwd] = createSignal('')
   const [envPairs, setEnvPairs] = createSignal('')
   const [trust, setTrust] = createSignal<'full' | 'sandbox' | 'none'>('full')
+  let dialogRef: HTMLDivElement | undefined
+
+  const handleClose = () => {
+    resetForm()
+    props.onClose()
+  }
+
+  useSettingsDialogEscape({
+    onEscape: handleClose,
+    isOpen: () => props.open,
+    getDialogElement: () => dialogRef,
+  })
 
   const resetForm = () => {
+    setTab('presets')
     setName('')
     setTransport('stdio')
     setCommand('')
@@ -39,6 +53,18 @@ export const AddMCPServerDialog: Component<AddMCPServerDialogProps> = (props) =>
     setEnvPairs('')
     setTrust('full')
   }
+
+  createEffect(
+    on(
+      () => props.open,
+      (open, wasOpen) => {
+        if (open && wasOpen === false) {
+          resetForm()
+        }
+      },
+      { defer: true }
+    )
+  )
 
   const applyPreset = (preset: MCPPreset) => {
     setTab('manual')
@@ -72,8 +98,7 @@ export const AddMCPServerDialog: Component<AddMCPServerDialogProps> = (props) =>
     }
 
     props.onSave(config)
-    resetForm()
-    props.onClose()
+    handleClose()
   }
 
   const canSave = () => {
@@ -93,9 +118,16 @@ export const AddMCPServerDialog: Component<AddMCPServerDialogProps> = (props) =>
 
   return (
     <Show when={props.open}>
+      {/* biome-ignore lint/a11y/noStaticElementInteractions: modal wrapper needs Escape handling */}
       <div
-        class="fixed inset-0 z-50 flex items-center justify-center"
+        ref={dialogRef}
+        data-settings-nested-dialog="true"
+        class="fixed inset-0 z-50 flex items-center justify-center outline-none"
         style={{ background: 'var(--modal-overlay)' }}
+        tabindex="-1"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Add MCP Server"
       >
         <div
           class="w-full max-w-lg overflow-hidden"
@@ -115,10 +147,7 @@ export const AddMCPServerDialog: Component<AddMCPServerDialogProps> = (props) =>
             <h3 class="text-sm font-semibold text-[var(--text-primary)] flex-1">Add MCP Server</h3>
             <button
               type="button"
-              onClick={() => {
-                resetForm()
-                props.onClose()
-              }}
+              onClick={handleClose}
               class="text-xs text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
             >
               Cancel
@@ -213,10 +242,7 @@ export const AddMCPServerDialog: Component<AddMCPServerDialogProps> = (props) =>
             >
               <button
                 type="button"
-                onClick={() => {
-                  resetForm()
-                  props.onClose()
-                }}
+                onClick={handleClose}
                 class="px-3 py-1.5 text-xs text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors"
               >
                 Cancel

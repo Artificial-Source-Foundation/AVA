@@ -6,7 +6,7 @@
  */
 
 import type { Component } from 'solid-js'
-import { Show } from 'solid-js'
+import { createUniqueId, Show } from 'solid-js'
 import { Toggle } from './Toggle'
 
 export interface ToggleRowProps {
@@ -25,6 +25,10 @@ export interface ToggleRowProps {
 }
 
 export const ToggleRow: Component<ToggleRowProps> = (props) => {
+  const generatedId = createUniqueId()
+  const labelId = () => `toggle-row-label-${generatedId}`
+  const descriptionId = () => `toggle-row-description-${generatedId}`
+
   return (
     <div
       class={`
@@ -34,12 +38,22 @@ export const ToggleRow: Component<ToggleRowProps> = (props) => {
       `}
     >
       <div class="flex flex-col min-w-0 gap-0.5">
-        <span class="settings-label">{props.label}</span>
+        <span id={labelId()} class="settings-label">
+          {props.label}
+        </span>
         <Show when={props.description}>
-          <span class="settings-description">{props.description}</span>
+          <span id={descriptionId()} class="settings-description">
+            {props.description}
+          </span>
         </Show>
       </div>
-      <Toggle checked={props.checked} onChange={props.onChange} disabled={props.disabled} />
+      <Toggle
+        checked={props.checked}
+        onChange={props.onChange}
+        disabled={props.disabled}
+        aria-labelledby={labelId()}
+        aria-describedby={props.description ? descriptionId() : undefined}
+      />
     </div>
   )
 }

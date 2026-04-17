@@ -1,6 +1,7 @@
 /**
  * Rules & Commands Content
  *
+ * Uses shared settings components and theme tokens for consistency.
  * Shared content block rendered inside the merged Skills settings surface.
  */
 
@@ -11,7 +12,13 @@ import {
   listCommands,
   saveCommand,
 } from '../../../services/custom-commands'
-import { SETTINGS_CARD_GAP } from '../settings-constants'
+import {
+  SettingsActionHeader,
+  SettingsButton,
+  SettingsCard,
+  SettingsCardSimple,
+  SettingsTabContainer,
+} from '../shared-settings-components'
 import { CommandEditForm } from './commands/CommandEditForm'
 import { RulesSection } from './rules-section'
 
@@ -48,120 +55,29 @@ export const RulesAndCommandsContent: Component = () => {
   }
 
   return (
-    <div style={{ display: 'flex', 'flex-direction': 'column', gap: SETTINGS_CARD_GAP }}>
+    <SettingsTabContainer>
       {/* ===== Rules Card ===== */}
-      <div
-        style={{
-          background: '#111114',
-          border: '1px solid #ffffff08',
-          'border-radius': '12px',
-          padding: '20px',
-          display: 'flex',
-          'flex-direction': 'column',
-          gap: '12px',
-        }}
+      <SettingsCard
+        icon={ScrollText}
+        title="Rules"
+        description="Project-specific instructions loaded from .ava/rules/"
+        compact
       >
-        {/* Header */}
-        <div style={{ display: 'flex', 'align-items': 'center', gap: '10px' }}>
-          <ScrollText size={16} style={{ color: '#C8C8CC' }} />
-          <div style={{ display: 'flex', 'flex-direction': 'column', gap: '2px' }}>
-            <span
-              style={{
-                'font-family': 'Geist, sans-serif',
-                'font-size': '14px',
-                'font-weight': '500',
-                color: '#F5F5F7',
-              }}
-            >
-              Rules
-            </span>
-            <span
-              style={{
-                'font-family': 'Geist, sans-serif',
-                'font-size': '12px',
-                color: '#48484A',
-              }}
-            >
-              Project-specific instructions loaded from .ava/rules/
-            </span>
-          </div>
-        </div>
-
-        {/* Rule file rows */}
         <RulesSection />
-      </div>
+      </SettingsCard>
 
       {/* ===== Commands Card ===== */}
-      <div
-        style={{
-          background: '#111114',
-          border: '1px solid #ffffff08',
-          'border-radius': '12px',
-          padding: '20px',
-          display: 'flex',
-          'flex-direction': 'column',
-          gap: '16px',
-        }}
-      >
-        {/* Header */}
-        <div
-          style={{
-            display: 'flex',
-            'align-items': 'center',
-            'justify-content': 'space-between',
-          }}
-        >
-          <div style={{ display: 'flex', 'align-items': 'center', gap: '10px' }}>
-            <Terminal size={16} style={{ color: '#C8C8CC' }} />
-            <div style={{ display: 'flex', 'flex-direction': 'column', gap: '2px' }}>
-              <span
-                style={{
-                  'font-family': 'Geist, sans-serif',
-                  'font-size': '14px',
-                  'font-weight': '500',
-                  color: '#F5F5F7',
-                }}
-              >
-                Custom Commands
-              </span>
-              <span
-                style={{
-                  'font-family': 'Geist, sans-serif',
-                  'font-size': '12px',
-                  color: '#48484A',
-                }}
-              >
-                Reusable TOML-based prompt templates
-              </span>
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={() => setEditingCmd('new')}
-            style={{
-              display: 'flex',
-              'align-items': 'center',
-              gap: '6px',
-              padding: '6px 12px',
-              background: '#0A84FF',
-              'border-radius': '8px',
-              border: 'none',
-              cursor: 'pointer',
-            }}
-          >
-            <Plus size={12} style={{ color: '#FFFFFF' }} />
-            <span
-              style={{
-                'font-family': 'Geist, sans-serif',
-                'font-size': '12px',
-                'font-weight': '500',
-                color: '#FFFFFF',
-              }}
-            >
+      <SettingsCardSimple>
+        <SettingsActionHeader
+          icon={Terminal}
+          title="Custom Commands"
+          description="Reusable TOML-based prompt templates"
+          action={
+            <SettingsButton variant="primary" onClick={() => setEditingCmd('new')} icon={Plus}>
               New Command
-            </span>
-          </button>
-        </div>
+            </SettingsButton>
+          }
+        />
 
         {/* Inline command form */}
         <Show when={editingCmd()}>
@@ -187,12 +103,15 @@ export const RulesAndCommandsContent: Component = () => {
                   'text-align': 'center',
                 }}
               >
-                <Terminal size={24} style={{ color: '#48484A', 'margin-bottom': '8px' }} />
+                <Terminal
+                  size={24}
+                  style={{ color: 'var(--text-muted)', 'margin-bottom': '8px' }}
+                />
                 <span
                   style={{
-                    'font-family': 'Geist, sans-serif',
+                    'font-family': 'var(--font-sans)',
                     'font-size': '12px',
-                    color: '#48484A',
+                    color: 'var(--text-muted)',
                   }}
                 >
                   No custom commands yet
@@ -213,21 +132,21 @@ export const RulesAndCommandsContent: Component = () => {
                     'align-items': 'center',
                     gap: '10px',
                     padding: '10px 14px',
-                    background: '#ffffff04',
-                    border: '1px solid #ffffff0a',
+                    background: 'var(--surface-sunken)',
+                    border: '1px solid var(--border-subtle)',
                     'border-radius': '8px',
                     cursor: 'pointer',
                     transition: 'border-color 0.15s',
                   }}
                 >
-                  <Terminal size={14} style={{ color: '#48484A', 'flex-shrink': '0' }} />
+                  <Terminal size={14} style={{ color: 'var(--text-muted)', 'flex-shrink': '0' }} />
                   <div style={{ display: 'flex', 'flex-direction': 'column', gap: '2px' }}>
                     <span
                       style={{
-                        'font-family': 'Geist, sans-serif',
+                        'font-family': 'var(--font-sans)',
                         'font-size': '13px',
                         'font-weight': '500',
-                        color: '#F5F5F7',
+                        color: 'var(--text-primary)',
                       }}
                     >
                       /{cmd.name}
@@ -235,9 +154,9 @@ export const RulesAndCommandsContent: Component = () => {
                     <Show when={cmd.description}>
                       <span
                         style={{
-                          'font-family': 'Geist, sans-serif',
+                          'font-family': 'var(--font-sans)',
                           'font-size': '11px',
-                          color: '#48484A',
+                          color: 'var(--text-muted)',
                         }}
                       >
                         {cmd.description}
@@ -249,7 +168,7 @@ export const RulesAndCommandsContent: Component = () => {
             </For>
           </Show>
         </Show>
-      </div>
-    </div>
+      </SettingsCardSimple>
+    </SettingsTabContainer>
   )
 }

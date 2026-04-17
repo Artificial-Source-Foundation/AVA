@@ -9,6 +9,7 @@ const listMcpServersMock = vi.fn<() => Promise<McpServerInfo[]>>()
 const reloadMcpServersMock = vi.fn<() => Promise<{ serverCount: number; toolCount: number }>>()
 const enableMcpServerMock = vi.fn<(name: string) => Promise<void>>()
 const disableMcpServerMock = vi.fn<(name: string) => Promise<void>>()
+const fetchModelsMock = vi.fn()
 const notificationErrorMock = vi.fn()
 const notificationSuccessMock = vi.fn()
 const closeSettingsMock = vi.fn()
@@ -43,6 +44,11 @@ vi.mock('../../services/rust-bridge', () => ({
     enableMcpServer: (name: string) => enableMcpServerMock(name),
     disableMcpServer: (name: string) => disableMcpServerMock(name),
   },
+}))
+
+vi.mock('../../services/providers/model-fetcher', () => ({
+  enrichWithCatalog: (_provider: string, models: unknown[]) => models,
+  fetchModels: (...args: unknown[]) => fetchModelsMock(...args),
 }))
 
 vi.mock('../../stores/layout', () => ({
@@ -137,29 +143,41 @@ vi.mock('./settings-modal-content', async () => {
     SettingsModalContent: (props: {
       activeTab: () => string
       mcpServers: () => import('./tabs/MCPServersTab').MCPServer[]
+      onTestProvider: (id: string) => Promise<void>
       onRemoveMcpServer: (id: string) => void
       onAddMcpServer: () => void
       onRefreshMcpServers?: () => void
       onToggleMcpServer?: (name: string, enabled: boolean) => void
       isMcpLoading?: () => boolean
     }) => (
-      <Show when={props.activeTab() === 'mcp'}>
-        <button
-          type="button"
-          aria-label="Mock remove fallback-local MCP server"
-          onClick={() => props.onRemoveMcpServer('fallback-local')}
-        >
-          Remove local MCP server
-        </button>
-        <MCPServersTab
-          servers={props.mcpServers()}
-          isLoading={props.isMcpLoading?.()}
-          onRemove={props.onRemoveMcpServer}
-          onAdd={props.onAddMcpServer}
-          onRefresh={props.onRefreshMcpServers}
-          onToggle={props.onToggleMcpServer}
-        />
-      </Show>
+      <>
+        <Show when={props.activeTab() === 'providers'}>
+          <button
+            type="button"
+            aria-label="Mock test OpenAI provider"
+            onClick={() => void props.onTestProvider('openai')}
+          >
+            Test OpenAI provider
+          </button>
+        </Show>
+        <Show when={props.activeTab() === 'mcp'}>
+          <button
+            type="button"
+            aria-label="Mock remove fallback-local MCP server"
+            onClick={() => props.onRemoveMcpServer('fallback-local')}
+          >
+            Remove local MCP server
+          </button>
+          <MCPServersTab
+            servers={props.mcpServers()}
+            isLoading={props.isMcpLoading?.()}
+            onRemove={props.onRemoveMcpServer}
+            onAdd={props.onAddMcpServer}
+            onRefresh={props.onRefreshMcpServers}
+            onToggle={props.onToggleMcpServer}
+          />
+        </Show>
+      </>
     ),
   }
 })
@@ -242,15 +260,23 @@ async function openMcpTab(): Promise<void> {
   await flush()
 }
 
+async function openProvidersTab(): Promise<void> {
+  await flush()
+  window.dispatchEvent(new CustomEvent('ava:settings-tab', { detail: { tab: 'providers' } }))
+  await flush()
+}
+
 describe('SettingsModal MCP live state', () => {
   let container: HTMLDivElement
   let dispose: (() => void) | undefined
 
   beforeEach(() => {
+    localStorage.clear()
     listMcpServersMock.mockReset()
     reloadMcpServersMock.mockReset()
     enableMcpServerMock.mockReset()
     disableMcpServerMock.mockReset()
+    fetchModelsMock.mockReset()
     notificationErrorMock.mockReset()
     notificationSuccessMock.mockReset()
     closeSettingsMock.mockReset()
@@ -287,6 +313,7 @@ describe('SettingsModal MCP live state', () => {
   afterEach(() => {
     dispose?.()
     dispose = undefined
+    localStorage.clear()
     document.body.innerHTML = ''
   })
 
@@ -571,5 +598,87 @@ describe('SettingsModal MCP live state', () => {
 
     expect(container.textContent).toContain('live-only')
     expect(queryButtonByLabel('Remove live-only MCP server')).toBeNull()
+  })
+
+  it('closes Settings on Escape when no nested settings dialog owns the keypress', async () => {
+    dispose = render(() => <SettingsModal />, container)
+    await flush()
+
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+
+    expect(closeSettingsMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('ignores Escape while any nested settings dialog is open', async () => {
+    dispose = render(() => <SettingsModal />, container)
+    await flush()
+
+    const nestedDialog = document.createElement('div')
+    nestedDialog.setAttribute('data-settings-nested-dialog', 'true')
+    document.body.appendChild(nestedDialog)
+
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+
+    expect(closeSettingsMock).not.toHaveBeenCalled()
+  })
+
+  it('tests OAuth-backed providers using stored credentials', async () => {
+    fetchModelsMock.mockResolvedValueOnce([
+      { id: 'gpt-4.1', name: 'GPT-4.1', contextWindow: 128000 },
+    ])
+    localStorage.setItem(
+      'ava_credentials',
+      JSON.stringify({ openai: { type: 'oauth-token', value: 'oauth-token' } })
+    )
+
+    dispose = render(() => <SettingsModal />, container)
+    await openProvidersTab()
+
+    click(getButtonByLabel('Mock test OpenAI provider'))
+    await flush()
+
+    expect(fetchModelsMock).toHaveBeenCalledWith('openai', {
+      apiKey: 'oauth-token',
+      authType: 'oauth-token',
+      baseUrl: undefined,
+    })
+    expect(updateProviderMock).toHaveBeenCalledWith(
+      'openai',
+      expect.objectContaining({
+        defaultModel: 'gpt-5.2',
+        status: 'connected',
+        error: undefined,
+        models: expect.arrayContaining([
+          expect.objectContaining({
+            id: 'gpt-4.1',
+            name: 'GPT-4.1',
+            contextWindow: 128000,
+          }),
+        ]),
+      })
+    )
+    expect(notificationSuccessMock).toHaveBeenCalledWith(
+      'Provider connected',
+      expect.stringMatching(/^\d+ models available$/)
+    )
+  })
+
+  it('tests OAuth-backed providers using the core auth-store token fallback', async () => {
+    fetchModelsMock.mockResolvedValueOnce([
+      { id: 'gpt-4.1-mini', name: 'GPT-4.1 Mini', contextWindow: 128000 },
+    ])
+    localStorage.setItem('ava_cred_ava:openai:oauth_token', 'core-oauth-token')
+
+    dispose = render(() => <SettingsModal />, container)
+    await openProvidersTab()
+
+    click(getButtonByLabel('Mock test OpenAI provider'))
+    await flush()
+
+    expect(fetchModelsMock).toHaveBeenCalledWith('openai', {
+      apiKey: 'core-oauth-token',
+      authType: 'oauth-token',
+      baseUrl: undefined,
+    })
   })
 })

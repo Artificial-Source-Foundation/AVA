@@ -11,6 +11,7 @@ import { type Component, createSignal, onCleanup, onMount, Show } from 'solid-js
 import type { DeviceCodeResponse } from '../../services/auth/oauth'
 import { pollDeviceCodeAuth, storeOAuthCredentials } from '../../services/auth/oauth'
 import type { LLMProvider } from '../../types/llm'
+import { useSettingsDialogEscape } from './settings-dialog-utils'
 
 interface DeviceCodeDialogProps {
   provider: LLMProvider
@@ -24,6 +25,13 @@ export const DeviceCodeDialog: Component<DeviceCodeDialogProps> = (props) => {
   const [status, setStatus] = createSignal<'waiting' | 'success' | 'error'>('waiting')
   const [errorMsg, setErrorMsg] = createSignal('')
   const abortController = new AbortController()
+  let dialogRef: HTMLDivElement | undefined
+
+  useSettingsDialogEscape({
+    onEscape: props.onClose,
+    isOpen: () => true,
+    getDialogElement: () => dialogRef,
+  })
 
   const copyCode = async () => {
     await navigator.clipboard.writeText(props.deviceCode.userCode)
@@ -69,11 +77,17 @@ export const DeviceCodeDialog: Component<DeviceCodeDialogProps> = (props) => {
 
   return (
     <div
-      class="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center"
+      ref={dialogRef}
+      data-settings-nested-dialog="true"
+      class="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center outline-none"
       style={{ background: 'var(--modal-overlay)' }}
+      tabindex="-1"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Device code authentication"
     >
       <div
-        class="w-[380px] p-6 animate-slide-up"
+        class="w-[380px] p-6"
         style={{
           background: 'var(--modal-surface)',
           border: '1px solid var(--modal-border)',
@@ -90,6 +104,7 @@ export const DeviceCodeDialog: Component<DeviceCodeDialogProps> = (props) => {
             type="button"
             onClick={() => props.onClose()}
             class="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)] rounded-[var(--radius-md)] transition-colors"
+            aria-label="Close device code dialog"
           >
             <X class="w-4 h-4" />
           </button>
@@ -125,6 +140,7 @@ export const DeviceCodeDialog: Component<DeviceCodeDialogProps> = (props) => {
               transition-colors
             "
             title="Copy code"
+            aria-label="Copy device code"
           >
             <Show when={copied()} fallback={<Clipboard class="w-4 h-4" />}>
               <Check class="w-4 h-4 text-[var(--success)]" />

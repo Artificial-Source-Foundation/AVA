@@ -11,16 +11,45 @@ import {
   type ProviderModel,
 } from '../../config/defaults/provider-defaults'
 import { log } from '../../lib/logger'
+import { isOAuthSupported } from '../../services/auth/oauth-config'
 import { logInfo, logWarn } from '../../services/logger'
 import { getModelsDevModels } from '../../services/providers/curated-model-catalog'
 import { enrichWithCatalog, fetchModels } from '../../services/providers/model-fetcher'
-import type { LLMProvider } from '../../types/llm'
+import type { Credentials, LLMProvider } from '../../types/llm'
 import { applyAppearanceToDOM } from './settings-appearance'
 import { saveSettings, syncProviderCredentials } from './settings-persistence'
 import { setSettingsRaw, settings, updateSettings, updateSubKey } from './settings-signal'
 import type { AppSettings, MCPServerConfig } from './settings-types'
 
 // ── Provider ─────────────────────────────────────────────────────────────────
+
+const AVA_CREDENTIALS_KEY = 'ava_credentials'
+const LEGACY_CREDENTIALS_KEY = 'estela_credentials'
+const AVA_CREDENTIAL_PREFIX = 'ava_cred_'
+const LEGACY_CREDENTIAL_PREFIX = 'estela_cred_'
+
+function clearStoredOAuthCredentials(id: string): void {
+  try {
+    const raw =
+      localStorage.getItem(AVA_CREDENTIALS_KEY) || localStorage.getItem(LEGACY_CREDENTIALS_KEY)
+    if (raw) {
+      const all = JSON.parse(raw) as Record<string, { type?: string }>
+      if (all[id]?.type === 'oauth-token') {
+        delete all[id]
+        const serialized = JSON.stringify(all)
+        localStorage.setItem(AVA_CREDENTIALS_KEY, serialized)
+        localStorage.setItem(LEGACY_CREDENTIALS_KEY, serialized)
+      }
+    }
+  } catch {
+    // Ignore malformed credential cache
+  }
+
+  localStorage.removeItem(`${AVA_CREDENTIAL_PREFIX}ava:${id}:oauth_token`)
+  localStorage.removeItem(`${AVA_CREDENTIAL_PREFIX}ava:${id}:account_id`)
+  localStorage.removeItem(`${AVA_CREDENTIAL_PREFIX}auth-${id}`)
+  localStorage.removeItem(`${LEGACY_CREDENTIAL_PREFIX}auth-${id}`)
+}
 
 export function updateProvider(id: string, patch: Partial<LLMProviderConfig>): void {
   if (patch.status)
@@ -38,16 +67,29 @@ export function updateProvider(id: string, patch: Partial<LLMProviderConfig>): v
     return next
   })
   if ('apiKey' in patch) {
+    if (patch.apiKey) {
+      clearStoredOAuthCredentials(id)
+    }
     syncProviderCredentials(id, patch.apiKey)
     // Auto-fetch models when an API key is set
     if (patch.apiKey) autoFetchModels(id)
   }
 }
 
-/** Get the effective API key for a provider (from config or OAuth storage) */
-export function getProviderCredential(id: string): string | undefined {
-  const provider = settings().providers.find((p) => p.id === id)
-  if (provider?.apiKey) return provider.apiKey
+/** Get the effective credential metadata for a provider (from config or OAuth storage). */
+export interface ProviderCredentialInfo {
+  value: string
+  type: Credentials['type']
+}
+
+function getStoredOAuthCredentialInfo(id: string): ProviderCredentialInfo | undefined {
+  const cachedOAuthToken = localStorage.getItem(`ava_cred_ava:${id}:oauth_token`)
+  if (cachedOAuthToken) {
+    return {
+      value: cachedOAuthToken,
+      type: 'oauth-token',
+    }
+  }
 
   // Check OAuth token in localStorage (same logic as providers-tab-helpers)
   try {
@@ -55,21 +97,100 @@ export function getProviderCredential(id: string): string | undefined {
       localStorage.getItem('ava_credentials') || localStorage.getItem('estela_credentials')
     if (raw) {
       const all = JSON.parse(raw) as Record<string, { type?: string; value?: string }>
-      if (all[id]?.type === 'oauth-token' && all[id]?.value) return all[id].value
+      if (all[id]?.type === 'oauth-token' && all[id]?.value) {
+        return {
+          value: all[id].value,
+          type: 'oauth-token',
+        }
+      }
     }
   } catch {
     // ignore
   }
+
+  // Legacy key format (best-effort fallback for migration paths)
+  try {
+    const legacyCoreAuth =
+      localStorage.getItem(`${AVA_CREDENTIAL_PREFIX}auth-${id}`) ||
+      localStorage.getItem(`${LEGACY_CREDENTIAL_PREFIX}auth-${id}`)
+    if (legacyCoreAuth) {
+      const parsed = JSON.parse(legacyCoreAuth) as {
+        type?: string
+        accessToken?: string
+        value?: string
+      }
+      if (parsed.type === 'oauth' && (parsed.accessToken || parsed.value)) {
+        return {
+          value: parsed.accessToken || parsed.value || '',
+          type: 'oauth-token',
+        }
+      }
+    }
+  } catch {
+    // Ignore malformed legacy credentials
+  }
+
   return undefined
+}
+
+function getConfiguredApiKeyCredentialInfo(
+  id: string,
+  provider: LLMProviderConfig | undefined
+): ProviderCredentialInfo | undefined {
+  if (!provider?.apiKey) return undefined
+
+  const cachedApiKey = localStorage.getItem(`ava_cred_ava:${id}:api_key`)
+  const isPersistedApiKey = cachedApiKey === provider.apiKey
+  const isHydratedConfiguredProvider = provider.enabled || provider.status === 'connected'
+
+  if (!isPersistedApiKey && !isHydratedConfiguredProvider) return undefined
+
+  return {
+    value: provider.apiKey,
+    type: 'api-key',
+  }
+}
+
+/** Get the effective credential for a provider (from config or OAuth storage). */
+export function getProviderCredentialInfo(id: string): ProviderCredentialInfo | undefined {
+  const provider = settings().providers.find((p) => p.id === id)
+  const configuredApiKey = getConfiguredApiKeyCredentialInfo(id, provider)
+  const storedOAuthCredential = getStoredOAuthCredentialInfo(id)
+
+  if (configuredApiKey) {
+    return configuredApiKey
+  }
+
+  if (isOAuthSupported(id as LLMProvider) && storedOAuthCredential) {
+    return storedOAuthCredential
+  }
+
+  if (provider?.apiKey) {
+    return {
+      value: provider.apiKey,
+      type: 'api-key',
+    }
+  }
+
+  return storedOAuthCredential
+}
+
+/** Get the effective credential value for a provider (from config or OAuth storage). */
+export function getProviderCredential(id: string): string | undefined {
+  return getProviderCredentialInfo(id)?.value
 }
 
 /** Fetch models from provider API and merge with hardcoded defaults */
 export function autoFetchModels(id: string): void {
-  const credential = getProviderCredential(id)
+  const credential = getProviderCredentialInfo(id)
   if (!credential) return
 
   const provider = settings().providers.find((p) => p.id === id)
-  fetchModels(id as LLMProvider, { apiKey: credential, baseUrl: provider?.baseUrl })
+  fetchModels(id as LLMProvider, {
+    apiKey: credential.value,
+    authType: credential.type,
+    baseUrl: provider?.baseUrl,
+  })
     .then((rawFetched) => {
       // Enrich with the backend-owned curated catalog (fills pricing, context windows, capabilities)
       const fetched = enrichWithCatalog(id as LLMProvider, rawFetched)
@@ -108,9 +229,11 @@ export function autoFetchModels(id: string): void {
       // Convert to array, mark the first model or current default
       const models: ProviderModel[] = [...fetchedMap.values()]
       const keepDefault = current?.defaultModel && models.some((m) => m.id === current.defaultModel)
-      const defaultModelId = keepDefault
-        ? current.defaultModel
-        : (defaults?.defaultModel ?? models[0]?.id)
+      const preferredDefaultModelId = keepDefault ? current.defaultModel : defaults?.defaultModel
+      const defaultModelId =
+        preferredDefaultModelId && models.some((m) => m.id === preferredDefaultModelId)
+          ? preferredDefaultModelId
+          : models[0]?.id
       for (const m of models) m.isDefault = m.id === defaultModelId
 
       updateProvider(id, {

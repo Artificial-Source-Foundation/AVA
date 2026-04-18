@@ -503,7 +503,7 @@ async fn question_requests_use_shared_timeout_and_clear_lifecycle() {
 
     let (app_tx, mut app_rx) = mpsc::unbounded_channel();
     let (agent_tx, _) = mpsc::unbounded_channel();
-    let (reply_tx, mut reply_rx) = oneshot::channel();
+    let (reply_tx, reply_rx) = oneshot::channel();
 
     app.receive_question_request(
         ava_tools::core::question::QuestionRequest {
@@ -567,7 +567,7 @@ async fn question_resolution_uses_request_id_and_shared_clear_event() {
 
     let (app_tx, mut app_rx) = mpsc::unbounded_channel();
     let (agent_tx, _) = mpsc::unbounded_channel();
-    let (reply_tx, mut reply_rx) = oneshot::channel();
+    let (reply_tx, reply_rx) = oneshot::channel();
 
     app.receive_question_request(
         ava_tools::core::question::QuestionRequest {
@@ -629,7 +629,7 @@ async fn plan_resolution_uses_request_id_and_shared_clear_event() {
 
     let (app_tx, mut app_rx) = mpsc::unbounded_channel();
     let (agent_tx, _) = mpsc::unbounded_channel();
-    let (reply_tx, mut reply_rx) = oneshot::channel();
+    let (reply_tx, reply_rx) = oneshot::channel();
 
     app.receive_plan_request(
         ava_tools::core::plan::PlanRequest {
@@ -701,7 +701,7 @@ async fn plan_requests_use_shared_timeout_and_clear_lifecycle() {
 
     let (app_tx, mut app_rx) = mpsc::unbounded_channel();
     let (agent_tx, _) = mpsc::unbounded_channel();
-    let (reply_tx, mut reply_rx) = oneshot::channel();
+    let (reply_tx, reply_rx) = oneshot::channel();
 
     app.receive_plan_request(
         ava_tools::core::plan::PlanRequest {
@@ -957,7 +957,7 @@ async fn cancelling_tui_run_clears_pending_approval_via_shared_lifecycle() {
 
     let (app_tx, mut app_rx) = mpsc::unbounded_channel();
     let (agent_tx, _) = mpsc::unbounded_channel();
-    let (reply_tx, mut reply_rx) = oneshot::channel();
+    let (reply_tx, reply_rx) = oneshot::channel();
 
     app.receive_tool_approval_request(
         ava_tools::permission_middleware::ApprovalRequest {
@@ -1126,7 +1126,7 @@ async fn queued_tool_approvals_preserve_replies_and_resolve_in_order() {
 
     let (app_tx, mut app_rx) = mpsc::unbounded_channel();
     let (agent_tx, _) = mpsc::unbounded_channel();
-    let (first_reply_tx, mut first_reply_rx) = oneshot::channel();
+    let (first_reply_tx, first_reply_rx) = oneshot::channel();
     let (second_reply_tx, second_reply_rx) = oneshot::channel();
 
     app.receive_tool_approval_request(
@@ -1273,7 +1273,7 @@ async fn queued_tool_approval_timeout_only_arms_visible_request_and_resets_modal
 
     let (app_tx, mut app_rx) = mpsc::unbounded_channel();
     let (agent_tx, _) = mpsc::unbounded_channel();
-    let (first_reply_tx, mut first_reply_rx) = oneshot::channel();
+    let (first_reply_tx, first_reply_rx) = oneshot::channel();
     let (second_reply_tx, mut second_reply_rx) = oneshot::channel();
 
     app.receive_tool_approval_request(
@@ -1423,7 +1423,7 @@ async fn question_requests_supersede_existing_pending_sender() {
 
     let (app_tx, mut app_rx) = mpsc::unbounded_channel();
     let (agent_tx, _) = mpsc::unbounded_channel();
-    let (first_reply_tx, mut first_reply_rx) = oneshot::channel();
+    let (first_reply_tx, first_reply_rx) = oneshot::channel();
     let (second_reply_tx, second_reply_rx) = oneshot::channel();
 
     app.receive_question_request(
@@ -1621,7 +1621,7 @@ async fn plan_requests_supersede_existing_pending_sender() {
 
     let (app_tx, mut app_rx) = mpsc::unbounded_channel();
     let (agent_tx, _) = mpsc::unbounded_channel();
-    let (first_reply_tx, mut first_reply_rx) = oneshot::channel();
+    let (first_reply_tx, first_reply_rx) = oneshot::channel();
     let (second_reply_tx, second_reply_rx) = oneshot::channel();
 
     app.receive_plan_request(

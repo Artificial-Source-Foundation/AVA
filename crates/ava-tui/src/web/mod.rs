@@ -94,7 +94,7 @@ fn build_router(state: WebState) -> Router {
         ])
         .allow_headers(Any);
 
-    Router::new()
+    let router = Router::new()
         // Agent endpoints
         .route("/api/agent/submit", post(api::submit_goal))
         .route("/api/agent/cancel", post(api::cancel_agent))
@@ -203,8 +203,17 @@ fn build_router(state: WebState) -> Router {
         // Health check
         .route("/api/health", get(api::health))
         .layer(cors)
-        .layer(TraceLayer::new_for_http())
-        .with_state(state)
+        .layer(TraceLayer::new_for_http());
+
+    #[cfg(debug_assertions)]
+    let router = router
+        .route(
+            "/api/debug/inject-approval",
+            post(api::inject_approval_request),
+        )
+        .route("/api/debug/finish-run", post(api::finish_debug_run));
+
+    router.with_state(state)
 }
 
 /// Start the AVA web server on the given host and port.
@@ -257,17 +266,19 @@ async fn shutdown_signal() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::web::api_agent::spawn_interactive_forwarders;
+    use crate::web::api_agent::{
+        emit_promoted_interactive_request_event, spawn_interactive_forwarders,
+    };
     use crate::web::state::WebEvent;
     use ava_agent::control_plane::interactive::{
         InteractiveRequestKind, InteractiveRequestStore, InteractiveTimeoutPolicy,
     };
-    use ava_tools::core::question::QuestionRequest;
-    use ava_tools::permission_middleware::ToolApproval;
+    use ava_tools::core::{plan::PlanRequest, question::QuestionRequest};
+    use ava_tools::permission_middleware::{ApprovalRequest, ToolApproval};
     use ava_types::PlanDecision;
     use axum::body::{to_bytes, Body};
     use axum::http::{Request, StatusCode};
-    use std::collections::{HashMap, VecDeque};
+    use std::collections::HashMap;
     use std::sync::Arc;
     use std::time::Duration;
     use tokio::sync::{broadcast, mpsc, oneshot, Mutex, RwLock};
@@ -301,7 +312,7 @@ mod tests {
                 ),
                 deferred_interactive_events: Mutex::new(HashMap::new()),
                 last_session_id: RwLock::new(None),
-                edit_history: Arc::new(RwLock::new(VecDeque::new())),
+                edit_history: Arc::new(RwLock::new(HashMap::new())),
                 deferred_queue: Arc::new(RwLock::new(HashMap::new())),
                 in_flight_deferred: Arc::new(RwLock::new(HashMap::new())),
             }),
@@ -311,7 +322,12 @@ mod tests {
     async fn register_test_run(state: &WebState, run_id: &str) -> uuid::Uuid {
         let session_id = uuid::Uuid::new_v4();
         state
-            .register_run(run_id.to_string(), session_id)
+            .register_run(
+                run_id.to_string(),
+                session_id,
+                "openai".to_string(),
+                "gpt-5.4".to_string(),
+            )
             .await
             .expect("register test run");
         session_id
@@ -327,7 +343,7 @@ mod tests {
         let inactive_session = uuid::Uuid::new_v4();
         register_test_run(&state, "web-run-status-b").await;
 
-        let app = build_router(state);
+        let app = build_router(state.clone());
 
         let active_response = app
             .clone()
@@ -381,7 +397,167 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn unrelated_web_question_requests_resolve_independently_by_run() {
+    async fn agent_status_uses_active_run_provider_and_model() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let state = WebState::init(temp.path().to_path_buf())
+            .await
+            .expect("web state");
+        let session_id = uuid::Uuid::new_v4();
+        state
+            .register_run(
+                "web-run-provider-model".to_string(),
+                session_id,
+                "anthropic".to_string(),
+                "claude-sonnet-4.6".to_string(),
+            )
+            .await
+            .expect("register run");
+
+        let app = build_router(state.clone());
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/api/agent/status?run_id=web-run-provider-model")
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), 8 * 1024)
+            .await
+            .expect("body");
+        let json: serde_json::Value = serde_json::from_slice(&body).expect("status json");
+        assert_eq!(
+            json.get("provider").and_then(|value| value.as_str()),
+            Some("anthropic")
+        );
+        assert_eq!(
+            json.get("model").and_then(|value| value.as_str()),
+            Some("claude-sonnet-4.6")
+        );
+    }
+
+    #[tokio::test]
+    async fn agent_status_only_exposes_same_kind_prompt_when_run_is_globally_actionable() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let state = WebState::init(temp.path().to_path_buf())
+            .await
+            .expect("web state");
+        register_test_run(&state, "web-run-a").await;
+        register_test_run(&state, "web-run-b").await;
+
+        let (run_a_tx, _run_a_rx) = oneshot::channel::<String>();
+        let run_a = state
+            .inner
+            .pending_question_reply
+            .register_with_run_id(run_a_tx, Some("web-run-a".to_string()))
+            .await;
+        let (run_b_tx, _run_b_rx) = oneshot::channel::<String>();
+        let run_b = state
+            .inner
+            .pending_question_reply
+            .register_with_run_id(run_b_tx, Some("web-run-b".to_string()))
+            .await;
+
+        state.inner.deferred_interactive_events.lock().await.insert(
+            run_a.request_id.clone(),
+            WebEvent::QuestionRequest {
+                id: run_a.request_id.clone(),
+                question: "Question A?".to_string(),
+                options: vec![],
+                run_id: run_a.run_id.clone(),
+            },
+        );
+        state.inner.deferred_interactive_events.lock().await.insert(
+            run_b.request_id.clone(),
+            WebEvent::QuestionRequest {
+                id: run_b.request_id.clone(),
+                question: "Question B?".to_string(),
+                options: vec![],
+                run_id: run_b.run_id.clone(),
+            },
+        );
+
+        let app = build_router(state.clone());
+
+        let run_a_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/api/agent/status?run_id=web-run-a")
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        let run_a_body = to_bytes(run_a_response.into_body(), 8 * 1024)
+            .await
+            .expect("body");
+        let run_a_json: serde_json::Value =
+            serde_json::from_slice(&run_a_body).expect("run A status json");
+        assert_eq!(
+            run_a_json
+                .get("pendingQuestion")
+                .and_then(|value| value.get("runId"))
+                .and_then(|value| value.as_str()),
+            Some("web-run-a")
+        );
+
+        let run_b_hidden_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/api/agent/status?run_id=web-run-b")
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        let run_b_hidden_body = to_bytes(run_b_hidden_response.into_body(), 8 * 1024)
+            .await
+            .expect("body");
+        let run_b_hidden_json: serde_json::Value =
+            serde_json::from_slice(&run_b_hidden_body).expect("run B hidden status json");
+        assert!(run_b_hidden_json.get("pendingQuestion").is_none());
+
+        let _ = state
+            .inner
+            .pending_question_reply
+            .resolve(Some(&run_a.request_id))
+            .await
+            .expect("run A request should resolve");
+
+        let run_b_visible_response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/api/agent/status?run_id=web-run-b")
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        let run_b_visible_body = to_bytes(run_b_visible_response.into_body(), 8 * 1024)
+            .await
+            .expect("body");
+        let run_b_visible_json: serde_json::Value =
+            serde_json::from_slice(&run_b_visible_body).expect("run B visible status json");
+        assert_eq!(
+            run_b_visible_json
+                .get("pendingQuestion")
+                .and_then(|value| value.get("runId"))
+                .and_then(|value| value.as_str()),
+            Some("web-run-b")
+        );
+    }
+
+    #[tokio::test]
+    async fn unrelated_web_question_requests_stay_hidden_until_globally_actionable() {
         let temp = tempfile::tempdir().expect("tempdir");
         let state = WebState::init(temp.path().to_path_buf())
             .await
@@ -428,13 +604,20 @@ mod tests {
             }
             other => panic!("expected question_request event, got {other:?}"),
         };
-        let request_b = match events.recv().await.expect("question B event") {
-            WebEvent::QuestionRequest { id, run_id, .. } => {
-                assert_eq!(run_id.as_deref(), Some("web-run-b"));
-                id
-            }
-            other => panic!("expected question_request event, got {other:?}"),
-        };
+
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), events.recv())
+                .await
+                .is_err(),
+            "same-kind request for another run should stay hidden until globally actionable"
+        );
+
+        let request_b = state
+            .inner
+            .pending_question_reply
+            .current_request_id_for_run(Some("web-run-b"))
+            .await
+            .expect("run B request id");
 
         let app = build_router(state.clone());
         let resolve_b_response = app
@@ -454,6 +637,14 @@ mod tests {
 
         assert_eq!(resolve_b_response.status(), StatusCode::OK);
         assert_eq!(reply_b_rx.await.expect("question B answer"), "beta");
+        assert_eq!(
+            state
+                .inner
+                .pending_question_reply
+                .current_request_id_for_run(Some("web-run-a"))
+                .await,
+            Some(request_a.clone())
+        );
 
         let resolve_a_response = app
             .oneshot(
@@ -488,7 +679,7 @@ mod tests {
         let request = state.inner.pending_plan_reply.register(tx).await;
 
         let retry_state = state.clone();
-        let app = build_router(state);
+        let app = build_router(state.clone());
 
         let response = app
             .oneshot(
@@ -588,8 +779,21 @@ mod tests {
 
         let (tx, rx) = oneshot::channel();
         let request = state.inner.pending_approval_reply.register(tx).await;
+        state.inner.deferred_interactive_events.lock().await.insert(
+            request.request_id.clone(),
+            WebEvent::ApprovalRequest {
+                id: request.request_id.clone(),
+                tool_call_id: "tool-1".to_string(),
+                tool_name: "bash".to_string(),
+                args: serde_json::json!({ "command": "pwd" }),
+                risk_level: "low".to_string(),
+                reason: "Need approval".to_string(),
+                warnings: vec![],
+                run_id: None,
+            },
+        );
 
-        let app = build_router(state);
+        let app = build_router(state.clone());
         let response = app
             .oneshot(
                 Request::builder()
@@ -625,6 +829,134 @@ mod tests {
             }
             other => panic!("expected interactive_request_cleared event, got {other:?}"),
         }
+        assert!(state
+            .inner
+            .deferred_interactive_events
+            .lock()
+            .await
+            .get(&request.request_id)
+            .is_none());
+    }
+
+    #[cfg(debug_assertions)]
+    #[tokio::test]
+    async fn debug_injected_approval_creates_correlated_run_and_cleans_up_after_resolution() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let state = WebState::init(temp.path().to_path_buf())
+            .await
+            .expect("web state");
+        let mut events = state.inner.event_tx.subscribe();
+        let session_id = uuid::Uuid::new_v4();
+        let run_id = "debug-run-approval";
+
+        let app = build_router(state.clone());
+        let inject_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/debug/inject-approval")
+                    .header("content-type", "application/json")
+                    .body(Body::from(format!(
+                        r#"{{"session_id":"{}","run_id":"{}","tool_name":"bash","args":{{"command":"pwd"}}}}"#,
+                        session_id, run_id
+                    )))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+
+        assert_eq!(inject_response.status(), StatusCode::OK);
+        let inject_body = to_bytes(inject_response.into_body(), 8 * 1024)
+            .await
+            .expect("inject body");
+        let inject_payload: serde_json::Value =
+            serde_json::from_slice(&inject_body).expect("inject payload");
+        let request_id = inject_payload["requestId"]
+            .as_str()
+            .expect("requestId")
+            .to_string();
+
+        match events.recv().await.expect("approval event") {
+            WebEvent::ApprovalRequest {
+                id,
+                run_id: event_run_id,
+                ..
+            } => {
+                assert_eq!(id, request_id);
+                assert_eq!(event_run_id.as_deref(), Some(run_id));
+            }
+            other => panic!("expected approval_request event, got {other:?}"),
+        }
+
+        let status_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(format!("/api/agent/status?session_id={session_id}"))
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+
+        assert_eq!(status_response.status(), StatusCode::OK);
+        let status_body = to_bytes(status_response.into_body(), 8 * 1024)
+            .await
+            .expect("status body");
+        let status_payload: serde_json::Value =
+            serde_json::from_slice(&status_body).expect("status payload");
+        assert_eq!(status_payload["running"], serde_json::json!(true));
+        assert_eq!(status_payload["runId"], serde_json::json!(run_id));
+        assert_eq!(
+            status_payload["pendingApproval"]["id"],
+            serde_json::json!(request_id)
+        );
+
+        let resolve_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/agent/resolve-approval")
+                    .header("content-type", "application/json")
+                    .body(Body::from(format!(
+                        r#"{{"request_id":"{}","approved":false}}"#,
+                        request_id
+                    )))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+
+        assert_eq!(resolve_response.status(), StatusCode::OK);
+
+        match events.recv().await.expect("clear event") {
+            WebEvent::InteractiveRequestCleared {
+                request_id: cleared_request_id,
+                request_kind,
+                timed_out,
+                run_id: cleared_run_id,
+            } => {
+                assert_eq!(cleared_request_id, request_id);
+                assert_eq!(request_kind, "approval");
+                assert!(!timed_out);
+                assert_eq!(cleared_run_id.as_deref(), Some(run_id));
+            }
+            other => panic!("expected interactive_request_cleared event, got {other:?}"),
+        }
+
+        tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                if state.active_run_count().await == 0 {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("synthetic run cleanup");
     }
 
     #[tokio::test]
@@ -1236,6 +1568,116 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn web_timeout_cleanup_discards_deferred_interactive_event_cache() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let base_state = WebState::init(temp.path().to_path_buf())
+            .await
+            .expect("web state");
+        let state = timeout_test_state(&base_state, Duration::from_millis(20));
+        let session_id = register_test_run(&state, "web-run-timeout-cleanup").await;
+        let _ = session_id;
+
+        let (_, approval_rx) = mpsc::unbounded_channel::<ApprovalRequest>();
+        let (question_tx, question_rx) = mpsc::unbounded_channel();
+        let (_, plan_rx) = mpsc::unbounded_channel::<PlanRequest>();
+
+        let (approval_forwarder, question_forwarder, plan_forwarder) =
+            spawn_interactive_forwarders(state.inner.clone(), approval_rx, question_rx, plan_rx);
+
+        let (reply_tx, _reply_rx) = oneshot::channel::<String>();
+        question_tx
+            .send(QuestionRequest {
+                run_id: Some("web-run-timeout-cleanup".to_string()),
+                question: "Will this timeout?".to_string(),
+                options: vec![],
+                reply: reply_tx,
+            })
+            .expect("question should enqueue");
+        drop(question_tx);
+
+        tokio::time::sleep(Duration::from_millis(60)).await;
+
+        assert!(state
+            .inner
+            .deferred_interactive_events
+            .lock()
+            .await
+            .is_empty());
+
+        approval_forwarder.abort();
+        question_forwarder.abort();
+        plan_forwarder.abort();
+    }
+
+    #[tokio::test]
+    async fn promoted_interactive_request_can_advance_to_different_run() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let base_state = WebState::init(temp.path().to_path_buf())
+            .await
+            .expect("web state");
+        let state = timeout_test_state(&base_state, Duration::from_millis(20));
+        let mut events = state.inner.event_tx.subscribe();
+
+        register_test_run(&state, "web-run-a").await;
+        register_test_run(&state, "web-run-b").await;
+
+        let (first_tx, _first_rx) = oneshot::channel::<String>();
+        let first = state
+            .inner
+            .pending_question_reply
+            .register_with_run_id(first_tx, Some("web-run-a".to_string()))
+            .await;
+        let (second_tx, _second_rx) = oneshot::channel::<String>();
+        let second = state
+            .inner
+            .pending_question_reply
+            .register_with_run_id(second_tx, Some("web-run-b".to_string()))
+            .await;
+
+        state.inner.deferred_interactive_events.lock().await.insert(
+            first.request_id.clone(),
+            WebEvent::QuestionRequest {
+                id: first.request_id.clone(),
+                question: "Question A".to_string(),
+                options: vec![],
+                run_id: first.run_id.clone(),
+            },
+        );
+        state.inner.deferred_interactive_events.lock().await.insert(
+            second.request_id.clone(),
+            WebEvent::QuestionRequest {
+                id: second.request_id.clone(),
+                question: "Question B".to_string(),
+                options: vec![],
+                run_id: second.run_id.clone(),
+            },
+        );
+
+        let resolved = state
+            .inner
+            .pending_question_reply
+            .resolve(Some(&first.request_id))
+            .await
+            .expect("first request should resolve");
+        assert_eq!(resolved.handle.run_id.as_deref(), Some("web-run-a"));
+
+        emit_promoted_interactive_request_event(
+            &state.inner,
+            InteractiveRequestKind::Question,
+            Some("web-run-a"),
+        )
+        .await;
+
+        match events.recv().await.expect("promoted question request") {
+            WebEvent::QuestionRequest { id, run_id, .. } => {
+                assert_eq!(id, second.request_id);
+                assert_eq!(run_id.as_deref(), Some("web-run-b"));
+            }
+            other => panic!("expected promoted question request, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
     async fn clear_message_queue_rejects_unsupported_follow_up_targets() {
         let temp = tempfile::tempdir().expect("tempdir");
         let state = WebState::init(temp.path().to_path_buf())
@@ -1573,5 +2015,70 @@ mod tests {
             .await
             .expect("body");
         assert!(String::from_utf8_lossy(&body).contains("session_id is required"));
+    }
+
+    #[tokio::test]
+    async fn undo_route_scopes_edit_history_to_the_requested_session() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let state = WebState::init(temp.path().to_path_buf())
+            .await
+            .expect("web state");
+
+        let session_a = uuid::Uuid::new_v4();
+        let session_b = uuid::Uuid::new_v4();
+        let file_a = temp.path().join("session-a.txt");
+        let file_b = temp.path().join("session-b.txt");
+        tokio::fs::write(&file_a, "new-a")
+            .await
+            .expect("write file a");
+        tokio::fs::write(&file_b, "new-b")
+            .await
+            .expect("write file b");
+
+        state
+            .push_edit(
+                session_a,
+                super::state::FileEditRecord {
+                    file_path: file_a.to_string_lossy().to_string(),
+                    previous_content: "old-a".to_string(),
+                },
+            )
+            .await;
+        state
+            .push_edit(
+                session_b,
+                super::state::FileEditRecord {
+                    file_path: file_b.to_string_lossy().to_string(),
+                    previous_content: "old-b".to_string(),
+                },
+            )
+            .await;
+
+        let app = build_router(state);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/agent/undo")
+                    .header("content-type", "application/json")
+                    .body(Body::from(format!(r#"{{"session_id":"{session_a}"}}"#)))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            tokio::fs::read_to_string(&file_a)
+                .await
+                .expect("read file a"),
+            "old-a"
+        );
+        assert_eq!(
+            tokio::fs::read_to_string(&file_b)
+                .await
+                .expect("read file b"),
+            "new-b"
+        );
     }
 }

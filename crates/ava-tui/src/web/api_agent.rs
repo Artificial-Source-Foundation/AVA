@@ -1,11 +1,14 @@
 //! Agent-related HTTP API handlers: submit, cancel, status, retry, edit-resend,
 //! regenerate, mid-stream messaging (steer/follow-up/post-complete), queue.
 
-use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 
 use ava_agent::control_plane::commands::{queue_message_tier, ControlPlaneCommand};
 use ava_agent::control_plane::interactive::InteractiveRequestKind;
+use ava_agent::control_plane::orchestration::{
+    clear_preserved_deferred, is_inactive_scoped_status_lookup, restore_in_flight_deferred,
+    sync_deferred_queues_for_progress,
+};
 use ava_agent::control_plane::queue::{
     clear_queue_semantics, parse_clear_queue_target, QueueClearSemantics,
     UNSUPPORTED_QUEUE_CLEAR_ERROR,
@@ -15,6 +18,7 @@ use ava_agent::control_plane::sessions::{
     resolve_existing_session, resolve_session_precedence, SessionPromptContext, SessionSelection,
     SessionSelectionSource,
 };
+use ava_agent::stack::AgentRunContext;
 use ava_tools::core::plan::PlanRequest;
 use ava_tools::core::question::QuestionRequest;
 use ava_tools::permission_middleware::{ApprovalRequest, ToolApproval};
@@ -71,16 +75,47 @@ fn ensure_web_run_id(run_id: Option<String>) -> String {
     run_id.unwrap_or_else(|| format!("web-run-{}", uuid::Uuid::new_v4()))
 }
 
-fn queued_post_complete_group(progress: &str) -> Option<u32> {
-    progress
-        .strip_prefix("post-complete group ")?
-        .split(':')
-        .next()?
-        .parse()
-        .ok()
+async fn web_effective_run_identity(
+    state: &WebState,
+    goal: &str,
+    images: &[ava_types::ImageContent],
+    model_override: Option<&(String, String)>,
+) -> (String, String) {
+    let run_context = AgentRunContext {
+        provider: model_override.map(|(provider, _)| provider.clone()),
+        model: model_override.map(|(_, model)| model.clone()),
+        ..AgentRunContext::default()
+    };
+
+    if let Ok(decision) = state
+        .inner
+        .stack
+        .resolve_model_route(goal, images, Some(&run_context))
+        .await
+    {
+        if state
+            .inner
+            .stack
+            .router
+            .route_required(&decision.provider, &decision.model)
+            .await
+            .is_ok()
+        {
+            return (decision.provider, decision.model);
+        }
+
+        let cfg = state.inner.stack.config.get().await;
+        if let Some(fallback) = cfg.fallback {
+            return (fallback.provider, fallback.model);
+        }
+
+        return (decision.provider, decision.model);
+    }
+
+    state.inner.stack.current_model().await
 }
 
-async fn cancel_run(state: &WebState, run_id: &str) {
+pub(crate) async fn cancel_run(state: &WebState, run_id: &str) {
     let _interactive_guard = state.inner.interactive_lifecycle_lock.lock().await;
     let Ok(run) = state.resolve_run(Some(run_id), None).await else {
         return;
@@ -89,12 +124,20 @@ async fn cancel_run(state: &WebState, run_id: &str) {
     state.revoke_queue_dispatch(run_id, true).await;
     run.cancel.cancel();
 
-    while let Some(cancelled) = state
-        .inner
-        .pending_approval_reply
-        .cancel_pending_for_run(run_id)
-        .await
-    {
+    loop {
+        let previous_global_request_id = state
+            .inner
+            .pending_approval_reply
+            .current_request_id()
+            .await;
+        let Some(cancelled) = state
+            .inner
+            .pending_approval_reply
+            .cancel_pending_for_run(run_id)
+            .await
+        else {
+            break;
+        };
         let request_id = cancelled.handle.request_id.clone();
         discard_deferred_interactive_request_event(&state.inner, &request_id).await;
         let _ = cancelled.reply.send(ToolApproval::Rejected(Some(
@@ -107,19 +150,28 @@ async fn cancel_run(state: &WebState, run_id: &str) {
             false,
             cancelled.handle.run_id.as_deref(),
         );
-        emit_promoted_interactive_request_event(
+        emit_promoted_interactive_request_event_if_current_changed(
             &state.inner,
             cancelled.handle.kind,
-            cancelled.handle.run_id.as_deref(),
+            &request_id,
+            previous_global_request_id.as_deref(),
         )
         .await;
     }
-    while let Some(cancelled) = state
-        .inner
-        .pending_question_reply
-        .cancel_pending_for_run(run_id)
-        .await
-    {
+    loop {
+        let previous_global_request_id = state
+            .inner
+            .pending_question_reply
+            .current_request_id()
+            .await;
+        let Some(cancelled) = state
+            .inner
+            .pending_question_reply
+            .cancel_pending_for_run(run_id)
+            .await
+        else {
+            break;
+        };
         let request_id = cancelled.handle.request_id.clone();
         discard_deferred_interactive_request_event(&state.inner, &request_id).await;
         let _ = cancelled.reply.send(String::new());
@@ -130,19 +182,24 @@ async fn cancel_run(state: &WebState, run_id: &str) {
             false,
             cancelled.handle.run_id.as_deref(),
         );
-        emit_promoted_interactive_request_event(
+        emit_promoted_interactive_request_event_if_current_changed(
             &state.inner,
             cancelled.handle.kind,
-            cancelled.handle.run_id.as_deref(),
+            &request_id,
+            previous_global_request_id.as_deref(),
         )
         .await;
     }
-    while let Some(cancelled) = state
-        .inner
-        .pending_plan_reply
-        .cancel_pending_for_run(run_id)
-        .await
-    {
+    loop {
+        let previous_global_request_id = state.inner.pending_plan_reply.current_request_id().await;
+        let Some(cancelled) = state
+            .inner
+            .pending_plan_reply
+            .cancel_pending_for_run(run_id)
+            .await
+        else {
+            break;
+        };
         let request_id = cancelled.handle.request_id.clone();
         discard_deferred_interactive_request_event(&state.inner, &request_id).await;
         let _ = cancelled.reply.send(ava_types::PlanDecision::Rejected {
@@ -155,96 +212,14 @@ async fn cancel_run(state: &WebState, run_id: &str) {
             false,
             cancelled.handle.run_id.as_deref(),
         );
-        emit_promoted_interactive_request_event(
+        emit_promoted_interactive_request_event_if_current_changed(
             &state.inner,
             cancelled.handle.kind,
-            cancelled.handle.run_id.as_deref(),
+            &request_id,
+            previous_global_request_id.as_deref(),
         )
         .await;
     }
-}
-
-fn is_inactive_scoped_status_lookup(
-    requested_run_id: Option<&str>,
-    requested_session_id: Option<uuid::Uuid>,
-    message: &str,
-) -> bool {
-    match (requested_run_id, requested_session_id) {
-        (Some(run_id), Some(session_id)) => {
-            message == format!("Run {run_id} is not active")
-                || message == format!("Session {session_id} does not have an active run")
-        }
-        (Some(run_id), None) => message == format!("Run {run_id} is not active"),
-        (None, Some(session_id)) => {
-            message == format!("Session {session_id} does not have an active run")
-        }
-        (None, None) => false,
-    }
-}
-
-fn move_follow_up_to_in_flight(
-    deferred: &mut std::collections::VecDeque<ava_types::QueuedMessage>,
-    in_flight: &mut std::collections::VecDeque<ava_types::QueuedMessage>,
-    text: &str,
-) {
-    in_flight.retain(|message| !matches!(message.tier, ava_types::MessageTier::FollowUp));
-    if let Some(index) = deferred.iter().position(|queued| {
-        queued.text == text && matches!(queued.tier, ava_types::MessageTier::FollowUp)
-    }) {
-        if let Some(message) = deferred.remove(index) {
-            in_flight.push_back(message);
-        }
-    }
-}
-
-fn move_post_complete_group_to_in_flight(
-    deferred: &mut std::collections::VecDeque<ava_types::QueuedMessage>,
-    in_flight: &mut std::collections::VecDeque<ava_types::QueuedMessage>,
-    group_id: u32,
-) {
-    in_flight
-        .retain(|message| !matches!(message.tier, ava_types::MessageTier::PostComplete { .. }));
-    let mut retained = std::collections::VecDeque::new();
-    while let Some(message) = deferred.pop_front() {
-        if matches!(message.tier, ava_types::MessageTier::PostComplete { group } if group == group_id)
-        {
-            in_flight.push_back(message);
-        } else {
-            retained.push_back(message);
-        }
-    }
-    *deferred = retained;
-}
-
-async fn restore_in_flight_deferred(
-    session_id: uuid::Uuid,
-    deferred: &tokio::sync::RwLock<HashMap<uuid::Uuid, VecDeque<ava_types::QueuedMessage>>>,
-    in_flight: &tokio::sync::RwLock<HashMap<uuid::Uuid, VecDeque<ava_types::QueuedMessage>>>,
-) {
-    let mut in_flight_guard = in_flight.write().await;
-    let Some(mut session_in_flight) = in_flight_guard.remove(&session_id) else {
-        return;
-    };
-    drop(in_flight_guard);
-
-    if session_in_flight.is_empty() {
-        return;
-    }
-
-    let mut deferred_guard = deferred.write().await;
-    let session_deferred = deferred_guard.entry(session_id).or_default();
-    while let Some(message) = session_in_flight.pop_back() {
-        session_deferred.push_front(message);
-    }
-}
-
-async fn clear_preserved_deferred(
-    session_id: uuid::Uuid,
-    deferred: &tokio::sync::RwLock<HashMap<uuid::Uuid, VecDeque<ava_types::QueuedMessage>>>,
-    in_flight: &tokio::sync::RwLock<HashMap<uuid::Uuid, VecDeque<ava_types::QueuedMessage>>>,
-) {
-    deferred.write().await.remove(&session_id);
-    in_flight.write().await.remove(&session_id);
 }
 
 fn resolve_web_submit_session(requested_session_id: Option<uuid::Uuid>) -> SessionSelection {
@@ -318,7 +293,18 @@ fn emit_interactive_request_cleared(
     });
 }
 
-async fn current_request_id_for_kind(
+async fn current_global_request_id_for_kind(
+    inner: &WebStateInner,
+    kind: InteractiveRequestKind,
+) -> Option<String> {
+    match kind {
+        InteractiveRequestKind::Approval => inner.pending_approval_reply.current_request_id().await,
+        InteractiveRequestKind::Question => inner.pending_question_reply.current_request_id().await,
+        InteractiveRequestKind::Plan => inner.pending_plan_reply.current_request_id().await,
+    }
+}
+
+async fn current_actionable_request_id_for_kind(
     inner: &WebStateInner,
     kind: InteractiveRequestKind,
     run_id: Option<&str>,
@@ -327,45 +313,44 @@ async fn current_request_id_for_kind(
         InteractiveRequestKind::Approval => {
             inner
                 .pending_approval_reply
-                .current_request_id_for_run(run_id)
+                .current_actionable_request_id_for_run(run_id)
                 .await
         }
         InteractiveRequestKind::Question => {
             inner
                 .pending_question_reply
-                .current_request_id_for_run(run_id)
+                .current_actionable_request_id_for_run(run_id)
                 .await
         }
         InteractiveRequestKind::Plan => {
             inner
                 .pending_plan_reply
-                .current_request_id_for_run(run_id)
+                .current_actionable_request_id_for_run(run_id)
                 .await
         }
     }
 }
 
-async fn emit_or_defer_interactive_request_event(
+pub(super) async fn emit_or_defer_interactive_request_event(
     inner: &Arc<WebStateInner>,
     request_id: &str,
     kind: InteractiveRequestKind,
     run_id: Option<&str>,
     event: WebEvent,
 ) {
-    let is_actionable_now = current_request_id_for_kind(inner, kind, run_id)
+    inner
+        .deferred_interactive_events
+        .lock()
+        .await
+        .insert(request_id.to_string(), event.clone());
+
+    let is_actionable_now = current_actionable_request_id_for_kind(inner, kind, run_id)
         .await
         .is_some_and(|current_id| current_id == request_id);
 
     if is_actionable_now {
         let _ = inner.event_tx.send(event);
-        return;
     }
-
-    inner
-        .deferred_interactive_events
-        .lock()
-        .await
-        .insert(request_id.to_string(), event);
 }
 
 pub(super) async fn discard_deferred_interactive_request_event(
@@ -382,16 +367,43 @@ pub(super) async fn discard_deferred_interactive_request_event(
 pub(super) async fn emit_promoted_interactive_request_event(
     inner: &Arc<WebStateInner>,
     kind: InteractiveRequestKind,
-    run_id: Option<&str>,
+    _run_id: Option<&str>,
 ) {
-    let Some(request_id) = current_request_id_for_kind(inner, kind, run_id).await else {
+    let Some(request_id) = current_global_request_id_for_kind(inner, kind).await else {
         return;
     };
     if let Some(event) = inner
         .deferred_interactive_events
         .lock()
         .await
-        .remove(&request_id)
+        .get(&request_id)
+        .cloned()
+    {
+        let _ = inner.event_tx.send(event);
+    }
+}
+
+async fn emit_promoted_interactive_request_event_if_current_changed(
+    inner: &Arc<WebStateInner>,
+    kind: InteractiveRequestKind,
+    removed_request_id: &str,
+    previous_global_request_id: Option<&str>,
+) {
+    if previous_global_request_id != Some(removed_request_id) {
+        return;
+    }
+    let Some(request_id) = current_global_request_id_for_kind(inner, kind).await else {
+        return;
+    };
+    if request_id == removed_request_id {
+        return;
+    }
+    if let Some(event) = inner
+        .deferred_interactive_events
+        .lock()
+        .await
+        .get(&request_id)
+        .cloned()
     {
         let _ = inner.event_tx.send(event);
     }
@@ -480,6 +492,11 @@ pub(super) fn spawn_interactive_forwarders(
                         timeout_secs = timeout.as_secs(),
                         "Web approval request timed out — auto-denying to unblock agent"
                     );
+                    discard_deferred_interactive_request_event(
+                        &promotion_inner,
+                        &timed_out.handle.request_id,
+                    )
+                    .await;
                     let _ = timed_out.reply.send(ToolApproval::Rejected(Some(
                         "Timed out waiting for user approval in web UI".to_string(),
                     )));
@@ -548,6 +565,11 @@ pub(super) fn spawn_interactive_forwarders(
                         timeout_secs = timeout.as_secs(),
                         "Web question request timed out — sending empty response to unblock agent"
                     );
+                    discard_deferred_interactive_request_event(
+                        &promotion_inner,
+                        &timed_out.handle.request_id,
+                    )
+                    .await;
                     let _ = timed_out.reply.send(String::new());
                     emit_interactive_request_cleared(
                         &event_tx,
@@ -618,6 +640,11 @@ pub(super) fn spawn_interactive_forwarders(
                         timeout_secs = timeout.as_secs(),
                         "Web plan request timed out — auto-rejecting to unblock agent"
                     );
+                    discard_deferred_interactive_request_event(
+                        &promotion_inner,
+                        &timed_out.handle.request_id,
+                    )
+                    .await;
                     let _ = timed_out.reply.send(ava_types::PlanDecision::Rejected {
                         feedback: "Timed out waiting for plan response in web UI".to_string(),
                     });
@@ -653,7 +680,7 @@ async fn launch_web_run(
     model_override: Option<(String, String)>,
 ) -> Result<Json<SubmitGoalResponse>, (StatusCode, Json<ErrorResponse>)> {
     let startup_guard = state.inner.startup_lock.lock().await;
-    if let Some((provider, model)) = model_override {
+    if let Some((provider, model)) = model_override.as_ref() {
         if state.has_active_runs().await {
             return Err(error_response(
                 StatusCode::CONFLICT,
@@ -667,8 +694,10 @@ async fn launch_web_run(
             .await
             .map_err(|e| error_response(StatusCode::BAD_REQUEST, &e.to_string()))?;
     }
+    let (provider, model) =
+        web_effective_run_identity(state, &goal, &images, model_override.as_ref()).await;
     let run = state
-        .register_run(run_id.clone(), session_id)
+        .register_run(run_id.clone(), session_id, provider, model)
         .await
         .map_err(|message| error_response(StatusCode::CONFLICT, &message))?;
 
@@ -692,14 +721,13 @@ async fn launch_web_run(
         return Err(error_response(StatusCode::CONFLICT, &message));
     }
 
-    let edit_history = inner.edit_history.clone();
     let state_for_run = state.clone();
     drop(startup_guard);
 
     tokio::spawn(async move {
         let (tx, mut rx) = mpsc::unbounded_channel();
         let event_broadcast = inner.event_tx.clone();
-        let edit_hist = edit_history.clone();
+        let edit_state = state_for_run.clone();
         let checkpoint_stack = stack.clone();
         let checkpoint_last_id = inner.clone();
         let deferred_queue = inner.deferred_queue.clone();
@@ -722,14 +750,15 @@ async fn launch_web_run(
                     if tc.name == "edit" || tc.name == "write" {
                         if let Some(path) = tc.arguments.get("file_path").and_then(|v| v.as_str()) {
                             if let Ok(content) = tokio::fs::read_to_string(path).await {
-                                let mut hist = edit_hist.write().await;
-                                if hist.len() >= 100 {
-                                    hist.pop_front();
-                                }
-                                hist.push_back(FileEditRecord {
-                                    file_path: path.to_string(),
-                                    previous_content: content,
-                                });
+                                edit_state
+                                    .push_edit(
+                                        deferred_session_id,
+                                        FileEditRecord {
+                                            file_path: path.to_string(),
+                                            previous_content: content,
+                                        },
+                                    )
+                                    .await;
                             }
                         }
                     }
@@ -756,23 +785,13 @@ async fn launch_web_run(
                 }
 
                 if let ava_agent::agent_loop::AgentEvent::Progress(ref message) = event {
-                    if let Some(text) = message.strip_prefix("follow-up: ") {
-                        let mut deferred = deferred_queue.write().await;
-                        let mut in_flight = in_flight_deferred.write().await;
-                        move_follow_up_to_in_flight(
-                            deferred.entry(deferred_session_id).or_default(),
-                            in_flight.entry(deferred_session_id).or_default(),
-                            text,
-                        );
-                    } else if let Some(group_id) = queued_post_complete_group(message) {
-                        let mut deferred = deferred_queue.write().await;
-                        let mut in_flight = in_flight_deferred.write().await;
-                        move_post_complete_group_to_in_flight(
-                            deferred.entry(deferred_session_id).or_default(),
-                            in_flight.entry(deferred_session_id).or_default(),
-                            group_id,
-                        );
-                    }
+                    sync_deferred_queues_for_progress(
+                        message,
+                        deferred_session_id,
+                        &deferred_queue,
+                        &in_flight_deferred,
+                    )
+                    .await;
                 }
 
                 let _ = event_broadcast.send(WebEvent::Agent {
@@ -934,6 +953,26 @@ pub struct AgentStatusResponse {
     pub model: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub run_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pending_approval: Option<super::api::WebAgentEvent>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pending_question: Option<super::api::WebAgentEvent>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pending_plan: Option<super::api::WebAgentEvent>,
+}
+
+async fn current_interactive_request_event(
+    inner: &Arc<WebStateInner>,
+    kind: InteractiveRequestKind,
+    run_id: Option<&str>,
+) -> Option<WebEvent> {
+    let request_id = current_actionable_request_id_for_kind(inner, kind, run_id).await?;
+    inner
+        .deferred_interactive_events
+        .lock()
+        .await
+        .get(&request_id)
+        .cloned()
 }
 
 /// Get current agent status.
@@ -963,7 +1002,46 @@ pub(crate) async fn agent_status(
     } else {
         state.single_active_run_id().await
     };
-    let (provider, model) = state.inner.stack.current_model().await;
+    let (provider, model) = match run_id.as_deref() {
+        Some(active_run_id) => {
+            let run = state
+                .resolve_run(Some(active_run_id), None)
+                .await
+                .map_err(|message| error_response(StatusCode::CONFLICT, &message))?;
+            (run.provider.clone(), run.model.clone())
+        }
+        None => state.inner.stack.current_model().await,
+    };
+    let pending_approval = match run_id.as_deref() {
+        Some(active_run_id) => current_interactive_request_event(
+            &state.inner,
+            InteractiveRequestKind::Approval,
+            Some(active_run_id),
+        )
+        .await
+        .and_then(|event| super::api::convert_web_event(&event)),
+        None => None,
+    };
+    let pending_question = match run_id.as_deref() {
+        Some(active_run_id) => current_interactive_request_event(
+            &state.inner,
+            InteractiveRequestKind::Question,
+            Some(active_run_id),
+        )
+        .await
+        .and_then(|event| super::api::convert_web_event(&event)),
+        None => None,
+    };
+    let pending_plan = match run_id.as_deref() {
+        Some(active_run_id) => current_interactive_request_event(
+            &state.inner,
+            InteractiveRequestKind::Plan,
+            Some(active_run_id),
+        )
+        .await
+        .and_then(|event| super::api::convert_web_event(&event)),
+        None => None,
+    };
     Ok(Json(AgentStatusResponse {
         running: if scoped_lookup {
             run_id.is_some()
@@ -973,6 +1051,9 @@ pub(crate) async fn agent_status(
         provider,
         model,
         run_id,
+        pending_approval,
+        pending_question,
+        pending_plan,
     }))
 }
 
@@ -1614,6 +1695,7 @@ pub(crate) async fn clear_message_queue(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
 
     fn sample_image(label: &str) -> ava_types::ImageContent {
         ava_types::ImageContent::new(label, ava_types::ImageMediaType::Png)
@@ -1823,5 +1905,79 @@ mod tests {
         let SessionPromptContext { images, .. } =
             build_regenerate_replay_payload(&session).expect("regen payload");
         assert_eq!(images, vec![sample_image("regen")]);
+    }
+
+    #[tokio::test]
+    async fn cancellation_promotion_does_not_reemit_visible_other_run_prompt() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let state = WebState::init(temp.path().to_path_buf())
+            .await
+            .expect("web state");
+        let mut events = state.inner.event_tx.subscribe();
+
+        state
+            .register_run(
+                "web-run-a".to_string(),
+                uuid::Uuid::new_v4(),
+                "openai".to_string(),
+                "gpt-5.4".to_string(),
+            )
+            .await
+            .expect("register run a");
+        state
+            .register_run(
+                "web-run-b".to_string(),
+                uuid::Uuid::new_v4(),
+                "anthropic".to_string(),
+                "claude-sonnet-4.6".to_string(),
+            )
+            .await
+            .expect("register run b");
+
+        let (run_a_tx, _run_a_rx) = tokio::sync::oneshot::channel::<String>();
+        let run_a = state
+            .inner
+            .pending_question_reply
+            .register_with_run_id(run_a_tx, Some("web-run-a".to_string()))
+            .await;
+        let (run_b_tx, _run_b_rx) = tokio::sync::oneshot::channel::<String>();
+        let run_b = state
+            .inner
+            .pending_question_reply
+            .register_with_run_id(run_b_tx, Some("web-run-b".to_string()))
+            .await;
+
+        state.inner.deferred_interactive_events.lock().await.insert(
+            run_a.request_id.clone(),
+            WebEvent::QuestionRequest {
+                id: run_a.request_id.clone(),
+                question: "Question A?".to_string(),
+                options: vec![],
+                run_id: run_a.run_id.clone(),
+            },
+        );
+        state.inner.deferred_interactive_events.lock().await.insert(
+            run_b.request_id.clone(),
+            WebEvent::QuestionRequest {
+                id: run_b.request_id.clone(),
+                question: "Question B?".to_string(),
+                options: vec![],
+                run_id: run_b.run_id.clone(),
+            },
+        );
+
+        emit_promoted_interactive_request_event_if_current_changed(
+            &state.inner,
+            InteractiveRequestKind::Question,
+            &run_b.request_id,
+            Some(&run_a.request_id),
+        )
+        .await;
+
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), events.recv())
+                .await
+                .is_err()
+        );
     }
 }

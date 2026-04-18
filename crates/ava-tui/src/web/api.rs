@@ -40,6 +40,8 @@ pub(crate) use super::api_config::{
     ingest_frontend_log, list_cli_agents, list_mcp_servers, list_models, list_plugins,
     list_providers, reload_mcp, set_permission_level, switch_model, toggle_permission_level,
 };
+#[cfg(debug_assertions)]
+pub(crate) use super::api_interactive::{finish_debug_run, inject_approval_request};
 pub(crate) use super::api_interactive::{
     resolve_approval, resolve_plan, resolve_question, undo_last_edit,
 };

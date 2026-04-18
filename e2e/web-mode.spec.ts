@@ -3,18 +3,11 @@ import { expect, type Page, test } from '@playwright/test'
 /**
  * AVA Web Mode E2E Tests
  *
- * Tests the UI served by either:
- *   - Vite dev server (http://localhost:1420) — no backend required
- *   - AVA web server  (http://localhost:8080) — requires `ava serve --port 8080`
+ * Tests the UI served by Vite (http://localhost:1420) against a live AVA web
+ * backend (http://localhost:18080). Playwright config starts both services.
  *
- * Tests that exercise HTTP/WebSocket API calls are guarded with a live-backend
- * check and will call `test.skip()` when the backend is not available.
- *
- * Run (Vite dev server):
+ * Run (Playwright starts Vite + backend):
  *   npx playwright test e2e/web-mode.spec.ts
- *
- * Run (AVA web server — full backend):
- *   AVA_WEB_URL=http://localhost:8080 npx playwright test e2e/web-mode.spec.ts
  */
 
 // ---------------------------------------------------------------------------
@@ -22,7 +15,8 @@ import { expect, type Page, test } from '@playwright/test'
 // ---------------------------------------------------------------------------
 
 /** URL of the AVA web server when running `ava serve`. Overridable via env. */
-const AVA_WEB_URL = process.env.AVA_WEB_URL ?? 'http://localhost:8080'
+const AVA_WEB_URL = process.env.AVA_WEB_URL ?? 'http://localhost:18080'
+const APP_VERSION = '2.2.6'
 
 /** Health endpoint exposed by `ava serve`. */
 const AVA_HEALTH_URL = `${AVA_WEB_URL}/api/health`
@@ -56,26 +50,69 @@ async function requireBackend(): Promise<void> {
     test.skip(
       true,
       `AVA web server not running at ${AVA_WEB_URL}. ` +
-        'Start with `cargo run --bin ava -- serve --port 8080` to run this test.'
+        'Start with `cargo run --bin ava --features web -- serve --port 18080` to run this test.'
     )
   }
 }
 
 /** Set localStorage to mark onboarding as complete before the page loads. */
 async function bypassOnboarding(page: Page): Promise<void> {
-  await page.addInitScript(() => {
+  await page.addInitScript((appVersion: string) => {
     const raw = localStorage.getItem('ava_settings')
     const settings = raw ? (JSON.parse(raw) as Record<string, unknown>) : {}
     settings.onboardingComplete = true
     localStorage.setItem('ava_settings', JSON.stringify(settings))
-    // Suppress "What's New" changelog dialog
-    localStorage.setItem('ava-last-seen-version', '0.1.0')
-  })
+    localStorage.setItem('ava-last-seen-version', appVersion)
+  }, APP_VERSION)
 }
 
-/** Wait until the main chat textarea is visible (app shell fully loaded). */
+async function currentSessionId(page: Page): Promise<string> {
+  const sessionId = await page.evaluate(() => localStorage.getItem('ava_last_session'))
+  expect(sessionId).toBeTruthy()
+  return sessionId!
+}
+
+async function injectDeterministicApproval(sessionId: string, runId: string): Promise<void> {
+  const res = await fetch(`${AVA_WEB_URL}/api/debug/inject-approval`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      sessionId,
+      runId,
+      tool_name: 'bash',
+      args: { command: 'pwd' },
+      risk_level: 'medium',
+      reason: 'Deterministic approval request for browser E2E',
+      warnings: ['Deterministic browser approval seam'],
+    }),
+  })
+  expect(res.ok).toBe(true)
+}
+
+async function finishDebugRun(runId: string): Promise<void> {
+  const res = await fetch(`${AVA_WEB_URL}/api/debug/finish-run`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ runId }),
+  })
+  expect(res.ok).toBe(true)
+}
+
+async function fetchAgentStatus(sessionId: string): Promise<{ running?: boolean }> {
+  const res = await fetch(
+    `${AVA_WEB_URL}/api/agent/status?session_id=${encodeURIComponent(sessionId)}`
+  )
+  expect(res.ok).toBe(true)
+  return (await res.json()) as { running?: boolean }
+}
+
+function composer(page: Page) {
+  return page.getByRole('textbox', { name: 'Message composer' })
+}
+
+/** Wait until the main chat composer is visible (app shell fully loaded). */
 async function waitForAppShell(page: Page): Promise<void> {
-  await page.locator('textarea').first().waitFor({ state: 'visible', timeout: 15_000 })
+  await composer(page).waitFor({ state: 'visible', timeout: 30_000 })
 }
 
 /** Dismiss the changelog "Got It" dialog if it pops up. */
@@ -85,12 +122,28 @@ async function dismissChangelog(page: Page): Promise<void> {
   if (visible) {
     await gotIt.click()
     await page.waitForTimeout(300)
+    return
   }
+
+  const whatsNew = page.getByText("What's New").first()
+  const changelogVisible = await whatsNew.isVisible({ timeout: 1000 }).catch(() => false)
+  if (!changelogVisible) return
+
+  const modal = page.locator('.fixed.inset-0.z-50').filter({ hasText: "What's New" }).first()
+  const closeButton = modal.locator('button').first()
+  const closeVisible = await closeButton.isVisible({ timeout: 500 }).catch(() => false)
+  if (closeVisible) {
+    await closeButton.click({ force: true }).catch(() => undefined)
+    await page.waitForTimeout(300)
+    return
+  }
+
+  await page.keyboard.press('Escape').catch(() => undefined)
+  await page.waitForTimeout(300)
 }
 
 // ---------------------------------------------------------------------------
 // 1. App loads
-//    Works against Vite dev server — no backend needed.
 // ---------------------------------------------------------------------------
 
 test.describe('1. App Loads', () => {
@@ -102,38 +155,28 @@ test.describe('1. App Loads', () => {
   })
 
   test('chat input (textarea) is visible', async ({ page }) => {
-    await expect(page.locator('textarea').first()).toBeVisible()
+    await expect(composer(page)).toBeVisible()
   })
 
   test('textarea has a non-empty placeholder', async ({ page }) => {
-    const placeholder = await page.locator('textarea').first().getAttribute('placeholder')
+    const placeholder = await composer(page).getAttribute('placeholder')
     expect(placeholder).toBeTruthy()
     expect(placeholder!.length).toBeGreaterThan(0)
   })
 
   test('status bar or toolbar strip renders below the input', async ({ page }) => {
-    // The toolbar strip sits inside the <form> that wraps the composer.
-    // It should contain at least 3 interactive controls (model selector, Plan/Act, etc.).
-    const form = page.locator('form')
-    await expect(form).toBeVisible()
-    const buttons = form.locator('button')
-    expect(await buttons.count()).toBeGreaterThan(2)
+    await expect(page.getByRole('button', { name: 'Plan mode' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Act mode' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Open model selector' })).toBeVisible()
   })
 
   test('model selector button is present in the toolbar', async ({ page }) => {
-    // Model selector is a pill-shaped button showing "Provider | Model" in the form.
-    // We look for ChevronDown icon + text — or simply a button inside the form.
-    const form = page.locator('form')
-    const modelBtn = form.locator('button').first()
-    await expect(modelBtn).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Open model selector' })).toBeVisible()
   })
 
   test('activity bar is present with at least two navigation icons', async ({ page }) => {
-    // ActivityBar buttons have aria-label attributes
-    const sessions = page.locator('button[aria-label="Sessions"]')
-    const explorer = page.locator('button[aria-label="Explorer"]')
-    await expect(sessions).toBeVisible()
-    await expect(explorer).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Dashboard' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Search sessions' })).toBeVisible()
   })
 
   test('settings button is visible in activity bar', async ({ page }) => {
@@ -149,7 +192,6 @@ test.describe('1. App Loads', () => {
 
 // ---------------------------------------------------------------------------
 // 2. Session management
-//    Vite dev server is sufficient — sessions are stored in localStorage.
 // ---------------------------------------------------------------------------
 
 test.describe('2. Session Management', () => {
@@ -160,32 +202,19 @@ test.describe('2. Session Management', () => {
     await dismissChangelog(page)
   })
 
-  test('sessions sidebar opens when clicking Sessions icon', async ({ page }) => {
-    const sessionsBtn = page.locator('button[aria-label="Sessions"]')
-    await sessionsBtn.click()
-    await page.waitForTimeout(300)
+  test('sessions sidebar is visible with the search control', async ({ page }) => {
+    const sessionsBtn = page.getByRole('button', { name: 'Search sessions' })
+    await expect(sessionsBtn).toBeVisible()
 
-    // Sidebar panel should now be visible with at least one session-related element.
-    // SidebarSessions renders a toolbar with a "New Chat" or similar action.
     const sidebar = page.locator('aside, [class*="sidebar"]').first()
     await expect(sidebar).toBeVisible()
   })
 
   test('new session button is accessible from sidebar', async ({ page }) => {
-    const sessionsBtn = page.locator('button[aria-label="Sessions"]')
-    await sessionsBtn.click()
-    await page.waitForTimeout(400)
-
-    // The sessions sidebar has a toolbar with a new-chat action
     const newChatBtn = page.locator(
-      'button[aria-label="New Chat"], button:has-text("New Chat"), button:has-text("New Session")'
+      'button[aria-label="New chat"], button:has-text("New Chat"), button:has-text("New Session")'
     )
-    const found = await newChatBtn.isVisible({ timeout: 2000 }).catch(() => false)
-    // Not all layouts show this immediately — verify sidebar opened instead
-    if (!found) {
-      const sidebar = page.locator('aside, [class*="sidebar"]').first()
-      await expect(sidebar).toBeVisible()
-    }
+    await expect(newChatBtn.first()).toBeVisible()
   })
 
   test('Ctrl+L shortcut opens session switcher', async ({ page }) => {
@@ -194,35 +223,24 @@ test.describe('2. Session Management', () => {
 
     // Session switcher or command palette should appear
     const dialog = page.locator('[role="dialog"], [role="listbox"]').first()
-    const textarea = page.locator('textarea').first()
+    const textarea = composer(page)
     // Either a dialog opened, or the app is still healthy
     const dialogVisible = await dialog.isVisible({ timeout: 1000 }).catch(() => false)
     const textareaStillVisible = await textarea.isVisible({ timeout: 1000 }).catch(() => false)
     expect(dialogVisible || textareaStillVisible).toBe(true)
   })
 
-  test('sidebar toggle button works without crashing', async ({ page }) => {
-    const toggleBtn = page.locator('button[aria-label="Toggle Sidebar"]')
-    await expect(toggleBtn).toBeVisible()
+  test('search sessions control is visible without breaking the composer', async ({ page }) => {
+    const searchBtn = page.getByRole('button', { name: 'Search sessions' })
+    await expect(searchBtn).toBeVisible()
 
-    await toggleBtn.click()
-    await page.waitForTimeout(200)
-
-    // App should still be functional after toggle
-    await expect(page.locator('textarea').first()).toBeVisible()
-
-    // Toggle back
-    await toggleBtn.click()
-    await page.waitForTimeout(200)
-    await expect(page.locator('textarea').first()).toBeVisible()
+    await expect(composer(page)).toBeVisible()
   })
 })
 
 // ---------------------------------------------------------------------------
 // 3. Message sending
-//    Vite dev server. Sending a message renders the user bubble in the UI
-//    without a real backend (the agent call will fail gracefully, but the
-//    optimistic user message should appear immediately).
+//    Runs against the real web backend started by Playwright.
 // ---------------------------------------------------------------------------
 
 test.describe('3. Message Sending', () => {
@@ -234,14 +252,14 @@ test.describe('3. Message Sending', () => {
   })
 
   test('typing in the composer updates its value', async ({ page }) => {
-    const textarea = page.locator('textarea').first()
+    const textarea = composer(page)
     await textarea.click()
     await textarea.fill('Hello from E2E!')
     expect(await textarea.inputValue()).toBe('Hello from E2E!')
   })
 
   test('submit button becomes active when text is entered', async ({ page }) => {
-    const textarea = page.locator('textarea').first()
+    const textarea = composer(page)
     await textarea.click()
     await textarea.fill('test message')
 
@@ -262,7 +280,7 @@ test.describe('3. Message Sending', () => {
   })
 
   test('submitting a message with Enter triggers the agent flow', async ({ page }) => {
-    const textarea = page.locator('textarea').first()
+    const textarea = composer(page)
     await textarea.click()
     await textarea.fill('Ping')
 
@@ -285,7 +303,7 @@ test.describe('3. Message Sending', () => {
   })
 
   test('composer is cleared after submission', async ({ page }) => {
-    const textarea = page.locator('textarea').first()
+    const textarea = composer(page)
     await textarea.click()
     await textarea.fill('Clear me after send')
     await page.keyboard.press('Enter')
@@ -296,7 +314,7 @@ test.describe('3. Message Sending', () => {
   })
 
   test('Shift+Enter inserts a newline instead of submitting', async ({ page }) => {
-    const textarea = page.locator('textarea').first()
+    const textarea = composer(page)
     await textarea.click()
     await textarea.fill('line1')
     await page.keyboard.press('Shift+Enter')
@@ -312,9 +330,9 @@ test.describe('3. Message Sending', () => {
 // ---------------------------------------------------------------------------
 // 4. Tool Approval UI (ApprovalDock)
 //    The ApprovalDock only renders when the agent raises an approval request.
-//    In web mode this requires a live backend. We test the structural
-//    rendering logic via localStorage-injected state and verify the DOM
-//    contract when an agent is not running.
+//    In web mode this requires a live backend. The positive case uses a
+//    debug-only backend seam that creates a correlated synthetic run and
+//    pending approval so the real rehydrate/resolve flow is exercised.
 // ---------------------------------------------------------------------------
 
 test.describe('4. Tool Approval UI (ApprovalDock)', () => {
@@ -339,7 +357,7 @@ test.describe('4. Tool Approval UI (ApprovalDock)', () => {
     const form = page.locator('form') // MessageInput wraps a <form>
     await expect(form).toBeVisible()
 
-    const textarea = page.locator('textarea').first()
+    const textarea = composer(page)
     await expect(textarea).toBeVisible()
 
     // The form/input must appear BELOW the message list in the DOM.
@@ -348,40 +366,28 @@ test.describe('4. Tool Approval UI (ApprovalDock)', () => {
     await expect(scrollable).toBeVisible()
   })
 
-  /**
-   * Backend-gated test: verifies that the ApprovalDock actually appears
-   * when the agent requests a tool approval via the WebSocket event stream.
-   *
-   * Requires `ava serve --port 8080` to be running.
-   */
   test('ApprovalDock appears when agent requests approval (backend required)', async ({ page }) => {
     await requireBackend()
 
-    // Navigate to the AVA web server (not the Vite dev server)
-    await page.goto(AVA_WEB_URL)
-    await page.addInitScript(() => {
-      const settings = { onboardingComplete: true }
-      localStorage.setItem('ava_settings', JSON.stringify(settings))
-      localStorage.setItem('ava-last-seen-version', '0.1.0')
-    })
-    await page.reload()
+    await bypassOnboarding(page)
+    await page.goto('/')
     await waitForAppShell(page)
     await dismissChangelog(page)
 
-    // Submit a goal that is likely to trigger a tool call requiring approval.
-    // We inject a bash command goal since bash requires approval by default.
-    const textarea = page.locator('textarea').first()
-    await textarea.click()
-    await textarea.fill('Run: echo hello')
-    await page.keyboard.press('Enter')
+    const sessionId = await currentSessionId(page)
+    const runId = `playwright-approval-${Date.now()}`
 
-    // Wait up to 20s for ApprovalDock to appear
-    const dock = page.locator('[role="dialog"][aria-label="Tool approval request"]')
-    const appeared = await dock.isVisible({ timeout: 20_000 }).catch(() => false)
+    try {
+      await injectDeterministicApproval(sessionId, runId)
+      await page.reload()
+      await waitForAppShell(page)
+      await dismissChangelog(page)
 
-    if (appeared) {
-      // Verify structure: tool name label, Deny button, Approve button
+      const dock = page.locator('[role="dialog"][aria-label="Tool approval request"]')
+      await expect(dock).toBeVisible()
       await expect(dock.locator('#approval-dock-title')).toBeVisible()
+      await expect(dock).toContainText('bash')
+      await expect(dock).toContainText('Running `pwd`')
       await expect(
         dock.locator('button:has-text("Deny"), button[aria-label*="Deny"]')
       ).toBeVisible()
@@ -389,14 +395,17 @@ test.describe('4. Tool Approval UI (ApprovalDock)', () => {
         dock.locator('button:has-text("Approve"), button[aria-label*="Approve"]')
       ).toBeVisible()
 
-      // Deny the approval — should dismiss the dock
       await dock.locator('button:has-text("Deny"), button[aria-label*="Deny"]').click()
-      await page.waitForTimeout(500)
       await expect(dock).not.toBeVisible()
-    } else {
-      // Agent may have used auto-approve or chose a non-tool response.
-      // Test still passes — we just couldn't trigger the UI path.
-      test.skip(true, 'Agent did not raise an approval request for the given goal.')
+
+      await expect
+        .poll(async () => {
+          const status = await fetchAgentStatus(sessionId)
+          return status.running ?? null
+        })
+        .toBe(false)
+    } finally {
+      await finishDebugRun(runId)
     }
   })
 })
@@ -425,12 +434,13 @@ test.describe('5. Settings Modal', () => {
     await expect(page.locator('button:has-text("Back to Chat")')).toBeVisible({ timeout: 5000 })
 
     const nav = page.locator('nav')
-    await expect(nav.locator('text=General')).toBeVisible()
-    await expect(nav.locator('text=Models')).toBeVisible()
-    await expect(nav.locator('text=Tools')).toBeVisible()
-    await expect(nav.locator('text=Permissions')).toBeVisible()
-    await expect(nav.locator('text=Appearance')).toBeVisible()
-    await expect(nav.locator('text=Advanced')).toBeVisible()
+    await expect(nav.getByRole('button', { name: 'General' })).toBeVisible()
+    await expect(nav.getByRole('button', { name: 'Providers' })).toBeVisible()
+    await expect(nav.getByRole('button', { name: 'Generation' })).toBeVisible()
+    await expect(nav.getByRole('button', { name: 'Agents' })).toBeVisible()
+    await expect(nav.getByRole('button', { name: 'Permissions & Trust' })).toBeVisible()
+    await expect(nav.getByRole('button', { name: 'Appearance' })).toBeVisible()
+    await expect(nav.getByRole('button', { name: 'Advanced' })).toBeVisible()
   })
 
   test('core top-level settings tabs render in sidebar', async ({ page }) => {
@@ -496,7 +506,7 @@ test.describe('5. Settings Modal', () => {
     await page.waitForTimeout(300)
 
     await expect(page.locator('button:has-text("Back to Chat")')).not.toBeVisible()
-    await expect(page.locator('textarea').first()).toBeVisible()
+    await expect(composer(page)).toBeVisible()
   })
 
   test('Escape key closes the settings modal', async ({ page }) => {
@@ -545,10 +555,7 @@ test.describe('6. Model Selector', () => {
   })
 
   test('model selector pill is present in the toolbar strip', async ({ page }) => {
-    const form = page.locator('form')
-    // The model selector is the first button inside the form's toolbar strip
-    const btn = form.locator('button').first()
-    await expect(btn).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Open model selector' })).toBeVisible()
   })
 
   test('Ctrl+M shortcut opens the model picker', async ({ page }) => {
@@ -562,7 +569,7 @@ test.describe('6. Model Selector', () => {
     if (!appeared) {
       // Some builds open the model browser inline rather than a dialog.
       // Verify the app hasn't crashed.
-      await expect(page.locator('textarea').first()).toBeVisible()
+      await expect(composer(page)).toBeVisible()
     }
   })
 
@@ -573,18 +580,17 @@ test.describe('6. Model Selector', () => {
     const dialog = page.locator('[role="dialog"]').first()
     const appeared = await dialog.isVisible({ timeout: 2000 }).catch(() => false)
 
-    // App must remain healthy regardless of whether dialog appeared
-    await expect(page.locator('textarea').first()).toBeVisible()
-
     if (appeared) {
-      // Verify some model-related content is displayed
       const modelText = page.locator('text=Model, text=model, text=Provider, text=provider')
       const hasModelContent = await modelText
         .first()
         .isVisible({ timeout: 1000 })
         .catch(() => false)
       expect(hasModelContent || appeared).toBe(true)
+      return
     }
+
+    await expect(composer(page)).toBeVisible()
   })
 
   /**
@@ -711,7 +717,7 @@ test.describe('8. Responsive Layout', () => {
     await dismissChangelog(page)
 
     // Core elements must still be visible on mobile width
-    await expect(page.locator('textarea').first()).toBeVisible()
+    await expect(composer(page)).toBeVisible()
 
     // No horizontal scrollbar should appear
     const hasHorizontalScroll = await page.evaluate(
@@ -727,7 +733,7 @@ test.describe('8. Responsive Layout', () => {
     await waitForAppShell(page)
     await dismissChangelog(page)
 
-    await expect(page.locator('textarea').first()).toBeVisible()
+    await expect(composer(page)).toBeVisible()
     // Activity bar should remain visible at tablet width
     await expect(page.locator('button[aria-label="Settings"]')).toBeVisible()
   })
@@ -739,7 +745,7 @@ test.describe('8. Responsive Layout', () => {
     await waitForAppShell(page)
     await dismissChangelog(page)
 
-    await expect(page.locator('textarea').first()).toBeVisible()
+    await expect(composer(page)).toBeVisible()
 
     // No unexpected horizontal overflow
     const hasHorizontalScroll = await page.evaluate(
@@ -764,7 +770,7 @@ test.describe('8. Responsive Layout', () => {
       await toggleBtn.click()
       await page.waitForTimeout(200)
       // Textarea must remain accessible
-      await expect(page.locator('textarea').first()).toBeVisible()
+      await expect(composer(page)).toBeVisible()
     }
   })
 })
@@ -920,22 +926,18 @@ test.describe('9. WebSocket & Backend API (backend required)', () => {
     expect(wsResult.connected).toBe(true)
   })
 
-  test('frontend served at AVA_WEB_URL renders the chat UI', async ({ page }) => {
+  test('frontend with the live web backend renders the chat UI', async ({ page }) => {
     await requireBackend()
 
-    await page.goto(AVA_WEB_URL)
-    await page.addInitScript(() => {
-      const settings = { onboardingComplete: true }
-      localStorage.setItem('ava_settings', JSON.stringify(settings))
-      localStorage.setItem('ava-last-seen-version', '0.1.0')
-    })
-    await page.reload()
+    await bypassOnboarding(page)
+
+    await page.goto('/')
 
     await waitForAppShell(page)
     await dismissChangelog(page)
 
     // Core elements must be present
-    await expect(page.locator('textarea').first()).toBeVisible()
+    await expect(composer(page)).toBeVisible()
     await expect(page.locator('button[aria-label="Settings"]')).toBeVisible()
   })
 })

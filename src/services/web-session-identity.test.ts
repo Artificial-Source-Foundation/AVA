@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 
 import { STORAGE_KEYS } from '../config/constants'
 
@@ -10,6 +10,7 @@ import {
   getSessionMappingCount,
   hasBackendSessionMapping,
   registerBackendSessionId,
+  rehydrateFromLocalStorageForTesting,
   resolveBackendSessionId,
   resolveFrontendSessionId,
   unregisterBackendSessionId,
@@ -400,38 +401,32 @@ describe('web-session-identity', () => {
       expect(parsed[frontendId]).toBeUndefined()
     })
 
-    it('alias survives a fresh module reload (simulated)', async () => {
+    it('alias survives a fresh module reload (simulated)', () => {
       const frontendId = 'fe-survivor'
       const backendId = 'be-survivor'
 
-      // Register an alias
+      // Register an alias - this persists to localStorage
       registerBackendSessionId(frontendId, backendId)
       expect(resolveBackendSessionId(frontendId)).toBe(backendId)
 
-      // Clear in-memory map (simulates module reload)
-      // Note: we intentionally do NOT call clearAllSessionIdMappings() because
-      // that would also clear localStorage. We want to simulate a fresh module
-      // load where the map is empty but localStorage still has the data.
+      // Verify it's in localStorage
       const stored = localStorage.getItem(STORAGE_KEYS.SESSION_ID_ALIASES)
+      expect(stored).toBeTruthy()
 
-      // Re-hydrate by dynamically re-importing the module
-      const { clearAllSessionIdMappings: clearAfterReload } =
-        await vi.importActual<typeof import('./web-session-identity')>('./web-session-identity')
+      // Clear the in-memory map (simulates module reload) without clearing localStorage
+      // This simulates a browser reload where the module is fresh but localStorage
+      // still contains the persisted aliases
 
-      // The module re-import will re-run hydrateSessionIdMappings()
-      // We need to clear the current map first to simulate a fresh load
-      clearAllSessionIdMappings() // This clears the local storage
-      localStorage.setItem(STORAGE_KEYS.SESSION_ID_ALIASES, stored!) // Restore it
+      // Clear everything including localStorage
+      clearAllSessionIdMappings()
+      // Restore localStorage state
+      localStorage.setItem(STORAGE_KEYS.SESSION_ID_ALIASES, stored!)
 
-      // Now re-import again with localStorage populated
-      const { resolveBackendSessionId: resolveFinal } =
-        await vi.importActual<typeof import('./web-session-identity')>('./web-session-identity')
+      // Re-hydrate from localStorage (simulates the module's hydrate on load)
+      rehydrateFromLocalStorageForTesting()
 
-      // After reload, the alias should still resolve
-      expect(resolveFinal(frontendId)).toBe(backendId)
-
-      // Cleanup
-      clearAfterReload()
+      // After reload simulation, the alias should still resolve
+      expect(resolveBackendSessionId(frontendId)).toBe(backendId)
     })
 
     it('does not write to localStorage when identical IDs are registered', () => {
@@ -458,23 +453,115 @@ describe('web-session-identity', () => {
       expect(after).toBe(before) // No change
     })
 
-    it('survives canonicalization after simulated reload', async () => {
+    it('survives canonicalization after simulated reload', () => {
       const frontendId = 'fe-canonical-reload'
       const backendId = 'be-canonical-reload'
 
+      // Register and persist
       registerBackendSessionId(frontendId, backendId)
+      const stored = localStorage.getItem(STORAGE_KEYS.SESSION_ID_ALIASES)
+      expect(stored).toBeTruthy()
 
-      // Simulate reload by re-importing the module
-      const {
-        canonicalizeSessionId: canonicalizeAfterReload,
-        clearAllSessionIdMappings: clearAfterReload,
-      } = await vi.importActual<typeof import('./web-session-identity')>('./web-session-identity')
+      // Simulate reload: clear memory, restore localStorage, rehydrate
+      clearAllSessionIdMappings()
+      localStorage.setItem(STORAGE_KEYS.SESSION_ID_ALIASES, stored!)
+      rehydrateFromLocalStorageForTesting()
 
-      // Verify canonicalization still works
-      expect(canonicalizeAfterReload(backendId)).toBe(frontendId)
-      expect(canonicalizeAfterReload(frontendId)).toBe(frontendId)
+      // Verify canonicalization still works after "reload"
+      expect(canonicalizeSessionId(backendId)).toBe(frontendId)
+      expect(canonicalizeSessionId(frontendId)).toBe(frontendId)
+    })
 
-      clearAfterReload()
+    it('removes persisted alias from localStorage on delete cleanup', () => {
+      const frontendId = 'fe-delete-cleanup'
+      const backendId = 'be-delete-cleanup'
+
+      // Register an alias - it should be in localStorage
+      registerBackendSessionId(frontendId, backendId)
+      let stored = localStorage.getItem(STORAGE_KEYS.SESSION_ID_ALIASES)
+      expect(stored).toContain(frontendId)
+      expect(stored).toContain(backendId)
+
+      // Simulate delete cleanup (unregister)
+      unregisterBackendSessionId(frontendId)
+
+      // The alias should be removed from localStorage
+      stored = localStorage.getItem(STORAGE_KEYS.SESSION_ID_ALIASES)
+      const parsed = JSON.parse(stored || '{}')
+      expect(parsed[frontendId]).toBeUndefined()
+      expect(hasBackendSessionMapping(frontendId)).toBe(false)
+    })
+
+    it('persists multiple aliases and cleans them individually', () => {
+      const sessions = [
+        { fe: 'fe-1', be: 'be-1' },
+        { fe: 'fe-2', be: 'be-2' },
+        { fe: 'fe-3', be: 'be-3' },
+      ]
+
+      // Register all aliases
+      sessions.forEach(({ fe, be }) => {
+        registerBackendSessionId(fe, be)
+      })
+
+      let stored = localStorage.getItem(STORAGE_KEYS.SESSION_ID_ALIASES)
+      expect(stored).toBeTruthy()
+      const parsedAll = JSON.parse(stored!)
+      expect(Object.keys(parsedAll)).toHaveLength(3)
+
+      // Delete only one
+      unregisterBackendSessionId('fe-2')
+
+      // Verify others remain in localStorage
+      stored = localStorage.getItem(STORAGE_KEYS.SESSION_ID_ALIASES)
+      const parsedRemaining = JSON.parse(stored!)
+      expect(parsedRemaining['fe-1']).toBe('be-1')
+      expect(parsedRemaining['fe-2']).toBeUndefined()
+      expect(parsedRemaining['fe-3']).toBe('be-3')
+    })
+
+    it('clears all persisted aliases with clearAllSessionIdMappings', () => {
+      const sessions = [
+        { fe: 'fe-a', be: 'be-a' },
+        { fe: 'fe-b', be: 'be-b' },
+      ]
+
+      // Register all aliases
+      sessions.forEach(({ fe, be }) => {
+        registerBackendSessionId(fe, be)
+      })
+
+      // Verify they're persisted
+      expect(localStorage.getItem(STORAGE_KEYS.SESSION_ID_ALIASES)).toBeTruthy()
+
+      // Clear all
+      clearAllSessionIdMappings()
+
+      // localStorage should be empty
+      expect(localStorage.getItem(STORAGE_KEYS.SESSION_ID_ALIASES)).toBeNull()
+      expect(getSessionMappingCount()).toBe(0)
+    })
+
+    it('handles reload with corrupted localStorage gracefully', () => {
+      // Put corrupted data in localStorage
+      localStorage.setItem(STORAGE_KEYS.SESSION_ID_ALIASES, 'not-valid-json')
+
+      // Rehydrate should not throw
+      expect(() => rehydrateFromLocalStorageForTesting()).not.toThrow()
+
+      // Map should be empty
+      expect(getSessionMappingCount()).toBe(0)
+    })
+
+    it('handles reload with non-object JSON gracefully', () => {
+      // Put an array instead of an object in localStorage
+      localStorage.setItem(STORAGE_KEYS.SESSION_ID_ALIASES, JSON.stringify(['fe-1', 'be-1']))
+
+      // Rehydrate should not throw
+      expect(() => rehydrateFromLocalStorageForTesting()).not.toThrow()
+
+      // Map should be empty (arrays are rejected)
+      expect(getSessionMappingCount()).toBe(0)
     })
   })
 })

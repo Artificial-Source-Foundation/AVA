@@ -1,7 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { STORAGE_KEYS } from '../config/constants'
+
 import { createWebDatabase } from './db-web-fallback'
-import { clearAllSessionIdMappings, registerBackendSessionId } from './web-session-identity'
+import {
+  clearAllSessionIdMappings,
+  registerBackendSessionId,
+  rehydrateFromLocalStorageForTesting,
+} from './web-session-identity'
 
 describe('db-web-fallback message recovery', () => {
   beforeEach(() => {
@@ -405,5 +411,124 @@ describe('db-web-fallback reverse alias canonicalization', () => {
     expect(rows[0]?.id).toBe('fe-mapped-session') // Canonicalized
     expect(rows[1]?.id).toBe('unmapped-session-id') // Unchanged
     expect(rows[2]?.id).toBe('another-unmapped') // Unchanged
+  })
+
+  it('canonicalizes active session list after persisted reload (reload persistence)', async () => {
+    // Register a mapping and persist to localStorage
+    registerBackendSessionId('fe-persisted-session', 'be-persisted-backend')
+    const stored = localStorage.getItem(STORAGE_KEYS.SESSION_ID_ALIASES)
+    expect(stored).toBeTruthy() // Verify persistence worked
+
+    // Simulate module reload: clear memory and rehydrate
+    clearAllSessionIdMappings()
+    localStorage.setItem(STORAGE_KEYS.SESSION_ID_ALIASES, stored!)
+    rehydrateFromLocalStorageForTesting()
+
+    // Backend returns backend IDs
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => [
+        {
+          id: 'be-persisted-backend', // Backend returns its ID
+          title: 'Persisted Session',
+          status: 'active',
+          message_count: 3,
+          created_at: '2026-04-18T10:00:00Z',
+          updated_at: '2026-04-18T10:05:00Z',
+        },
+      ],
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const database = createWebDatabase()
+    const rows = await database.select<Array<Record<string, unknown>>>(
+      `SELECT s.* FROM sessions s LEFT JOIN messages m ON m.session_id = s.id GROUP BY s.id`,
+      []
+    )
+
+    // After "reload", canonicalization should still work
+    expect(rows).toHaveLength(1)
+    expect(rows[0]?.id).toBe('fe-persisted-session') // Canonicalized, NOT be-persisted-backend
+  })
+
+  it('canonicalizes archived session list after persisted reload (reload persistence)', async () => {
+    // Register and persist a mapping
+    registerBackendSessionId('fe-archived-persisted', 'be-archived-persisted')
+    const stored = localStorage.getItem(STORAGE_KEYS.SESSION_ID_ALIASES)
+    expect(stored).toBeTruthy()
+
+    // Simulate reload
+    clearAllSessionIdMappings()
+    localStorage.setItem(STORAGE_KEYS.SESSION_ID_ALIASES, stored!)
+    rehydrateFromLocalStorageForTesting()
+
+    // Backend returns archived list with backend ID
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => [
+        {
+          id: 'be-archived-persisted',
+          title: 'Archived Persisted Session',
+          status: 'archived',
+          message_count: 5,
+          created_at: '2026-04-18T10:00:00Z',
+          updated_at: '2026-04-18T10:05:00Z',
+        },
+      ],
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const database = createWebDatabase()
+    const rows = await database.select<Array<Record<string, unknown>>>(
+      `SELECT s.* FROM sessions s LEFT JOIN messages m ON m.session_id = s.id WHERE s.status = 'archived' GROUP BY s.id`,
+      []
+    )
+
+    // After "reload", archived list canonicalization should work
+    expect(rows).toHaveLength(1)
+    expect(rows[0]?.id).toBe('fe-archived-persisted') // Canonicalized
+    expect(rows[0]?.status).toBe('archived')
+  })
+
+  it('handles mixed sessions after persisted reload', async () => {
+    // Register and persist one mapping
+    registerBackendSessionId('fe-mixed-1', 'be-mixed-1')
+    const stored = localStorage.getItem(STORAGE_KEYS.SESSION_ID_ALIASES)
+
+    // Simulate reload
+    clearAllSessionIdMappings()
+    localStorage.setItem(STORAGE_KEYS.SESSION_ID_ALIASES, stored!)
+    rehydrateFromLocalStorageForTesting()
+
+    // Backend returns mixed IDs
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => [
+        {
+          id: 'be-mixed-1', // Has persisted reverse mapping
+          title: 'Mixed 1',
+          status: 'active',
+          message_count: 2,
+        },
+        {
+          id: 'unmapped-session', // No mapping
+          title: 'Unmapped',
+          status: 'active',
+          message_count: 1,
+        },
+      ],
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const database = createWebDatabase()
+    const rows = await database.select<Array<Record<string, unknown>>>(
+      `SELECT s.* FROM sessions s LEFT JOIN messages m ON m.session_id = s.id GROUP BY s.id`,
+      []
+    )
+
+    // After "reload", canonicalization should still work correctly
+    expect(rows).toHaveLength(2)
+    expect(rows[0]?.id).toBe('fe-mixed-1') // Canonicalized from persisted mapping
+    expect(rows[1]?.id).toBe('unmapped-session') // Passed through unchanged
   })
 })

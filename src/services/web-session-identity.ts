@@ -76,6 +76,16 @@ function hydrateSessionIdMappings(): void {
 // Hydrate on module load
 hydrateSessionIdMappings()
 
+/**
+ * Re-hydrate session ID mappings from localStorage.
+ * This is exported for testing purposes to simulate a browser reload.
+ * @internal - not for production use
+ */
+export function rehydrateFromLocalStorageForTesting(): void {
+  _sessionIdMap.clear()
+  hydrateSessionIdMappings()
+}
+
 /** Register a frontend→backend session ID mapping (called after agent run). */
 export function registerBackendSessionId(frontendId: string, backendId: string): void {
   if (frontendId !== backendId) {

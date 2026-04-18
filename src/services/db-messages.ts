@@ -4,6 +4,7 @@
  * CRUD for messages within sessions. Updates session timestamps via touchSession.
  */
 
+import { extractToolCallsFromMetadata } from '../lib/tool-call-state'
 import type { Message } from '../types'
 import { initDatabase, touchSession } from './db-init'
 
@@ -230,7 +231,7 @@ function mapDbMessages(rows: Array<Record<string, unknown>>): Message[] {
       model: (row.model as string | null) ?? undefined,
       metadata,
       images: metadata?.images as Message['images'],
-      toolCalls: metadata?.toolCalls as Message['toolCalls'],
+      toolCalls: extractToolCallsFromMetadata(metadata),
     }
   })
 }

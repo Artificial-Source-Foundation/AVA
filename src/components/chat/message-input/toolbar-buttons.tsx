@@ -141,13 +141,14 @@ export interface PlanActSliderProps {
 }
 
 export const PlanActSlider: Component<PlanActSliderProps> = (props) => (
-  <div
+  <fieldset
     class="
       relative flex items-center
       rounded-[6px]
       bg-[var(--alpha-white-5)] p-[2px]
       select-none
     "
+    aria-label="Mode selector"
   >
     {/* Plan tab */}
     <button
@@ -156,7 +157,7 @@ export const PlanActSlider: Component<PlanActSliderProps> = (props) => (
         if (!props.isPlanMode()) props.togglePlanMode()
       }}
       disabled={props.isProcessing()}
-      class="relative z-10 flex items-center justify-center rounded-[4px] transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+      class="relative z-10 flex items-center justify-center rounded-[4px] transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-1"
       style={{
         padding: '4px 10px',
         'font-size': '11px',
@@ -165,8 +166,13 @@ export const PlanActSlider: Component<PlanActSliderProps> = (props) => (
         'font-weight': props.isPlanMode() ? '500' : undefined,
         'background-color': props.isPlanMode() ? 'var(--alpha-white-10)' : undefined,
       }}
-      title="Plan mode — read-only exploration"
-      aria-label="Switch to plan mode"
+      title={
+        props.isPlanMode()
+          ? 'Plan mode active — read-only exploration'
+          : 'Switch to plan mode — read-only exploration'
+      }
+      aria-label="Plan mode"
+      aria-pressed={props.isPlanMode()}
     >
       Plan
     </button>
@@ -177,7 +183,7 @@ export const PlanActSlider: Component<PlanActSliderProps> = (props) => (
         if (props.isPlanMode()) props.togglePlanMode()
       }}
       disabled={props.isProcessing()}
-      class="relative z-10 flex items-center justify-center rounded-[4px] transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+      class="relative z-10 flex items-center justify-center rounded-[4px] transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-1"
       style={{
         padding: '4px 10px',
         'font-size': '11px',
@@ -186,12 +192,17 @@ export const PlanActSlider: Component<PlanActSliderProps> = (props) => (
         'font-weight': props.isPlanMode() ? undefined : '500',
         'background-color': props.isPlanMode() ? undefined : 'var(--alpha-white-10)',
       }}
-      title="Act mode — full execution"
-      aria-label="Switch to act mode"
+      title={
+        props.isPlanMode()
+          ? 'Switch to act mode — full execution'
+          : 'Act mode active — full execution'
+      }
+      aria-label="Act mode"
+      aria-pressed={!props.isPlanMode()}
     >
       Act
     </button>
-  </div>
+  </fieldset>
 )
 
 // ---------------------------------------------------------------------------

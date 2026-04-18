@@ -88,7 +88,7 @@ export const ChatView: Component = () => {
   const activeApproval = createMemo(() => agent.pendingApproval())
 
   // Handle question resolution
-  const handleQuestionResolve = (answer: string) => {
+  const handleQuestionResolve = async (answer: string) => {
     const request = agent.pendingQuestion()
     if (request) {
       logInfo('question', 'Agent question answered', {
@@ -96,15 +96,16 @@ export const ChatView: Component = () => {
         hasAnswer: !!answer,
       })
     }
-    agent.resolveQuestion(answer)
+    try {
+      await agent.resolveQuestion(answer)
+    } catch {
+      // Error logged by agent, UI remains consistent for retry
+    }
   }
 
   // Handle tool approval resolution
-  const handleApprovalResolve = (approved: boolean, alwaysAllow?: boolean) => {
+  const handleApprovalResolve = async (approved: boolean, alwaysAllow?: boolean) => {
     const request = activeApproval()
-    if (approved && alwaysAllow && request) {
-      addAutoApprovedTool(request.toolName)
-    }
     if (request) {
       logInfo('approval', 'Tool approval resolved', {
         toolName: request.toolName,
@@ -112,7 +113,15 @@ export const ChatView: Component = () => {
         alwaysAllow: !!alwaysAllow,
       })
     }
-    agent.resolveApproval(approved, alwaysAllow)
+    try {
+      await agent.resolveApproval(approved, alwaysAllow)
+      // Only persist optimistic side effects after backend success
+      if (approved && alwaysAllow && request) {
+        addAutoApprovedTool(request.toolName)
+      }
+    } catch {
+      // Error logged by agent, UI remains consistent for retry
+    }
   }
 
   const shell = () => (

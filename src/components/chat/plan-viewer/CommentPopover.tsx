@@ -13,6 +13,9 @@ export const CommentPopover: Component<{
 
   return (
     <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Add comment"
       data-comment-popover
       class="fixed z-[110] rounded-xl border w-[320px]"
       style={{

@@ -1085,6 +1085,96 @@ button {
   opacity: 0.9;
 }
 
+/* Running state: subtle shimmer animation */
+.tool-summary-shimmer--running {
+  background: linear-gradient(
+    90deg,
+    var(--text-primary) 0%,
+    var(--text-primary) 40%,
+    var(--accent) 50%,
+    var(--text-primary) 60%,
+    var(--text-primary) 100%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: tool-shimmer-sweep 2s ease-in-out infinite;
+}
+
+@keyframes tool-shimmer-sweep {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: -100% 0;
+  }
+}
+
+/* Tool card header running state */
+.tool-card-header--running {
+  position: relative;
+}
+
+.tool-card-header--running::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent 0%, var(--accent-subtle) 50%, transparent 100%);
+  background-size: 200% 100%;
+  opacity: 0.5;
+  animation: tool-header-shimmer 3s ease-in-out infinite;
+  pointer-events: none;
+}
+
+@keyframes tool-header-shimmer {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: -100% 0;
+  }
+}
+
+/* Respect reduced motion preferences */
+@media (prefers-reduced-motion: reduce) {
+  .tool-summary-shimmer--running {
+    animation: none;
+    background: none;
+    -webkit-text-fill-color: var(--text-primary);
+    color: var(--text-primary);
+  }
+
+  .tool-card-header--running::before {
+    animation: none;
+    background: none;
+    display: none;
+  }
+
+  .tool-status-dot--running {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+
+  .animate-tool-card-in {
+    animation: none;
+  }
+
+  /* Ensure content is still visible without animation */
+  .tool-card-body-grid {
+    transition: none;
+  }
+
+  .tool-card-body-grid[data-expanded="true"] {
+    grid-template-rows: 1fr;
+  }
+
+  .tool-card-body-grid[data-expanded="false"] {
+    grid-template-rows: 0fr;
+  }
+}
+
 /* ========================================
    TOOL STATUS DOT
    8px colored indicator overlaid top-right of the tool icon.

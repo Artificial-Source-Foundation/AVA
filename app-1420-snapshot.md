@@ -1,0 +1,120 @@
+- generic [ref=e8]:
+  - complementary [ref=e10]:
+    - generic [ref=e11]:
+      - generic [ref=e13]: A
+      - generic [ref=e14]:
+        - button "Dashboard" [ref=e15] [cursor=pointer]:
+          - img [ref=e16]
+        - button "Search sessions" [ref=e21] [cursor=pointer]:
+          - img [ref=e22]
+        - button "Settings" [ref=e25] [cursor=pointer]:
+          - img [ref=e26]
+    - button "New chat" [ref=e30] [cursor=pointer]:
+      - img [ref=e31]
+      - generic [ref=e32]: New Chat
+    - button "Estela" [ref=e35] [cursor=pointer]:
+      - img [ref=e36]
+      - generic [ref=e38]: Estela
+      - img [ref=e39]
+    - generic [ref=e42]:
+      - generic [ref=e43]:
+        - button "M5 Session B 1776479409064 15h ago" [ref=e44] [cursor=pointer]:
+          - generic [ref=e46]: M5 Session B 1776479409064
+          - generic [ref=e47]: 15h ago
+        - button "M5 Session A 1776479409064 15h ago" [ref=e48] [cursor=pointer]:
+          - generic [ref=e50]: M5 Session A 1776479409064
+          - generic [ref=e51]: 15h ago
+        - button "New Session 15h ago" [ref=e52] [cursor=pointer]:
+          - generic [ref=e54]: New Session
+          - generic [ref=e55]: 15h ago
+        - button "New Session 15h ago" [ref=e56] [cursor=pointer]:
+          - generic [ref=e58]: New Session
+          - generic [ref=e59]: 15h ago
+        - button "M5 Session B 1776479297068 15h ago" [ref=e60] [cursor=pointer]:
+          - generic [ref=e62]: M5 Session B 1776479297068
+          - generic [ref=e63]: 15h ago
+        - button "M5 Session A 1776479297068 15h ago" [ref=e64] [cursor=pointer]:
+          - generic [ref=e66]: M5 Session A 1776479297068
+          - generic [ref=e67]: 15h ago
+        - button "ApprovalDock browser seam 15h ago" [ref=e68] [cursor=pointer]:
+          - generic [ref=e70]: ApprovalDock browser seam
+          - generic [ref=e71]: 15h ago
+        - button "New Session 15h ago" [ref=e72] [cursor=pointer]:
+          - generic [ref=e74]: New Session
+          - generic [ref=e75]: 15h ago
+        - button "New Session 15h ago" [ref=e76] [cursor=pointer]:
+          - generic [ref=e78]: New Session
+          - generic [ref=e79]: 15h ago
+        - button "New Session 16h ago" [ref=e80] [cursor=pointer]:
+          - generic [ref=e82]: New Session
+          - generic [ref=e83]: 16h ago
+        - button "New Session 16h ago" [ref=e84] [cursor=pointer]:
+          - generic [ref=e86]: New Session
+          - generic [ref=e87]: 16h ago
+        - button "New Session 16h ago" [ref=e88] [cursor=pointer]:
+          - generic [ref=e90]: New Session
+          - generic [ref=e91]: 16h ago
+        - button "New Session 16h ago" [ref=e92] [cursor=pointer]:
+          - generic [ref=e94]: New Session
+          - generic [ref=e95]: 16h ago
+        - button "Give a concise status update... 16h ago" [ref=e96] [cursor=pointer]:
+          - generic [ref=e98]: Give a concise status update...
+          - generic [ref=e99]: 16h ago
+        - button "Give a concise status update... 16h ago" [ref=e100] [cursor=pointer]:
+          - generic [ref=e102]: Give a concise status update...
+          - generic [ref=e103]: 16h ago
+      - button "Show 35 more" [ref=e104] [cursor=pointer]
+      - button "archived" [ref=e106] [cursor=pointer]
+  - generic [ref=e112]:
+    - generic [ref=e113]:
+      - generic [ref=e114]:
+        - generic [ref=e115]: New Session
+        - generic [ref=e116]: Code
+      - generic [ref=e117]:
+        - generic "0% of context window used" [ref=e118]:
+          - generic [ref=e120]: 0%
+        - generic [ref=e121]: 0 / 200.0k
+    - log "Conversation messages" [ref=e124]:
+      - generic [ref=e126]:
+        - paragraph [ref=e128]: Good afternoon
+        - heading "What are you working on?" [level=2] [ref=e129]
+        - paragraph [ref=e130]: Describe a task, or start with one of these.
+        - generic [ref=e131]:
+          - button "Explain this codebase" [ref=e132] [cursor=pointer]:
+            - img [ref=e133]
+            - generic [ref=e136]: Explain this codebase
+          - button "Fix a bug" [ref=e137] [cursor=pointer]:
+            - img [ref=e138]
+            - generic [ref=e147]: Fix a bug
+          - button "Write tests" [ref=e148] [cursor=pointer]:
+            - img [ref=e149]
+            - generic [ref=e151]: Write tests
+          - button "Refactor code" [ref=e152] [cursor=pointer]:
+            - img [ref=e153]
+            - generic [ref=e156]: Refactor code
+        - generic [ref=e157]:
+          - generic [ref=e158]: Ctrl+/ commands
+          - generic [ref=e159]: Ctrl+M model
+          - generic [ref=e160]: Ctrl+T thinking
+    - generic [ref=e163]:
+      - generic [ref=e167]:
+        - textbox "Message composer" [ref=e168]:
+          - /placeholder: Ask anything...
+        - button "Send message" [disabled] [ref=e172] [cursor=pointer]:
+          - img [ref=e173]
+      - generic [ref=e176]:
+        - generic [ref=e177]:
+          - group "Mode selector" [ref=e178]:
+            - button "Plan mode" [ref=e179] [cursor=pointer]: Plan
+            - button "Act mode" [pressed] [ref=e180] [cursor=pointer]: Act
+          - button "Attach file" [ref=e182] [cursor=pointer]:
+            - img [ref=e183]
+          - button "Toggle inspector" [ref=e185] [cursor=pointer]:
+            - img [ref=e186]
+        - generic [ref=e188]:
+          - button "Open model selector" [ref=e189] [cursor=pointer]:
+            - img [ref=e191]
+            - generic [ref=e192]: Anthropic | Claude Sonnet 4.5
+          - button "Enable reasoning" [ref=e193] [cursor=pointer]:
+            - img [ref=e194]
+            - generic [ref=e202]: Think

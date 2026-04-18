@@ -309,6 +309,7 @@ export function useLayout() {
 
     // Model browser
     modelBrowserOpen: dialogs.modelBrowserOpen,
+    modelBrowserRequest: dialogs.modelBrowserRequest,
     openModelBrowser: dialogs.openModelBrowser,
     closeModelBrowser: dialogs.closeModelBrowser,
     toggleModelBrowser: dialogs.toggleModelBrowser,

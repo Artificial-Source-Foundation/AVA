@@ -467,6 +467,7 @@ export interface SubmitGoalResult {
   success: boolean
   turns: number
   sessionId: string
+  detachedSessionId?: string | null
 }
 
 export interface AgentStatus {
@@ -474,6 +475,9 @@ export interface AgentStatus {
   provider: string
   model: string
   runId?: string | null
+  pendingApproval?: ApprovalRequestEvent | null
+  pendingQuestion?: QuestionRequestEvent | null
+  pendingPlan?: PlanCreatedEvent | null
 }
 
 export interface RunCorrelationArgs {

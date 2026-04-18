@@ -1,3 +1,8 @@
+//! Canonical control-plane command inventory and completion semantics.
+//!
+//! Ownership: command names, command families, response envelopes, lifecycle closure
+//! signals, and correlation requirements shared across runtime adapters.
+
 use ava_types::MessageTier;
 use serde::Serialize;
 

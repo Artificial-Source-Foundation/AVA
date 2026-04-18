@@ -30,6 +30,8 @@ pub struct QueueDispatchSnapshot {
 pub struct WebRunState {
     pub run_id: String,
     pub session_id: uuid::Uuid,
+    pub provider: String,
+    pub model: String,
     pub cancel: CancellationToken,
     pub queue_dispatch: Mutex<Option<QueueDispatchSnapshot>>,
     pub queue_control: Mutex<Option<MessageQueueControl>>,
@@ -37,10 +39,12 @@ pub struct WebRunState {
 }
 
 impl WebRunState {
-    fn new(run_id: String, session_id: uuid::Uuid) -> Self {
+    fn new(run_id: String, session_id: uuid::Uuid, provider: String, model: String) -> Self {
         Self {
             run_id,
             session_id,
+            provider,
+            model,
             cancel: CancellationToken::new(),
             queue_dispatch: Mutex::new(None),
             queue_control: Mutex::new(None),
@@ -164,16 +168,16 @@ pub struct WebStateInner {
     pub pending_question_reply: PendingQuestionReply,
     /// Pending plan reply; set by the plan forwarder, consumed by resolve_plan.
     pub pending_plan_reply: PendingPlanReply,
-    /// Deferred interactive request events keyed by request_id.
+    /// Cached pending interactive request events keyed by request_id.
     ///
-    /// Same-kind interactive prompts are only actionable in FIFO order. When a
-    /// later same-kind prompt is registered while another is still pending, we
-    /// stage its event here and only emit it once it reaches the front.
+    /// Same-kind interactive prompts are only actionable in FIFO order. We keep
+    /// every pending payload here so queued promotions and session rehydration
+    /// can reconstruct the current actionable event for a run.
     pub deferred_interactive_events: Mutex<HashMap<String, WebEvent>>,
     /// Session ID from the last completed run, used for retry/regenerate/undo.
     pub last_session_id: RwLock<Option<uuid::Uuid>>,
-    /// Stack of file edits for undo support.
-    pub edit_history: Arc<RwLock<VecDeque<FileEditRecord>>>,
+    /// File-edit undo history, keyed by session.
+    pub edit_history: Arc<RwLock<HashMap<uuid::Uuid, VecDeque<FileEditRecord>>>>,
     /// Follow-up and post-complete items preserved across cancellation, by session.
     pub deferred_queue: Arc<RwLock<HashMap<uuid::Uuid, VecDeque<QueuedMessage>>>>,
     /// Deferred items that started execution and must be restored on cancel, by session.
@@ -206,7 +210,7 @@ impl WebState {
             pending_plan_reply: InteractiveRequestStore::new(InteractiveRequestKind::Plan),
             deferred_interactive_events: Mutex::new(HashMap::new()),
             last_session_id: RwLock::new(None),
-            edit_history: Arc::new(RwLock::new(VecDeque::new())),
+            edit_history: Arc::new(RwLock::new(HashMap::new())),
             deferred_queue: Arc::new(RwLock::new(HashMap::new())),
             in_flight_deferred: Arc::new(RwLock::new(HashMap::new())),
         });
@@ -225,6 +229,8 @@ impl WebState {
         &self,
         run_id: String,
         session_id: uuid::Uuid,
+        provider: String,
+        model: String,
     ) -> Result<Arc<WebRunState>, String> {
         {
             let runs = self.inner.runs.read().await;
@@ -242,7 +248,12 @@ impl WebState {
             }
         }
 
-        let run = Arc::new(WebRunState::new(run_id.clone(), session_id));
+        let run = Arc::new(WebRunState::new(
+            run_id.clone(),
+            session_id,
+            provider,
+            model,
+        ));
         self.inner
             .runs
             .write()
@@ -436,5 +447,24 @@ impl WebState {
                 control.clear_steering();
             }
         }
+    }
+
+    pub async fn push_edit(&self, session_id: uuid::Uuid, record: FileEditRecord) {
+        let mut history = self.inner.edit_history.write().await;
+        let session_history = history.entry(session_id).or_default();
+        if session_history.len() >= 100 {
+            session_history.pop_front();
+        }
+        session_history.push_back(record);
+    }
+
+    pub async fn pop_last_edit(&self, session_id: uuid::Uuid) -> Option<FileEditRecord> {
+        let mut history = self.inner.edit_history.write().await;
+        let session_history = history.get_mut(&session_id)?;
+        let record = session_history.pop_back();
+        if session_history.is_empty() {
+            history.remove(&session_id);
+        }
+        record
     }
 }

@@ -464,7 +464,7 @@ mod tests {
     #[tokio::test]
     async fn store_provider_auth_command_persists_oauth_metadata() {
         let dir = tempdir().expect("temp dir should be created");
-        let bridge = DesktopBridge::init(dir.path().to_path_buf())
+        let bridge = DesktopBridge::init_for_tests(dir.path().to_path_buf())
             .await
             .expect("bridge should initialize");
 
@@ -501,7 +501,7 @@ mod tests {
     #[tokio::test]
     async fn delete_provider_auth_command_clears_existing_credentials() {
         let dir = tempdir().expect("temp dir should be created");
-        let bridge = DesktopBridge::init(dir.path().to_path_buf())
+        let bridge = DesktopBridge::init_for_tests(dir.path().to_path_buf())
             .await
             .expect("bridge should initialize");
 
@@ -539,7 +539,7 @@ mod tests {
     #[tokio::test]
     async fn sync_credentials_command_clears_stale_oauth_metadata_when_api_key_takes_over() {
         let dir = tempdir().expect("temp dir should be created");
-        let bridge = DesktopBridge::init(dir.path().to_path_buf())
+        let bridge = DesktopBridge::init_for_tests(dir.path().to_path_buf())
             .await
             .expect("bridge should initialize");
 

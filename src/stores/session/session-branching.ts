@@ -11,6 +11,7 @@ import {
   getMessages,
 } from '../../services/database'
 import { logInfo } from '../../services/logger'
+import { buildSessionBaseEndpoint } from '../../services/web-session-identity'
 import type { Session, SessionWithStats } from '../../types'
 import { useProject } from '../project'
 import { setLastSessionForProject } from '../session-persistence'
@@ -24,8 +25,6 @@ import {
   setSessions,
 } from './session-state'
 
-const API_BASE = import.meta.env.VITE_API_URL || ''
-
 // ============================================================================
 // Helpers
 // ============================================================================
@@ -37,7 +36,9 @@ async function duplicateViaApi(
   projectId: string | undefined
 ): Promise<void> {
   const newId = crypto.randomUUID()
-  const res = await fetch(`${API_BASE}/api/sessions/${sourceSessionId}/duplicate`, {
+  // Route through web session identity service to resolve frontend→backend session ID
+  const endpoint = buildSessionBaseEndpoint(sourceSessionId, 'duplicate')
+  const res = await fetch(endpoint, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name, id: newId }),

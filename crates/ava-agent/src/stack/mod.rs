@@ -1,13 +1,13 @@
 mod stack_config;
+mod stack_mcp;
 mod stack_run;
 pub(crate) mod stack_tools;
 
 pub use stack_config::{AgentRunResult, AgentStackConfig};
+pub use stack_mcp::{MCPServerInfo, McpServerStatus};
 pub use stack_run::parse_model_spec;
-pub use stack_tools::{MCPServerInfo, McpServerStatus};
 
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -17,7 +17,6 @@ use ava_config::AgentsConfig;
 use ava_config::ConfigManager;
 use ava_llm::provider::LLMProvider;
 use ava_llm::ModelRouter;
-use ava_mcp::config::{load_merged_mcp_config_with_scope, McpServerScope};
 use ava_memory::MemorySystem;
 use ava_permissions::inspector::{DefaultInspector, InspectionContext, PermissionInspector};
 use ava_permissions::policy::PermissionPolicy;
@@ -34,7 +33,6 @@ use ava_tools::core::{
     register_custom_tools_with_plugins, register_plan_tool, register_question_tool,
     register_task_tool, register_todo_tools,
 };
-use ava_tools::mcp_bridge::MCPBridgeTool;
 use ava_tools::permission_middleware::{convert_tool_source, ApprovalBridge, SharedToolSources};
 use ava_tools::registry::{ToolRegistry, ToolSource, ToolTier};
 use ava_types::{
@@ -44,13 +42,43 @@ use tokio::sync::{mpsc, RwLock};
 use tokio::time::{timeout, Duration};
 use tracing::{error, info, instrument, warn};
 
-use stack_tools::{
-    build_tool_registry_with_plugins, init_mcp_with_disabled, resolve_workspace_roots, MCPRuntime,
-};
+use stack_mcp::AgentMcpRuntime;
+#[cfg(test)]
+use stack_mcp::MCPRuntime;
+use stack_tools::{build_tool_registry_with_plugins, resolve_workspace_roots};
 
 use crate::system_prompt::BenchmarkPromptOverride;
 
 const CONFIG_HOOK_TIMEOUT_MS: u64 = 150;
+
+#[derive(Debug, Clone, Default)]
+pub struct AgentRunContext {
+    pub provider: Option<String>,
+    pub model: Option<String>,
+    pub thinking_level: Option<ThinkingLevel>,
+    pub auto_compact: Option<bool>,
+    pub compaction_threshold: Option<u8>,
+    pub compaction_provider: Option<String>,
+    pub compaction_model: Option<String>,
+    pub todo_state: Option<TodoState>,
+    pub permission_context: Option<Arc<RwLock<InspectionContext>>>,
+}
+
+impl AgentRunContext {
+    pub fn resolved_model_override(&self) -> Option<(String, String)> {
+        match (&self.provider, &self.model) {
+            (Some(provider), Some(model)) => Some((provider.clone(), model.clone())),
+            _ => None,
+        }
+    }
+
+    pub fn compaction_model_override(&self) -> Option<(String, String)> {
+        match (&self.compaction_provider, &self.compaction_model) {
+            (Some(provider), Some(model)) => Some((provider.clone(), model.clone())),
+            _ => None,
+        }
+    }
+}
 
 pub struct AgentStack {
     data_dir: PathBuf,
@@ -67,14 +95,8 @@ pub struct AgentStack {
     max_turns: usize,
     max_budget_usd: f64,
     injected_provider: Option<Arc<dyn LLMProvider>>,
-    mcp: Arc<RwLock<Option<MCPRuntime>>>,
-    /// Session-scoped set of disabled MCP server names.
-    disabled_mcp_servers: RwLock<std::collections::HashSet<String>>,
-    /// Last known connection status for configured MCP servers.
-    mcp_server_statuses: RwLock<std::collections::HashMap<String, McpServerStatus>>,
+    mcp_runtime: AgentMcpRuntime,
     custom_tool_dirs: Vec<PathBuf>,
-    mcp_global_config: PathBuf,
-    mcp_project_config: PathBuf,
     pub thinking_level: RwLock<ThinkingLevel>,
     pub mode_prompt_suffix: RwLock<Option<String>>,
     /// When true, agent is in Plan mode — write/edit restricted to .ava/plans/*.md.
@@ -116,10 +138,6 @@ pub struct AgentStack {
     /// Stored so we can detect task panics and surface them to the caller.
     /// Wrapped in `std::sync::Mutex` so the field is `Send` (JoinHandle is Send).
     index_task: std::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
-    /// Whether MCP lazy-init has been triggered at least once.
-    /// Set to `true` before the background init task is spawned so multiple
-    /// concurrent first-`run()` calls don't double-init.
-    mcp_init_done: Arc<AtomicBool>,
     /// Approved plan to inject as system context for the next run.
     /// Consumed (taken) at the start of each `run()` call so it only applies once.
     pub plan_context: RwLock<Option<String>>,
@@ -131,126 +149,11 @@ pub struct AgentStack {
     cli_agents: Vec<ava_acp::DiscoveredAgent>,
 }
 
-fn build_mcp_server_info(
-    config_entries: Vec<(ava_mcp::config::MCPServerConfig, McpServerScope)>,
-    runtime: Option<&MCPRuntime>,
-    server_statuses: &std::collections::HashMap<String, McpServerStatus>,
-    disabled: &std::collections::HashSet<String>,
-) -> Vec<MCPServerInfo> {
-    let tool_counts: std::collections::HashMap<String, usize> = runtime
-        .map(|runtime| {
-            runtime.tools_with_source.iter().fold(
-                std::collections::HashMap::new(),
-                |mut acc, (server_name, _)| {
-                    *acc.entry(server_name.clone()).or_insert(0) += 1;
-                    acc
-                },
-            )
-        })
-        .unwrap_or_default();
-
-    let mut result = Vec::with_capacity(config_entries.len());
-    let mut seen = std::collections::HashSet::new();
-
-    for (cfg, scope) in config_entries {
-        let name = cfg.name;
-        let session_disabled = disabled.contains(&name);
-        let enabled = cfg.enabled && !session_disabled;
-        let status = if enabled {
-            server_statuses
-                .get(&name)
-                .cloned()
-                .unwrap_or(McpServerStatus::Connecting)
-        } else {
-            McpServerStatus::Disabled
-        };
-
-        result.push(MCPServerInfo {
-            tool_count: tool_counts.get(&name).copied().unwrap_or(0),
-            scope,
-            enabled,
-            can_toggle: cfg.enabled,
-            status,
-            name: name.clone(),
-        });
-        seen.insert(name);
-    }
-
-    if let Some(runtime) = runtime {
-        for name in disabled.iter() {
-            if seen.contains(name) {
-                continue;
-            }
-            result.push(MCPServerInfo {
-                name: name.clone(),
-                tool_count: tool_counts.get(name).copied().unwrap_or(0),
-                scope: runtime
-                    .server_scopes
-                    .get(name)
-                    .copied()
-                    .unwrap_or(McpServerScope::Global),
-                enabled: false,
-                can_toggle: true,
-                status: McpServerStatus::Disabled,
-            });
-            seen.insert(name.clone());
-        }
-
-        for (name, status) in server_statuses {
-            if seen.contains(name) {
-                continue;
-            }
-            result.push(MCPServerInfo {
-                name: name.clone(),
-                tool_count: tool_counts.get(name).copied().unwrap_or(0),
-                scope: runtime
-                    .server_scopes
-                    .get(name)
-                    .copied()
-                    .unwrap_or(McpServerScope::Global),
-                enabled: !disabled.contains(name),
-                can_toggle: true,
-                status: if disabled.contains(name) {
-                    McpServerStatus::Disabled
-                } else {
-                    status.clone()
-                },
-            });
-        }
-    }
-
-    result.sort_by(|a, b| a.name.cmp(&b.name));
-    result
-}
-
-fn register_runtime_mcp_tools(
-    registry: &mut ToolRegistry,
-    runtime: &MCPRuntime,
-    disabled: &std::collections::HashSet<String>,
-) {
-    for (server_name, tool_def) in &runtime.tools_with_source {
-        if disabled.contains(server_name) {
-            continue;
-        }
-
-        let source = ToolSource::MCP {
-            server: server_name.clone(),
-        };
-        registry.register_with_source(
-            MCPBridgeTool::new(tool_def.clone(), runtime.caller.clone(), server_name),
-            source,
-        );
-    }
-}
-
 impl AgentStack {
     async fn register_enabled_runtime_mcp_tools(&self, registry: &mut ToolRegistry) {
-        let disabled = self.disabled_mcp_servers.read().await.clone();
-        let mcp_guard = self.mcp.read().await;
-
-        if let Some(ref runtime) = *mcp_guard {
-            register_runtime_mcp_tools(registry, runtime, &disabled);
-        }
+        self.mcp_runtime
+            .register_enabled_runtime_tools(registry)
+            .await;
     }
 
     /// Create a new `AgentStack`.
@@ -528,10 +431,8 @@ impl AgentStack {
             Some(Arc::clone(&plugin_manager)),
         );
 
-        // MCP init is deferred to the first run() call via ensure_mcp_initialized().
-        // This avoids blocking startup on potentially-slow server connections while
-        // still guaranteeing MCP tools are registered before the agent runs.
-        let mcp_runtime: Option<stack_tools::MCPRuntime> = None;
+        let mcp_runtime =
+            AgentMcpRuntime::new(mcp_global_config.clone(), mcp_project_config.clone());
 
         // Populate the permission middleware's source map from the fully-built registry
         // so that inspect() receives the correct ToolSource for every tool.
@@ -563,12 +464,8 @@ impl AgentStack {
                 max_turns: config.max_turns,
                 max_budget_usd: config.max_budget_usd,
                 injected_provider: config.injected_provider,
-                mcp: Arc::new(RwLock::new(mcp_runtime)),
-                disabled_mcp_servers: RwLock::new(std::collections::HashSet::new()),
-                mcp_server_statuses: RwLock::new(std::collections::HashMap::new()),
+                mcp_runtime,
                 custom_tool_dirs,
-                mcp_global_config,
-                mcp_project_config,
                 thinking_level: RwLock::new(ThinkingLevel::Off),
                 mode_prompt_suffix: RwLock::new(None),
                 plan_mode: RwLock::new(false),
@@ -589,7 +486,6 @@ impl AgentStack {
                 parent_session_id: RwLock::new(None),
                 plugin_manager,
                 index_task: std::sync::Mutex::new(index_handle),
-                mcp_init_done: Arc::new(AtomicBool::new(false)),
                 plan_context: RwLock::new(None),
                 file_backup_session,
                 cli_agents,
@@ -604,132 +500,35 @@ impl AgentStack {
     // MCP server management
     // ========================================================================
 
-    /// Ensure MCP is initialized, awaiting completion before returning.
-    ///
-    /// This is the lazy-init entry point. An `AtomicBool` compare-exchange
-    /// ensures only the first concurrent caller actually runs init; subsequent
-    /// callers return immediately once the flag is already set.
-    ///
-    /// The init runs **inline** (not in a background task) so that MCP tools
-    /// are guaranteed to be registered in the `ToolRegistry` by the time this
-    /// returns — fixing the race condition where `run()` would read an empty
-    /// `self.mcp` because the background task had not yet completed.
     pub async fn ensure_mcp_initialized(&self) {
-        // compare_exchange: if false → set true and proceed; otherwise bail out.
-        if self
-            .mcp_init_done
-            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-            .is_err()
-        {
-            return; // already initialised
-        }
-
-        info!("MCP init: connecting servers…");
-
-        let disabled = self.disabled_mcp_servers.read().await.clone();
-
-        let mut registry = self.tools.write().await;
-        let init = init_mcp_with_disabled(
-            &self.mcp_global_config,
-            &self.mcp_project_config,
-            &mut registry,
-            &disabled,
-        )
-        .await;
-
-        // Refresh shared tool sources so permission middleware sees MCP tools.
-        {
-            // infallible: RwLock poisoning is recovered by taking the inner value
-            let mut sources = self
-                .shared_tool_sources
-                .write()
-                .unwrap_or_else(|e| e.into_inner());
-            for (def, src) in registry.list_tools_with_source() {
-                if matches!(src, ToolSource::MCP { .. }) {
-                    sources.insert(def.name, convert_tool_source(&src));
-                }
-            }
-        }
-        // Drop the registry write-lock before acquiring the mcp write-lock.
-        drop(registry);
-
-        let counts = init
-            .runtime
-            .as_ref()
-            .map_or((0, 0), |r| (r.server_count, r.tool_count));
-        *self.mcp.write().await = init.runtime;
-        *self.mcp_server_statuses.write().await = init.statuses;
-        info!(
-            servers = counts.0,
-            tools = counts.1,
-            "MCP init complete — tools now available"
-        );
+        self.mcp_runtime
+            .ensure_initialized(&self.tools, &self.shared_tool_sources)
+            .await;
     }
 
     pub async fn mcp_server_count(&self) -> usize {
-        self.mcp.read().await.as_ref().map_or(0, |r| r.server_count)
+        self.mcp_runtime.server_count().await
     }
 
     pub async fn mcp_tool_count(&self) -> usize {
-        self.mcp.read().await.as_ref().map_or(0, |r| r.tool_count)
+        self.mcp_runtime.tool_count().await
     }
 
     pub async fn mcp_server_info(&self) -> Vec<MCPServerInfo> {
-        let config_entries =
-            load_merged_mcp_config_with_scope(&self.mcp_global_config, &self.mcp_project_config)
-                .await
-                .unwrap_or_default();
-        let disabled = self.disabled_mcp_servers.read().await.clone();
-        let server_statuses = self.mcp_server_statuses.read().await.clone();
-        let guard = self.mcp.read().await;
-        build_mcp_server_info(config_entries, guard.as_ref(), &server_statuses, &disabled)
+        self.mcp_runtime.server_info().await
     }
 
     /// Disable an MCP server by name (session-scoped). Returns true if the server exists.
     pub async fn mcp_disable_server(&self, name: &str) -> bool {
-        // Check that the server name is known
-        let known = self.mcp_server_exists(name).await;
-        if known {
-            self.disabled_mcp_servers
-                .write()
-                .await
-                .insert(name.to_string());
-            // Remove tools from this server in the registry
-            let mut registry = self.tools.write().await;
-            registry.remove_by_source(
-                |src| matches!(src, ToolSource::MCP { server } if server == name),
-            );
-        }
-        known
+        self.mcp_runtime.disable_server(name, &self.tools).await
     }
 
     /// Enable a previously disabled MCP server. Returns true if it was disabled.
     /// Triggers a selective reload to re-register tools from this server.
     pub async fn mcp_enable_server(&self, name: &str) -> bool {
-        let was_disabled = self.disabled_mcp_servers.write().await.remove(name);
-        if was_disabled {
-            // Re-register tools from this server by reloading MCP
-            let _ = self.reload_mcp().await;
-        }
-        was_disabled
-    }
-
-    /// Check if a server name exists in config or runtime.
-    async fn mcp_server_exists(&self, name: &str) -> bool {
-        // Check runtime first
-        let guard = self.mcp.read().await;
-        if let Some(runtime) = guard.as_ref() {
-            if runtime.server_scopes.contains_key(name) {
-                return true;
-            }
-        }
-        drop(guard);
-        // Check config files
-        let configs =
-            load_merged_mcp_config_with_scope(&self.mcp_global_config, &self.mcp_project_config)
-                .await
-                .unwrap_or_default();
-        configs.iter().any(|(cfg, _)| cfg.name == name)
+        self.mcp_runtime
+            .enable_server(name, &self.tools, &self.shared_tool_sources)
+            .await
     }
 
     // ========================================================================
@@ -737,40 +536,9 @@ impl AgentStack {
     // ========================================================================
 
     pub async fn reload_mcp(&self) -> Result<(usize, usize)> {
-        let disabled = self.disabled_mcp_servers.read().await.clone();
-        let mut registry = self.tools.write().await;
-        registry.remove_by_source(|src| matches!(src, ToolSource::MCP { .. }));
-        let init = init_mcp_with_disabled(
-            &self.mcp_global_config,
-            &self.mcp_project_config,
-            &mut registry,
-            &disabled,
-        )
-        .await;
-        let counts = init
-            .runtime
-            .as_ref()
-            .map_or((0, 0), |r| (r.server_count, r.tool_count));
-        *self.mcp.write().await = init.runtime;
-        *self.mcp_server_statuses.write().await = init.statuses;
-        // Refresh shared_tool_sources so the permission middleware sees new MCP tools.
-        {
-            // infallible: RwLock poisoning is recovered by taking the inner value
-            let mut sources = self
-                .shared_tool_sources
-                .write()
-                .unwrap_or_else(|e| e.into_inner());
-            // Remove stale MCP entries, then re-insert from the updated registry.
-            sources.retain(|_, src| {
-                !matches!(src, ava_permissions::inspector::ToolSource::MCP { .. })
-            });
-            for (def, src) in registry.list_tools_with_source() {
-                if matches!(src, ToolSource::MCP { .. }) {
-                    sources.insert(def.name, convert_tool_source(&src));
-                }
-            }
-        }
-        Ok(counts)
+        self.mcp_runtime
+            .reload(&self.tools, &self.shared_tool_sources)
+            .await
     }
 
     pub async fn reload_custom_tools(&self) -> usize {
@@ -808,14 +576,7 @@ impl AgentStack {
             &self.custom_tool_dirs,
             Some(Arc::clone(&self.plugin_manager)),
         );
-        let disabled = self.disabled_mcp_servers.read().await.clone();
-        let init = init_mcp_with_disabled(
-            &self.mcp_global_config,
-            &self.mcp_project_config,
-            &mut registry,
-            &disabled,
-        )
-        .await;
+        self.mcp_runtime.populate_registry(&mut registry).await;
         // Populate tool sources for the permission middleware.
         {
             // infallible: RwLock poisoning is recovered by taking the inner value
@@ -826,9 +587,11 @@ impl AgentStack {
         }
         let count = registry.tool_count();
         *self.tools.write().await = registry;
-        *self.mcp.write().await = init.runtime;
-        *self.mcp_server_statuses.write().await = init.statuses;
         Ok(count)
+    }
+
+    pub async fn cloned_permission_context(&self) -> Arc<RwLock<InspectionContext>> {
+        Arc::new(RwLock::new(self.permission_context.read().await.clone()))
     }
 
     /// List the current prompt-visible tool surface for an interactive run preview.
@@ -844,7 +607,7 @@ impl AgentStack {
         images: &[ImageContent],
     ) -> Vec<(ava_types::Tool, ToolSource)> {
         let (_, plan_mode, tool_visibility_profile, delegation_policy) = self
-            .runtime_tool_access_profile(goal, history, images)
+            .runtime_tool_access_profile(goal, history, images, None)
             .await;
 
         let registry = {
@@ -1117,6 +880,28 @@ impl AgentStack {
             .refresh_auth(provider, refresh_token)
             .await
     }
+
+    #[cfg(test)]
+    async fn set_mcp_runtime_for_tests(&self, runtime: Option<MCPRuntime>) {
+        self.mcp_runtime.set_runtime_for_tests(runtime).await;
+    }
+
+    #[cfg(test)]
+    async fn mcp_init_done_for_tests(&self) -> bool {
+        self.mcp_runtime.init_done_for_tests().await
+    }
+
+    #[cfg(test)]
+    async fn mcp_runtime_is_none_for_tests(&self) -> bool {
+        self.mcp_runtime.runtime_is_none_for_tests().await
+    }
+
+    #[cfg(test)]
+    async fn mcp_server_statuses_for_tests(
+        &self,
+    ) -> std::collections::HashMap<String, McpServerStatus> {
+        self.mcp_runtime.server_statuses_for_tests().await
+    }
 }
 
 struct IntrospectionTaskSpawner;
@@ -1175,42 +960,17 @@ const _: () = {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::{HashMap, HashSet};
+    use std::collections::HashMap;
     use std::pin::Pin;
 
     use async_trait::async_trait;
     use ava_llm::provider::LLMResponse;
-    use ava_mcp::config::{MCPServerConfig, TransportType};
-    use ava_mcp::manager::McpManager;
+    use ava_mcp::config::McpServerScope;
     use ava_types::{StreamChunk, ToolCall};
     use futures::Stream;
     use serde_json::json;
     use stack_run::parse_model_spec;
     use tokio_util::sync::CancellationToken;
-
-    fn stdio_config(name: &str, enabled: bool) -> MCPServerConfig {
-        MCPServerConfig {
-            name: name.to_string(),
-            transport: TransportType::Stdio {
-                command: "true".to_string(),
-                args: Vec::new(),
-                env: HashMap::new(),
-            },
-            enabled,
-        }
-    }
-
-    fn empty_runtime(name: &str, scope: McpServerScope) -> MCPRuntime {
-        MCPRuntime {
-            caller: Arc::new(stack_tools::McpManagerCaller {
-                manager: McpManager::new(),
-            }),
-            server_count: 1,
-            tool_count: 0,
-            tools_with_source: Vec::new(),
-            server_scopes: HashMap::from([(name.to_string(), scope)]),
-        }
-    }
 
     fn test_tool(name: &str) -> ava_types::Tool {
         ava_types::Tool {
@@ -1317,73 +1077,6 @@ mod tests {
         assert!(!roots.contains(&missing));
     }
 
-    #[test]
-    fn build_mcp_server_info_keeps_connected_zero_tool_servers_visible() {
-        let config_entries = vec![(stdio_config("zero-tools", true), McpServerScope::Local)];
-        let runtime = empty_runtime("zero-tools", McpServerScope::Local);
-        let statuses = HashMap::from([("zero-tools".to_string(), McpServerStatus::Connected)]);
-
-        let info =
-            build_mcp_server_info(config_entries, Some(&runtime), &statuses, &HashSet::new());
-
-        assert_eq!(info.len(), 1);
-        assert_eq!(info[0].name, "zero-tools");
-        assert_eq!(info[0].tool_count, 0);
-        assert!(info[0].enabled);
-        assert_eq!(info[0].status, McpServerStatus::Connected);
-    }
-
-    #[test]
-    fn build_mcp_server_info_preserves_failed_status_without_runtime_tools() {
-        let config_entries = vec![(stdio_config("broken-server", true), McpServerScope::Global)];
-        let statuses = HashMap::from([(
-            "broken-server".to_string(),
-            McpServerStatus::Failed("spawn failed: missing binary".to_string()),
-        )]);
-
-        let info = build_mcp_server_info(config_entries, None, &statuses, &HashSet::new());
-
-        assert_eq!(info.len(), 1);
-        assert_eq!(info[0].name, "broken-server");
-        assert!(matches!(
-            &info[0].status,
-            McpServerStatus::Failed(error) if error == "spawn failed: missing binary"
-        ));
-    }
-
-    #[test]
-    fn register_runtime_mcp_tools_skips_session_disabled_servers() {
-        let mut registry = ToolRegistry::new();
-        let runtime = MCPRuntime {
-            caller: Arc::new(stack_tools::McpManagerCaller {
-                manager: McpManager::new(),
-            }),
-            server_count: 2,
-            tool_count: 2,
-            tools_with_source: vec![
-                ("enabled-server".to_string(), test_tool("enabled_tool")),
-                ("disabled-server".to_string(), test_tool("disabled_tool")),
-            ],
-            server_scopes: HashMap::from([
-                ("enabled-server".to_string(), McpServerScope::Global),
-                ("disabled-server".to_string(), McpServerScope::Global),
-            ]),
-        };
-        let disabled = HashSet::from(["disabled-server".to_string()]);
-
-        register_runtime_mcp_tools(&mut registry, &runtime, &disabled);
-
-        let names = registry
-            .list_tools_with_source()
-            .into_iter()
-            .map(|(tool, _)| tool.name)
-            .collect::<Vec<_>>();
-        let enabled_name = namespaced_mcp_tool_name("enabled-server", "enabled_tool");
-        let disabled_name = namespaced_mcp_tool_name("disabled-server", "disabled_tool");
-        assert!(names.iter().any(|name| name == &enabled_name));
-        assert!(!names.iter().any(|name| name == &disabled_name));
-    }
-
     #[tokio::test]
     async fn mcp_server_info_uses_config_state_without_initializing_runtime() {
         let temp = tempfile::tempdir().expect("temp");
@@ -1422,8 +1115,8 @@ mod tests {
 
         let (stack, _question_rx, _approval_rx, _plan_rx) = AgentStack::new(config).await.unwrap();
 
-        assert!(stack.mcp_server_statuses.read().await.is_empty());
-        assert!(!stack.mcp_init_done.load(Ordering::Acquire));
+        assert!(stack.mcp_server_statuses_for_tests().await.is_empty());
+        assert!(!stack.mcp_init_done_for_tests().await);
 
         let info = stack.mcp_server_info().await;
 
@@ -1431,15 +1124,18 @@ mod tests {
         assert_eq!(info[0].name, "broken-server");
         assert_eq!(info[0].tool_count, 0);
         assert_eq!(info[0].status, McpServerStatus::Connecting);
-        assert!(!stack.mcp_init_done.load(Ordering::Acquire));
-        assert!(stack.mcp_server_statuses.read().await.is_empty());
+        assert!(!stack.mcp_init_done_for_tests().await);
+        assert!(stack.mcp_server_statuses_for_tests().await.is_empty());
 
         stack.reload_mcp().await.expect("reload should succeed");
 
         let refreshed = stack.mcp_server_info().await;
         assert!(matches!(refreshed[0].status, McpServerStatus::Failed(_)));
         assert!(matches!(
-            stack.mcp_server_statuses.read().await.get("broken-server"),
+            stack
+                .mcp_server_statuses_for_tests()
+                .await
+                .get("broken-server"),
             Some(McpServerStatus::Failed(_))
         ));
     }
@@ -1484,9 +1180,9 @@ mod tests {
 
         assert!(tool_names.contains(&"read"));
         assert!(!tool_names.iter().any(|name| name.starts_with("mcp_")));
-        assert!(!stack.mcp_init_done.load(Ordering::Acquire));
-        assert!(stack.mcp.read().await.is_none());
-        assert!(stack.mcp_server_statuses.read().await.is_empty());
+        assert!(!stack.mcp_init_done_for_tests().await);
+        assert!(stack.mcp_runtime_is_none_for_tests().await);
+        assert!(stack.mcp_server_statuses_for_tests().await.is_empty());
     }
 
     #[tokio::test]
@@ -1503,21 +1199,23 @@ mod tests {
         .await
         .expect("stack init should succeed");
 
-        *stack.mcp.write().await = Some(MCPRuntime {
-            caller: Arc::new(stack_tools::McpManagerCaller {
-                manager: McpManager::new(),
-            }),
-            server_count: 2,
-            tool_count: 2,
-            tools_with_source: vec![
-                ("enabled-server".to_string(), test_tool("enabled_tool")),
-                ("disabled-server".to_string(), test_tool("disabled_tool")),
-            ],
-            server_scopes: HashMap::from([
-                ("enabled-server".to_string(), McpServerScope::Global),
-                ("disabled-server".to_string(), McpServerScope::Global),
-            ]),
-        });
+        stack
+            .set_mcp_runtime_for_tests(Some(MCPRuntime {
+                caller: Arc::new(stack_mcp::McpManagerCaller {
+                    manager: ava_mcp::manager::McpManager::new(),
+                }),
+                server_count: 2,
+                tool_count: 2,
+                tools_with_source: vec![
+                    ("enabled-server".to_string(), test_tool("enabled_tool")),
+                    ("disabled-server".to_string(), test_tool("disabled_tool")),
+                ],
+                server_scopes: HashMap::from([
+                    ("enabled-server".to_string(), McpServerScope::Global),
+                    ("disabled-server".to_string(), McpServerScope::Global),
+                ]),
+            }))
+            .await;
 
         assert!(stack.mcp_disable_server("disabled-server").await);
 
@@ -1548,21 +1246,23 @@ mod tests {
         .await
         .expect("stack init should succeed");
 
-        *stack.mcp.write().await = Some(MCPRuntime {
-            caller: Arc::new(stack_tools::McpManagerCaller {
-                manager: McpManager::new(),
-            }),
-            server_count: 2,
-            tool_count: 2,
-            tools_with_source: vec![
-                ("enabled-server".to_string(), test_tool("enabled_tool")),
-                ("disabled-server".to_string(), test_tool("disabled_tool")),
-            ],
-            server_scopes: HashMap::from([
-                ("enabled-server".to_string(), McpServerScope::Global),
-                ("disabled-server".to_string(), McpServerScope::Global),
-            ]),
-        });
+        stack
+            .set_mcp_runtime_for_tests(Some(MCPRuntime {
+                caller: Arc::new(stack_mcp::McpManagerCaller {
+                    manager: ava_mcp::manager::McpManager::new(),
+                }),
+                server_count: 2,
+                tool_count: 2,
+                tools_with_source: vec![
+                    ("enabled-server".to_string(), test_tool("enabled_tool")),
+                    ("disabled-server".to_string(), test_tool("disabled_tool")),
+                ],
+                server_scopes: HashMap::from([
+                    ("enabled-server".to_string(), McpServerScope::Global),
+                    ("disabled-server".to_string(), McpServerScope::Global),
+                ]),
+            }))
+            .await;
 
         assert!(stack.mcp_disable_server("disabled-server").await);
 

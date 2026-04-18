@@ -10,7 +10,12 @@
 
 use ava_agent::control_plane::commands::{queue_message_tier, ControlPlaneCommand};
 use ava_agent::control_plane::interactive::{
-    InteractiveRequestStore, ResolveInteractiveRequestError, TerminalInteractiveRequest,
+    InteractiveRequestKind, InteractiveRequestStore, ResolveInteractiveRequestError,
+    TerminalInteractiveRequest,
+};
+use ava_agent::control_plane::orchestration::{
+    clear_preserved_deferred, is_inactive_scoped_status_lookup, restore_in_flight_deferred,
+    sync_deferred_queues_for_progress,
 };
 use ava_agent::control_plane::queue::{
     clear_queue_semantics, ClearQueueTarget, QueueClearSemantics, UNSUPPORTED_QUEUE_CLEAR_ERROR,
@@ -19,9 +24,9 @@ use ava_agent::control_plane::sessions::{
     build_edit_replay_payload, build_regenerate_replay_payload, build_retry_replay_payload,
     resolve_session_precedence, SessionPromptContext, SessionSelectionSource,
 };
+use ava_agent::stack::AgentRunContext;
 use ava_tools::permission_middleware::ToolApproval;
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::Ordering;
 use tauri::{AppHandle, Emitter, State};
 use tokio::sync::mpsc;
@@ -36,95 +41,27 @@ fn ensure_desktop_run_id(run_id: Option<String>) -> String {
     run_id.unwrap_or_else(|| format!("desktop-run-{}", Uuid::new_v4()))
 }
 
-fn queued_post_complete_group(progress: &str) -> Option<u32> {
-    progress
-        .strip_prefix("post-complete group ")?
-        .split(':')
-        .next()?
-        .parse()
-        .ok()
-}
-
-fn move_follow_up_to_in_flight(
-    deferred: &mut VecDeque<ava_types::QueuedMessage>,
-    in_flight: &mut VecDeque<ava_types::QueuedMessage>,
-    text: &str,
-) {
-    in_flight.retain(|message| !matches!(message.tier, ava_types::MessageTier::FollowUp));
-    if let Some(index) = deferred.iter().position(|queued| {
-        queued.text == text && matches!(queued.tier, ava_types::MessageTier::FollowUp)
-    }) {
-        if let Some(message) = deferred.remove(index) {
-            in_flight.push_back(message);
-        }
-    }
-}
-
-fn move_post_complete_group_to_in_flight(
-    deferred: &mut VecDeque<ava_types::QueuedMessage>,
-    in_flight: &mut VecDeque<ava_types::QueuedMessage>,
-    group_id: u32,
-) {
-    in_flight
-        .retain(|message| !matches!(message.tier, ava_types::MessageTier::PostComplete { .. }));
-    let mut retained = VecDeque::new();
-    while let Some(message) = deferred.pop_front() {
-        if matches!(message.tier, ava_types::MessageTier::PostComplete { group } if group == group_id)
-        {
-            in_flight.push_back(message);
-        } else {
-            retained.push_back(message);
-        }
-    }
-    *deferred = retained;
-}
-
-async fn restore_in_flight_deferred(
-    session_id: Option<Uuid>,
-    deferred: &tokio::sync::RwLock<HashMap<Uuid, VecDeque<ava_types::QueuedMessage>>>,
-    in_flight: &tokio::sync::RwLock<HashMap<Uuid, VecDeque<ava_types::QueuedMessage>>>,
-) {
-    let Some(session_id) = session_id else {
-        return;
-    };
-
-    let mut in_flight_guard = in_flight.write().await;
-    let Some(mut session_in_flight) = in_flight_guard.remove(&session_id) else {
-        return;
-    };
-    drop(in_flight_guard);
-
-    if session_in_flight.is_empty() {
-        return;
-    }
-
-    let mut deferred_guard = deferred.write().await;
-    let session_deferred = deferred_guard.entry(session_id).or_default();
-    while let Some(message) = session_in_flight.pop_back() {
-        session_deferred.push_front(message);
-    }
-}
-
-async fn clear_preserved_deferred(
-    session_id: Option<Uuid>,
-    deferred: &tokio::sync::RwLock<HashMap<Uuid, VecDeque<ava_types::QueuedMessage>>>,
-    in_flight: &tokio::sync::RwLock<HashMap<Uuid, VecDeque<ava_types::QueuedMessage>>>,
-) {
-    let Some(session_id) = session_id else {
-        return;
-    };
-
-    deferred.write().await.remove(&session_id);
-    in_flight.write().await.remove(&session_id);
-}
-
-async fn cancel_active_run(app: &AppHandle, bridge: &DesktopBridge) {
+async fn cancel_desktop_run(app: &AppHandle, bridge: &DesktopBridge, run_id: &str) {
     let _interactive_guard = bridge.interactive_lifecycle_lock.lock().await;
-    bridge.interactive_revoked.store(true, Ordering::SeqCst);
-    bridge.revoke_queue_dispatch(true).await;
-    bridge.cancel().await;
-    while let Some(pending) = bridge.pending_approval_reply.cancel_pending().await {
+    let Ok(run) = bridge.resolve_run(Some(run_id), None).await else {
+        return;
+    };
+    run.interactive_revoked.store(true, Ordering::SeqCst);
+    bridge.revoke_queue_dispatch(run_id, true).await;
+    run.cancel.cancel();
+    loop {
+        let previous_global_request_id = bridge.pending_approval_reply.current_request_id().await;
+        let Some(pending) = bridge
+            .pending_approval_reply
+            .cancel_pending_for_run(run_id)
+            .await
+        else {
+            break;
+        };
         let request_id = pending.handle.request_id.clone();
+        bridge
+            .discard_deferred_interactive_request_event(&request_id)
+            .await;
         let _ = pending.reply.send(ToolApproval::Rejected(Some(
             "Agent run cancelled from desktop UI".to_string(),
         )));
@@ -135,9 +72,28 @@ async fn cancel_active_run(app: &AppHandle, bridge: &DesktopBridge) {
             false,
             pending.handle.run_id.as_deref(),
         );
+        emit_promoted_desktop_interactive_request_if_current_changed(
+            app,
+            bridge,
+            pending.handle.kind,
+            &request_id,
+            previous_global_request_id.as_deref(),
+        )
+        .await;
     }
-    while let Some(pending) = bridge.pending_question_reply.cancel_pending().await {
+    loop {
+        let previous_global_request_id = bridge.pending_question_reply.current_request_id().await;
+        let Some(pending) = bridge
+            .pending_question_reply
+            .cancel_pending_for_run(run_id)
+            .await
+        else {
+            break;
+        };
         let request_id = pending.handle.request_id.clone();
+        bridge
+            .discard_deferred_interactive_request_event(&request_id)
+            .await;
         let _ = pending.reply.send(String::new());
         emit_interactive_request_cleared(
             app,
@@ -146,9 +102,28 @@ async fn cancel_active_run(app: &AppHandle, bridge: &DesktopBridge) {
             false,
             pending.handle.run_id.as_deref(),
         );
+        emit_promoted_desktop_interactive_request_if_current_changed(
+            app,
+            bridge,
+            pending.handle.kind,
+            &request_id,
+            previous_global_request_id.as_deref(),
+        )
+        .await;
     }
-    while let Some(pending) = bridge.pending_plan_reply.cancel_pending().await {
+    loop {
+        let previous_global_request_id = bridge.pending_plan_reply.current_request_id().await;
+        let Some(pending) = bridge
+            .pending_plan_reply
+            .cancel_pending_for_run(run_id)
+            .await
+        else {
+            break;
+        };
         let request_id = pending.handle.request_id.clone();
+        bridge
+            .discard_deferred_interactive_request_event(&request_id)
+            .await;
         let _ = pending.reply.send(ava_types::PlanDecision::Rejected {
             feedback: "Agent run cancelled from desktop UI".to_string(),
         });
@@ -159,6 +134,14 @@ async fn cancel_active_run(app: &AppHandle, bridge: &DesktopBridge) {
             false,
             pending.handle.run_id.as_deref(),
         );
+        emit_promoted_desktop_interactive_request_if_current_changed(
+            app,
+            bridge,
+            pending.handle.kind,
+            &request_id,
+            previous_global_request_id.as_deref(),
+        )
+        .await;
     }
 }
 
@@ -182,6 +165,45 @@ fn emit_interactive_request_cleared<R: tauri::Runtime>(
     let payload = interactive_request_cleared_event(request_id, request_kind, timed_out, run_id);
     if let Err(error) = app.emit("agent-event", payload) {
         tracing::error!("Failed to emit interactive_request_cleared event to frontend: {error}");
+    }
+}
+
+async fn emit_promoted_desktop_interactive_request<R: tauri::Runtime>(
+    app: &AppHandle<R>,
+    bridge: &DesktopBridge,
+    kind: ava_agent::control_plane::interactive::InteractiveRequestKind,
+    run_id: Option<&str>,
+) {
+    let Some(event) = bridge
+        .take_promoted_interactive_request_event(kind, run_id)
+        .await
+    else {
+        return;
+    };
+    if let Err(error) = app.emit("agent-event", event) {
+        tracing::error!("Failed to emit promoted interactive request event to frontend: {error}");
+    }
+}
+
+async fn emit_promoted_desktop_interactive_request_if_current_changed<R: tauri::Runtime>(
+    app: &AppHandle<R>,
+    bridge: &DesktopBridge,
+    kind: ava_agent::control_plane::interactive::InteractiveRequestKind,
+    removed_request_id: &str,
+    previous_global_request_id: Option<&str>,
+) {
+    let Some(event) = bridge
+        .promoted_interactive_request_event_after_current_change(
+            kind,
+            removed_request_id,
+            previous_global_request_id,
+        )
+        .await
+    else {
+        return;
+    };
+    if let Err(error) = app.emit("agent-event", event) {
+        tracing::error!("Failed to emit promoted interactive request event to frontend: {error}");
     }
 }
 
@@ -264,58 +286,175 @@ pub struct SubmitGoalResult {
 
 /// Internal helper that runs the agent, streams events, tracks edits for undo,
 /// handles approval/question forwarding, and manages the message queue.
+fn parse_thinking_level(level_str: &str) -> ava_types::ThinkingLevel {
+    match level_str {
+        "off" => ava_types::ThinkingLevel::Off,
+        "low" => ava_types::ThinkingLevel::Low,
+        "medium" => ava_types::ThinkingLevel::Medium,
+        "high" => ava_types::ThinkingLevel::High,
+        "max" | "xhigh" => ava_types::ThinkingLevel::Max,
+        _ => ava_types::ThinkingLevel::Off,
+    }
+}
+
+fn desktop_run_context_from_submit_args(args: &SubmitGoalArgs) -> AgentRunContext {
+    let mut context = AgentRunContext {
+        provider: args.provider.clone(),
+        model: args.model.clone(),
+        thinking_level: args.thinking_level.as_deref().map(parse_thinking_level),
+        auto_compact: None,
+        compaction_threshold: None,
+        compaction_provider: None,
+        compaction_model: None,
+        todo_state: None,
+        permission_context: None,
+    };
+
+    if args.auto_compact.is_some()
+        || args.compaction_threshold.is_some()
+        || args.compaction_provider.is_some()
+        || args.compaction_model.is_some()
+    {
+        context.auto_compact = Some(args.auto_compact.unwrap_or(true));
+        context.compaction_threshold = Some(args.compaction_threshold.unwrap_or(80));
+        context.compaction_provider = args.compaction_provider.clone();
+        context.compaction_model = args.compaction_model.clone();
+    }
+
+    context
+}
+
+fn desktop_run_context_with_state(
+    mut context: AgentRunContext,
+    run: &std::sync::Arc<crate::bridge::DesktopRunState>,
+) -> AgentRunContext {
+    context.todo_state = Some(run.todo_state.clone());
+    context.permission_context = Some(run.permission_context.clone());
+    context
+}
+
+fn desktop_run_context_from_session(session: &ava_types::Session) -> AgentRunContext {
+    let mut context = AgentRunContext::default();
+    let metadata = session.metadata.get("runContext");
+
+    context.provider = metadata
+        .and_then(|value| value.get("provider"))
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string)
+        .or_else(|| {
+            session
+                .metadata
+                .get("routing")
+                .and_then(|value| value.get("provider"))
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string)
+        });
+    context.model = metadata
+        .and_then(|value| value.get("model"))
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string)
+        .or_else(|| {
+            session
+                .metadata
+                .get("routing")
+                .and_then(|value| value.get("model"))
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string)
+        });
+    context.thinking_level = metadata
+        .and_then(|value| value.get("thinkingLevel"))
+        .and_then(serde_json::Value::as_str)
+        .map(parse_thinking_level);
+    context.auto_compact = metadata
+        .and_then(|value| value.get("autoCompact"))
+        .and_then(serde_json::Value::as_bool);
+    context.compaction_threshold = metadata
+        .and_then(|value| value.get("compactionThreshold"))
+        .and_then(serde_json::Value::as_u64)
+        .map(|value| value as u8);
+    context.compaction_provider = metadata
+        .and_then(|value| value.get("compactionProvider"))
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string);
+    context.compaction_model = metadata
+        .and_then(|value| value.get("compactionModel"))
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string);
+
+    context
+}
+
+async fn desktop_effective_run_identity(
+    bridge: &DesktopBridge,
+    goal: &str,
+    images: &[ava_types::ImageContent],
+    run_context: &AgentRunContext,
+) -> (String, String) {
+    if let Ok(decision) = bridge
+        .stack
+        .resolve_model_route(goal, images, Some(run_context))
+        .await
+    {
+        if bridge
+            .stack
+            .router
+            .route_required(&decision.provider, &decision.model)
+            .await
+            .is_ok()
+        {
+            return (decision.provider, decision.model);
+        }
+
+        let cfg = bridge.stack.config.get().await;
+        if let Some(fallback) = cfg.fallback {
+            return (fallback.provider, fallback.model);
+        }
+
+        return (decision.provider, decision.model);
+    }
+
+    bridge.stack.current_model().await
+}
+
 async fn run_agent_inner(
     goal: &str,
     max_turns: usize,
     history: Vec<ava_types::Message>,
     images: Vec<ava_types::ImageContent>,
-    session_id: Option<Uuid>,
-    run_id: Option<String>,
+    session_id: Uuid,
+    run_id: String,
+    run: std::sync::Arc<crate::bridge::DesktopRunState>,
     app: &AppHandle,
     bridge: &DesktopBridge,
+    run_context: Option<AgentRunContext>,
 ) -> Result<SubmitGoalResult, String> {
-    let _startup_guard = bridge.startup_lock.lock().await;
+    info!(goal = %goal, run_id = %run_id, session_id = %session_id, "run_agent_inner: starting agent");
 
-    // Prevent concurrent runs
-    {
-        let running = bridge.running.read().await;
-        if *running {
-            return Err("Agent is already running. Cancel first.".to_string());
+    let (message_queue, message_queue_tx, message_queue_control) =
+        bridge.stack.create_message_queue_with_control();
+    if let Some(messages) = bridge.deferred_queue.read().await.get(&session_id) {
+        for message in messages.iter().cloned() {
+            let _ = message_queue_tx.send(message);
         }
     }
+    bridge
+        .activate_message_queue(&run_id, message_queue_tx, message_queue_control)
+        .await?;
 
-    let cancel = bridge.new_cancel_token().await;
-    bridge.interactive_revoked.store(false, Ordering::SeqCst);
-
-    // Create a message queue for mid-stream messaging
-    let message_queue = bridge.new_message_queue(session_id).await;
-    *bridge.active_run_id.write().await = run_id.clone();
-    *bridge.running.write().await = true;
-
-    // Create an event channel; spawn a forwarder that emits to all Tauri windows
     let (tx, mut rx) = mpsc::unbounded_channel();
     let app_clone = app.clone();
-
-    // Clone the Arc-wrapped edit history so the forwarder can record file edits
-    let edit_history = bridge.edit_history.clone();
-    // Clone the todo state so the forwarder can emit todo updates
-    let todo_state = bridge.stack.todo_state.clone();
+    let todo_state = run.todo_state.clone();
     let checkpoint_sm = bridge.stack.session_manager.clone();
     let checkpoint_last_id = bridge.last_session_id.clone();
     let deferred_queue = bridge.deferred_queue.clone();
     let in_flight_deferred = bridge.in_flight_deferred.clone();
+    let bridge_for_forwarder = bridge.clone();
     let deferred_session_id = session_id;
     let event_run_id = run_id.clone();
     let todo_event_run_id = run_id.clone();
-    let plan_event_run_id = run_id.clone();
-    let approval_event_run_id = run_id.clone();
-    let question_event_run_id = run_id.clone();
     let forwarder = tokio::spawn(async move {
         let mut last_tool_was_todo_write = false;
         while let Some(event) = rx.recv().await {
-            // Checkpoint: incrementally save session so progress survives crashes.
-            // Also update last_session_id so the next run can load history even
-            // if the current run is cancelled/interrupted.
             if let ava_agent::agent_loop::AgentEvent::Checkpoint(ref session) = event {
                 if let Err(e) =
                     save_session_checkpoint(checkpoint_sm.clone(), session.clone()).await
@@ -325,20 +464,21 @@ async fn run_agent_inner(
                 *checkpoint_last_id.write().await = Some(session.id);
                 continue;
             }
-            // Track write/edit tool calls for undo support
+
             if let ava_agent::agent_loop::AgentEvent::ToolCall(ref tc) = event {
                 if tc.name == "edit" || tc.name == "write" {
                     if let Some(path) = tc.arguments.get("file_path").and_then(|v| v.as_str()) {
                         match tokio::fs::read_to_string(path).await {
                             Ok(content) => {
-                                let mut hist = edit_history.write().await;
-                                if hist.len() >= crate::bridge::MAX_EDIT_HISTORY {
-                                    hist.pop_front();
-                                }
-                                hist.push_back(crate::bridge::FileEditRecord {
-                                    file_path: path.to_string(),
-                                    previous_content: content,
-                                });
+                                bridge_for_forwarder
+                                    .push_edit(
+                                        deferred_session_id,
+                                        crate::bridge::FileEditRecord {
+                                            file_path: path.to_string(),
+                                            previous_content: content,
+                                        },
+                                    )
+                                    .await;
                             }
                             Err(e) => {
                                 tracing::warn!(
@@ -349,10 +489,8 @@ async fn run_agent_inner(
                         }
                     }
                 }
-                // Track when todo_write is called so we emit a todo_update after its result
                 last_tool_was_todo_write = tc.name == "todo_write";
             } else if let ava_agent::agent_loop::AgentEvent::ToolResult(_) = event {
-                // After a todo_write result, emit the updated todo list
                 if last_tool_was_todo_write {
                     last_tool_was_todo_write = false;
                     let items = todo_state.get();
@@ -368,7 +506,7 @@ async fn run_agent_inner(
                         "agent-event",
                         AgentEvent::TodoUpdate {
                             todos,
-                            run_id: todo_event_run_id.clone(),
+                            run_id: Some(todo_event_run_id.clone()),
                         },
                     ) {
                         tracing::error!("Failed to emit todo_update event: {e}");
@@ -378,278 +516,40 @@ async fn run_agent_inner(
                 event,
                 ava_agent::agent_loop::AgentEvent::SnapshotTaken { .. }
             ) {
-                // Only reset the flag for events that aren't snapshots —
-                // SnapshotTaken fires between ToolCall and ToolResult and would
-                // incorrectly reset last_tool_was_todo_write.
                 last_tool_was_todo_write = false;
             }
+
             if let ava_agent::agent_loop::AgentEvent::Progress(ref message) = event {
-                if let Some(session_id) = deferred_session_id {
-                    if let Some(text) = message.strip_prefix("follow-up: ") {
-                        let mut deferred = deferred_queue.write().await;
-                        let mut in_flight = in_flight_deferred.write().await;
-                        move_follow_up_to_in_flight(
-                            deferred.entry(session_id).or_default(),
-                            in_flight.entry(session_id).or_default(),
-                            text,
-                        );
-                    } else if let Some(group_id) = queued_post_complete_group(message) {
-                        let mut deferred = deferred_queue.write().await;
-                        let mut in_flight = in_flight_deferred.write().await;
-                        move_post_complete_group_to_in_flight(
-                            deferred.entry(session_id).or_default(),
-                            in_flight.entry(session_id).or_default(),
-                            group_id,
-                        );
-                    }
-                }
-            }
-            emit_backend_event(&app_clone, &event, event_run_id.as_deref());
-        }
-    });
-
-    // Take the approval and question receivers out of the bridge for this run
-    let mut approval_rx = {
-        let mut lock = bridge.approval_rx.lock().await;
-        let (_, empty) = mpsc::unbounded_channel();
-        std::mem::replace(&mut *lock, empty)
-    };
-    let mut question_rx = {
-        let mut lock = bridge.question_rx.lock().await;
-        let (_, empty) = mpsc::unbounded_channel();
-        std::mem::replace(&mut *lock, empty)
-    };
-
-    let mut plan_rx = {
-        let mut lock = bridge.plan_rx.lock().await;
-        let (_, empty) = mpsc::unbounded_channel();
-        std::mem::replace(&mut *lock, empty)
-    };
-
-    let pending_approval = bridge.pending_approval_reply.clone();
-    let pending_question = bridge.pending_question_reply.clone();
-    let pending_plan = bridge.pending_plan_reply.clone();
-    let approval_revoked = bridge.interactive_revoked.clone();
-    let question_revoked = bridge.interactive_revoked.clone();
-    let plan_revoked = bridge.interactive_revoked.clone();
-    let approval_lifecycle_lock = bridge.interactive_lifecycle_lock.clone();
-    let question_lifecycle_lock = bridge.interactive_lifecycle_lock.clone();
-    let plan_lifecycle_lock = bridge.interactive_lifecycle_lock.clone();
-
-    // Spawn approval forwarder with timeout protection.
-    // If the frontend does not respond within the timeout, auto-deny the approval
-    // so the agent doesn't hang forever.
-    let app_approval = app.clone();
-    let approval_forwarder = tokio::spawn(async move {
-        while let Some(req) = approval_rx.recv().await {
-            let _interactive_guard = approval_lifecycle_lock.lock().await;
-            if approval_revoked.load(Ordering::SeqCst) {
-                let _ = req.reply.send(ToolApproval::Rejected(Some(
-                    "Agent run cancelled from desktop UI".to_string(),
-                )));
-                continue;
-            }
-            let risk_level = format!("{:?}", req.inspection.risk_level).to_lowercase();
-            let handle = pending_approval
-                .register_with_run_id(req.reply, approval_event_run_id.clone())
+                sync_deferred_queues_for_progress(
+                    message,
+                    deferred_session_id,
+                    &deferred_queue,
+                    &in_flight_deferred,
+                )
                 .await;
-            let id = handle.request_id.clone();
-
-            if let Err(e) = app_approval.emit(
-                "agent-event",
-                AgentEvent::ApprovalRequest {
-                    id: id.clone(),
-                    tool_call_id: req.call.id.clone(),
-                    tool_name: req.call.name.clone(),
-                    args: req.call.arguments.clone(),
-                    risk_level: risk_level.clone(),
-                    reason: req.inspection.reason.clone(),
-                    warnings: req.inspection.warnings.clone(),
-                    run_id: handle.run_id.clone(),
-                },
-            ) {
-                tracing::error!("Failed to emit approval_request event to frontend: {e}");
             }
-
-            // Spawn a timeout watchdog: if the frontend hasn't consumed the
-            // pending reply within the timeout, auto-deny so the agent unblocks.
-            let watchdog_pending = pending_approval.clone();
-            let watchdog_id = id.clone();
-            let watchdog_app = app_approval.clone();
-            tokio::spawn(async move {
-                let watchdog_timeout = watchdog_pending.timeout();
-                if let Some(reply) = watchdog_pending.await_timeout_request(&watchdog_id).await {
-                    tracing::warn!(
-                        "Approval request {id} timed out after {}s — auto-denying to unblock agent",
-                        watchdog_timeout.as_secs()
-                    );
-                    let _ = reply.reply.send(ToolApproval::Rejected(Some(
-                        "Timed out waiting for user approval in desktop UI".to_string(),
-                    )));
-                    emit_interactive_request_cleared(
-                        &watchdog_app,
-                        &reply.handle.request_id,
-                        reply.handle.kind.as_str(),
-                        true,
-                        reply.handle.run_id.as_deref(),
-                    );
-                }
-            });
+            emit_backend_event(&app_clone, &event, Some(event_run_id.as_str()));
         }
     });
-
-    // Spawn question forwarder with timeout protection.
-    let app_question = app.clone();
-    let question_forwarder = tokio::spawn(async move {
-        while let Some(req) = question_rx.recv().await {
-            let _interactive_guard = question_lifecycle_lock.lock().await;
-            if question_revoked.load(Ordering::SeqCst) {
-                let _ = req.reply.send(String::new());
-                continue;
-            }
-            let handle = pending_question
-                .register_with_run_id(req.reply, question_event_run_id.clone())
-                .await;
-            let id = handle.request_id.clone();
-
-            if let Err(e) = app_question.emit(
-                "agent-event",
-                AgentEvent::QuestionRequest {
-                    id: id.clone(),
-                    question: req.question.clone(),
-                    options: req.options.clone(),
-                    run_id: handle.run_id.clone(),
-                },
-            ) {
-                tracing::error!("Failed to emit question_request event to frontend: {e}");
-            }
-
-            // Timeout watchdog for question responses
-            let watchdog_pending = pending_question.clone();
-            let watchdog_id = id.clone();
-            let watchdog_app = app_question.clone();
-            tokio::spawn(async move {
-                let watchdog_timeout = watchdog_pending.timeout();
-                if let Some(reply) = watchdog_pending.await_timeout_request(&watchdog_id).await {
-                    tracing::warn!(
-                        "Question request {id} timed out after {}s — sending empty response to unblock agent",
-                        watchdog_timeout.as_secs()
-                    );
-                    let _ = reply.reply.send(String::new());
-                    emit_interactive_request_cleared(
-                        &watchdog_app,
-                        &reply.handle.request_id,
-                        reply.handle.kind.as_str(),
-                        true,
-                        reply.handle.run_id.as_deref(),
-                    );
-                }
-            });
-        }
-    });
-
-    // Spawn plan forwarder with timeout protection.
-    let app_plan = app.clone();
-    let plan_forwarder = tokio::spawn(async move {
-        use crate::events::{PlanPayload, PlanStepPayload};
-        while let Some(req) = plan_rx.recv().await {
-            let _interactive_guard = plan_lifecycle_lock.lock().await;
-            if plan_revoked.load(Ordering::SeqCst) {
-                let _ = req.reply.send(ava_types::PlanDecision::Rejected {
-                    feedback: "Agent run cancelled from desktop UI".to_string(),
-                });
-                continue;
-            }
-            let handle = pending_plan
-                .register_with_run_id(req.reply, plan_event_run_id.clone())
-                .await;
-            let id = handle.request_id.clone();
-            let steps = req
-                .plan
-                .steps
-                .iter()
-                .map(|s| {
-                    let action = match s.action {
-                        ava_types::PlanAction::Research => "research",
-                        ava_types::PlanAction::Implement => "implement",
-                        ava_types::PlanAction::Test => "test",
-                        ava_types::PlanAction::Review => "review",
-                    };
-                    PlanStepPayload {
-                        id: s.id.clone(),
-                        description: s.description.clone(),
-                        files: s.files.clone(),
-                        action: action.to_string(),
-                        depends_on: s.depends_on.clone(),
-                    }
-                })
-                .collect();
-
-            if let Err(e) = app_plan.emit(
-                "agent-event",
-                AgentEvent::PlanCreated {
-                    id: id.clone(),
-                    plan: PlanPayload {
-                        summary: req.plan.summary.clone(),
-                        steps,
-                        estimated_turns: req.plan.estimated_turns.unwrap_or(0) as usize,
-                    },
-                    run_id: handle.run_id.clone(),
-                },
-            ) {
-                tracing::error!("Failed to emit plan_created event to frontend: {e}");
-            }
-
-            let watchdog_pending = pending_plan.clone();
-            let watchdog_id = id.clone();
-            let watchdog_app = app_plan.clone();
-            tokio::spawn(async move {
-                let watchdog_timeout = watchdog_pending.timeout();
-                if let Some(reply) = watchdog_pending.await_timeout_request(&watchdog_id).await {
-                    tracing::warn!(
-                        "Plan request {watchdog_id} timed out after {}s — auto-rejecting to unblock agent",
-                        watchdog_timeout.as_secs()
-                    );
-                    let _ = reply.reply.send(ava_types::PlanDecision::Rejected {
-                        feedback: "Timed out waiting for plan response in desktop UI".to_string(),
-                    });
-                    emit_interactive_request_cleared(
-                        &watchdog_app,
-                        &reply.handle.request_id,
-                        reply.handle.kind.as_str(),
-                        true,
-                        reply.handle.run_id.as_deref(),
-                    );
-                }
-            });
-        }
-    });
-
-    info!(goal = %goal, "run_agent_inner: starting agent");
 
     let result = bridge
         .stack
-        .run(
+        .run_with_context(
             goal,
             max_turns,
             Some(tx),
-            cancel,
+            run.cancel.clone(),
             history,
             Some(message_queue),
             images,
-            session_id,
-            run_id.clone(),
+            Some(session_id),
+            Some(run_id.clone()),
+            run_context,
         )
         .await;
 
-    // Stop accepting queue mutations as soon as the run reaches a terminal state.
-    bridge.clear_message_tx().await;
-
-    // Wait for the forwarder to drain; abort the approval/question/plan forwarders
+    bridge.clear_message_queue_dispatch(&run_id).await;
     let _ = forwarder.await;
-    approval_forwarder.abort();
-    question_forwarder.abort();
-    plan_forwarder.abort();
 
     match &result {
         Ok(run) => info!(
@@ -692,10 +592,7 @@ async fn run_agent_inner(
         }
     };
 
-    // Clean up
-    *bridge.running.write().await = false;
-    *bridge.active_run_id.write().await = None;
-
+    bridge.finish_run(&run_id).await;
     run_result
 }
 
@@ -707,46 +604,9 @@ pub async fn submit_goal(
     app: AppHandle,
     bridge: State<'_, DesktopBridge>,
 ) -> Result<SubmitGoalResult, String> {
-    // Apply model override if requested
-    if let (Some(ref provider), Some(ref model)) = (&args.provider, &args.model) {
-        bridge
-            .stack
-            .switch_model(provider, model)
-            .await
-            .map_err(|e| e.to_string())?;
-    }
+    let _startup_guard = bridge.startup_lock.lock().await;
 
-    // Apply thinking level from frontend
-    if let Some(ref level_str) = args.thinking_level {
-        let level = match level_str.as_str() {
-            "low" => ava_types::ThinkingLevel::Low,
-            "medium" => ava_types::ThinkingLevel::Medium,
-            "high" => ava_types::ThinkingLevel::High,
-            "max" | "xhigh" => ava_types::ThinkingLevel::Max,
-            _ => ava_types::ThinkingLevel::Off,
-        };
-        if let Err(e) = bridge.stack.set_thinking_level(level).await {
-            tracing::warn!("Failed to set thinking level: {e}");
-        }
-    }
-
-    if args.auto_compact.is_some()
-        || args.compaction_threshold.is_some()
-        || args.compaction_provider.is_some()
-        || args.compaction_model.is_some()
-    {
-        let auto_compact = args.auto_compact.unwrap_or(true);
-        let threshold = args.compaction_threshold.unwrap_or(80);
-        let override_model = match (&args.compaction_provider, &args.compaction_model) {
-            (Some(provider), Some(model)) => Some((provider.clone(), model.clone())),
-            _ => None,
-        };
-        bridge
-            .stack
-            .set_compaction_settings(auto_compact, threshold, override_model)
-            .await
-            .map_err(|e| e.to_string())?;
-    }
+    let run_context = desktop_run_context_from_submit_args(&args);
 
     let requested_session_id = args
         .session_id
@@ -774,16 +634,25 @@ pub async fn submit_goal(
     };
 
     let run_id = ensure_desktop_run_id(args.run_id);
+    let (provider, model) =
+        desktop_effective_run_identity(&bridge, &args.goal, &[], &run_context).await;
+    let run = bridge
+        .register_run(run_id.clone(), run_session.session_id, provider, model)
+        .await?;
+    let run_context = desktop_run_context_with_state(run_context, &run);
+    drop(_startup_guard);
 
     run_agent_inner(
         &args.goal,
         args.max_turns,
         history,
         vec![],
-        Some(run_session.session_id),
-        Some(run_id),
+        run_session.session_id,
+        run_id,
+        run,
         &app,
         &bridge,
+        Some(run_context),
     )
     .await
 }
@@ -797,10 +666,25 @@ pub struct RunCorrelationArgs {
     pub session_id: Option<String>,
 }
 
+fn parse_optional_run_session_id(session_id: Option<&str>) -> Result<Option<Uuid>, String> {
+    session_id
+        .map(Uuid::parse_str)
+        .transpose()
+        .map_err(|e| format!("Invalid session id: {e}"))
+}
+
 /// Cancel the currently-running agent.
 #[tauri::command]
-pub async fn cancel_agent(app: AppHandle, bridge: State<'_, DesktopBridge>) -> Result<(), String> {
-    cancel_active_run(&app, &bridge).await;
+pub async fn cancel_agent(
+    args: RunCorrelationArgs,
+    app: AppHandle,
+    bridge: State<'_, DesktopBridge>,
+) -> Result<(), String> {
+    let requested_session_id = parse_optional_run_session_id(args.session_id.as_deref())?;
+    let run = bridge
+        .resolve_run(args.run_id.as_deref(), requested_session_id)
+        .await?;
+    cancel_desktop_run(&app, &bridge, &run.run_id).await;
     Ok(())
 }
 
@@ -812,24 +696,93 @@ pub struct AgentStatus {
     pub model: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub run_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pending_approval: Option<crate::events::AgentEvent>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pending_question: Option<crate::events::AgentEvent>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pending_plan: Option<crate::events::AgentEvent>,
 }
 
 /// Get current agent status (running, provider, model).
 #[tauri::command]
-pub async fn get_agent_status(bridge: State<'_, DesktopBridge>) -> Result<AgentStatus, String> {
-    let running = *bridge.running.read().await;
-    let run_id = bridge
-        .active_run_id
-        .read()
-        .await
-        .clone()
-        .filter(|id| !id.trim().is_empty());
-    let (provider, model) = bridge.stack.current_model().await;
+pub async fn get_agent_status(
+    args: RunCorrelationArgs,
+    bridge: State<'_, DesktopBridge>,
+) -> Result<AgentStatus, String> {
+    let requested_session_id = parse_optional_run_session_id(args.session_id.as_deref())?;
+    let scoped_lookup = args.run_id.is_some() || requested_session_id.is_some();
+    let run_id = if scoped_lookup {
+        bridge
+            .resolve_run(args.run_id.as_deref(), requested_session_id)
+            .await
+            .map(|run| Some(run.run_id.clone()))
+            .or_else(|message| {
+                if is_inactive_scoped_status_lookup(
+                    args.run_id.as_deref(),
+                    requested_session_id,
+                    &message,
+                ) {
+                    Ok(None)
+                } else {
+                    Err(message)
+                }
+            })?
+    } else {
+        bridge.single_active_run_id().await
+    };
+    let (provider, model) = match run_id.as_deref() {
+        Some(active_run_id) => {
+            let run = bridge.resolve_run(Some(active_run_id), None).await?;
+            (run.provider.clone(), run.model.clone())
+        }
+        None => bridge.stack.current_model().await,
+    };
+    let pending_approval = match run_id.as_deref() {
+        Some(active_run_id) => {
+            bridge
+                .current_interactive_request_event(
+                    InteractiveRequestKind::Approval,
+                    Some(active_run_id),
+                )
+                .await
+        }
+        None => None,
+    };
+    let pending_question = match run_id.as_deref() {
+        Some(active_run_id) => {
+            bridge
+                .current_interactive_request_event(
+                    InteractiveRequestKind::Question,
+                    Some(active_run_id),
+                )
+                .await
+        }
+        None => None,
+    };
+    let pending_plan = match run_id.as_deref() {
+        Some(active_run_id) => {
+            bridge
+                .current_interactive_request_event(
+                    InteractiveRequestKind::Plan,
+                    Some(active_run_id),
+                )
+                .await
+        }
+        None => None,
+    };
     Ok(AgentStatus {
-        running: running && run_id.is_some(),
+        running: if scoped_lookup {
+            run_id.is_some()
+        } else {
+            run_id.is_some() || bridge.has_active_runs().await
+        },
         provider,
         model,
         run_id,
+        pending_approval,
+        pending_question,
+        pending_plan,
     })
 }
 
@@ -873,6 +826,9 @@ pub async fn resolve_approval(
     };
 
     if reply.reply.send(approval).is_err() {
+        bridge
+            .discard_deferred_interactive_request_event(&reply.handle.request_id)
+            .await;
         emit_interactive_request_cleared(
             &app,
             &reply.handle.request_id,
@@ -880,11 +836,21 @@ pub async fn resolve_approval(
             false,
             reply.handle.run_id.as_deref(),
         );
+        emit_promoted_desktop_interactive_request(
+            &app,
+            &bridge,
+            reply.handle.kind,
+            reply.handle.run_id.as_deref(),
+        )
+        .await;
         return Err(
             "Failed to send approval response — the agent may have already moved on".to_string(),
         );
     }
 
+    bridge
+        .discard_deferred_interactive_request_event(&reply.handle.request_id)
+        .await;
     emit_interactive_request_cleared(
         &app,
         &reply.handle.request_id,
@@ -892,6 +858,13 @@ pub async fn resolve_approval(
         false,
         reply.handle.run_id.as_deref(),
     );
+    emit_promoted_desktop_interactive_request(
+        &app,
+        &bridge,
+        reply.handle.kind,
+        reply.handle.run_id.as_deref(),
+    )
+    .await;
 
     Ok(())
 }
@@ -920,6 +893,9 @@ pub async fn resolve_question(
     .await?;
 
     if reply.reply.send(args.answer).is_err() {
+        bridge
+            .discard_deferred_interactive_request_event(&reply.handle.request_id)
+            .await;
         emit_interactive_request_cleared(
             &app,
             &reply.handle.request_id,
@@ -927,11 +903,21 @@ pub async fn resolve_question(
             false,
             reply.handle.run_id.as_deref(),
         );
+        emit_promoted_desktop_interactive_request(
+            &app,
+            &bridge,
+            reply.handle.kind,
+            reply.handle.run_id.as_deref(),
+        )
+        .await;
         return Err(
             "Failed to send question response — the agent may have already moved on".to_string(),
         );
     }
 
+    bridge
+        .discard_deferred_interactive_request_event(&reply.handle.request_id)
+        .await;
     emit_interactive_request_cleared(
         &app,
         &reply.handle.request_id,
@@ -939,6 +925,13 @@ pub async fn resolve_question(
         false,
         reply.handle.run_id.as_deref(),
     );
+    emit_promoted_desktop_interactive_request(
+        &app,
+        &bridge,
+        reply.handle.kind,
+        reply.handle.run_id.as_deref(),
+    )
+    .await;
 
     Ok(())
 }
@@ -980,6 +973,9 @@ pub async fn resolve_plan(
     .await?;
 
     if reply.reply.send(decision).is_err() {
+        bridge
+            .discard_deferred_interactive_request_event(&reply.handle.request_id)
+            .await;
         emit_interactive_request_cleared(
             &app,
             &reply.handle.request_id,
@@ -987,11 +983,21 @@ pub async fn resolve_plan(
             false,
             reply.handle.run_id.as_deref(),
         );
+        emit_promoted_desktop_interactive_request(
+            &app,
+            &bridge,
+            reply.handle.kind,
+            reply.handle.run_id.as_deref(),
+        )
+        .await;
         return Err(
             "Failed to send plan response — the agent may have already moved on".to_string(),
         );
     }
 
+    bridge
+        .discard_deferred_interactive_request_event(&reply.handle.request_id)
+        .await;
     emit_interactive_request_cleared(
         &app,
         &reply.handle.request_id,
@@ -999,6 +1005,13 @@ pub async fn resolve_plan(
         false,
         reply.handle.run_id.as_deref(),
     );
+    emit_promoted_desktop_interactive_request(
+        &app,
+        &bridge,
+        reply.handle.kind,
+        reply.handle.run_id.as_deref(),
+    )
+    .await;
 
     Ok(())
 }
@@ -1007,18 +1020,33 @@ pub async fn resolve_plan(
 // Mid-stream messaging commands
 // ============================================================================
 
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct SteerArgs {
+    pub message: String,
+    #[serde(default)]
+    pub run_id: Option<String>,
+    #[serde(default)]
+    pub session_id: Option<String>,
+}
+
 /// Inject a steering message (Tier 1).
 #[tauri::command]
-pub async fn steer_agent(message: String, bridge: State<'_, DesktopBridge>) -> Result<(), String> {
-    if message.is_empty() {
+pub async fn steer_agent(args: SteerArgs, bridge: State<'_, DesktopBridge>) -> Result<(), String> {
+    if args.message.is_empty() {
         return Err("Steering message must not be empty.".to_string());
     }
+    let requested_session_id = parse_optional_queue_session_id(args.session_id.as_deref())?;
     bridge
-        .send_message(
-            message,
-            queue_message_tier(ControlPlaneCommand::SteerAgent, None)
-                .expect("steer command should map to a queue tier"),
-            None,
+        .enqueue_message(
+            ava_types::QueuedMessage {
+                text: args.message,
+                tier: queue_message_tier(ControlPlaneCommand::SteerAgent, None)
+                    .expect("steer command should map to a queue tier"),
+            },
+            args.run_id.as_deref(),
+            requested_session_id,
+            false,
         )
         .await
 }
@@ -1027,6 +1055,8 @@ pub async fn steer_agent(message: String, bridge: State<'_, DesktopBridge>) -> R
 #[serde(rename_all = "camelCase")]
 pub struct FollowUpArgs {
     pub message: String,
+    #[serde(default)]
+    pub run_id: Option<String>,
     #[serde(default)]
     pub session_id: Option<String>,
 }
@@ -1043,11 +1073,15 @@ pub async fn follow_up_agent(
     let requested_session_id = parse_optional_queue_session_id(args.session_id.as_deref())?;
 
     bridge
-        .send_message(
-            args.message,
-            queue_message_tier(ControlPlaneCommand::FollowUpAgent, None)
-                .expect("follow-up command should map to a queue tier"),
+        .enqueue_message(
+            ava_types::QueuedMessage {
+                text: args.message,
+                tier: queue_message_tier(ControlPlaneCommand::FollowUpAgent, None)
+                    .expect("follow-up command should map to a queue tier"),
+            },
+            args.run_id.as_deref(),
             requested_session_id,
+            true,
         )
         .await
 }
@@ -1058,6 +1092,8 @@ pub struct PostCompleteArgs {
     pub message: String,
     #[serde(default = "default_group")]
     pub group: u32,
+    #[serde(default)]
+    pub run_id: Option<String>,
     #[serde(default)]
     pub session_id: Option<String>,
 }
@@ -1109,11 +1145,15 @@ pub async fn post_complete_agent(
     let requested_session_id = parse_optional_queue_session_id(args.session_id.as_deref())?;
 
     bridge
-        .send_message(
-            args.message,
-            queue_message_tier(ControlPlaneCommand::PostCompleteAgent, Some(args.group))
-                .expect("post-complete command should map to a queue tier"),
+        .enqueue_message(
+            ava_types::QueuedMessage {
+                text: args.message,
+                tier: queue_message_tier(ControlPlaneCommand::PostCompleteAgent, Some(args.group))
+                    .expect("post-complete command should map to a queue tier"),
+            },
+            args.run_id.as_deref(),
             requested_session_id,
+            true,
         )
         .await
 }
@@ -1127,25 +1167,56 @@ pub struct MessageQueueState {
 /// Get the current message queue state.
 #[tauri::command]
 pub async fn get_message_queue(
+    args: RunCorrelationArgs,
     bridge: State<'_, DesktopBridge>,
 ) -> Result<MessageQueueState, String> {
-    let running = *bridge.running.read().await;
-    let snapshot = bridge.queue_dispatch_snapshot().await;
+    let requested_session_id = parse_optional_run_session_id(args.session_id.as_deref())?;
+    let snapshot = if args.run_id.is_some() || requested_session_id.is_some() {
+        bridge
+            .queue_dispatch_snapshot(args.run_id.as_deref(), requested_session_id)
+            .await?
+    } else {
+        match bridge.resolve_run(None, None).await {
+            Ok(run) => {
+                bridge
+                    .queue_dispatch_snapshot(Some(&run.run_id), None)
+                    .await?
+            }
+            Err(message) if message == "No active desktop runs" => None,
+            Err(message) => return Err(message),
+        }
+    };
     Ok(MessageQueueState {
-        active: running && snapshot.accepting && snapshot.tx.is_some(),
+        active: snapshot
+            .as_ref()
+            .is_some_and(|snapshot| snapshot.accepting && snapshot.tx.is_some()),
     })
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClearMessageQueueArgs {
+    pub target: ClearQueueTarget,
+    #[serde(default)]
+    pub run_id: Option<String>,
+    #[serde(default)]
+    pub session_id: Option<String>,
 }
 
 /// Clear messages from the queue.
 #[tauri::command]
 pub async fn clear_message_queue(
-    target: ClearQueueTarget,
+    args: ClearMessageQueueArgs,
     app: AppHandle,
     bridge: State<'_, DesktopBridge>,
 ) -> Result<(), String> {
-    match clear_queue_semantics(target) {
+    match clear_queue_semantics(args.target) {
         QueueClearSemantics::CancelRunAndClearSteering => {
-            cancel_active_run(&app, &bridge).await;
+            let requested_session_id = parse_optional_run_session_id(args.session_id.as_deref())?;
+            let run = bridge
+                .resolve_run(args.run_id.as_deref(), requested_session_id)
+                .await?;
+            cancel_desktop_run(&app, &bridge, &run.run_id).await;
             Ok(())
         }
         QueueClearSemantics::Unsupported => Err(UNSUPPORTED_QUEUE_CLEAR_ERROR.to_string()),
@@ -1187,16 +1258,27 @@ pub async fn retry_last_message(
 
     info!(goal = %goal, session_id = %session_id, "retry_last_message");
     let run_id = ensure_desktop_run_id(args.run_id);
+    let _startup_guard = bridge.startup_lock.lock().await;
+    let run_context = desktop_run_context_from_session(&session);
+    let (provider, model) =
+        desktop_effective_run_identity(&bridge, &goal, &images, &run_context).await;
+    let run = bridge
+        .register_run(run_id.clone(), session_id, provider, model)
+        .await?;
+    let run_context = desktop_run_context_with_state(run_context, &run);
+    drop(_startup_guard);
 
     run_agent_inner(
         &goal,
         0,
         history,
         images,
-        Some(session_id),
-        Some(run_id),
+        session_id,
+        run_id,
+        run,
         &app,
         &bridge,
+        Some(run_context),
     )
     .await
 }
@@ -1247,16 +1329,27 @@ pub async fn edit_and_resend(
 
     info!(new_content = %goal, message_id = %args.message_id, "edit_and_resend");
     let run_id = ensure_desktop_run_id(args.run_id);
+    let _startup_guard = bridge.startup_lock.lock().await;
+    let run_context = desktop_run_context_from_session(&session);
+    let (provider, model) =
+        desktop_effective_run_identity(&bridge, &goal, &images, &run_context).await;
+    let run = bridge
+        .register_run(run_id.clone(), session_id, provider, model)
+        .await?;
+    let run_context = desktop_run_context_with_state(run_context, &run);
+    drop(_startup_guard);
 
     run_agent_inner(
         &goal,
         0,
         history,
         images,
-        Some(session_id),
-        Some(run_id),
+        session_id,
+        run_id,
+        run,
         &app,
         &bridge,
+        Some(run_context),
     )
     .await
 }
@@ -1292,16 +1385,27 @@ pub async fn regenerate_response(
 
     info!(goal = %goal, session_id = %session_id, "regenerate_response");
     let run_id = ensure_desktop_run_id(args.run_id);
+    let _startup_guard = bridge.startup_lock.lock().await;
+    let run_context = desktop_run_context_from_session(&session);
+    let (provider, model) =
+        desktop_effective_run_identity(&bridge, &goal, &images, &run_context).await;
+    let run = bridge
+        .register_run(run_id.clone(), session_id, provider, model)
+        .await?;
+    let run_context = desktop_run_context_with_state(run_context, &run);
+    drop(_startup_guard);
 
     run_agent_inner(
         &goal,
         0,
         history,
         images,
-        Some(session_id),
-        Some(run_id),
+        session_id,
+        run_id,
+        run,
         &app,
         &bridge,
+        Some(run_context),
     )
     .await
 }
@@ -1316,8 +1420,32 @@ pub struct UndoResult {
 
 /// Undo the last file edit made by the agent.
 #[tauri::command]
-pub async fn undo_last_edit(bridge: State<'_, DesktopBridge>) -> Result<UndoResult, String> {
-    let record = bridge.pop_last_edit().await;
+pub async fn undo_last_edit(
+    args: Option<RunCorrelationArgs>,
+    bridge: State<'_, DesktopBridge>,
+) -> Result<UndoResult, String> {
+    let args = args.unwrap_or_default();
+    let requested_session_id = parse_optional_run_session_id(args.session_id.as_deref())?;
+    let session_id = if let Some(session_id) = requested_session_id {
+        if let Some(run_id) = args.run_id.as_deref() {
+            if let Ok(run) = bridge.resolve_run(Some(run_id), None).await {
+                if run.session_id != session_id {
+                    return Err(format!("Run {run_id} does not own session {session_id}"));
+                }
+            }
+        }
+        session_id
+    } else if let Some(run_id) = args.run_id.as_deref() {
+        bridge
+            .resolve_run(Some(run_id), requested_session_id)
+            .await?
+            .session_id
+    } else {
+        (*bridge.last_session_id.read().await)
+            .ok_or_else(|| "No previous session to undo".to_string())?
+    };
+
+    let record = bridge.pop_last_edit(session_id).await;
 
     match record {
         Some(edit) => {
@@ -1579,9 +1707,97 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn failed_desktop_question_response_still_leaves_next_request_promotable() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let bridge = crate::bridge::DesktopBridge::init_for_tests(dir.path().to_path_buf())
+            .await
+            .expect("bridge");
+
+        let (first_tx, first_rx) = tokio::sync::oneshot::channel::<String>();
+        let first = bridge
+            .pending_question_reply
+            .register_with_run_id(first_tx, Some("desktop-run-a".to_string()))
+            .await;
+        drop(first_rx);
+        let (second_tx, _second_rx) = tokio::sync::oneshot::channel::<String>();
+        let second = bridge
+            .pending_question_reply
+            .register_with_run_id(second_tx, Some("desktop-run-b".to_string()))
+            .await;
+
+        bridge.deferred_interactive_events.lock().await.insert(
+            first.request_id.clone(),
+            AgentEvent::QuestionRequest {
+                id: first.request_id.clone(),
+                question: "Question A".to_string(),
+                options: vec![],
+                run_id: first.run_id.clone(),
+            },
+        );
+        bridge.deferred_interactive_events.lock().await.insert(
+            second.request_id.clone(),
+            AgentEvent::QuestionRequest {
+                id: second.request_id.clone(),
+                question: "Question B".to_string(),
+                options: vec![],
+                run_id: second.run_id.clone(),
+            },
+        );
+
+        let reply = take_resolved_desktop_interactive_request(
+            &bridge.pending_question_reply,
+            "question",
+            Some(&first.request_id),
+        )
+        .await
+        .expect("current request should resolve");
+
+        assert!(reply.reply.send("late answer".to_string()).is_err());
+        bridge
+            .discard_deferred_interactive_request_event(&reply.handle.request_id)
+            .await;
+
+        let promoted = bridge
+            .take_promoted_interactive_request_event(
+                ava_agent::control_plane::interactive::InteractiveRequestKind::Question,
+                reply.handle.run_id.as_deref(),
+            )
+            .await
+            .expect("next queued question should still be promotable");
+
+        match promoted {
+            AgentEvent::QuestionRequest { id, run_id, .. } => {
+                assert_eq!(id, second.request_id);
+                assert_eq!(run_id.as_deref(), Some("desktop-run-b"));
+            }
+            other => panic!("expected promoted question request, got {other:?}"),
+        }
+    }
+
     #[test]
     fn unsupported_queue_clear_error_mentions_unimplemented_targets() {
         assert!(UNSUPPORTED_QUEUE_CLEAR_ERROR.contains("not supported yet"));
+    }
+
+    #[test]
+    fn inactive_scoped_status_lookup_treats_missing_scoped_runs_as_non_errors() {
+        let session_id = Uuid::new_v4();
+        assert!(is_inactive_scoped_status_lookup(
+            Some("desktop-run-a"),
+            Some(session_id),
+            &format!("Run {} is not active", "desktop-run-a")
+        ));
+        assert!(is_inactive_scoped_status_lookup(
+            None,
+            Some(session_id),
+            &format!("Session {session_id} does not have an active run")
+        ));
+        assert!(!is_inactive_scoped_status_lookup(
+            Some("desktop-run-a"),
+            Some(session_id),
+            &format!("Run {} does not own session {session_id}", "desktop-run-a")
+        ));
     }
 
     #[test]
@@ -1628,5 +1844,33 @@ mod tests {
         let SessionPromptContext { images, .. } =
             build_regenerate_replay_payload(&session).expect("regen input");
         assert_eq!(images, vec![sample_image("regen")]);
+    }
+
+    #[test]
+    fn desktop_run_context_from_session_recovers_effective_run_settings() {
+        let session = ava_types::Session::new().with_metadata(serde_json::json!({
+            "runContext": {
+                "provider": "openai",
+                "model": "gpt-5.4",
+                "thinkingLevel": "high",
+                "autoCompact": true,
+                "compactionThreshold": 72,
+                "compactionProvider": "anthropic",
+                "compactionModel": "claude-sonnet-4.6"
+            }
+        }));
+
+        let context = desktop_run_context_from_session(&session);
+
+        assert_eq!(context.provider.as_deref(), Some("openai"));
+        assert_eq!(context.model.as_deref(), Some("gpt-5.4"));
+        assert_eq!(context.thinking_level, Some(ava_types::ThinkingLevel::High));
+        assert_eq!(context.auto_compact, Some(true));
+        assert_eq!(context.compaction_threshold, Some(72));
+        assert_eq!(context.compaction_provider.as_deref(), Some("anthropic"));
+        assert_eq!(
+            context.compaction_model.as_deref(),
+            Some("claude-sonnet-4.6")
+        );
     }
 }

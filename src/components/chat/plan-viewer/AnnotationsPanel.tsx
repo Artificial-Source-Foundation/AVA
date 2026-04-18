@@ -1,14 +1,19 @@
 import { MessageCircle, X } from 'lucide-solid'
-import { type Component, For, Show } from 'solid-js'
+import { type Component, For, type JSX, Show } from 'solid-js'
 import type { PlanAnnotation } from '../../../stores/planOverlayStore'
 import { PLAN_ACCENT, PLAN_ACCENT_SUBTLE } from './types'
 
-export const AnnotationsPanel: Component<{
+export interface AnnotationsPanelProps {
   annotations: PlanAnnotation[]
   focusedId: string | null
   onFocus: (id: string) => void
   onRemove: (id: string) => void
-}> = (props) => {
+  sidebarTop?: JSX.Element
+  sidebarBottom?: JSX.Element
+  sidebarLabel?: string
+}
+
+export const AnnotationsPanel: Component<AnnotationsPanelProps> = (props) => {
   return (
     <aside
       class="flex flex-col h-full border-l flex-shrink-0 overflow-hidden"
@@ -27,7 +32,7 @@ export const AnnotationsPanel: Component<{
           class="text-[11px] font-semibold tracking-widest uppercase"
           style={{ color: 'var(--text-muted)' }}
         >
-          Annotations
+          {props.sidebarLabel ?? 'Annotations'}
         </span>
         <Show when={props.annotations.length > 0}>
           <span
@@ -41,6 +46,9 @@ export const AnnotationsPanel: Component<{
 
       {/* Content */}
       <div class="flex-1 overflow-y-auto p-3 space-y-2">
+        {/* Optional top slot content */}
+        <Show when={props.sidebarTop}>{props.sidebarTop}</Show>
+
         <Show
           when={props.annotations.length > 0}
           fallback={
@@ -131,6 +139,9 @@ export const AnnotationsPanel: Component<{
             )}
           </For>
         </Show>
+
+        {/* Optional bottom slot content */}
+        <Show when={props.sidebarBottom}>{props.sidebarBottom}</Show>
       </div>
     </aside>
   )

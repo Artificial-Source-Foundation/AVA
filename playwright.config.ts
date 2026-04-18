@@ -11,15 +11,15 @@ import { defineConfig, devices } from '@playwright/test'
  */
 export default defineConfig({
   testDir: './e2e',
-  fullyParallel: true,
+  fullyParallel: false,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
-  workers: process.env.CI ? 1 : undefined,
+  workers: 1,
   reporter: 'html',
   timeout: 30_000,
 
   use: {
-    baseURL: 'http://localhost:1420',
+    baseURL: 'http://localhost:11420',
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
   },
@@ -31,10 +31,19 @@ export default defineConfig({
     },
   ],
 
-  webServer: {
-    command: 'npx vite --port 1420',
-    port: 1420,
-    reuseExistingServer: !process.env.CI,
-    timeout: 60_000,
-  },
+  webServer: [
+    {
+      command: 'cargo run --bin ava --features web -- serve --port 18080',
+      port: 18080,
+      reuseExistingServer: false,
+      timeout: 120_000,
+    },
+    {
+      command:
+        'VITE_API_URL=http://localhost:18080 VITE_DISABLE_BACKEND_PROXY=1 npx vite --port 11420',
+      port: 11420,
+      reuseExistingServer: false,
+      timeout: 60_000,
+    },
+  ],
 })

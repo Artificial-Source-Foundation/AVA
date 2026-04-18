@@ -4,7 +4,8 @@
  * other layout state. Each follows the pattern: signal + open/close/toggle.
  */
 
-import { createSignal } from 'solid-js'
+import { type Accessor, createSignal } from 'solid-js'
+import type { LLMProviderConfig } from '../config/defaults/provider-defaults'
 import { log } from '../lib/logger'
 import { loadString, save } from './layout-persistence'
 
@@ -34,21 +35,31 @@ export { settingsOpen }
 // Model Browser
 // ============================================================================
 
-const [modelBrowserOpen, setModelBrowserOpen] = createSignal(false)
+export interface ModelBrowserRequest {
+  selectedModel: Accessor<string>
+  selectedProvider?: Accessor<string | null>
+  enabledProviders: Accessor<LLMProviderConfig[]>
+  onSelect: (modelId: string, providerId: string) => void
+}
 
-export function openModelBrowser(): void {
+const [modelBrowserOpen, setModelBrowserOpen] = createSignal(false)
+const [modelBrowserRequest, setModelBrowserRequest] = createSignal<ModelBrowserRequest | null>(null)
+
+export function openModelBrowser(request?: ModelBrowserRequest): void {
+  setModelBrowserRequest(request ?? null)
   setModelBrowserOpen(true)
 }
 
 export function closeModelBrowser(): void {
   setModelBrowserOpen(false)
+  setModelBrowserRequest(null)
 }
 
 export function toggleModelBrowser(): void {
   setModelBrowserOpen(!modelBrowserOpen())
 }
 
-export { modelBrowserOpen }
+export { modelBrowserOpen, modelBrowserRequest }
 
 // ============================================================================
 // Quick Model Picker

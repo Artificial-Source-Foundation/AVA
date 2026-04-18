@@ -26,10 +26,8 @@ const h = vi.hoisted(() => {
 })
 
 // Mock the Rust agent at the lowest level
-vi.mock('./use-rust-agent', () => {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const solidJs = require('solid-js') as typeof import('solid-js')
-  const createSignal = solidJs.createSignal
+vi.mock('./use-rust-agent', async () => {
+  const { createSignal } = await vi.importActual<typeof import('solid-js')>('solid-js')
   return {
     useRustAgent: () => {
       const [isRunning, setIsRunning] = createSignal(false)
@@ -40,11 +38,13 @@ vi.mock('./use-rust-agent', () => {
       const [thinkingSegments] = createSignal<unknown[]>([])
       const [lastResult, setLastResult] = createSignal<unknown>(null)
       const [currentRunId] = createSignal<string | null>(null)
+      const [trackedSessionId, setTrackedSessionId] = createSignal<string | null>(null)
       const [tokenUsage] = createSignal({ input: 0, output: 0, cost: 0 })
       const [thinkingContent] = createSignal('')
 
       const run = async (goal: string) => {
         setIsRunning(true)
+        setTrackedSessionId('s1')
         h.isRunningState.value = true
         try {
           const result = await h.runMock(goal)
@@ -52,12 +52,14 @@ vi.mock('./use-rust-agent', () => {
           return result
         } finally {
           setIsRunning(false)
+          setTrackedSessionId(null)
           h.isRunningState.value = false
         }
       }
 
       const cancel = async () => {
         setIsRunning(false)
+        setTrackedSessionId(null)
         h.isRunningState.value = false
         h.cancelMock()
       }
@@ -71,19 +73,61 @@ vi.mock('./use-rust-agent', () => {
         error,
         lastResult,
         currentRunId,
+        trackedSessionId,
         tokenUsage,
         events,
+        eventVersion: () => events().length,
+        eventCursor: () => events().length,
+        readEventsSince: (cursor: number) => {
+          const snapshot = events()
+          const safeCursor = Math.max(0, Math.min(cursor, snapshot.length))
+          return {
+            cursor: snapshot.length,
+            events: snapshot.slice(safeCursor),
+          }
+        },
         run,
         cancel,
         endRun: vi.fn(),
         steer: vi.fn(async () => {}),
         followUp: vi.fn(async () => {}),
         postComplete: vi.fn(async () => {}),
-        rehydrateStatus: vi.fn(async () => {}),
+        rehydrateStatus: vi.fn(async (sessionId?: string | null) => ({
+          sessionId: sessionId ?? null,
+          running: false,
+          runId: null,
+          pendingApproval: null,
+          pendingQuestion: null,
+          pendingPlan: null,
+        })),
         clearError: () => {
           setError(null)
           h.clearErrorMock()
         },
+        resetState: vi.fn(),
+        captureRuntimeSnapshot: () => ({
+          isRunning: isRunning(),
+          streamingContent: streamingContent(),
+          thinkingContent: thinkingContent(),
+          activeToolCalls: activeToolCalls(),
+          error: error(),
+          lastResult: lastResult(),
+          currentRunId: currentRunId(),
+          trackedSessionId: trackedSessionId(),
+          detachedSessionId: null,
+          tokenUsage: tokenUsage(),
+          events: events(),
+          progressMessage: null,
+          budgetWarning: null,
+          pendingPlan: null,
+          thinkingSegments: thinkingSegments(),
+          todos: [],
+          binding: {
+            activeRunId: currentRunId(),
+            attachedSessionId: trackedSessionId(),
+          },
+        }),
+        restoreRuntimeSnapshot: vi.fn(),
         stop: cancel,
         isStreaming: isRunning,
         currentTokens: streamingContent,
@@ -108,6 +152,10 @@ vi.mock('../services/tool-approval-bridge', () => ({
   setAutoApprovalChecker: vi.fn(),
 }))
 
+vi.mock('../services/database', () => ({
+  getMessages: vi.fn(async () => []),
+}))
+
 vi.mock('../stores/settings', () => ({
   useSettings: () => ({
     settings: () => ({
@@ -127,14 +175,13 @@ vi.mock('../stores/settings', () => ({
   }),
 }))
 
-vi.mock('../stores/session', () => {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const solidJs = require('solid-js') as typeof import('solid-js')
-  const createSignal = solidJs.createSignal
+vi.mock('../stores/session', async () => {
+  const { createSignal } = await vi.importActual<typeof import('solid-js')>('solid-js')
 
-  const [currentSession, setCurrentSession] = createSignal<{ id: string; name: string } | null>(
-    null
-  )
+  const [currentSession, setCurrentSession] = createSignal<{ id: string; name: string } | null>({
+    id: 's1',
+    name: 'Session 1',
+  })
   const [messages, setMessages] = createSignal<unknown[]>([])
   const [selectedModel] = createSignal<string | undefined>(undefined)
   const [selectedProvider] = createSignal<string | undefined>(undefined)

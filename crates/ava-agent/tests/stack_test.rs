@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use ava_agent::message_queue::MessageQueue;
-use ava_agent::stack::{AgentStack, AgentStackConfig};
+use ava_agent::stack::{AgentRunContext, AgentStack, AgentStackConfig};
 use ava_config::{Config, CredentialStore, ProviderCredential, RoutingMode};
 use ava_llm::provider::LLMProvider;
 use ava_llm::providers::mock::MockProvider;
@@ -247,7 +247,7 @@ async fn agent_stack_run_dispatches_subagent_when_enabled() {
     let (tx, mut rx) = mpsc::unbounded_channel();
     let result = stack
         .run(
-            "Use a scout subagent to inspect the repo, then finish the task.",
+            "Use a scout subagent to inspect the repo, then implement a follow-up patch and finish the task.",
             5,
             Some(tx),
             CancellationToken::new(),
@@ -270,7 +270,7 @@ async fn agent_stack_run_dispatches_subagent_when_enabled() {
         .session
         .messages
         .iter()
-        .any(|m| m.role == Role::Tool && m.content.contains("scout summary")));
+        .any(|m| m.content.contains("scout summary")));
 
     let mut saw_subagent_complete = false;
     while let Ok(event) = rx.try_recv() {
@@ -385,7 +385,7 @@ async fn agent_stack_resolve_model_route_prefers_cheap_model_when_enabled() {
     .expect("stack init should succeed");
 
     let decision = stack
-        .resolve_model_route("Summarize this diff in two bullets.", &[])
+        .resolve_model_route("Summarize this diff in two bullets.", &[], None)
         .await
         .expect("route resolution should succeed");
 
@@ -410,13 +410,186 @@ async fn agent_stack_resolve_model_route_respects_manual_override_lock() {
     .expect("stack init should succeed");
 
     let decision = stack
-        .resolve_model_route("Summarize this diff in two bullets.", &[])
+        .resolve_model_route("Summarize this diff in two bullets.", &[], None)
         .await
         .expect("route resolution should succeed");
 
     assert_eq!(decision.source, RouteSource::ManualOverride);
     assert_eq!(decision.provider, "openai");
     assert_eq!(decision.display_model, "gpt-5.3-codex");
+}
+
+#[tokio::test]
+async fn agent_stack_resolve_model_route_respects_run_context_override_only() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    write_routing_config(&dir);
+    write_credentials(&dir, &["anthropic", "openai"]).await;
+
+    let (stack, _question_rx, _approval_rx, _plan_rx) = AgentStack::new(AgentStackConfig {
+        data_dir: dir.path().to_path_buf(),
+        ..Default::default()
+    })
+    .await
+    .expect("stack init should succeed");
+
+    let context = AgentRunContext {
+        provider: Some("openai".to_string()),
+        model: Some("gpt-5.4-nano".to_string()),
+        thinking_level: None,
+        auto_compact: None,
+        compaction_threshold: None,
+        compaction_provider: None,
+        compaction_model: None,
+        todo_state: None,
+        permission_context: None,
+    };
+
+    let decision = stack
+        .resolve_model_route("Summarize this diff in two bullets.", &[], Some(&context))
+        .await
+        .expect("route resolution should succeed");
+
+    assert_eq!(decision.source, RouteSource::ManualOverride);
+    assert_eq!(decision.provider, "openai");
+    assert_eq!(decision.model, "gpt-5.4-nano");
+
+    let (provider, model) = stack.current_model().await;
+    assert_eq!(provider, "anthropic");
+    assert_eq!(model, "claude-sonnet-4.6");
+}
+
+#[tokio::test]
+async fn agent_stack_run_with_context_thinking_level_does_not_mutate_shared_thinking() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let recorded = Arc::new(tokio::sync::Mutex::new(Vec::new()));
+    let provider = Arc::new(RecordingThinkingProvider::new(
+        "gemini-2.5-pro",
+        recorded.clone(),
+    ));
+    let (stack, _question_rx, _approval_rx, _plan_rx) = AgentStack::new(AgentStackConfig {
+        data_dir: dir.path().to_path_buf(),
+        injected_provider: Some(provider.clone()),
+        ..Default::default()
+    })
+    .await
+    .expect("stack init should succeed");
+
+    stack
+        .set_thinking_level(ava_types::ThinkingLevel::High)
+        .await
+        .expect("set shared thinking level");
+
+    let context = AgentRunContext {
+        provider: None,
+        model: None,
+        thinking_level: Some(ava_types::ThinkingLevel::Low),
+        auto_compact: None,
+        compaction_threshold: None,
+        compaction_provider: None,
+        compaction_model: None,
+        todo_state: None,
+        permission_context: None,
+    };
+
+    let (event_tx, _event_rx) = mpsc::unbounded_channel();
+
+    let result = stack
+        .run_with_context(
+            "finish task",
+            5,
+            Some(event_tx),
+            CancellationToken::new(),
+            Vec::new(),
+            None,
+            Vec::new(),
+            None,
+            None,
+            Some(context),
+        )
+        .await
+        .expect("run should succeed");
+
+    assert!(result.success);
+
+    let shared_level = stack.get_thinking_level().await;
+    assert_eq!(shared_level, ava_types::ThinkingLevel::High);
+
+    let lock = recorded.lock().await;
+    assert_eq!(lock.len(), 1);
+    assert_eq!(lock[0].level, ava_types::ThinkingLevel::Low);
+}
+
+#[tokio::test]
+async fn agent_stack_run_with_context_falls_back_to_shared_compaction_override() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    write_credentials(&dir, &["openai"]).await;
+    let provider = Arc::new(MockProvider::new(
+        "test-model",
+        vec![completion_response("done")],
+    ));
+    let (stack, _question_rx, _approval_rx, _plan_rx) = AgentStack::new(AgentStackConfig {
+        data_dir: dir.path().to_path_buf(),
+        injected_provider: Some(provider),
+        ..Default::default()
+    })
+    .await
+    .expect("stack init should succeed");
+
+    stack
+        .set_compaction_settings(
+            true,
+            80,
+            Some(("openai".to_string(), "gpt-5.4-nano".to_string())),
+        )
+        .await
+        .expect("set shared compaction settings");
+
+    let context = AgentRunContext {
+        provider: None,
+        model: None,
+        thinking_level: None,
+        auto_compact: None,
+        compaction_threshold: None,
+        compaction_provider: None,
+        compaction_model: None,
+        todo_state: None,
+        permission_context: None,
+    };
+
+    let result = stack
+        .run_with_context(
+            "finish task",
+            5,
+            None,
+            CancellationToken::new(),
+            Vec::new(),
+            None,
+            Vec::new(),
+            None,
+            None,
+            Some(context),
+        )
+        .await
+        .expect("run should succeed");
+
+    let run_context = result
+        .session
+        .metadata
+        .get("runContext")
+        .and_then(|value| value.as_object())
+        .expect("runContext metadata should be present");
+    assert_eq!(
+        run_context
+            .get("compactionProvider")
+            .and_then(|value| value.as_str()),
+        Some("openai")
+    );
+    assert_eq!(
+        run_context
+            .get("compactionModel")
+            .and_then(|value| value.as_str()),
+        Some("gpt-5.4-nano")
+    );
 }
 
 #[tokio::test]

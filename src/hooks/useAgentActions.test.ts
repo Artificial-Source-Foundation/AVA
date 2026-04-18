@@ -39,11 +39,6 @@ function createDeferred<T>() {
   return { promise, resolve, reject }
 }
 
-async function flushMicrotasks(): Promise<void> {
-  await Promise.resolve()
-  await Promise.resolve()
-}
-
 function createHarness() {
   const setMessageError = vi.fn()
   const rustAgent = {
@@ -234,6 +229,106 @@ describe('createAgentActions session sync preflight', () => {
     expect(markActiveSessionSyncedMock).toHaveBeenCalledWith('session-123')
   })
 
+  it('preserves tool-only retry completions instead of deleting the assistant message', async () => {
+    ensureActiveSessionSyncedMock.mockResolvedValueOnce({
+      sessionId: 'session-123',
+      exists: true,
+      messageCount: 2,
+    })
+    const updateMessage = vi.fn()
+    const deleteMessage = vi.fn()
+    const retryRun = vi
+      .fn()
+      .mockResolvedValue({ success: true, turns: 1, sessionId: 'session-123' })
+    const actions = createAgentActions({
+      rustAgent: {
+        isRunning: () => false,
+        retryRun,
+        error: () => null,
+        streamingContent: () => '',
+        thinkingContent: () => '',
+        thinkingSegments: () => [],
+        tokenUsage: () => ({ output: 0, cost: 0 }),
+        activeToolCalls: () => [
+          {
+            id: 'tool-1',
+            name: 'bash',
+            args: { command: 'pwd' },
+            status: 'success',
+            startedAt: 10,
+            completedAt: 20,
+            output: '/workspace',
+          },
+        ],
+        endRun: vi.fn(),
+      },
+      session: {
+        currentSession: () => ({ id: 'session-123' }),
+        setMessageError: vi.fn(),
+        selectedModel: () => 'gpt-5.4',
+        selectedProvider: () => 'openai',
+        updateMessage,
+        deleteMessage,
+      },
+      settingsRef: { settings: () => ({}) },
+      isPlanMode: () => false,
+      setIsPlanMode: vi.fn(),
+      currentTurn: () => 0,
+      tokensUsed: () => 0,
+      currentThought: () => '',
+      setCurrentThought: vi.fn(),
+      toolActivity: () => [],
+      setToolActivity: vi.fn(),
+      pendingApproval: () => null,
+      setPendingApproval: vi.fn(),
+      pendingQuestion: () => null,
+      setPendingQuestion: vi.fn(),
+      pendingPlan: () => null,
+      setPendingPlan: vi.fn(),
+      doomLoopDetected: () => false,
+      setDoomLoopDetected: vi.fn(),
+      streamingTokenEstimate: () => 0,
+      setStreamingTokenEstimate: vi.fn(),
+      streamingStartedAt: () => null,
+      setStreamingStartedAt: vi.fn(),
+      messageQueue: () => [],
+      setMessageQueue: vi.fn(),
+      liveMessageId: () => 'assistant-1',
+      setLiveMessageId: vi.fn(),
+      streaming: {
+        streamingContentOffset: () => 0,
+        setStreamingContentOffset: vi.fn(),
+        toolCallsOffset: () => 0,
+        setToolCallsOffset: vi.fn(),
+        thinkingSegmentsOffset: () => 0,
+        setThinkingSegmentsOffset: vi.fn(),
+      },
+      runOwnership: {
+        beginRun: (() => {
+          let token = 0
+          return () => ++token
+        })(),
+        isCurrentRun: () => true,
+      },
+    } as unknown as Parameters<typeof createAgentActions>[0])
+
+    await actions.retryMessage('assistant-1')
+
+    expect(updateMessage).toHaveBeenCalledWith('assistant-1', {
+      content: '',
+      tokensUsed: 0,
+      costUSD: undefined,
+      toolCalls: [expect.objectContaining({ id: 'tool-1', name: 'bash', output: '/workspace' })],
+      metadata: {
+        provider: 'openai',
+        model: 'gpt-5.4',
+        mode: 'code',
+        elapsedMs: expect.any(Number),
+      },
+    })
+    expect(deleteMessage).not.toHaveBeenCalled()
+  })
+
   it('forwards current web session id on retry replays', async () => {
     isTauriRuntime = false
     const retryRun = vi
@@ -305,6 +400,82 @@ describe('createAgentActions session sync preflight', () => {
 
     expect(retryRun).toHaveBeenCalledTimes(1)
     expect(retryRun).toHaveBeenCalledWith('session-web')
+  })
+
+  it('allows retry in the visible session while another session runs off-screen', async () => {
+    isTauriRuntime = false
+    const retryRun = vi
+      .fn()
+      .mockResolvedValue({ success: true, turns: 1, sessionId: 'session-visible' })
+    const actions = createAgentActions({
+      rustAgent: {
+        isRunning: () => true,
+        trackedSessionId: () => 'session-hidden',
+        currentRunId: () => 'run-hidden',
+        retryRun,
+        error: () => null,
+        streamingContent: () => 'visible retry answer',
+        thinkingContent: () => '',
+        thinkingSegments: () => [],
+        tokenUsage: () => ({ output: 0, cost: 0 }),
+        activeToolCalls: () => [],
+        endRun: vi.fn(),
+      },
+      session: {
+        currentSession: () => ({ id: 'session-visible' }),
+        setMessageError: vi.fn(),
+        selectedModel: () => 'gpt-5.4',
+        selectedProvider: () => 'openai',
+        updateMessage: vi.fn(),
+        deleteMessage: vi.fn(),
+      },
+      settingsRef: { settings: () => ({}) },
+      sessionHasActiveRun: () => false,
+      isPlanMode: () => false,
+      setIsPlanMode: vi.fn(),
+      currentTurn: () => 0,
+      tokensUsed: () => 0,
+      currentThought: () => '',
+      setCurrentThought: vi.fn(),
+      toolActivity: () => [],
+      setToolActivity: vi.fn(),
+      pendingApproval: () => null,
+      setPendingApproval: vi.fn(),
+      pendingQuestion: () => null,
+      setPendingQuestion: vi.fn(),
+      pendingPlan: () => null,
+      setPendingPlan: vi.fn(),
+      doomLoopDetected: () => false,
+      setDoomLoopDetected: vi.fn(),
+      streamingTokenEstimate: () => 0,
+      setStreamingTokenEstimate: vi.fn(),
+      streamingStartedAt: () => null,
+      setStreamingStartedAt: vi.fn(),
+      messageQueue: () => [],
+      setMessageQueue: vi.fn(),
+      liveMessageId: () => null,
+      setLiveMessageId: vi.fn(),
+      streaming: {
+        streamingContentOffset: () => 0,
+        setStreamingContentOffset: vi.fn(),
+        toolCallsOffset: () => 0,
+        setToolCallsOffset: vi.fn(),
+        thinkingSegmentsOffset: () => 0,
+        setThinkingSegmentsOffset: vi.fn(),
+      },
+      runOwnership: {
+        beginRun: (() => {
+          let token = 0
+          return () => ++token
+        })(),
+        isCurrentRun: () => true,
+      },
+    } as unknown as Parameters<typeof createAgentActions>[0])
+
+    await actions.retryMessage('assistant-visible')
+
+    expect(retryRun).toHaveBeenCalledTimes(1)
+    expect(retryRun).toHaveBeenCalledWith('session-visible')
   })
 
   it('waits for desktop session sync before regenerate continues on the happy path', async () => {
@@ -865,8 +1036,10 @@ describe('createAgentActions session sync preflight', () => {
           },
         } as unknown as Parameters<typeof createAgentActions>[0])
 
+        const actPromise = actions.resolveApproval(true)
+
         return {
-          act: () => actions.resolveApproval(true),
+          actPromise,
           reject: () => deferred.reject(new Error('approval failed')),
           pending: () => pending,
           setPending: setPendingApproval,
@@ -940,8 +1113,10 @@ describe('createAgentActions session sync preflight', () => {
           },
         } as unknown as Parameters<typeof createAgentActions>[0])
 
+        const actPromise = actions.resolveQuestion('yes')
+
         return {
-          act: () => actions.resolveQuestion('yes'),
+          actPromise,
           reject: () => deferred.reject(new Error('question failed')),
           pending: () => pending,
           setPending: setPendingQuestion,
@@ -1014,8 +1189,10 @@ describe('createAgentActions session sync preflight', () => {
           },
         } as unknown as Parameters<typeof createAgentActions>[0])
 
+        const actPromise = actions.resolvePlan('approved', current)
+
         return {
-          act: () => actions.resolvePlan('approved', current),
+          actPromise,
           reject: () => deferred.reject(new Error('plan failed')),
           pending: () => pending,
           setPending: setPendingPlan,
@@ -1026,20 +1203,24 @@ describe('createAgentActions session sync preflight', () => {
   ])('keeps pending $label UI visible when resolve IPC rejects', async ({ setup }) => {
     const scenario = setup()
 
-    scenario.act()
-
+    // Act starts the promise but we don't await it yet
     expect(scenario.pending()).not.toBeNull()
     expect(scenario.setPending).not.toHaveBeenCalledWith(null)
 
+    // Reject the IPC call
     scenario.reject()
-    await flushMicrotasks()
+
+    // Now await and catch the rejection to prevent unhandled rejection
+    await scenario.actPromise.catch(() => {
+      /* expected rejection, test continues */
+    })
 
     expect(scenario.pending()).not.toBeNull()
     expect(scenario.setPending).not.toHaveBeenCalledWith(null)
     scenario.verify()
   })
 
-  it('does not call resolvePlan when the pending plan is missing requestId', () => {
+  it('rejects when the pending plan is missing requestId', async () => {
     const current = {
       summary: 'Ship polish',
       steps: [],
@@ -1099,9 +1280,153 @@ describe('createAgentActions session sync preflight', () => {
       },
     } as unknown as Parameters<typeof createAgentActions>[0])
 
-    actions.resolvePlan('approved', current)
+    // Should reject since there's no requestId
+    await expect(actions.resolvePlan('approved', current)).rejects.toThrow(
+      'Cannot resolve plan without requestId'
+    )
 
     expect(resolvePlanBridgeMock).not.toHaveBeenCalled()
     expect(setPendingPlan).not.toHaveBeenCalledWith(null)
+  })
+
+  it('syncs messages from backend and marks session synced after successful web retry', async () => {
+    isTauriRuntime = false
+    markActiveSessionSyncedMock.mockReset()
+    const replaceMessagesFromBackend = vi.fn()
+    const updateMessage = vi.fn()
+
+    // Mock successful backend response
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: vi.fn().mockResolvedValue([
+        {
+          id: 'backend-msg-1',
+          role: 'user',
+          content: 'Hello',
+          created_at: 1000,
+          tokens_used: 10,
+          cost_usd: 0.001,
+          model: 'gpt-5.4',
+          metadata: null,
+        },
+        {
+          id: 'backend-msg-2',
+          role: 'assistant',
+          content: 'Hi there',
+          created_at: 2000,
+          tokens_used: 20,
+          cost_usd: 0.002,
+          model: 'gpt-5.4',
+          metadata: JSON.stringify({ thinking: 'test' }),
+        },
+      ]),
+    })
+    global.fetch = mockFetch
+
+    const retryRun = vi
+      .fn()
+      .mockResolvedValue({ success: true, turns: 1, sessionId: 'backend-session-web' })
+
+    const actions = createAgentActions({
+      rustAgent: {
+        isRunning: () => false,
+        retryRun,
+        error: () => null,
+        streamingContent: () => 'retry answer',
+        thinkingContent: () => '',
+        thinkingSegments: () => [],
+        tokenUsage: () => ({ output: 50, cost: 0.005 }),
+        activeToolCalls: () => [],
+        endRun: vi.fn(),
+        detachedSessionId: () => null,
+        clearDetachedSessionId: vi.fn(),
+      },
+      session: {
+        currentSession: () => ({ id: 'session-web' }),
+        setMessageError: vi.fn(),
+        selectedModel: () => 'gpt-5.4',
+        selectedProvider: () => 'openai',
+        updateMessage,
+        deleteMessage: vi.fn(),
+        replaceMessagesFromBackend,
+      },
+      settingsRef: { settings: () => ({}) },
+      isPlanMode: () => false,
+      setIsPlanMode: vi.fn(),
+      currentTurn: () => 0,
+      tokensUsed: () => 0,
+      currentThought: () => '',
+      setCurrentThought: vi.fn(),
+      toolActivity: () => [],
+      setToolActivity: vi.fn(),
+      pendingApproval: () => null,
+      setPendingApproval: vi.fn(),
+      pendingQuestion: () => null,
+      setPendingQuestion: vi.fn(),
+      pendingPlan: () => null,
+      setPendingPlan: vi.fn(),
+      doomLoopDetected: () => false,
+      setDoomLoopDetected: vi.fn(),
+      streamingTokenEstimate: () => 0,
+      setStreamingTokenEstimate: vi.fn(),
+      streamingStartedAt: () => null,
+      setStreamingStartedAt: vi.fn(),
+      messageQueue: () => [],
+      setMessageQueue: vi.fn(),
+      liveMessageId: () => 'assistant-1',
+      setLiveMessageId: vi.fn(),
+      streaming: {
+        streamingContentOffset: () => 0,
+        setStreamingContentOffset: vi.fn(),
+        toolCallsOffset: () => 0,
+        setToolCallsOffset: vi.fn(),
+        thinkingSegmentsOffset: () => 0,
+        setThinkingSegmentsOffset: vi.fn(),
+      },
+      runOwnership: {
+        beginRun: (() => {
+          let token = 0
+          return () => ++token
+        })(),
+        isCurrentRun: () => true,
+      },
+    } as unknown as Parameters<typeof createAgentActions>[0])
+
+    await actions.retryMessage('assistant-1')
+
+    // Verify backend sync was called
+    expect(mockFetch).toHaveBeenCalledWith(
+      expect.stringContaining('/api/sessions/backend-session-web/messages')
+    )
+
+    // Verify messages were replaced from backend
+    expect(replaceMessagesFromBackend).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'backend-msg-1',
+          sessionId: 'session-web',
+          role: 'user',
+          content: 'Hello',
+        }),
+        expect.objectContaining({
+          id: 'backend-msg-2',
+          sessionId: 'session-web',
+          role: 'assistant',
+          content: 'Hi there',
+          metadata: expect.objectContaining({
+            provider: 'openai',
+            model: 'gpt-5.4',
+            mode: 'code',
+          }),
+          tokensUsed: 50,
+        }),
+      ])
+    )
+
+    // Verify active session was marked as synced (called by settlement service)
+    expect(markActiveSessionSyncedMock).toHaveBeenCalledWith('session-web', 2)
+
+    // Restore fetch
+    mockFetch.mockRestore()
   })
 })

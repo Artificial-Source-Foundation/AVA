@@ -49,10 +49,11 @@ pub(crate) use super::api_plugin_host::{
     get_plugin_route, invoke_plugin_command, list_plugin_mounts, post_plugin_route,
 };
 pub(crate) use super::api_sessions::{
-    add_message, create_session, delete_session, delete_session_body, duplicate_session,
-    get_session, get_session_messages, list_session_agents, list_session_checkpoints,
-    list_session_files, list_session_memory, list_session_terminal, list_sessions,
-    load_session_body, rename_session, rename_session_body, search_sessions, update_message,
+    add_message, archive_session, create_session, delete_session, delete_session_body,
+    duplicate_session, get_session, get_session_messages, list_session_agents,
+    list_session_checkpoints, list_session_files, list_session_memory, list_session_terminal,
+    list_sessions, load_session_body, rename_session, rename_session_body, search_sessions,
+    unarchive_session, update_message,
 };
 pub(crate) use super::api_tools::list_agent_tools;
 

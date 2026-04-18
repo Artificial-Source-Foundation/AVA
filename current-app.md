@@ -1,0 +1,3 @@
+- generic [ref=e7]:
+  - generic [ref=e9]: A
+  - generic: ava

@@ -140,8 +140,8 @@ export const ModelBrowserDialog: Component<ModelBrowserDialogProps> = (props) =>
       onOpenChange={props.onOpenChange}
       title="Model Browser"
       size="2xl"
-      class="!max-w-[960px] !max-h-[76vh]"
-      bodyClass="!max-h-[62vh]"
+      class="!max-w-[1080px] !max-h-[84vh]"
+      bodyClass="!max-h-[72vh]"
       overlayStyle={{
         background: 'transparent',
       }}

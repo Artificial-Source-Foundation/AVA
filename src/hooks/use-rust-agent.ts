@@ -8,7 +8,7 @@ import {
   createAgentEventHandler,
   type StreamingMetrics,
 } from './rust-agent-events'
-import { createAgentIpc } from './rust-agent-ipc'
+import { createAgentIpc, type RehydrateResult } from './rust-agent-ipc'
 
 /**
  * A thinking segment: thinking content that occurred before a group of tool calls.
@@ -19,6 +19,39 @@ export interface ThinkingSegment {
   thinking: string
   /** IDs of tool calls that followed this thinking block (may be empty for final thinking) */
   toolCallIds: string[]
+}
+
+export interface AgentRuntimeSnapshot {
+  isRunning: boolean
+  streamingContent: string
+  thinkingContent: string
+  activeToolCalls: ToolCall[]
+  error: string | null
+  lastResult: SubmitGoalResult | null
+  currentRunId: string | null
+  trackedSessionId: string | null
+  detachedSessionId: string | null
+  tokenUsage: { input: number; output: number; cost: number }
+  events: AgentEvent[]
+  progressMessage: string | null
+  budgetWarning: {
+    thresholdPercent: number
+    currentCostUsd: number
+    maxBudgetUsd: number
+  } | null
+  pendingPlan: PlanData | null
+  thinkingSegments: ThinkingSegment[]
+  todos: TodoItem[]
+  binding: {
+    activeRunId: string | null
+    attachedSessionId: string | null
+  }
+}
+
+export type AgentRehydrateResult = RehydrateResult
+
+interface CaptureRuntimeSnapshotOptions {
+  maxEvents?: number
 }
 
 // Module-level shared signal for todos — all useRustAgent instances share this
@@ -39,6 +72,8 @@ export function useRustAgent() {
   const [error, setError] = createSignal<string | null>(null)
   const [lastResult, setLastResult] = createSignal<SubmitGoalResult | null>(null)
   const [currentRunId, setCurrentRunId] = createSignal<string | null>(null)
+  const [trackedSessionId, setTrackedSessionId] = createSignal<string | null>(null)
+  const [detachedSessionId, setDetachedSessionId] = createSignal<string | null>(null)
   const [tokenUsage, setTokenUsage] = createSignal({ input: 0, output: 0, cost: 0 })
   const eventHistory = createBoundedEventHistory<AgentEvent>(MAX_EVENT_HISTORY)
   const [progressMessage, setProgressMessage] = createSignal<string | null>(null)
@@ -89,6 +124,8 @@ export function useRustAgent() {
       setError(null)
       setLastResult(null)
       setCurrentRunId(null)
+      setTrackedSessionId(null)
+      setDetachedSessionId(null)
       setTokenUsage({ input: 0, output: 0, cost: 0 })
       setProgressMessage(null)
       setBudgetWarning(null)
@@ -107,6 +144,8 @@ export function useRustAgent() {
     setError,
     setLastResult,
     setCurrentRunId,
+    setTrackedSessionId,
+    setDetachedSessionId,
     setActiveToolCalls,
     handleAgentEvent,
     resetState,
@@ -114,6 +153,68 @@ export function useRustAgent() {
 
   const clearError = (): void => {
     setError(null)
+  }
+
+  const clearDetachedSessionId = (): void => {
+    setDetachedSessionId(null)
+  }
+
+  const captureRuntimeSnapshot = (
+    options: CaptureRuntimeSnapshotOptions = {}
+  ): AgentRuntimeSnapshot => {
+    const events = eventHistory.snapshot()
+    const maxEvents =
+      typeof options.maxEvents === 'number' && options.maxEvents >= 0
+        ? Math.floor(options.maxEvents)
+        : null
+
+    return {
+      isRunning: isRunning(),
+      streamingContent: streamingContent(),
+      thinkingContent: thinkingContent(),
+      activeToolCalls: [...activeToolCalls()],
+      error: error(),
+      lastResult: lastResult(),
+      currentRunId: currentRunId(),
+      trackedSessionId: trackedSessionId(),
+      detachedSessionId: detachedSessionId(),
+      tokenUsage: { ...tokenUsage() },
+      events: maxEvents !== null && events.length > maxEvents ? events.slice(-maxEvents) : events,
+      progressMessage: progressMessage(),
+      budgetWarning: budgetWarning() ? { ...budgetWarning()! } : null,
+      pendingPlan: pendingPlan() ? { ...pendingPlan()! } : null,
+      thinkingSegments: [...thinkingSegments()],
+      todos: [...todos()],
+      binding: ipc.captureSessionBinding(),
+    }
+  }
+
+  const restoreRuntimeSnapshot = (snapshot: AgentRuntimeSnapshot | null): void => {
+    if (!snapshot) {
+      ipc.restoreSessionBinding({ activeRunId: null, attachedSessionId: null })
+      resetState()
+      return
+    }
+
+    ipc.restoreSessionBinding(snapshot.binding)
+    batch(() => {
+      eventHistory.replace(snapshot.events)
+      setIsRunning(snapshot.isRunning)
+      setStreamingContent(snapshot.streamingContent)
+      setThinkingContent(snapshot.thinkingContent)
+      setActiveToolCalls([...snapshot.activeToolCalls])
+      setError(snapshot.error)
+      setLastResult(snapshot.lastResult)
+      setCurrentRunId(snapshot.currentRunId)
+      setTrackedSessionId(snapshot.trackedSessionId)
+      setDetachedSessionId(snapshot.detachedSessionId)
+      setTokenUsage({ ...snapshot.tokenUsage })
+      setProgressMessage(snapshot.progressMessage)
+      setBudgetWarning(snapshot.budgetWarning ? { ...snapshot.budgetWarning } : null)
+      setPendingPlan(snapshot.pendingPlan ? { ...snapshot.pendingPlan } : null)
+      setThinkingSegments([...snapshot.thinkingSegments])
+      setTodos([...snapshot.todos])
+    })
   }
 
   /**
@@ -157,8 +258,13 @@ export function useRustAgent() {
     error,
     lastResult,
     currentRunId,
+    trackedSessionId,
+    detachedSessionId,
     tokenUsage,
     events: eventHistory.events,
+    eventVersion: eventHistory.version,
+    eventCursor: eventHistory.cursor,
+    readEventsSince: eventHistory.readSince,
     progressMessage,
     budgetWarning,
     pendingPlan,
@@ -175,6 +281,10 @@ export function useRustAgent() {
     followUp: ipc.followUp,
     postComplete: ipc.postComplete,
     rehydrateStatus: ipc.rehydrateStatus,
+    resetState,
+    captureRuntimeSnapshot,
+    restoreRuntimeSnapshot,
+    clearDetachedSessionId,
     markToolApproval,
     // Aliases for compatibility
     stop: ipc.cancel,

@@ -43,13 +43,16 @@ export const CommandOutputRow: Component<CommandOutputRowProps> = (props) => {
   const nowTick = useSecondTicker(isRunning)
 
   const output = (): string => props.toolCall.output ?? props.toolCall.streamingOutput ?? ''
+  const errorText = (): string => props.toolCall.error ?? ''
+  const displayText = (): string => output() || errorText()
 
-  const outputLines = createMemo(() => output().split('\n'))
+  const outputLines = createMemo(() => displayText().split('\n'))
   const isLong = (): boolean => outputLines().length > COLLAPSED_LINE_LIMIT
-  const hasOutput = (): boolean => !!output()
+  const hasOutput = (): boolean => !!(output() || errorText())
 
   const displayOutput = createMemo((): string => {
-    if (!isLong() || expanded()) return output()
+    const text = displayText()
+    if (!isLong() || expanded()) return text
     return outputLines().slice(0, COLLAPSED_LINE_LIMIT).join('\n')
   })
 
@@ -76,6 +79,9 @@ export const CommandOutputRow: Component<CommandOutputRowProps> = (props) => {
     return 'var(--accent)'
   }
 
+  // Determine if this row can be expanded/interacted with
+  const isExpandable = () => hasOutput()
+
   return (
     <div
       class="chat-tool-shell animate-tool-card-in rounded-[10px] overflow-hidden transition-colors duration-[var(--duration-fast)]"
@@ -89,23 +95,20 @@ export const CommandOutputRow: Component<CommandOutputRowProps> = (props) => {
       }}
     >
       {/* Header -- 40px */}
-      {/* biome-ignore lint/a11y/useSemanticElements: div+role=button avoids nested button which crashes WebKitGTK */}
-      <div
-        role="button"
-        tabIndex={0}
-        aria-expanded={expanded()}
-        class="tool-card-header flex cursor-pointer select-none items-center justify-between px-3.5 transition-colors duration-[var(--duration-fast)] hover:bg-[var(--alpha-white-5)]"
+      <button
+        type="button"
+        disabled={!isExpandable()}
+        aria-expanded={isExpandable() ? expanded() : undefined}
+        class="tool-card-header flex select-none items-center justify-between px-3.5 transition-colors duration-[var(--duration-fast)]"
+        classList={{
+          'cursor-pointer hover:bg-[var(--alpha-white-5)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-inset':
+            isExpandable(),
+        }}
         style={{
           height: '40px',
         }}
         onClick={() => {
-          if (hasOutput()) setExpanded((v) => !v)
-        }}
-        onKeyDown={(e) => {
-          if ((e.key === 'Enter' || e.key === ' ') && hasOutput()) {
-            e.preventDefault()
-            setExpanded((v) => !v)
-          }
+          if (isExpandable()) setExpanded((v) => !v)
         }}
       >
         {/* Left: icon + command */}
@@ -116,12 +119,14 @@ export const CommandOutputRow: Component<CommandOutputRowProps> = (props) => {
               <Loader2
                 class="flex-shrink-0 animate-spin"
                 style={{ width: '14px', height: '14px', color: 'var(--accent)' }}
+                aria-hidden="true"
               />
             }
           >
             <Terminal
               class="flex-shrink-0"
               style={{ width: '14px', height: '14px', color: terminalColor() }}
+              aria-hidden="true"
             />
           </Show>
           <span
@@ -191,55 +196,76 @@ export const CommandOutputRow: Component<CommandOutputRowProps> = (props) => {
                 <ChevronRight
                   class="flex-shrink-0 transition-transform duration-[var(--duration-fast)]"
                   style={{ width: '14px', height: '14px', color: 'var(--text-muted)' }}
+                  aria-hidden="true"
                 />
               }
             >
               <ChevronDown
                 class="flex-shrink-0"
                 style={{ width: '14px', height: '14px', color: 'var(--text-muted)' }}
+                aria-hidden="true"
               />
             </Show>
           </Show>
         </div>
-      </div>
+      </button>
 
-      {/* Terminal output body */}
-      <Show when={expanded() || (isRunning() && !!props.toolCall.streamingOutput)}>
+      {/* Terminal output body - show when expanded, streaming, or has error */}
+      <Show
+        when={
+          expanded() ||
+          (isRunning() && !!props.toolCall.streamingOutput) ||
+          (isError() && errorText())
+        }
+      >
         <div
           style={{
             background: 'var(--background)',
             padding: '10px 14px',
           }}
         >
-          <pre
-            class="whitespace-pre-wrap break-all max-h-[300px] overflow-y-auto scrollbar-thin"
+          <section
+            class="max-h-[300px] overflow-y-auto scrollbar-thin focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-inset"
             style={{
-              'font-family': 'var(--font-ui-mono), Geist Mono, monospace',
-              'font-size': '11px',
-              color: isError() ? 'var(--error)' : 'var(--text-tertiary)',
-              'line-height': '1.6',
               gap: '2px',
             }}
+            aria-label={`Command ${errorText() ? 'error' : 'output'} for ${command()}`}
           >
-            {displayOutput()}
-            <Show when={isRunning()}>
-              <span
-                class="inline-block animate-pulse ml-px align-middle"
-                style={{
-                  width: '6px',
-                  height: '14px',
-                  background: 'var(--chat-streaming-indicator)',
-                }}
-              />
-            </Show>
-          </pre>
+            <pre
+              class="whitespace-pre-wrap break-all"
+              style={{
+                'font-family': 'var(--font-ui-mono), Geist Mono, monospace',
+                'font-size': '11px',
+                color: isError() ? 'var(--error)' : 'var(--text-tertiary)',
+                'line-height': '1.6',
+                margin: '0',
+              }}
+            >
+              {displayOutput()}
+              <Show when={isRunning()}>
+                <span
+                  class="inline-block animate-pulse ml-px align-middle"
+                  style={{
+                    width: '6px',
+                    height: '14px',
+                    background: 'var(--chat-streaming-indicator)',
+                  }}
+                  aria-hidden="true"
+                />
+              </Show>
+            </pre>
+          </section>
           <Show when={isLong() && !isRunning()}>
             <button
               type="button"
               onClick={() => setExpanded((v) => !v)}
               class="mt-2 text-[10px] text-[var(--accent)] transition-colors hover:text-[var(--accent-hover)]"
               style={{ 'font-family': 'var(--font-ui-mono), Geist Mono, monospace' }}
-              aria-label={expanded() ? 'Collapse command output' : 'Expand command output'}
+              aria-label={
+                expanded()
+                  ? 'Collapse command output'
+                  : `Expand command ${errorText() ? 'error' : 'output'}`
+              }
             >
               {expanded() ? 'Show less' : `Show all (${outputLines().length} lines)`}
             </button>

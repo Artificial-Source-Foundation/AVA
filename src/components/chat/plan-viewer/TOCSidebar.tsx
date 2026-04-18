@@ -35,6 +35,7 @@ export const TOCSidebar: Component<{
       }
     >
       <aside
+        aria-label="Plan table of contents"
         class="flex flex-col h-full border-r flex-shrink-0 overflow-hidden"
         style={{
           width: '240px',

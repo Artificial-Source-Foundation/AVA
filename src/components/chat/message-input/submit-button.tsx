@@ -10,6 +10,9 @@
  *
  * Right-clicking the send button during processing opens a context menu
  * to choose between Queue, Interrupt, and Post-complete message tiers.
+ *
+ * Accessibility: Full keyboard navigation in menu (Arrow keys, Enter, Escape),
+ * focus trap, and proper ARIA attributes.
  */
 
 import { ArrowUp, ChevronDown, Clock, MessageSquare, Square, Zap } from 'lucide-solid'
@@ -40,6 +43,15 @@ export interface SubmitButtonProps {
 export const SubmitButton: Component<SubmitButtonProps> = (props) => {
   const [menuOpen, setMenuOpen] = createSignal(false)
   let menuRef: HTMLDivElement | undefined
+  let triggerRef: HTMLButtonElement | undefined
+  const menuItemRefs: (HTMLButtonElement | undefined)[] = []
+  let currentFocusIndex = 0
+
+  const menuItems: Array<{ action: 'queue' | 'interrupt' | 'postComplete'; label: string }> = [
+    { action: 'queue', label: 'Queue for next turn' },
+    { action: 'interrupt', label: 'Interrupt and send now' },
+    { action: 'postComplete', label: 'Queue for after agent stops' },
+  ]
 
   // Close menu on outside click
   const handleDocClick = (e: MouseEvent): void => {
@@ -54,10 +66,48 @@ export const SubmitButton: Component<SubmitButtonProps> = (props) => {
     e.stopPropagation()
     if (!props.isProcessing() || !props.inputHasText()) return
     setMenuOpen(true)
+    currentFocusIndex = 0
     // Defer so the current click doesn't immediately close it
     requestAnimationFrame(() => {
       document.addEventListener('click', handleDocClick, { once: true })
+      // Focus first menu item
+      menuItemRefs[0]?.focus()
     })
+  }
+
+  // Handle keyboard navigation within menu
+  const handleMenuKeyDown = (e: KeyboardEvent): void => {
+    switch (e.key) {
+      case 'ArrowDown':
+        e.preventDefault()
+        currentFocusIndex = (currentFocusIndex + 1) % menuItems.length
+        menuItemRefs[currentFocusIndex]?.focus()
+        break
+      case 'ArrowUp':
+        e.preventDefault()
+        currentFocusIndex = (currentFocusIndex - 1 + menuItems.length) % menuItems.length
+        menuItemRefs[currentFocusIndex]?.focus()
+        break
+      case 'Home':
+        e.preventDefault()
+        currentFocusIndex = 0
+        menuItemRefs[0]?.focus()
+        break
+      case 'End':
+        e.preventDefault()
+        currentFocusIndex = menuItems.length - 1
+        menuItemRefs[currentFocusIndex]?.focus()
+        break
+      case 'Escape':
+        e.preventDefault()
+        setMenuOpen(false)
+        triggerRef?.focus()
+        break
+      case 'Tab':
+        // Close menu on tab out
+        setMenuOpen(false)
+        break
+    }
   }
 
   onCleanup(() => {
@@ -66,6 +116,7 @@ export const SubmitButton: Component<SubmitButtonProps> = (props) => {
 
   const handleMenuAction = (action: 'queue' | 'interrupt' | 'postComplete'): void => {
     setMenuOpen(false)
+    triggerRef?.focus()
     if (action === 'queue') props.onQueue?.()
     else if (action === 'interrupt') props.onInterrupt?.()
     else if (action === 'postComplete') props.onPostComplete?.()
@@ -127,12 +178,14 @@ export const SubmitButton: Component<SubmitButtonProps> = (props) => {
       <div class="relative" ref={menuRef}>
         <div class="flex items-center">
           <button
+            ref={triggerRef}
             type="submit"
             disabled={!props.inputHasText()}
             class={`
               flex items-center justify-center
               w-8 h-8 rounded-[10px]
               transition-[background-color,box-shadow,transform] active:scale-95
+              focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2
               ${
                 props.inputHasText()
                   ? 'bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-[var(--text-on-accent)]'
@@ -142,6 +195,8 @@ export const SubmitButton: Component<SubmitButtonProps> = (props) => {
             `}
             title={props.isProcessing() ? 'Queue for next turn (Enter)' : 'Send message (Enter)'}
             aria-label={props.isProcessing() ? 'Queue message for next turn' : 'Send message'}
+            aria-expanded={menuOpen()}
+            aria-haspopup="menu"
             onContextMenu={(e) => openMenu(e)}
           >
             <ArrowUp class="w-4 h-4" stroke-width={2.5} />
@@ -156,9 +211,11 @@ export const SubmitButton: Component<SubmitButtonProps> = (props) => {
                 e.stopPropagation()
                 const nextOpen = !menuOpen()
                 setMenuOpen(nextOpen)
+                currentFocusIndex = 0
                 if (nextOpen) {
                   requestAnimationFrame(() => {
                     document.addEventListener('click', handleDocClick, { once: true })
+                    menuItemRefs[0]?.focus()
                   })
                 }
               }}
@@ -167,9 +224,13 @@ export const SubmitButton: Component<SubmitButtonProps> = (props) => {
                 w-5 h-8 rounded-r-[10px] border-l border-white/20
                 bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-[var(--text-on-accent)]
                 transition-[background-color,transform] active:scale-95
+                focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2
               "
               title="Choose message tier"
               aria-label="Choose message tier"
+              aria-expanded={menuOpen()}
+              aria-haspopup="menu"
+              aria-controls={menuOpen() ? 'tier-selection-menu' : undefined}
             >
               <ChevronDown class="w-3 h-3" />
             </button>
@@ -179,6 +240,8 @@ export const SubmitButton: Component<SubmitButtonProps> = (props) => {
         {/* Tier selection dropdown menu */}
         <Show when={menuOpen()}>
           <div
+            id="tier-selection-menu"
+            ref={menuRef}
             class="
               absolute right-0 bottom-full mb-2
               w-64 py-1
@@ -187,15 +250,23 @@ export const SubmitButton: Component<SubmitButtonProps> = (props) => {
               z-50
             "
             role="menu"
+            aria-label="Message tier options"
+            onKeyDown={handleMenuKeyDown}
           >
             <button
+              ref={(el) => {
+                menuItemRefs[0] = el
+              }}
               type="button"
               onClick={() => handleMenuAction('queue')}
               class="
                 w-full flex items-center gap-3 px-3 py-2
-                hover:bg-[var(--gray-3)] transition-colors text-left
+                hover:bg-[var(--gray-3)] focus:bg-[var(--gray-3)] focus:outline-none
+                transition-colors text-left
               "
               role="menuitem"
+              tabindex="-1"
+              aria-label="Queue for next turn. Press Enter to select."
             >
               <MessageSquare class="w-4 h-4 text-[var(--accent)] shrink-0" />
               <div class="flex-1 min-w-0">
@@ -212,13 +283,19 @@ export const SubmitButton: Component<SubmitButtonProps> = (props) => {
             </button>
 
             <button
+              ref={(el) => {
+                menuItemRefs[1] = el
+              }}
               type="button"
               onClick={() => handleMenuAction('interrupt')}
               class="
                 w-full flex items-center gap-3 px-3 py-2
-                hover:bg-[var(--gray-3)] transition-colors text-left
+                hover:bg-[var(--gray-3)] focus:bg-[var(--gray-3)] focus:outline-none
+                transition-colors text-left
               "
               role="menuitem"
+              tabindex="-1"
+              aria-label="Interrupt and send now. Press Enter to select."
             >
               <Zap class="w-4 h-4 text-[var(--warning)] shrink-0" />
               <div class="flex-1 min-w-0">
@@ -233,13 +310,19 @@ export const SubmitButton: Component<SubmitButtonProps> = (props) => {
             </button>
 
             <button
+              ref={(el) => {
+                menuItemRefs[2] = el
+              }}
               type="button"
               onClick={() => handleMenuAction('postComplete')}
               class="
                 w-full flex items-center gap-3 px-3 py-2
-                hover:bg-[var(--gray-3)] transition-colors text-left
+                hover:bg-[var(--gray-3)] focus:bg-[var(--gray-3)] focus:outline-none
+                transition-colors text-left
               "
               role="menuitem"
+              tabindex="-1"
+              aria-label="Queue for after agent stops. Press Enter to select."
             >
               <Clock class="w-4 h-4 text-[var(--violet-4,var(--accent))] shrink-0" />
               <div class="flex-1 min-w-0">

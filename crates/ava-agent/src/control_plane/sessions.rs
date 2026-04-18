@@ -1,3 +1,8 @@
+//! Shared session selection and replay payload contract helpers.
+//!
+//! Ownership: requested/last/new session precedence and retry/edit/regenerate prompt
+//! context derivation rules reused by multiple runtime adapters.
+
 use std::fmt;
 
 use ava_types::{ImageContent, Message, Role, Session};

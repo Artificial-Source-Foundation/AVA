@@ -34,7 +34,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{info, instrument, warn};
 
 use super::stack_tools::{build_tool_registry_with_plugins, LlmSummarizer};
-use super::{AgentRunResult, AgentStack};
+use super::{AgentRunContext, AgentRunResult, AgentStack};
 use crate::agent_loop::{AgentConfig, AgentEvent, AgentLoop, LLM_STREAM_TIMEOUT_SECS};
 use crate::budget::BudgetTelemetry;
 use crate::routing::{analyze_task, analyze_task_full_with_history, EXPLICIT_DELEGATION_REASON};
@@ -47,13 +47,17 @@ impl AgentStack {
         goal: &str,
         history: &[ava_types::Message],
         images: &[ava_types::ImageContent],
+        context: Option<&AgentRunContext>,
     ) -> (
         ThinkingLevel,
         bool,
         crate::routing::ToolVisibilityProfile,
         crate::routing::SubagentDelegationPolicy,
     ) {
-        let thinking = *self.thinking_level.read().await;
+        let thinking = match context.and_then(|ctx| ctx.thinking_level) {
+            Some(level) => level,
+            None => *self.thinking_level.read().await,
+        };
         let plan_mode = *self.plan_mode.read().await;
         let task_analysis =
             analyze_task_full_with_history(goal, history, images, thinking, plan_mode);
@@ -110,6 +114,33 @@ impl AgentStack {
         });
     }
 
+    fn attach_run_context_metadata(
+        session: &mut Session,
+        provider: &str,
+        model: &str,
+        thinking_level: ThinkingLevel,
+        auto_compact: bool,
+        compaction_threshold_pct: u8,
+        compaction_provider: &str,
+        compaction_model: &str,
+    ) {
+        session.metadata["runContext"] = serde_json::json!({
+            "provider": provider,
+            "model": model,
+            "thinkingLevel": match thinking_level {
+                ThinkingLevel::Off => "off",
+                ThinkingLevel::Low => "low",
+                ThinkingLevel::Medium => "medium",
+                ThinkingLevel::High => "high",
+                ThinkingLevel::Max => "max",
+            },
+            "autoCompact": auto_compact,
+            "compactionThreshold": compaction_threshold_pct,
+            "compactionProvider": compaction_provider,
+            "compactionModel": compaction_model,
+        });
+    }
+
     async fn enrich_goal_with_memories(&self, goal: &str) -> String {
         crate::memory_enrichment::enrich_goal_with_memories(&self.memory, goal).await
     }
@@ -122,13 +153,39 @@ impl AgentStack {
         &self,
         goal: &str,
         images: &[ava_types::ImageContent],
+        context: Option<&AgentRunContext>,
     ) -> Result<RouteDecision> {
         let cfg = self.config.get().await;
-        let (provider, model) = self.current_model().await;
-        let thinking = *self.thinking_level.read().await;
+        let (provider, model) = if let Some((provider, model)) =
+            context.and_then(AgentRunContext::resolved_model_override)
+        {
+            (provider, model)
+        } else {
+            self.current_model().await
+        };
+        let thinking = match context.and_then(|ctx| ctx.thinking_level) {
+            Some(level) => level,
+            None => *self.thinking_level.read().await,
+        };
         let plan_mode = *self.plan_mode.read().await;
         let intent = analyze_task(goal, images, thinking, plan_mode);
         let intent_reasons = intent.reasons.clone();
+
+        if let Some((provider, model)) = context.and_then(AgentRunContext::resolved_model_override)
+        {
+            let mut reasons = intent.reasons;
+            reasons.push(
+                "provider/model override provided for this run; skipping automatic routing"
+                    .to_string(),
+            );
+            return Ok(RouteDecision::fixed(
+                provider,
+                model,
+                intent.profile,
+                RouteSource::ManualOverride,
+                reasons,
+            ));
+        }
 
         if *self.routing_locked.read().await {
             let mut reasons = intent.reasons;
@@ -178,12 +235,46 @@ impl AgentStack {
         session_id: Option<uuid::Uuid>,
         interactive_run_id: Option<String>,
     ) -> Result<AgentRunResult> {
+        self.run_with_context(
+            goal,
+            max_turns,
+            event_tx,
+            cancel,
+            history,
+            message_queue,
+            images,
+            session_id,
+            interactive_run_id,
+            None,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    #[instrument(
+        skip(self, event_tx, cancel, history, message_queue, images, session_id),
+        fields(max_turns)
+    )]
+    pub async fn run_with_context(
+        &self,
+        goal: &str,
+        max_turns: usize,
+        event_tx: Option<mpsc::UnboundedSender<AgentEvent>>,
+        cancel: CancellationToken,
+        history: Vec<ava_types::Message>,
+        message_queue: Option<crate::message_queue::MessageQueue>,
+        images: Vec<ava_types::ImageContent>,
+        session_id: Option<uuid::Uuid>,
+        interactive_run_id: Option<String>,
+        run_context: Option<AgentRunContext>,
+    ) -> Result<AgentRunResult> {
+        let run_context = run_context.as_ref();
         let raw_goal = goal.to_string();
 
         // Ensure MCP is initialized before building the per-run tool registry.
-        // This awaits completion so MCP tools are available when we read self.mcp below.
+        // This awaits completion so the runtime service can register MCP tools below.
         // Best-effort skip: configs created mid-run will be picked up on the next run.
-        if self.mcp_global_config.exists() || self.mcp_project_config.exists() {
+        if self.mcp_runtime.has_config_files() {
             self.ensure_mcp_initialized().await;
         }
 
@@ -202,7 +293,7 @@ impl AgentStack {
         let cfg = self.config.get().await;
         let mut resolved_provider_name = self.current_model().await.0;
         let route_decision = if self.injected_provider.is_none() {
-            Some(self.resolve_model_route(goal, &images).await?)
+            Some(self.resolve_model_route(goal, &images, run_context).await?)
         } else {
             None
         };
@@ -263,6 +354,7 @@ impl AgentStack {
                 }
             }
         };
+        let resolved_model_name = provider.model_name().to_string();
 
         // 0 = unlimited everywhere; explicit non-zero arg overrides stored config
         let turns_limit = if max_turns > 0 {
@@ -271,7 +363,7 @@ impl AgentStack {
             self.max_turns // may also be 0 (unlimited)
         };
         let (thinking, plan_mode, tool_visibility_profile, delegation_policy) = self
-            .runtime_tool_access_profile(goal, &history, &images)
+            .runtime_tool_access_profile(goal, &history, &images, run_context)
             .await;
         let thinking_budget_tokens = cfg
             .llm
@@ -292,8 +384,14 @@ impl AgentStack {
                 }
             }
         };
+        let run_permission_context = run_context
+            .and_then(|context| context.permission_context.clone())
+            .unwrap_or_else(|| Arc::clone(&self.permission_context));
+        let run_todo_state = run_context
+            .and_then(|context| context.todo_state.clone())
+            .unwrap_or_else(|| self.todo_state.clone());
         let mode_suffix = self.mode_prompt_suffix.read().await.clone();
-        let project_root = self.permission_context.read().await.workspace_root.clone();
+        let project_root = run_permission_context.read().await.workspace_root.clone();
         // Consume any pending plan context (one-shot: only applies to this run).
         let plan_context = self.plan_context.write().await.take();
 
@@ -397,8 +495,16 @@ impl AgentStack {
                 idx.pagerank.clone()
             })
         };
+        let compaction_model_override =
+            match run_context.and_then(|context| context.compaction_model_override()) {
+                Some(model_override) => Some(model_override),
+                None => self.current_compaction_model().await,
+            };
+        let (compaction_provider_name, compaction_model_name) = compaction_model_override
+            .clone()
+            .unwrap_or_else(|| (resolved_provider_name.clone(), resolved_model_name.clone()));
         let compaction_provider =
-            if let Some((provider_name, model_name)) = self.current_compaction_model().await {
+            if let Some((provider_name, model_name)) = compaction_model_override {
                 self.router
                     .route_required(&provider_name, &model_name)
                     .await?
@@ -407,7 +513,11 @@ impl AgentStack {
             };
         let summarizer: Arc<dyn ava_context::Summarizer> =
             Arc::new(LlmSummarizer(compaction_provider));
-        let compaction_pct = *self.compaction_threshold_pct.read().await as f32 / 100.0;
+        let compaction_threshold_pct = run_context
+            .and_then(|context| context.compaction_threshold)
+            .unwrap_or(*self.compaction_threshold_pct.read().await)
+            .clamp(50, 95);
+        let compaction_pct = compaction_threshold_pct as f32 / 100.0;
         let condenser_config = ava_context::CondenserConfig {
             max_tokens: model_context_window,
             target_tokens: model_context_window * 3 / 4,
@@ -439,11 +549,11 @@ impl AgentStack {
                 build_tool_registry_with_plugins(
                     self.platform.clone(),
                     Arc::clone(&self.permission_inspector),
-                    Arc::clone(&self.permission_context),
+                    Arc::clone(&run_permission_context),
                     self.approval_bridge.with_run_id(interactive_run_id.clone()),
                     Some(Arc::clone(&self.plugin_manager)),
                 );
-            register_todo_tools(&mut registry, self.todo_state.clone());
+            register_todo_tools(&mut registry, run_todo_state);
             register_question_tool(
                 &mut registry,
                 self.question_bridge.with_run_id(interactive_run_id.clone()),
@@ -492,7 +602,9 @@ impl AgentStack {
             "run-scoped tool registry prepared"
         );
 
-        let auto_compact = *self.auto_compact.read().await;
+        let auto_compact = run_context
+            .and_then(|context| context.auto_compact)
+            .unwrap_or(*self.auto_compact.read().await);
         let config = AgentConfig {
             max_turns: turns_limit,
             max_budget_usd: self.max_budget_usd,
@@ -752,6 +864,16 @@ impl AgentStack {
             if let Some(decision) = applied_route_decision.as_ref() {
                 Self::attach_route_metadata(&mut session, decision);
             }
+            Self::attach_run_context_metadata(
+                &mut session,
+                &resolved_provider_name,
+                &resolved_model_name,
+                thinking,
+                auto_compact,
+                compaction_threshold_pct,
+                &compaction_provider_name,
+                &compaction_model_name,
+            );
             self.learn_project_patterns_from_goal(&raw_goal);
 
             // Fire SessionEnd plugin hook
@@ -782,6 +904,16 @@ impl AgentStack {
         if let Some(decision) = applied_route_decision.as_ref() {
             Self::attach_route_metadata(&mut session, decision);
         }
+        Self::attach_run_context_metadata(
+            &mut session,
+            &resolved_provider_name,
+            &resolved_model_name,
+            thinking,
+            auto_compact,
+            compaction_threshold_pct,
+            &compaction_provider_name,
+            &compaction_model_name,
+        );
         self.learn_project_patterns_from_goal(&raw_goal);
 
         // Fire SessionEnd plugin hook

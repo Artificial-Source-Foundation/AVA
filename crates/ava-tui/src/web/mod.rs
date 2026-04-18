@@ -29,6 +29,8 @@
 //! | POST   | `/api/sessions/search`            | Search sessions by message content        |
 //! | GET    | `/api/sessions/{id}`              | Get session with messages                 |
 //! | POST   | `/api/sessions/{id}/rename`       | Rename a session                          |
+//! | POST   | `/api/sessions/{id}/archive`      | Archive a session                         |
+//! | POST   | `/api/sessions/{id}/unarchive`    | Restore an archived session               |
 //! | DELETE | `/api/sessions/{id}`              | Delete a session                          |
 //! | GET    | `/api/sessions/{id}/messages`     | List all messages for a session           |
 //! | POST   | `/api/sessions/{id}/message`      | Add a message to a session                |
@@ -125,6 +127,8 @@ fn build_router(state: WebState) -> Router {
             get(api::get_session).delete(api::delete_session),
         )
         .route("/api/sessions/{id}/rename", post(api::rename_session))
+        .route("/api/sessions/{id}/archive", post(api::archive_session))
+        .route("/api/sessions/{id}/unarchive", post(api::unarchive_session))
         .route("/api/sessions/{id}/duplicate", post(api::duplicate_session))
         // Message endpoints
         .route(
@@ -331,6 +335,185 @@ mod tests {
             .await
             .expect("register test run");
         session_id
+    }
+
+    async fn response_json(response: axum::response::Response) -> serde_json::Value {
+        let body = to_bytes(response.into_body(), 8 * 1024)
+            .await
+            .expect("body");
+        serde_json::from_slice(&body).expect("json body")
+    }
+
+    #[tokio::test]
+    async fn session_archive_state_persists_across_reload_and_list_filters() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let session_id = uuid::Uuid::new_v4();
+
+        let state = WebState::init(temp.path().to_path_buf())
+            .await
+            .expect("web state");
+        let app = build_router(state.clone());
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/sessions/create")
+                    .header("content-type", "application/json")
+                    .body(Body::from(format!(
+                        r#"{{"id":"{session_id}","name":"Archive Me"}}"#
+                    )))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(&format!("/api/sessions/{session_id}/archive"))
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let active_sessions = response_json(
+            app.clone()
+                .oneshot(
+                    Request::builder()
+                        .method("GET")
+                        .uri("/api/sessions")
+                        .body(Body::empty())
+                        .expect("request"),
+                )
+                .await
+                .expect("response"),
+        )
+        .await;
+        assert!(active_sessions
+            .as_array()
+            .expect("active sessions array")
+            .iter()
+            .all(|session| session["id"] != session_id.to_string()));
+
+        let archived_sessions = response_json(
+            app.clone()
+                .oneshot(
+                    Request::builder()
+                        .method("GET")
+                        .uri("/api/sessions?status=archived")
+                        .body(Body::empty())
+                        .expect("request"),
+                )
+                .await
+                .expect("response"),
+        )
+        .await;
+        let archived = archived_sessions
+            .as_array()
+            .expect("archived sessions array")
+            .iter()
+            .find(|session| session["id"] == session_id.to_string())
+            .expect("archived session entry");
+        assert_eq!(
+            archived["status"],
+            serde_json::Value::String("archived".to_string())
+        );
+
+        drop(app);
+        drop(state);
+
+        let reloaded_state = WebState::init(temp.path().to_path_buf())
+            .await
+            .expect("reloaded web state");
+        let reloaded_app = build_router(reloaded_state);
+
+        let archived_after_reload = response_json(
+            reloaded_app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("GET")
+                        .uri("/api/sessions?status=archived")
+                        .body(Body::empty())
+                        .expect("request"),
+                )
+                .await
+                .expect("response"),
+        )
+        .await;
+        let archived_after_reload = archived_after_reload
+            .as_array()
+            .expect("archived reload array")
+            .iter()
+            .find(|session| session["id"] == session_id.to_string())
+            .expect("archived session after reload");
+        assert_eq!(
+            archived_after_reload["status"],
+            serde_json::Value::String("archived".to_string())
+        );
+
+        let archived_detail = response_json(
+            reloaded_app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("GET")
+                        .uri(&format!("/api/sessions/{session_id}"))
+                        .body(Body::empty())
+                        .expect("request"),
+                )
+                .await
+                .expect("response"),
+        )
+        .await;
+        assert_eq!(
+            archived_detail["status"],
+            serde_json::Value::String("archived".to_string())
+        );
+
+        let response = reloaded_app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(&format!("/api/sessions/{session_id}/unarchive"))
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let active_after_unarchive = response_json(
+            reloaded_app
+                .oneshot(
+                    Request::builder()
+                        .method("GET")
+                        .uri("/api/sessions")
+                        .body(Body::empty())
+                        .expect("request"),
+                )
+                .await
+                .expect("response"),
+        )
+        .await;
+        let restored = active_after_unarchive
+            .as_array()
+            .expect("active sessions after unarchive")
+            .iter()
+            .find(|session| session["id"] == session_id.to_string())
+            .expect("restored active session");
+        assert_eq!(
+            restored["status"],
+            serde_json::Value::String("active".to_string())
+        );
     }
 
     #[tokio::test]

@@ -32,6 +32,7 @@ pub enum ToolSource {
 }
 
 /// Runtime context for permission inspection — workspace root, auto-approve flag, session approvals, persistent rules, and safety profiles.
+#[derive(Debug, Clone)]
 pub struct InspectionContext {
     pub workspace_root: PathBuf,
     pub auto_approve: bool,

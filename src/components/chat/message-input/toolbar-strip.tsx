@@ -112,30 +112,33 @@ export const ToolbarStrip: Component<ToolbarStripProps> = (props) => {
           {/* Sandbox mode toggle — only when enabled */}
           <Show when={sandbox.sandboxEnabled()}>
             <ComposerToolbarDivider />
-            <button
-              type="button"
-              onClick={() => sandbox.toggleSandbox()}
-              class="inline-flex items-center gap-1 rounded-[var(--radius-md)] bg-[var(--warning-subtle)] p-1 text-[var(--warning)] transition-colors hover:border-[var(--warning-border)]"
-              title="Sandbox mode ON (changes are queued)"
-              aria-label="Toggle sandbox mode"
+            <fieldset
+              class="inline-flex items-center gap-1 rounded-[var(--radius-md)] bg-[var(--warning-subtle)] p-1 text-[var(--warning)]"
+              aria-label="Sandbox mode controls"
             >
-              <Shield class="w-3 h-3" />
-              <span class="text-[var(--text-2xs)]">Sandbox</span>
+              <button
+                type="button"
+                onClick={() => sandbox.toggleSandbox()}
+                class="inline-flex items-center gap-1 text-[var(--warning)] transition-colors hover:text-[var(--warning-hover)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--warning)] focus-visible:ring-offset-1 focus-visible:ring-offset-[var(--surface)] rounded px-1"
+                title="Toggle sandbox mode ON (changes are queued)"
+                aria-label="Toggle sandbox mode"
+                aria-pressed={sandbox.sandboxEnabled()}
+              >
+                <Shield class="w-3 h-3" />
+                <span class="text-[var(--text-2xs)]">Sandbox</span>
+              </button>
               <Show when={sandbox.pendingCount() > 0}>
                 <button
                   type="button"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    sandbox.openReview()
-                  }}
-                  class="px-1 py-0.5 text-[9px] font-medium bg-[var(--warning)] text-white rounded-full min-w-[16px] text-center"
+                  onClick={() => sandbox.openReview()}
+                  class="px-1 py-0.5 text-[9px] font-medium bg-[var(--warning)] text-white rounded-full min-w-[16px] text-center hover:bg-[var(--warning-hover)] transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-1 focus-visible:ring-offset-[var(--warning)]"
                   title={`${sandbox.pendingCount()} pending change(s) — click to review`}
                   aria-label={`Review ${sandbox.pendingCount()} sandbox changes`}
                 >
                   {sandbox.pendingCount()}
                 </button>
               </Show>
-            </button>
+            </fieldset>
           </Show>
 
           {/* Run in Background button */}

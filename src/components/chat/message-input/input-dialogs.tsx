@@ -34,8 +34,13 @@ export interface InputDialogsProps {
 
 export const InputDialogs: Component<InputDialogsProps> = (props) => {
   const sessionStore = useSession()
-  const { modelBrowserOpen, closeModelBrowser, expandedEditorOpen, setExpandedEditorOpen } =
-    useLayout()
+  const {
+    modelBrowserOpen,
+    modelBrowserRequest,
+    closeModelBrowser,
+    expandedEditorOpen,
+    setExpandedEditorOpen,
+  } = useLayout()
   const sandbox = useSandbox()
   let focusTextarea = () => {}
   let autoResize = () => {}
@@ -63,10 +68,19 @@ export const InputDialogs: Component<InputDialogsProps> = (props) => {
           onOpenChange={(open) => {
             if (!open) closeModelBrowser()
           }}
-          selectedModel={sessionStore.selectedModel}
-          selectedProvider={sessionStore.selectedProvider}
-          onSelect={(modelId, providerId) => sessionStore.setSelectedModel(modelId, providerId)}
-          enabledProviders={props.enabledProviders}
+          selectedModel={modelBrowserRequest()?.selectedModel ?? sessionStore.selectedModel}
+          selectedProvider={
+            modelBrowserRequest()?.selectedProvider ?? sessionStore.selectedProvider
+          }
+          onSelect={(modelId, providerId) => {
+            const request = modelBrowserRequest()
+            if (request) {
+              request.onSelect(modelId, providerId)
+              return
+            }
+            sessionStore.setSelectedModel(modelId, providerId)
+          }}
+          enabledProviders={modelBrowserRequest()?.enabledProviders ?? props.enabledProviders}
         />
       </Show>
       <Show when={expandedEditorOpen()}>

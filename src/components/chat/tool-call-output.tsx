@@ -77,6 +77,7 @@ const HighlightedPre: Component<{ output: string; html: string; hasLang: boolean
 // ============================================================================
 
 const LINE_LIMIT = 15
+const MAX_OUTPUT_LENGTH = 10000 // Character limit for very large outputs
 
 // ============================================================================
 // Component
@@ -110,13 +111,28 @@ export const ToolCallOutput: Component<ToolCallOutputProps> = (props) => {
 
   const errorCategory = () => categorizeToolError(props.toolCall.name, props.toolCall.error)
 
-  const outputLines = createMemo(() => (props.toolCall.output ?? '').split('\n'))
+  const rawOutput = createMemo(() => props.toolCall.output ?? '')
+  const outputLines = createMemo(() => rawOutput().split('\n'))
   const totalLineCount = createMemo(() => outputLines().length)
-  const isLong = () => totalLineCount() > LINE_LIMIT
+  const totalCharCount = createMemo(() => rawOutput().length)
+  const isLong = () => totalLineCount() > LINE_LIMIT || totalCharCount() > MAX_OUTPUT_LENGTH
 
   const displayOutput = createMemo(() => {
-    if (!isLong() || expanded()) return props.toolCall.output ?? ''
-    return outputLines().slice(0, LINE_LIMIT).join('\n')
+    // When explicitly expanded, show full output without character limits
+    if (expanded()) {
+      return rawOutput()
+    }
+    // When collapsed but content is long, apply truncation
+    if (isLong()) {
+      const lineLimited = outputLines().slice(0, LINE_LIMIT).join('\n')
+      // Also apply char limit within line limit for very dense output
+      if (lineLimited.length > 5000) {
+        return `${lineLimited.slice(0, 5000)}\n[...]`
+      }
+      return lineLimited
+    }
+    // Short output: show everything
+    return rawOutput()
   })
 
   const lang = () => detectLanguage(props.toolCall.name, props.toolCall.filePath)
@@ -154,6 +170,7 @@ export const ToolCallOutput: Component<ToolCallOutputProps> = (props) => {
               <Dynamic
                 component={ERROR_ICONS[errorCategory()]}
                 class="mt-0.5 h-4 w-4 flex-shrink-0 text-[var(--error)]"
+                aria-hidden="true"
               />
               <div class="flex-1 min-w-0">
                 <span class="text-[10px] font-semibold uppercase tracking-wider text-[var(--error)]">
@@ -170,8 +187,8 @@ export const ToolCallOutput: Component<ToolCallOutputProps> = (props) => {
                 title="Copy error"
                 aria-label="Copy tool error"
               >
-                <Show when={copied()} fallback={<Copy class="w-3.5 h-3.5" />}>
-                  <Check class="h-3.5 w-3.5 text-[var(--success)]" />
+                <Show when={copied()} fallback={<Copy class="w-3.5 h-3.5" aria-hidden="true" />}>
+                  <Check class="h-3.5 w-3.5 text-[var(--success)]" aria-hidden="true" />
                 </Show>
               </button>
             </div>
@@ -180,9 +197,10 @@ export const ToolCallOutput: Component<ToolCallOutputProps> = (props) => {
 
         {/* Diff view for edit/write tools — side-by-side */}
         <Show when={hasDiff() && !hasError()}>
-          <div
-            class="scroll-fade-mask tool-output-region max-h-[400px] overflow-auto"
+          <section
+            class="scroll-fade-mask tool-output-region max-h-[400px] overflow-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-inset"
             data-scrollable
+            aria-label={`Diff view for ${props.toolCall.filePath ?? 'file changes'}`}
           >
             <DiffViewer
               oldContent={props.toolCall.diff!.oldContent}
@@ -192,7 +210,7 @@ export const ToolCallOutput: Component<ToolCallOutputProps> = (props) => {
               showLineNumbers={true}
               class="border-0 rounded-none"
             />
-          </div>
+          </section>
         </Show>
 
         {/* MCP UI resource rendering (table, chart, form, image, markdown) */}
@@ -202,20 +220,22 @@ export const ToolCallOutput: Component<ToolCallOutputProps> = (props) => {
 
         {/* Regular output with syntax highlighting */}
         <Show when={hasOutput() && !hasError() && !hasDiff() && !hasUIResource()}>
-          <div
-            class="scroll-fade-mask tool-output-region relative max-h-[320px] overflow-auto group/output"
+          <section
+            class={`tool-output-region relative overflow-auto group/output ${expanded() ? 'max-h-[60vh]' : 'max-h-[320px]'}`}
+            classList={{ 'scroll-fade-mask': !expanded() }}
             data-scrollable
+            aria-label="Tool output"
           >
             {/* Copy button (top-right) */}
             <button
               type="button"
               onClick={copyContent}
-              class="absolute top-1.5 right-1.5 z-10 p-1 rounded text-[var(--gray-6)] hover:text-[var(--gray-8)] hover:bg-[var(--alpha-white-8)] transition-colors opacity-0 group-hover/output:opacity-100"
+              class="absolute top-1.5 right-1.5 z-10 p-1 rounded text-[var(--gray-6)] hover:text-[var(--gray-8)] hover:bg-[var(--alpha-white-8)] transition-colors opacity-0 group-hover/output:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
               title="Copy output"
               aria-label="Copy tool output"
             >
-              <Show when={copied()} fallback={<Copy class="w-3.5 h-3.5" />}>
-                <Check class="h-3.5 w-3.5 text-[var(--success)]" />
+              <Show when={copied()} fallback={<Copy class="w-3.5 h-3.5" aria-hidden="true" />}>
+                <Check class="h-3.5 w-3.5 text-[var(--success)]" aria-hidden="true" />
               </Show>
             </button>
 
@@ -232,22 +252,29 @@ export const ToolCallOutput: Component<ToolCallOutputProps> = (props) => {
               <button
                 type="button"
                 onClick={() => setExpanded((v) => !v)}
-                class="flex w-full items-center justify-center gap-1 border-t border-[var(--border-default)] bg-[var(--alpha-white-3)] px-3 py-1.5 text-center font-[var(--font-ui-mono)] text-[10px] text-[var(--accent)] transition-colors hover:bg-[var(--alpha-white-5)]"
+                class="flex w-full items-center justify-center gap-2 border-t border-[var(--border-default)] bg-[var(--alpha-white-3)] px-3 py-2 text-center font-[var(--font-ui-mono)] text-[10px] text-[var(--accent)] transition-colors hover:bg-[var(--alpha-white-5)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-inset"
                 aria-label={expanded() ? 'Collapse tool output' : 'Expand tool output'}
               >
                 <Show
                   when={expanded()}
                   fallback={
-                    <>
-                      <ChevronDown class="w-3 h-3" /> Show all ({totalLineCount()} lines)
-                    </>
+                    <div class="contents">
+                      <ChevronDown class="w-3.5 h-3.5" aria-hidden="true" />
+                      <span>
+                        Show all ({totalLineCount().toLocaleString()} lines,{' '}
+                        {(totalCharCount() / 1024).toFixed(1)} KB)
+                      </span>
+                    </div>
                   }
                 >
-                  <ChevronUp class="w-3 h-3" /> Show less
+                  <div class="contents">
+                    <ChevronUp class="w-3.5 h-3.5" aria-hidden="true" />
+                    <span>Show less</span>
+                  </div>
                 </Show>
               </button>
             </Show>
-          </div>
+          </section>
         </Show>
       </div>
     </Show>

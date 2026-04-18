@@ -1,3 +1,8 @@
+//! Canonical control-plane event taxonomy and required field schema.
+//!
+//! Ownership: event kind names, required JSON keys, and required backend emission
+//! coverage for cross-surface event projection.
+
 use serde::Serialize;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]

@@ -1,10 +1,12 @@
 //! Session CRUD and message HTTP API handlers.
 
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::Json;
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
 use tracing::{debug, warn};
 
 use super::api::{error_response, ErrorResponse};
@@ -18,6 +20,7 @@ use super::state::WebState;
 pub struct SessionSummary {
     pub id: String,
     pub title: String,
+    pub status: String,
     pub message_count: usize,
     pub created_at: String,
     pub updated_at: String,
@@ -27,10 +30,153 @@ pub struct SessionSummary {
 pub struct SessionDetail {
     pub id: String,
     pub title: String,
+    pub status: String,
     pub message_count: usize,
     pub created_at: String,
     pub updated_at: String,
     pub messages: Vec<MessageSummary>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PersistedSessionStatus {
+    Active,
+    Archived,
+}
+
+impl PersistedSessionStatus {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Active => "active",
+            Self::Archived => "archived",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SessionListFilter {
+    Active,
+    Archived,
+    All,
+}
+
+impl SessionListFilter {
+    fn matches(self, status: PersistedSessionStatus) -> bool {
+        match self {
+            Self::Active => status == PersistedSessionStatus::Active,
+            Self::Archived => status == PersistedSessionStatus::Archived,
+            Self::All => true,
+        }
+    }
+}
+
+#[derive(Default, Deserialize)]
+pub struct ListSessionsQuery {
+    #[serde(default)]
+    pub status: Option<String>,
+}
+
+fn session_status(session: &ava_types::Session) -> PersistedSessionStatus {
+    match session.metadata.get("status").and_then(Value::as_str) {
+        Some("archived") => PersistedSessionStatus::Archived,
+        _ => PersistedSessionStatus::Active,
+    }
+}
+
+fn set_session_status(session: &mut ava_types::Session, status: PersistedSessionStatus) {
+    if let Some(metadata) = session.metadata.as_object_mut() {
+        metadata.insert(
+            "status".to_string(),
+            Value::String(status.as_str().to_string()),
+        );
+    } else {
+        let mut metadata = Map::new();
+        metadata.insert(
+            "status".to_string(),
+            Value::String(status.as_str().to_string()),
+        );
+        session.metadata = Value::Object(metadata);
+    }
+}
+
+fn parse_list_filter(
+    status: Option<&str>,
+) -> Result<SessionListFilter, (StatusCode, Json<ErrorResponse>)> {
+    match status {
+        None | Some("active") => Ok(SessionListFilter::Active),
+        Some("archived") => Ok(SessionListFilter::Archived),
+        Some("all") => Ok(SessionListFilter::All),
+        Some(other) => Err(error_response(
+            StatusCode::BAD_REQUEST,
+            &format!("Invalid session status filter: {other}. Expected active, archived, or all."),
+        )),
+    }
+}
+
+fn session_title(session: &ava_types::Session) -> String {
+    session
+        .metadata
+        .get("title")
+        .and_then(|v| v.as_str())
+        .map(String::from)
+        .unwrap_or_else(|| {
+            session
+                .messages
+                .first()
+                .map(|message| {
+                    let content = &message.content;
+                    if content.len() > 80 {
+                        format!("{}...", &content[..77])
+                    } else {
+                        content.clone()
+                    }
+                })
+                .unwrap_or_else(|| "New session".to_string())
+        })
+}
+
+fn summarize_session(session: &ava_types::Session) -> SessionSummary {
+    SessionSummary {
+        id: session.id.to_string(),
+        title: session_title(session),
+        status: session_status(session).as_str().to_string(),
+        message_count: session.messages.len(),
+        created_at: session.created_at.to_rfc3339(),
+        updated_at: session.updated_at.to_rfc3339(),
+    }
+}
+
+fn parse_session_uuid(id: &str) -> Result<uuid::Uuid, (StatusCode, Json<ErrorResponse>)> {
+    uuid::Uuid::parse_str(id)
+        .map_err(|e| error_response(StatusCode::BAD_REQUEST, &format!("Invalid session ID: {e}")))
+}
+
+fn load_session_by_uuid(
+    state: &WebState,
+    uuid: uuid::Uuid,
+) -> Result<ava_types::Session, (StatusCode, Json<ErrorResponse>)> {
+    state
+        .inner
+        .stack
+        .session_manager
+        .get(uuid)
+        .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?
+        .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "Session not found"))
+}
+
+fn persist_session_status(
+    state: &WebState,
+    uuid: uuid::Uuid,
+    status: PersistedSessionStatus,
+) -> Result<(), (StatusCode, Json<ErrorResponse>)> {
+    let mut session = load_session_by_uuid(state, uuid)?;
+    set_session_status(&mut session, status);
+    session.updated_at = Utc::now();
+    state
+        .inner
+        .stack
+        .session_manager
+        .save(&session)
+        .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))
 }
 
 #[derive(Serialize)]
@@ -56,6 +202,125 @@ pub struct MessageSummary {
     pub model: Option<String>,
 }
 
+fn tool_calls_value(message: &ava_types::Message) -> Option<Value> {
+    if let Some(tool_calls) = message.metadata.get("toolCalls") {
+        if tool_calls.is_array() {
+            return Some(tool_calls.clone());
+        }
+    }
+
+    if message.tool_calls.is_empty() {
+        return None;
+    }
+
+    Some(Value::Array(
+        message
+            .tool_calls
+            .iter()
+            .map(|tool_call| {
+                serde_json::json!({
+                    "id": tool_call.id,
+                    "name": tool_call.name,
+                    "arguments": tool_call.arguments,
+                    "args": tool_call.arguments,
+                    "status": "success",
+                    "startedAt": 0,
+                })
+            })
+            .collect(),
+    ))
+}
+
+fn merged_message_metadata(message: &ava_types::Message) -> Option<Value> {
+    let mut metadata = message
+        .metadata
+        .as_object()
+        .cloned()
+        .unwrap_or_else(Map::new);
+
+    if !metadata.contains_key("toolCalls") {
+        if let Some(tool_calls) = tool_calls_value(message) {
+            metadata.insert("toolCalls".to_string(), tool_calls);
+        }
+    }
+
+    if metadata.is_empty() {
+        None
+    } else {
+        Some(Value::Object(metadata))
+    }
+}
+
+fn metadata_u32(metadata: Option<&Value>, key: &str) -> Option<u32> {
+    metadata
+        .and_then(Value::as_object)
+        .and_then(|map| map.get(key))
+        .and_then(Value::as_u64)
+        .and_then(|value| u32::try_from(value).ok())
+}
+
+fn metadata_f64(metadata: Option<&Value>, key: &str) -> Option<f64> {
+    metadata
+        .and_then(Value::as_object)
+        .and_then(|map| map.get(key))
+        .and_then(Value::as_f64)
+}
+
+fn metadata_string(metadata: Option<&Value>, key: &str) -> Option<String> {
+    metadata
+        .and_then(Value::as_object)
+        .and_then(|map| map.get(key))
+        .and_then(Value::as_str)
+        .map(str::to_string)
+}
+
+fn summarize_message(message: &ava_types::Message) -> MessageSummary {
+    let metadata = merged_message_metadata(message);
+
+    MessageSummary {
+        id: message.id.to_string(),
+        role: format!("{:?}", message.role).to_lowercase(),
+        content: message.content.clone(),
+        timestamp: message.timestamp.to_rfc3339(),
+        tool_calls: tool_calls_value(message),
+        tokens_used: metadata_u32(metadata.as_ref(), "tokens_used")
+            .or_else(|| metadata_u32(metadata.as_ref(), "tokensUsed")),
+        cost_usd: metadata_f64(metadata.as_ref(), "cost_usd")
+            .or_else(|| metadata_f64(metadata.as_ref(), "costUSD")),
+        model: metadata_string(metadata.as_ref(), "model"),
+        metadata,
+    }
+}
+
+fn message_tool_calls_from_metadata(metadata: &Value) -> Vec<ava_types::ToolCall> {
+    metadata
+        .as_object()
+        .and_then(|map| map.get("toolCalls"))
+        .and_then(Value::as_array)
+        .map(|tool_calls| {
+            tool_calls
+                .iter()
+                .filter_map(|tool_call| {
+                    let record = tool_call.as_object()?;
+                    let id = record.get("id")?.as_str()?.to_string();
+                    let name = record.get("name")?.as_str()?.to_string();
+                    let arguments = record
+                        .get("arguments")
+                        .or_else(|| record.get("args"))
+                        .cloned()
+                        .unwrap_or_else(|| Value::Object(Map::new()));
+
+                    Some(ava_types::ToolCall {
+                        id,
+                        name,
+                        arguments,
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 // ============================================================================
 // List Sessions
 // ============================================================================
@@ -63,43 +328,21 @@ pub struct MessageSummary {
 /// List recent sessions.
 pub(crate) async fn list_sessions(
     State(state): State<WebState>,
+    Query(query): Query<ListSessionsQuery>,
 ) -> Result<Json<Vec<SessionSummary>>, (StatusCode, Json<ErrorResponse>)> {
+    let filter = parse_list_filter(query.status.as_deref())?;
     let sessions = state
         .inner
         .stack
         .session_manager
-        .list_recent(50)
+        .list_recent(i64::MAX as usize)
         .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
 
     let summaries: Vec<SessionSummary> = sessions
         .iter()
-        .map(|s| {
-            let title = s
-                .metadata
-                .get("title")
-                .and_then(|v| v.as_str())
-                .map(String::from)
-                .unwrap_or_else(|| {
-                    s.messages
-                        .first()
-                        .map(|m| {
-                            let content = &m.content;
-                            if content.len() > 80 {
-                                format!("{}...", &content[..77])
-                            } else {
-                                content.clone()
-                            }
-                        })
-                        .unwrap_or_else(|| "New session".to_string())
-                });
-            SessionSummary {
-                id: s.id.to_string(),
-                title,
-                message_count: s.messages.len(),
-                created_at: s.created_at.to_rfc3339(),
-                updated_at: s.updated_at.to_rfc3339(),
-            }
-        })
+        .filter(|session| filter.matches(session_status(session)))
+        .take(50)
+        .map(summarize_session)
         .collect();
 
     Ok(Json(summaries))
@@ -147,6 +390,10 @@ pub(crate) async fn create_session(
             "title".to_string(),
             serde_json::Value::String(req.name.clone()),
         );
+        map.insert(
+            "status".to_string(),
+            serde_json::Value::String(PersistedSessionStatus::Active.as_str().to_string()),
+        );
     }
 
     state
@@ -160,6 +407,7 @@ pub(crate) async fn create_session(
     Ok(Json(SessionSummary {
         id: session.id.to_string(),
         title: req.name,
+        status: PersistedSessionStatus::Active.as_str().to_string(),
         message_count: 0,
         created_at: session.created_at.to_rfc3339(),
         updated_at: session.updated_at.to_rfc3339(),
@@ -171,58 +419,21 @@ pub(crate) async fn get_session(
     State(state): State<WebState>,
     Path(id): Path<String>,
 ) -> Result<Json<SessionDetail>, (StatusCode, Json<ErrorResponse>)> {
-    let uuid = uuid::Uuid::parse_str(&id).map_err(|e| {
-        error_response(StatusCode::BAD_REQUEST, &format!("Invalid session ID: {e}"))
-    })?;
+    let uuid = parse_session_uuid(&id)?;
 
-    let session = state
-        .inner
-        .stack
-        .session_manager
-        .get(uuid)
-        .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?
-        .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "Session not found"))?;
-
-    let title = session
-        .metadata
-        .get("title")
-        .and_then(|v| v.as_str())
-        .map(String::from)
-        .unwrap_or_else(|| {
-            session
-                .messages
-                .first()
-                .map(|m| {
-                    let c = &m.content;
-                    if c.len() > 80 {
-                        format!("{}...", &c[..77])
-                    } else {
-                        c.clone()
-                    }
-                })
-                .unwrap_or_else(|| "New session".to_string())
-        });
+    let session = load_session_by_uuid(&state, uuid)?;
 
     let messages: Vec<MessageSummary> = session
         .messages
         .iter()
         .filter(|m| m.user_visible)
-        .map(|m| MessageSummary {
-            id: m.id.to_string(),
-            role: format!("{:?}", m.role).to_lowercase(),
-            content: m.content.clone(),
-            timestamp: m.timestamp.to_rfc3339(),
-            tool_calls: None,
-            metadata: None,
-            tokens_used: None,
-            cost_usd: None,
-            model: None,
-        })
+        .map(summarize_message)
         .collect();
 
     Ok(Json(SessionDetail {
         id: session.id.to_string(),
-        title,
+        title: session_title(&session),
+        status: session_status(&session).as_str().to_string(),
         message_count: session.messages.len(),
         created_at: session.created_at.to_rfc3339(),
         updated_at: session.updated_at.to_rfc3339(),
@@ -238,59 +449,15 @@ pub(crate) async fn get_session_messages(
     State(state): State<WebState>,
     Path(id): Path<String>,
 ) -> Result<Json<Vec<MessageSummary>>, (StatusCode, Json<ErrorResponse>)> {
-    let uuid = uuid::Uuid::parse_str(&id).map_err(|e| {
-        error_response(StatusCode::BAD_REQUEST, &format!("Invalid session ID: {e}"))
-    })?;
+    let uuid = parse_session_uuid(&id)?;
 
-    let session = state
-        .inner
-        .stack
-        .session_manager
-        .get(uuid)
-        .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?
-        .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "Session not found"))?;
+    let session = load_session_by_uuid(&state, uuid)?;
 
     let messages: Vec<MessageSummary> = session
         .messages
         .iter()
         .filter(|m| m.user_visible)
-        .map(|m| {
-            // Embed tool_calls inside the metadata JSON object under the "toolCalls" key
-            // so that the frontend mapper (metadata?.toolCalls) can reconstruct them on
-            // session restore — matching the convention used by db-messages.ts on desktop.
-            let metadata = if !m.tool_calls.is_empty() {
-                // Build minimal frontend-compatible ToolCall shape:
-                // { id, name, args, status: "success", startedAt: 0 }
-                let tc_json: Vec<serde_json::Value> = m
-                    .tool_calls
-                    .iter()
-                    .map(|tc| {
-                        serde_json::json!({
-                            "id": tc.id,
-                            "name": tc.name,
-                            "args": tc.arguments,
-                            "status": "success",
-                            "startedAt": 0,
-                        })
-                    })
-                    .collect();
-                Some(serde_json::json!({ "toolCalls": tc_json }))
-            } else {
-                None
-            };
-
-            MessageSummary {
-                id: m.id.to_string(),
-                role: format!("{:?}", m.role).to_lowercase(),
-                content: m.content.clone(),
-                timestamp: m.timestamp.to_rfc3339(),
-                tool_calls: None,
-                metadata,
-                tokens_used: None,
-                cost_usd: None,
-                model: None,
-            }
-        })
+        .map(summarize_message)
         .collect();
 
     Ok(Json(messages))
@@ -307,9 +474,7 @@ pub(crate) async fn rename_session(
     Path(id): Path<String>,
     Json(req): Json<RenameSessionRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ErrorResponse>)> {
-    let uuid = uuid::Uuid::parse_str(&id).map_err(|e| {
-        error_response(StatusCode::BAD_REQUEST, &format!("Invalid session ID: {e}"))
-    })?;
+    let uuid = parse_session_uuid(&id)?;
 
     state
         .inner
@@ -321,14 +486,34 @@ pub(crate) async fn rename_session(
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 
+/// Archive a session by persisting archived status in metadata.
+pub(crate) async fn archive_session(
+    State(state): State<WebState>,
+    Path(id): Path<String>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ErrorResponse>)> {
+    let uuid = parse_session_uuid(&id)?;
+    persist_session_status(&state, uuid, PersistedSessionStatus::Archived)?;
+    debug!(session_id = %uuid, "session archived");
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+/// Restore an archived session to active status.
+pub(crate) async fn unarchive_session(
+    State(state): State<WebState>,
+    Path(id): Path<String>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ErrorResponse>)> {
+    let uuid = parse_session_uuid(&id)?;
+    persist_session_status(&state, uuid, PersistedSessionStatus::Active)?;
+    debug!(session_id = %uuid, "session unarchived");
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
 /// Delete a session.
 pub(crate) async fn delete_session(
     State(state): State<WebState>,
     Path(id): Path<String>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ErrorResponse>)> {
-    let uuid = uuid::Uuid::parse_str(&id).map_err(|e| {
-        error_response(StatusCode::BAD_REQUEST, &format!("Invalid session ID: {e}"))
-    })?;
+    let uuid = parse_session_uuid(&id)?;
 
     state
         .inner
@@ -358,9 +543,7 @@ pub(crate) async fn delete_session_body(
     State(state): State<WebState>,
     Json(req): Json<DeleteSessionBody>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ErrorResponse>)> {
-    let uuid = uuid::Uuid::parse_str(&req.id).map_err(|e| {
-        error_response(StatusCode::BAD_REQUEST, &format!("Invalid session ID: {e}"))
-    })?;
+    let uuid = parse_session_uuid(&req.id)?;
 
     state
         .inner
@@ -383,9 +566,7 @@ pub(crate) async fn rename_session_body(
     State(state): State<WebState>,
     Json(req): Json<RenameSessionBody>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ErrorResponse>)> {
-    let uuid = uuid::Uuid::parse_str(&req.id).map_err(|e| {
-        error_response(StatusCode::BAD_REQUEST, &format!("Invalid session ID: {e}"))
-    })?;
+    let uuid = parse_session_uuid(&req.id)?;
 
     state
         .inner
@@ -431,36 +612,7 @@ pub(crate) async fn search_sessions(
         .search(trimmed)
         .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
 
-    let summaries = sessions
-        .iter()
-        .map(|s| {
-            let title = s
-                .metadata
-                .get("title")
-                .and_then(|v| v.as_str())
-                .map(String::from)
-                .unwrap_or_else(|| {
-                    s.messages
-                        .first()
-                        .map(|m| {
-                            let c = &m.content;
-                            if c.len() > 80 {
-                                format!("{}...", &c[..77])
-                            } else {
-                                c.clone()
-                            }
-                        })
-                        .unwrap_or_else(|| "New session".to_string())
-                });
-            SessionSummary {
-                id: s.id.to_string(),
-                title,
-                message_count: s.messages.len(),
-                created_at: s.created_at.to_rfc3339(),
-                updated_at: s.updated_at.to_rfc3339(),
-            }
-        })
-        .collect();
+    let summaries = sessions.iter().map(summarize_session).collect();
 
     Ok(Json(summaries))
 }
@@ -491,9 +643,7 @@ pub(crate) async fn add_message(
     Path(id): Path<String>,
     Json(req): Json<AddMessageRequest>,
 ) -> Result<Json<MessageSummary>, (StatusCode, Json<ErrorResponse>)> {
-    let uuid = uuid::Uuid::parse_str(&id).map_err(|e| {
-        error_response(StatusCode::BAD_REQUEST, &format!("Invalid session ID: {e}"))
-    })?;
+    let uuid = parse_session_uuid(&id)?;
 
     let role = match req.role.as_str() {
         "user" => ava_types::Role::User,
@@ -562,9 +712,11 @@ pub struct UpdateMessageRequest {
     pub metadata: Option<serde_json::Value>,
     /// Token count for this message.
     #[serde(default)]
+    #[serde(rename = "tokens_used")]
     pub tokens_used: Option<u32>,
     /// USD cost for this message.
     #[serde(default)]
+    #[serde(rename = "cost_usd")]
     pub cost_usd: Option<f64>,
     /// Model that generated this message.
     #[serde(default)]
@@ -589,19 +741,62 @@ pub(crate) async fn update_message(
         error_response(StatusCode::BAD_REQUEST, &format!("Invalid message ID: {e}"))
     })?;
 
-    // Metadata, tokens, cost, model are frontend-only fields not stored in
-    // ava_types::Message.  We persist the content update in the backend
-    // session (for LLM context) and return success; the frontend's in-memory
-    // store holds the rich metadata for its own display needs.
+    let mut session = state
+        .inner
+        .stack
+        .session_manager
+        .get(session_uuid)
+        .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?
+        .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "Session not found"))?;
+
+    let message = session
+        .messages
+        .iter_mut()
+        .find(|message| message.id == msg_uuid)
+        .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "Message not found"))?;
+
     if let Some(content) = req.content {
-        // O(1) targeted UPDATE — no need to load/rewrite the entire session.
-        state
-            .inner
-            .stack
-            .session_manager
-            .update_message_content(session_uuid, msg_uuid, &content)
-            .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
+        message.content = content;
     }
+
+    let mut metadata = message
+        .metadata
+        .as_object()
+        .cloned()
+        .unwrap_or_else(Map::new);
+
+    if let Some(extra_metadata) = req.metadata {
+        if let Some(extra_map) = extra_metadata.as_object() {
+            metadata.extend(extra_map.clone());
+        } else {
+            metadata.insert("frontend_metadata".to_string(), extra_metadata);
+        }
+    }
+
+    if let Some(tokens_used) = req.tokens_used {
+        metadata.insert("tokens_used".to_string(), Value::from(tokens_used));
+    }
+
+    if let Some(cost_usd) = req.cost_usd {
+        metadata.insert("cost_usd".to_string(), Value::from(cost_usd));
+    }
+
+    if let Some(model) = req.model {
+        metadata.insert("model".to_string(), Value::from(model));
+    }
+
+    message.metadata = Value::Object(metadata.clone());
+    let reconstructed_tool_calls = message_tool_calls_from_metadata(&message.metadata);
+    if !reconstructed_tool_calls.is_empty() {
+        message.tool_calls = reconstructed_tool_calls;
+    }
+
+    state
+        .inner
+        .stack
+        .session_manager
+        .save(&session)
+        .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
 
     Ok(Json(serde_json::json!({ "ok": true })))
 }
@@ -695,6 +890,10 @@ pub(crate) async fn duplicate_session(
     });
     if let Some(map) = new_session.metadata.as_object_mut() {
         map.insert("title".to_string(), serde_json::Value::String(title));
+        map.insert(
+            "status".to_string(),
+            serde_json::Value::String(PersistedSessionStatus::Active.as_str().to_string()),
+        );
     }
 
     // Save the new session first
@@ -734,6 +933,7 @@ pub(crate) async fn duplicate_session(
     Ok(Json(SessionSummary {
         id: new_session.id.to_string(),
         title: final_title,
+        status: PersistedSessionStatus::Active.as_str().to_string(),
         message_count,
         created_at: new_session.created_at.to_rfc3339(),
         updated_at: new_session.updated_at.to_rfc3339(),

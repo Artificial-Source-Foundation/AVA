@@ -10,7 +10,21 @@
  * resources, checkpoints, stats which are non-critical for basic chat).
  */
 
+import { mapWebSessionMessageRows } from '../lib/web-session-messages'
+import {
+  buildSessionBaseEndpoint,
+  buildSessionEndpoint,
+  canonicalizeSessionId,
+  resolveBackendSessionId,
+} from './web-session-identity'
+
 const API_BASE = import.meta.env.VITE_API_URL || ''
+
+function buildSessionListEndpoint(query: string): string {
+  const archivedOnly = query.includes("where s.status = 'archived'")
+  const status = archivedOnly ? 'archived' : 'active'
+  return `${API_BASE}/api/sessions?status=${status}`
+}
 
 interface ExecuteResult {
   rowsAffected: number
@@ -22,22 +36,8 @@ interface WebDatabase {
   execute(query: string, params?: unknown[]): Promise<ExecuteResult>
 }
 
-/**
- * Maps frontend session IDs to backend session IDs.
- *
- * With the session ID pass-through fix, submit_goal now uses the frontend's
- * session ID so IDs should always match. This map is kept as a fallback for
- * edge cases (e.g., retry/regenerate creating new sessions) but should
- * rarely be populated.
- */
-const _sessionIdMap = new Map<string, string>()
-
-/** Register a frontend→backend session ID mapping (called after agent run). */
-export function registerBackendSessionId(frontendId: string, backendId: string): void {
-  if (frontendId !== backendId) {
-    _sessionIdMap.set(frontendId, backendId)
-  }
-}
+// Session ID aliasing is now handled by web-session-identity.ts
+// This file no longer owns the mapping logic — it only resolves through that service.
 
 /**
  * Create a web-mode database adapter that routes operations through HTTP.
@@ -51,7 +51,7 @@ export function createWebDatabase(): WebDatabase {
       if (q.includes('from sessions s') && q.includes('left join messages m')) {
         // getSessionsWithStats / getArchivedSessions
         try {
-          const res = await fetch(`${API_BASE}/api/sessions`)
+          const res = await fetch(buildSessionListEndpoint(q))
           if (!res.ok) {
             console.warn('[db-web] Failed to list sessions:', res.status, res.statusText)
             return [] as unknown as T
@@ -60,8 +60,10 @@ export function createWebDatabase(): WebDatabase {
           // Map API response to the row format expected by mapSessionRow.
           // The backend may return fields as either snake_case or camelCase;
           // also handle `name` vs `title` variations.
+          // CRITICAL: Canonicalize session IDs - backend may return backend IDs,
+          // but frontend state must always use the canonical frontend session ID.
           return (Array.isArray(sessions) ? sessions : []).map((s: Record<string, unknown>) => ({
-            id: s.id,
+            id: canonicalizeSessionId(s.id as string),
             name: s.title || s.name || 'Untitled',
             project_id: s.project_id ?? null,
             parent_session_id: s.parent_session_id ?? null,
@@ -106,7 +108,7 @@ export function createWebDatabase(): WebDatabase {
         const frontendSessionId = params[0] as string
         if (!frontendSessionId) return [] as unknown as T
         // Use the backend session ID if we have a mapping (frontend and backend IDs diverge)
-        const sessionId = _sessionIdMap.get(frontendSessionId) || frontendSessionId
+        const sessionId = resolveBackendSessionId(frontendSessionId)
         try {
           // Use the dedicated messages endpoint for a flat array of MessageSummary objects.
           // Fall back to the session detail endpoint if the dedicated endpoint is unavailable.
@@ -131,27 +133,7 @@ export function createWebDatabase(): WebDatabase {
             console.warn('[db-web] Failed to load session messages:', msgsRes.status, sessionId)
             return [] as unknown as T
           }
-          // Map to db row format expected by mapDbMessages.
-          // Handle both `timestamp` and `created_at` field names.
-          return msgs.map((m: Record<string, unknown>) => ({
-            id: m.id,
-            session_id: sessionId,
-            role: m.role,
-            content: m.content,
-            agent_id: m.agent_id ?? null,
-            created_at:
-              typeof m.created_at === 'number'
-                ? m.created_at
-                : typeof m.timestamp === 'string'
-                  ? new Date(m.timestamp).getTime()
-                  : typeof m.created_at === 'string'
-                    ? new Date(m.created_at).getTime()
-                    : Date.now(),
-            tokens_used: m.tokens_used ?? 0,
-            cost_usd: m.cost_usd ?? null,
-            model: m.model ?? null,
-            metadata: m.metadata ?? '{}',
-          })) as unknown as T
+          return mapWebSessionMessageRows(msgs, frontendSessionId) as unknown as T
         } catch (e) {
           console.warn('[db-web] Failed to load session messages:', e)
           return [] as unknown as T
@@ -164,11 +146,12 @@ export function createWebDatabase(): WebDatabase {
       }
 
       // Session sub-resource tables — route through HTTP API stubs
+      // All operations resolve frontend→backend session IDs at the adapter boundary
       if (q.includes('from agents') && q.includes('session_id')) {
-        const sessionId = (_params ?? [])[0] as string
-        if (sessionId) {
+        const frontendSessionId = (_params ?? [])[0] as string
+        if (frontendSessionId) {
           try {
-            const res = await fetch(`${API_BASE}/api/sessions/${sessionId}/agents`)
+            const res = await fetch(buildSessionEndpoint(frontendSessionId, 'agents'))
             if (res.ok) return (await res.json()) as T
           } catch {
             /* fall through */
@@ -178,10 +161,10 @@ export function createWebDatabase(): WebDatabase {
       }
 
       if (q.includes('from file_operations') && q.includes('session_id')) {
-        const sessionId = (_params ?? [])[0] as string
-        if (sessionId) {
+        const frontendSessionId = (_params ?? [])[0] as string
+        if (frontendSessionId) {
           try {
-            const res = await fetch(`${API_BASE}/api/sessions/${sessionId}/files`)
+            const res = await fetch(buildSessionEndpoint(frontendSessionId, 'files'))
             if (res.ok) return (await res.json()) as T
           } catch {
             /* fall through */
@@ -191,10 +174,10 @@ export function createWebDatabase(): WebDatabase {
       }
 
       if (q.includes('from terminal_executions') && q.includes('session_id')) {
-        const sessionId = (_params ?? [])[0] as string
-        if (sessionId) {
+        const frontendSessionId = (_params ?? [])[0] as string
+        if (frontendSessionId) {
           try {
-            const res = await fetch(`${API_BASE}/api/sessions/${sessionId}/terminal`)
+            const res = await fetch(buildSessionEndpoint(frontendSessionId, 'terminal'))
             if (res.ok) return (await res.json()) as T
           } catch {
             /* fall through */
@@ -204,13 +187,13 @@ export function createWebDatabase(): WebDatabase {
       }
 
       if (q.includes('from memory_items') && q.includes('session_id')) {
-        const sessionId = (_params ?? [])[0] as string
-        if (sessionId) {
+        const frontendSessionId = (_params ?? [])[0] as string
+        if (frontendSessionId) {
           // Checkpoints are memory_items with type='checkpoint'
           const isCheckpoint = q.includes("type = 'checkpoint'") || q.includes('type = ?')
-          const endpoint = isCheckpoint ? 'checkpoints' : 'memory'
+          const path = isCheckpoint ? 'checkpoints' : 'memory'
           try {
-            const res = await fetch(`${API_BASE}/api/sessions/${sessionId}/${endpoint}`)
+            const res = await fetch(buildSessionEndpoint(frontendSessionId, path))
             if (res.ok) return (await res.json()) as T
           } catch {
             /* fall through */
@@ -262,15 +245,19 @@ export function createWebDatabase(): WebDatabase {
       // Update session (rename, status change, etc.)
       if (q.includes('update sessions set')) {
         // The last param is the session ID (WHERE id = ?)
-        const id = params?.[params.length - 1] as string
-        if (id && q.includes('name =')) {
-          // Parse the name from params by matching the SQL SET clause order.
-          // updateSession builds: SET updated_at = ?, [name = ?,] [status = ?,] ... WHERE id = ?
-          // The name value is at index 1 (after updated_at which is at index 0).
-          const name = params && params.length >= 3 ? (params[1] as string) : null
+        const frontendSessionId = params?.[params.length - 1] as string
+        if (frontendSessionId) {
+          let valueIndex = 1 // params[0] is updated_at
+          const name = q.includes('name =')
+            ? (params?.[valueIndex++] as string | undefined)
+            : undefined
+          const status = q.includes('status =')
+            ? (params?.[valueIndex++] as string | undefined)
+            : undefined
+
           if (name) {
             try {
-              await fetch(`${API_BASE}/api/sessions/${id}/rename`, {
+              await fetch(buildSessionBaseEndpoint(frontendSessionId, 'rename'), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ name }),
@@ -279,17 +266,32 @@ export function createWebDatabase(): WebDatabase {
               console.warn('[db-web] Failed to rename session:', e)
             }
           }
+
+          if (status === 'archived' || status === 'active') {
+            const action = status === 'archived' ? 'archive' : 'unarchive'
+            try {
+              const res = await fetch(buildSessionBaseEndpoint(frontendSessionId, action), {
+                method: 'POST',
+              })
+              if (!res.ok) {
+                console.warn(`[db-web] Failed to ${action} session:`, res.status, res.statusText)
+              }
+            } catch (e) {
+              console.warn(`[db-web] Failed to ${action} session:`, e)
+            }
+          }
         }
-        // For status changes, updated_at-only (touchSession), etc. — no HTTP call needed
+        // updated_at-only (touchSession), metadata-only, etc. remain no-ops in web mode
         return { rowsAffected: 1 }
       }
 
       // Delete session
       if (q.includes('delete from sessions')) {
-        const id = params?.[0] as string
-        if (id) {
+        const frontendSessionId = params?.[0] as string
+        if (frontendSessionId) {
           try {
-            await fetch(`${API_BASE}/api/sessions/${id}`, { method: 'DELETE' })
+            // Resolve to backend ID for delete, then clean up alias mapping
+            await fetch(buildSessionBaseEndpoint(frontendSessionId), { method: 'DELETE' })
           } catch (e) {
             console.warn('[db-web] Failed to delete session:', e)
           }

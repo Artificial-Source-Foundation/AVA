@@ -1,3 +1,8 @@
+//! Shared queue target parsing and clear semantics.
+//!
+//! Ownership: canonical queue target aliases, clear behavior contract, and active
+//! session ownership validation for deferred queue operations.
+
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use uuid::Uuid;

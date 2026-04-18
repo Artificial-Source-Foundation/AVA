@@ -73,7 +73,10 @@ pub fn run() {
                 .map(std::path::PathBuf::from)
                 .unwrap_or_else(|_| app_data_dir.clone())
                 .join(".ava");
-            let bridge = tauri::async_runtime::block_on(DesktopBridge::init(ava_home))
+            let bridge = tauri::async_runtime::block_on(DesktopBridge::init(
+                ava_home,
+                app.handle().clone(),
+            ))
                 .map_err(|error| format!("failed to initialize desktop bridge: {error}"))?;
             app.manage(bridge);
 

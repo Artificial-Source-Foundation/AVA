@@ -34,18 +34,40 @@ async function resetForOnboarding(page: Page): Promise<void> {
   })
 }
 
-/** Wait for the main app shell to be ready (textarea visible). */
+function composer(page: Page) {
+  return page.getByRole('textbox', { name: 'Message composer' })
+}
+
+/** Wait for the main app shell to be ready (composer visible). */
 async function waitForAppShell(page: Page): Promise<void> {
-  await page.locator('textarea').first().waitFor({ state: 'visible', timeout: 15000 })
+  await composer(page).waitFor({ state: 'visible', timeout: 15000 })
 }
 
 /** Dismiss the changelog dialog if it appears. */
 async function dismissChangelog(page: Page): Promise<void> {
   const gotIt = page.locator('button:has-text("Got It"), button:has-text("Got it")')
-  if (await gotIt.isVisible({ timeout: 1000 }).catch(() => false)) {
+  const visible = await gotIt.isVisible({ timeout: 1000 }).catch(() => false)
+  if (visible) {
     await gotIt.click()
     await page.waitForTimeout(300)
+    return
   }
+
+  const whatsNew = page.getByText("What's New").first()
+  const changelogVisible = await whatsNew.isVisible({ timeout: 1000 }).catch(() => false)
+  if (!changelogVisible) return
+
+  const modal = page.locator('.fixed.inset-0.z-50').filter({ hasText: "What's New" }).first()
+  const closeButton = modal.locator('button').first()
+  const closeVisible = await closeButton.isVisible({ timeout: 500 }).catch(() => false)
+  if (closeVisible) {
+    await closeButton.click({ force: true }).catch(() => undefined)
+    await page.waitForTimeout(300)
+    return
+  }
+
+  await page.keyboard.press('Escape').catch(() => undefined)
+  await page.waitForTimeout(300)
 }
 
 // ---------------------------------------------------------------------------
@@ -97,25 +119,25 @@ test.describe('Chat View', () => {
     await dismissChangelog(page)
   })
 
-  test('composer textarea is present with correct placeholder', async ({ page }) => {
-    const textarea = page.locator('textarea').first()
-    await expect(textarea).toBeVisible()
+  test('message composer is present with correct placeholder', async ({ page }) => {
+    const input = composer(page)
+    await expect(input).toBeVisible()
 
-    const placeholder = await textarea.getAttribute('placeholder')
+    const placeholder = await input.getAttribute('placeholder')
     expect(placeholder).toContain('Ask anything')
   })
 
-  test('composer textarea accepts input', async ({ page }) => {
-    const textarea = page.locator('textarea').first()
-    await textarea.click()
-    await textarea.fill('Hello from Playwright!')
+  test('message composer accepts input', async ({ page }) => {
+    const input = composer(page)
+    await input.click()
+    await input.fill('Hello from Playwright!')
 
-    const value = await textarea.inputValue()
+    const value = await input.inputValue()
     expect(value).toBe('Hello from Playwright!')
   })
 
   test('toolbar strip renders with multiple controls', async ({ page }) => {
-    // The toolbar strip is inside the <form> below the textarea
+    // The toolbar strip is inside the <form> below the message composer
     // It contains model selector, Plan/Act slider, permissions, etc.
     const form = page.locator('form')
     await expect(form).toBeVisible()
@@ -272,7 +294,7 @@ test.describe('Settings Modal', () => {
     await page.waitForTimeout(300)
 
     await expect(page.locator('button:has-text("Back to Chat")')).not.toBeVisible()
-    await expect(page.locator('textarea').first()).toBeVisible()
+    await expect(composer(page)).toBeVisible()
   })
 
   test('Escape key closes settings modal', async ({ page }) => {
@@ -377,7 +399,7 @@ test.describe('Onboarding', () => {
 
     const settingsButton = page.getByRole('button', { name: 'Settings' })
     await expect(page.getByRole('dialog', { name: 'Onboarding' })).not.toBeVisible()
-    await expect(page.locator('textarea').first()).toBeVisible()
+    await expect(composer(page)).toBeVisible()
 
     await page.keyboard.press('Control+,')
     await expect(page.getByRole('button', { name: 'Back to Chat' })).toBeVisible({ timeout: 3000 })
@@ -469,13 +491,13 @@ test.describe('Keyboard Shortcuts', () => {
     if (wasVisible) {
       // Sidebar may have been hidden — or the button still exists but panel is collapsed
       // Just verify no crash and the app is still functional
-      await expect(page.locator('textarea').first()).toBeVisible()
+      await expect(composer(page)).toBeVisible()
     }
 
     // Toggle back
     await page.keyboard.press('Control+s')
     await page.waitForTimeout(300)
-    await expect(page.locator('textarea').first()).toBeVisible()
+    await expect(composer(page)).toBeVisible()
   })
 
   test('Escape closes settings modal', async ({ page }) => {
@@ -489,7 +511,7 @@ test.describe('Keyboard Shortcuts', () => {
 
     // Settings should be closed
     await expect(page.locator('button:has-text("Back to Chat")')).not.toBeVisible()
-    await expect(page.locator('textarea').first()).toBeVisible()
+    await expect(composer(page)).toBeVisible()
   })
 })
 
@@ -534,8 +556,8 @@ test.describe('QuestionDock', () => {
     const chatArea = page.locator('form')
     await expect(chatArea).toBeVisible()
 
-    // The textarea (MessageInput) is always present
-    await expect(page.locator('textarea').first()).toBeVisible()
+    // The message composer is always present
+    await expect(composer(page)).toBeVisible()
 
     // QuestionDock only renders when agent asks a question — verify no crash
     // by confirming the app is in a healthy state
@@ -593,14 +615,14 @@ test.describe('ProjectHub', () => {
     // 3. Chat with restored session (has messages)
     const greeting = page.locator('h1:has-text("Good")')
     const emptyState = page.locator('h2:has-text("How can I help")')
-    const textarea = page.locator('textarea').first()
+    const input = composer(page)
 
     const hasGreeting = await greeting.isVisible({ timeout: 1000 }).catch(() => false)
     const hasEmptyState = await emptyState.isVisible({ timeout: 1000 }).catch(() => false)
-    const hasTextarea = await textarea.isVisible({ timeout: 1000 }).catch(() => false)
+    const hasComposer = await input.isVisible({ timeout: 1000 }).catch(() => false)
 
     // At least one of these should be true
-    expect(hasGreeting || hasEmptyState || hasTextarea).toBe(true)
+    expect(hasGreeting || hasEmptyState || hasComposer).toBe(true)
 
     // If ProjectHub is visible, verify quick action buttons
     if (hasGreeting) {

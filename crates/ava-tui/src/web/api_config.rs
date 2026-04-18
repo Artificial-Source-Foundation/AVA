@@ -230,11 +230,6 @@ pub(crate) async fn list_mcp_servers(State(state): State<WebState>) -> impl Into
     Json(response)
 }
 
-#[derive(Deserialize)]
-pub struct McpServerNamePath {
-    pub name: String,
-}
-
 /// Enable a previously disabled MCP server.
 pub(crate) async fn enable_mcp_server(
     State(state): State<WebState>,

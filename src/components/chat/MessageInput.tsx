@@ -10,7 +10,7 @@ import { DoomLoopBanner } from './DoomLoopBanner'
 import { MessageInputShell } from './MessageInputShell'
 import { FileMentionPopover } from './message-input/file-mention-popover'
 import { InputDialogs } from './message-input/input-dialogs'
-import type { QueuedItem } from './message-input/MessageQueueWidget'
+import type { QueuedItem, QueueSection } from './message-input/MessageQueueWidget'
 import { SlashCommandPopover } from './message-input/slash-command-popover'
 import { InputTextArea } from './message-input/text-area'
 import { ToolbarStrip } from './message-input/toolbar-strip'
@@ -98,9 +98,13 @@ export const MessageInput: Component<{ adapter?: MessageInputAdapter }> = (props
           onInterrupt={state.handleInterruptFromMenu}
           onPostComplete={state.handlePostCompleteFromMenu}
           queuedMessages={queuedItems}
-          onQueueRemove={(i) => state.agent.removeFromQueue(i)}
-          onQueueReorder={(from, to) => state.agent.reorderInQueue(from, to)}
-          onQueueEdit={(i, content) => state.agent.editInQueue(i, content)}
+          onQueueRemove={(i, section: QueueSection) => state.agent.removeFromQueue(i, section)}
+          onQueueReorder={(from, to, section: QueueSection) =>
+            state.agent.reorderInQueue(from, to, section)
+          }
+          onQueueEdit={(i, content, section: QueueSection) =>
+            state.agent.editInQueue(i, content, section)
+          }
           onQueueClearAll={() => state.agent.clearQueue()}
         />
       </form>
@@ -127,7 +131,7 @@ export const MessageInput: Component<{ adapter?: MessageInputAdapter }> = (props
     shortcutHintSendCount: state.sendCount(),
   })
 
-  const adapter = () => props.adapter ?? defaultAdapter()
+  const adapter = createMemo(() => props.adapter ?? defaultAdapter())
 
   return (
     <MessageInputShell

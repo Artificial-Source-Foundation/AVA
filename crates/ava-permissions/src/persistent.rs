@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 /// to prevent malicious repositories from pre-populating allowlists via a
 /// repo-local `.ava/permissions.toml`. Project-local rules (via `load_project`)
 /// can only *restrict* (add blocked tools/commands), never expand permissions.
-#[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct PersistentRules {
     /// Tools that are always allowed (e.g., "bash", "task").
     #[serde(default)]

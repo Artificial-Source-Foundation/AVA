@@ -36,6 +36,8 @@ export const MessageBubble: Component<MessageBubbleProps> = (props) => {
 
   return (
     <div
+      data-message-role={props.message.role}
+      data-message-id={props.message.id}
       class={`chat-message-shell flex ${isUser() ? 'justify-end' : 'justify-start'} ${shouldAnimateIn() ? 'animate-message-in' : ''}`}
     >
       <Show

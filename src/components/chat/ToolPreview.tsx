@@ -44,11 +44,15 @@ export const ToolPreview: Component<ToolPreviewProps> = (props) => {
 
   return (
     <Show when={props.isStreaming && activeCall()}>
-      <div class="flex items-center gap-2 py-1 text-xs text-[var(--text-muted)] animate-fade-in">
+      <div class="flex items-center gap-2 py-1.5 text-xs text-[var(--text-muted)] animate-fade-in">
         <Loader2 class="w-3 h-3 animate-spin text-[var(--accent)] flex-shrink-0" />
-        <span class="truncate">{label()}</span>
+        <span class="truncate flex-1" title={label()}>
+          {label()}
+        </span>
         <Show when={elapsed()}>
-          <span class="tabular-nums whitespace-nowrap text-[11px]">{elapsed()}</span>
+          <span class="tabular-nums whitespace-nowrap text-[11px] text-[var(--accent)]">
+            {elapsed()}
+          </span>
         </Show>
       </div>
     </Show>

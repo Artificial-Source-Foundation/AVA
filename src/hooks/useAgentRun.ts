@@ -14,9 +14,17 @@ import { debugLog } from '../lib/debug-log'
 import { generateMessageId } from '../lib/ids'
 import { log } from '../lib/logger'
 import { deriveSessionTitle } from '../lib/title-utils'
+import {
+  persistAssistantPayloadToBackendSession,
+  syncMessagesFromBackend,
+} from '../services/agent-settlement'
 import { decodeCompactionModel } from '../services/context-compaction'
-import { getCoreBudget, markActiveSessionSynced } from '../services/core-bridge'
-import { registerBackendSessionId } from '../services/db-web-fallback'
+import {
+  getCoreBudget,
+  markActiveSessionSynced,
+  markSessionNeedsAuthoritativeRecovery,
+} from '../services/core-bridge'
+import { registerBackendSessionId } from '../services/web-session-identity'
 import type { Message } from '../types'
 import type { ToolActivity } from './agent'
 import type { QueuedMessage } from './chat/types'
@@ -25,12 +33,30 @@ import type { StreamingOffsets } from './useAgentStreaming'
 /** Small promise-based delay for async coordination. */
 const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
 
+function shouldPreserveAssistantCompletion(options: {
+  content: string
+  thinking: string
+  segments: Array<{ thinking: string; toolCallIds: string[] }>
+  toolCalls: Array<unknown>
+}): boolean {
+  return (
+    options.content.length > 0 ||
+    options.thinking.length > 0 ||
+    options.toolCalls.length > 0 ||
+    options.segments.some(
+      (segment) => segment.thinking.length > 0 || segment.toolCallIds.length > 0
+    )
+  )
+}
+
 // ── Deps: signals and stores the run function needs ─────────────────
 
 export interface RunDeps {
   rustAgent: ReturnType<typeof import('./use-rust-agent').useRustAgent>
   session: ReturnType<typeof import('../stores/session').useSession>
   settingsRef: ReturnType<typeof import('../stores/settings').useSettings>
+  sessionHasActiveRun?: (sessionId?: string | null) => boolean
+  onSessionRuntimeSettled?: (sessionId: string) => void
 
   // Signals
   isPlanMode: Accessor<boolean>
@@ -58,6 +84,8 @@ export function createAgentRun(deps: RunDeps) {
     rustAgent,
     session,
     settingsRef,
+    sessionHasActiveRun,
+    onSessionRuntimeSettled,
     isPlanMode,
     setCurrentThought,
     setDoomLoopDetected,
@@ -77,7 +105,14 @@ export function createAgentRun(deps: RunDeps) {
     config?: { model?: string; provider?: string }
   ): Promise<unknown> {
     const activeSessionId = session.currentSession()?.id
-    if (rustAgent.isRunning()) {
+    const currentSessionHasActiveRun =
+      sessionHasActiveRun?.(activeSessionId ?? null) ??
+      (rustAgent.isRunning() &&
+        ((typeof rustAgent.trackedSessionId === 'function' ? rustAgent.trackedSessionId() : null) ??
+          activeSessionId ??
+          null) === (activeSessionId ?? null))
+
+    if (currentSessionHasActiveRun) {
       setMessageQueue((prev) => [...prev, { content: goal, sessionId: activeSessionId }])
       return null
     }
@@ -107,6 +142,11 @@ export function createAgentRun(deps: RunDeps) {
       currentSess = session.currentSession()
     }
     const sessionId = currentSess?.id ?? ''
+    const settleSessionRuntimeCache = (): void => {
+      if (sessionId) {
+        onSessionRuntimeSettled?.(sessionId)
+      }
+    }
     const ownsOriginSession = (): boolean => session.currentSession()?.id === sessionId
     const runIsCurrent = (): boolean => runOwnership.isCurrentRun(runToken)
     const canMutateOriginSession = (): boolean => runIsCurrent() && ownsOriginSession()
@@ -226,6 +266,83 @@ export function createAgentRun(deps: RunDeps) {
       })
       const errorText = rustAgent.error()
 
+      const detachedSessionId =
+        result?.detachedSessionId ??
+        (typeof rustAgent.detachedSessionId === 'function' ? rustAgent.detachedSessionId() : null)
+
+      if (!errorText && detachedSessionId === sessionId) {
+        const backendSessionId = result?.sessionId || sessionId
+        let persistenceSucceeded = isTauri() // In Tauri mode, we don't persist via HTTP so consider it succeeded
+        if (!isTauri() && backendSessionId) {
+          registerBackendSessionId(sessionId, backendSessionId)
+          persistenceSucceeded = await persistAssistantPayloadToBackendSession(backendSessionId, {
+            content: rustAgent.streamingContent(),
+            thinking: rustAgent.thinkingContent(),
+            segments: rustAgent.thinkingSegments(),
+            toolCalls: rustAgent.activeToolCalls(),
+            tokensUsed: rustAgent.tokenUsage().output,
+            costUSD: rustAgent.tokenUsage().cost,
+            elapsedMs: Date.now() - runStartedAt,
+            provider: selectedProviderId,
+            model: selectedModelId,
+            mode: isPlanMode() ? 'plan' : 'code',
+          })
+        }
+        // Only mark for authoritative recovery if persistence succeeded (or Tauri mode)
+        // This avoids recovery attempts from stale backend state after failed persistence
+        if (persistenceSucceeded) {
+          markSessionNeedsAuthoritativeRecovery(sessionId)
+        }
+        const detachedMsgId = settleRunMessageId(assistantMsgId)
+        const detachedContent = rustAgent.streamingContent()
+        const detachedContentOffset = streaming.streamingContentOffset()
+        const partialContent =
+          detachedContentOffset > 0 ? detachedContent.slice(detachedContentOffset) : detachedContent
+        const detachedThinking = rustAgent.thinkingContent()
+        const detachedSegments = rustAgent.thinkingSegments()
+        const detachedSegmentsOffset = streaming.thinkingSegmentsOffset()
+        const partialSegments =
+          detachedSegmentsOffset > 0
+            ? detachedSegments.slice(detachedSegmentsOffset)
+            : detachedSegments
+        const detachedToolCalls = rustAgent.activeToolCalls()
+        const detachedToolCallsOffset = streaming.toolCallsOffset()
+        const partialToolCalls =
+          detachedToolCallsOffset > 0
+            ? detachedToolCalls.slice(detachedToolCallsOffset)
+            : detachedToolCalls
+
+        if (
+          shouldPreserveAssistantCompletion({
+            content: partialContent,
+            thinking: detachedThinking,
+            segments: partialSegments,
+            toolCalls: partialToolCalls,
+          })
+        ) {
+          updateOriginMessage(detachedMsgId, {
+            content: partialContent,
+            tokensUsed: rustAgent.tokenUsage().output,
+            costUSD: rustAgent.tokenUsage().cost || undefined,
+            toolCalls: partialToolCalls,
+            metadata: {
+              provider: selectedProviderId,
+              model: selectedModelId,
+              mode: isPlanMode() ? 'plan' : 'code',
+              elapsedMs: Date.now() - runStartedAt,
+              ...(detachedThinking ? { thinking: detachedThinking } : {}),
+              ...(partialSegments.length > 1 ? { thinkingSegments: partialSegments } : {}),
+            },
+          })
+        } else {
+          await deleteOriginMessage(detachedMsgId)
+        }
+        rustAgent.clearDetachedSessionId?.()
+        clearRunUiIfCurrent()
+        settleSessionRuntimeCache()
+        return null
+      }
+
       // Check if the agent errored
       if (errorText) {
         const isCancelled =
@@ -238,14 +355,21 @@ export function createAgentRun(deps: RunDeps) {
           const cOffset = streaming.streamingContentOffset()
           const partialContent = cOffset > 0 ? fullPartial.slice(cOffset) : fullPartial
           const partialThinking = rustAgent.thinkingContent()
+          const allSegments = rustAgent.thinkingSegments()
+          const sOffset = streaming.thinkingSegmentsOffset()
+          const partialSegments = sOffset > 0 ? allSegments.slice(sOffset) : allSegments
+          const allTc = rustAgent.activeToolCalls()
+          const tOffset = streaming.toolCallsOffset()
+          const partialToolCalls = tOffset > 0 ? allTc.slice(tOffset) : allTc
           const elapsedMs = Date.now() - runStartedAt
-          if (partialContent || partialThinking) {
-            const allSegments = rustAgent.thinkingSegments()
-            const sOffset = streaming.thinkingSegmentsOffset()
-            const partialSegments = sOffset > 0 ? allSegments.slice(sOffset) : allSegments
-            const allTc = rustAgent.activeToolCalls()
-            const tOffset = streaming.toolCallsOffset()
-            const partialToolCalls = tOffset > 0 ? allTc.slice(tOffset) : allTc
+          if (
+            shouldPreserveAssistantCompletion({
+              content: partialContent,
+              thinking: partialThinking,
+              segments: partialSegments,
+              toolCalls: partialToolCalls,
+            })
+          ) {
             updateOriginMessage(cancelMsgId, {
               content: partialContent,
               tokensUsed: rustAgent.tokenUsage().output,
@@ -276,6 +400,7 @@ export function createAgentRun(deps: RunDeps) {
           }
           addOriginMessage(cancelNote)
           clearRunUiIfCurrent()
+          settleSessionRuntimeCache()
           return null
         }
 
@@ -286,6 +411,7 @@ export function createAgentRun(deps: RunDeps) {
           error: { type: 'unknown', message: errorText, timestamp: Date.now() },
         })
         clearRunUiIfCurrent()
+        settleSessionRuntimeCache()
         return null
       }
 
@@ -309,7 +435,14 @@ export function createAgentRun(deps: RunDeps) {
         segments.length > 0 ? `${segments.length} segments` : ''
       )
 
-      if (content) {
+      if (
+        shouldPreserveAssistantCompletion({
+          content,
+          thinking,
+          segments,
+          toolCalls,
+        })
+      ) {
         updateOriginMessage(finalMsgId, {
           content,
           tokensUsed: rustAgent.tokenUsage().output,
@@ -338,51 +471,36 @@ export function createAgentRun(deps: RunDeps) {
       })
 
       const backendSessionId = result?.sessionId || sessionId
-      if (backendSessionId && canMutateOriginSession()) {
-        markActiveSessionSynced(backendSessionId)
-      }
       if (!isTauri() && backendSessionId && canMutateOriginSession()) {
-        try {
-          const apiBase = (import.meta.env.VITE_API_URL as string) || ''
-          const res = await fetch(`${apiBase}/api/sessions/${backendSessionId}/messages`)
-          if (res.ok) {
-            const rawMsgs = (await res.json()) as Array<Record<string, unknown>>
-            const backendMsgs: Message[] = rawMsgs.map((m) => {
-              const metaRaw = m.metadata
-              const metadata =
-                typeof metaRaw === 'string'
-                  ? (JSON.parse(metaRaw) as Record<string, unknown>)
-                  : (metaRaw as Record<string, unknown> | undefined)
-              return {
-                id: m.id as string,
-                sessionId: backendSessionId,
-                role: m.role as Message['role'],
-                content: (m.content as string) ?? '',
-                createdAt:
-                  typeof m.created_at === 'number'
-                    ? m.created_at
-                    : typeof m.timestamp === 'string'
-                      ? new Date(m.timestamp).getTime()
-                      : Date.now(),
-                tokensUsed: (m.tokens_used as number) || undefined,
-                costUSD: (m.cost_usd as number | null) ?? undefined,
-                model: (m.model as string | null) ?? undefined,
-                metadata,
-                toolCalls: (metadata?.toolCalls as Message['toolCalls']) ?? undefined,
-              }
-            })
-            session.replaceMessagesFromBackend(backendMsgs)
+        await syncMessagesFromBackend(
+          backendSessionId,
+          { session, markActiveSessionSynced },
+          {
+            originSessionId: sessionId,
+            assistantPayload: {
+              content: rustAgent.streamingContent(),
+              thinking: rustAgent.thinkingContent(),
+              segments: rustAgent.thinkingSegments(),
+              toolCalls: rustAgent.activeToolCalls(),
+              tokensUsed: rustAgent.tokenUsage().output,
+              costUSD: rustAgent.tokenUsage().cost,
+              elapsedMs: elapsedMs,
+              provider: selectedProviderId,
+              model: selectedModelId,
+              mode: isPlanMode() ? 'plan' : 'code',
+            },
           }
-        } catch (syncErr) {
+        ).catch((syncErr) => {
           log.warn('agent', 'Failed to sync messages from backend after run', {
             error: String(syncErr),
           })
-        }
+        })
         registerBackendSessionId(sessionId, backendSessionId)
         log.info('agent', 'Backend session ID registered', { backendSessionId })
       }
 
       ranSuccessfully = result?.success === true
+      settleSessionRuntimeCache()
       return result
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
@@ -393,6 +511,7 @@ export function createAgentRun(deps: RunDeps) {
         error: { type: 'unknown', message: msg, timestamp: Date.now() },
       })
       clearRunUiIfCurrent()
+      settleSessionRuntimeCache()
       return null
     } finally {
       if (runIsCurrent()) {

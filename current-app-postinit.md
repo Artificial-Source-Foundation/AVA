@@ -1,0 +1,95 @@
+- generic:
+  - generic:
+    - generic:
+      - generic:
+        - generic:
+          - complementary:
+            - generic:
+              - generic
+              - generic
+            - generic:
+              - button
+            - generic:
+              - generic
+            - generic:
+              - generic
+              - button: Show 35 more
+              - generic
+        - generic:
+          - generic:
+            - generic:
+              - generic
+    - generic:
+      - generic:
+        - generic:
+          - generic:
+            - img
+            - generic: What's New
+            - generic: v2.2.6
+          - button:
+            - img
+        - generic:
+          - generic:
+            - generic:
+              - generic: New
+              - generic: macOS Luxury Design System
+            - paragraph: Complete UI overhaul with new color system, typography, and component library inspired by premium macOS applications.
+          - generic:
+            - generic:
+              - generic: Improved
+              - generic: Streaming Performance
+            - paragraph: Removed filter-based hover effects, converted animations to scaleX transforms, and trimmed transition-all hot paths.
+          - generic:
+            - generic:
+              - generic: Fixed
+              - generic: Chat Scroll Position
+            - paragraph: "Fixed contain: layout style breaking flex height calculations in the message list."
+          - generic:
+            - generic:
+              - generic: New
+              - generic: Mid-Stream Messaging
+            - paragraph: "Three-tier message queue: Enter = queue, Ctrl+Enter = interrupt, Alt+Enter = post-complete."
+          - generic:
+            - generic:
+              - generic: New
+              - generic: Shadow Git Snapshots
+            - paragraph: File undo/rollback via automatic shadow git snapshots before every edit.
+          - generic:
+            - generic:
+              - generic: Improved
+              - generic: Context Overflow Auto-Compact
+            - paragraph: Automatic context compaction with retry for 12 different provider overflow patterns.
+          - generic:
+            - generic:
+              - generic: Fixed
+              - generic: Incremental Persistence
+            - paragraph: Crash-safe per-turn message persistence with retry-after header parsing.
+          - generic: v2.1.0
+          - generic:
+            - generic:
+              - generic: New
+              - generic: 21 Rust Crates
+            - paragraph: 9 default tools, thinking + tool interleaving, multi-agent orchestration via HQ.
+          - generic:
+            - generic:
+              - generic: Improved
+              - generic: MCP Protocol Support
+            - paragraph: Hot-reload and per-project trust for MCP servers.
+          - generic:
+            - generic:
+              - generic: New
+              - generic: 29 Built-in Themes
+            - paragraph: Live preview and custom TOML theme support.
+  - dialog "Onboarding" [ref=e7]:
+    - heading "Onboarding" [level=2] [ref=e9]
+    - paragraph [ref=e10]: Complete the initial AVA setup flow.
+    - generic [ref=e12]:
+      - generic [ref=e14]: A
+      - heading "Welcome to AVA" [active] [level=1] [ref=e15]
+      - paragraph [ref=e16]:
+        - text: Your AI coding agent — lean by default,
+        - text: infinitely extensible.
+      - button "Get Started" [ref=e17] [cursor=pointer]:
+        - text: Get Started
+        - generic [ref=e18]: →
+      - button "Skip setup for now" [ref=e19] [cursor=pointer]

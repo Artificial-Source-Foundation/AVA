@@ -84,6 +84,7 @@ export function useSession() {
     restoreForCurrentProject: lifecycle.restoreForCurrentProject,
     createNewSession: lifecycle.createNewSession,
     switchSession: lifecycle.switchSession,
+    recoverDetachedDesktopSessionIfNeeded: lifecycle.recoverDetachedDesktopSessionIfNeeded,
     renameSession: lifecycle.renameSession,
     archiveSession: lifecycle.archiveSession,
     unarchiveSession: lifecycle.unarchiveSession,
@@ -111,6 +112,7 @@ export function useSession() {
     deleteMessagesAfter: msg.deleteMessagesAfter,
     rollbackToMessage: msg.rollbackToMessage,
     replaceMessagesFromBackend: msg.replaceMessagesFromBackend,
+    replaceMessagesFromBackendForSession: msg.replaceMessagesFromBackendForSession,
 
     // Agent Management
     addAgent: data.addAgent,

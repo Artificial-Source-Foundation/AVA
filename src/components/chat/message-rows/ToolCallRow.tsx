@@ -57,6 +57,9 @@ export const ToolCallRow: Component<ToolCallRowProps> = (props) => {
     return formatElapsed(props.toolCall.startedAt)
   })
 
+  // Determine if this row can be expanded/interacted with
+  const isExpandable = () => hasOutput()
+
   return (
     <div
       class="chat-tool-shell animate-tool-card-in rounded-[10px] overflow-hidden transition-colors duration-[var(--duration-fast)]"
@@ -70,24 +73,19 @@ export const ToolCallRow: Component<ToolCallRowProps> = (props) => {
       }}
     >
       {/* Header — 40px, bottom border when collapsed */}
-      {/* biome-ignore lint/a11y/useSemanticElements: div+role=button avoids nested button which crashes WebKitGTK */}
-      <div
-        role="button"
-        tabIndex={0}
-        aria-expanded={expanded()}
-        class="tool-card-header flex h-10 cursor-pointer select-none items-center gap-2.5 px-3 text-[13px] transition-colors duration-[var(--duration-fast)] hover:bg-[var(--alpha-white-5)]"
+      <button
+        type="button"
+        disabled={!isExpandable()}
+        aria-expanded={isExpandable() ? expanded() : undefined}
+        class="tool-card-header flex h-10 select-none items-center gap-2.5 px-3 text-[13px] transition-colors duration-[var(--duration-fast)]"
         classList={{
           'border-b border-[var(--border-subtle)]': !expanded(),
           'bg-[var(--alpha-white-5)]': expanded(),
+          'cursor-pointer hover:bg-[var(--alpha-white-5)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-inset':
+            isExpandable(),
         }}
         onClick={() => {
-          if (hasOutput()) setExpanded((v) => !v)
-        }}
-        onKeyDown={(e) => {
-          if ((e.key === 'Enter' || e.key === ' ') && hasOutput()) {
-            e.preventDefault()
-            setExpanded((v) => !v)
-          }
+          if (isExpandable()) setExpanded((v) => !v)
         }}
       >
         <ToolIcon name={props.toolCall.name} status={props.toolCall.status} />
@@ -134,7 +132,7 @@ export const ToolCallRow: Component<ToolCallRowProps> = (props) => {
             classList={{ 'rotate-90': expanded() }}
           />
         </Show>
-      </div>
+      </button>
 
       {/* Live streaming output */}
       <Show when={isRunning() && !!props.toolCall.streamingOutput}>

@@ -36,10 +36,14 @@ export const SessionSwitcher: Component<{ open: boolean; onClose: () => void }> 
     )
   )
 
-  // Clamp index when results change
+  // Clamp index when results change; keep at -1 when empty to indicate no selection
   createEffect(
     on(filtered, (f) => {
-      setSelectedIndex((i) => Math.min(i, Math.max(0, f.length - 1)))
+      if (f.length === 0) {
+        setSelectedIndex(-1)
+      } else {
+        setSelectedIndex((i) => Math.min(Math.max(i, 0), f.length - 1))
+      }
     })
   )
 
@@ -57,23 +61,36 @@ export const SessionSwitcher: Component<{ open: boolean; onClose: () => void }> 
 
   const handleKeyDown = (e: KeyboardEvent) => {
     const count = filtered().length
+    // No-op safely when there are no results
+    if (count === 0) {
+      if (e.key === 'Enter') {
+        e.preventDefault()
+        // Enter with no results just closes the dialog
+        props.onClose()
+      }
+      return
+    }
+
     if (e.key === 'ArrowDown') {
       e.preventDefault()
       setSelectedIndex((i) => {
-        const next = (i + 1) % count
+        const current = Math.max(i, 0)
+        const next = (current + 1) % count
         scrollSelectedIntoView(next)
         return next
       })
     } else if (e.key === 'ArrowUp') {
       e.preventDefault()
       setSelectedIndex((i) => {
-        const next = (i - 1 + count) % count
+        const current = Math.max(i, 0)
+        const next = (current - 1 + count) % count
         scrollSelectedIntoView(next)
         return next
       })
     } else if (e.key === 'Enter') {
       e.preventDefault()
-      const session = filtered()[selectedIndex()]
+      const currentIndex = Math.max(selectedIndex(), 0)
+      const session = filtered()[currentIndex]
       if (session) handleSelect(session.id)
     }
   }
@@ -107,7 +124,16 @@ export const SessionSwitcher: Component<{ open: boolean; onClose: () => void }> 
             'box-shadow': 'var(--modal-shadow)',
           }}
           onKeyDown={handleKeyDown}
+          aria-labelledby="session-switcher-title"
+          aria-describedby="session-switcher-description"
+          role="dialog"
+          aria-modal="true"
         >
+          {/* Screen reader only title and description */}
+          <div class="sr-only" style={{ position: 'absolute', left: '-9999px' }}>
+            <h2 id="session-switcher-title">Switch Session</h2>
+            <p id="session-switcher-description">Search and switch to a different chat session</p>
+          </div>
           {/* Search input */}
           <div class="px-3 py-2" style={{ 'border-bottom': '1px solid var(--modal-border)' }}>
             <input
@@ -120,14 +146,18 @@ export const SessionSwitcher: Component<{ open: boolean; onClose: () => void }> 
               aria-expanded={filtered().length > 0}
               aria-controls="session-switcher-listbox"
               aria-activedescendant={
-                filtered().length > 0 ? `session-option-${selectedIndex()}` : undefined
+                filtered().length > 0 && selectedIndex() >= 0
+                  ? `session-option-${selectedIndex()}`
+                  : undefined
               }
               aria-autocomplete="list"
               aria-label="Search sessions"
               class="
                 w-full bg-transparent text-sm text-[var(--text-primary)]
                 placeholder:text-[var(--text-muted)]
-                focus:outline-none
+                focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]
+                focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--modal-surface)]
+                rounded px-2 py-1 -mx-2 -my-1
               "
             />
           </div>

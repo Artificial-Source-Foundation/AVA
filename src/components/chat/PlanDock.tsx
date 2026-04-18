@@ -19,19 +19,40 @@ export const PlanDock: Component = () => {
   const { openPlan } = usePlanOverlay()
   const { openPlanViewer } = useLayout()
 
-  const handleApprove = (plan: PlanData, stepComments: Record<string, string>): void => {
+  const handleApprove = async (
+    plan: PlanData,
+    stepComments: Record<string, string>
+  ): Promise<void> => {
     logInfo('plan', 'Plan approved', { steps: plan.steps.length })
-    agent.resolvePlan('approved', plan, undefined, stepComments)
+    try {
+      await agent.resolvePlan('approved', plan, undefined, stepComments)
+    } catch {
+      // Error logged by agent, dock remains consistent for retry
+    }
   }
 
-  const handleReject = (feedback: string, stepComments: Record<string, string>): void => {
+  const handleReject = async (
+    feedback: string,
+    stepComments: Record<string, string>
+  ): Promise<void> => {
     logInfo('plan', 'Plan rejected', { feedback: feedback.slice(0, 80) })
-    agent.resolvePlan('rejected', undefined, feedback, stepComments)
+    try {
+      await agent.resolvePlan('rejected', undefined, feedback, stepComments)
+    } catch {
+      // Error logged by agent, dock remains consistent for retry
+    }
   }
 
-  const handleEdit = (plan: PlanData, stepComments: Record<string, string>): void => {
+  const handleEdit = async (
+    plan: PlanData,
+    stepComments: Record<string, string>
+  ): Promise<void> => {
     logInfo('plan', 'Plan modified', { steps: plan.steps.length })
-    agent.resolvePlan('modified', plan, undefined, stepComments)
+    try {
+      await agent.resolvePlan('modified', plan, undefined, stepComments)
+    } catch {
+      // Error logged by agent, dock remains consistent for retry
+    }
   }
 
   const handleViewFull = (): void => {

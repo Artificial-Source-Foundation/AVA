@@ -9,7 +9,7 @@
  * - Post-decision approval audit badge (Approved / Auto-approved / Denied)
  */
 
-import { Check, CheckCheck, ChevronRight, Loader2, X } from 'lucide-solid'
+import { AlertTriangle, Check, CheckCheck, ChevronRight, Clock, Loader2, X } from 'lucide-solid'
 import { type Component, createMemo, createSignal, Match, Show, Switch } from 'solid-js'
 import { useSecondTicker } from '../../hooks/useElapsedTimer'
 import { useSettings } from '../../stores/settings'
@@ -68,6 +68,7 @@ const ToolCallCardContent: Component<ToolCallCardProps> = (props) => {
 
   const summary = () => getToolDescription(props.toolCall.name, props.toolCall.args)
   const isRunning = () => props.toolCall.status === 'running' || props.toolCall.status === 'pending'
+  const isPending = () => props.toolCall.status === 'pending'
   const hasOutput = () => !!(props.toolCall.output || props.toolCall.error || props.toolCall.diff)
   const hasStreamingOutput = () => isRunning() && !!props.toolCall.streamingOutput
   const nowTick = useSecondTicker(isRunning)
@@ -81,6 +82,15 @@ const ToolCallCardContent: Component<ToolCallCardProps> = (props) => {
     nowTick()
     return formatElapsed(props.toolCall.startedAt)
   })
+
+  // Status-aware shimmer animation for running state
+  const shimmerClass = () => {
+    if (isRunning()) return 'tool-summary-shimmer tool-summary-shimmer--running'
+    return 'tool-summary-shimmer'
+  }
+
+  // Determine if this tool card can be expanded
+  const isExpandable = () => hasOutput()
 
   return (
     <div
@@ -96,33 +106,29 @@ const ToolCallCardContent: Component<ToolCallCardProps> = (props) => {
       }}
     >
       {/* Single-line header — 40px height, bottom border when collapsed */}
-      {/* biome-ignore lint/a11y/useSemanticElements: div+role=button avoids nested button which crashes WebKitGTK */}
-      <div
-        role="button"
-        tabIndex={0}
-        aria-expanded={expanded()}
-        class="tool-card-header flex h-10 cursor-pointer select-none items-center gap-2.5 px-3 text-[13px] transition-colors duration-[var(--duration-fast)] hover:bg-[var(--alpha-white-5)]"
+      <button
+        type="button"
+        disabled={!isExpandable()}
+        aria-expanded={isExpandable() ? expanded() : undefined}
+        class="tool-card-header flex h-10 select-none items-center gap-2.5 px-3 text-[13px] transition-colors duration-[var(--duration-fast)]"
         classList={{
           'border-b border-[var(--border-subtle)]': !expanded(),
           'bg-[var(--alpha-white-5)]': expanded(),
+          'tool-card-header--running': isRunning(),
+          'cursor-pointer hover:bg-[var(--alpha-white-5)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-inset':
+            isExpandable(),
         }}
         onClick={() => {
-          if (hasOutput()) setExpanded((v) => !v)
-        }}
-        onKeyDown={(e) => {
-          if ((e.key === 'Enter' || e.key === ' ') && hasOutput()) {
-            e.preventDefault()
-            setExpanded((v) => !v)
-          }
+          if (isExpandable()) setExpanded((v) => !v)
         }}
       >
         {/* Tool icon — 16px, color-coded by type */}
         <ToolIcon name={props.toolCall.name} status={props.toolCall.status} />
 
-        {/* Tool name / summary */}
+        {/* Tool name / summary with optional shimmer */}
         <span
-          class="truncate text-[13px] text-[var(--text-primary)]"
-          style={isRunning() ? { opacity: '0.9' } : undefined}
+          class={`truncate text-[13px] text-[var(--text-primary)] ${shimmerClass()}`}
+          style={isPending() ? { opacity: '0.7' } : undefined}
           title={summary()}
         >
           {summary()}
@@ -135,22 +141,34 @@ const ToolCallCardContent: Component<ToolCallCardProps> = (props) => {
           <ApprovalBadge decision={props.toolCall.approvalDecision!} />
         </Show>
 
-        {/* Status badge for expanded cards */}
-        <Show when={expanded() && !isRunning()}>
+        {/* Status badge for completed/error states */}
+        <Show when={!isRunning() && !expanded()}>
           <span
-            class="text-[10px] font-medium px-1.5 py-0.5 rounded-full"
+            class="text-[10px] font-medium px-1.5 py-0.5 rounded-full flex items-center gap-1"
             classList={{
-              'text-[var(--success)] bg-[var(--success-subtle)]':
+              'text-[var(--success)] bg-[var(--success-subtle)] border border-[var(--success-border)]':
                 props.toolCall.status === 'success',
-              'text-[var(--error)] bg-[var(--error-subtle)]': props.toolCall.status === 'error',
+              'text-[var(--error)] bg-[var(--error-subtle)] border border-[var(--error-border)]':
+                props.toolCall.status === 'error',
             }}
           >
+            <Show when={props.toolCall.status === 'error'}>
+              <AlertTriangle class="w-2.5 h-2.5" />
+            </Show>
             {props.toolCall.status === 'error' ? 'Error' : 'Done'}
           </span>
         </Show>
 
+        {/* Pending indicator */}
+        <Show when={isPending()}>
+          <Clock
+            class="flex-shrink-0"
+            style={{ width: '14px', height: '14px', color: 'var(--text-muted)' }}
+          />
+        </Show>
+
         {/* Running indicator */}
-        <Show when={isRunning()}>
+        <Show when={isRunning() && !isPending()}>
           <Loader2
             class="animate-spin flex-shrink-0"
             style={{ width: '14px', height: '14px', color: 'var(--accent)' }}
@@ -189,15 +207,21 @@ const ToolCallCardContent: Component<ToolCallCardProps> = (props) => {
             classList={{ 'rotate-90': expanded() }}
           />
         </Show>
-      </div>
+      </button>
 
       {/* Live streaming output while running */}
       <Show when={hasStreamingOutput()}>
         <div class="border-t border-[var(--border-subtle)] px-3 pb-2">
-          <pre class="scroll-fade-mask mt-1.5 max-h-32 overflow-y-auto whitespace-pre-wrap break-all font-[var(--font-ui-mono)] text-[11px] leading-relaxed text-[var(--text-muted)] scrollbar-none">
-            {props.toolCall.streamingOutput!.slice(-2000)}
-            <span class="ml-px inline-block h-[14px] w-[6px] animate-pulse align-middle bg-[var(--chat-streaming-indicator)]" />
-          </pre>
+          <div class="relative">
+            <pre class="scroll-fade-mask mt-1.5 max-h-32 overflow-y-auto whitespace-pre-wrap break-all font-[var(--font-ui-mono)] text-[11px] leading-relaxed text-[var(--text-muted)] scrollbar-none pr-2">
+              {props.toolCall.streamingOutput!.slice(-2000)}
+              <span class="ml-px inline-block h-[14px] w-[6px] animate-pulse align-middle bg-[var(--chat-streaming-indicator)]" />
+            </pre>
+            {/* Streaming truncation hint */}
+            <Show when={(props.toolCall.streamingOutput?.length ?? 0) > 2000}>
+              <div class="absolute bottom-0 left-0 right-0 h-6 bg-gradient-to-t from-[var(--tool-card-background)] to-transparent pointer-events-none" />
+            </Show>
+          </div>
         </div>
       </Show>
 

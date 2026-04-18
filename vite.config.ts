@@ -6,6 +6,7 @@ import solid from 'vite-plugin-solid'
 const host = process.env.TAURI_DEV_HOST
 const isTauriDev = !!process.env.TAURI_DEV_HOST || !!process.env.TAURI_ENV_ARCH
 const analyze = process.env.ANALYZE === 'true'
+const disableBackendProxy = process.env.VITE_DISABLE_BACKEND_PROXY === '1'
 
 const STUB_PATH = fileURLToPath(new URL('./src/stubs/node-stub.ts', import.meta.url))
 
@@ -182,7 +183,7 @@ export default defineConfig(async () => ({
       },
       // Only proxy /api and /ws when running in browser mode (not Tauri dev).
       // TAURI_DEV_HOST is set by `tauri dev` — if present, skip the proxy.
-      ...(!isTauriDev
+      ...(!isTauriDev && !disableBackendProxy
         ? {
             '/api': {
               target: 'http://localhost:8080',

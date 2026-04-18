@@ -6,6 +6,7 @@ import { useLayout } from '../../stores/layout'
 import { usePlanOverlay } from '../../stores/planOverlayStore'
 import { useSettings } from '../../stores/settings'
 import { PlanOverlay } from '../chat/PlanOverlay'
+
 import { TerminalPanel } from '../panels/TerminalPanel'
 import { SettingsModal } from '../settings'
 import { SidebarMemory } from '../sidebar/SidebarMemory'
@@ -43,6 +44,7 @@ export const AppShell: Component = () => {
     setBottomPanelHeight,
     bottomPanelTab,
     switchBottomPanelTab,
+    viewingPlanId,
   } = useLayout()
   const { settings } = useSettings()
 
@@ -97,9 +99,9 @@ export const AppShell: Component = () => {
 
         {/* Center: Main content + optional bottom panel */}
         <div class="flex-1 flex flex-col overflow-hidden min-w-0">
-          {/* Main content — plan overlay replaces chat when open */}
+          {/* Main content — fullscreen plan viewer (via viewingPlanId) takes precedence over overlay */}
           <div class="flex-1 overflow-hidden min-h-0">
-            <Show when={!planOverlayOpen()} fallback={<PlanOverlay />}>
+            <Show when={!planOverlayOpen() || viewingPlanId()} fallback={<PlanOverlay />}>
               <MainArea />
             </Show>
           </div>

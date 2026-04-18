@@ -1,76 +1,18 @@
-//! Tool registry construction, MCP initialization, and workspace resolution.
+//! Tool registry construction, workspace resolution, and runtime helpers.
 
-use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use ava_llm::provider::LLMProvider;
-use ava_mcp::config::{load_merged_mcp_config_with_scope, McpServerScope};
-use ava_mcp::manager::{McpManager, McpServerInitStatus};
 use ava_permissions::inspector::PermissionInspector;
 use ava_platform::Platform;
-use ava_tools::mcp_bridge::{MCPBridgeTool, MCPToolCaller};
 use ava_tools::permission_middleware::{ApprovalBridge, PermissionMiddleware, SharedToolSources};
-use ava_tools::registry::{ToolRegistry, ToolSource};
-use ava_types::{Result, ToolResult};
-use serde_json::Value;
+use ava_tools::registry::ToolRegistry;
 use tokio::sync::RwLock;
-use tracing::{info, warn};
 
 use ava_permissions::inspector::InspectionContext;
 use ava_plugin::PluginManager;
 use ava_tools::core::register_default_tools_with_plugins;
-
-pub(crate) struct McpManagerCaller {
-    pub(crate) manager: McpManager,
-}
-
-#[async_trait]
-impl MCPToolCaller for McpManagerCaller {
-    async fn call_tool(&self, name: &str, arguments: Value) -> Result<ToolResult> {
-        self.manager.call_tool(name, arguments).await
-    }
-}
-
-pub(crate) struct MCPRuntime {
-    pub(crate) caller: Arc<dyn MCPToolCaller>,
-    pub(crate) server_count: usize,
-    pub(crate) tool_count: usize,
-    pub(crate) tools_with_source: Vec<(String, ava_types::Tool)>,
-    /// Scope (global vs local) for each server name.
-    pub(crate) server_scopes: HashMap<String, McpServerScope>,
-}
-
-/// Connection status of an individual MCP server.
-#[derive(Debug, Clone, PartialEq)]
-pub enum McpServerStatus {
-    /// Tools are available and the server is responding.
-    Connected,
-    /// Server was explicitly disabled (`enabled: false` in config or via `/mcp disable`).
-    Disabled,
-    /// The connection or `list_tools` call failed.
-    Failed(String),
-    /// Connection is in progress (shown while lazy init is running).
-    Connecting,
-}
-
-#[derive(Debug, Clone)]
-pub struct MCPServerInfo {
-    pub name: String,
-    pub tool_count: usize,
-    pub scope: McpServerScope,
-    pub enabled: bool,
-    /// Whether the current UI toggle action is supported by the backend.
-    pub can_toggle: bool,
-    /// Current connection status for UI display.
-    pub status: McpServerStatus,
-}
-
-#[derive(Default)]
-pub(crate) struct MCPInitResult {
-    pub(crate) runtime: Option<MCPRuntime>,
-    pub(crate) statuses: HashMap<String, McpServerStatus>,
-}
 
 /// Summarizer adapter for the LLM provider (used by context compaction).
 pub(crate) struct LlmSummarizer(pub(crate) Arc<dyn LLMProvider>);
@@ -81,101 +23,6 @@ impl ava_context::Summarizer for LlmSummarizer {
         use ava_types::{Message, Role};
         let messages = vec![Message::new(Role::User, text.to_string())];
         self.0.generate(&messages).await.map_err(|e| e.to_string())
-    }
-}
-
-pub(crate) async fn init_mcp_with_disabled(
-    global_config: &std::path::Path,
-    project_config: &std::path::Path,
-    registry: &mut ToolRegistry,
-    disabled: &HashSet<String>,
-) -> MCPInitResult {
-    match load_merged_mcp_config_with_scope(global_config, project_config).await {
-        Ok(configs_with_scope) if !configs_with_scope.is_empty() => {
-            // Build scope map from all configs (before filtering)
-            let server_scopes: HashMap<String, McpServerScope> = configs_with_scope
-                .iter()
-                .map(|(cfg, scope)| (cfg.name.clone(), *scope))
-                .collect();
-
-            // Filter out disabled servers
-            let configs: Vec<_> = configs_with_scope
-                .into_iter()
-                .filter(|(cfg, _)| !disabled.contains(&cfg.name))
-                .map(|(cfg, _)| cfg)
-                .collect();
-
-            if configs.is_empty() {
-                // All servers disabled — return runtime with scope info but no tools
-                return MCPInitResult {
-                    runtime: Some(MCPRuntime {
-                        caller: Arc::new(McpManagerCaller {
-                            manager: McpManager::new(),
-                        }),
-                        server_count: 0,
-                        tool_count: 0,
-                        tools_with_source: Vec::new(),
-                        server_scopes,
-                    }),
-                    statuses: HashMap::new(),
-                };
-            }
-
-            let mut manager = McpManager::new();
-            let statuses = manager
-                .initialize_with_report(configs)
-                .await
-                .into_iter()
-                .map(|report| {
-                    let status = match report.status {
-                        McpServerInitStatus::Connected => McpServerStatus::Connected,
-                        McpServerInitStatus::Failed(error) => McpServerStatus::Failed(error),
-                    };
-                    (report.name, status)
-                })
-                .collect();
-            let server_count = manager.server_count();
-            let mcp_tools_with_server = manager.list_tools_with_server().to_vec();
-            let mcp_tools = manager.list_tools();
-            let caller: Arc<dyn MCPToolCaller> = Arc::new(McpManagerCaller { manager });
-            let mut tools_with_source = Vec::new();
-            for (server_name, mcp_tool) in &mcp_tools_with_server {
-                if let Some(tool_def) = mcp_tools.iter().find(|t| t.name == mcp_tool.name) {
-                    tools_with_source.push((server_name.clone(), tool_def.clone()));
-                }
-            }
-            let tool_count = tools_with_source.len();
-            for (server_name, tool_def) in &tools_with_source {
-                info!(tool = %tool_def.name, server = %server_name, "Registering MCP tool");
-                let source = ToolSource::MCP {
-                    server: server_name.clone(),
-                };
-                registry.register_with_source(
-                    MCPBridgeTool::new(tool_def.clone(), caller.clone(), server_name),
-                    source,
-                );
-            }
-            info!(
-                servers = server_count,
-                tools = tool_count,
-                "MCP initialized"
-            );
-            MCPInitResult {
-                runtime: Some(MCPRuntime {
-                    caller,
-                    server_count,
-                    tool_count,
-                    tools_with_source,
-                    server_scopes,
-                }),
-                statuses,
-            }
-        }
-        Ok(_) => MCPInitResult::default(),
-        Err(e) => {
-            warn!(error = %e, "Failed to load MCP config, continuing without MCP tools");
-            MCPInitResult::default()
-        }
     }
 }
 

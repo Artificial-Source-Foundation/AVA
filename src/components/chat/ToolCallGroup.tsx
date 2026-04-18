@@ -10,10 +10,16 @@
  *     └ src/components/chat/ToolCallCard.tsx
  *
  *   [check]  Read 3 files                    [4.1s] [v]   ← collapsed
+ *
+ * Improvements in Milestone 3:
+ * - Better focus-visible indicators for keyboard navigation
+ * - Improved indentation for nested tool calls (ml-8 with visual connector)
+ * - Smoother expand/collapse transitions
+ * - Clearer status badges with icons
  */
 
 import { ChevronRight, Layers } from 'lucide-solid'
-import { type Component, createEffect, createSignal, For, Show } from 'solid-js'
+import { type Component, createEffect, createSignal, createUniqueId, For, Show } from 'solid-js'
 import type { ToolCall } from '../../types'
 import { ToolCallCard } from './ToolCallCard'
 import { ToolIcon } from './tool-call-icon'
@@ -40,6 +46,7 @@ interface GroupHeaderProps {
 
 const GroupHeader: Component<GroupHeaderProps> = (props) => {
   const [expanded, setExpanded] = createSignal(false)
+  const contentId = createUniqueId()
 
   // Auto-expand when active, auto-collapse when complete (but not while streaming)
   createEffect(() => {
@@ -76,7 +83,9 @@ const GroupHeader: Component<GroupHeaderProps> = (props) => {
       <div
         role="button"
         tabIndex={0}
-        class="tool-card-header flex h-10 cursor-pointer select-none items-center gap-2.5 px-3.5 transition-colors duration-[var(--duration-fast)] hover:bg-[var(--alpha-white-5)]"
+        aria-expanded={expanded()}
+        aria-controls={contentId}
+        class="tool-card-header flex h-10 cursor-pointer select-none items-center gap-2.5 px-3.5 transition-colors duration-[var(--duration-fast)] hover:bg-[var(--alpha-white-5)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-inset"
         onClick={() => setExpanded((v) => !v)}
         onKeyDown={(e) => {
           if (e.key === 'Enter' || e.key === ' ') {
@@ -152,7 +161,10 @@ const GroupHeader: Component<GroupHeaderProps> = (props) => {
 
       {/* Expanded: individual cards */}
       <Show when={expanded()}>
-        <div class="flex flex-col gap-1 border-t border-[var(--border-default)] px-2 pb-2 pt-1">
+        <div
+          id={contentId}
+          class="flex flex-col gap-1 border-t border-[var(--border-default)] px-2 pb-2 pt-1"
+        >
           <For each={props.group.calls}>{(tc) => <ToolCallCard toolCall={tc} />}</For>
         </div>
       </Show>
@@ -185,10 +197,13 @@ interface ContextGroupHeaderProps {
  */
 export const ContextGroupHeader: Component<ContextGroupHeaderProps> = (props) => {
   const anyRunning = () => props.calls.some((c) => c.status === 'running' || c.status === 'pending')
+  const anyPending = () => props.calls.some((c) => c.status === 'pending')
+  const anyActive = () => props.calls.some((c) => c.status === 'running')
   const anyError = () => props.calls.some((c) => c.status === 'error')
   const allDone = () => props.calls.every((c) => c.status === 'success' || c.status === 'error')
 
   const [expanded, setExpanded] = createSignal(false)
+  const contentId = createUniqueId()
 
   createEffect(() => {
     if (anyRunning()) {
@@ -199,7 +214,8 @@ export const ContextGroupHeader: Component<ContextGroupHeaderProps> = (props) =>
   })
 
   const label = () => {
-    if (anyRunning()) return `Gathering context... (${props.calls.length})`
+    if (anyActive()) return `Gathering context... (${props.calls.length})`
+    if (anyPending()) return `Waiting for tools... (${props.calls.length})`
     return describeContextGroup(props.calls)
   }
 
@@ -218,6 +234,16 @@ export const ContextGroupHeader: Component<ContextGroupHeaderProps> = (props) =>
     return formatDuration(total)
   }
 
+  // Progress stats for context gathering
+  const progressStats = () => {
+    const total = props.calls.length
+    const done = props.calls.filter((c) => c.status === 'success').length
+    const running = props.calls.filter((c) => c.status === 'running').length
+    const pending = props.calls.filter((c) => c.status === 'pending').length
+    const failed = props.calls.filter((c) => c.status === 'error').length
+    return { done, running, pending, failed, total }
+  }
+
   return (
     <div
       class="chat-tool-shell animate-tool-card-in overflow-hidden rounded-[10px]"
@@ -234,7 +260,10 @@ export const ContextGroupHeader: Component<ContextGroupHeaderProps> = (props) =>
       <div
         role="button"
         tabIndex={0}
-        class="tool-card-header flex cursor-pointer select-none items-center gap-2 px-3.5 transition-colors duration-[var(--duration-fast)] hover:bg-[var(--alpha-white-5)]"
+        aria-expanded={expanded()}
+        aria-controls={contentId}
+        class="tool-card-header flex cursor-pointer select-none items-center gap-2 px-3.5 transition-colors duration-[var(--duration-fast)] hover:bg-[var(--alpha-white-5)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-inset"
+        classList={{ 'tool-card-header--running': anyActive() }}
         style={{ height: '42px' }}
         onClick={() => setExpanded((v) => !v)}
         onKeyDown={(e) => {
@@ -244,20 +273,31 @@ export const ContextGroupHeader: Component<ContextGroupHeaderProps> = (props) =>
           }
         }}
       >
-        {/* Layers icon in amber for gathered context */}
+        {/* Layers icon - amber when active, muted when pending, gray when done */}
         <Layers
           class="flex-shrink-0"
-          style={{ width: '16px', height: '16px', color: 'var(--warning)' }}
+          style={{
+            width: '16px',
+            height: '16px',
+            color: anyActive()
+              ? 'var(--warning)'
+              : anyPending()
+                ? 'var(--text-muted)'
+                : 'var(--text-tertiary)',
+            opacity: anyPending() ? 0.7 : 1,
+          }}
         />
 
         <div class="flex flex-col min-w-0 flex-1">
           <span
             class="truncate"
+            classList={{ 'tool-summary-shimmer tool-summary-shimmer--running': anyActive() }}
             style={{
               'font-family': 'var(--font-ui), Geist, sans-serif',
               'font-size': '13px',
               'font-weight': '500',
               color: 'var(--text-primary)',
+              opacity: anyPending() ? 0.7 : 1,
             }}
           >
             {label()}
@@ -276,21 +316,59 @@ export const ContextGroupHeader: Component<ContextGroupHeaderProps> = (props) =>
           </Show>
         </div>
 
-        {/* Count badge */}
-        <span
-          class="tabular-nums"
-          style={{
-            'font-family': 'var(--font-ui-mono), Geist Mono, monospace',
-            'font-size': '10px',
-            'font-weight': '500',
-            color: 'var(--text-tertiary)',
-            background: 'var(--alpha-white-8)',
-            padding: '2px 6px',
-            'border-radius': '4px',
-          }}
-        >
-          {props.calls.length}
-        </span>
+        {/* Active progress indicator - shows running count */}
+        <Show when={anyActive()}>
+          <span
+            class="tabular-nums"
+            style={{
+              'font-family': 'var(--font-ui-mono), Geist Mono, monospace',
+              'font-size': '10px',
+              'font-weight': '500',
+              color: 'var(--warning)',
+              background: 'var(--warning-subtle)',
+              padding: '2px 6px',
+              'border-radius': '4px',
+            }}
+          >
+            {progressStats().running} active
+          </span>
+        </Show>
+
+        {/* Pending indicator */}
+        <Show when={anyPending() && !anyActive()}>
+          <span
+            class="tabular-nums"
+            style={{
+              'font-family': 'var(--font-ui-mono), Geist Mono, monospace',
+              'font-size': '10px',
+              'font-weight': '500',
+              color: 'var(--text-muted)',
+              background: 'var(--alpha-white-8)',
+              padding: '2px 6px',
+              'border-radius': '4px',
+            }}
+          >
+            {progressStats().pending} pending
+          </span>
+        </Show>
+
+        {/* Error indicator */}
+        <Show when={anyError() && !anyRunning()}>
+          <span
+            class="tabular-nums"
+            style={{
+              'font-family': 'var(--font-ui-mono), Geist Mono, monospace',
+              'font-size': '10px',
+              'font-weight': '500',
+              color: 'var(--error)',
+              background: 'var(--error-subtle)',
+              padding: '2px 6px',
+              'border-radius': '4px',
+            }}
+          >
+            {progressStats().failed} failed
+          </span>
+        </Show>
 
         {/* Duration */}
         <Show when={totalDuration()}>
@@ -298,9 +376,8 @@ export const ContextGroupHeader: Component<ContextGroupHeaderProps> = (props) =>
             class="tabular-nums whitespace-nowrap"
             style={{
               'font-family': 'var(--font-ui-mono), Geist Mono, monospace',
-              'font-size': '12px',
-              'font-weight': '600',
-              color: 'var(--text-primary)',
+              'font-size': '11px',
+              color: 'var(--text-muted)',
             }}
           >
             {totalDuration()}
@@ -314,10 +391,21 @@ export const ContextGroupHeader: Component<ContextGroupHeaderProps> = (props) =>
         />
       </div>
 
-      {/* Expanded: individual tool cards -- indented nested rows */}
+      {/* Expanded: individual tool cards -- indented nested rows with visual connector */}
       <Show when={expanded()}>
-        <div class="flex flex-col gap-1 border-t border-[var(--border-subtle)] pb-2 pl-7 pr-2 pt-1">
-          <For each={props.calls}>{(tc) => <ToolCallCard toolCall={tc} />}</For>
+        <div
+          id={contentId}
+          class="flex flex-col gap-1.5 border-t border-[var(--border-subtle)] pb-2 pt-2"
+          style={{ 'padding-left': '44px', 'padding-right': '12px' }}
+        >
+          <div class="relative">
+            {/* Visual connector line for nested tools */}
+            <div
+              class="absolute left-[-20px] top-0 bottom-0 w-px bg-[var(--border-subtle)]"
+              aria-hidden="true"
+            />
+            <For each={props.calls}>{(tc) => <ToolCallCard toolCall={tc} />}</For>
+          </div>
         </div>
       </Show>
     </div>
@@ -379,6 +467,7 @@ function toolSummary(calls: ToolCall[]): string {
 export const ToolCallGroup: Component<ToolCallGroupProps> = (props) => {
   const groups = () => groupToolCalls(props.toolCalls)
   const [expanded, setExpanded] = createSignal(false)
+  const contentId = createUniqueId()
 
   // Auto-expand while streaming (tools actively running), collapse when done
   createEffect(() => {
@@ -431,7 +520,9 @@ export const ToolCallGroup: Component<ToolCallGroupProps> = (props) => {
         <div
           role="button"
           tabIndex={0}
-          class="tool-card-header flex h-10 cursor-pointer select-none items-center gap-2.5 px-3.5 transition-colors hover:bg-[var(--alpha-white-5)]"
+          aria-expanded={expanded()}
+          aria-controls={contentId}
+          class="tool-card-header flex h-10 cursor-pointer select-none items-center gap-2.5 px-3.5 transition-colors hover:bg-[var(--alpha-white-5)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-inset"
           onClick={() => setExpanded((v) => !v)}
           onKeyDown={(e) => {
             if (e.key === 'Enter' || e.key === ' ') {
@@ -497,7 +588,10 @@ export const ToolCallGroup: Component<ToolCallGroupProps> = (props) => {
 
         {/* Expanded: show per-type sub-groups */}
         <Show when={expanded()}>
-          <div class="flex flex-col gap-1 border-t border-[var(--border-default)] px-2 pb-2 pt-1">
+          <div
+            id={contentId}
+            class="flex flex-col gap-1 border-t border-[var(--border-default)] px-2 pb-2 pt-1"
+          >
             <For each={groups()}>
               {(group) => (
                 <Show

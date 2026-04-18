@@ -304,7 +304,7 @@ mod tests {
     #[tokio::test]
     async fn create_session_command_persists_sessions_before_active_session_checks() {
         let dir = tempdir().expect("temp dir should be created");
-        let bridge = DesktopBridge::init(dir.path().to_path_buf())
+        let bridge = DesktopBridge::init_for_tests(dir.path().to_path_buf())
             .await
             .expect("bridge should initialize");
 
@@ -324,7 +324,7 @@ mod tests {
     #[tokio::test]
     async fn set_active_session_command_reports_existing_session_and_updates_last_session() {
         let dir = tempdir().expect("temp dir should be created");
-        let bridge = DesktopBridge::init(dir.path().to_path_buf())
+        let bridge = DesktopBridge::init_for_tests(dir.path().to_path_buf())
             .await
             .expect("bridge should initialize");
 
@@ -350,7 +350,7 @@ mod tests {
     #[tokio::test]
     async fn set_active_session_command_reports_missing_sessions_without_throwing() {
         let dir = tempdir().expect("temp dir should be created");
-        let bridge = DesktopBridge::init(dir.path().to_path_buf())
+        let bridge = DesktopBridge::init_for_tests(dir.path().to_path_buf())
             .await
             .expect("bridge should initialize");
         let missing = uuid::Uuid::new_v4().to_string();
@@ -368,7 +368,7 @@ mod tests {
     #[tokio::test]
     async fn set_active_session_command_materializes_missing_sessions_from_frontend_snapshot() {
         let dir = tempdir().expect("temp dir should be created");
-        let bridge = DesktopBridge::init(dir.path().to_path_buf())
+        let bridge = DesktopBridge::init_for_tests(dir.path().to_path_buf())
             .await
             .expect("bridge should initialize");
         let missing = uuid::Uuid::new_v4().to_string();

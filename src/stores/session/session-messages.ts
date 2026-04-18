@@ -5,9 +5,11 @@
 
 import { isTauri } from '@tauri-apps/api/core'
 import { log } from '../../lib/logger'
+import { mergeMessagesWithExisting, mergeMessageWithBackend } from '../../lib/tool-call-state'
 import {
   deleteMessageFromDb as dbDeleteMessage,
   deleteMessagesFromTimestamp as dbDeleteMessagesFromTimestamp,
+  deleteSessionMessages as dbDeleteSessionMessages,
   insertMessages as dbInsertMessages,
   updateMessage as dbUpdateMessage,
   getMessages,
@@ -15,6 +17,7 @@ import {
 import { logError } from '../../services/logger'
 import type { Message, MessageError } from '../../types'
 import { createLatestRequestGate } from './request-gate'
+import { getCachedSessionArtifacts, updateCachedSessionArtifacts } from './session-artifact-cache'
 import {
   currentSession,
   messages,
@@ -38,6 +41,16 @@ import {
 
 const pendingInserts = new Map<string, Promise<void>>()
 const loadMessagesGate = createLatestRequestGate()
+
+function updateCachedSessionMessages(
+  sessionId: string,
+  updater: (messages: Message[]) => Message[]
+): void {
+  updateCachedSessionArtifacts(sessionId, (snapshot) => ({
+    ...snapshot,
+    messages: updater(snapshot.messages),
+  }))
+}
 
 function persistMessageInsert(message: Message): void {
   // In web mode the Rust agent is the single source of truth for persistence.
@@ -139,6 +152,7 @@ export function addMessage(message: Message): void {
 
   // Update frontend state immediately
   setMessages((prev) => [...prev, message])
+  updateCachedSessionMessages(message.sessionId, (prev) => [...prev, message])
 
   setSessions((prev) =>
     prev.map((s) =>
@@ -172,20 +186,43 @@ export function addMessageToSession(message: Message): void {
     sessionId: message.sessionId,
   })
   persistMessageInsert(message)
+  updateCachedSessionMessages(message.sessionId, (prev) => [...prev, message])
 }
 
 export function updateMessageContent(id: string, content: string): void {
-  setMessages((prev) => prev.map((msg) => (msg.id === id ? { ...msg, content } : msg)))
+  let updatedSessionId: string | null = null
+  setMessages((prev) =>
+    prev.map((msg) => {
+      if (msg.id !== id) {
+        return msg
+      }
+      updatedSessionId = msg.sessionId
+      return { ...msg, content }
+    })
+  )
+  if (updatedSessionId) {
+    updateCachedSessionMessages(updatedSessionId, (prev) =>
+      prev.map((msg) => (msg.id === id ? { ...msg, content } : msg))
+    )
+  }
 }
 
 export function updateMessage(id: string, updates: Partial<Message>): void {
+  let updatedSessionId: string | null = null
   setMessages((prev) => {
     const idx = prev.findIndex((msg) => msg.id === id)
     if (idx === -1) return prev
+    updatedSessionId = prev[idx]?.sessionId ?? null
     const next = prev.slice()
     next[idx] = { ...prev[idx], ...updates }
     return next
   })
+
+  if (updatedSessionId) {
+    updateCachedSessionMessages(updatedSessionId, (prev) =>
+      prev.map((msg) => (msg.id === id ? { ...msg, ...updates } : msg))
+    )
+  }
 
   persistMessageUpdate(id, updates)
 }
@@ -205,18 +242,41 @@ export function updateMessageInSession(
   }
 
   log.debug('session', 'Persisting message update for inactive session', { id, sessionId })
+  updateCachedSessionMessages(sessionId, (prev) =>
+    prev.map((msg) => (msg.id === id ? { ...msg, ...updates } : msg))
+  )
   persistMessageUpdate(id, updates)
 }
 
 export function setMessageError(messageId: string, error: MessageError | null): void {
+  let updatedSessionId: string | null = null
   setMessages((prev) =>
-    prev.map((msg) => (msg.id === messageId ? { ...msg, error: error || undefined } : msg))
+    prev.map((msg) => {
+      if (msg.id !== messageId) {
+        return msg
+      }
+      updatedSessionId = msg.sessionId
+      return { ...msg, error: error || undefined }
+    })
   )
+  if (updatedSessionId) {
+    updateCachedSessionMessages(updatedSessionId, (prev) =>
+      prev.map((msg) => (msg.id === messageId ? { ...msg, error: error || undefined } : msg))
+    )
+  }
 }
 
 export async function deleteMessage(id: string): Promise<void> {
   log.debug('session', 'Message deleted', { id })
-  setMessages((prev) => prev.filter((msg) => msg.id !== id))
+  let deletedSessionId: string | null = null
+  setMessages((prev) => {
+    const match = prev.find((msg) => msg.id === id)
+    deletedSessionId = match?.sessionId ?? deletedSessionId
+    return prev.filter((msg) => msg.id !== id)
+  })
+  if (deletedSessionId) {
+    updateCachedSessionMessages(deletedSessionId, (prev) => prev.filter((msg) => msg.id !== id))
+  }
   await persistMessageDelete(id)
 }
 
@@ -231,6 +291,7 @@ export async function deleteMessageInSession(sessionId: string, id: string): Pro
   }
 
   log.debug('session', 'Persisting message delete for inactive session', { id, sessionId })
+  updateCachedSessionMessages(sessionId, (prev) => prev.filter((msg) => msg.id !== id))
   await persistMessageDelete(id)
 }
 
@@ -268,19 +329,22 @@ export function deleteMessagesAfter(messageId: string): void {
  */
 export function replaceMessagesFromBackend(msgs: Message[]): void {
   const current = messages()
+  const recoveredMessages = mergeMessagesWithExisting(current, msgs)
 
   // Preserve locally-added tier messages (steering/follow-up/post-complete)
   // that the backend doesn't know about. These are user messages with a tier
   // in metadata that were added during mid-stream messaging.
   const localTierMsgs = current.filter(
-    (m) => m.metadata?.tier && !msgs.some((bm) => bm.id === m.id)
+    (m) => m.metadata?.tier && !recoveredMessages.some((bm) => bm.id === m.id)
   )
 
   // Merge: backend messages + any local tier messages that weren't in the backend set
   const merged =
     localTierMsgs.length > 0
-      ? [...msgs, ...localTierMsgs].sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0))
-      : msgs
+      ? [...recoveredMessages, ...localTierMsgs].sort(
+          (a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0)
+        )
+      : recoveredMessages
 
   // Smart comparison: IDs may differ between frontend-generated placeholders
   // and backend-persisted messages. Compare by role+content instead of just IDs
@@ -307,12 +371,52 @@ export function replaceMessagesFromBackend(msgs: Message[]): void {
         }
         // Adopt backend ID + metadata while preserving the SolidJS object identity
         // as much as possible to minimize DOM thrash
-        return { ...existing, ...incoming }
+        return mergeMessageWithBackend(existing, incoming)
       })
     )
   } else {
     setMessages(merged)
   }
+}
+
+export async function replaceMessagesFromBackendForSession(
+  sessionId: string,
+  msgs: Message[]
+): Promise<void> {
+  const existingMessagesForSession =
+    currentSession()?.id === sessionId
+      ? messages()
+      : (getCachedSessionArtifacts(sessionId)?.messages ?? [])
+  const mergedMessages = mergeMessagesWithExisting(existingMessagesForSession, msgs)
+
+  if (isTauri()) {
+    await Promise.allSettled([...pendingInserts.values()])
+    await dbDeleteSessionMessages(sessionId)
+    await dbInsertMessages(mergedMessages)
+  }
+
+  const totalTokens = mergedMessages.reduce((sum, message) => sum + (message.tokensUsed || 0), 0)
+  const lastPreview = mergedMessages[mergedMessages.length - 1]?.content.slice(0, 80) ?? ''
+
+  setSessions((prev) =>
+    prev.map((session) =>
+      session.id === sessionId
+        ? {
+            ...session,
+            messageCount: msgs.length,
+            totalTokens,
+            lastPreview,
+            updatedAt: Date.now(),
+          }
+        : session
+    )
+  )
+
+  if (currentSession()?.id === sessionId) {
+    replaceMessagesFromBackend(mergedMessages)
+  }
+
+  updateCachedSessionMessages(sessionId, () => mergedMessages)
 }
 
 export async function rollbackToMessage(messageId: string): Promise<void> {

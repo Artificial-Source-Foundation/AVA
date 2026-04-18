@@ -4,6 +4,12 @@
  * Extracted from useAgent.ts: steer, followUp, postComplete, cancel,
  * retry, regenerate, editAndResend, queue operations, approval/question/plan
  * resolution, plan mode, auto-approval, and state getters.
+ *
+ * Settlement coordination (message finalization, backend sync) is now delegated
+ * to the agent-settlement service to reduce duplication across retry/edit/regenerate.
+ * This file focuses on action orchestration and UI state management.
+ *
+ * @see src/services/agent-settlement.ts for settlement helpers
  */
 
 import { isTauri } from '@tauri-apps/api/core'
@@ -13,11 +19,24 @@ import { generateMessageId } from '../lib/ids'
 import { log } from '../lib/logger'
 import { checkAutoApproval as sharedCheckAutoApproval } from '../lib/tool-approval'
 import {
+  sessionOwnershipStillCurrent as checkSessionOwnershipStillCurrent,
+  createRunGuard,
+  isCancelledError,
+  type RunGuard,
+  resetAgentUiState,
+  restoreMessagesAndSetError,
+  settleCancelledAssistantMessage,
+  settleDetachedSessionResult,
+  settleErrorAssistantMessage,
+  settleSuccessAssistantMessage,
+  syncMessagesFromBackend,
+} from '../services/agent-settlement'
+import {
   ensureActiveSessionSynced,
   getCoreBudget,
   markActiveSessionSynced,
+  markSessionNeedsAuthoritativeRecovery,
 } from '../services/core-bridge'
-import { registerBackendSessionId } from '../services/db-web-fallback'
 import { rustAgent as rustAgentBridge, rustBackend } from '../services/rust-bridge'
 import type { Message } from '../types'
 import type { PlanData, PlanResponse } from '../types/rust-ipc'
@@ -32,6 +51,8 @@ export interface ActionDeps {
   rustAgent: ReturnType<typeof import('./use-rust-agent').useRustAgent>
   session: ReturnType<typeof import('../stores/session').useSession>
   settingsRef: ReturnType<typeof import('../stores/settings').useSettings>
+  sessionHasActiveRun?: (sessionId?: string | null) => boolean
+  onSessionRuntimeSettled?: (sessionId: string) => void
 
   // Signals
   isPlanMode: Accessor<boolean>
@@ -78,6 +99,8 @@ export function createAgentActions(deps: ActionDeps) {
     rustAgent,
     session,
     settingsRef,
+    sessionHasActiveRun,
+    onSessionRuntimeSettled,
     isPlanMode,
     setIsPlanMode,
     currentTurn,
@@ -104,6 +127,27 @@ export function createAgentActions(deps: ActionDeps) {
     streaming,
     runOwnership,
   } = deps
+  const targetSessionHasActiveRun = (sessionId?: string | null): boolean => {
+    if (sessionHasActiveRun) {
+      return sessionHasActiveRun(sessionId ?? null)
+    }
+
+    if (!rustAgent.isRunning()) {
+      return false
+    }
+
+    const trackedSessionId =
+      typeof rustAgent.trackedSessionId === 'function' ? rustAgent.trackedSessionId() : null
+    if (!trackedSessionId) {
+      return true
+    }
+
+    return trackedSessionId === (sessionId ?? session.currentSession()?.id ?? null)
+  }
+  const currentSessionHasActiveRun = (): boolean =>
+    targetSessionHasActiveRun(session.currentSession()?.id ?? null)
+  const currentSessionRunId = (): string | null =>
+    currentSessionHasActiveRun() ? rustAgent.currentRunId() : null
   const clearAllPendingInteractiveRequests = (): void => {
     if (clearPendingInteractiveRequests) {
       clearPendingInteractiveRequests()
@@ -145,10 +189,29 @@ export function createAgentActions(deps: ActionDeps) {
     }
   }
 
-  const visibleQueueIndicesForCurrentSession = (queue: QueuedMessage[]): number[] => {
+  type QueueMutationScope = 'all' | 'regular' | 'post-complete'
+  const queueScopeForTier = (tier?: QueuedMessage['tier']): QueueMutationScope =>
+    tier === 'post-complete' ? 'post-complete' : 'regular'
+
+  const visibleQueueIndicesForCurrentSession = (
+    queue: QueuedMessage[],
+    scope: QueueMutationScope = 'all'
+  ): number[] => {
     const currentSessionId = session.currentSession()?.id
 
     return queue.reduce<number[]>((indices, item, index) => {
+      if (item.sessionId && item.sessionId !== currentSessionId) {
+        return indices
+      }
+
+      if (scope === 'regular' && item.tier === 'post-complete') {
+        return indices
+      }
+
+      if (scope === 'post-complete' && item.tier !== 'post-complete') {
+        return indices
+      }
+
       if (!item.sessionId || item.sessionId === currentSessionId) {
         indices.push(index)
       }
@@ -172,56 +235,25 @@ export function createAgentActions(deps: ActionDeps) {
     return feedback?.trim() ? `${feedback.trim()}\n\n${commentsBlock}` : commentsBlock
   }
 
-  function beginRunGuard(sessionId: string): {
-    runToken: number
-    runIsCurrent: () => boolean
-    ownsOriginSession: () => boolean
-    canMutateOriginSession: () => boolean
-    settleMessageId: (fallbackId: string) => string
-    updateMessage: (messageId: string, updates: Partial<Message>) => void
-    deleteMessage: (messageId: string) => Promise<void>
-    clearRunUiIfCurrent: () => void
-  } {
-    const runToken = runOwnership.beginRun()
-    const runIsCurrent = (): boolean => runOwnership.isCurrentRun(runToken)
-    const ownsOriginSession = (): boolean => session.currentSession()?.id === sessionId
-    const canMutateOriginSession = (): boolean => runIsCurrent() && ownsOriginSession()
+  /**
+   * @deprecated Use createRunGuard from agent-settlement service directly.
+   * Kept for incremental migration; will be removed in follow-up refactor.
+   */
+  function beginRunGuard(sessionId: string): RunGuard {
+    return createRunGuard({
+      sessionId,
+      session,
+      liveMessageId,
+      setLiveMessageId,
+      setStreamingStartedAt,
+      runOwnership,
+      rustAgent,
+    })
+  }
 
-    return {
-      runToken,
-      runIsCurrent,
-      ownsOriginSession,
-      canMutateOriginSession,
-      settleMessageId: (fallbackId: string): string => {
-        if (runIsCurrent()) {
-          return liveMessageId() || fallbackId
-        }
-        return fallbackId
-      },
-      updateMessage: (messageId: string, updates: Partial<Message>): void => {
-        if (ownsOriginSession()) {
-          session.updateMessage(messageId, updates)
-          return
-        }
-        session.updateMessageInSession?.(sessionId, messageId, updates)
-      },
-      deleteMessage: async (messageId: string): Promise<void> => {
-        if (ownsOriginSession()) {
-          await session.deleteMessage(messageId)
-          return
-        }
-        await session.deleteMessageInSession?.(sessionId, messageId)
-      },
-      clearRunUiIfCurrent: (): void => {
-        if (!runIsCurrent()) {
-          return
-        }
-        batch(() => {
-          rustAgent.endRun()
-          setLiveMessageId(null)
-          setStreamingStartedAt(null)
-        })
-      },
+  const settleSessionRuntimeCache = (sessionId: string | null | undefined): void => {
+    if (sessionId) {
+      onSessionRuntimeSettled?.(sessionId)
     }
   }
 
@@ -250,30 +282,28 @@ export function createAgentActions(deps: ActionDeps) {
     }
   }
 
+  /**
+   * @deprecated Use checkSessionOwnershipStillCurrent from agent-settlement service.
+   * Kept as thin wrapper for incremental migration.
+   */
   function sessionOwnershipStillCurrent(
     initiatingSessionId: string | null,
     action: 'retry' | 'edit-and-resend' | 'regenerate',
     messageId: string
   ): boolean {
-    if (!initiatingSessionId) {
-      return true
-    }
-
     const currentSessionId = session.currentSession()?.id ?? null
-    if (currentSessionId === initiatingSessionId) {
-      return true
-    }
-
-    log.info('agent', 'Desktop session action aborted after session switch', {
-      action,
-      messageId,
+    return checkSessionOwnershipStillCurrent(
       initiatingSessionId,
       currentSessionId,
-    })
-    return false
+      action,
+      messageId
+    )
   }
 
   function cancel(): void {
+    if (!currentSessionHasActiveRun()) {
+      return
+    }
     log.info('agent', 'Cancel requested by user')
     void rustAgent.cancel()
     batch(() => {
@@ -286,6 +316,9 @@ export function createAgentActions(deps: ActionDeps) {
   }
 
   function steer(content: string): void {
+    if (!currentSessionHasActiveRun()) {
+      return
+    }
     // Snapshot the current streaming state into the existing assistant placeholder
     // so it becomes a finalized message. Then create a new placeholder for post-
     // steering content.
@@ -346,6 +379,10 @@ export function createAgentActions(deps: ActionDeps) {
   async function followUp(content: string, sessionId?: string): Promise<void> {
     const queueSessionId = sessionId ?? session.currentSession()?.id
 
+    if (!targetSessionHasActiveRun(queueSessionId ?? null)) {
+      throw new Error('Agent is not running')
+    }
+
     await rustAgent.followUp(content, queueSessionId)
     setMessageQueue((prev) => [
       ...prev,
@@ -360,6 +397,10 @@ export function createAgentActions(deps: ActionDeps) {
 
   async function postComplete(content: string, group?: number, sessionId?: string): Promise<void> {
     const queueSessionId = sessionId ?? session.currentSession()?.id
+
+    if (!targetSessionHasActiveRun(queueSessionId ?? null)) {
+      throw new Error('Agent is not running')
+    }
 
     await rustAgent.postComplete(content, group, queueSessionId)
     setMessageQueue((prev) => [
@@ -387,18 +428,18 @@ export function createAgentActions(deps: ActionDeps) {
     return sharedCheckAutoApproval(toolName, args, settingsRef.isToolAutoApproved)
   }
 
-  function resolveApproval(approved: boolean, alwaysAllow?: boolean): void {
+  function resolveApproval(approved: boolean, alwaysAllow?: boolean): Promise<void> {
     log.info('tools', 'Approval resolved', { approved, alwaysAllow: alwaysAllow ?? false })
     const current = pendingApproval()
     if (!current) {
-      return
+      return Promise.reject(new Error('Cannot resolve approval: no pending approval'))
     }
     const decision: 'once' | 'always' | 'denied' = !approved
       ? 'denied'
       : alwaysAllow
         ? 'always'
         : 'once'
-    void rustAgentBridge
+    return rustAgentBridge
       .resolveApproval(current.id, approved, alwaysAllow ?? false)
       .then(() => {
         rustAgent.markToolApproval(current.toolName, decision, current.toolCallId)
@@ -406,22 +447,24 @@ export function createAgentActions(deps: ActionDeps) {
       })
       .catch((err) => {
         log.error('error', 'Failed to resolve approval', { error: String(err) })
+        throw err
       })
   }
 
-  function resolveQuestion(answer: string): void {
+  function resolveQuestion(answer: string): Promise<void> {
     log.info('agent', 'Question resolved', { answerLength: answer.length })
     const current = deps.pendingQuestion()
     if (!current) {
-      return
+      return Promise.reject(new Error('Cannot resolve question: no pending question'))
     }
-    void rustAgentBridge
+    return rustAgentBridge
       .resolveQuestion(current.id, answer)
       .then(() => {
         clearResolvedQuestion(current.id)
       })
       .catch((err) => {
         log.error('error', 'Failed to resolve question', { error: String(err) })
+        throw err
       })
   }
 
@@ -430,15 +473,16 @@ export function createAgentActions(deps: ActionDeps) {
     modifiedPlan?: PlanData,
     feedback?: string,
     stepComments?: Record<string, string>
-  ): void {
+  ): Promise<void> {
     log.info('agent', 'Plan resolved', { response, hasFeedback: !!feedback })
     const current = deps.pendingPlan()
     if (!current) {
-      return
+      return Promise.reject(new Error('Cannot resolve plan: no pending plan'))
     }
     if (!current.requestId) {
-      log.error('error', 'Cannot resolve plan without requestId')
-      return
+      const error = new Error('Cannot resolve plan without requestId')
+      log.error('error', error.message)
+      return Promise.reject(error)
     }
     const sanitizedModifiedPlan = modifiedPlan
       ? (() => {
@@ -447,13 +491,14 @@ export function createAgentActions(deps: ActionDeps) {
         })()
       : null
     const mergedFeedback = mergePlanFeedback(feedback, stepComments)
-    void rustAgentBridge
+    return rustAgentBridge
       .resolvePlan(current.requestId, response, sanitizedModifiedPlan, mergedFeedback ?? null)
       .then(() => {
         clearResolvedPlan(current.requestId)
       })
       .catch((err) => {
         log.error('error', 'Failed to resolve plan', { error: String(err) })
+        throw err
       })
   }
 
@@ -477,9 +522,9 @@ export function createAgentActions(deps: ActionDeps) {
     }
   }
 
-  function removeFromQueue(index: number): void {
+  function removeFromQueue(index: number, scope: QueueMutationScope = 'all'): void {
     setMessageQueue((prev) => {
-      const visibleIndices = visibleQueueIndicesForCurrentSession(prev)
+      const visibleIndices = visibleQueueIndicesForCurrentSession(prev, scope)
       if (index < 0 || index >= visibleIndices.length) return prev
 
       const fullIndex = visibleIndices[index]
@@ -489,9 +534,13 @@ export function createAgentActions(deps: ActionDeps) {
     })
   }
 
-  function reorderInQueue(fromIndex: number, toIndex: number): void {
+  function reorderInQueue(
+    fromIndex: number,
+    toIndex: number,
+    scope: QueueMutationScope = 'all'
+  ): void {
     setMessageQueue((prev) => {
-      const visibleIndices = visibleQueueIndicesForCurrentSession(prev)
+      const visibleIndices = visibleQueueIndicesForCurrentSession(prev, scope)
       if (fromIndex < 0 || fromIndex >= visibleIndices.length) return prev
       if (toIndex < 0 || toIndex >= visibleIndices.length) return prev
 
@@ -499,6 +548,28 @@ export function createAgentActions(deps: ActionDeps) {
       const toFullIndex = visibleIndices[toIndex]
       if (fromFullIndex === undefined || toFullIndex === undefined) return prev
       if (prev[fromFullIndex]?.backendManaged || prev[toFullIndex]?.backendManaged) return prev
+      const fromScope = queueScopeForTier(prev[fromFullIndex]?.tier)
+      const toScope = queueScopeForTier(prev[toFullIndex]?.tier)
+      if (fromScope !== toScope) {
+        return prev
+      }
+      const step = fromIndex < toIndex ? 1 : -1
+      for (
+        let visibleIndex = fromIndex + step;
+        visibleIndex !== toIndex + step;
+        visibleIndex += step
+      ) {
+        const traversedFullIndex = visibleIndices[visibleIndex]
+        if (traversedFullIndex === undefined) {
+          return prev
+        }
+        if (queueScopeForTier(prev[traversedFullIndex]?.tier) !== fromScope) {
+          return prev
+        }
+      }
+      if (prev[toFullIndex]?.backendManaged) {
+        return prev
+      }
 
       const reorderedVisibleItems = visibleIndices.map((fullIndex) => prev[fullIndex]!)
       const [item] = reorderedVisibleItems.splice(fromIndex, 1)
@@ -514,9 +585,9 @@ export function createAgentActions(deps: ActionDeps) {
     })
   }
 
-  function editInQueue(index: number, newContent: string): void {
+  function editInQueue(index: number, newContent: string, scope: QueueMutationScope = 'all'): void {
     setMessageQueue((prev) => {
-      const visibleIndices = visibleQueueIndicesForCurrentSession(prev)
+      const visibleIndices = visibleQueueIndicesForCurrentSession(prev, scope)
       if (index < 0 || index >= visibleIndices.length) return prev
 
       const fullIndex = visibleIndices[index]
@@ -541,7 +612,7 @@ export function createAgentActions(deps: ActionDeps) {
   }
 
   async function retryMessage(assistantMessageId: string): Promise<void> {
-    if (rustAgent.isRunning()) return
+    if (currentSessionHasActiveRun()) return
     log.info('agent', 'Retrying last message', { assistantMessageId })
     const initiatingSessionId = session.currentSession()?.id ?? null
 
@@ -557,17 +628,18 @@ export function createAgentActions(deps: ActionDeps) {
       return
     }
 
-    // ── 1. Reset agent UI state ──────────────────────────────────────
-    batch(() => {
-      setCurrentThought('')
-      setDoomLoopDetected(false)
-      setToolActivity([])
-      setStreamingTokenEstimate(0)
-      setStreamingStartedAt(Date.now())
-      streaming.setStreamingContentOffset(0)
-      streaming.setToolCallsOffset(0)
-      streaming.setThinkingSegmentsOffset(0)
-    })
+    // ── 1. Reset agent UI state via settlement service ───────────────
+    resetAgentUiState(
+      {
+        setCurrentThought,
+        setDoomLoopDetected,
+        setToolActivity,
+        setStreamingTokenEstimate,
+        setStreamingStartedAt,
+        streaming,
+      },
+      Date.now()
+    )
 
     // ── 2. Clear the error from the existing assistant message and reuse it ──
     const selectedModelId = session.selectedModel()
@@ -590,120 +662,123 @@ export function createAgentActions(deps: ActionDeps) {
       const result = await rustAgent.retryRun(replaySessionId)
       const errorText = rustAgent.error()
 
+      // Check for detached session (off-screen completion)
+      const detachedSessionId =
+        result?.detachedSessionId ??
+        (typeof rustAgent.detachedSessionId === 'function' ? rustAgent.detachedSessionId() : null)
+      if (!errorText && detachedSessionId === replaySessionId) {
+        const wasDetachedSettlement = await settleDetachedSessionResult(
+          runGuard,
+          detachedSessionId,
+          replaySessionId,
+          {
+            content: rustAgent.streamingContent(),
+            thinking: rustAgent.thinkingContent(),
+            segments: rustAgent.thinkingSegments(),
+            toolCalls: rustAgent.activeToolCalls(),
+            contentOffset: streaming.streamingContentOffset(),
+            segmentsOffset: streaming.thinkingSegmentsOffset(),
+            toolCallsOffset: streaming.toolCallsOffset(),
+            tokensUsed: rustAgent.tokenUsage().output,
+            costUSD: rustAgent.tokenUsage().cost,
+            elapsedMs: Date.now() - runStartedAt,
+            provider: selectedProviderId,
+            model: selectedModelId,
+            mode: isPlanMode() ? 'plan' : 'code',
+          },
+          assistantMessageId,
+          markSessionNeedsAuthoritativeRecovery,
+          rustAgent.clearDetachedSessionId
+        )
+        if (wasDetachedSettlement) {
+          runGuard.clearRunUiIfCurrent()
+          settleSessionRuntimeCache(replaySessionId)
+          return
+        }
+      }
+
       if (errorText) {
-        const isCancelled =
-          errorText === 'Agent run cancelled by user' || errorText.includes('cancelled by user')
-        if (isCancelled) {
-          const partialContent = rustAgent.streamingContent()
-          const elapsedMs = Date.now() - runStartedAt
-          const retryMsgId = runGuard.settleMessageId(assistantMessageId)
-          if (partialContent) {
-            runGuard.updateMessage(retryMsgId, {
-              content: partialContent,
-              metadata: {
-                provider: selectedProviderId,
-                model: selectedModelId,
-                elapsedMs,
-                cancelled: true,
-              },
-            })
-          } else {
-            await runGuard.deleteMessage(retryMsgId)
-          }
+        if (isCancelledError(errorText)) {
+          await settleCancelledAssistantMessage(
+            runGuard,
+            {
+              content: rustAgent.streamingContent(),
+              thinking: rustAgent.thinkingContent(),
+              segments: rustAgent.thinkingSegments(),
+              toolCalls: rustAgent.activeToolCalls(),
+              tokensUsed: rustAgent.tokenUsage().output,
+              costUSD: rustAgent.tokenUsage().cost,
+              elapsedMs: Date.now() - runStartedAt,
+              provider: selectedProviderId,
+              model: selectedModelId,
+              mode: isPlanMode() ? 'plan' : 'code',
+            },
+            assistantMessageId
+          )
           runGuard.clearRunUiIfCurrent()
           return
         }
-        const retryMsgId = runGuard.settleMessageId(assistantMessageId)
-        runGuard.updateMessage(retryMsgId, {
-          content: '',
-          error: { type: 'unknown', message: errorText, timestamp: Date.now() },
-        })
+        await settleErrorAssistantMessage(runGuard, errorText, assistantMessageId)
         runGuard.clearRunUiIfCurrent()
         return
       }
 
       // ── 4. Settle the assistant response ───────────────────────────
-      const content = rustAgent.streamingContent()
-      const elapsedMs = Date.now() - runStartedAt
-      const thinking = rustAgent.thinkingContent()
-      const segments = rustAgent.thinkingSegments()
-
-      const retryMsgId = runGuard.settleMessageId(assistantMessageId)
-      if (content) {
-        runGuard.updateMessage(retryMsgId, {
-          content,
-          tokensUsed: rustAgent.tokenUsage().output,
-          costUSD: rustAgent.tokenUsage().cost || undefined,
+      await settleSuccessAssistantMessage(
+        runGuard,
+        {
+          content: rustAgent.streamingContent(),
+          thinking: rustAgent.thinkingContent(),
+          segments: rustAgent.thinkingSegments(),
           toolCalls: rustAgent.activeToolCalls(),
-          metadata: {
-            provider: selectedProviderId,
-            model: selectedModelId,
-            mode: isPlanMode() ? 'plan' : 'code',
-            elapsedMs,
-            ...(thinking ? { thinking } : {}),
-            ...(segments.length > 1 ? { thinkingSegments: segments } : {}),
-          },
-        })
-      } else {
-        await runGuard.deleteMessage(retryMsgId)
-      }
+          tokensUsed: rustAgent.tokenUsage().output,
+          costUSD: rustAgent.tokenUsage().cost,
+          elapsedMs: Date.now() - runStartedAt,
+          provider: selectedProviderId,
+          model: selectedModelId,
+          mode: isPlanMode() ? 'plan' : 'code',
+        },
+        assistantMessageId
+      )
       runGuard.clearRunUiIfCurrent()
 
       // ── 5. Sync from backend in web mode ──────────────────────────
       const sessionId = session.currentSession()?.id ?? ''
       const backendSessionId = result?.sessionId || sessionId
-      if (backendSessionId && runGuard.canMutateOriginSession()) {
-        markActiveSessionSynced(backendSessionId)
+      if (backendSessionId && sessionId && runGuard.canMutateOriginSession()) {
+        markActiveSessionSynced(sessionId)
       }
       if (!isTauri() && backendSessionId && runGuard.canMutateOriginSession()) {
-        try {
-          const apiBase = (import.meta.env.VITE_API_URL as string) || ''
-          const res = await fetch(`${apiBase}/api/sessions/${backendSessionId}/messages`)
-          if (res.ok) {
-            const rawMsgs = (await res.json()) as Array<Record<string, unknown>>
-            const backendMsgs: Message[] = rawMsgs.map((m) => {
-              const metaRaw = m.metadata
-              const metadata =
-                typeof metaRaw === 'string'
-                  ? (JSON.parse(metaRaw) as Record<string, unknown>)
-                  : (metaRaw as Record<string, unknown> | undefined)
-              return {
-                id: m.id as string,
-                sessionId: backendSessionId,
-                role: m.role as Message['role'],
-                content: (m.content as string) ?? '',
-                createdAt:
-                  typeof m.created_at === 'number'
-                    ? m.created_at
-                    : typeof m.timestamp === 'string'
-                      ? new Date(m.timestamp).getTime()
-                      : Date.now(),
-                tokensUsed: (m.tokens_used as number) || undefined,
-                costUSD: (m.cost_usd as number | null) ?? undefined,
-                model: (m.model as string | null) ?? undefined,
-                metadata,
-                toolCalls: (metadata?.toolCalls as Message['toolCalls']) ?? undefined,
-              }
-            })
-            session.replaceMessagesFromBackend(backendMsgs)
-            registerBackendSessionId(sessionId, backendSessionId)
+        await syncMessagesFromBackend(
+          backendSessionId,
+          {
+            session,
+            markActiveSessionSynced,
+          },
+          {
+            originSessionId: sessionId,
+            assistantPayload: {
+              content: rustAgent.streamingContent(),
+              thinking: rustAgent.thinkingContent(),
+              segments: rustAgent.thinkingSegments(),
+              toolCalls: rustAgent.activeToolCalls(),
+              tokensUsed: rustAgent.tokenUsage().output,
+              costUSD: rustAgent.tokenUsage().cost,
+              elapsedMs: Date.now() - runStartedAt,
+              provider: selectedProviderId,
+              model: selectedModelId,
+              mode: isPlanMode() ? 'plan' : 'code',
+            },
           }
-        } catch (syncErr) {
-          log.warn('agent', 'Failed to sync messages from backend after retry', {
-            error: String(syncErr),
-          })
-        }
+        )
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       log.error('agent', 'Unexpected error in retryMessage', { error: msg })
-      const retryMsgId = runGuard.settleMessageId(assistantMessageId)
-      runGuard.updateMessage(retryMsgId, {
-        content: '',
-        error: { type: 'unknown', message: msg, timestamp: Date.now() },
-      })
+      await settleErrorAssistantMessage(runGuard, msg, assistantMessageId)
       runGuard.clearRunUiIfCurrent()
     } finally {
+      settleSessionRuntimeCache(replaySessionId)
       if (runGuard.runIsCurrent()) {
         batch(() => {
           setStreamingStartedAt(null)
@@ -714,7 +789,7 @@ export function createAgentActions(deps: ActionDeps) {
   }
 
   async function editAndResend(messageId: string, newContent: string): Promise<void> {
-    if (rustAgent.isRunning()) return
+    if (currentSessionHasActiveRun()) return
     log.info('agent', 'Edit and resend', { messageId, contentLength: newContent.length })
     const initiatingSessionId = session.currentSession()?.id ?? null
     const originalMessages = !isTauri()
@@ -739,17 +814,18 @@ export function createAgentActions(deps: ActionDeps) {
       session.stopEditing()
     })
 
-    // ── 2. Reset agent UI state ──────────────────────────────────────
-    batch(() => {
-      setCurrentThought('')
-      setDoomLoopDetected(false)
-      setToolActivity([])
-      setStreamingTokenEstimate(0)
-      setStreamingStartedAt(Date.now())
-      streaming.setStreamingContentOffset(0)
-      streaming.setToolCallsOffset(0)
-      streaming.setThinkingSegmentsOffset(0)
-    })
+    // ── 2. Reset agent UI state via settlement service ───────────────
+    resetAgentUiState(
+      {
+        setCurrentThought,
+        setDoomLoopDetected,
+        setToolActivity,
+        setStreamingTokenEstimate,
+        setStreamingStartedAt,
+        streaming,
+      },
+      Date.now()
+    )
 
     // Ensure a session exists
     let currentSess = session.currentSession()
@@ -806,137 +882,131 @@ export function createAgentActions(deps: ActionDeps) {
       const result = await rustAgent.editAndResendRun(messageId, newContent, replaySessionId)
       const errorText = rustAgent.error()
 
+      // Check for detached session (off-screen completion)
+      const detachedSessionId =
+        result?.detachedSessionId ??
+        (typeof rustAgent.detachedSessionId === 'function' ? rustAgent.detachedSessionId() : null)
+      if (!errorText && detachedSessionId === replaySessionId) {
+        const wasDetachedSettlement = await settleDetachedSessionResult(
+          runGuard,
+          detachedSessionId,
+          replaySessionId,
+          {
+            content: rustAgent.streamingContent(),
+            thinking: rustAgent.thinkingContent(),
+            segments: rustAgent.thinkingSegments(),
+            toolCalls: rustAgent.activeToolCalls(),
+            contentOffset: streaming.streamingContentOffset(),
+            segmentsOffset: streaming.thinkingSegmentsOffset(),
+            toolCallsOffset: streaming.toolCallsOffset(),
+            tokensUsed: rustAgent.tokenUsage().output,
+            costUSD: rustAgent.tokenUsage().cost,
+            elapsedMs: Date.now() - runStartedAt,
+            provider: selectedProviderId,
+            model: selectedModelId,
+            mode: isPlanMode() ? 'plan' : 'code',
+          },
+          assistantMsgId,
+          markSessionNeedsAuthoritativeRecovery,
+          rustAgent.clearDetachedSessionId
+        )
+        if (wasDetachedSettlement) {
+          runGuard.clearRunUiIfCurrent()
+          settleSessionRuntimeCache(replaySessionId)
+          return
+        }
+      }
+
       if (errorText) {
-        const isCancelled =
-          errorText === 'Agent run cancelled by user' || errorText.includes('cancelled by user')
-        if (isCancelled) {
-          const partialContent = rustAgent.streamingContent()
-          const elapsedMs = Date.now() - runStartedAt
-          const finalMsgId = runGuard.settleMessageId(assistantMsgId)
-          if (partialContent) {
-            runGuard.updateMessage(finalMsgId, {
-              content: partialContent,
-              metadata: {
-                provider: selectedProviderId,
-                model: selectedModelId,
-                elapsedMs,
-                cancelled: true,
-              },
-            })
-          } else {
-            await runGuard.deleteMessage(finalMsgId)
-          }
+        if (isCancelledError(errorText)) {
+          await settleCancelledAssistantMessage(
+            runGuard,
+            {
+              content: rustAgent.streamingContent(),
+              thinking: rustAgent.thinkingContent(),
+              segments: rustAgent.thinkingSegments(),
+              toolCalls: rustAgent.activeToolCalls(),
+              tokensUsed: rustAgent.tokenUsage().output,
+              costUSD: rustAgent.tokenUsage().cost,
+              elapsedMs: Date.now() - runStartedAt,
+              provider: selectedProviderId,
+              model: selectedModelId,
+              mode: isPlanMode() ? 'plan' : 'code',
+            },
+            assistantMsgId
+          )
           runGuard.clearRunUiIfCurrent()
           return
         }
-        const finalMsgId = runGuard.settleMessageId(assistantMsgId)
         if (!isTauri() && originalMessages) {
-          session.setMessages(originalMessages)
-          session.setMessageError(messageId, {
-            type: 'unknown',
-            message: errorText,
-            timestamp: Date.now(),
-          })
+          restoreMessagesAndSetError(session, originalMessages, messageId, errorText)
         } else {
-          runGuard.updateMessage(finalMsgId, {
-            content: '',
-            error: { type: 'unknown', message: errorText, timestamp: Date.now() },
-          })
+          await settleErrorAssistantMessage(runGuard, errorText, assistantMsgId)
         }
         runGuard.clearRunUiIfCurrent()
         return
       }
 
       // Settle the assistant response
-      const content = rustAgent.streamingContent()
-      const elapsedMs = Date.now() - runStartedAt
-      const thinking = rustAgent.thinkingContent()
-      const segments = rustAgent.thinkingSegments()
-
-      const finalMsgId = runGuard.settleMessageId(assistantMsgId)
-      if (content) {
-        runGuard.updateMessage(finalMsgId, {
-          content,
-          tokensUsed: rustAgent.tokenUsage().output,
-          costUSD: rustAgent.tokenUsage().cost || undefined,
+      await settleSuccessAssistantMessage(
+        runGuard,
+        {
+          content: rustAgent.streamingContent(),
+          thinking: rustAgent.thinkingContent(),
+          segments: rustAgent.thinkingSegments(),
           toolCalls: rustAgent.activeToolCalls(),
-          metadata: {
-            provider: selectedProviderId,
-            model: selectedModelId,
-            mode: isPlanMode() ? 'plan' : 'code',
-            elapsedMs,
-            ...(thinking ? { thinking } : {}),
-            ...(segments.length > 1 ? { thinkingSegments: segments } : {}),
-          },
-        })
-      } else {
-        await runGuard.deleteMessage(finalMsgId)
-      }
+          tokensUsed: rustAgent.tokenUsage().output,
+          costUSD: rustAgent.tokenUsage().cost,
+          elapsedMs: Date.now() - runStartedAt,
+          provider: selectedProviderId,
+          model: selectedModelId,
+          mode: isPlanMode() ? 'plan' : 'code',
+        },
+        assistantMsgId
+      )
       runGuard.clearRunUiIfCurrent()
 
       // Sync from backend in web mode
+      const sessionId = session.currentSession()?.id ?? ''
       const backendSessionId = result?.sessionId || sessionId
-      if (backendSessionId && runGuard.canMutateOriginSession()) {
-        markActiveSessionSynced(backendSessionId)
+      if (backendSessionId && sessionId && runGuard.canMutateOriginSession()) {
+        markActiveSessionSynced(sessionId)
       }
       if (!isTauri() && backendSessionId && runGuard.canMutateOriginSession()) {
-        try {
-          const apiBase = (import.meta.env.VITE_API_URL as string) || ''
-          const res = await fetch(`${apiBase}/api/sessions/${backendSessionId}/messages`)
-          if (res.ok) {
-            const rawMsgs = (await res.json()) as Array<Record<string, unknown>>
-            const backendMsgs: Message[] = rawMsgs.map((m) => {
-              const metaRaw = m.metadata
-              const metadata =
-                typeof metaRaw === 'string'
-                  ? (JSON.parse(metaRaw) as Record<string, unknown>)
-                  : (metaRaw as Record<string, unknown> | undefined)
-              return {
-                id: m.id as string,
-                sessionId: backendSessionId,
-                role: m.role as Message['role'],
-                content: (m.content as string) ?? '',
-                createdAt:
-                  typeof m.created_at === 'number'
-                    ? m.created_at
-                    : typeof m.timestamp === 'string'
-                      ? new Date(m.timestamp).getTime()
-                      : Date.now(),
-                tokensUsed: (m.tokens_used as number) || undefined,
-                costUSD: (m.cost_usd as number | null) ?? undefined,
-                model: (m.model as string | null) ?? undefined,
-                metadata,
-                toolCalls: (metadata?.toolCalls as Message['toolCalls']) ?? undefined,
-              }
-            })
-            session.replaceMessagesFromBackend(backendMsgs)
-            registerBackendSessionId(sessionId, backendSessionId)
+        await syncMessagesFromBackend(
+          backendSessionId,
+          {
+            session,
+            markActiveSessionSynced,
+          },
+          {
+            originSessionId: sessionId,
+            assistantPayload: {
+              content: rustAgent.streamingContent(),
+              thinking: rustAgent.thinkingContent(),
+              segments: rustAgent.thinkingSegments(),
+              toolCalls: rustAgent.activeToolCalls(),
+              tokensUsed: rustAgent.tokenUsage().output,
+              costUSD: rustAgent.tokenUsage().cost,
+              elapsedMs: Date.now() - runStartedAt,
+              provider: selectedProviderId,
+              model: selectedModelId,
+              mode: isPlanMode() ? 'plan' : 'code',
+            },
           }
-        } catch (syncErr) {
-          log.warn('agent', 'Failed to sync messages from backend after edit-resend', {
-            error: String(syncErr),
-          })
-        }
+        )
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       log.error('agent', 'Unexpected error in editAndResend', { error: msg })
       if (!isTauri() && originalMessages) {
-        session.setMessages(originalMessages)
-        session.setMessageError(messageId, {
-          type: 'unknown',
-          message: msg,
-          timestamp: Date.now(),
-        })
+        restoreMessagesAndSetError(session, originalMessages, messageId, msg)
       } else {
-        const finalMsgId = runGuard.settleMessageId(assistantMsgId)
-        runGuard.updateMessage(finalMsgId, {
-          content: `**Error:** ${msg}`,
-          error: { type: 'unknown', message: msg, timestamp: Date.now() },
-        })
+        await settleErrorAssistantMessage(runGuard, `**Error:** ${msg}`, assistantMsgId)
       }
       runGuard.clearRunUiIfCurrent()
     } finally {
+      settleSessionRuntimeCache(sessionId)
       if (runGuard.runIsCurrent()) {
         batch(() => {
           setStreamingStartedAt(null)
@@ -947,7 +1017,7 @@ export function createAgentActions(deps: ActionDeps) {
   }
 
   async function regenerateResponse(assistantMessageId: string): Promise<void> {
-    if (rustAgent.isRunning()) return
+    if (currentSessionHasActiveRun()) return
     log.info('agent', 'Regenerating response', { assistantMessageId })
     const initiatingSessionId = session.currentSession()?.id ?? null
 
@@ -963,17 +1033,18 @@ export function createAgentActions(deps: ActionDeps) {
       return
     }
 
-    // ── 1. Reset agent UI state ──────────────────────────────────────
-    batch(() => {
-      setCurrentThought('')
-      setDoomLoopDetected(false)
-      setToolActivity([])
-      setStreamingTokenEstimate(0)
-      setStreamingStartedAt(Date.now())
-      streaming.setStreamingContentOffset(0)
-      streaming.setToolCallsOffset(0)
-      streaming.setThinkingSegmentsOffset(0)
-    })
+    // ── 1. Reset agent UI state via settlement service ───────────────
+    resetAgentUiState(
+      {
+        setCurrentThought,
+        setDoomLoopDetected,
+        setToolActivity,
+        setStreamingTokenEstimate,
+        setStreamingStartedAt,
+        streaming,
+      },
+      Date.now()
+    )
 
     // ── 2. Clear the existing assistant message and reuse it ─────────
     const selectedModelId = session.selectedModel()
@@ -996,120 +1067,123 @@ export function createAgentActions(deps: ActionDeps) {
       const result = await rustAgent.regenerateRun(replaySessionId)
       const errorText = rustAgent.error()
 
+      // Check for detached session (off-screen completion)
+      const detachedSessionId =
+        result?.detachedSessionId ??
+        (typeof rustAgent.detachedSessionId === 'function' ? rustAgent.detachedSessionId() : null)
+      if (!errorText && detachedSessionId === replaySessionId) {
+        const wasDetachedSettlement = await settleDetachedSessionResult(
+          runGuard,
+          detachedSessionId,
+          replaySessionId,
+          {
+            content: rustAgent.streamingContent(),
+            thinking: rustAgent.thinkingContent(),
+            segments: rustAgent.thinkingSegments(),
+            toolCalls: rustAgent.activeToolCalls(),
+            contentOffset: streaming.streamingContentOffset(),
+            segmentsOffset: streaming.thinkingSegmentsOffset(),
+            toolCallsOffset: streaming.toolCallsOffset(),
+            tokensUsed: rustAgent.tokenUsage().output,
+            costUSD: rustAgent.tokenUsage().cost,
+            elapsedMs: Date.now() - runStartedAt,
+            provider: selectedProviderId,
+            model: selectedModelId,
+            mode: isPlanMode() ? 'plan' : 'code',
+          },
+          assistantMessageId,
+          markSessionNeedsAuthoritativeRecovery,
+          rustAgent.clearDetachedSessionId
+        )
+        if (wasDetachedSettlement) {
+          runGuard.clearRunUiIfCurrent()
+          settleSessionRuntimeCache(replaySessionId)
+          return
+        }
+      }
+
       if (errorText) {
-        const isCancelled =
-          errorText === 'Agent run cancelled by user' || errorText.includes('cancelled by user')
-        if (isCancelled) {
-          const partialContent = rustAgent.streamingContent()
-          const elapsedMs = Date.now() - runStartedAt
-          const regenerateMsgId = runGuard.settleMessageId(assistantMessageId)
-          if (partialContent) {
-            runGuard.updateMessage(regenerateMsgId, {
-              content: partialContent,
-              metadata: {
-                provider: selectedProviderId,
-                model: selectedModelId,
-                elapsedMs,
-                cancelled: true,
-              },
-            })
-          } else {
-            await runGuard.deleteMessage(regenerateMsgId)
-          }
+        if (isCancelledError(errorText)) {
+          await settleCancelledAssistantMessage(
+            runGuard,
+            {
+              content: rustAgent.streamingContent(),
+              thinking: rustAgent.thinkingContent(),
+              segments: rustAgent.thinkingSegments(),
+              toolCalls: rustAgent.activeToolCalls(),
+              tokensUsed: rustAgent.tokenUsage().output,
+              costUSD: rustAgent.tokenUsage().cost,
+              elapsedMs: Date.now() - runStartedAt,
+              provider: selectedProviderId,
+              model: selectedModelId,
+              mode: isPlanMode() ? 'plan' : 'code',
+            },
+            assistantMessageId
+          )
           runGuard.clearRunUiIfCurrent()
           return
         }
-        const regenerateMsgId = runGuard.settleMessageId(assistantMessageId)
-        runGuard.updateMessage(regenerateMsgId, {
-          content: '',
-          error: { type: 'unknown', message: errorText, timestamp: Date.now() },
-        })
+        await settleErrorAssistantMessage(runGuard, errorText, assistantMessageId)
         runGuard.clearRunUiIfCurrent()
         return
       }
 
       // ── 4. Settle the assistant response ───────────────────────────
-      const content = rustAgent.streamingContent()
-      const elapsedMs = Date.now() - runStartedAt
-      const thinking = rustAgent.thinkingContent()
-      const segments = rustAgent.thinkingSegments()
-
-      const regenerateMsgId = runGuard.settleMessageId(assistantMessageId)
-      if (content) {
-        runGuard.updateMessage(regenerateMsgId, {
-          content,
-          tokensUsed: rustAgent.tokenUsage().output,
-          costUSD: rustAgent.tokenUsage().cost || undefined,
+      await settleSuccessAssistantMessage(
+        runGuard,
+        {
+          content: rustAgent.streamingContent(),
+          thinking: rustAgent.thinkingContent(),
+          segments: rustAgent.thinkingSegments(),
           toolCalls: rustAgent.activeToolCalls(),
-          metadata: {
-            provider: selectedProviderId,
-            model: selectedModelId,
-            mode: isPlanMode() ? 'plan' : 'code',
-            elapsedMs,
-            ...(thinking ? { thinking } : {}),
-            ...(segments.length > 1 ? { thinkingSegments: segments } : {}),
-          },
-        })
-      } else {
-        await runGuard.deleteMessage(regenerateMsgId)
-      }
+          tokensUsed: rustAgent.tokenUsage().output,
+          costUSD: rustAgent.tokenUsage().cost,
+          elapsedMs: Date.now() - runStartedAt,
+          provider: selectedProviderId,
+          model: selectedModelId,
+          mode: isPlanMode() ? 'plan' : 'code',
+        },
+        assistantMessageId
+      )
       runGuard.clearRunUiIfCurrent()
 
       // ── 5. Sync from backend in web mode ──────────────────────────
       const sessionId = session.currentSession()?.id ?? ''
       const backendSessionId = result?.sessionId || sessionId
-      if (backendSessionId && runGuard.canMutateOriginSession()) {
-        markActiveSessionSynced(backendSessionId)
+      if (backendSessionId && sessionId && runGuard.canMutateOriginSession()) {
+        markActiveSessionSynced(sessionId)
       }
       if (!isTauri() && backendSessionId && runGuard.canMutateOriginSession()) {
-        try {
-          const apiBase = (import.meta.env.VITE_API_URL as string) || ''
-          const res = await fetch(`${apiBase}/api/sessions/${backendSessionId}/messages`)
-          if (res.ok) {
-            const rawMsgs = (await res.json()) as Array<Record<string, unknown>>
-            const backendMsgs: Message[] = rawMsgs.map((m) => {
-              const metaRaw = m.metadata
-              const metadata =
-                typeof metaRaw === 'string'
-                  ? (JSON.parse(metaRaw) as Record<string, unknown>)
-                  : (metaRaw as Record<string, unknown> | undefined)
-              return {
-                id: m.id as string,
-                sessionId: backendSessionId,
-                role: m.role as Message['role'],
-                content: (m.content as string) ?? '',
-                createdAt:
-                  typeof m.created_at === 'number'
-                    ? m.created_at
-                    : typeof m.timestamp === 'string'
-                      ? new Date(m.timestamp).getTime()
-                      : Date.now(),
-                tokensUsed: (m.tokens_used as number) || undefined,
-                costUSD: (m.cost_usd as number | null) ?? undefined,
-                model: (m.model as string | null) ?? undefined,
-                metadata,
-                toolCalls: (metadata?.toolCalls as Message['toolCalls']) ?? undefined,
-              }
-            })
-            session.replaceMessagesFromBackend(backendMsgs)
-            registerBackendSessionId(sessionId, backendSessionId)
+        await syncMessagesFromBackend(
+          backendSessionId,
+          {
+            session,
+            markActiveSessionSynced,
+          },
+          {
+            originSessionId: sessionId,
+            assistantPayload: {
+              content: rustAgent.streamingContent(),
+              thinking: rustAgent.thinkingContent(),
+              segments: rustAgent.thinkingSegments(),
+              toolCalls: rustAgent.activeToolCalls(),
+              tokensUsed: rustAgent.tokenUsage().output,
+              costUSD: rustAgent.tokenUsage().cost,
+              elapsedMs: Date.now() - runStartedAt,
+              provider: selectedProviderId,
+              model: selectedModelId,
+              mode: isPlanMode() ? 'plan' : 'code',
+            },
           }
-        } catch (syncErr) {
-          log.warn('agent', 'Failed to sync messages from backend after regenerate', {
-            error: String(syncErr),
-          })
-        }
+        )
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       log.error('agent', 'Unexpected error in regenerateResponse', { error: msg })
-      const regenerateMsgId = runGuard.settleMessageId(assistantMessageId)
-      runGuard.updateMessage(regenerateMsgId, {
-        content: '',
-        error: { type: 'unknown', message: msg, timestamp: Date.now() },
-      })
+      await settleErrorAssistantMessage(runGuard, msg, assistantMessageId)
       runGuard.clearRunUiIfCurrent()
     } finally {
+      settleSessionRuntimeCache(replaySessionId)
       if (runGuard.runIsCurrent()) {
         batch(() => {
           setStreamingStartedAt(null)
@@ -1120,7 +1194,10 @@ export function createAgentActions(deps: ActionDeps) {
   }
 
   async function undoLastEdit(): Promise<{ success: boolean; message: string }> {
-    const result = await rustBackend.undoLastEdit()
+    const result = await rustBackend.undoLastEdit({
+      runId: currentSessionRunId() ?? undefined,
+      sessionId: session.currentSession()?.id ?? undefined,
+    })
     return { success: result.success, message: result.message }
   }
 

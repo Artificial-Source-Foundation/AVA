@@ -12,15 +12,26 @@
  */
 
 import { isTauri } from '@tauri-apps/api/core'
-import { type Accessor, batch, createEffect, createSignal, on, type Setter } from 'solid-js'
-
+import {
+  type Accessor,
+  batch,
+  createEffect,
+  createMemo,
+  createSignal,
+  on,
+  type Setter,
+} from 'solid-js'
+import { createBoundedSessionCache } from '../lib/bounded-session-cache'
 import { debugLog } from '../lib/debug-log'
 import { log } from '../lib/logger'
 import { applyCompactionResult } from '../services/context-compaction'
 import { getCoreBudget } from '../services/core-bridge'
+import { getMessages } from '../services/database'
 import { useSession } from '../stores/session'
 import { useSettings } from '../stores/settings'
+import type { ToolCall } from '../types'
 import type {
+  AgentEvent,
   ApprovalRequestEvent,
   InteractiveRequestClearedEvent,
   PlanCreatedEvent,
@@ -29,7 +40,12 @@ import type {
 } from '../types/rust-ipc'
 import type { AgentState, ApprovalRequest, ToolActivity } from './agent'
 import type { QueuedMessage } from './chat/types'
-import { useRustAgent } from './use-rust-agent'
+import {
+  type AgentRehydrateResult,
+  type AgentRuntimeSnapshot,
+  type ThinkingSegment,
+  useRustAgent,
+} from './use-rust-agent'
 import { createAgentActions } from './useAgentActions'
 import { createAgentRun } from './useAgentRun'
 import { createAgentStreaming } from './useAgentStreaming'
@@ -49,6 +65,36 @@ type PendingRequestWithId = {
   id?: string
   requestId?: string
 }
+
+interface AgentUiRuntimeSnapshot {
+  isPlanMode: boolean
+  currentTurn: number
+  tokensUsed: number
+  currentThought: string
+  toolActivity: ToolActivity[]
+  visiblePendingApproval: ApprovalRequest | null
+  queuedPendingApprovals: ApprovalRequest[]
+  visiblePendingQuestion: QuestionRequest | null
+  queuedPendingQuestions: QuestionRequest[]
+  visiblePendingPlan: PlanData | null
+  queuedPendingPlans: PlanData[]
+  doomLoopDetected: boolean
+  currentAgentId: string | null
+  streamingTokenEstimate: number
+  streamingStartedAt: number | null
+  liveMessageId: string | null
+  streamingContentOffset: number
+  toolCallsOffset: number
+  thinkingSegmentsOffset: number
+}
+
+interface CachedSessionRuntime {
+  rust: AgentRuntimeSnapshot
+  ui: AgentUiRuntimeSnapshot
+}
+
+const RECENT_SESSION_RUNTIME_CACHE_LIMIT = 3
+const MAX_CACHED_RUNTIME_EVENTS = 1000
 
 // ============================================================================
 // Singleton
@@ -77,23 +123,63 @@ function createAgentStore() {
   const rustAgent = useRustAgent()
   const settingsRef = useSettings()
   const session = useSession()
+  const refreshSessionMessages = async (sessionId: string): Promise<void> => {
+    if (isTauri() || !session.replaceMessagesFromBackend) {
+      return
+    }
+
+    const backendMessages = await getMessages(sessionId)
+    if (session.currentSession()?.id !== sessionId) {
+      return
+    }
+
+    session.replaceMessagesFromBackend(backendMessages)
+  }
+  let lastVisibleSessionId: string | null = null
   // Startup rehydration must stay on the singleton path so multiple
   // useRustAgent()-only consumers cannot duplicate listener side effects.
-  if (isTauri()) {
-    void rustAgent.rehydrateStatus()
-  } else {
-    createEffect(
-      on(
-        () => session.currentSession()?.id ?? null,
-        (sessionId) => {
-          if (!sessionId) {
+  createEffect(
+    on(
+      () => session.currentSession()?.id ?? null,
+      (sessionId) => {
+        if (lastVisibleSessionId && lastVisibleSessionId !== sessionId) {
+          cacheSessionRuntime(lastVisibleSessionId)
+        }
+        lastVisibleSessionId = sessionId
+
+        const restoredCachedRuntime = sessionId
+          ? (sessionRuntimeCache.get(sessionId) ?? null)
+          : null
+        restoreSessionRuntime(sessionId, restoredCachedRuntime)
+
+        void (async () => {
+          const rehydrateResult = await rustAgent.rehydrateStatus(sessionId)
+          if (session.currentSession()?.id !== sessionId) {
             return
           }
-          void rustAgent.rehydrateStatus(sessionId)
-        }
-      )
+          reconcileRuntimeAfterRehydrate(sessionId, rehydrateResult, restoredCachedRuntime)
+          if (sessionId && session.currentSession()?.id === sessionId && !rehydrateResult.running) {
+            await refreshSessionMessages(sessionId).catch(() => {})
+          }
+        })()
+      }
     )
-  }
+  )
+  createEffect(
+    on(
+      () => ({
+        sessionId: session.currentSession()?.id ?? null,
+        isRunning: rustAgent.isRunning(),
+      }),
+      ({ sessionId, isRunning }) => {
+        if (!isTauri() || !sessionId || isRunning) {
+          return
+        }
+
+        void session.recoverDetachedDesktopSessionIfNeeded?.(sessionId)
+      }
+    )
+  )
   let nextRunToken = 0
   let activeRunToken = 0
 
@@ -116,13 +202,13 @@ function createAgentStore() {
   const [visiblePendingApproval, setVisiblePendingApproval] = createSignal<ApprovalRequest | null>(
     null
   )
-  const [, setQueuedPendingApprovals] = createSignal<ApprovalRequest[]>([])
+  const [queuedPendingApprovals, setQueuedPendingApprovals] = createSignal<ApprovalRequest[]>([])
   const [visiblePendingQuestion, setVisiblePendingQuestion] = createSignal<QuestionRequest | null>(
     null
   )
-  const [, setQueuedPendingQuestions] = createSignal<QuestionRequest[]>([])
+  const [queuedPendingQuestions, setQueuedPendingQuestions] = createSignal<QuestionRequest[]>([])
   const [visiblePendingPlan, setVisiblePendingPlan] = createSignal<PlanData | null>(null)
-  const [, setQueuedPendingPlans] = createSignal<PlanData[]>([])
+  const [queuedPendingPlans, setQueuedPendingPlans] = createSignal<PlanData[]>([])
   const [doomLoopDetected, setDoomLoopDetected] = createSignal(false)
   const [currentAgentId, _setCurrentAgentId] = createSignal<string | null>(null)
   const [streamingTokenEstimate, setStreamingTokenEstimate] = createSignal(0)
@@ -135,12 +221,15 @@ function createAgentStore() {
    * final metadata when streaming ends.  Null when no run is in progress.
    */
   const [liveMessageId, setLiveMessageId] = createSignal<string | null>(null)
+  const sessionRuntimeCache = createBoundedSessionCache<CachedSessionRuntime>(
+    RECENT_SESSION_RUNTIME_CACHE_LIMIT
+  )
 
   // ── Streaming state (offsets + derived signals) ─────────────────────
   const streamingState = createAgentStreaming(rustAgent)
 
   // ── Forward agent events into UI signals ─────────────────────────────
-  let lastEventIdx = 0
+  let lastEventCursor = 0
   const requestKey = <T extends PendingRequestWithId>(request: T | null): string | null =>
     request?.id ?? request?.requestId ?? null
   const upsertPendingRequest = <T extends PendingRequestWithId>(
@@ -254,6 +343,246 @@ function createAgentStore() {
       clearPendingRequests(setVisiblePendingPlan, setQueuedPendingPlans)
     })
   }
+  const captureUiRuntimeSnapshot = (): AgentUiRuntimeSnapshot => ({
+    isPlanMode: isPlanMode(),
+    currentTurn: currentTurn(),
+    tokensUsed: tokensUsed(),
+    currentThought: currentThought(),
+    toolActivity: [...toolActivity()],
+    visiblePendingApproval: visiblePendingApproval(),
+    queuedPendingApprovals: [...queuedPendingApprovals()],
+    visiblePendingQuestion: visiblePendingQuestion(),
+    queuedPendingQuestions: [...queuedPendingQuestions()],
+    visiblePendingPlan: visiblePendingPlan(),
+    queuedPendingPlans: [...queuedPendingPlans()],
+    doomLoopDetected: doomLoopDetected(),
+    currentAgentId: currentAgentId(),
+    streamingTokenEstimate: streamingTokenEstimate(),
+    streamingStartedAt: streamingStartedAt(),
+    liveMessageId: liveMessageId(),
+    streamingContentOffset: streamingState.streamingContentOffset(),
+    toolCallsOffset: streamingState.toolCallsOffset(),
+    thinkingSegmentsOffset: streamingState.thinkingSegmentsOffset(),
+  })
+  const hasRestorableUiRuntimeState = (): boolean =>
+    currentThought().length > 0 ||
+    toolActivity().length > 0 ||
+    visiblePendingApproval() !== null ||
+    queuedPendingApprovals().length > 0 ||
+    visiblePendingQuestion() !== null ||
+    queuedPendingQuestions().length > 0 ||
+    visiblePendingPlan() !== null ||
+    queuedPendingPlans().length > 0 ||
+    doomLoopDetected() ||
+    currentAgentId() !== null ||
+    streamingTokenEstimate() !== 0 ||
+    streamingStartedAt() !== null ||
+    liveMessageId() !== null ||
+    streamingState.streamingContentOffset() !== 0 ||
+    streamingState.toolCallsOffset() !== 0 ||
+    streamingState.thinkingSegmentsOffset() !== 0
+  const hasRestorableRustRuntimeState = (): boolean =>
+    rustAgent.isRunning() ||
+    rustAgent.currentRunId() !== null ||
+    rustAgent.trackedSessionId() !== null ||
+    rustAgent.detachedSessionId() !== null ||
+    rustAgent.streamingContent().length > 0 ||
+    rustAgent.thinkingContent().length > 0 ||
+    rustAgent.activeToolCalls().length > 0 ||
+    rustAgent.error() !== null ||
+    rustAgent.progressMessage() !== null ||
+    rustAgent.budgetWarning() !== null ||
+    rustAgent.pendingPlan() !== null ||
+    rustAgent.thinkingSegments().length > 0 ||
+    rustAgent.todos().length > 0
+  const restoreUiRuntimeSnapshot = (snapshot: AgentUiRuntimeSnapshot | null): void => {
+    if (!snapshot) {
+      batch(() => {
+        setIsPlanMode(false)
+        _setCurrentTurn(0)
+        _setTokensUsed(0)
+        setCurrentThought('')
+        setToolActivity([])
+        setVisiblePendingApproval(null)
+        setQueuedPendingApprovals([])
+        setVisiblePendingQuestion(null)
+        setQueuedPendingQuestions([])
+        setVisiblePendingPlan(null)
+        setQueuedPendingPlans([])
+        setDoomLoopDetected(false)
+        _setCurrentAgentId(null)
+        setStreamingTokenEstimate(0)
+        setStreamingStartedAt(null)
+        setLiveMessageId(null)
+        streamingState.setStreamingContentOffset(0)
+        streamingState.setToolCallsOffset(0)
+        streamingState.setThinkingSegmentsOffset(0)
+      })
+      return
+    }
+
+    batch(() => {
+      setIsPlanMode(snapshot.isPlanMode)
+      _setCurrentTurn(snapshot.currentTurn)
+      _setTokensUsed(snapshot.tokensUsed)
+      setCurrentThought(snapshot.currentThought)
+      setToolActivity([...snapshot.toolActivity])
+      setVisiblePendingApproval(snapshot.visiblePendingApproval)
+      setQueuedPendingApprovals([...snapshot.queuedPendingApprovals])
+      setVisiblePendingQuestion(snapshot.visiblePendingQuestion)
+      setQueuedPendingQuestions([...snapshot.queuedPendingQuestions])
+      setVisiblePendingPlan(snapshot.visiblePendingPlan)
+      setQueuedPendingPlans([...snapshot.queuedPendingPlans])
+      setDoomLoopDetected(snapshot.doomLoopDetected)
+      _setCurrentAgentId(snapshot.currentAgentId)
+      setStreamingTokenEstimate(snapshot.streamingTokenEstimate)
+      setStreamingStartedAt(snapshot.streamingStartedAt)
+      setLiveMessageId(snapshot.liveMessageId)
+      streamingState.setStreamingContentOffset(snapshot.streamingContentOffset)
+      streamingState.setToolCallsOffset(snapshot.toolCallsOffset)
+      streamingState.setThinkingSegmentsOffset(snapshot.thinkingSegmentsOffset)
+    })
+  }
+  const cacheSessionRuntime = (sessionId: string | null | undefined): void => {
+    if (!sessionId) {
+      return
+    }
+    if (!hasRestorableUiRuntimeState() && !hasRestorableRustRuntimeState()) {
+      sessionRuntimeCache.delete(sessionId)
+      return
+    }
+    const rustSnapshot = rustAgent.captureRuntimeSnapshot({
+      maxEvents: MAX_CACHED_RUNTIME_EVENTS,
+    })
+    sessionRuntimeCache.set(sessionId, {
+      rust: rustSnapshot,
+      ui: captureUiRuntimeSnapshot(),
+    })
+  }
+  const discardSessionRuntime = (sessionId: string | null | undefined): void => {
+    if (!sessionId) {
+      return
+    }
+    sessionRuntimeCache.delete(sessionId)
+  }
+  const restoreSessionRuntime = (
+    sessionId: string | null | undefined,
+    cachedRuntime: CachedSessionRuntime | null = sessionId
+      ? (sessionRuntimeCache.get(sessionId) ?? null)
+      : null
+  ): boolean => {
+    if (!sessionId) {
+      rustAgent.restoreRuntimeSnapshot(null)
+      restoreUiRuntimeSnapshot(null)
+      lastEventCursor = 0
+      return false
+    }
+
+    const cached = cachedRuntime
+    if (!cached) {
+      rustAgent.restoreRuntimeSnapshot(null)
+      restoreUiRuntimeSnapshot(null)
+      lastEventCursor = 0
+      return false
+    }
+
+    rustAgent.restoreRuntimeSnapshot(cached.rust)
+    restoreUiRuntimeSnapshot(cached.ui)
+    lastEventCursor = cached.rust.events.length
+    return true
+  }
+  const approvalRequestFromEvent = (
+    approvalEvent: ApprovalRequestEvent | null | undefined
+  ): ApprovalRequest | null => {
+    if (!approvalEvent) {
+      return null
+    }
+
+    const riskLevel = (
+      ['low', 'medium', 'high', 'critical'].includes(approvalEvent.risk_level)
+        ? approvalEvent.risk_level
+        : 'medium'
+    ) as 'low' | 'medium' | 'high' | 'critical'
+    const toolName = approvalEvent.tool_name
+    const toolType =
+      toolName === 'bash'
+        ? ('command' as const)
+        : toolName.startsWith('mcp_')
+          ? ('mcp' as const)
+          : ('file' as const)
+
+    return {
+      id: approvalEvent.id,
+      toolCallId: approvalEvent.tool_call_id,
+      type: toolType,
+      toolName,
+      args: approvalEvent.args as Record<string, unknown>,
+      description: approvalEvent.reason,
+      riskLevel,
+      resolve: () => {},
+    }
+  }
+  const questionRequestFromEvent = (
+    questionEvent: QuestionRequestEvent | null | undefined
+  ): QuestionRequest | null => {
+    if (!questionEvent) {
+      return null
+    }
+    return {
+      id: questionEvent.id,
+      question: questionEvent.question,
+      options: questionEvent.options,
+    }
+  }
+  const planRequestFromEvent = (
+    planEvent: PlanCreatedEvent | null | undefined
+  ): PlanData | null => {
+    if (!planEvent) {
+      return null
+    }
+    return {
+      ...planEvent.plan,
+      requestId: planEvent.id,
+    }
+  }
+  const reconcileRuntimeAfterRehydrate = (
+    sessionId: string | null,
+    rehydrateResult: AgentRehydrateResult,
+    restoredCachedRuntime: CachedSessionRuntime | null
+  ): void => {
+    if (!sessionId) {
+      restoreUiRuntimeSnapshot(null)
+      lastEventCursor = rustAgent.eventCursor()
+      return
+    }
+
+    const restoredRunId = restoredCachedRuntime?.rust.currentRunId ?? null
+    const authoritativeRunId = rehydrateResult.runId ?? null
+    const runStillActive = rehydrateResult.running && authoritativeRunId !== null
+    const runChanged = restoredRunId !== null && authoritativeRunId !== restoredRunId
+
+    if (!runStillActive) {
+      discardSessionRuntime(sessionId)
+      restoreUiRuntimeSnapshot(null)
+      lastEventCursor = rustAgent.eventCursor()
+      return
+    }
+
+    if (runChanged) {
+      restoreUiRuntimeSnapshot(null)
+    }
+
+    batch(() => {
+      setVisiblePendingApproval(approvalRequestFromEvent(rehydrateResult.pendingApproval))
+      setQueuedPendingApprovals([])
+      setVisiblePendingQuestion(questionRequestFromEvent(rehydrateResult.pendingQuestion))
+      setQueuedPendingQuestions([])
+      setVisiblePendingPlan(planRequestFromEvent(rehydrateResult.pendingPlan))
+      setQueuedPendingPlans([])
+    })
+    lastEventCursor = rustAgent.eventCursor()
+    cacheSessionRuntime(sessionId)
+  }
   const eventRunId = (event: { run_id?: string; runId?: string }): string | null =>
     event.runId ?? event.run_id ?? null
   const shouldHandleInteractiveEvent = (
@@ -267,8 +596,8 @@ function createAgentStore() {
     const activeRunId = rustAgent.currentRunId()
 
     if (!correlatedRunId) {
-      if (activeRunId && !isTauri()) {
-        log.warn('agent', 'Ignoring uncorrelated interactive event during active web run', {
+      if (activeRunId) {
+        log.warn('agent', 'Ignoring uncorrelated interactive event during active run', {
           eventType: event.type,
           activeRunId,
         })
@@ -291,14 +620,10 @@ function createAgentStore() {
   }
 
   createEffect(
-    on(rustAgent.events, (allEvents) => {
-      // Reset cursor when events array is cleared (new run started)
-      if (allEvents.length < lastEventIdx) {
-        lastEventIdx = 0
-      }
-      for (let i = lastEventIdx; i < allEvents.length; i++) {
-        const event = allEvents[i]!
+    on(rustAgent.eventVersion, () => {
+      const { events: newEvents, cursor } = rustAgent.readEventsSince(lastEventCursor)
 
+      for (const event of newEvents) {
         // ── UI signals: approval / question / thinking / tokens ────
         if (event.type === 'tool_call') {
           log.debug('agent', 'Tool called', { tool: (event as { name?: string }).name })
@@ -441,7 +766,7 @@ function createAgentStore() {
           )
         }
       }
-      lastEventIdx = allEvents.length
+      lastEventCursor = cursor
     })
   )
 
@@ -453,11 +778,18 @@ function createAgentStore() {
       (message) => !message.sessionId || message.sessionId === currentSessionId
     )
   }
+  const sessionHasActiveRun = (sessionId?: string | null): boolean =>
+    rustAgent.isRunning() && rustAgent.trackedSessionId() === (sessionId ?? null)
+  const visibleSessionHasActiveRun = createMemo(() =>
+    sessionHasActiveRun(session.currentSession()?.id ?? null)
+  )
 
   const actions = createAgentActions({
     rustAgent,
     session,
     settingsRef,
+    sessionHasActiveRun,
+    onSessionRuntimeSettled: discardSessionRuntime,
     isPlanMode,
     setIsPlanMode,
     currentTurn,
@@ -491,6 +823,8 @@ function createAgentStore() {
     rustAgent,
     session,
     settingsRef,
+    sessionHasActiveRun,
+    onSessionRuntimeSettled: discardSessionRuntime,
     isPlanMode,
     setCurrentThought,
     setDoomLoopDetected,
@@ -506,38 +840,78 @@ function createAgentStore() {
     runOwnership,
   })
 
+  const visibleIsRunning = (): boolean =>
+    visibleSessionHasActiveRun() ? rustAgent.isRunning() : false
+  const visibleCurrentRunId = (): string | null =>
+    visibleSessionHasActiveRun() ? rustAgent.currentRunId() : null
+  const visibleProgressMessage = (): string | null =>
+    visibleSessionHasActiveRun() ? rustAgent.progressMessage() : null
+  const visibleIsPlanMode = (): boolean => (visibleSessionHasActiveRun() ? isPlanMode() : false)
+  const visibleCurrentTurn = (): number => (visibleSessionHasActiveRun() ? currentTurn() : 0)
+  const visibleTokensUsed = (): number => (visibleSessionHasActiveRun() ? tokensUsed() : 0)
+  const visibleCurrentThought = (): string => (visibleSessionHasActiveRun() ? currentThought() : '')
+  const visibleToolActivity = (): ToolActivity[] =>
+    visibleSessionHasActiveRun() ? toolActivity() : []
+  const visibleScopedPendingApproval = (): ApprovalRequest | null =>
+    visibleSessionHasActiveRun() ? pendingApproval() : null
+  const visibleScopedPendingQuestion = (): QuestionRequest | null =>
+    visibleSessionHasActiveRun() ? pendingQuestion() : null
+  const visibleScopedPendingPlan = (): PlanData | null =>
+    visibleSessionHasActiveRun() ? pendingPlan() : null
+  const visibleDoomLoopDetected = (): boolean =>
+    visibleSessionHasActiveRun() ? doomLoopDetected() : false
+  const visibleLastError = (): string | null =>
+    visibleSessionHasActiveRun() ? rustAgent.error() : null
+  const visibleCurrentAgentId = (): string | null =>
+    visibleSessionHasActiveRun() ? currentAgentId() : null
+  const visibleEventTimeline = (): AgentEvent[] =>
+    visibleSessionHasActiveRun() ? rustAgent.events() : []
+  const visibleActiveToolCalls = (): ToolCall[] =>
+    visibleSessionHasActiveRun() ? streamingState.liveActiveToolCalls() : []
+  const visibleStreamingContent = (): string =>
+    visibleSessionHasActiveRun() ? streamingState.liveStreamingContent() : ''
+  const visibleThinkingSegments = (): ThinkingSegment[] =>
+    visibleSessionHasActiveRun() ? streamingState.liveThinkingSegments() : []
+  const visibleStreamingTokenEstimate = (): number =>
+    visibleSessionHasActiveRun() ? streamingTokenEstimate() : 0
+  const visibleStreamingStartedAt = (): number | null =>
+    visibleSessionHasActiveRun() ? streamingStartedAt() : null
+  const visibleStreamingError = () => (visibleSessionHasActiveRun() ? streamingState.error() : null)
+  const visibleLiveMessageId = (): string | null =>
+    visibleSessionHasActiveRun() ? liveMessageId() : null
+
   // ====================================================================
   // Return full public API (identical shape to original)
   // ====================================================================
 
   return {
     // ── Agent signals (mapped from Rust agent) ───────────────────────
-    isRunning: rustAgent.isRunning,
-    currentRunId: rustAgent.currentRunId,
-    progressMessage: rustAgent.progressMessage,
-    isPlanMode,
-    currentTurn,
-    tokensUsed,
-    currentThought,
-    toolActivity,
-    pendingApproval,
-    pendingQuestion,
-    pendingPlan,
-    doomLoopDetected,
-    lastError: rustAgent.error,
-    currentAgentId,
-    eventTimeline: rustAgent.events,
+    isRunning: visibleIsRunning,
+    currentRunId: visibleCurrentRunId,
+    progressMessage: visibleProgressMessage,
+    isPlanMode: visibleIsPlanMode,
+    currentTurn: visibleCurrentTurn,
+    tokensUsed: visibleTokensUsed,
+    currentThought: visibleCurrentThought,
+    toolActivity: visibleToolActivity,
+    pendingApproval: visibleScopedPendingApproval,
+    pendingQuestion: visibleScopedPendingQuestion,
+    pendingPlan: visibleScopedPendingPlan,
+    doomLoopDetected: visibleDoomLoopDetected,
+    lastError: visibleLastError,
+    currentAgentId: visibleCurrentAgentId,
+    eventTimeline: visibleEventTimeline,
 
     // ── Chat signals (mapped from Rust agent) ────────────────────────
     // These use offset-aware derived signals so that after a steering message
     // splits the response, only the current placeholder's content is shown.
-    isStreaming: rustAgent.isRunning, // alias for backward compat
-    activeToolCalls: streamingState.liveActiveToolCalls,
-    streamingContent: streamingState.liveStreamingContent,
-    thinkingSegments: streamingState.liveThinkingSegments,
-    streamingTokenEstimate,
-    streamingStartedAt,
-    error: streamingState.error,
+    isStreaming: visibleIsRunning, // alias for backward compat
+    activeToolCalls: visibleActiveToolCalls,
+    streamingContent: visibleStreamingContent,
+    thinkingSegments: visibleThinkingSegments,
+    streamingTokenEstimate: visibleStreamingTokenEstimate,
+    streamingStartedAt: visibleStreamingStartedAt,
+    error: visibleStreamingError,
     messageQueue: visibleMessageQueue,
     queuedCount: () => visibleMessageQueue().length,
     /**
@@ -546,7 +920,7 @@ function createAgentStore() {
      * row is the live streaming bubble so it can pass live signals down to it.
      * Null when no run is in progress.
      */
-    liveMessageId,
+    liveMessageId: visibleLiveMessageId,
 
     // ── Actions ──────────────────────────────────────────────────────
     run: runModule.run,

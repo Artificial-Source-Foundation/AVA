@@ -9,8 +9,20 @@ export const QuickLabelPicker: Component<{
   onSelect: (labelId: string, labelText: string) => void
   onCancel: () => void
 }> = (props) => {
+  // Handle escape key
+  const handleKeyDown = (e: KeyboardEvent): void => {
+    if (e.key === 'Escape') {
+      e.preventDefault()
+      props.onCancel()
+    }
+  }
+
   return (
     <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Quick labels"
+      onKeyDown={handleKeyDown}
       data-quick-label-picker
       class="fixed z-[110] rounded-xl border w-[260px] overflow-hidden"
       style={{

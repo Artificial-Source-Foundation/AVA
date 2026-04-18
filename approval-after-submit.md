@@ -1,0 +1,120 @@
+- generic [ref=e4]:
+  - complementary [ref=e6]:
+    - generic [ref=e7]:
+      - generic [ref=e9]: A
+      - generic [ref=e10]:
+        - button "Dashboard" [ref=e11] [cursor=pointer]:
+          - img [ref=e12]
+        - button "Search sessions" [ref=e17] [cursor=pointer]:
+          - img [ref=e18]
+        - button "Settings" [ref=e21] [cursor=pointer]:
+          - img [ref=e22]
+    - button "New chat" [ref=e26] [cursor=pointer]:
+      - img [ref=e27]
+      - generic [ref=e28]: New Chat
+    - button "Estela" [ref=e31] [cursor=pointer]:
+      - img [ref=e32]
+      - generic [ref=e34]: Estela
+      - img [ref=e35]
+    - generic [ref=e38]:
+      - generic [ref=e39]:
+        - button "New Session 1m ago" [ref=e40] [cursor=pointer]:
+          - generic [ref=e42]: New Session
+          - generic [ref=e43]: 1m ago
+        - button "New Session 1m ago" [ref=e44] [cursor=pointer]:
+          - generic [ref=e46]: New Session
+          - generic [ref=e47]: 1m ago
+        - button "New Session 1h ago" [ref=e48] [cursor=pointer]:
+          - generic [ref=e50]: New Session
+          - generic [ref=e51]: 1h ago
+        - button "New Session 1h ago" [ref=e52] [cursor=pointer]:
+          - generic [ref=e54]: New Session
+          - generic [ref=e55]: 1h ago
+        - button "New Session 1h ago" [ref=e56] [cursor=pointer]:
+          - generic [ref=e58]: New Session
+          - generic [ref=e59]: 1h ago
+        - button "New Session 1h ago" [ref=e60] [cursor=pointer]:
+          - generic [ref=e62]: New Session
+          - generic [ref=e63]: 1h ago
+        - button "New Session 1h ago" [ref=e64] [cursor=pointer]:
+          - generic [ref=e66]: New Session
+          - generic [ref=e67]: 1h ago
+        - button "New Session 1h ago" [ref=e68] [cursor=pointer]:
+          - generic [ref=e70]: New Session
+          - generic [ref=e71]: 1h ago
+        - button "who are you 4h ago" [ref=e72] [cursor=pointer]:
+          - generic [ref=e74]: who are you
+          - generic [ref=e75]: 4h ago
+        - button "hello 4h ago" [ref=e76] [cursor=pointer]:
+          - generic [ref=e78]: hello
+          - generic [ref=e79]: 4h ago
+        - button "hello 4h ago" [ref=e80] [cursor=pointer]:
+          - generic [ref=e82]: hello
+          - generic [ref=e83]: 4h ago
+        - button "Give me a high-level overvie... 4h ago" [ref=e84] [cursor=pointer]:
+          - generic [ref=e86]: Give me a high-level overvie...
+          - generic [ref=e87]: 4h ago
+        - button "Check docs, are we missing s... 7h ago" [ref=e88] [cursor=pointer]:
+          - generic [ref=e90]: Check docs, are we missing s...
+          - generic [ref=e91]: 7h ago
+        - button "New Chat 1d ago" [ref=e92] [cursor=pointer]:
+          - generic [ref=e94]: New Chat
+          - generic [ref=e95]: 1d ago
+        - button "hello 1d ago" [ref=e96] [cursor=pointer]:
+          - generic [ref=e98]: hello
+          - generic [ref=e99]: 1d ago
+      - button "Show 35 more" [ref=e100] [cursor=pointer]
+      - button "archived" [ref=e102] [cursor=pointer]
+  - generic [ref=e108]:
+    - generic [ref=e109]:
+      - generic [ref=e110]:
+        - generic [ref=e111]: New Session
+        - generic [ref=e112]: Code
+      - generic [ref=e113]:
+        - generic "0% of context window used" [ref=e114]:
+          - generic [ref=e116]: 0%
+        - generic [ref=e117]: 0 / 200.0k
+    - log "Conversation messages" [ref=e120]:
+      - generic [ref=e122]:
+        - paragraph [ref=e124]: Good evening
+        - heading "What are you working on?" [level=2] [ref=e125]
+        - paragraph [ref=e126]: Describe a task, or start with one of these.
+        - generic [ref=e127]:
+          - button "Explain this codebase" [ref=e128] [cursor=pointer]:
+            - img [ref=e129]
+            - generic [ref=e132]: Explain this codebase
+          - button "Fix a bug" [ref=e133] [cursor=pointer]:
+            - img [ref=e134]
+            - generic [ref=e143]: Fix a bug
+          - button "Write tests" [ref=e144] [cursor=pointer]:
+            - img [ref=e145]
+            - generic [ref=e147]: Write tests
+          - button "Refactor code" [ref=e148] [cursor=pointer]:
+            - img [ref=e149]
+            - generic [ref=e152]: Refactor code
+        - generic [ref=e153]:
+          - generic [ref=e154]: Ctrl+/ commands
+          - generic [ref=e155]: Ctrl+M model
+          - generic [ref=e156]: Ctrl+T thinking
+    - generic [ref=e159]:
+      - generic [ref=e163]:
+        - textbox "Message composer" [ref=e164]:
+          - /placeholder: Ask anything...
+        - button "Send message" [disabled] [ref=e168] [cursor=pointer]:
+          - img [ref=e169]
+      - generic [ref=e172]:
+        - generic [ref=e173]:
+          - generic [ref=e174]:
+            - button "Switch to plan mode" [ref=e175] [cursor=pointer]: Plan
+            - button "Switch to act mode" [ref=e176] [cursor=pointer]: Act
+          - button "Attach file" [ref=e178] [cursor=pointer]:
+            - img [ref=e179]
+          - button "Toggle inspector" [ref=e181] [cursor=pointer]:
+            - img [ref=e182]
+        - generic [ref=e184]:
+          - button "Open model selector" [ref=e185] [cursor=pointer]:
+            - img [ref=e187]
+            - generic [ref=e188]: Anthropic | Claude Sonnet 4.5
+          - button "Enable reasoning" [ref=e189] [cursor=pointer]:
+            - img [ref=e190]
+            - generic [ref=e198]: Think

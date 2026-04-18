@@ -8,7 +8,7 @@
 
 import { type Accessor, type Component, Show } from 'solid-js'
 import { FileChips, ImagePreviews, PasteChips } from './attachment-previews'
-import { MessageQueueWidget, type QueuedItem } from './MessageQueueWidget'
+import { MessageQueueWidget, type QueuedItem, type QueueSection } from './MessageQueueWidget'
 import { SubmitButton } from './submit-button'
 import type { PendingFile, PendingImage, PendingPaste } from './types'
 
@@ -51,9 +51,9 @@ export interface InputTextAreaProps {
   onPostComplete?: () => void
   // Queue widget
   queuedMessages?: Accessor<QueuedItem[]>
-  onQueueRemove?: (index: number) => void
-  onQueueReorder?: (fromIndex: number, toIndex: number) => void
-  onQueueEdit?: (index: number, newContent: string) => void
+  onQueueRemove?: (index: number, section: QueueSection) => void
+  onQueueReorder?: (fromIndex: number, toIndex: number, section: QueueSection) => void
+  onQueueEdit?: (index: number, newContent: string, section: QueueSection) => void
   onQueueClearAll?: () => void
 }
 
@@ -114,13 +114,14 @@ export const InputTextArea: Component<InputTextAreaProps> = (props) => (
         aria-label="Message composer"
         class="
           message-composer-textarea
-          w-full px-0 py-0 pr-[100px]
+          w-full px-2 py-2 pr-[100px]
           bg-transparent text-[var(--text-primary)]
           placeholder:text-[var(--text-muted)]
-          border-none
+          border border-transparent rounded-lg
           resize-none
-          focus:outline-none
+          focus:outline-none focus-visible:border-[var(--accent)] focus-visible:bg-[var(--alpha-white-5)]
           disabled:opacity-50
+          transition-colors
         "
         style={{
           'min-height': '24px',

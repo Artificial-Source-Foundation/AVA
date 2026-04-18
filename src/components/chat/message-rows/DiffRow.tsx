@@ -117,7 +117,7 @@ export const DiffRow: Component<DiffRowProps> = (props) => {
           role="button"
           tabIndex={0}
           aria-expanded={expanded()}
-          class="tool-card-header flex cursor-pointer select-none items-center justify-between px-3.5 transition-colors duration-[var(--duration-fast)] hover:bg-[var(--alpha-white-5)]"
+          class="tool-card-header flex cursor-pointer select-none items-center justify-between px-3.5 transition-colors duration-[var(--duration-fast)] hover:bg-[var(--alpha-white-5)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-inset"
           style={{
             height: '40px',
           }}
@@ -246,7 +246,11 @@ export const DiffRow: Component<DiffRowProps> = (props) => {
 
         {/* Expanded: side-by-side diff view */}
         <Show when={expanded()}>
-          <div class="max-h-[400px] overflow-auto" data-scrollable>
+          <section
+            class="max-h-[400px] overflow-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-inset"
+            data-scrollable
+            aria-label={`Diff view for ${fileName()}`}
+          >
             <DiffViewer
               oldContent={props.toolCall.diff!.oldContent}
               newContent={props.toolCall.diff!.newContent}
@@ -255,7 +259,7 @@ export const DiffRow: Component<DiffRowProps> = (props) => {
               showLineNumbers={true}
               class="border-0 rounded-none"
             />
-          </div>
+          </section>
         </Show>
       </div>
     </Show>

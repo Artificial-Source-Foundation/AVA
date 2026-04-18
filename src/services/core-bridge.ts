@@ -18,6 +18,7 @@ let _activeSessionSyncSnapshot: ActiveSessionSyncSnapshot | null = null
 let _activeSessionSyncError: BackendSessionSyncError | null = null
 let _activeSessionSyncRequestToken = 0
 let _activeSessionRepairToken: number | null = null
+const _sessionsNeedingAuthoritativeRecovery = new Set<string>()
 
 export function getCoreBudget(): ContextBudget | null {
   return _budget
@@ -204,6 +205,7 @@ export async function initCoreBridge(opts: CoreBridgeOptions = {}): Promise<() =
     _activeSessionSyncError = null
     _activeSessionSyncRequestToken = 0
     _activeSessionRepairToken = null
+    _sessionsNeedingAuthoritativeRecovery.clear()
   }
   return _cleanup
 }
@@ -284,4 +286,19 @@ export function markActiveSessionSynced(sessionId: string, messageCount = 0): vo
     exists: true,
     messageCount,
   })
+}
+
+export function markSessionNeedsAuthoritativeRecovery(sessionId: string): void {
+  if (!sessionId) return
+  _sessionsNeedingAuthoritativeRecovery.add(sessionId)
+}
+
+export function sessionNeedsAuthoritativeRecovery(sessionId: string): boolean {
+  if (!sessionId) return false
+  return _sessionsNeedingAuthoritativeRecovery.has(sessionId)
+}
+
+export function clearSessionNeedsAuthoritativeRecovery(sessionId: string): void {
+  if (!sessionId) return
+  _sessionsNeedingAuthoritativeRecovery.delete(sessionId)
 }

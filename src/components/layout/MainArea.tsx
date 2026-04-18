@@ -7,8 +7,9 @@
 
 import { Sparkles } from 'lucide-solid'
 import { type Component, createMemo } from 'solid-js'
+import { useAgent } from '../../hooks/useAgent'
 import { useLayout } from '../../stores/layout'
-import { usePlanOverlay } from '../../stores/planOverlayStore'
+import { type PlanAnnotation, usePlanOverlay } from '../../stores/planOverlayStore'
 import { useSession } from '../../stores/session'
 import type { ToolCall } from '../../types'
 import { ChatView } from '../chat/ChatView'
@@ -20,6 +21,7 @@ export const MainArea: Component = () => {
   const { currentSession, messages } = useSession()
   const { dashboardVisible, viewingSubagentId, viewingPlanId, closePlanViewer } = useLayout()
   const planOverlay = usePlanOverlay()
+  const agent = useAgent()
 
   /** Find the tool call being viewed by scanning session messages */
   const viewedToolCall = createMemo((): ToolCall | undefined => {
@@ -40,21 +42,74 @@ export const MainArea: Component = () => {
     return planOverlay.activePlan()
   })
 
+  /** Serialize annotations to feedback text format (matches PlanOverlay pattern) */
+  const serializeAnnotations = (annotations: PlanAnnotation[] | undefined): string => {
+    if (!annotations || annotations.length === 0) return ''
+    const parts: string[] = []
+    for (const ann of annotations) {
+      if (ann.type === 'deletion') {
+        parts.push(`[DELETE] "${ann.originalText}"`)
+      } else if (ann.type === 'comment') {
+        parts.push(`[COMMENT on "${ann.originalText.slice(0, 60)}..."] ${ann.commentText ?? ''}`)
+      } else if (ann.type === 'global_comment') {
+        parts.push(`[GLOBAL COMMENT] ${ann.commentText ?? ''}`)
+      }
+    }
+    return parts.join('\n')
+  }
+
   return (
     <div class="flex flex-col h-full w-full min-w-0 bg-[var(--surface)]">
       {viewingPlanId() && viewedPlan() ? (
         <div class="flex-1 min-h-0 overflow-hidden">
           <PlanFullScreen
             plan={viewedPlan()!}
-            onApprove={() => {
-              planOverlay.executePlan()
-              closePlanViewer()
+            previousPlan={planOverlay.previousPlan()}
+            showDiff={planOverlay.showDiff()}
+            hasDiff={planOverlay.hasDiff()}
+            onToggleDiff={planOverlay.toggleDiff}
+            onApprove={async () => {
+              const plan = viewedPlan()
+              if (plan && agent) {
+                try {
+                  // Resolve plan back to agent (matching PlanOverlay pattern)
+                  await agent.resolvePlan('approved', plan, undefined, {})
+                  // Only proceed if resolve succeeded
+                  planOverlay.executePlan()
+                  closePlanViewer()
+                } catch {
+                  // Keep viewer open on failure - user can retry
+                }
+              } else {
+                // No agent/plan - proceed with local-only flow
+                planOverlay.executePlan()
+                closePlanViewer()
+              }
             }}
-            onRevise={() => {
-              planOverlay.refinePlan()
-              closePlanViewer()
+            onRevise={async (annotations: PlanAnnotation[]) => {
+              const plan = viewedPlan()
+              const feedback = serializeAnnotations(annotations)
+              if (plan && agent && feedback) {
+                try {
+                  // Send feedback with annotations back to agent
+                  await agent.resolvePlan('rejected', undefined, feedback, {})
+                  // Only proceed if resolve succeeded
+                  planOverlay.refinePlan(annotations)
+                  closePlanViewer()
+                } catch {
+                  // Keep viewer open on failure - user can retry
+                }
+              } else {
+                // No agent/plan/feedback - proceed with local-only flow
+                planOverlay.refinePlan(annotations)
+                closePlanViewer()
+              }
             }}
-            onClose={closePlanViewer}
+            onClose={() => {
+              // Close fullscreen viewer AND underlying overlay so users return to chat
+              closePlanViewer()
+              planOverlay.closePlan()
+            }}
           />
         </div>
       ) : viewingSubagentId() ? (

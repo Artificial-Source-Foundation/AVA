@@ -12,6 +12,7 @@
  *   Approve      — blue filled                               (primary)
  *
  * Keyboard: Enter = Approve, Shift+Enter = Always Allow, Escape = Deny
+ * Accessibility: Focus trapped within dock, initial focus on Approve, live region for announcements
  */
 
 import { Shield, Terminal } from 'lucide-solid'
@@ -37,6 +38,9 @@ export interface ApprovalDockProps {
 
 export const ApprovalDock: Component<ApprovalDockProps> = (props) => {
   const [expanded, setExpanded] = createSignal(false)
+  let dockRef: HTMLDivElement | undefined
+  let approveButtonRef: HTMLButtonElement | undefined
+  let previouslyFocusedElement: Element | null = null
 
   const riskLevel = () => props.request?.riskLevel ?? 'medium'
   const toolConfig = () => {
@@ -55,26 +59,70 @@ export const ApprovalDock: Component<ApprovalDockProps> = (props) => {
     setExpanded(level === 'high' || level === 'critical')
   })
 
+  // Focus management: store previously focused element and focus dock when it appears
+  createEffect(() => {
+    if (props.request) {
+      previouslyFocusedElement = document.activeElement
+      // Focus the approve button when dock appears
+      requestAnimationFrame(() => {
+        approveButtonRef?.focus()
+      })
+    } else if (previouslyFocusedElement instanceof HTMLElement) {
+      // Restore focus when dock closes
+      previouslyFocusedElement.focus()
+    }
+  })
+
+  // Focus trap: keep focus within the dock
+  const handleDockKeyDown = (e: KeyboardEvent) => {
+    if (e.key !== 'Tab') return
+
+    const focusableElements = dockRef?.querySelectorAll<HTMLElement>(
+      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+    )
+    if (!focusableElements || focusableElements.length === 0) return
+
+    const firstElement = focusableElements[0]
+    const lastElement = focusableElements[focusableElements.length - 1]
+
+    if (e.shiftKey && document.activeElement === firstElement) {
+      e.preventDefault()
+      lastElement.focus()
+    } else if (!e.shiftKey && document.activeElement === lastElement) {
+      e.preventDefault()
+      firstElement.focus()
+    }
+  }
+
   // Keyboard shortcuts:
-  //   Enter           → Approve (Allow Once)
-  //   Shift+Enter     → Always Allow (skipped for critical risk)
+  //   Enter           → Approve (only when focus is not on a button; preserves native button activation)
+  //   Shift+Enter     → Always Allow (skipped for critical risk; only when focus is not on a button)
   //   Escape          → Deny
   createEffect(() => {
     if (!props.request) return
 
     const handleKeyDown = (e: KeyboardEvent) => {
       const target = e.target
+      // Skip if target is an input/textarea
       if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) return
 
+      // Escape always denies regardless of focus
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        props.onResolve(false)
+        return
+      }
+
+      // When focus is on a button, preserve native button activation (don't intercept Enter)
+      if (target instanceof HTMLButtonElement) return
+
+      // Global shortcuts only apply when focus is NOT on a button
       if (e.key === 'Enter' && e.shiftKey && riskLevel() !== 'critical') {
         e.preventDefault()
         props.onResolve(true, true)
       } else if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault()
         props.onResolve(true, false)
-      } else if (e.key === 'Escape') {
-        e.preventDefault()
-        props.onResolve(false)
       }
     }
 
@@ -84,10 +132,23 @@ export const ApprovalDock: Component<ApprovalDockProps> = (props) => {
 
   return (
     <Show when={props.request}>
+      {/* Live region for screen reader announcements */}
+      <output
+        aria-live="polite"
+        aria-atomic="true"
+        class="sr-only"
+        style={{ position: 'absolute', left: '-9999px' }}
+      >
+        Tool approval request: {props.request?.toolName}. Risk level: {risk().label}. Press Enter to
+        approve, Escape to deny
+        {riskLevel() !== 'critical' ? ', or Shift Enter to always allow' : ''}.
+      </output>
       <div
+        ref={dockRef}
         role="dialog"
         aria-label="Tool approval request"
         aria-labelledby="approval-dock-title"
+        aria-modal="false"
         class="approval-dock-enter"
         style={{
           width: '620px',
@@ -100,6 +161,7 @@ export const ApprovalDock: Component<ApprovalDockProps> = (props) => {
           'align-self': 'center',
           animation: 'approvalSlideUp 150ms ease-out',
         }}
+        onKeyDown={handleDockKeyDown}
       >
         {/* Header bar */}
         <div
@@ -204,7 +266,7 @@ export const ApprovalDock: Component<ApprovalDockProps> = (props) => {
             <button
               type="button"
               onClick={() => props.onResolve(false)}
-              class="inline-flex items-center justify-center transition-colors"
+              class="inline-flex items-center justify-center transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface)]"
               style={{
                 padding: '8px 16px',
                 'border-radius': '6px',
@@ -225,7 +287,7 @@ export const ApprovalDock: Component<ApprovalDockProps> = (props) => {
               <button
                 type="button"
                 onClick={() => props.onResolve(true, true)}
-                class="inline-flex items-center justify-center transition-colors"
+                class="inline-flex items-center justify-center transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface)]"
                 style={{
                   padding: '8px 16px',
                   'border-radius': '6px',
@@ -244,9 +306,10 @@ export const ApprovalDock: Component<ApprovalDockProps> = (props) => {
 
             {/* Approve — blue filled */}
             <button
+              ref={approveButtonRef}
               type="button"
               onClick={() => props.onResolve(true, false)}
-              class="inline-flex items-center justify-center transition-colors"
+              class="inline-flex items-center justify-center transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface)]"
               style={{
                 padding: '8px 20px',
                 'border-radius': '6px',

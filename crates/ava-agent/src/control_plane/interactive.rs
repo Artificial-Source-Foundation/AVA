@@ -1,3 +1,8 @@
+//! Shared interactive request lifecycle primitives.
+//!
+//! Ownership: approval/question/plan request IDs, queueing, resolve/cancel/timeout
+//! transitions, and timeout policy used by all surface adapters.
+
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::Duration;
@@ -148,6 +153,12 @@ impl<T> PendingInteractiveQueues<T> {
             .get(&owner_key(run_id))
             .and_then(|queue| queue.front())
             .map(|entry| entry.handle.request_id.clone())
+    }
+
+    fn current_actionable_request_id_for_run(&self, run_id: Option<&str>) -> Option<String> {
+        let run_request_id = self.current_request_id_for_run(run_id)?;
+        let global_request_id = self.current_request_id()?;
+        (run_request_id == global_request_id).then_some(run_request_id)
     }
 
     fn locate_request(&self, request_id: &str) -> Option<(&str, usize)> {
@@ -378,6 +389,16 @@ impl<T> InteractiveRequestStore<T> {
     pub async fn current_request_id_for_run(&self, run_id: Option<&str>) -> Option<String> {
         self.pending.lock().await.current_request_id_for_run(run_id)
     }
+
+    pub async fn current_actionable_request_id_for_run(
+        &self,
+        run_id: Option<&str>,
+    ) -> Option<String> {
+        self.pending
+            .lock()
+            .await
+            .current_actionable_request_id_for_run(run_id)
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -599,6 +620,44 @@ mod tests {
             .expect("run A request should still resolve afterwards");
         assert_eq!(resolved_run_a.handle.request_id, run_a.request_id);
         assert!(store.current_request_id().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn actionable_request_for_run_requires_global_front_ownership() {
+        let store = InteractiveRequestStore::<String>::new(InteractiveRequestKind::Question);
+        let (run_a_tx, _run_a_rx) = oneshot::channel();
+        let run_a = store
+            .register_with_run_id(run_a_tx, Some("web-run-a".to_string()))
+            .await;
+        let (run_b_tx, _run_b_rx) = oneshot::channel();
+        let run_b = store
+            .register_with_run_id(run_b_tx, Some("web-run-b".to_string()))
+            .await;
+
+        assert_eq!(
+            store
+                .current_actionable_request_id_for_run(Some("web-run-a"))
+                .await,
+            Some(run_a.request_id.clone())
+        );
+        assert_eq!(
+            store
+                .current_actionable_request_id_for_run(Some("web-run-b"))
+                .await,
+            None
+        );
+
+        let _ = store
+            .resolve(Some(&run_a.request_id))
+            .await
+            .expect("run A request should resolve first");
+
+        assert_eq!(
+            store
+                .current_actionable_request_id_for_run(Some("web-run-b"))
+                .await,
+            Some(run_b.request_id)
+        );
     }
 
     #[tokio::test]

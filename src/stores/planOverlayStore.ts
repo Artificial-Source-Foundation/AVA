@@ -121,8 +121,11 @@ export function usePlanOverlay() {
       setPendingExecution(null)
       return exec
     },
-    refinePlan: () => {
-      // Just close — agent stays in Plan mode
+    refinePlan: (annotationsForRefine?: PlanAnnotation[]) => {
+      // Store annotations for refine if provided — agent stays in Plan mode
+      if (annotationsForRefine && annotationsForRefine.length > 0) {
+        setAnnotations((prev) => [...prev, ...annotationsForRefine])
+      }
       setIsOpen(false)
       setTimeout(() => {
         setActivePlan(null)

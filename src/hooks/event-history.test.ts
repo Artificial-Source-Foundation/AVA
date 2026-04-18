@@ -31,4 +31,27 @@ describe('createBoundedEventHistory', () => {
       dispose()
     })
   })
+
+  it('reads only newly appended events after saturation', () => {
+    createRoot((dispose) => {
+      const history = createBoundedEventHistory<number>(3)
+
+      history.append(1)
+      history.append(2)
+      history.append(3)
+
+      const initialCursor = history.cursor()
+
+      history.append(4)
+      history.append(5)
+
+      expect(history.events()).toEqual([3, 4, 5])
+      expect(history.readSince(initialCursor)).toEqual({
+        cursor: history.cursor(),
+        events: [4, 5],
+      })
+
+      dispose()
+    })
+  })
 })

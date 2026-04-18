@@ -121,28 +121,57 @@ function dotClass(status: ToolCallStatus): string {
   }
 }
 
+function getStatusLabel(status: ToolCallStatus): string {
+  switch (status) {
+    case 'pending':
+      return 'Pending'
+    case 'running':
+      return 'Running'
+    case 'success':
+      return 'Complete'
+    case 'error':
+      return 'Error'
+  }
+}
+
 export const ToolIcon: Component<ToolIconProps> = (props) => {
-  const isRunning = () => props.status === 'running' || props.status === 'pending'
+  const isRunning = () => props.status === 'running'
+  const isPending = () => props.status === 'pending'
   const isError = () => props.status === 'error'
   const baseClass = () => `w-4 h-4 flex-shrink-0 ${props.class ?? ''}`
 
   return (
-    <div class="tool-status-dot-wrapper">
+    <div class="tool-status-dot-wrapper" title={`${props.name}: ${getStatusLabel(props.status)}`}>
+      {/* Pending: clock/waiting indicator */}
       <Show
-        when={!isRunning()}
+        when={!isPending()}
         fallback={
-          <Loader2 class={`${baseClass()} animate-spin`} style={{ color: 'var(--accent)' }} />
-        }
-      >
-        <Show
-          when={!isError()}
-          fallback={<AlertCircle class={baseClass()} style={{ color: 'var(--error)' }} />}
-        >
           <Dynamic
             component={getToolIcon(props.name)}
             class={baseClass()}
-            style={{ color: getIconColor(props.status, props.name) }}
+            style={{ color: 'var(--text-muted)', opacity: '0.6' }}
           />
+        }
+      >
+        {/* Running: spinner */}
+        <Show
+          when={!isRunning()}
+          fallback={
+            <Loader2 class={`${baseClass()} animate-spin`} style={{ color: 'var(--accent)' }} />
+          }
+        >
+          {/* Error: alert circle */}
+          <Show
+            when={!isError()}
+            fallback={<AlertCircle class={baseClass()} style={{ color: 'var(--error)' }} />}
+          >
+            {/* Success: tool-specific icon */}
+            <Dynamic
+              component={getToolIcon(props.name)}
+              class={baseClass()}
+              style={{ color: getIconColor(props.status, props.name) }}
+            />
+          </Show>
         </Show>
       </Show>
       {/* Status dot — overlaid top-right */}

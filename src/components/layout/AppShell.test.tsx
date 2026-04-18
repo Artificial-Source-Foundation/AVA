@@ -19,12 +19,18 @@ vi.mock('../../stores/layout', () => ({
     settingsOpen: () => false,
     openSettings: vi.fn(),
     closeSettings: vi.fn(),
+    viewingPlanId: () => layoutViewingPlanId,
   }),
 }))
 
+// Track mock states for testing
+let planOverlayIsOpen = false
+let layoutViewingPlanId: string | null = null
+
 vi.mock('../../stores/planOverlayStore', () => ({
   usePlanOverlay: () => ({
-    isOpen: () => false,
+    isOpen: () => planOverlayIsOpen,
+    activePlan: () => (planOverlayIsOpen ? { summary: 'Test Plan', steps: [] } : null),
   }),
 }))
 
@@ -101,6 +107,9 @@ describe('AppShell', () => {
   beforeEach(() => {
     container = document.createElement('div')
     document.body.appendChild(container)
+    // Reset mock states
+    planOverlayIsOpen = false
+    layoutViewingPlanId = null
   })
 
   it('should NOT render TitleBar in web mode (isTauri returns false)', () => {
@@ -122,5 +131,32 @@ describe('AppShell', () => {
 
     // Reset mock after test
     vi.restoreAllMocks()
+  })
+
+  it('shows MainArea (with PlanFullScreen) when viewingPlanId is set, even when planOverlay isOpen', () => {
+    // Simulate: plan overlay is open AND fullscreen viewer is requested
+    planOverlayIsOpen = true
+    layoutViewingPlanId = 'plan-123'
+
+    render(() => <AppShell />, container)
+
+    // MainArea should be rendered (which contains PlanFullScreen path)
+    // PlanOverlay should NOT be rendered when viewingPlanId is set
+    const mainArea = container.querySelector('[data-testid="main-area"]')
+    expect(mainArea).not.toBeNull()
+  })
+
+  it('shows PlanOverlay when planOverlay isOpen and viewingPlanId is not set', () => {
+    // Simulate: only plan overlay is open (no fullscreen viewer)
+    planOverlayIsOpen = true
+    layoutViewingPlanId = null
+
+    render(() => <AppShell />, container)
+
+    // PlanOverlay should be rendered, MainArea should NOT
+    const planOverlay = container.querySelector('[data-testid="plan-overlay"]')
+    expect(planOverlay).not.toBeNull()
+    const mainArea = container.querySelector('[data-testid="main-area"]')
+    expect(mainArea).toBeNull()
   })
 })

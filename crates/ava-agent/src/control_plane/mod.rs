@@ -1,6 +1,12 @@
+//! Canonical cross-surface control-plane contract seam.
+//!
+//! This module owns backend-shared command/event/session/interactive/queue contract
+//! primitives that desktop, web, TUI, and headless adapters reuse.
+
 pub mod commands;
 pub mod events;
 pub mod interactive;
+pub mod orchestration;
 pub mod queue;
 pub mod sessions;
 

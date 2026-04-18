@@ -47,8 +47,9 @@ describe('MessageQueueWidget backend-managed row controls', () => {
       { id: 'q-1', content: 'Editable queued item', tier: 'queued', backendManaged: false },
     ])
 
-    const editButton = container.querySelector('button[title="Edit"]')
-    const removeButton = container.querySelector('button[title="Remove"]')
+    // Use aria-label selectors for better accessibility testing
+    const editButton = container.querySelector('button[aria-label^="Edit"]')
+    const removeButton = container.querySelector('button[aria-label^="Remove"]')
     const clearAllButton = Array.from(container.querySelectorAll('button')).find(
       (button) => button.textContent?.trim() === 'Clear local'
     )
@@ -76,8 +77,8 @@ describe('MessageQueueWidget backend-managed row controls', () => {
     expect(container.textContent).toContain('2 queued messages')
     expect(container.textContent).toContain('Post-complete')
     expect(container.textContent).toContain('G2')
-    expect(container.querySelector('button[title="Edit"]')).toBeNull()
-    expect(container.querySelector('button[title="Remove"]')).toBeNull()
+    expect(container.querySelector('button[aria-label^="Edit"]')).toBeNull()
+    expect(container.querySelector('button[aria-label^="Remove"]')).toBeNull()
     expect(
       Array.from(container.querySelectorAll('button')).find(
         (button) => button.textContent?.trim() === 'Clear local'
@@ -91,6 +92,64 @@ describe('MessageQueueWidget backend-managed row controls', () => {
       { id: 'q-2', content: 'Backend follow-up', tier: 'follow-up', backendManaged: true },
     ])
 
-    expect(container.querySelector('button[title="Move down"]')).toBeNull()
+    expect(container.querySelector('button[aria-label="Move message down in queue"]')).toBeNull()
+  })
+
+  it('maps regular-section actions to section-local indices when post-complete rows are present', () => {
+    const { onRemove, onReorder } = mount([
+      { id: 'q-1', content: 'Queued first', tier: 'queued', backendManaged: false },
+      { id: 'q-2', content: 'Backend post-complete', tier: 'post-complete', group: 1 },
+      { id: 'q-3', content: 'Queued second', tier: 'queued', backendManaged: false },
+    ])
+
+    const removeSecondQueued = container.querySelector(
+      'button[aria-label="Remove queued message 2"]'
+    )
+    expect(removeSecondQueued).not.toBeNull()
+
+    const moveUpButtons = container.querySelectorAll(
+      'button[aria-label="Move message up in queue"]'
+    )
+    moveUpButtons[0]?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    removeSecondQueued?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+
+    expect(onReorder).toHaveBeenCalledWith(1, 0, 'regular')
+    expect(onRemove).toHaveBeenCalledWith(1, 'regular')
+  })
+
+  it('maps post-complete section actions to post-complete-local indices', () => {
+    const { onRemove } = mount([
+      { id: 'q-1', content: 'Queued first', tier: 'queued', backendManaged: false },
+      {
+        id: 'q-2',
+        content: 'Local post one',
+        tier: 'post-complete',
+        group: 1,
+        backendManaged: false,
+      },
+      {
+        id: 'q-3',
+        content: 'Local post two',
+        tier: 'post-complete',
+        group: 2,
+        backendManaged: false,
+      },
+    ])
+
+    const removeSecondPost = container.querySelector(
+      'button[aria-label="Remove post-complete message 2"]'
+    )
+
+    expect(removeSecondPost).not.toBeNull()
+    expect(
+      container.querySelectorAll('button[aria-label="Move message up in queue"]')
+    ).toHaveLength(0)
+    expect(
+      container.querySelectorAll('button[aria-label="Move message down in queue"]')
+    ).toHaveLength(0)
+
+    removeSecondPost?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+
+    expect(onRemove).toHaveBeenCalledWith(1, 'post-complete')
   })
 })

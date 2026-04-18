@@ -178,6 +178,10 @@ export const InterleavedThinkingSegments: Component<{
         const isLastSegment = () => idx === props.segments.length - 1
         const segStreaming = () =>
           !!(props.isStreaming && isLastSegment() && segment().toolCallIds.length === 0)
+        // Any running tools in this segment should keep it expanded during streaming
+        const hasRunningTools = () =>
+          segmentTools().some((tc) => tc.status === 'running' || tc.status === 'pending')
+        const isSegmentStreaming = () => props.isStreaming || hasRunningTools()
 
         return (
           <div class="flex flex-col gap-1">
@@ -186,7 +190,10 @@ export const InterleavedThinkingSegments: Component<{
             </Show>
             <Show when={segmentTools().length > 0}>
               <div class="ml-2 my-0.5">
-                <ToolSegmentDispatch toolCalls={segmentTools()} isStreaming={false} />
+                <ToolSegmentDispatch
+                  toolCalls={segmentTools()}
+                  isStreaming={isSegmentStreaming()}
+                />
               </div>
             </Show>
           </div>
@@ -207,6 +214,7 @@ export const InterleavedThinkingSegments: Component<{
         }}
       >
         <summary
+          class="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-inset rounded-lg"
           style={{
             cursor: 'pointer',
             'font-size': '12px',
@@ -216,28 +224,38 @@ export const InterleavedThinkingSegments: Component<{
             padding: '8px 12px',
             display: 'flex',
             'align-items': 'center',
-            gap: '6px',
+            gap: '8px',
           }}
         >
           <Show
             when={props.isStreaming}
             fallback={
               <span
-                style={{ 'font-size': '10px', opacity: '0.5', transition: 'transform 150ms' }}
-                class={detailsOpen() ? 'rotate-90' : ''}
+                style={{
+                  'font-size': '10px',
+                  opacity: '0.5',
+                  transition: 'transform 150ms var(--ease-out)',
+                  transform: detailsOpen() ? 'rotate(90deg)' : 'rotate(0deg)',
+                }}
+                aria-hidden="true"
               >
                 ▶
               </span>
             }
           >
-            <span class="w-3.5 h-3.5 border-2 border-[var(--accent)] border-t-transparent rounded-full animate-spin flex-shrink-0" />
+            <span
+              class="w-3.5 h-3.5 border-2 border-[var(--accent)] border-t-transparent rounded-full animate-spin flex-shrink-0"
+              aria-hidden="true"
+            />
           </Show>
           <span style={{ flex: '1' }}>{summaryLabel()}</span>
           <Show when={!detailsOpen()}>
             <span style={{ 'font-size': '11px', opacity: '0.35' }}>click to expand</span>
           </Show>
         </summary>
-        <div class="flex flex-col gap-1.5 px-3 pb-3">{inner}</div>
+        <section class="flex flex-col gap-1.5 px-3 pb-3" aria-label="Tool execution details">
+          {inner}
+        </section>
       </details>
     </Show>
   )

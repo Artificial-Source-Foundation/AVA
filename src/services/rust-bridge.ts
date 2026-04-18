@@ -313,7 +313,14 @@ export const rustBackend = {
 
   // Mid-stream messaging (3-tier)
   steerAgent: (message: string, correlation?: RunCorrelationArgs): Promise<void> =>
-    invokeCommand('steer_agent', correlation ? { message, ...correlation } : { message }),
+    invokeCommand(
+      'steer_agent',
+      isTauri()
+        ? { args: { message, ...(correlation ?? {}) } }
+        : correlation
+          ? { message, ...correlation }
+          : { message }
+    ),
   followUpAgent: (
     message: string,
     sessionId?: string,
@@ -336,7 +343,11 @@ export const rustBackend = {
   clearMessageQueue: (
     target: ClearTarget = 'all',
     correlation?: RunCorrelationArgs
-  ): Promise<void> => invokeCommand('clear_message_queue', { target, ...(correlation ?? {}) }),
+  ): Promise<void> =>
+    invokeCommand(
+      'clear_message_queue',
+      isTauri() ? { args: { target, ...(correlation ?? {}) } } : { target, ...(correlation ?? {}) }
+    ),
 
   // Retry / Edit+Resend / Regenerate / Undo
   retryLastMessage: (sessionId?: string): Promise<SubmitGoalResult> =>
@@ -345,7 +356,8 @@ export const rustBackend = {
     invokeCommand('edit_and_resend', { args }),
   regenerateResponse: (sessionId?: string): Promise<SubmitGoalResult> =>
     invokeCommand('regenerate_response', { args: { sessionId: sessionId ?? null } }),
-  undoLastEdit: (): Promise<UndoResult> => invokeCommand('undo_last_edit'),
+  undoLastEdit: (correlation?: RunCorrelationArgs): Promise<UndoResult> =>
+    invokeCommand('undo_last_edit', correlation ? { args: correlation } : undefined),
 
   // Session rename/search
   renameSession: (id: string, title: string): Promise<void> =>

@@ -4,11 +4,18 @@
  * Branching operations (duplicate/fork/branch) are in session-branching.ts.
  */
 
+import { isTauri } from '@tauri-apps/api/core'
 import { batch, createMemo } from 'solid-js'
 import { DEFAULTS, STORAGE_KEYS } from '../../config/constants'
 import { clearTodos } from '../../hooks/use-rust-agent'
 import { log } from '../../lib/logger'
-import { notifySessionOpened } from '../../services/core-bridge'
+import { normalizeToolCalls } from '../../lib/tool-call-state'
+import {
+  clearSessionNeedsAuthoritativeRecovery,
+  markSessionNeedsAuthoritativeRecovery,
+  notifySessionOpened,
+  sessionNeedsAuthoritativeRecovery,
+} from '../../services/core-bridge'
 import {
   archiveSession as dbArchiveSession,
   createSession as dbCreateSession,
@@ -24,15 +31,26 @@ import {
   getTerminalExecutions,
 } from '../../services/database'
 import { logDebug, logError, logInfo, logWarn } from '../../services/logger'
-import { rustAgent } from '../../services/rust-bridge'
-import type { Session, SessionWithStats } from '../../types'
+import { rustBackend } from '../../services/rust-bridge'
+import { unregisterBackendSessionId } from '../../services/web-session-identity'
+import type { Message, Session, SessionWithStats, ToolCall } from '../../types'
 import type { ActiveSessionSyncSnapshot } from '../../types/rust-ipc'
 import { useProject } from '../project'
 import { getLastSessionForProject, setLastSessionForProject } from '../session-persistence'
 import { createLatestRequestGate } from './request-gate'
 import {
+  cacheSessionArtifacts,
+  deleteCachedSessionArtifacts,
+  getCachedSessionArtifacts,
+} from './session-artifact-cache'
+import { replaceMessagesFromBackendForSession } from './session-messages'
+import {
+  agents,
   archivedSessions,
+  checkpoints,
   currentSession,
+  fileOperations,
+  memoryItems,
   messages,
   sessions,
   setAgents,
@@ -48,6 +66,7 @@ import {
   setRetryingMessageId,
   setSessions,
   setTerminalExecutions,
+  terminalExecutions,
 } from './session-state'
 
 // Re-export branching operations so existing `import * as lifecycle` still works
@@ -72,50 +91,159 @@ export const getSessionTree = createMemo(() => {
 const sessionListGate = createLatestRequestGate()
 const sessionSwitchGate = createLatestRequestGate()
 const createSessionInFlightByKey = new Map<string, Promise<Session>>()
-const CANCEL_CONFIRM_RETRIES = 6
-const CANCEL_CONFIRM_DELAY_MS = 50
-const ACTIVE_RUN_TRANSITION_BLOCKED_MESSAGE =
-  'Cannot change sessions while the backend run remains active after cancel confirmation'
 
-const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null
+}
+
+function asString(value: unknown): string | undefined {
+  return typeof value === 'string' ? value : undefined
+}
+
+function parseSessionMessageRole(value: unknown): Message['role'] | null {
+  const normalized = asString(value)?.toLowerCase()
+  if (normalized === 'user' || normalized === 'assistant' || normalized === 'system') {
+    return normalized
+  }
+  return null
+}
+
+function parseSessionMessageImages(value: unknown): Message['images'] | undefined {
+  if (!Array.isArray(value) || value.length === 0) {
+    return undefined
+  }
+
+  const normalized = value
+    .map((entry) => {
+      const record = asRecord(entry)
+      const data = asString(record?.data)
+      const mimeType = asString(record?.mimeType) ?? asString(record?.media_type)
+      const name = asString(record?.name)
+      if (!record || !data || !mimeType) {
+        return null
+      }
+      return {
+        data,
+        mimeType,
+        ...(name ? { name } : {}),
+      }
+    })
+    .filter((image): image is NonNullable<typeof image> => image !== null)
+
+  return normalized.length > 0 ? normalized : undefined
+}
+
+function parseSessionMessageToolCalls(value: unknown): ToolCall[] | undefined {
+  if (!Array.isArray(value) || value.length === 0) {
+    return undefined
+  }
+
+  const normalized = normalizeToolCalls(value)
+
+  return normalized && normalized.length > 0 ? normalized : undefined
+}
+
+function mapDesktopBackendSessionMessages(sessionId: string, rawSession: unknown): Message[] {
+  const session = asRecord(rawSession)
+  const rawMessages = Array.isArray(session?.messages) ? session.messages : []
+
+  return rawMessages
+    .map((rawMessage): Message | null => {
+      const record = asRecord(rawMessage)
+      const id = asString(record?.id)
+      const role = parseSessionMessageRole(record?.role)
+      if (!record || !id || !role) {
+        return null
+      }
+
+      const metadata = asRecord(record.metadata) ?? undefined
+      const toolCalls =
+        parseSessionMessageToolCalls(record.tool_calls) ?? normalizeToolCalls(metadata?.toolCalls)
+      const mergedMetadata =
+        metadata || toolCalls
+          ? {
+              ...(metadata ?? {}),
+              ...(toolCalls ? { toolCalls } : {}),
+            }
+          : undefined
+
+      return {
+        id,
+        sessionId,
+        role,
+        content: asString(record.content) ?? '',
+        createdAt:
+          typeof record.timestamp === 'string'
+            ? new Date(record.timestamp).getTime()
+            : typeof record.created_at === 'number'
+              ? record.created_at
+              : Date.now(),
+        ...(mergedMetadata ? { metadata: mergedMetadata } : {}),
+        toolCalls,
+        images: parseSessionMessageImages(record.images),
+      }
+    })
+    .filter((message): message is Message => message !== null)
+}
+
+async function recoverDesktopSessionFromBackend(sessionId: string): Promise<Message[]> {
+  const rawSession = await rustBackend.loadSession(sessionId)
+  return mapDesktopBackendSessionMessages(sessionId, rawSession)
+}
+
+async function recoverWebSessionFromBackendIfNeeded(sessionId: string): Promise<boolean> {
+  if (isTauri() || !sessionId || !sessionNeedsAuthoritativeRecovery(sessionId)) {
+    return false
+  }
+
+  try {
+    const authoritativeMessages = await getMessages(sessionId)
+    if (authoritativeMessages.length === 0) {
+      return false
+    }
+
+    await replaceMessagesFromBackendForSession(sessionId, authoritativeMessages)
+    clearSessionNeedsAuthoritativeRecovery(sessionId)
+    return true
+  } catch (err) {
+    markSessionNeedsAuthoritativeRecovery(sessionId)
+    log.warn('session', 'Failed to recover authoritative detached web session', {
+      sessionId,
+      error: err instanceof Error ? err.message : String(err),
+    })
+    return false
+  }
+}
+
+export async function recoverDetachedDesktopSessionIfNeeded(sessionId: string): Promise<boolean> {
+  if (!isTauri() || !sessionId || !sessionNeedsAuthoritativeRecovery(sessionId)) {
+    return false
+  }
+
+  try {
+    const status = await rustBackend.getAgentStatus({ sessionId })
+    if (status.running) {
+      return false
+    }
+
+    const authoritativeMessages = await recoverDesktopSessionFromBackend(sessionId)
+    await replaceMessagesFromBackendForSession(sessionId, authoritativeMessages)
+    clearSessionNeedsAuthoritativeRecovery(sessionId)
+    return true
+  } catch (err) {
+    markSessionNeedsAuthoritativeRecovery(sessionId)
+    log.warn('session', 'Failed to recover authoritative detached desktop session', {
+      sessionId,
+      error: err instanceof Error ? err.message : String(err),
+    })
+    return false
+  }
+}
 
 interface SessionTransitionOptions {
   preserveActiveRun?: boolean
-}
-
-async function bestEffortCancelActiveRun(
-  reason: 'create-session' | 'switch-session'
-): Promise<boolean> {
-  const sessionId = currentSession()?.id
-  const correlation = sessionId ? { sessionId } : undefined
-
-  try {
-    const status = await rustAgent.status(correlation)
-    if (!status.running) {
-      return true
-    }
-
-    await rustAgent.cancel(correlation).catch(() => {})
-
-    for (let attempt = 0; attempt < CANCEL_CONFIRM_RETRIES; attempt += 1) {
-      await delay(CANCEL_CONFIRM_DELAY_MS)
-      const refreshed = await rustAgent.status(correlation).catch(() => null)
-      if (!refreshed?.running) {
-        return true
-      }
-    }
-
-    log.warn('session', 'Backend run still active after cancel confirmation window', { reason })
-    return false
-  } catch (error) {
-    rustAgent.cancel(correlation).catch(() => {})
-    log.warn('session', 'Best-effort cancel status check failed during session transition', {
-      reason,
-      sessionId,
-      error: error instanceof Error ? error.message : String(error),
-    })
-    return true
-  }
 }
 
 function resetSessionArtifacts(): void {
@@ -127,6 +255,17 @@ function resetSessionArtifacts(): void {
     setMemoryItems([])
     setCheckpoints([])
     clearTodos()
+  })
+}
+
+function cacheCurrentSessionArtifacts(sessionId: string): void {
+  cacheSessionArtifacts(sessionId, {
+    messages: messages(),
+    agents: agents(),
+    fileOps: fileOperations(),
+    terminalExecutions: terminalExecutions(),
+    memoryItems: memoryItems(),
+    checkpoints: checkpoints(),
   })
 }
 
@@ -221,7 +360,7 @@ export async function restoreForCurrentProject(
 export async function createNewSession(
   name?: string,
   projectIdOverride?: string,
-  options: SessionTransitionOptions = {}
+  _options: SessionTransitionOptions = {}
 ): Promise<Session> {
   const requestedName = name || DEFAULTS.SESSION_NAME
   const requestedProjectId = projectIdOverride ?? useProject().currentProject()?.id
@@ -247,22 +386,28 @@ export async function createNewSession(
   }
 
   const createPromise = (async () => {
-    if (!options.preserveActiveRun) {
-      const cancelConfirmed = await bestEffortCancelActiveRun('create-session')
-      if (!cancelConfirmed) {
-        throw new Error(ACTIVE_RUN_TRANSITION_BLOCKED_MESSAGE)
-      }
-    }
-
     const { currentProject } = useProject()
     const project = currentProject()
     const projectId = projectIdOverride ?? requestedProjectId ?? project?.id
     const session = await dbCreateSession(requestedName, projectId)
     const sessionWithStats: SessionWithStats = { ...session, messageCount: 0, totalTokens: 0 }
+    const fromSessionId = currentSession()?.id
+
+    if (fromSessionId && fromSessionId !== session.id) {
+      cacheCurrentSessionArtifacts(fromSessionId)
+    }
 
     setSessions((prev) => [sessionWithStats, ...prev])
     setCurrentSession(session)
     resetSessionArtifacts()
+    cacheSessionArtifacts(session.id, {
+      messages: [],
+      agents: [],
+      fileOps: [],
+      terminalExecutions: [],
+      memoryItems: [],
+      checkpoints: [],
+    })
     log.info('session', 'Session created', { id: session.id, name: session.name })
     logInfo('session', 'Session created', {
       id: session.id,
@@ -293,33 +438,39 @@ export async function createNewSession(
 
 export async function switchSession(
   id: string,
-  options: SessionTransitionOptions = {}
+  _options: SessionTransitionOptions = {}
 ): Promise<void> {
   const fromSessionId = currentSession()?.id
+  if (fromSessionId === id) {
+    return
+  }
+
   const session = sessions().find((s) => s.id === id)
   if (!session) {
     logWarn('session', 'Session not found', { id })
     return
   }
 
-  if (!options.preserveActiveRun) {
-    const cancelConfirmed = await bestEffortCancelActiveRun('switch-session')
-    if (!cancelConfirmed) {
-      return
-    }
-  }
-
   const requestToken = sessionSwitchGate.begin()
   let loadedMessages: Awaited<ReturnType<typeof getMessages>> = []
+  if (fromSessionId && fromSessionId !== id) {
+    cacheCurrentSessionArtifacts(fromSessionId)
+  }
+  const cachedArtifacts = getCachedSessionArtifacts(id)
+  loadedMessages = cachedArtifacts?.messages ?? []
   setEditingMessageId(null)
   setRetryingMessageId(null)
   setCurrentSession(session)
-  resetSessionArtifacts()
+  if (cachedArtifacts) {
+    hydrateSessionArtifacts(cachedArtifacts)
+  } else {
+    resetSessionArtifacts()
+  }
 
   // Switch to per-session log file
   import('../../lib/logger').then((m) => m.setSessionLogFile(id)).catch(() => {})
 
-  setIsLoadingMessages(true)
+  setIsLoadingMessages(!cachedArtifacts)
   try {
     const [dbMessages, dbAgents, dbFileOps, dbTerminalExecs, dbMemItems, dbCheckpoints] =
       await Promise.all([
@@ -335,14 +486,16 @@ export async function switchSession(
     }
     loadedMessages = dbMessages
     log.debug('session', `switchSession: loaded ${dbMessages.length} messages from DB for ${id}`)
-    hydrateSessionArtifacts({
+    const freshArtifacts = {
       messages: dbMessages,
       agents: dbAgents,
       fileOps: dbFileOps,
       terminalExecutions: dbTerminalExecs,
       memoryItems: dbMemItems,
       checkpoints: dbCheckpoints,
-    })
+    }
+    hydrateSessionArtifacts(freshArtifacts)
+    cacheSessionArtifacts(id, freshArtifacts)
     log.info('session', 'Session loaded', { id, messageCount: dbMessages.length })
     logInfo('session', 'Session switched', {
       from: fromSessionId ?? 'none',
@@ -361,12 +514,36 @@ export async function switchSession(
     }
   }
 
+  // Perform detached session recovery BEFORE notifying the backend, so the
+  // snapshot sent to notifySessionOpened() contains the authoritative recovered
+  // transcript rather than stale pre-recovery messages.
+  if (isTauri()) {
+    const recovered = await recoverDetachedDesktopSessionIfNeeded(id)
+    if (recovered && sessionSwitchGate.isCurrent(requestToken) && currentSession()?.id === id) {
+      // Update loadedMessages to reflect the recovered authoritative state
+      loadedMessages = messages()
+    }
+    if (!sessionSwitchGate.isCurrent(requestToken) || currentSession()?.id !== id) {
+      return
+    }
+  } else {
+    const recovered = await recoverWebSessionFromBackendIfNeeded(id)
+    if (recovered && sessionSwitchGate.isCurrent(requestToken) && currentSession()?.id === id) {
+      // Update loadedMessages to reflect the recovered authoritative state
+      loadedMessages = messages()
+    }
+    if (!sessionSwitchGate.isCurrent(requestToken) || currentSession()?.id !== id) {
+      return
+    }
+  }
+
   const { currentProject: getProject } = useProject()
   const cwd = getProject()?.directory || '.'
   await notifySessionOpened(id, cwd, buildDesktopSessionSnapshot(session, loadedMessages))
   if (!sessionSwitchGate.isCurrent(requestToken) || currentSession()?.id !== id) {
     return
   }
+
   localStorage.setItem(STORAGE_KEYS.LAST_SESSION, id)
   const { currentProject } = useProject()
   setLastSessionForProject(currentProject()?.id, id)
@@ -411,6 +588,11 @@ export async function archiveSession(id: string): Promise<void> {
   log.info('session', 'Session archived', { id })
   const projectId = currentSession()?.id === id ? currentSession()?.projectId : undefined
   await dbArchiveSession(id)
+  // NOTE: Do NOT unregister the web-mode session alias mapping here.
+  // The backend session still exists and may be accessed later (e.g., viewing
+  // archived sessions, unarchiving). Alias cleanup is tied to permanent
+  // deletion in deleteSessionPermanently() only.
+  deleteCachedSessionArtifacts(id)
   setSessions((prev) => prev.filter((s) => s.id !== id))
   if (currentSession()?.id === id) await switchAfterRemoval(projectId)
 }
@@ -449,6 +631,9 @@ export async function deleteSessionPermanently(id: string): Promise<void> {
   log.info('session', 'Session deleted permanently', { id })
   const projectId = currentSession()?.id === id ? currentSession()?.projectId : undefined
   await dbDeleteSession(id)
+  // Clean up web-mode session alias mapping when session is deleted
+  unregisterBackendSessionId(id)
+  deleteCachedSessionArtifacts(id)
   setSessions((prev) => prev.filter((s) => s.id !== id))
   if (currentSession()?.id === id) await switchAfterRemoval(projectId)
 }

@@ -2,7 +2,7 @@
 title: "Backlog"
 description: "Pending work for AVA after the recent 3.3 refactor and normalization passes."
 order: 3
-updated: "2026-04-17"
+updated: "2026-04-18"
 ---
 
 # AVA Backlog
@@ -59,8 +59,13 @@ Source of truth for direction: `docs/project/roadmap.md`
 20. Keep web detached-completion regressions on real switch-back recovery so off-screen browser runs reload the backend-authored final message/tool state instead of preserving only the hidden partial placeholder.
 21. Keep authoritative recovery regressions on rich tool-call preservation so thinner `load_session` or `/api/sessions/:id/messages` payloads cannot wipe already-known tool outputs, timestamps, statuses, or content offsets when final assistant text changes on switch-back.
 22. Keep browser cache-miss recovery and replay-sync regressions on origin-session identity plus durable tool metadata so divergent backend session IDs remain an internal lookup detail and web reloads still recover full tool cards after cache eviction.
-23. Keep active web switch-back regressions on the rehydrate/refresh seam so `rehydrateStatus().running === true` preserves cached live assistant/tool state until final sync instead of replaying stale persisted messages mid-run.
-24. Keep deterministic browser approval coverage on the real rehydrate/resolve path so ApprovalDock regressions are caught without relying on model-specific tool behavior to raise an approval request.
+23. Keep browser archive/unarchive regressions on the real web backend path so archived status survives reload/list filtering and mapped frontend sessions still resolve later archive/unarchive operations through the backend alias seam.
+24. Keep active web switch-back regressions on the rehydrate/refresh seam so `rehydrateStatus().running === true` preserves cached live assistant/tool state until final sync instead of replaying stale persisted messages mid-run.
+25. Keep deterministic browser approval coverage on the real rehydrate/resolve path so ApprovalDock regressions are caught without relying on model-specific tool behavior to raise an approval request.
+26. Keep Playwright smoke harness selectors and entrypoints aligned with the current frontend shell so stress/smoke specs wait on the Vite app, target the semantic "Message composer" textbox, and avoid stale server flags or backend-root navigation assumptions.
+27. Keep Playwright shell smoke helpers aligned on the robust changelog-dismiss path so the What's New modal cannot intermittently intercept composer input after shell readiness in app/stress/browser smoke runs.
+28. Keep live stress assertions anchored to newly-added assistant artifacts so browser smokes cannot false-pass by re-reading preexisting transcript text or the just-submitted user prompt when no assistant response is actually produced.
+29. Keep live agent stress smokes validating real success outcomes so UI/API flows assert the expected assistant marker, fail on clear assistant error output, verify persisted transcript content after API submission, and skip cleanly when no provider is configured instead of timing out with misleading noise.
 
 ## Out Of Scope For This Queue
 

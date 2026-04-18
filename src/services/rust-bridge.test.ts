@@ -174,6 +174,7 @@ describe('rustBackend set/list argument shaping', () => {
     await rustBackend.steerAgent('nudge', { runId: 'web-run-1' })
     await rustBackend.getMessageQueue({ sessionId: 'session-1' })
     await rustBackend.clearMessageQueue('all', { runId: 'web-run-1', sessionId: 'session-1' })
+    await rustBackend.undoLastEdit({ runId: 'web-run-1', sessionId: 'session-1' })
 
     expect(invokeMock).toHaveBeenNthCalledWith(1, 'get_agent_status', {
       args: { runId: 'web-run-1' },
@@ -182,16 +183,16 @@ describe('rustBackend set/list argument shaping', () => {
       args: { runId: 'web-run-1', sessionId: 'session-1' },
     })
     expect(invokeMock).toHaveBeenNthCalledWith(3, 'steer_agent', {
-      message: 'nudge',
-      runId: 'web-run-1',
+      args: { message: 'nudge', runId: 'web-run-1' },
     })
     expect(invokeMock).toHaveBeenNthCalledWith(4, 'get_message_queue', {
       args: { sessionId: 'session-1' },
     })
     expect(invokeMock).toHaveBeenNthCalledWith(5, 'clear_message_queue', {
-      target: 'all',
-      runId: 'web-run-1',
-      sessionId: 'session-1',
+      args: { target: 'all', runId: 'web-run-1', sessionId: 'session-1' },
+    })
+    expect(invokeMock).toHaveBeenNthCalledWith(6, 'undo_last_edit', {
+      args: { runId: 'web-run-1', sessionId: 'session-1' },
     })
   })
 })

@@ -221,14 +221,19 @@ export const PlanOverlay: Component = () => {
     return parts.join('\n')
   }
 
-  const handleApprove = (): void => {
+  const handleApprove = async (): Promise<void> => {
     const plan = activePlan()
     if (!plan) return
-    agent.resolvePlan('approved', plan, undefined, collectStepComments())
-    executePlan()
+    try {
+      await agent.resolvePlan('approved', plan, undefined, collectStepComments())
+      // Only execute/close on successful resolve
+      executePlan()
+    } catch {
+      // Keep overlay open on failure - user can retry
+    }
   }
 
-  const handleReject = (): void => {
+  const handleReject = async (): Promise<void> => {
     const feedback = collectAnnotationFeedback()
     const comments = collectStepComments()
     const commentEntries = Object.entries(comments)
@@ -241,8 +246,13 @@ export const PlanOverlay: Component = () => {
       closePlan()
       return
     }
-    agent.resolvePlan('rejected', undefined, fullFeedback, comments)
-    closePlan()
+    try {
+      await agent.resolvePlan('rejected', undefined, fullFeedback, comments)
+      // Only close on successful resolve
+      closePlan()
+    } catch {
+      // Keep overlay open on failure - user can retry
+    }
   }
 
   const handleCopy = (): void => {

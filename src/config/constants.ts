@@ -21,6 +21,7 @@ export const STORAGE_KEYS = {
   LAYOUT_BOTTOM_HEIGHT: 'ava-layout-bottom-height',
   LAYOUT_PROJECT_HUB_VISIBLE: 'ava-layout-project-hub-visible',
   SHORTCUTS: 'ava_shortcuts',
+  SESSION_ID_ALIASES: 'ava_session_id_aliases',
 } as const
 
 // Default values

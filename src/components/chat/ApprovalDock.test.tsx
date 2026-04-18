@@ -182,4 +182,50 @@ describe('ApprovalDock', () => {
     expect(container.textContent).toContain('path:')
     expect(container.textContent).toContain('/src/test.ts')
   })
+
+  it('preserves native button activation when Enter is pressed on a focused button', () => {
+    const onResolve = vi.fn()
+    dispose = render(
+      () => <ApprovalDock request={makeRequest()} onResolve={onResolve} />,
+      container
+    )
+    // Get the Deny button and focus it
+    const denyBtn = container.querySelector('button') as HTMLButtonElement
+    expect(denyBtn?.textContent).toContain('Deny')
+    denyBtn.focus()
+    expect(document.activeElement).toBe(denyBtn)
+
+    // Press Enter while Deny button is focused - dispatch on the button itself
+    // so e.target is the button element
+    denyBtn.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+
+    // Global handler should NOT have been called because focus is on a button
+    // Native button click handler will fire instead (handled by the button's onClick)
+    expect(onResolve).not.toHaveBeenCalledWith(true, false)
+    expect(onResolve).not.toHaveBeenCalledWith(true, true)
+  })
+
+  it('preserves native button activation when Enter is pressed on Always Allow button', () => {
+    const onResolve = vi.fn()
+    dispose = render(
+      () => <ApprovalDock request={makeRequest()} onResolve={onResolve} />,
+      container
+    )
+    // Find the Always Allow button
+    const buttons = Array.from(container.querySelectorAll('button'))
+    const alwaysBtn = buttons.find((b) =>
+      b.textContent?.includes('Always Allow')
+    ) as HTMLButtonElement
+    expect(alwaysBtn).toBeDefined()
+
+    alwaysBtn.focus()
+    expect(document.activeElement).toBe(alwaysBtn)
+
+    // Press Enter while Always Allow button is focused - dispatch on the button
+    alwaysBtn.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+
+    // Global handler should NOT have been called
+    expect(onResolve).not.toHaveBeenCalledWith(true, false)
+    expect(onResolve).not.toHaveBeenCalledWith(true, true)
+  })
 })

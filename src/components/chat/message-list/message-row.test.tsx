@@ -1,3 +1,4 @@
+import type { JSXElement } from 'solid-js'
 import { render } from 'solid-js/web'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -20,8 +21,8 @@ vi.mock('../../../hooks/use-rust-agent', () => ({
 
 // Mock @kobalte/core/button to avoid JSX file extension issues in tests
 vi.mock('@kobalte/core/button', () => ({
-  Button: (props: { children: JSX.Element; onClick?: () => void; disabled?: boolean }) => (
-    <button type="button" onClick={props.onClick} disabled={props.disabled}>
+  Button: (props: { children: JSXElement; onClick?: () => void; disabled?: boolean }) => (
+    <button type="button" onClick={() => props.onClick?.()} disabled={props.disabled}>
       {props.children}
     </button>
   ),

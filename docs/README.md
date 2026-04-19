@@ -20,7 +20,7 @@ Public-facing entrypoint: [docs/index.md](index.md)
 5. [Project backlog](project/backlog.md) - active `0.6 -> V1` checklist plus archived prior backlog
 6. [Desktop testing guide](testing/desktop-testing.md) - practical desktop regression pass after refactors
 7. [Testing docs](testing/README.md) - Rust, frontend, desktop, and benchmark verification guidance
-8. [Current eval plan](project/ava-3.3.1-evals.md) - validation and benchmark expansion plan
+8. [Current eval plan](project/v1-evals.md) - validation and benchmark expansion plan
 9. [Benchmark docs](benchmark/README.md) - how the benchmark system works, how to run it, and how to compare reports
 10. [Provider prompt benchmarking](project/provider-prompt-benchmarking.md) - implementation and usage docs for provider-family and system-prompt evals
 11. [Architecture docs](architecture/README.md) - crate maps, capability audits, and architecture notes

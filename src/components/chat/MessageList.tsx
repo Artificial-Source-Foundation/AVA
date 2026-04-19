@@ -80,6 +80,7 @@ export const MessageList: Component<{ adapter?: MessageListAdapter }> = (props) 
     stopEditing,
     rollbackToMessage,
     branchAtMessage,
+    canBranchAtMessage,
     checkpoints,
     rollbackToCheckpoint,
     revertFilesAfter,
@@ -245,6 +246,7 @@ export const MessageList: Component<{ adapter?: MessageListAdapter }> = (props) 
         onBranch: isReadOnly ? noop : () => actions.handleBranch(msg().id),
         onRewind: isReadOnly ? noop : () => actions.setRewindTarget(msg().id),
         onRestoreCheckpoint: isReadOnly ? noop : rollbackToCheckpoint,
+        canBranch: canBranchAtMessage(),
       }
     },
     bottomContent: (

@@ -108,6 +108,20 @@ PY
   done
 fi
 
+if [ -n "${AVA_PNPM_FAIL_IF_CONTAINS:-}" ]; then
+  for arg in "$@"; do
+    case "$arg" in
+      *.ts|*.tsx|*.js|*.jsx|*.json|*.css)
+        [ -f "$arg" ] || continue
+        if grep -F -q "$AVA_PNPM_FAIL_IF_CONTAINS" "$arg"; then
+          printf 'pnpm received content marker in: %s\n' "$arg" >&2
+          exit 1
+        fi
+        ;;
+    esac
+  done
+fi
+
 exit 0
 EOF
 
@@ -135,6 +149,20 @@ for arg in "$@"; do
       ;;
   esac
 done
+
+if [ -n "${AVA_RUSTFMT_FAIL_IF_CONTAINS:-}" ]; then
+  for arg in "$@"; do
+    case "$arg" in
+      *.rs)
+        [ -f "$arg" ] || continue
+        if grep -F -q "$AVA_RUSTFMT_FAIL_IF_CONTAINS" "$arg"; then
+          printf 'rustfmt received content marker in: %s\n' "$arg" >&2
+          exit 1
+        fi
+        ;;
+    esac
+  done
+fi
 
 if [ "$check_mode" -eq 0 ]; then
   for arg in "$@"; do
@@ -439,8 +467,9 @@ EOF
 }
 
 test_pre_commit_keeps_partial_rust_stage_intact() {
-  local repo output before_cached after_cached before_worktree after_worktree
+  local repo output before_cached after_cached before_worktree after_worktree hook_log
   repo="$(create_repo pre-commit-rust-partial)"
+  hook_log="$repo/hook.log"
 
   cat > "$repo/demo.rs" <<'EOF'
 fn main() {
@@ -475,22 +504,28 @@ EOF
 
   before_cached="$(git -C "$repo" diff --cached -- demo.rs)"
   before_worktree="$(git -C "$repo" diff -- demo.rs)"
+  : > "$hook_log"
   output="$(
     cd "$repo"
     export PATH="$repo/bin:$PATH"
+    export AVA_TEST_HOOK_LOG="$hook_log"
+    export AVA_RUSTFMT_FAIL_IF_CONTAINS='keep_unstaged'
     bash scripts/dev/git-hooks.sh pre-commit
   )"
   after_cached="$(git -C "$repo" diff --cached -- demo.rs)"
   after_worktree="$(git -C "$repo" diff -- demo.rs)"
 
   assert_contains "$output" 'rustfmt --check on 1 staged Rust file(s)' 'rust pre-commit should use check mode'
+  assert_contains "$(<"$hook_log")" 'ava-hook-staged' 'rust pre-commit should validate a staged snapshot path'
+  assert_not_contains "$(<"$hook_log")" "$repo/.tmp/ava-hook-staged" 'rust pre-commit snapshot path should stay outside ignored repo .tmp paths'
   assert_equal "$after_cached" "$before_cached" 'rust pre-commit should not restage whole file'
   assert_equal "$after_worktree" "$before_worktree" 'rust pre-commit should not mutate worktree file'
 }
 
 test_pre_commit_keeps_partial_frontend_stage_intact() {
-  local repo output before_cached after_cached before_worktree after_worktree
+  local repo output before_cached after_cached before_worktree after_worktree hook_log
   repo="$(create_repo pre-commit-frontend-partial)"
+  hook_log="$repo/hook.log"
 
   cat > "$repo/demo.ts" <<'EOF'
 export const value = "base"
@@ -517,9 +552,12 @@ EOF
 
   before_cached="$(git -C "$repo" diff --cached -- demo.ts)"
   before_worktree="$(git -C "$repo" diff -- demo.ts)"
+  : > "$hook_log"
   output="$(
     cd "$repo"
     export PATH="$repo/bin:$PATH"
+    export AVA_TEST_HOOK_LOG="$hook_log"
+    export AVA_PNPM_FAIL_IF_CONTAINS='keep-unstaged'
     bash scripts/dev/git-hooks.sh pre-commit
   )"
   after_cached="$(git -C "$repo" diff --cached -- demo.ts)"
@@ -527,6 +565,8 @@ EOF
 
   assert_contains "$output" 'biome check on 1 staged frontend file(s)' 'frontend pre-commit should use non-mutating biome check'
   assert_not_contains "$output" '--write' 'frontend pre-commit should not use write mode'
+  assert_contains "$(<"$hook_log")" 'ava-hook-staged' 'frontend pre-commit should validate a staged snapshot path'
+  assert_not_contains "$(<"$hook_log")" "$repo/.tmp/ava-hook-staged" 'frontend pre-commit snapshot path should stay outside ignored repo .tmp paths'
   assert_equal "$after_cached" "$before_cached" 'frontend pre-commit should not restage whole file'
   assert_equal "$after_worktree" "$before_worktree" 'frontend pre-commit should not mutate worktree file'
 }

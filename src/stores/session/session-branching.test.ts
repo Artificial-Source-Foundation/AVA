@@ -58,7 +58,12 @@ vi.mock('../session-persistence', () => ({
     setLastSessionForProjectMock(projectId, sessionId),
 }))
 
-import { branchAtMessage, duplicateSession, forkSession } from './session-branching'
+import {
+  branchAtMessage,
+  canBranchAtMessage,
+  duplicateSession,
+  forkSession,
+} from './session-branching'
 import {
   currentSession,
   messages,
@@ -117,6 +122,27 @@ function resetSessionState(): void {
   setMessages([])
   setIsLoadingMessages(false)
 }
+
+describe('canBranchAtMessage capability', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    isTauriRuntime = false
+  })
+
+  afterEach(() => {
+    isTauriRuntime = false
+  })
+
+  it('returns true in Tauri mode', () => {
+    isTauriRuntime = true
+    expect(canBranchAtMessage()).toBe(true)
+  })
+
+  it('returns false in web mode', () => {
+    isTauriRuntime = false
+    expect(canBranchAtMessage()).toBe(false)
+  })
+})
 
 describe('session-branching web mode', () => {
   const fetchMock = vi.fn<typeof fetch>()

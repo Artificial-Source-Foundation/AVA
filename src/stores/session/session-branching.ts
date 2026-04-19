@@ -29,6 +29,27 @@ import {
 } from './session-state'
 
 // ============================================================================
+// Capability Contract
+// ============================================================================
+
+/**
+ * Returns whether branching at a specific message is supported in the current
+ * environment. This is a UI capability check that should be used to hide or
+ * disable branch affordances before user interaction.
+ *
+ * In Tauri (desktop) mode: branching at a message is fully supported.
+ * In web mode: branching requires a backend-backed endpoint that is not yet
+ * implemented, so this returns false.
+ *
+ * Note: The runtime will still reject branch operations in web mode as
+ * defense-in-depth, but this capability check allows the UI to proactively
+ * hide the affordance.
+ */
+export function canBranchAtMessage(): boolean {
+  return isTauri()
+}
+
+// ============================================================================
 // Helpers
 // ============================================================================
 

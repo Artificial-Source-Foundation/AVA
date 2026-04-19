@@ -18,6 +18,8 @@ interface UserMessageBubbleProps {
   onDelete: () => void
   onBranch: () => void
   onRewind: () => void
+  /** Whether branching at a message is supported in the current environment */
+  canBranch?: boolean
 }
 
 function formatTimestamp(msg: Message): string {
@@ -116,6 +118,7 @@ export const UserMessageBubble: Component<UserMessageBubbleProps> = (props) => {
                   onBranch={props.onBranch}
                   onRewind={props.onRewind}
                   isLoading={props.isStreaming}
+                  canBranch={props.canBranch}
                 />
               </div>
             </Show>

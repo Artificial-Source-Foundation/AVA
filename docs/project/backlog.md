@@ -18,10 +18,18 @@ Source of truth for direction: `docs/project/roadmap.md`
 1. Polish the desktop app until it feels ready for daily use, especially chat layout, settings, tool cards, and overall fit and finish.
 2. Make sure every core tool and important agent action has clear UI so users can understand what AVA is doing without reading logs.
 3. Verify multi-chat behavior end to end so users can switch sessions while runs continue without losing state, mixing outputs, or breaking approvals/plans.
-4. Prove the backend can do real coding work reliably in headless, TUI, desktop, and web flows.
+4. Prove the backend can do real coding work reliably in a **headless-first** flow (authoritative for backend correctness under the current scoped non-interactive exception), with TUI, desktop, and web checks to confirm lighter surface parity only (not full interactive approval/question/plan proof by itself).
 5. Add a simple automated product smoke suite for the core journey: prompt -> tools -> edit -> verify -> persist.
 6. Keep a repeatable AVA-vs-OpenCode comparison path so quality can be measured, not argued.
 7. Finish the docs reset around the `0.6` story so roadmap, backlog, README, and release language all describe the same product stage.
+
+## Milestone 1 Proof Definition
+
+1. **Backend scope is headless-first**: the authoritative proof path is `ava` headless/benchmark execution.
+2. **Proof is real work**: milestone evidence comes from realistic coding suites (`normal_coding`, `small_coding`, `stress_coding`, `test_heavy`) with compile/test validation, plus selected `tool_reliability` coverage and a minimal product smoke (`prompt -> tools -> edit -> verify -> persist`) as the required proof set; contract checks support but do not drive the milestone gate.
+3. **Approval policy baseline**: only dangerous commands/actions require explicit approval; ordinary safe tool calls and workspace-preserving edits remain low-friction by default.
+4. **Primary comparison reference**: `OpenCode` is the main baseline for backend/runtime contract and automation parity.
+5. **Secondary execution reference**: `Goose` is useful as a supplemental reference for execution modes and automation pattern parity.
 
 ## Simple V1 Checklist
 
@@ -45,6 +53,7 @@ The previous detailed backlog has been intentionally collapsed into the archive 
 7. Multi-run and session-attachment follow-up work across frontend and adapters, especially off-screen runs, switch-back recovery, and per-run ownership.
 8. Settings cleanup and accessibility follow-up work, including provider flows, dialog behavior, and remaining shell simplification.
 9. Backend contract and runtime-boundary cleanup work around queue semantics, event schemas, session continuity, and `AgentStack` ownership seams.
+10. Keep local verification ergonomics healthy so staged-snapshot pre-commit checks and path-aware pre-push gates stay safe for partial commits and mixed-surface pushes.
 
 ## Out Of Scope For This Queue
 

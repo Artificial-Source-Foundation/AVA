@@ -63,6 +63,8 @@ interface AssistantMessageBubbleProps {
   onBranch: () => void
   onRewind: () => void
   onRetry: () => void
+  /** Whether branching at a message is supported in the current environment */
+  canBranch?: boolean
 }
 
 interface ContextSummaryMetadata {
@@ -181,6 +183,7 @@ export const AssistantMessageBubble: Component<AssistantMessageBubbleProps> = (p
               onBranch={props.onBranch}
               onRewind={props.onRewind}
               isLoading={props.isStreaming}
+              canBranch={props.canBranch}
             />
           </div>
         </Show>

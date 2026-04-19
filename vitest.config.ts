@@ -19,7 +19,7 @@ export default defineConfig({
     },
     server: {
       deps: {
-        inline: ['lucide-solid'],
+        inline: ['lucide-solid', '@kobalte/core', 'solid-motionone'],
       },
     },
     // Coverage configuration

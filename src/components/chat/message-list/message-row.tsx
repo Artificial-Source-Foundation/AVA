@@ -33,6 +33,8 @@ export interface MessageRowProps {
   onBranch: () => void
   onRewind: () => void
   onRestoreCheckpoint: (id: string) => void
+  /** Whether branching at a message is supported in the current environment */
+  canBranch?: boolean
 }
 
 export const MessageRow: Component<MessageRowProps> = (props) => {
@@ -69,12 +71,14 @@ export const MessageRow: Component<MessageRowProps> = (props) => {
       })
     }
 
-    items.push({
-      label: 'Branch from here',
-      icon: GitBranch,
-      action: () => props.onBranch(),
-      disabled: props.isStreaming,
-    })
+    if (props.canBranch !== false) {
+      items.push({
+        label: 'Branch from here',
+        icon: GitBranch,
+        action: () => props.onBranch(),
+        disabled: props.isStreaming,
+      })
+    }
 
     // Retry — assistant messages with errors, or regenerate for assistant without errors
     if (props.message.role === 'assistant') {
@@ -144,6 +148,7 @@ export const MessageRow: Component<MessageRowProps> = (props) => {
         onDelete={props.onDelete}
         onBranch={props.onBranch}
         onRewind={props.onRewind}
+        canBranch={props.canBranch}
       />
       <Show when={props.checkpoint}>
         {(checkpoint) => (

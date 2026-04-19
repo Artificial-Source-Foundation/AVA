@@ -21,7 +21,7 @@ pnpm lint && pnpm typecheck
 
 Git hook policy:
 
-1. `pre-commit` must stay fast, staged-file-oriented, non-mutating, and file-scoped for Rust checks.
+1. `pre-commit` must stay fast, staged-file-oriented, non-mutating, file-scoped for Rust checks, and validate the staged snapshot rather than the working-tree copy.
 2. `pre-push` should be path-aware: docs-only pushes should stay light, frontend-sensitive pushes must run `pnpm typecheck` + `pnpm lint`, and Rust/general repo changes should run the pragmatic local Rust gate.
 3. CI remains the authoritative full gate.
 

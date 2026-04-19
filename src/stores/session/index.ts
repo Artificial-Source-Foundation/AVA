@@ -97,6 +97,7 @@ export function useSession() {
     duplicateSession: lifecycle.duplicateSession,
     forkSession: lifecycle.forkSession,
     branchAtMessage: lifecycle.branchAtMessage,
+    canBranchAtMessage: lifecycle.canBranchAtMessage,
     updateSessionStats: lifecycle.updateSessionStats,
 
     // Message Management

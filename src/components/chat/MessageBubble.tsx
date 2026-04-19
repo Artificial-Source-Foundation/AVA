@@ -28,6 +28,8 @@ interface MessageBubbleProps {
   onDelete: () => void
   onBranch: () => void
   onRewind: () => void
+  /** Whether branching at a message is supported in the current environment */
+  canBranch?: boolean
 }
 
 export const MessageBubble: Component<MessageBubbleProps> = (props) => {
@@ -57,6 +59,7 @@ export const MessageBubble: Component<MessageBubbleProps> = (props) => {
             onDelete={props.onDelete}
             onBranch={props.onBranch}
             onRewind={props.onRewind}
+            canBranch={props.canBranch}
           />
         }
       >
@@ -86,6 +89,7 @@ export const MessageBubble: Component<MessageBubbleProps> = (props) => {
             onBranch={props.onBranch}
             onRewind={props.onRewind}
             onRetry={props.onRetry}
+            canBranch={props.canBranch}
           />
         </Show>
       </Show>

@@ -70,7 +70,12 @@ import {
 } from './session-state'
 
 // Re-export branching operations so existing `import * as lifecycle` still works
-export { branchAtMessage, duplicateSession, forkSession } from './session-branching'
+export {
+  branchAtMessage,
+  canBranchAtMessage,
+  duplicateSession,
+  forkSession,
+} from './session-branching'
 
 export const getSessionTree = createMemo(() => {
   const all = sessions()

@@ -64,6 +64,19 @@ collect_staged_files() {
   done < <(git diff --cached --name-only --diff-filter=ACMR -z)
 }
 
+create_staged_snapshot_root() {
+  mktemp -d "${TMPDIR:-/tmp}/ava-hook-staged.XXXXXX"
+}
+
+materialize_staged_file() {
+  local file="$1"
+  local snapshot_path="$staged_snapshot_root/$file"
+
+  mkdir -p "$(dirname -- "$snapshot_path")"
+  git show ":$file" > "$snapshot_path"
+  printf '%s\n' "$snapshot_path"
+}
+
 resolve_push_range() {
   if [ -n "${AVA_HOOK_RANGE:-}" ]; then
     printf '%s\n' "$AVA_HOOK_RANGE"
@@ -252,43 +265,52 @@ run_pre_commit() {
     return
   fi
 
+  staged_snapshot_root="$(create_staged_snapshot_root)"
+  trap 'rm -rf "$staged_snapshot_root"' EXIT
+
   rust_files=()
   biome_files=()
   ts_files=()
+  snapshot_rust_files=()
+  snapshot_biome_files=()
+  snapshot_ts_files=()
 
   for file in "${staged_files[@]}"; do
     case "$file" in
       *.rs)
         rust_files+=("$file")
+        snapshot_rust_files+=("$(materialize_staged_file "$file")")
         ;;
     esac
 
     case "$file" in
       *.ts|*.tsx|*.js|*.jsx|*.json|*.css)
         biome_files+=("$file")
+        snapshot_biome_files+=("$(materialize_staged_file "$file")")
         ;;
     esac
 
     case "$file" in
       *.ts|*.tsx)
         ts_files+=("$file")
+        snapshot_ts_files+=("$(materialize_staged_file "$file")")
         ;;
     esac
   done
 
   if [ "${#rust_files[@]}" -gt 0 ]; then
     run_step "pre-commit: rustfmt --check on ${#rust_files[@]} staged Rust file(s)" \
-      rustfmt --check --config-path "$repo_root/rustfmt.toml" --config skip_children=true "${rust_files[@]}"
+      rustfmt --check --config-path "$repo_root/rustfmt.toml" --config skip_children=true "${snapshot_rust_files[@]}"
   fi
 
   if [ "${#biome_files[@]}" -gt 0 ]; then
     run_step "pre-commit: biome check on ${#biome_files[@]} staged frontend file(s)" \
-      pnpm exec biome check "${biome_files[@]}"
+      pnpm exec biome check "${snapshot_biome_files[@]}"
   fi
 
   if [ "${#ts_files[@]}" -gt 0 ]; then
     run_step "pre-commit: oxlint on ${#ts_files[@]} staged TypeScript file(s)" \
-      pnpm exec oxlint "${ts_files[@]}"
+      pnpm exec oxlint "${snapshot_ts_files[@]}"
   fi
 
   printf '[hooks] pre-commit complete\n'

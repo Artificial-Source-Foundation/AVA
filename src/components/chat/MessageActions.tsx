@@ -23,6 +23,9 @@ interface MessageActionsProps {
   onBranch: () => void
   onRewind: () => void
   isLoading: boolean
+  /** Whether branching at a message is supported in the current environment.
+   * If false, the branch button is hidden. Defaults to true for backward compatibility. */
+  canBranch?: boolean
 }
 
 const btnClass = `
@@ -155,17 +158,19 @@ export const MessageActions: Component<MessageActionsProps> = (props) => {
           </button>
         </Show>
 
-        {/* Branch button — all messages */}
-        <button
-          type="button"
-          on:click={(e: MouseEvent) => runAction(e, props.onBranch)}
-          disabled={props.isLoading}
-          class={btnClass}
-          title="Branch conversation here"
-          aria-label="Branch conversation here"
-        >
-          <GitFork class="w-3.5 h-3.5" />
-        </button>
+        {/* Branch button — all messages (hidden when not supported, e.g., web mode) */}
+        <Show when={props.canBranch !== false}>
+          <button
+            type="button"
+            on:click={(e: MouseEvent) => runAction(e, props.onBranch)}
+            disabled={props.isLoading}
+            class={btnClass}
+            title="Branch conversation here"
+            aria-label="Branch conversation here"
+          >
+            <GitFork class="w-3.5 h-3.5" />
+          </button>
+        </Show>
 
         {/* Rewind button — non-last messages only */}
         <Show when={!props.isLastMessage}>

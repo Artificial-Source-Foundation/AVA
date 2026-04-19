@@ -1,29 +1,10 @@
 # Contributing to AVA
 
-This repository is currently organized around AVA 3.3 as the baseline core.
+Start in:
 
-Read these first:
+1. [AGENTS.md](../AGENTS.md) — source of truth for architecture, workflow, and doc-update rules
+2. [docs/contributing/development-workflow.md](../docs/contributing/development-workflow.md) — day-to-day contributor loop and hook policy
+3. [docs/how-to/test.md](../docs/how-to/test.md) — verification and check commands
+4. [docs/contributing/releasing.md](../docs/contributing/releasing.md) — release workflow
 
-1. `AGENTS.md` — source of truth for architecture, workflow, and doc-update requirements
-2. `docs/README.md` — docs entrypoint
-3. `docs/project/roadmap.md` — current product direction
-4. `docs/project/backlog.md` — active work
-5. `docs/contributing/releasing.md` — release workflow
-
-## Development Checks
-
-```bash
-just check              # fmt + clippy + nextest
-just test               # cargo nextest run --workspace
-just run                # interactive TUI
-
-pnpm install
-pnpm run tauri dev
-```
-
-## Pull Requests
-
-1. Keep changes aligned with `AGENTS.md` and the AVA 3.3 docs.
-2. Run the relevant verification before opening the PR.
-3. Update `CHANGELOG.md` and `docs/project/backlog.md` when the change materially affects shipped behavior or project status.
-4. Follow the release-specific instructions in `docs/contributing/releasing.md` instead of duplicating them here.
+For PRs, follow the workflow in [`docs/contributing/development-workflow.md`](../docs/contributing/development-workflow.md), run the relevant checks there, and keep docs/changelog updates in sync with AGENTS-guided requirements.

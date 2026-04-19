@@ -16,6 +16,7 @@ export interface UseMessageActionsOptions {
   branchAtMessage: (messageId: string) => Promise<void>
   revertFilesAfter: (messageId: string) => Promise<number>
   notifySuccess: ReturnType<typeof useNotification>['success']
+  notifyError: ReturnType<typeof useNotification>['error']
 }
 
 export interface DeleteTarget {
@@ -51,8 +52,15 @@ export function useMessageActions(opts: UseMessageActionsOptions): MessageAction
   }
 
   const handleBranch = async (messageId: string): Promise<void> => {
-    await opts.branchAtMessage(messageId)
-    opts.notifySuccess('Conversation branched')
+    try {
+      await opts.branchAtMessage(messageId)
+      opts.notifySuccess('Conversation branched')
+    } catch (error) {
+      opts.notifyError(
+        'Conversation branch unavailable',
+        error instanceof Error ? error.message : 'Could not branch this conversation.'
+      )
+    }
   }
 
   const handleRewindConversationOnly = async (): Promise<void> => {

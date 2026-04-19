@@ -62,11 +62,15 @@ export function createWebDatabase(): WebDatabase {
           // also handle `name` vs `title` variations.
           // CRITICAL: Canonicalize session IDs - backend may return backend IDs,
           // but frontend state must always use the canonical frontend session ID.
+          const canonicalizeParentId = (value: unknown): string | null => {
+            if (typeof value !== 'string' || !value) return null
+            return canonicalizeSessionId(value)
+          }
           return (Array.isArray(sessions) ? sessions : []).map((s: Record<string, unknown>) => ({
             id: canonicalizeSessionId(s.id as string),
             name: s.title || s.name || 'Untitled',
             project_id: s.project_id ?? null,
-            parent_session_id: s.parent_session_id ?? null,
+            parent_session_id: canonicalizeParentId(s.parent_session_id ?? s.parentSessionId),
             slug: s.slug ?? null,
             busy_since: s.busy_since ?? null,
             created_at:

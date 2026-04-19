@@ -1,6 +1,6 @@
 # @ava-ai/plugin
 
-TypeScript SDK for building [AVA](https://github.com/ASF-GROUP/AVA) plugins.
+TypeScript SDK for building [AVA](https://github.com/Artificial-Source/AVA) plugins.
 
 AVA plugins are standalone processes that communicate with the AVA agent via JSON-RPC 2.0 over stdio. This SDK handles all the protocol details so you can focus on your plugin logic.
 

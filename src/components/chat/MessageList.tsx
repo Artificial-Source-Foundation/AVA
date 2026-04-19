@@ -87,7 +87,7 @@ export const MessageList: Component<{ adapter?: MessageListAdapter }> = (props) 
   } = useSession()
   const agent = useAgent()
   const { isRunning, retryMessage, editAndResend, regenerateResponse } = agent
-  const { success: notifySuccess } = useNotification()
+  const { success: notifySuccess, error: notifyError } = useNotification()
 
   const effectiveMessages = sessionMessages
   const effectiveLoading = isLoadingMessages
@@ -134,6 +134,7 @@ export const MessageList: Component<{ adapter?: MessageListAdapter }> = (props) 
     branchAtMessage: isReadOnly ? noopAsyncVoid : branchAtMessage,
     revertFilesAfter: isReadOnly ? noopAsyncNumber : revertFilesAfter,
     notifySuccess,
+    notifyError,
   })
 
   const handleSearchHighlight = (matchIds: Set<string>, currentId: string | null) => {

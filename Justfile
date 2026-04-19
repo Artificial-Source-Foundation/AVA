@@ -1,13 +1,22 @@
 # AVA Development Commands
 
+hook_entrypoint := "bash scripts/dev/git-hooks.sh"
+rust_throttle := "bash scripts/dev/run-rust-throttled.sh"
+
 default:
     @just --list
 
-# Run all checks (format + lint + quick test)
+# Run the pragmatic local Rust confidence gate
 check:
-    cargo fmt --all --check
-    cargo clippy --workspace -- -D warnings
-    cargo nextest run -p ava-agent -p ava-tools -p ava-review -j 4
+    {{hook_entrypoint}} check
+
+# Run the staged-file pre-commit checks used by lefthook
+hook-pre-commit:
+    {{hook_entrypoint}} pre-commit
+
+# Run the path-aware pre-push gate used by lefthook
+hook-pre-push:
+    {{hook_entrypoint}} pre-push
 
 # Run tests (per-crate to avoid OOM)
 test *ARGS:
@@ -86,9 +95,9 @@ smoke:
 install:
     cargo install --path crates/ava-tui --bin ava
 
-# Full CI-equivalent check (everything CI runs)
+# Broader local verification pass; CI remains authoritative
 ci: check
-    cargo nextest run --workspace -j 4
+    {{rust_throttle}} cargo nextest run --workspace -j 4
     RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
     pnpm typecheck
     pnpm lint

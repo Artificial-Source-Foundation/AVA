@@ -5,33 +5,14 @@
 rc: ~/.bashrc
 
 pre-commit:
-  parallel: true
   commands:
-    rustfmt:
-      glob: "**/*.rs"
-      run: cargo fmt --all --check
-
-    clippy:
-      glob: "**/*.rs"
-      run: cargo clippy --workspace -- -D warnings
-
-    biome-check:
-      glob: "**/*.{ts,tsx,js,jsx,json,css}"
-      run: npx biome check --write {staged_files}
-      stage_fixed: true
-
-    oxlint:
-      glob: "**/*.{ts,tsx}"
-      run: npx oxlint {staged_files}
-
-    typecheck:
-      glob: "**/*.{ts,tsx}"
-      run: npx tsc --noEmit
+    staged-local-checks:
+      run: bash scripts/dev/git-hooks.sh pre-commit
 
 pre-push:
   commands:
-    test-quick:
-      run: cargo nextest run -p ava-agent -p ava-tools -j 4 --status-level fail
+    local-confidence-gate:
+      run: bash scripts/dev/git-hooks.sh pre-push
       skip:
         - merge
         - rebase

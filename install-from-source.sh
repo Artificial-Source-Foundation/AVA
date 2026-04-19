@@ -177,7 +177,7 @@ fi
 # ============================================================================
 if [[ "$NON_INTERACTIVE" == "false" ]]; then
     echo -e "${DIM}  Note: Building from source takes 5-10 minutes on first run.${NC}"
-    echo -e "${DIM}  For a quick install, use: curl -fsSL https://raw.githubusercontent.com/ASF-GROUP/AVA/main/install.sh | sh${NC}"
+    echo -e "${DIM}  For a quick install, use: curl -fsSL https://raw.githubusercontent.com/Artificial-Source/AVA/develop/install.sh | sh${NC}"
     echo ""
     echo -e "${BOLD}What would you like to install?${NC}"
     echo ""

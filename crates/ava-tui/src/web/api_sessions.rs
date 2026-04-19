@@ -21,7 +21,11 @@ pub struct SessionSummary {
     pub id: String,
     pub title: String,
     pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent_session_id: Option<String>,
     pub message_count: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_preview: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -31,10 +35,22 @@ pub struct SessionDetail {
     pub id: String,
     pub title: String,
     pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent_session_id: Option<String>,
     pub message_count: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_preview: Option<String>,
     pub created_at: String,
     pub updated_at: String,
     pub messages: Vec<MessageSummary>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+enum SessionCloneKind {
+    #[default]
+    Duplicate,
+    Fork,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -134,12 +150,59 @@ fn session_title(session: &ava_types::Session) -> String {
         })
 }
 
+fn session_parent_session_id(session: &ava_types::Session) -> Option<String> {
+    session
+        .metadata
+        .get("parentSessionId")
+        .or_else(|| session.metadata.get("parent_session_id"))
+        .and_then(Value::as_str)
+        .map(str::to_string)
+}
+
+fn set_session_parent_session_id(
+    session: &mut ava_types::Session,
+    parent_session_id: Option<String>,
+) {
+    let metadata = session
+        .metadata
+        .as_object_mut()
+        .expect("session metadata object");
+    match parent_session_id {
+        Some(parent_id) => {
+            metadata.insert("parentSessionId".to_string(), Value::String(parent_id));
+        }
+        None => {
+            metadata.remove("parentSessionId");
+            metadata.remove("parent_session_id");
+        }
+    }
+}
+
+fn session_last_preview(session: &ava_types::Session) -> Option<String> {
+    session
+        .messages
+        .iter()
+        .rev()
+        .find(|message| message.user_visible)
+        .map(|message| message.content.chars().take(100).collect())
+}
+
+fn visible_message_count(session: &ava_types::Session) -> usize {
+    session
+        .messages
+        .iter()
+        .filter(|message| message.user_visible)
+        .count()
+}
+
 fn summarize_session(session: &ava_types::Session) -> SessionSummary {
     SessionSummary {
         id: session.id.to_string(),
         title: session_title(session),
         status: session_status(session).as_str().to_string(),
-        message_count: session.messages.len(),
+        parent_session_id: session_parent_session_id(session),
+        message_count: visible_message_count(session),
+        last_preview: session_last_preview(session),
         created_at: session.created_at.to_rfc3339(),
         updated_at: session.updated_at.to_rfc3339(),
     }
@@ -408,7 +471,9 @@ pub(crate) async fn create_session(
         id: session.id.to_string(),
         title: req.name,
         status: PersistedSessionStatus::Active.as_str().to_string(),
+        parent_session_id: None,
         message_count: 0,
+        last_preview: None,
         created_at: session.created_at.to_rfc3339(),
         updated_at: session.updated_at.to_rfc3339(),
     }))
@@ -434,7 +499,9 @@ pub(crate) async fn get_session(
         id: session.id.to_string(),
         title: session_title(&session),
         status: session_status(&session).as_str().to_string(),
-        message_count: session.messages.len(),
+        parent_session_id: session_parent_session_id(&session),
+        message_count: visible_message_count(&session),
+        last_preview: session_last_preview(&session),
         created_at: session.created_at.to_rfc3339(),
         updated_at: session.updated_at.to_rfc3339(),
         messages,
@@ -842,10 +909,12 @@ pub struct DuplicateSessionRequest {
     /// Optional client-provided ID for the new session.
     #[serde(default)]
     pub id: Option<String>,
+    /// Explicit clone semantics so backend can own duplicate vs fork lineage.
+    #[serde(default)]
+    pub kind: SessionCloneKind,
 }
 
-/// Duplicate a session: creates a new session with all messages copied from the source.
-/// Used by both "Duplicate" and "Fork" actions in the frontend.
+/// Clone a session: duplicate creates a root-level copy, while fork persists parent linkage.
 pub(crate) async fn duplicate_session(
     State(state): State<WebState>,
     Path(source_id): Path<String>,
@@ -886,7 +955,10 @@ pub(crate) async fn duplicate_session(
             .get("title")
             .and_then(|v| v.as_str())
             .unwrap_or("Untitled");
-        format!("{source_title} (copy)")
+        match req.kind {
+            SessionCloneKind::Duplicate => format!("{source_title} (copy)"),
+            SessionCloneKind::Fork => format!("{source_title} (fork)"),
+        }
     });
     if let Some(map) = new_session.metadata.as_object_mut() {
         map.insert("title".to_string(), serde_json::Value::String(title));
@@ -895,6 +967,11 @@ pub(crate) async fn duplicate_session(
             serde_json::Value::String(PersistedSessionStatus::Active.as_str().to_string()),
         );
     }
+    let parent_session_id = match req.kind {
+        SessionCloneKind::Duplicate => None,
+        SessionCloneKind::Fork => Some(source_session.id.to_string()),
+    };
+    set_session_parent_session_id(&mut new_session, parent_session_id.clone());
 
     // Save the new session first
     state
@@ -904,16 +981,11 @@ pub(crate) async fn duplicate_session(
         .save(&new_session)
         .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
 
-    // Copy all visible messages from source to new session
-    let message_count = source_session
-        .messages
-        .iter()
-        .filter(|m| m.user_visible)
-        .count();
+    // Copy all persisted messages from source to new session.
+    // Summary fields below still use the visible subset, but the cloned session
+    // must retain hidden/system/tool messages so web clone semantics match desktop.
+    let message_count = visible_message_count(&source_session);
     for msg in &source_session.messages {
-        if !msg.user_visible {
-            continue;
-        }
         let mut cloned = msg.clone();
         cloned.id = uuid::Uuid::new_v4();
         state
@@ -924,18 +996,22 @@ pub(crate) async fn duplicate_session(
             .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
     }
 
-    let final_title = new_session
+    let persisted_session = load_session_by_uuid(&state, new_session.id)?;
+    let final_title = persisted_session
         .metadata
         .get("title")
         .and_then(|v| v.as_str())
         .unwrap_or("Untitled")
         .to_string();
+    let last_preview = session_last_preview(&persisted_session);
     Ok(Json(SessionSummary {
         id: new_session.id.to_string(),
         title: final_title,
         status: PersistedSessionStatus::Active.as_str().to_string(),
+        parent_session_id,
         message_count,
-        created_at: new_session.created_at.to_rfc3339(),
-        updated_at: new_session.updated_at.to_rfc3339(),
+        last_preview,
+        created_at: persisted_session.created_at.to_rfc3339(),
+        updated_at: persisted_session.updated_at.to_rfc3339(),
     }))
 }

@@ -131,7 +131,7 @@ const ErrorFallback: Component<ErrorFallbackProps> = (props) => {
           </button>
           <span class="text-sm text-[var(--surface-overlay)]">&middot;</span>
           <a
-            href="https://github.com/ASF-GROUP/AVA/issues/new"
+            href="https://github.com/Artificial-Source/AVA/issues/new"
             target="_blank"
             rel="noopener noreferrer"
             class="text-sm text-[var(--text-tertiary)] no-underline"

@@ -32,8 +32,8 @@ edition = "2021"
 rust-version = "1.86"
 authors = ["ASF Group"]
 license = "MIT"
-repository = "https://github.com/Artificial-Source-Foundation/AVA"
-homepage = "https://github.com/ASF-GROUP/AVA"
+repository = "https://github.com/Artificial-Source/AVA"
+homepage = "https://github.com/Artificial-Source/AVA"
 
 [workspace.dependencies]
 tokio = { version = "1.0", features = ["full"] }

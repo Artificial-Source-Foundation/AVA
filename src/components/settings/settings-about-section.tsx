@@ -61,7 +61,7 @@ export const AboutSection: Component = () => {
       </div>
 
       <a
-        href="https://github.com/ASF-GROUP/AVA"
+        href="https://github.com/Artificial-Source/AVA"
         target="_blank"
         rel="noopener noreferrer"
         class="inline-flex items-center gap-1.5 text-xs text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors"

@@ -6,8 +6,7 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-const GITHUB_API_URL: &str =
-    "https://api.github.com/repos/Artificial-Source-Foundation/AVA/releases/latest";
+const GITHUB_API_URL: &str = "https://api.github.com/repos/Artificial-Source/AVA/releases/latest";
 const CHECK_INTERVAL_SECS: u64 = 86400; // 24 hours
 
 /// Info about an available update.
@@ -297,7 +296,7 @@ async fn install_from_source(info: &UpdateInfo) -> color_eyre::Result<()> {
         .args([
             "install",
             "--git",
-            "https://github.com/Artificial-Source-Foundation/AVA.git",
+            "https://github.com/Artificial-Source/AVA.git",
             "--tag",
             &tag,
             "--bin",
@@ -310,8 +309,8 @@ async fn install_from_source(info: &UpdateInfo) -> color_eyre::Result<()> {
 
     if !status.success() {
         return Err(color_eyre::eyre::eyre!(
-            "cargo install failed (exit {}). Install manually:\n  \
-             cargo install --git https://github.com/Artificial-Source-Foundation/AVA.git --tag {tag} --bin ava",
+             "cargo install failed (exit {}). Install manually:\n  \
+             cargo install --git https://github.com/Artificial-Source/AVA.git --tag {tag} --bin ava",
             status.code().unwrap_or(-1)
         ));
     }
@@ -377,7 +376,7 @@ pub async fn run_update_command() -> color_eyre::Result<()> {
         Err(e) => {
             eprintln!("  \x1b[1;31m\u{2717}\x1b[0m Failed to check for updates: {e}");
             eprintln!(
-                "  \x1b[2mDownload manually: https://github.com/Artificial-Source-Foundation/AVA/releases/latest\x1b[0m\n"
+                "  \x1b[2mDownload manually: https://github.com/Artificial-Source/AVA/releases/latest\x1b[0m\n"
             );
         }
     }

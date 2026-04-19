@@ -1,6 +1,6 @@
 #!/bin/sh
 # AVA CLI installer
-# Usage: curl -fsSL https://raw.githubusercontent.com/ASF-GROUP/AVA/master/install.sh | sh
+# Usage: curl -fsSL https://raw.githubusercontent.com/Artificial-Source/AVA/develop/install.sh | sh
 #
 # Installs the `ava` CLI binary to ~/.ava/bin/ and adds it to PATH.
 #
@@ -15,7 +15,7 @@ set -eu
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
-REPO="Artificial-Source-Foundation/AVA"
+REPO="Artificial-Source/AVA"
 INSTALL_DIR="${AVA_INSTALL_DIR:-${HOME}/.ava/bin}"
 TMP_DIR=""
 

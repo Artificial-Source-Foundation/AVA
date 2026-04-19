@@ -11,7 +11,10 @@ import {
   getMessages,
 } from '../../services/database'
 import { logInfo } from '../../services/logger'
-import { buildSessionBaseEndpoint } from '../../services/web-session-identity'
+import {
+  branchSessionAtMessageInWebMode,
+  cloneSessionInWebMode,
+} from '../../services/web-session-mutations'
 import type { Session, SessionWithStats } from '../../types'
 import { useProject } from '../project'
 import { setLastSessionForProject } from '../session-persistence'
@@ -28,46 +31,6 @@ import {
 // ============================================================================
 // Helpers
 // ============================================================================
-
-/** Web-mode helper: call the backend duplicate endpoint which copies messages server-side. */
-async function duplicateViaApi(
-  sourceSessionId: string,
-  name: string,
-  projectId: string | undefined
-): Promise<void> {
-  const newId = crypto.randomUUID()
-  // Route through web session identity service to resolve frontend→backend session ID
-  const endpoint = buildSessionBaseEndpoint(sourceSessionId, 'duplicate')
-  const res = await fetch(endpoint, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, id: newId }),
-  })
-  if (!res.ok) {
-    console.error('[session] duplicate API failed:', res.status, await res.text())
-    return
-  }
-  const data = (await res.json()) as { id: string; title: string; message_count: number }
-
-  // Build a local Session object matching what dbCreateSession returns
-  const now = Date.now()
-  const newSession: Session = {
-    id: data.id,
-    name: data.title,
-    projectId,
-    parentSessionId: sourceSessionId,
-    createdAt: now,
-    updatedAt: now,
-    status: 'active' as const,
-    metadata: {},
-  }
-
-  await activateClonedSession(
-    newSession,
-    { messageCount: data.message_count, totalTokens: 0, lastPreview: '' },
-    projectId
-  )
-}
 
 /** After cloning a session, update signals and persist the new session as active. */
 async function activateClonedSession(
@@ -107,14 +70,19 @@ export async function duplicateSession(sourceSessionId: string): Promise<void> {
 
   const { currentProject } = useProject()
   const projectId = currentProject()?.id
-  const newName = `${source.name} (copy)`
 
   if (!isTauri()) {
-    // Web mode: use the dedicated backend API to duplicate with messages
-    return duplicateViaApi(sourceSessionId, newName, projectId)
+    const clone = await cloneSessionInWebMode({
+      kind: 'duplicate',
+      sourceSessionId,
+      sourceSessionName: source.name,
+      projectId,
+    })
+    return activateClonedSession(clone.session, clone.stats, projectId)
   }
 
   const sourceMessages = await getMessages(sourceSessionId)
+  const newName = `${source.name} (copy)`
   const newSession = await dbCreateSession(newName, projectId)
 
   if (sourceMessages.length > 0) {
@@ -150,12 +118,19 @@ export async function forkSession(sourceSessionId: string, name?: string): Promi
 
   const { currentProject } = useProject()
   const projectId = currentProject()?.id
-  const forkName = name || `${source.name} (fork)`
 
   if (!isTauri()) {
-    // Web mode: use the dedicated backend API to fork with messages
-    return duplicateViaApi(sourceSessionId, forkName, projectId)
+    const clone = await cloneSessionInWebMode({
+      kind: 'fork',
+      sourceSessionId,
+      sourceSessionName: source.name,
+      projectId,
+      name,
+    })
+    return activateClonedSession(clone.session, clone.stats, projectId)
   }
+
+  const forkName = name || `${source.name} (fork)`
 
   const sourceMessages = await getMessages(sourceSessionId)
   const newSession = await dbCreateSession(forkName, projectId, sourceSessionId)
@@ -190,6 +165,11 @@ export async function forkSession(sourceSessionId: string, name?: string): Promi
 export async function branchAtMessage(messageId: string): Promise<void> {
   const session = currentSession()
   if (!session) return
+
+  if (!isTauri()) {
+    await branchSessionAtMessageInWebMode({ sessionId: session.id, messageId })
+    return
+  }
 
   const msgs = messages()
   const index = msgs.findIndex((m) => m.id === messageId)

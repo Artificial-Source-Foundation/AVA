@@ -17,10 +17,10 @@ Public-facing entrypoint: [docs/index.md](index.md)
 2. [Root README](../README.md) - public project overview and quick start
 3. [AGENTS.md](../AGENTS.md) - source of truth for repo workflow, architecture, and coding conventions
 4. [Project roadmap](project/roadmap.md) - current product direction and locked decisions
-5. [Project backlog](project/backlog.md) - pending work only, with completed history removed
+5. [Project backlog](project/backlog.md) - active `0.6 -> V1` checklist plus archived prior backlog
 6. [Desktop testing guide](testing/desktop-testing.md) - practical desktop regression pass after refactors
 7. [Testing docs](testing/README.md) - Rust, frontend, desktop, and benchmark verification guidance
-8. [AVA 3.3.1 eval plan](project/ava-3.3.1-evals.md) - validation and benchmark expansion plan
+8. [Current eval plan](project/ava-3.3.1-evals.md) - validation and benchmark expansion plan
 9. [Benchmark docs](benchmark/README.md) - how the benchmark system works, how to run it, and how to compare reports
 10. [Provider prompt benchmarking](project/provider-prompt-benchmarking.md) - implementation and usage docs for provider-family and system-prompt evals
 11. [Architecture docs](architecture/README.md) - crate maps, capability audits, and architecture notes
@@ -32,7 +32,12 @@ Public-facing entrypoint: [docs/index.md](index.md)
 17. [Backend contract exceptions](architecture/backend-contract-exceptions.md) - versioned registry of intentional adapter-specific backend contract exceptions
 18. [Operations docs](operations/README.md) - maintainer runbooks and operational guidance
 19. [Docs manifest](manifest.md) - list of new public Diátaxis pages and purpose
-20. [Changelog](../CHANGELOG.md) - shipped changes and release history
+20. [How-to: Install AVA](how-to/install.md) - binary, release, and source install paths
+21. [How-to: Use local models with Ollama](how-to/ollama-local-models.md) - Ollama-only local-model setup and verification path
+22. [How-to: Run AVA in CI/headless automation](how-to/ci-headless-automation.md) - non-interactive CI/script usage with JSON mode and conservative behavior assumptions
+23. [Troubleshooting: Common errors](troubleshooting/common-errors.md) - fast recovery for common runtime failures
+24. [Reference: Install and release paths](reference/install-and-release-paths.md) - grounded install/release surface map
+25. [Changelog](../CHANGELOG.md) - shipped changes and release history
 
 ## Sections
 
@@ -55,7 +60,7 @@ Public-facing entrypoint: [docs/index.md](index.md)
 ## Notes
 
 1. `README.md` is the front door; `docs/` is the browsable knowledge base.
-2. `AGENTS.md` remains the authoritative workflow and architecture document for this repo.
+2. `AGENTS.md` remains the authoritative workflow and architecture document for this repo and is written primarily for AI assistants and automated coding agents.
 3. `CLAUDE.md`, `llms.txt`, and `CODEBASE_STRUCTURE.md` are compatibility entrypoints that point back to the active docs.
 4. Historical material is preserved for context, not as current roadmap guidance.
 5. Active docs pages now include frontmatter and `_meta.json` navigation manifests so the Markdown can be imported into a docs website later without a full rewrite.

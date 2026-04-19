@@ -1,0 +1,367 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(cd -- "$script_dir/../.." && pwd)"
+
+cd "$repo_root"
+
+run_step() {
+  local label="$1"
+  shift
+  printf '[hooks] %s\n' "$label"
+  "$@"
+}
+
+run_low_priority() {
+  if command -v ionice >/dev/null 2>&1; then
+    ionice -c 3 nice -n 15 "$@"
+    return
+  fi
+
+  nice -n 15 "$@"
+}
+
+run_rust_gate() {
+  run_step "cargo fmt --all --check" \
+    bash scripts/dev/run-rust-throttled.sh cargo fmt --all --check
+
+  run_step "cargo clippy --workspace -- -D warnings" \
+    bash scripts/dev/run-rust-throttled.sh cargo clippy --workspace -- -D warnings
+
+  run_step "cargo nextest run -p ava-agent --test agent_loop --test stack_test --test e2e_test --test reflection_loop -j 4 --status-level fail" \
+    bash scripts/dev/run-rust-throttled.sh cargo nextest run -p ava-agent --test agent_loop --test stack_test --test e2e_test --test reflection_loop -j 4 --status-level fail
+
+  run_step "cargo nextest run -p ava-tools -p ava-review -j 4 --status-level fail" \
+    bash scripts/dev/run-rust-throttled.sh cargo nextest run -p ava-tools -p ava-review -j 4 --status-level fail
+}
+
+run_frontend_gate() {
+  run_step "pnpm typecheck" run_low_priority pnpm typecheck
+  run_step "pnpm lint" run_low_priority pnpm lint
+}
+
+is_zero_oid() {
+  local oid="$1"
+
+  [ -n "$oid" ] || return 1
+
+  case "$oid" in
+    *[!0]*)
+      return 1
+      ;;
+    *)
+      return 0
+      ;;
+  esac
+}
+
+collect_staged_files() {
+  staged_files=()
+
+  while IFS= read -r -d '' file; do
+    staged_files+=("$file")
+  done < <(git diff --cached --name-only --diff-filter=ACMR -z)
+}
+
+resolve_push_range() {
+  if [ -n "${AVA_HOOK_RANGE:-}" ]; then
+    printf '%s\n' "$AVA_HOOK_RANGE"
+    return
+  fi
+
+  if upstream_ref="$(git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null)"; then
+    printf '%s..HEAD\n' "$upstream_ref"
+    return
+  fi
+
+  origin_head_ref="$(git symbolic-ref --quiet refs/remotes/origin/HEAD 2>/dev/null || true)"
+  if [ -n "$origin_head_ref" ]; then
+    printf '%s..HEAD\n' "${origin_head_ref#refs/remotes/}"
+    return
+  fi
+
+  for candidate in origin/main origin/master main master; do
+    if git rev-parse --verify --quiet "$candidate" >/dev/null; then
+      printf '%s..HEAD\n' "$candidate"
+      return
+    fi
+  done
+
+  if git rev-parse --verify --quiet HEAD^ >/dev/null; then
+    printf 'HEAD^..HEAD\n'
+    return
+  fi
+
+  printf 'HEAD\n'
+}
+
+append_unique_push_file() {
+  local file="$1"
+  local existing
+
+  [ -n "$file" ] || return
+
+  for existing in "${push_files[@]}"; do
+    if [ "$existing" = "$file" ]; then
+      return
+    fi
+  done
+
+  push_files+=("$file")
+}
+
+append_push_files_from_stream() {
+  local file
+
+  while IFS= read -r file; do
+    append_unique_push_file "$file"
+  done
+}
+
+append_push_files_from_range() {
+  local range="$1"
+
+  append_push_files_from_stream < <(git diff --name-only --diff-filter=ACMRD "$range")
+}
+
+append_push_files_from_new_ref() {
+  local local_sha="$1"
+  local commit
+  local have_commit=0
+
+  while IFS= read -r commit; do
+    [ -n "$commit" ] || continue
+    have_commit=1
+    append_push_files_from_stream < <(git diff-tree --root --no-commit-id --name-only --diff-filter=ACMRD -r "$commit")
+  done < <(git rev-list "$local_sha" --not --remotes)
+
+  if [ "$have_commit" -eq 1 ]; then
+    return 0
+  fi
+
+  return 1
+}
+
+collect_push_updates_from_stdin() {
+  stdin_updates=()
+  local local_ref local_sha remote_ref remote_sha
+
+  if [ -t 0 ]; then
+    return
+  fi
+
+  while IFS=' ' read -r local_ref local_sha remote_ref remote_sha; do
+    [ -n "$local_ref$local_sha$remote_ref$remote_sha" ] || continue
+    stdin_updates+=("$local_ref $local_sha $remote_ref $remote_sha")
+  done
+}
+
+collect_push_files_from_stdin_updates() {
+  local update local_ref local_sha remote_ref remote_sha
+  local used_stdin=0
+
+  collect_push_updates_from_stdin
+
+  if [ "${#stdin_updates[@]}" -eq 0 ]; then
+    return 1
+  fi
+
+  for update in "${stdin_updates[@]}"; do
+    IFS=' ' read -r local_ref local_sha remote_ref remote_sha <<EOF
+$update
+EOF
+
+    if is_zero_oid "$local_sha"; then
+      continue
+    fi
+
+    used_stdin=1
+
+    if is_zero_oid "$remote_sha"; then
+      if append_push_files_from_new_ref "$local_sha"; then
+        continue
+      fi
+
+      return 1
+    fi
+
+    append_push_files_from_range "$remote_sha..$local_sha"
+  done
+
+  if [ "$used_stdin" -eq 0 ]; then
+    return 1
+  fi
+
+  return 0
+}
+
+collect_push_files() {
+  push_files=()
+  push_range=''
+
+  if [ -n "${AVA_HOOK_FILES:-}" ]; then
+    while IFS= read -r file; do
+      [ -n "$file" ] || continue
+      push_files+=("$file")
+    done <<EOF
+$AVA_HOOK_FILES
+EOF
+    return
+  fi
+
+  if collect_push_files_from_stdin_updates; then
+    return
+  fi
+
+  push_range="$(resolve_push_range)"
+
+  if [ "$push_range" = 'HEAD' ]; then
+    append_push_files_from_stream < <(git diff-tree --root --no-commit-id --name-only --diff-filter=ACMRD -r HEAD)
+    return
+  fi
+
+  append_push_files_from_range "$push_range"
+}
+
+is_docs_path() {
+  case "$1" in
+    docs/*|.github/CONTRIBUTING.md|.github/pull_request_template.md|AGENTS.md|CHANGELOG.md|CLAUDE.md|README.md)
+      return 0
+      ;;
+  esac
+
+  return 1
+}
+
+is_frontend_path() {
+  case "$1" in
+    src/*|e2e/*|plugins/*|package.json|pnpm-lock.yaml|tsconfig*.json|vite.config.*|vitest.config.*|playwright.config.*|biome.json|biome.jsonc|eslint.config.*|tailwind.config.*|postcss.config.*|index.html)
+      return 0
+      ;;
+  esac
+
+  return 1
+}
+
+run_pre_commit() {
+  collect_staged_files
+
+  if [ "${#staged_files[@]}" -eq 0 ]; then
+    printf '[hooks] pre-commit: no staged files\n'
+    return
+  fi
+
+  rust_files=()
+  biome_files=()
+  ts_files=()
+
+  for file in "${staged_files[@]}"; do
+    case "$file" in
+      *.rs)
+        rust_files+=("$file")
+        ;;
+    esac
+
+    case "$file" in
+      *.ts|*.tsx|*.js|*.jsx|*.json|*.css)
+        biome_files+=("$file")
+        ;;
+    esac
+
+    case "$file" in
+      *.ts|*.tsx)
+        ts_files+=("$file")
+        ;;
+    esac
+  done
+
+  if [ "${#rust_files[@]}" -gt 0 ]; then
+    run_step "pre-commit: rustfmt --check on ${#rust_files[@]} staged Rust file(s)" \
+      rustfmt --check --config-path "$repo_root/rustfmt.toml" --config skip_children=true "${rust_files[@]}"
+  fi
+
+  if [ "${#biome_files[@]}" -gt 0 ]; then
+    run_step "pre-commit: biome check on ${#biome_files[@]} staged frontend file(s)" \
+      pnpm exec biome check "${biome_files[@]}"
+  fi
+
+  if [ "${#ts_files[@]}" -gt 0 ]; then
+    run_step "pre-commit: oxlint on ${#ts_files[@]} staged TypeScript file(s)" \
+      pnpm exec oxlint "${ts_files[@]}"
+  fi
+
+  printf '[hooks] pre-commit complete\n'
+}
+
+run_pre_push() {
+  collect_push_files
+
+  if [ -n "$push_range" ]; then
+    printf '[hooks] pre-push range: %s\n' "$push_range"
+  fi
+
+  if [ "${#push_files[@]}" -eq 0 ]; then
+    printf '[hooks] pre-push: no changed files detected for push\n'
+    return
+  fi
+
+  docs_only=1
+  needs_frontend=0
+  needs_rust=0
+
+  for file in "${push_files[@]}"; do
+    if is_docs_path "$file"; then
+      continue
+    fi
+
+    docs_only=0
+
+    if is_frontend_path "$file"; then
+      needs_frontend=1
+      continue
+    fi
+
+    needs_rust=1
+  done
+
+  if [ "$docs_only" -eq 1 ]; then
+    printf '[hooks] pre-push: docs-only changes detected; skipping code validation gates\n'
+    return
+  fi
+
+  if [ "$needs_frontend" -eq 1 ]; then
+    printf '[hooks] pre-push: frontend-sensitive changes detected\n'
+    run_frontend_gate
+  fi
+
+  if [ "$needs_rust" -eq 1 ]; then
+    printf '[hooks] pre-push: Rust/general repo changes detected\n'
+    run_rust_gate
+  fi
+
+  printf '[hooks] pre-push complete\n'
+}
+
+usage() {
+  printf 'usage: %s <check|check-frontend|pre-commit|pre-push>\n' "$0" >&2
+}
+
+case "${1:-}" in
+  check)
+    run_rust_gate
+    ;;
+  check-frontend)
+    run_frontend_gate
+    ;;
+  pre-commit)
+    run_pre_commit
+    ;;
+  pre-push)
+    run_pre_push
+    ;;
+  *)
+    usage
+    exit 64
+    ;;
+esac

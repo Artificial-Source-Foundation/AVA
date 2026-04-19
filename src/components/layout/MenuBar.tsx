@@ -243,12 +243,12 @@ export const MenuBar: Component = () => {
             developer toolkit.
           </p>
           <a
-            href="https://github.com/ASF-GROUP/AVA"
+            href="https://github.com/Artificial-Source/AVA"
             target="_blank"
             rel="noopener noreferrer"
             class="text-xs text-[var(--accent)] hover:underline mt-1"
           >
-            github.com/ASF-GROUP/AVA
+            github.com/Artificial-Source/AVA
           </a>
         </div>
       </Dialog>

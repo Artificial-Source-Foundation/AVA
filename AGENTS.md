@@ -1,4 +1,4 @@
-<!-- Last verified: 2026-04-16 -->
+<!-- Last verified: 2026-04-18 -->
 # AI Coding Agent Instructions (v3)
 
 > Instructions for AI assistants working on AVA. This file is auto-injected into the AVA agent's system prompt.
@@ -7,7 +7,8 @@
 
 ```bash
 # All-in-one check
-just check                      # fmt + clippy + targeted nextest
+just check                      # pragmatic local Rust confidence gate
+just ci                         # broader local verification pass (CI remains authoritative)
 
 # Or raw cargo
 cargo test --workspace
@@ -17,6 +18,12 @@ cargo clippy --workspace
 pnpm tauri dev
 pnpm lint && pnpm typecheck
 ```
+
+Git hook policy:
+
+1. `pre-commit` must stay fast, staged-file-oriented, non-mutating, and file-scoped for Rust checks.
+2. `pre-push` should be path-aware: docs-only pushes should stay light, frontend-sensitive pushes must run `pnpm typecheck` + `pnpm lint`, and Rust/general repo changes should run the pragmatic local Rust gate.
+3. CI remains the authoritative full gate.
 
 ## Local Resource Throttling
 
@@ -75,7 +82,7 @@ Current workspace Rust baseline: `rust-version = 1.86`.
 
 Keep the default set capped at 9. New tools should default to opt-in delivery (plugin, MCP, or custom-tool). Only promote to default with strong justification.
 
-Power plugins are part of the core architecture. The current 3.3 direction is to grow advanced capability behind plugin seams instead of expanding core product surfaces.
+Power plugins are part of the core architecture. The current 0.6 direction is to grow advanced capability behind plugin seams instead of expanding core product surfaces.
 
 ## Common Tasks
 

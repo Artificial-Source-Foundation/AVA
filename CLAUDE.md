@@ -8,7 +8,7 @@ Use these files instead:
 
 1. `AGENTS.md` — source of truth for repo workflow, architecture, and agent instructions
 2. `docs/README.md` — docs entrypoint
-3. `docs/project/roadmap.md` — AVA 3.3 baseline and product direction
+3. `docs/project/roadmap.md` — AVA 0.6 roadmap and product direction
 4. `docs/project/backlog.md` — active work
 5. `docs/architecture/README.md` — architecture entrypoint and audits
 6. `docs/architecture/agent-backend-capability-audit-m1.md` — current coding-agent backend capability inventory
@@ -34,7 +34,7 @@ pnpm tauri dev
 pnpm lint && pnpm typecheck
 ```
 
-## AVA 3.3 Summary
+## AVA 0.6 Summary
 
 1. AVA is a practical solo-first coding agent.
 2. Core AVA stays small and opinionated.

@@ -432,7 +432,7 @@ mod tests {
         let reloaded_state = WebState::init(temp.path().to_path_buf())
             .await
             .expect("reloaded web state");
-        let reloaded_app = build_router(reloaded_state);
+        let reloaded_app = build_router(reloaded_state.clone());
 
         let archived_after_reload = response_json(
             reloaded_app
@@ -514,6 +514,163 @@ mod tests {
             restored["status"],
             serde_json::Value::String("active".to_string())
         );
+    }
+
+    #[tokio::test]
+    async fn fork_session_persists_parent_linkage_across_reload_and_refetch() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let source_id = uuid::Uuid::new_v4();
+        let fork_id = uuid::Uuid::new_v4();
+
+        let state = WebState::init(temp.path().to_path_buf())
+            .await
+            .expect("web state");
+        let app = build_router(state.clone());
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/sessions/create")
+                    .header("content-type", "application/json")
+                    .body(Body::from(format!(
+                        r#"{{"id":"{source_id}","name":"Source Session"}}"#
+                    )))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(&format!("/api/sessions/{source_id}/message"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"role":"user","content":"Parent conversation message"}"#,
+                    ))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let mut hidden_tool_message = ava_types::Message::new(
+            ava_types::Role::Tool,
+            "hidden tool payload that should persist in cloned session",
+        );
+        hidden_tool_message.user_visible = false;
+        state
+            .inner
+            .stack
+            .session_manager
+            .add_message(source_id, &hidden_tool_message)
+            .expect("hidden tool message added to source session");
+
+        let fork_response = response_json(
+            app.clone()
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri(&format!("/api/sessions/{source_id}/duplicate"))
+                        .header("content-type", "application/json")
+                        .body(Body::from(format!(
+                            r#"{{"id":"{fork_id}","name":"Fork Session","kind":"fork"}}"#
+                        )))
+                        .expect("request"),
+                )
+                .await
+                .expect("response"),
+        )
+        .await;
+
+        assert_eq!(
+            fork_response["parent_session_id"],
+            serde_json::Value::String(source_id.to_string())
+        );
+        assert_eq!(
+            fork_response["last_preview"],
+            serde_json::Value::String("Parent conversation message".to_string())
+        );
+        assert_eq!(fork_response["message_count"], serde_json::Value::from(1));
+
+        drop(app);
+        drop(state);
+
+        let reloaded_state = WebState::init(temp.path().to_path_buf())
+            .await
+            .expect("reloaded web state");
+        let reloaded_app = build_router(reloaded_state);
+
+        let listed_sessions = response_json(
+            reloaded_app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("GET")
+                        .uri("/api/sessions")
+                        .body(Body::empty())
+                        .expect("request"),
+                )
+                .await
+                .expect("response"),
+        )
+        .await;
+        let listed_fork = listed_sessions
+            .as_array()
+            .expect("listed sessions array")
+            .iter()
+            .find(|session| session["id"] == fork_id.to_string())
+            .expect("fork session listed after reload");
+        assert_eq!(
+            listed_fork["parent_session_id"],
+            serde_json::Value::String(source_id.to_string())
+        );
+        assert_eq!(
+            listed_fork["last_preview"],
+            serde_json::Value::String("Parent conversation message".to_string())
+        );
+
+        let fork_detail = response_json(
+            reloaded_app
+                .oneshot(
+                    Request::builder()
+                        .method("GET")
+                        .uri(&format!("/api/sessions/{fork_id}"))
+                        .body(Body::empty())
+                        .expect("request"),
+                )
+                .await
+                .expect("response"),
+        )
+        .await;
+        assert_eq!(
+            fork_detail["parent_session_id"],
+            serde_json::Value::String(source_id.to_string())
+        );
+        assert_eq!(
+            fork_detail["last_preview"],
+            serde_json::Value::String("Parent conversation message".to_string())
+        );
+        assert_eq!(fork_detail["message_count"], serde_json::Value::from(1));
+
+        let persisted_fork = reloaded_state
+            .inner
+            .stack
+            .session_manager
+            .get(fork_id)
+            .expect("load persisted fork session")
+            .expect("fork session persisted after reload");
+        assert_eq!(persisted_fork.messages.len(), 2);
+        assert!(persisted_fork.messages.iter().any(|message| {
+            message.role == ava_types::Role::Tool
+                && !message.user_visible
+                && message.content == "hidden tool payload that should persist in cloned session"
+        }));
     }
 
     #[tokio::test]

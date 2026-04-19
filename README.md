@@ -17,12 +17,28 @@ It is designed to sit between OpenCode and PI Code: focused by default, extensib
 
 ## Get Started
 
-Install from source:
+Install the CLI (choose one path):
+
+1. Installer script (Linux/macOS binaries from GitHub Releases):
 
 ```bash
-git clone https://github.com/ASF-GROUP/AVA.git && cd AVA
-cargo install --path crates/ava-tui
+curl -fsSL https://raw.githubusercontent.com/Artificial-Source/AVA/develop/install.sh | sh
 ```
+
+2. GitHub Releases (manual download):
+
+See <https://github.com/Artificial-Source/AVA/releases> for release assets.
+
+3. Install from source:
+
+```bash
+git clone https://github.com/Artificial-Source/AVA.git && cd AVA
+cargo install --path crates/ava-tui --bin ava
+```
+
+More install details and platform notes: [docs/how-to/install.md](docs/how-to/install.md)
+
+Release-repo note: release-related links in this checkout are aligned to `Artificial-Source/AVA`.
 
 Add credentials:
 
@@ -39,8 +55,8 @@ Run AVA:
 
 ```bash
 ava                          # TUI
-ava "fix the login bug"      # headless
-ava serve                    # web mode
+ava "fix the login bug" --headless
+ava serve                    # web mode, requires a build with --features web
 ```
 
 ## Core AVA
@@ -55,7 +71,7 @@ ava serve                    # web mode
 
 ## Official Providers
 
-AVA 3.3 supports a smaller set of officially supported providers that are actively tested and tuned:
+AVA 0.6 supports a smaller set of officially supported providers that are actively tested and tuned:
 
 1. Anthropic
 2. OpenAI
@@ -122,6 +138,12 @@ Plugins are a core part of AVA's identity, but plugin-owned UI and settings shou
 ```bash
 just check
 ```
+
+For the fuller verification flow and PR-era check policy (including hook behavior and desktop/frontend split), see:
+
+- [How to run tests and checks](docs/how-to/test.md)
+- [Development workflow](docs/contributing/development-workflow.md)
+- [Testing and verification](docs/testing/README.md)
 
 ## License
 

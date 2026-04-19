@@ -1,13 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { STORAGE_KEYS } from '../config/constants'
-
 import { createWebDatabase } from './db-web-fallback'
 import {
   clearAllSessionIdMappings,
   registerBackendSessionId,
   rehydrateFromLocalStorageForTesting,
 } from './web-session-identity'
+
+/** localStorage key prefix for per-alias storage (must match implementation). */
+const ALIAS_KEY_PREFIX = 'ava_sa:'
 
 describe('db-web-fallback message recovery', () => {
   beforeEach(() => {
@@ -413,15 +414,49 @@ describe('db-web-fallback reverse alias canonicalization', () => {
     expect(rows[2]?.id).toBe('another-unmapped') // Unchanged
   })
 
+  it('canonicalizes persisted fork parent linkage on session list refetch', async () => {
+    registerBackendSessionId('fe-parent-session', 'be-parent-session')
+
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => [
+        {
+          id: 'fork-session',
+          title: 'Fork Session',
+          status: 'active',
+          parent_session_id: 'be-parent-session',
+          message_count: 2,
+          last_preview: 'Fork preview',
+          created_at: '2026-04-18T10:00:00Z',
+          updated_at: '2026-04-18T10:05:00Z',
+        },
+      ],
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const database = createWebDatabase()
+    const rows = await database.select<Array<Record<string, unknown>>>(
+      `SELECT s.* FROM sessions s LEFT JOIN messages m ON m.session_id = s.id GROUP BY s.id`,
+      []
+    )
+
+    expect(rows).toHaveLength(1)
+    expect(rows[0]?.id).toBe('fork-session')
+    expect(rows[0]?.parent_session_id).toBe('fe-parent-session')
+    expect(rows[0]?.last_preview).toBe('Fork preview')
+  })
+
   it('canonicalizes active session list after persisted reload (reload persistence)', async () => {
-    // Register a mapping and persist to localStorage
+    // Register a mapping and persist to localStorage (per-alias key)
     registerBackendSessionId('fe-persisted-session', 'be-persisted-backend')
-    const stored = localStorage.getItem(STORAGE_KEYS.SESSION_ID_ALIASES)
-    expect(stored).toBeTruthy() // Verify persistence worked
+    expect(localStorage.getItem(`${ALIAS_KEY_PREFIX}fe-persisted-session`)).toBe(
+      'be-persisted-backend'
+    )
 
     // Simulate module reload: clear memory and rehydrate
     clearAllSessionIdMappings()
-    localStorage.setItem(STORAGE_KEYS.SESSION_ID_ALIASES, stored!)
+    // Restore the alias manually (simulating it surviving reload)
+    localStorage.setItem(`${ALIAS_KEY_PREFIX}fe-persisted-session`, 'be-persisted-backend')
     rehydrateFromLocalStorageForTesting()
 
     // Backend returns backend IDs
@@ -452,14 +487,13 @@ describe('db-web-fallback reverse alias canonicalization', () => {
   })
 
   it('canonicalizes archived session list after persisted reload (reload persistence)', async () => {
-    // Register and persist a mapping
+    // Register and persist a mapping (per-alias key)
     registerBackendSessionId('fe-archived-persisted', 'be-archived-persisted')
-    const stored = localStorage.getItem(STORAGE_KEYS.SESSION_ID_ALIASES)
-    expect(stored).toBeTruthy()
 
     // Simulate reload
     clearAllSessionIdMappings()
-    localStorage.setItem(STORAGE_KEYS.SESSION_ID_ALIASES, stored!)
+    // Restore the alias manually
+    localStorage.setItem(`${ALIAS_KEY_PREFIX}fe-archived-persisted`, 'be-archived-persisted')
     rehydrateFromLocalStorageForTesting()
 
     // Backend returns archived list with backend ID
@@ -493,11 +527,11 @@ describe('db-web-fallback reverse alias canonicalization', () => {
   it('handles mixed sessions after persisted reload', async () => {
     // Register and persist one mapping
     registerBackendSessionId('fe-mixed-1', 'be-mixed-1')
-    const stored = localStorage.getItem(STORAGE_KEYS.SESSION_ID_ALIASES)
 
     // Simulate reload
     clearAllSessionIdMappings()
-    localStorage.setItem(STORAGE_KEYS.SESSION_ID_ALIASES, stored!)
+    // Restore the alias manually
+    localStorage.setItem(`${ALIAS_KEY_PREFIX}fe-mixed-1`, 'be-mixed-1')
     rehydrateFromLocalStorageForTesting()
 
     // Backend returns mixed IDs

@@ -10,14 +10,20 @@
  * operations that create new backend sessions).
  *
  * Reload Persistence:
- * Session alias mappings are persisted to localStorage and automatically hydrated
- * on module load. This ensures alias mappings survive browser reloads and new tabs.
- * Mappings are cleaned up only when a session is permanently deleted.
+ * Session alias mappings are persisted to localStorage using per-alias keys
+ * (ava_sa:${frontendId}) to avoid whole-blob read/modify/write races.
+ * Each alias is stored independently, so unrelated aliases cannot clobber each other
+ * under cross-tab interleaving. Mappings are cleaned up only when a session is
+ * permanently deleted.
  */
 
-import { STORAGE_KEYS } from '../config/constants'
-
 const API_BASE = import.meta.env.VITE_API_URL || ''
+
+/** localStorage key prefix for per-alias storage. */
+const ALIAS_KEY_PREFIX = 'ava_sa:'
+
+/** legacy storage key for the pre-refactor blob-backed alias map. */
+const LEGACY_ALIAS_KEY = 'ava_session_id_aliases'
 
 /**
  * Maps frontend session IDs to backend session IDs.
@@ -27,26 +33,50 @@ const API_BASE = import.meta.env.VITE_API_URL || ''
  * edge cases (e.g., retry/regenerate creating new sessions) but should
  * rarely be populated.
  *
- * This map is automatically hydrated from localStorage on module load.
+ * This map is automatically hydrated from localStorage on module load and
+ * stays synchronized across tabs via the storage event.
  */
 const _sessionIdMap = new Map<string, string>()
 
 /**
- * Storage shape for persisted alias mappings.
- * Using a Record for JSON serialization stability.
+ * Build the localStorage key for a specific alias.
  */
-type PersistedAliasMap = Record<string, string>
+function aliasStorageKey(frontendId: string): string {
+  return `${ALIAS_KEY_PREFIX}${frontendId}`
+}
 
 /**
- * Persist the current session ID mappings to localStorage.
- * Called automatically on register/unregister operations.
+ * Extract frontendId from a storage key.
  */
-function persistSessionIdMappings(): void {
+function parseAliasStorageKey(key: string): string | null {
+  if (!key.startsWith(ALIAS_KEY_PREFIX)) return null
+  return key.slice(ALIAS_KEY_PREFIX.length)
+}
+
+/**
+ * Persist a single alias registration to storage.
+ * Uses independent per-alias keys to avoid whole-blob races.
+ * @returns true if the value was written successfully
+ */
+function persistAliasRegistration(frontendId: string, backendId: string): boolean {
   try {
-    const record: PersistedAliasMap = Object.fromEntries(_sessionIdMap.entries())
-    localStorage.setItem(STORAGE_KEYS.SESSION_ID_ALIASES, JSON.stringify(record))
+    localStorage.setItem(aliasStorageKey(frontendId), backendId)
+    return true
   } catch {
     // Silently fail if localStorage is unavailable or full
+    return false
+  }
+}
+
+/**
+ * Remove a specific alias from storage.
+ * Uses independent per-alias keys to avoid whole-blob races.
+ */
+function persistSessionIdDeletion(frontendId: string): void {
+  try {
+    localStorage.removeItem(aliasStorageKey(frontendId))
+  } catch {
+    // Silently fail if localStorage is unavailable
   }
 }
 
@@ -56,21 +86,79 @@ function persistSessionIdMappings(): void {
  */
 function hydrateSessionIdMappings(): void {
   try {
-    const raw = localStorage.getItem(STORAGE_KEYS.SESSION_ID_ALIASES)
-    if (!raw) return
+    // Iterate all localStorage keys and find those matching our prefix
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i)
+      if (!key || !key.startsWith(ALIAS_KEY_PREFIX)) continue
 
-    const parsed: unknown = JSON.parse(raw)
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return
+      const frontendId = parseAliasStorageKey(key)
+      if (!frontendId) continue
 
-    const record = parsed as PersistedAliasMap
-    for (const [frontendId, backendId] of Object.entries(record)) {
-      if (typeof frontendId === 'string' && typeof backendId === 'string') {
+      const backendId = localStorage.getItem(key)
+      if (backendId) {
         _sessionIdMap.set(frontendId, backendId)
       }
     }
+
+    // One-time migration from legacy blob format to per-alias keys.
+    const rawLegacyAliasMap = localStorage.getItem(LEGACY_ALIAS_KEY)
+    if (rawLegacyAliasMap !== null) {
+      let legacyMigrationSucceeded = true
+      try {
+        const parsed: unknown = JSON.parse(rawLegacyAliasMap)
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          for (const [frontendId, backendId] of Object.entries(parsed as Record<string, unknown>)) {
+            if (typeof frontendId !== 'string' || !frontendId) continue
+            if (typeof backendId !== 'string' || !backendId) continue
+
+            if (!_sessionIdMap.has(frontendId)) {
+              _sessionIdMap.set(frontendId, backendId)
+
+              const migrated = persistAliasRegistration(frontendId, backendId)
+              if (!migrated) {
+                legacyMigrationSucceeded = false
+              }
+            }
+          }
+        } else {
+          // Non-object payload is not a recognized legacy shape.
+          legacyMigrationSucceeded = false
+        }
+      } catch {
+        // Silently ignore malformed legacy payloads
+        legacyMigrationSucceeded = false
+      } finally {
+        // Remove legacy key only after a successful migration.
+        // If migration did not fully persist, keep legacy key for retry.
+        if (legacyMigrationSucceeded) {
+          localStorage.removeItem(LEGACY_ALIAS_KEY)
+        }
+      }
+    }
   } catch {
-    // Silently fail if localStorage is unavailable or corrupted
+    // Silently fail if localStorage is unavailable
   }
+}
+
+/**
+ * Listen for storage events from other tabs to keep aliases synchronized.
+ * With per-alias keys, each alias change is independent and cannot race.
+ */
+if (typeof window !== 'undefined') {
+  window.addEventListener('storage', (event) => {
+    if (!event.key || !event.key.startsWith(ALIAS_KEY_PREFIX)) return
+
+    const frontendId = parseAliasStorageKey(event.key)
+    if (!frontendId) return
+
+    if (event.newValue === null) {
+      // Alias was deleted in another tab
+      _sessionIdMap.delete(frontendId)
+    } else {
+      // Alias was added or updated in another tab
+      _sessionIdMap.set(frontendId, event.newValue)
+    }
+  })
 }
 
 // Hydrate on module load
@@ -90,7 +178,7 @@ export function rehydrateFromLocalStorageForTesting(): void {
 export function registerBackendSessionId(frontendId: string, backendId: string): void {
   if (frontendId !== backendId) {
     _sessionIdMap.set(frontendId, backendId)
-    persistSessionIdMappings()
+    persistAliasRegistration(frontendId, backendId)
   }
 }
 
@@ -106,17 +194,28 @@ export function hasBackendSessionMapping(frontendId: string): boolean {
 
 /** Remove a session ID mapping (e.g., when a session is deleted). */
 export function unregisterBackendSessionId(frontendId: string): void {
-  const hadMapping = _sessionIdMap.delete(frontendId)
-  if (hadMapping) {
-    persistSessionIdMappings()
-  }
+  // Always delete from memory (idempotent) and always persist the deletion.
+  // This ensures a stale tab (without the alias in memory) can still remove
+  // a storage-only alias left by another tab.
+  _sessionIdMap.delete(frontendId)
+  persistSessionIdDeletion(frontendId)
 }
 
 /** Clear all session ID mappings (primarily for testing). */
 export function clearAllSessionIdMappings(): void {
   _sessionIdMap.clear()
   try {
-    localStorage.removeItem(STORAGE_KEYS.SESSION_ID_ALIASES)
+    // Remove all keys with our prefix
+    const keysToRemove: string[] = []
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i)
+      if (key?.startsWith(ALIAS_KEY_PREFIX)) {
+        keysToRemove.push(key)
+      }
+    }
+    keysToRemove.forEach((key) => {
+      localStorage.removeItem(key)
+    })
   } catch {
     // Silently fail if localStorage is unavailable
   }

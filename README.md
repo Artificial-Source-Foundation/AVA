@@ -14,34 +14,55 @@ AVA reads code, edits files, runs commands, and helps you finish software work w
 
 </div>
 
+AVA is a Rust-first coding agent built for real repository work.
+
+- Use `ava` in the terminal for interactive or headless runs
+- Use AVA Desktop for a native desktop shell on top of the same backend
+- Use web mode when you want browser access from `ava serve`
+
 ## Get Started
 
-AVA has two install surfaces today:
+### Fastest Path
 
-1. `ava` CLI/TUI
-2. AVA Desktop
+Install the CLI/TUI:
 
-### Download Matrix
+```bash
+curl -fsSL https://raw.githubusercontent.com/Artificial-Source/AVA/develop/install.sh | sh
+```
+
+Download desktop builds from <https://github.com/Artificial-Source/AVA/releases> when bundles are published.
+
+Add credentials:
+
+```bash
+ava auth login openrouter
+```
+
+Run AVA:
+
+```bash
+ava
+ava "fix the login bug" --headless
+ava serve
+```
+
+### Install Surfaces
+
+| Surface | Best for | Fastest path | More options |
+|---|---|---|---|
+| `ava` CLI/TUI | Terminal and headless usage | `curl -fsSL https://raw.githubusercontent.com/Artificial-Source/AVA/develop/install.sh` piped to `sh` | [Install guide](docs/how-to/install.md) |
+| AVA Desktop | Native desktop app usage | Download from <https://github.com/Artificial-Source/AVA/releases> | [Desktop guide](docs/how-to/download-desktop.md) |
+
+### Release Artifacts
 
 | Surface | Linux | macOS | Windows |
 |---|---|---|---|
 | `ava` CLI/TUI | `ava-x86_64-unknown-linux-gnu.tar.gz` or `ava-aarch64-unknown-linux-gnu.tar.gz` | `ava-x86_64-apple-darwin.tar.gz` or `ava-aarch64-apple-darwin.tar.gz` | `ava-x86_64-pc-windows-msvc.zip` or generated Windows installer |
 | AVA Desktop | `.deb`, `.rpm`, or `.AppImage` when published | `.dmg` when published | `.msi` or `.exe` when published |
 
-| Surface | Best for | Fastest path | More options |
-|---|---|---|---|
-| `ava` CLI/TUI | Terminal and headless usage | `curl -fsSL https://raw.githubusercontent.com/Artificial-Source/AVA/develop/install.sh` piped to `sh` | [Install AVA](docs/how-to/install.md) |
-| AVA Desktop | Native desktop app usage | Download from <https://github.com/Artificial-Source/AVA/releases> when desktop bundles are present | [Download AVA Desktop](docs/how-to/download-desktop.md) |
-
 ### CLI / TUI
 
-Quick install:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/Artificial-Source/AVA/develop/install.sh | sh
-```
-
-Alternative paths:
+Other install paths:
 
 1. Manual binary install on Windows, Linux, or macOS from <https://github.com/Artificial-Source/AVA/releases>
 2. Source install:
@@ -57,11 +78,11 @@ cargo install --path crates/ava-tui --bin ava
 ./install-from-source.sh --help
 ```
 
-More install details, platform notes, and power-user paths: [docs/how-to/install.md](docs/how-to/install.md)
+Full install details: [docs/how-to/install.md](docs/how-to/install.md)
 
 ### Desktop
 
-Desktop is a separate product surface from the CLI.
+Desktop is the native desktop shell for AVA.
 
 Quick path:
 
@@ -78,26 +99,12 @@ Desktop build and release details: [docs/how-to/download-desktop.md](docs/how-to
 
 Release-repo note: release-related links in this checkout are aligned to `Artificial-Source/AVA`.
 
-Add credentials:
-
-```bash
-ava auth login openrouter
-```
-
 Security note:
 
 1. Prefer AVA's connect flow, environment variables, or keychain-backed credential storage.
 2. Avoid manually editing `~/.ava/credentials.json` unless you intentionally want plaintext local storage.
 
-Run AVA:
-
-```bash
-ava                          # TUI
-ava "fix the login bug" --headless
-ava serve                    # web mode, requires a build with --features web
-```
-
-## Core AVA
+## What AVA Includes
 
 - Solo-first coding agent
 - 9 default built-in tools: `read`, `write`, `edit`, `bash`, `glob`, `grep`, `web_fetch`, `web_search`, `git_read`
@@ -107,9 +114,9 @@ ava serve                    # web mode, requires a build with --features web
 - Stable plugin architecture for optional advanced capability
 - Session persistence and safety features for real repo work
 
-## Official Providers
+## Supported Providers
 
-AVA 0.6 supports a smaller set of officially supported providers that are actively tested and tuned:
+AVA 0.6 actively supports and tests these providers:
 
 1. Anthropic
 2. OpenAI
@@ -127,7 +134,7 @@ Provider variants should appear as routing or region options inside a provider, 
 
 ## Customization
 
-Default visible customization is centered on:
+The main user-visible customization surface is:
 
 1. MCPs
 2. Commands
@@ -149,26 +156,22 @@ Plugins are a core part of AVA's identity, but plugin-owned UI and settings shou
 
 ## Documentation
 
-1. [docs/README.md](docs/README.md) - documentation entrypoint (tutorials, how-to, explanation, reference, and project material)
-2. [AGENTS.md](AGENTS.md) - source of truth for repo workflow, conventions, and architecture
-3. [docs/project/roadmap.md](docs/project/roadmap.md) - current product direction
-4. [docs/project/backlog.md](docs/project/backlog.md) - pending work only
-5. [docs/testing/desktop-testing.md](docs/testing/desktop-testing.md) - practical desktop regression workflow
-6. [docs/testing/README.md](docs/testing/README.md) - testing and verification entrypoint
-7. [docs/architecture/README.md](docs/architecture/README.md) - architecture entrypoint, capability audits, and transition docs
-8. [docs/architecture/agent-backend-capability-audit-m1.md](docs/architecture/agent-backend-capability-audit-m1.md) - current coding-agent backend capability inventory
-9. [docs/architecture/agent-backend-capability-comparison-m2.md](docs/architecture/agent-backend-capability-comparison-m2.md) - comparison matrix for AVA vs external coding-agent backends
-10. [docs/architecture/cross-surface-runtime-map-m4.md](docs/architecture/cross-surface-runtime-map-m4.md) - runtime wiring map across interactive TUI, headless CLI, desktop, and web
-11. [docs/architecture/cross-surface-behavior-audit-m5.md](docs/architecture/cross-surface-behavior-audit-m5.md) - shared-vs-divergent backend behavior audit across surfaces
-12. [docs/architecture/shared-backend-contract-m6.md](docs/architecture/shared-backend-contract-m6.md) - canonical shared-backend contract for cross-surface semantics
-13. [docs/architecture/backend-correction-roadmap-m7.md](docs/architecture/backend-correction-roadmap-m7.md) - implementation roadmap for backend contract adoption
-14. [docs/architecture/backend-contract-exceptions.md](docs/architecture/backend-contract-exceptions.md) - versioned backend-contract exception registry
-15. [docs/architecture/crate-map.md](docs/architecture/crate-map.md) - current crate and dependency map
-16. [docs/extend/README.md](docs/extend/README.md) - extension and customization overview
-17. [docs/reference/providers-and-auth.md](docs/reference/providers-and-auth.md) - provider IDs, aliases, and auth behavior
-18. [docs/reference/commands.md](docs/reference/commands.md) - slash commands and CLI surfaces
-19. [docs/reference/credential-storage.md](docs/reference/credential-storage.md) - credential storage and security guidance
-20. [CLAUDE.md](CLAUDE.md) - compatibility entrypoint pointing back to the active docs
+Start here:
+
+- [docs/README.md](docs/README.md) - main documentation entrypoint
+- [docs/how-to/install.md](docs/how-to/install.md) - installation and platform notes
+- [docs/reference/providers-and-auth.md](docs/reference/providers-and-auth.md) - providers, aliases, and auth
+- [docs/reference/commands.md](docs/reference/commands.md) - slash commands and CLI surfaces
+- [docs/testing/README.md](docs/testing/README.md) - testing and verification
+- [AGENTS.md](AGENTS.md) - repo workflow, conventions, and architecture
+
+Project and architecture material:
+
+- [docs/project/roadmap.md](docs/project/roadmap.md)
+- [docs/project/backlog.md](docs/project/backlog.md)
+- [docs/architecture/README.md](docs/architecture/README.md)
+- [docs/extend/README.md](docs/extend/README.md)
+- [CLAUDE.md](CLAUDE.md)
 
 ## Contributing
 

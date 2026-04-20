@@ -89,35 +89,37 @@ get_auth_token() {
     fi
 }
 
-get_latest_tag() {
-    # Try gh CLI first (handles auth automatically)
+get_release_tags() {
+    # Try gh CLI first so authenticated users still get a filtered, ordered list.
     if command -v gh >/dev/null 2>&1; then
-        _tag=$(gh release view --repo "${REPO}" --json tagName -q '.tagName' 2>/dev/null) || true
-        if [ -n "${_tag:-}" ]; then
-            echo "${_tag}"
+        _tags=$(gh api "repos/${REPO}/releases?per_page=20" --jq '.[] | select((.draft | not) and (.prerelease | not)) | .tag_name' 2>/dev/null) || true
+        if [ -n "${_tags:-}" ]; then
+            printf '%s\n' "${_tags}"
             return 0
         fi
     fi
 
-    # Fallback: GitHub API with optional auth
-    _api_url="https://api.github.com/repos/${REPO}/releases/latest"
-    _token=$(get_auth_token)
+    # Public unauthenticated API excludes drafts, which is what the installer wants.
+    _api_url="https://api.github.com/repos/${REPO}/releases?per_page=20"
+    _response=$(curl -fsSL "${_api_url}" 2>/dev/null) || true
 
-    if [ -n "${_token}" ]; then
-        _response=$(curl -fsSL -H "Authorization: token ${_token}" "${_api_url}" 2>/dev/null) || true
-    else
-        _response=$(curl -fsSL "${_api_url}" 2>/dev/null) || true
+    if [ -z "${_response:-}" ]; then
+        _token=$(get_auth_token)
+        if [ -n "${_token}" ]; then
+            _response=$(curl -fsSL -H "Authorization: token ${_token}" "${_api_url}" 2>/dev/null) || true
+        fi
     fi
 
     if [ -n "${_response:-}" ]; then
-        _tag=$(echo "${_response}" | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
-        if [ -n "${_tag}" ]; then
-            echo "${_tag}"
+        _tags=$(printf '%s' "${_response}" | tr '\n' ' ' | sed 's/},{/}\
+{/g' | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+        if [ -n "${_tags:-}" ]; then
+            printf '%s\n' "${_tags}"
             return 0
         fi
     fi
 
-    warn "Could not fetch latest release from GitHub."
+    warn "Could not fetch release list from GitHub."
     warn "If the repo is private, install the gh CLI and run: gh auth login"
     warn "Or build from source:"
     printf '\n    \033[1mgit clone https://github.com/%s.git && cd AVA\033[0m\n' "${REPO}"
@@ -225,22 +227,35 @@ main() {
     _target=$(get_target "${_os}" "${_arch}")
     info "Detected platform: ${_os} ${_arch} (${_target})"
 
-    # Resolve latest version
-    _tag=$(get_latest_tag)
-    info "Latest release: ${_tag}"
-
     # Asset name
     _archive="ava-${_target}.tar.gz"
+
+    # Resolve candidate releases
+    _tags=$(get_release_tags)
+    _latest_tag=$(printf '%s\n' "${_tags}" | head -1)
+    info "Latest release: ${_latest_tag}"
 
     # Create temp directory
     TMP_DIR=$(mktemp -d 2>/dev/null || mktemp -d -t 'ava-install')
 
-    # Download archive
+    # Download archive from the newest release that contains this platform asset.
     info "Downloading ${_archive}..."
-    if ! download_asset "${_archive}" "${TMP_DIR}/${_archive}" "${_tag}"; then
-        die "Failed to download ${_archive} from release ${_tag}.
+    _tag=""
+    for _candidate_tag in ${_tags}; do
+        if download_asset "${_archive}" "${TMP_DIR}/${_archive}" "${_candidate_tag}"; then
+            _tag="${_candidate_tag}"
+            break
+        fi
+    done
+
+    if [ -z "${_tag}" ]; then
+        die "Failed to download ${_archive} from the latest published releases.
 No binary available for ${_target}.
 Build from source: cargo build --release --bin ava"
+    fi
+
+    if [ "${_tag}" != "${_latest_tag}" ]; then
+        warn "Latest release ${_latest_tag} does not include ${_archive}; using ${_tag}."
     fi
 
     # Download and verify checksum (optional)

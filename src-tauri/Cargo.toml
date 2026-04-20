@@ -1,6 +1,6 @@
 [package]
 name = "ava"
-version = "3.3.0"
+version = "0.6.0"
 description = "Practical AI coding agent desktop app"
 authors = ["ASF Group"]
 edition = "2021"

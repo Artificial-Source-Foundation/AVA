@@ -1,0 +1,77 @@
+---
+title: "Docs Manifest"
+description: "Machine-readable-for-humans list of public Diátaxis pages and why each exists."
+updated: "2026-04-19"
+---
+
+# Docs Manifest
+
+This manifest lists the Diataxis-facing pages in the public docs layer and why each exists.
+
+## Public layer
+
+| Page | Diátaxis Type | Why it exists |
+|---|---|---|
+| `docs/index.md` | Landing / routing | Public entrypoint that separates quick-start docs from internal architecture/project material. |
+| `docs/tutorials/first-run.md` | Tutorial | Step-by-step first success path: install, auth, and launch using real repo commands. |
+| `docs/tutorials/your-first-workflow.md` | Tutorial | Guided walkthrough for a small edit-review-verify loop in a real repository. |
+| `docs/how-to/install.md` | How-to | Task-focused install entrypoint that splits CLI and desktop surfaces clearly. |
+| `docs/how-to/download-desktop.md` | How-to | Desktop-specific download and local-build guide grounded in the current Tauri release flow and current release-availability limits. |
+| `docs/how-to/configure.md` | How-to | Task-focused provider and local configuration setup. |
+| `docs/how-to/run-locally.md` | How-to | Task-focused commands for TUI, headless, desktop, and feature-gated web mode. |
+| `docs/how-to/test.md` | How-to | Task-focused verification commands from the existing Rust and frontend workflow. |
+| `docs/how-to/ci-headless-automation.md` | How-to | Task-focused CI/unattended automation guidance grounded in current headless behavior, JSON mode, env setup, and repository workflows. |
+| `docs/how-to/first-workflow.md` | How-to | Task-oriented first workflow: run one scoped task, review, and verify with repo checks. |
+| `docs/how-to/ollama-local-models.md` | How-to | Ollama-only local model usage guide grounded in current provider defaults, env overrides, and verification paths. |
+| `docs/explanation/ava-surfaces-and-doc-boundaries.md` | Explanation | Clarifies why docs are split by audience and avoids overclaiming parity/maturity. |
+| `docs/explanation/security-and-trust.md` | Explanation | Explains AVA's trust model, local credential handling, permissions, sandboxing, and logging boundaries. |
+
+## Existing pages intentionally reused (not replaced)
+
+| Page | Why it is linked instead of duplicated |
+|---|---|
+| `docs/reference/README.md` | Existing stable reference index already covers commands/providers/credentials. |
+| `docs/reference/commands.md` | Canonical command surface reference used by first-workflow how-to. |
+| `docs/reference/providers-and-auth.md` | Canonical provider/auth behavior used by first-run tutorial. |
+| `docs/project/README.md`, `docs/architecture/README.md`, `docs/contributing/README.md`, `docs/operations/README.md` | Internal or maintainer-oriented docs preserved as-is and linked from the new index under a separate section. |
+
+## Reference pages in the public layer
+
+| Page | Diataxis Type | Why it exists |
+|---|---|---|
+| `docs/reference/README.md` | Reference | Section index for factual command, configuration, and runtime reference pages. |
+| `docs/reference/overview.md` | Reference | Explains how to read the reference section and where its source-of-truth files live. |
+| `docs/reference/configuration.md` | Reference | Documents config sources, resolver behavior, and current path caveats from code. |
+| `docs/reference/environment-variables.md` | Reference | Lists runtime env vars clearly consumed by the current codebase. |
+| `docs/reference/filesystem-layout.md` | Reference | Documents the current `~/.ava` and project-local `.ava` file layout. |
+| `docs/reference/scripts-and-build.md` | Reference | Centralizes `just`, `cargo`, `pnpm`, and script entrypoints used across the repo. |
+| `docs/reference/install-and-release-paths.md` | Reference | Maps public binary/source install paths and release automation to concrete repo files. |
+| `docs/reference/web-api.md` | Reference | Documents the currently implemented web routes for `--features web` builds without overstating API stability. |
+| `docs/reference/providers-and-auth.md` | Reference | Canonical provider IDs, aliases, auth surfaces, and credential lookup order. |
+| `docs/reference/commands.md` | Reference | Canonical slash commands, CLI subcommands, and important runtime flags. |
+| `docs/reference/credential-storage.md` | Reference | Documents credential storage paths and security posture. |
+| `docs/_meta.json`, `docs/how-to/_meta.json`, `docs/reference/_meta.json`, and `docs/troubleshooting/_meta.json` | Navigation metadata | Keep the docs tree importable into docs-site generators without restructuring the Markdown files. |
+
+## Troubleshooting pages in the public layer
+
+| Page | Diataxis Type | Why it exists |
+|---|---|---|
+| `docs/troubleshooting/README.md` | Troubleshooting index | Routes users to common setup/runtime recovery pages by failure type. |
+| `docs/troubleshooting/common-errors.md` | Troubleshooting | Fast fixes for common provider/auth/config/CLI startup failures. |
+| `docs/troubleshooting/ollama-local-models.md` | Troubleshooting | Focused Ollama local-model failure recovery and verification guidance. |
+| `docs/troubleshooting/tauri-toolchain-checklist.md` | Troubleshooting | Linux desktop toolchain checklist for Tauri development setup. |
+| `docs/troubleshooting/webkitgtk-rendering.md` | Troubleshooting | Linux WebKitGTK rendering failure diagnosis and mitigation steps. |
+
+## Grounding policy for this milestone
+
+Each new public page links to concrete source paths (for example `README.md`, `Justfile`, and reference docs) so claims can be verified in-repo.
+
+## Section Health
+
+| Section | Current coverage | Notes |
+|---|---|---|
+| Tutorials | 2 pages | Covers first setup and first workflow. |
+| How-to | 8 pages | Covers install, desktop download, configure, Ollama local-model usage, run, verify, CI/headless automation, and a shorter workflow recipe. |
+| Reference | 11 pages plus navigation metadata | Covers install/release paths, commands, providers, config, env vars, filesystem, scripts, and the feature-gated web API. |
+| Troubleshooting | 5 pages plus navigation metadata | Covers common runtime failures, Ollama-specific local-model diagnostics, and Linux desktop setup/rendering issues. |
+| Explanation | 2 pages | Covers docs boundaries plus security/trust concepts grounded in the codebase. |

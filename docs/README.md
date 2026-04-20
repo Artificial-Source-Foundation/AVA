@@ -2,7 +2,7 @@
 title: "Docs"
 description: "Entry point for AVA's documentation, organized by audience and purpose."
 order: 1
-updated: "2026-04-18"
+updated: "2026-04-19"
 ---
 
 # AVA Docs
@@ -33,11 +33,12 @@ Public-facing entrypoint: [docs/index.md](index.md)
 18. [Operations docs](operations/README.md) - maintainer runbooks and operational guidance
 19. [Docs manifest](manifest.md) - list of new public Diátaxis pages and purpose
 20. [How-to: Install AVA](how-to/install.md) - binary, release, and source install paths
-21. [How-to: Use local models with Ollama](how-to/ollama-local-models.md) - Ollama-only local-model setup and verification path
-22. [How-to: Run AVA in CI/headless automation](how-to/ci-headless-automation.md) - non-interactive CI/script usage with JSON mode and conservative behavior assumptions
-23. [Troubleshooting: Common errors](troubleshooting/common-errors.md) - fast recovery for common runtime failures
-24. [Reference: Install and release paths](reference/install-and-release-paths.md) - grounded install/release surface map
-25. [Changelog](../CHANGELOG.md) - shipped changes and release history
+21. [How-to: Download AVA Desktop](how-to/download-desktop.md) - desktop-specific download and source-build path
+22. [How-to: Use local models with Ollama](how-to/ollama-local-models.md) - Ollama-only local-model setup and verification path
+23. [How-to: Run AVA in CI/headless automation](how-to/ci-headless-automation.md) - non-interactive CI/script usage with JSON mode and conservative behavior assumptions
+24. [Troubleshooting: Common errors](troubleshooting/common-errors.md) - fast recovery for common runtime failures
+25. [Reference: Install and release paths](reference/install-and-release-paths.md) - grounded install/release surface map
+26. [Changelog](../CHANGELOG.md) - shipped changes and release history
 
 ## Sections
 

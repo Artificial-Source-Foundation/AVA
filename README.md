@@ -17,26 +17,65 @@ It is designed to sit between OpenCode and PI Code: focused by default, extensib
 
 ## Get Started
 
-Install the CLI (choose one path):
+AVA has two install surfaces today:
 
-1. Installer script (Linux/macOS binaries from GitHub Releases):
+1. `ava` CLI/TUI
+2. AVA Desktop
+
+### Download Matrix
+
+| Surface | Linux | macOS | Windows |
+|---|---|---|---|
+| `ava` CLI/TUI | `ava-x86_64-unknown-linux-gnu.tar.gz` or `ava-aarch64-unknown-linux-gnu.tar.gz` | `ava-x86_64-apple-darwin.tar.gz` or `ava-aarch64-apple-darwin.tar.gz` | `ava-x86_64-pc-windows-msvc.zip` or generated Windows installer |
+| AVA Desktop | `.deb`, `.rpm`, or `.AppImage` when published | `.dmg` when published | `.msi` or `.exe` when published |
+
+| Surface | Best for | Fastest path | More options |
+|---|---|---|---|
+| `ava` CLI/TUI | Terminal and headless usage | `curl -fsSL https://raw.githubusercontent.com/Artificial-Source/AVA/develop/install.sh | sh` | [Install AVA](docs/how-to/install.md) |
+| AVA Desktop | Native desktop app usage | Download from <https://github.com/Artificial-Source/AVA/releases> when desktop bundles are present | [Download AVA Desktop](docs/how-to/download-desktop.md) |
+
+### CLI / TUI
+
+Quick install:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Artificial-Source/AVA/develop/install.sh | sh
 ```
 
-2. GitHub Releases (manual download):
+Alternative paths:
 
-See <https://github.com/Artificial-Source/AVA/releases> for release assets.
-
-3. Install from source:
+1. Manual binary install on Windows, Linux, or macOS from <https://github.com/Artificial-Source/AVA/releases>
+2. Source install:
 
 ```bash
 git clone https://github.com/Artificial-Source/AVA.git && cd AVA
 cargo install --path crates/ava-tui --bin ava
 ```
 
-More install details and platform notes: [docs/how-to/install.md](docs/how-to/install.md)
+3. Guided source build:
+
+```bash
+./install-from-source.sh --help
+```
+
+More install details, platform notes, and power-user paths: [docs/how-to/install.md](docs/how-to/install.md)
+
+### Desktop
+
+Desktop is a separate product surface from the CLI.
+
+Quick path:
+
+1. Open <https://github.com/Artificial-Source/AVA/releases>
+2. Download the desktop bundle for your platform when that release includes one
+
+Fallback path:
+
+```bash
+./install-from-source.sh --desktop
+```
+
+Desktop build and release details: [docs/how-to/download-desktop.md](docs/how-to/download-desktop.md), [docs/contributing/releasing.md](docs/contributing/releasing.md)
 
 Release-repo note: release-related links in this checkout are aligned to `Artificial-Source/AVA`.
 

@@ -8,10 +8,6 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow?style=flat-square)](LICENSE)
 
 AVA reads code, edits files, runs commands, and helps you finish software work without leaving your repo.
-
-
-<img src="docs/screenshots/main-chat.png" width="700" alt="AVA screenshot" />
-
 </div>
 
 AVA is a Rust-first coding agent built for real repository work.
@@ -91,6 +87,14 @@ curl -fsSL https://raw.githubusercontent.com/Artificial-Source/AVA/develop/insta
 ```bash
 git clone https://github.com/Artificial-Source/AVA.git && cd AVA
 cargo build --release --bin ava
+./target/release/ava
+```
+
+Optional compiler-cache variant for repeat source builds:
+
+```bash
+git clone https://github.com/Artificial-Source/AVA.git && cd AVA
+RUSTC_WRAPPER=sccache cargo build --release --bin ava
 ./target/release/ava
 ```
 
@@ -187,18 +191,22 @@ Plugins are a core part of AVA's identity, but plugin-owned UI and settings shou
 
 ## Documentation
 
-Start here:
+User docs:
 
-- [docs/README.md](docs/README.md) - main documentation entrypoint
-- [docs/how-to/install.md](docs/how-to/install.md) - installation and platform notes
-- [docs/how-to/download-desktop.md](docs/how-to/download-desktop.md) - desktop download and source-build paths
-- [docs/reference/providers-and-auth.md](docs/reference/providers-and-auth.md) - providers, aliases, and auth
-- [docs/reference/commands.md](docs/reference/commands.md) - slash commands and CLI surfaces
-- [docs/testing/README.md](docs/testing/README.md) - testing and verification
+- [docs/index.md](docs/index.md) - public docs entrypoint
+- [docs/how-to/install.md](docs/how-to/install.md) - install AVA for CLI or desktop use
+- [docs/tutorials/first-run.md](docs/tutorials/first-run.md) - first success path
+- [docs/how-to/configure.md](docs/how-to/configure.md) - provider auth and local settings
+- [docs/how-to/run-locally.md](docs/how-to/run-locally.md) - run AVA in TUI, headless, desktop, or web mode
+- [docs/troubleshooting/common-errors.md](docs/troubleshooting/common-errors.md) - common setup and runtime fixes
+- [docs/reference/README.md](docs/reference/README.md) - commands, providers, configuration, and storage reference
 
-Project and architecture material:
+Contributor and maintainer docs:
 
+- [docs/README.md](docs/README.md) - internal docs map
 - [AGENTS.md](AGENTS.md) - repo workflow, conventions, and architecture for contributors and AI coding agents
+- [docs/contributing/README.md](docs/contributing/README.md) - contributor workflow and release docs
+- [docs/testing/README.md](docs/testing/README.md) - testing and verification
 - [docs/project/roadmap.md](docs/project/roadmap.md)
 - [docs/project/backlog.md](docs/project/backlog.md)
 - [docs/architecture/README.md](docs/architecture/README.md)

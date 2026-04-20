@@ -1,10 +1,9 @@
 {
+  "README": "How-To Overview",
   "install": "Install AVA",
   "download-desktop": "Download AVA Desktop",
   "configure": "Configure AVA",
   "run-locally": "Run AVA Locally",
-  "test": "Run Tests And Checks",
   "ci-headless-automation": "Run AVA In CI/Headless Automation",
-  "first-workflow": "First Workflow",
   "ollama-local-models": "Use Local Models With Ollama"
 }

@@ -9,7 +9,7 @@ updated: "2026-04-20"
 
 This is the public-facing documentation entrypoint for AVA.
 
-Use this page when you want user-facing docs first. Contributor, maintainer, and architecture material is linked separately below.
+Use this page when you want user docs first. Contributor, maintainer, and architecture material is linked separately below.
 
 ## Choose by goal
 
@@ -23,26 +23,33 @@ Use this page when you want user-facing docs first. Contributor, maintainer, and
 | Run AVA in CI or scripts | [How-to: Run AVA in CI/headless automation](how-to/ci-headless-automation.md) |
 | Troubleshoot common setup/runtime failures | [Troubleshooting: Common errors](troubleshooting/common-errors.md) |
 
-## Start here (public)
+## Core user docs
 
-1. [Tutorial: First run](tutorials/first-run.md)
-2. [Tutorial: Your first workflow](tutorials/your-first-workflow.md)
-3. [How-to: Install AVA](how-to/install.md)
-4. [How-to: Download AVA Desktop](how-to/download-desktop.md)
-5. [How-to: Configure providers and local settings](how-to/configure.md)
-6. [How-to: Use local models with Ollama](how-to/ollama-local-models.md)
-7. [How-to: Run AVA Locally](how-to/run-locally.md)
-8. [How-to: Run tests and checks](how-to/test.md)
-9. [How-to: Run AVA in CI/headless automation](how-to/ci-headless-automation.md)
-10. [How-to: Run your first workflow](how-to/first-workflow.md)
-11. [Explanation: AVA surfaces and docs boundaries](explanation/ava-surfaces-and-doc-boundaries.md)
-12. [Explanation: Security and trust](explanation/security-and-trust.md)
-13. [Reference docs](reference/README.md)
-14. [Reference: Install and release paths](reference/install-and-release-paths.md)
-15. [Troubleshooting: Common errors](troubleshooting/common-errors.md)
-16. [Troubleshooting: Ollama local models](troubleshooting/ollama-local-models.md)
+1. [How-to: Install AVA](how-to/install.md)
+2. [Tutorial: First run](tutorials/first-run.md)
+3. [How-to: Configure providers and local settings](how-to/configure.md)
+4. [How-to: Run AVA locally](how-to/run-locally.md)
+5. [How-to: Download AVA Desktop](how-to/download-desktop.md)
+6. [Troubleshooting: Common errors](troubleshooting/common-errors.md)
+7. [Reference docs](reference/README.md)
 
-The tutorial and how-to pages are the main public layer. Reference pages are the factual source of truth for commands, providers, install artifacts, filesystem layout, and other stable details. Troubleshooting pages stay focused on recovery steps.
+## More guides
+
+1. [Tutorial: Your first workflow](tutorials/your-first-workflow.md)
+2. [How-to: Use local models with Ollama](how-to/ollama-local-models.md)
+3. [How-to: Run AVA in CI/headless automation](how-to/ci-headless-automation.md)
+4. [Troubleshooting: Ollama local models](troubleshooting/ollama-local-models.md)
+5. [Explanation: Security and trust](explanation/security-and-trust.md)
+
+The public layer is intentionally small: install, first success, configuration, normal run modes, troubleshooting, and reference.
+
+Browse by docs type:
+
+1. [Tutorials](tutorials/README.md)
+2. [How-To Guides](how-to/README.md)
+3. [Reference Docs](reference/README.md)
+4. [Troubleshooting](troubleshooting/README.md)
+5. [Explanation](explanation/README.md)
 
 ## Internal and maintainer material (kept separate)
 
@@ -53,12 +60,4 @@ These pages remain important, but they are not the public quick-start path:
 3. [Operations docs](operations/README.md)
 4. [Contributor workflow](contributing/README.md)
 
-## Grounding
-
-Claims in the new public pages are grounded in these repository sources:
-
-1. [`README.md`](../README.md) for install, auth, and run commands
-2. [`docs/reference/commands.md`](reference/commands.md) for CLI/subcommand workflow
-3. [`docs/reference/providers-and-auth.md`](reference/providers-and-auth.md) for provider/auth behavior
-4. [`Justfile`](../Justfile) and [`docs/contributing/development-workflow.md`](contributing/development-workflow.md) for first contributor workflow checks
-5. [`install.sh`](../install.sh), [`dist-workspace.toml`](../dist-workspace.toml), and [`.github/workflows/release.yml`](../.github/workflows/release.yml) for binary install/release path claims
+Contributor workflow, testing, architecture, and project-planning docs live in the internal sections below because they are not part of the normal user quick-start path.

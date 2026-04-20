@@ -38,6 +38,46 @@ print_error() { echo -e "${RED}✗${NC} $1"; }
 print_dry() { echo -e "${DIM}[dry-run]${NC} $1"; }
 print_info() { echo -e "  ${DIM}$1${NC}"; }
 
+detect_cpu_count() {
+    local cpu_count=""
+
+    if command -v getconf >/dev/null 2>&1; then
+        cpu_count="$(getconf _NPROCESSORS_ONLN 2>/dev/null || true)"
+    fi
+
+    if [[ -z "$cpu_count" ]] && command -v nproc >/dev/null 2>&1; then
+        cpu_count="$(nproc 2>/dev/null || true)"
+    fi
+
+    if [[ -z "$cpu_count" ]] && command -v sysctl >/dev/null 2>&1; then
+        cpu_count="$(sysctl -n hw.ncpu 2>/dev/null || true)"
+    fi
+
+    if [[ ! "$cpu_count" =~ ^[0-9]+$ ]] || [[ "$cpu_count" -lt 1 ]]; then
+        cpu_count=1
+    fi
+
+    printf '%s\n' "$cpu_count"
+}
+
+ensure_cargo_build_jobs() {
+    if [[ -n "${CARGO_BUILD_JOBS:-}" ]]; then
+        return
+    fi
+
+    export CARGO_BUILD_JOBS="$(detect_cpu_count)"
+}
+
+ensure_rustc_wrapper() {
+    if [[ -n "${RUSTC_WRAPPER:-}" ]]; then
+        return
+    fi
+
+    if command -v sccache >/dev/null 2>&1; then
+        export RUSTC_WRAPPER="$(command -v sccache)"
+    fi
+}
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Default options
@@ -45,6 +85,9 @@ DRY_RUN=false
 INSTALL_CLI=false
 INSTALL_DESKTOP=false
 NON_INTERACTIVE=false
+
+ensure_cargo_build_jobs
+ensure_rustc_wrapper
 
 # ============================================================================
 # Help
@@ -87,6 +130,14 @@ ${BOLD}SUPPORTED DISTROS:${NC}
 
 ${BOLD}TO UNINSTALL:${NC}
     ./uninstall.sh
+
+${BOLD}ENVIRONMENT OVERRIDES:${NC}
+    CARGO_BUILD_JOBS=4 ./install-from-source.sh --cli
+        Override the default Cargo parallelism if you want fewer jobs.
+    RUSTC_WRAPPER= ./install-from-source.sh --cli
+        Disable the automatic `sccache` wrapper for this invocation.
+    RUSTC_WRAPPER=/path/to/wrapper ./install-from-source.sh --cli
+        Use your own compiler wrapper instead of the default detection.
 
 EOF
 }
@@ -379,9 +430,19 @@ fi
 if [[ "$INSTALL_CLI" == "true" ]]; then
     echo ""
     print_step "Building AVA CLI/TUI (this may take a few minutes on first build)..."
+    print_info "Using Cargo parallelism: ${CARGO_BUILD_JOBS} job(s)"
+    if [[ -n "${RUSTC_WRAPPER:-}" ]]; then
+        print_info "Using Rust compiler wrapper: ${RUSTC_WRAPPER}"
+    else
+        print_info "Using Rust compiler wrapper: none"
+    fi
 
     if [[ "$DRY_RUN" == "true" ]]; then
-        print_dry "Would run: cargo build --release --bin ava"
+        if [[ -n "${RUSTC_WRAPPER:-}" ]]; then
+            print_dry "Would run: RUSTC_WRAPPER=${RUSTC_WRAPPER} CARGO_BUILD_JOBS=${CARGO_BUILD_JOBS} cargo build --release --bin ava"
+        else
+            print_dry "Would run: CARGO_BUILD_JOBS=${CARGO_BUILD_JOBS} cargo build --release --bin ava"
+        fi
     else
         cd "$SCRIPT_DIR"
         # Show cargo output filtered to progress lines
@@ -433,9 +494,19 @@ if [[ "$INSTALL_DESKTOP" == "true" ]]; then
 
     echo ""
     print_step "Building AVA desktop app (this may take a few minutes)..."
+    print_info "Using Cargo parallelism: ${CARGO_BUILD_JOBS} job(s)"
+    if [[ -n "${RUSTC_WRAPPER:-}" ]]; then
+        print_info "Using Rust compiler wrapper: ${RUSTC_WRAPPER}"
+    else
+        print_info "Using Rust compiler wrapper: none"
+    fi
 
     if [[ "$DRY_RUN" == "true" ]]; then
-        print_dry "Would run: pnpm tauri build"
+        if [[ -n "${RUSTC_WRAPPER:-}" ]]; then
+            print_dry "Would run: RUSTC_WRAPPER=${RUSTC_WRAPPER} CARGO_BUILD_JOBS=${CARGO_BUILD_JOBS} pnpm tauri build"
+        else
+            print_dry "Would run: CARGO_BUILD_JOBS=${CARGO_BUILD_JOBS} pnpm tauri build"
+        fi
     else
         cd "$SCRIPT_DIR"
         pnpm tauri build 2>&1 | while IFS= read -r line; do
@@ -560,7 +631,7 @@ fi
 echo ""
 if [[ "$DRY_RUN" == "false" ]]; then
     echo -e "  ${DIM}Get started:${NC}"
-    echo -e "    ${DIM}1. Connect a provider: ava auth add${NC}"
+    echo -e "    ${DIM}1. Connect a provider: ava auth login${NC}"
     echo -e "    ${DIM}2. Launch: ava${NC}"
 fi
 

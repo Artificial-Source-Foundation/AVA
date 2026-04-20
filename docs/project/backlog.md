@@ -21,9 +21,11 @@ Source of truth for direction: `docs/project/roadmap.md`
 4. Prove the backend can do real coding work reliably in a **headless-first** flow (authoritative for backend correctness under the current scoped non-interactive exception), with TUI, desktop, and web checks to confirm lighter surface parity only (not full interactive approval/question/plan proof by itself).
 5. Add a simple automated product smoke suite for the core journey: prompt -> tools -> edit -> verify -> persist.
 6. Keep a repeatable AVA-vs-OpenCode comparison path so quality can be measured, not argued.
-7. Finish the docs reset around the `0.6` story so roadmap, backlog, README, and release language all describe the same product stage.
+7. Finish the docs reset around the `0.6` story so roadmap, backlog, README, release language, and the public docs front door all describe the same product stage without mixing normal-user paths with contributor workflow detail.
 
 Current bounded parity note: web submit and replay flows now honor the shared persisted per-run thinking/model/compaction context used by desktop session runs; the remaining bounded divergence is the manual TUI/headless `/compact` path tracked in `docs/architecture/backend-contract-exceptions.md` as `EX-003`.
+
+Current TUI delegation note: subagent cards now open child conversations on click and child-session views reconstruct stored tool-call/tool-result history instead of degrading into result-only rows, but the broader “show the delegated run as richly as OpenCode” polish pass is still part of the active desktop/TUI fit-and-finish queue.
 
 Current web hardening note: `ava serve` now defaults to loopback-only bind/origin exposure, token-protects sensitive session/history/status reads plus persisted plan listing/loading routes, high-risk plugin/CLI discovery + plugin route surfaces, and privileged HTTP control-plane routes (and `/ws`), redacts raw control tokens from normal logs, and still keeps broader browser-origin exposure as an explicit `--insecure-open-cors` opt-in.
 

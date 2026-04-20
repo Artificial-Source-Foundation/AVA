@@ -1,13 +1,13 @@
 ---
 title: "How-to: Install AVA"
-description: "Install AVA through the fastest binary path, a manual release download, or a more explicit source build depending on how much control you want."
+description: "Build, run, and install AVA with explicit Cargo-first workflows for power users and source-based development."
 order: 1
 updated: "2026-04-19"
 ---
 
 # How-to: Install AVA
 
-Use this page when you want the shortest path to a working AVA install without guessing which route is meant for you.
+Use this page when you want explicit Cargo-first workflows: build in place, run from the build output, or install only when you actually want an installed binary.
 
 AVA has two install surfaces:
 
@@ -16,16 +16,68 @@ AVA has two install surfaces:
 
 See also: [Tutorial: First run](../tutorials/first-run.md), [How-to: Download AVA Desktop](download-desktop.md), [How-to: Run AVA locally](run-locally.md), [Reference: Install and release paths](../reference/install-and-release-paths.md)
 
-## Choose your path
+This page is intentionally written for power users.
 
-| If you want... | Use this path |
-|---|---|
-| Fastest CLI install on Linux or macOS | `install.sh` |
-| Windows install or a manual binary download | GitHub Releases |
-| A repo-pinned CLI build or a custom feature build | `cargo install --path ...` |
-| A guided source build for CLI and desktop from a checkout | `./install-from-source.sh` |
+If you downloaded the source, the primary workflow is:
+
+1. build with Cargo
+2. run the built binary from the build output directory
+3. only use `cargo install` if you specifically want an installed binary on your `PATH`
+
+## Quick Path
+
+If you already know what you want, use one of these:
+
+1. Fast binary install on Linux/macOS:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Artificial-Source/AVA/develop/install.sh | sh
+```
+
+2. Manual source build without installing:
+
+```bash
+cargo build --release --bin ava
+./target/release/ava
+```
+
+3. Manual source install:
+
+```bash
+cargo install --path crates/ava-tui --bin ava
+```
+
+4. Windows or manual binary download:
+
+Open <https://github.com/Artificial-Source/AVA/releases>
 
 ## Install AVA CLI
+
+For the CLI, there are four normal paths:
+
+1. Binary install from GitHub Releases using `install.sh`
+2. Manual source build using Cargo
+3. Manual source install using Cargo
+4. Optional convenience wrapper using `install-from-source.sh`
+
+If you downloaded the source and want the normal developer workflow, use `cargo build` first, not `cargo install`.
+
+## Prerequisites
+
+For binary install:
+
+1. Linux or macOS
+2. `tar`
+3. `curl`
+
+For manual source build/install:
+
+1. Rust toolchain with Cargo
+2. A checked-out copy of this repository
+
+There is no separate configure step for the CLI.
+
+If you are used to CMake-style projects, Cargo combines the normal build/install behavior into its own commands.
 
 ## Fast install from release binaries (Linux/macOS)
 
@@ -37,7 +89,9 @@ curl -fsSL https://raw.githubusercontent.com/Artificial-Source/AVA/develop/insta
 
 This is the best default for most CLI users because it does not require Rust, Node.js, or a repo checkout.
 
-Current script behavior:
+This path downloads a prebuilt binary. It does not compile AVA from source.
+
+What this does:
 
 1. Detects Linux/macOS + `x86_64`/`aarch64`
 2. Downloads the latest matching release archive from GitHub Releases
@@ -62,7 +116,7 @@ Grounding: [`../../install.sh`](../../install.sh), [`../../dist-workspace.toml`]
 
 Repo-slug note: release-related links in this checkout are aligned to `Artificial-Source/AVA`.
 
-## Install from GitHub Releases (manual)
+## Manual binary download from GitHub Releases
 
 Use this path when you want to inspect the asset yourself, pin a specific release, or install on Windows.
 
@@ -79,11 +133,11 @@ Current CLI release targets are:
 4. `x86_64-unknown-linux-gnu`
 5. `x86_64-pc-windows-msvc`
 
-The release pipeline is also configured to generate shell and PowerShell installers. `install.sh` is the Unix entrypoint in this repo; Windows users should use the GitHub Releases page and choose the Windows asset or generated installer for the version they want.
+The release pipeline also generates installer assets. `install.sh` is the Unix entrypoint in this repo; Windows users should use the GitHub Releases page and choose the Windows asset or generated installer for the version they want.
 
 This route is also the fallback for platforms not handled by `install.sh`.
 
-### Exact CLI asset examples
+### Asset names
 
 AVA's current CLI release archives follow the target-triple naming used by `cargo-dist`. The installer also accepts the older `ava-...tar.gz` naming from earlier releases.
 
@@ -97,9 +151,62 @@ Examples:
 
 If you are scanning a release page quickly, these names are the fastest way to map OS and architecture to the right CLI download.
 
-## Install the CLI from source
+## Build from source without installing
 
-Use this when you want the build to come from your checked-out source, you need a feature-gated build, or you prefer Cargo's install flow over downloading release assets.
+This is the primary path for power users.
+
+Use it when you want to:
+
+1. recompile after changing one file
+2. let Cargo rebuild only the minimum necessary work
+3. run the new binary immediately
+4. avoid installing into `$HOME`, `/usr`, or `/usr/local`
+
+From the repository root:
+
+```bash
+cargo build --release --bin ava
+```
+
+Default output path:
+
+```text
+target/release/ava
+```
+
+Run it directly:
+
+```bash
+./target/release/ava
+```
+
+If you want a dedicated build directory similar to `BUILDDIR`, set `CARGO_TARGET_DIR`:
+
+```bash
+CARGO_TARGET_DIR=build cargo build --release --bin ava
+./build/release/ava
+```
+
+In Cargo terms, `CARGO_TARGET_DIR` is the closest equivalent to a separate build directory in a CMake-style project.
+
+If you are iterating on the code, this is usually the best loop:
+
+```bash
+cargo build --release --bin ava
+./target/release/ava
+```
+
+Cargo already uses dependency tracking and incremental build information, so after a small code change it will typically rebuild only what is necessary.
+
+## Build and install from source
+
+Use this only when you want Cargo to compile the CLI and place an installed `ava` binary on your system path.
+
+In simple terms:
+
+1. There is no separate `configure` step for the CLI
+2. `cargo install --path ...` compiles the Rust project from source
+3. After compiling, Cargo installs the `ava` binary for you
 
 From the repository root:
 
@@ -107,13 +214,17 @@ From the repository root:
 cargo install --path crates/ava-tui --bin ava
 ```
 
-This remains the clearest path for reproducible local builds tied to your checkout.
+This is the clearest manual install path when you explicitly want an installed binary instead of running from the build output.
 
 Grounding: [`../../README.md`](../../README.md), [`../../crates/ava-tui/Cargo.toml`](../../crates/ava-tui/Cargo.toml)
 
-## Guided source install from a repo checkout
+## Optional convenience wrapper
 
-If you want a more guided source-build path, the repo also ships `install-from-source.sh`.
+The repo also ships `install-from-source.sh`.
+
+This is not a different build system. It is a convenience script for people who want one command instead of typing the manual steps themselves.
+
+If you prefer explicit commands over helper scripts, skip this section and use the Cargo commands above.
 
 Examples:
 
@@ -123,7 +234,9 @@ Examples:
 ./install-from-source.sh --all
 ```
 
-This script is useful for power users who want a one-command source install while still choosing between CLI-only and desktop builds.
+This script is useful when you want a repo-provided wrapper that handles dependency checks and routes you to CLI-only, desktop-only, or combined source installs.
+
+For most power users, the manual Cargo commands are still the clearer default.
 
 Grounding: [`../../install-from-source.sh`](../../install-from-source.sh)
 
@@ -131,7 +244,7 @@ Grounding: [`../../install-from-source.sh`](../../install-from-source.sh)
 
 The `serve` command is feature-gated behind the `web` feature in [`../../crates/ava-tui/Cargo.toml`](../../crates/ava-tui/Cargo.toml).
 
-Install it like this:
+Manual source install with web support:
 
 ```bash
 cargo install --path crates/ava-tui --bin ava --features web --force
@@ -178,11 +291,11 @@ See: [Reference: Install and release paths](../reference/install-and-release-pat
 On Windows, use one of these paths instead:
 
 1. GitHub Releases for the Windows asset or generated PowerShell installer
-2. Source builds from a repo checkout
+2. Manual source build from a repo checkout with Cargo
 
 Grounding: [`../../install.sh`](../../install.sh), [`../../dist-workspace.toml`](../../dist-workspace.toml)
 
-## Prepare the desktop development toolchain
+## Desktop development prerequisites
 
 If you want to run the Tauri desktop app from source, install the JavaScript dependencies first:
 
@@ -192,7 +305,7 @@ pnpm install --reporter=silent
 
 The desktop commands live in [`../../package.json`](../../package.json) and the Tauri app lives under `src-tauri/`.
 
-## Verify the install
+## Verify the CLI
 
 Run:
 
@@ -201,6 +314,10 @@ ava --help
 ```
 
 If the command is not found after using `install.sh`, your current shell probably has not reloaded the PATH update yet.
+
+If you used `cargo install`, make sure Cargo's bin directory is on your `PATH`.
+
+If you used `cargo build`, run the binary directly from `target/release/ava` or your chosen `CARGO_TARGET_DIR`.
 
 If you built with `--features web`, verify it by actually starting the server:
 

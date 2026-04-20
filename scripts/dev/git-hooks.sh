@@ -285,8 +285,10 @@ run_pre_commit() {
 
     case "$file" in
       *.ts|*.tsx|*.js|*.jsx|*.json|*.css)
-        biome_files+=("$file")
-        snapshot_biome_files+=("$(materialize_staged_file "$file")")
+        if is_frontend_path "$file"; then
+          biome_files+=("$file")
+          snapshot_biome_files+=("$(materialize_staged_file "$file")")
+        fi
         ;;
     esac
 

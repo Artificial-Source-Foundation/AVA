@@ -12,8 +12,13 @@ import {
   PASTE_PREVIEW_LINES,
   type PendingFile,
   type PendingImage,
+  type SupportedImageMimeType,
   TEXT_EXTENSIONS,
 } from './types'
+
+function isSupportedImageMimeType(type: string): type is SupportedImageMimeType {
+  return ACCEPTED_IMAGE_TYPES.includes(type as SupportedImageMimeType)
+}
 
 // ---------------------------------------------------------------------------
 // Image processing
@@ -21,15 +26,16 @@ import {
 
 /** Read a File as a base64 image payload. Returns null for unsupported/oversized files. */
 export function processImageFile(file: File): Promise<PendingImage | null> {
-  if (!ACCEPTED_IMAGE_TYPES.includes(file.type)) return Promise.resolve(null)
+  if (!isSupportedImageMimeType(file.type)) return Promise.resolve(null)
   if (file.size > MAX_IMAGE_SIZE) return Promise.resolve(null)
+  const mimeType = file.type
   return new Promise((resolve) => {
     const reader = new FileReader()
     reader.onload = () => {
       const result = reader.result as string
       const base64 = result.split(',')[1]
       if (base64) {
-        resolve({ data: base64, mimeType: file.type, name: file.name })
+        resolve({ data: base64, mimeType, name: file.name })
       } else {
         resolve(null)
       }

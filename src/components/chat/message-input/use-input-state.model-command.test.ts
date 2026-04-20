@@ -1,22 +1,42 @@
 import { createRoot } from 'solid-js'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import type { PendingFile, PendingImage, PendingPaste } from './types'
+
 const openModelBrowserMock = vi.fn()
 const agentRunMock = vi.fn(async (_message: string, _options?: unknown) => undefined)
+const followUpMock = vi.fn(async (_message: string, _sessionId?: string) => undefined)
+const clearAllMock = vi.fn<
+  () => {
+    images: PendingImage[]
+    files: PendingFile[]
+    pastes: PendingPaste[]
+  }
+>(() => ({ images: [], files: [], pastes: [] }))
+const notifyInfoMock = vi.fn()
+const notifyErrorMock = vi.fn()
+
+let isRunningState = false
+let pendingPastesState: Array<{ content: string; lineCount: number }> = []
+let pendingImagesState: Array<{
+  data: string
+  mimeType: 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp'
+  name?: string
+}> = []
 
 vi.mock('../../../contexts/notification', () => ({
   useNotification: () => ({
-    info: vi.fn(),
-    error: vi.fn(),
+    info: notifyInfoMock,
+    error: notifyErrorMock,
   }),
 }))
 
 vi.mock('../../../hooks/useAgent', () => ({
   useAgent: () => ({
-    isRunning: () => false,
+    isRunning: () => isRunningState,
     isPlanMode: () => false,
     streamingStartedAt: () => null,
-    followUp: vi.fn(async () => undefined),
+    followUp: (message: string, sessionId?: string) => followUpMock(message, sessionId),
     postComplete: vi.fn(async () => undefined),
     messageQueue: () => [],
     run: (message: string, options?: unknown) => agentRunMock(message, options),
@@ -83,9 +103,9 @@ vi.mock('../../../stores/settings', () => ({
 
 vi.mock('./attachment-bar', () => ({
   createAttachmentState: () => ({
-    pendingPastes: () => [],
-    pendingImages: () => [],
-    clearAll: () => ({ files: [], pastes: [] }),
+    pendingPastes: () => pendingPastesState,
+    pendingImages: () => pendingImagesState,
+    clearAll: () => clearAllMock(),
   }),
 }))
 
@@ -151,6 +171,15 @@ describe('useInputState /model routing', () => {
     openModelBrowserMock.mockReset()
     agentRunMock.mockReset()
     agentRunMock.mockResolvedValue(undefined)
+    followUpMock.mockReset()
+    followUpMock.mockResolvedValue(undefined)
+    clearAllMock.mockReset()
+    clearAllMock.mockReturnValue({ images: [], files: [], pastes: [] })
+    notifyInfoMock.mockReset()
+    notifyErrorMock.mockReset()
+    isRunningState = false
+    pendingPastesState = []
+    pendingImagesState = []
   })
 
   it('opens the full model browser for bare /model', async () => {
@@ -174,6 +203,46 @@ describe('useInputState /model routing', () => {
         model: 'gpt-5.4',
       })
       expect(state.input()).toBe('')
+    })
+  })
+
+  it('forwards pending images to the initial run payload', async () => {
+    clearAllMock.mockReturnValue({
+      images: [{ data: 'base64-image', mimeType: 'image/png', name: 'screen.png' }],
+      files: [],
+      pastes: [],
+    })
+
+    await runInRoot(async (state) => {
+      state.setInput('describe this screenshot')
+      await state.handleSubmit(new Event('submit'))
+
+      expect(agentRunMock).toHaveBeenCalledWith('describe this screenshot', {
+        model: 'gpt-5.4',
+        images: [{ data: 'base64-image', mediaType: 'image/png' }],
+      })
+    })
+  })
+
+  it('blocks image-bearing submit while a run is active with a clear error', async () => {
+    isRunningState = true
+    pendingImagesState = [{ data: 'base64-image', mimeType: 'image/png', name: 'screen.png' }]
+
+    await runInRoot(async (state) => {
+      state.setInput('queue this screenshot')
+      await state.handleSubmit(new Event('submit'))
+
+      expect(followUpMock).not.toHaveBeenCalled()
+      expect(agentRunMock).not.toHaveBeenCalled()
+      expect(clearAllMock).not.toHaveBeenCalled()
+      expect(notifyErrorMock).toHaveBeenCalledWith(
+        'Images unavailable while agent is running',
+        'Wait for the current response to finish before sending images.'
+      )
+      expect(state.input()).toBe('queue this screenshot')
+      expect(state.attachments.pendingImages()).toEqual([
+        { data: 'base64-image', mimeType: 'image/png', name: 'screen.png' },
+      ])
     })
   })
 })

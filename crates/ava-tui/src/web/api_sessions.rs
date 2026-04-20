@@ -1,5 +1,7 @@
 //! Session CRUD and message HTTP API handlers.
 
+use std::collections::HashMap;
+
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
@@ -22,6 +24,8 @@ pub struct SessionSummary {
     pub title: String,
     pub status: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub parent_session_id: Option<String>,
     pub message_count: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -36,6 +40,8 @@ pub struct SessionDetail {
     pub title: String,
     pub status: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub parent_session_id: Option<String>,
     pub message_count: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -47,7 +53,7 @@ pub struct SessionDetail {
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "lowercase")]
-enum SessionCloneKind {
+pub(crate) enum SessionCloneKind {
     #[default]
     Duplicate,
     Fork,
@@ -89,6 +95,8 @@ impl SessionListFilter {
 pub struct ListSessionsQuery {
     #[serde(default)]
     pub status: Option<String>,
+    #[serde(default)]
+    pub project_id: Option<String>,
 }
 
 fn session_status(session: &ava_types::Session) -> PersistedSessionStatus {
@@ -159,6 +167,15 @@ fn session_parent_session_id(session: &ava_types::Session) -> Option<String> {
         .map(str::to_string)
 }
 
+fn session_project_id(session: &ava_types::Session) -> Option<String> {
+    session
+        .metadata
+        .get("projectId")
+        .or_else(|| session.metadata.get("project_id"))
+        .and_then(Value::as_str)
+        .map(str::to_string)
+}
+
 fn set_session_parent_session_id(
     session: &mut ava_types::Session,
     parent_session_id: Option<String>,
@@ -174,6 +191,23 @@ fn set_session_parent_session_id(
         None => {
             metadata.remove("parentSessionId");
             metadata.remove("parent_session_id");
+        }
+    }
+}
+
+fn set_session_project_id(session: &mut ava_types::Session, project_id: Option<String>) {
+    let metadata = session
+        .metadata
+        .as_object_mut()
+        .expect("session metadata object");
+    match project_id {
+        Some(project_id) => {
+            metadata.insert("projectId".to_string(), Value::String(project_id));
+            metadata.remove("project_id");
+        }
+        None => {
+            metadata.remove("projectId");
+            metadata.remove("project_id");
         }
     }
 }
@@ -200,6 +234,7 @@ fn summarize_session(session: &ava_types::Session) -> SessionSummary {
         id: session.id.to_string(),
         title: session_title(session),
         status: session_status(session).as_str().to_string(),
+        project_id: session_project_id(session),
         parent_session_id: session_parent_session_id(session),
         message_count: visible_message_count(session),
         last_preview: session_last_preview(session),
@@ -248,6 +283,8 @@ pub struct MessageSummary {
     pub role: String,
     pub content: String,
     pub timestamp: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub images: Vec<MessageImageSummary>,
     /// Tool calls associated with this message (serialised as JSON array or null).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_calls: Option<serde_json::Value>,
@@ -263,6 +300,19 @@ pub struct MessageSummary {
     /// Model that generated this message.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct MessageImageSummary {
+    pub data: String,
+    pub media_type: String,
+}
+
+fn summarize_message_image(image: &ava_types::ImageContent) -> MessageImageSummary {
+    MessageImageSummary {
+        data: image.data.clone(),
+        media_type: image.media_type.to_string(),
+    }
 }
 
 fn tool_calls_value(message: &ava_types::Message) -> Option<Value> {
@@ -345,6 +395,7 @@ fn summarize_message(message: &ava_types::Message) -> MessageSummary {
         role: format!("{:?}", message.role).to_lowercase(),
         content: message.content.clone(),
         timestamp: message.timestamp.to_rfc3339(),
+        images: message.images.iter().map(summarize_message_image).collect(),
         tool_calls: tool_calls_value(message),
         tokens_used: metadata_u32(metadata.as_ref(), "tokens_used")
             .or_else(|| metadata_u32(metadata.as_ref(), "tokensUsed")),
@@ -404,6 +455,11 @@ pub(crate) async fn list_sessions(
     let summaries: Vec<SessionSummary> = sessions
         .iter()
         .filter(|session| filter.matches(session_status(session)))
+        .filter(|session| {
+            query.project_id.as_ref().is_none_or(|project_id| {
+                session_project_id(session).as_deref() == Some(project_id.as_str())
+            })
+        })
         .take(50)
         .map(summarize_session)
         .collect();
@@ -422,6 +478,8 @@ pub struct CreateSessionRequest {
     /// Optional client-generated session ID. If provided, the server uses this ID.
     #[serde(default)]
     pub id: Option<String>,
+    #[serde(default)]
+    pub project_id: Option<String>,
 }
 
 fn default_session_name() -> String {
@@ -459,6 +517,8 @@ pub(crate) async fn create_session(
         );
     }
 
+    set_session_project_id(&mut session, req.project_id.clone());
+
     state
         .inner
         .stack
@@ -467,16 +527,7 @@ pub(crate) async fn create_session(
         .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
 
     debug!(session_id = %session.id, title = %req.name, "session created");
-    Ok(Json(SessionSummary {
-        id: session.id.to_string(),
-        title: req.name,
-        status: PersistedSessionStatus::Active.as_str().to_string(),
-        parent_session_id: None,
-        message_count: 0,
-        last_preview: None,
-        created_at: session.created_at.to_rfc3339(),
-        updated_at: session.updated_at.to_rfc3339(),
-    }))
+    Ok(Json(summarize_session(&session)))
 }
 
 /// Get a session by ID, including its messages.
@@ -499,6 +550,7 @@ pub(crate) async fn get_session(
         id: session.id.to_string(),
         title: session_title(&session),
         status: session_status(&session).as_str().to_string(),
+        project_id: session_project_id(&session),
         parent_session_id: session_parent_session_id(&session),
         message_count: visible_message_count(&session),
         last_preview: session_last_preview(&session),
@@ -746,6 +798,7 @@ pub(crate) async fn add_message(
         role: req.role.clone(),
         content: message.content.clone(),
         timestamp: message.timestamp.to_rfc3339(),
+        images: message.images.iter().map(summarize_message_image).collect(),
         tool_calls: None,
         metadata: None,
         tokens_used: None,
@@ -914,6 +967,32 @@ pub struct DuplicateSessionRequest {
     pub kind: SessionCloneKind,
 }
 
+fn rewrite_cloned_message_references(
+    message: &mut ava_types::Message,
+    id_map: &HashMap<uuid::Uuid, uuid::Uuid>,
+) {
+    if let Some(parent_id) = message.parent_id.and_then(|id| id_map.get(&id).copied()) {
+        message.parent_id = Some(parent_id);
+    }
+
+    if let Some(metadata) = message.metadata.as_object_mut() {
+        for key in ["parentId", "parent_id"] {
+            let Some(value) = metadata.get_mut(key) else {
+                continue;
+            };
+            let Some(source_id) = value.as_str() else {
+                continue;
+            };
+            let Ok(source_uuid) = uuid::Uuid::parse_str(source_id) else {
+                continue;
+            };
+            if let Some(remapped) = id_map.get(&source_uuid) {
+                *value = Value::String(remapped.to_string());
+            }
+        }
+    }
+}
+
 /// Clone a session: duplicate creates a root-level copy, while fork persists parent linkage.
 pub(crate) async fn duplicate_session(
     State(state): State<WebState>,
@@ -960,13 +1039,17 @@ pub(crate) async fn duplicate_session(
             SessionCloneKind::Fork => format!("{source_title} (fork)"),
         }
     });
-    if let Some(map) = new_session.metadata.as_object_mut() {
-        map.insert("title".to_string(), serde_json::Value::String(title));
-        map.insert(
-            "status".to_string(),
-            serde_json::Value::String(PersistedSessionStatus::Active.as_str().to_string()),
-        );
-    }
+    let mut cloned_metadata = source_session
+        .metadata
+        .as_object()
+        .cloned()
+        .unwrap_or_else(Map::new);
+    cloned_metadata.insert("title".to_string(), serde_json::Value::String(title));
+    cloned_metadata.insert(
+        "status".to_string(),
+        serde_json::Value::String(PersistedSessionStatus::Active.as_str().to_string()),
+    );
+    new_session.metadata = Value::Object(cloned_metadata);
     let parent_session_id = match req.kind {
         SessionCloneKind::Duplicate => None,
         SessionCloneKind::Fork => Some(source_session.id.to_string()),
@@ -985,9 +1068,17 @@ pub(crate) async fn duplicate_session(
     // Summary fields below still use the visible subset, but the cloned session
     // must retain hidden/system/tool messages so web clone semantics match desktop.
     let message_count = visible_message_count(&source_session);
+    let id_map: HashMap<uuid::Uuid, uuid::Uuid> = source_session
+        .messages
+        .iter()
+        .map(|message| (message.id, uuid::Uuid::new_v4()))
+        .collect();
     for msg in &source_session.messages {
         let mut cloned = msg.clone();
-        cloned.id = uuid::Uuid::new_v4();
+        cloned.id = *id_map
+            .get(&msg.id)
+            .expect("cloned message ids should be precomputed");
+        rewrite_cloned_message_references(&mut cloned, &id_map);
         state
             .inner
             .stack
@@ -1008,6 +1099,7 @@ pub(crate) async fn duplicate_session(
         id: new_session.id.to_string(),
         title: final_title,
         status: PersistedSessionStatus::Active.as_str().to_string(),
+        project_id: session_project_id(&persisted_session),
         parent_session_id,
         message_count,
         last_preview,

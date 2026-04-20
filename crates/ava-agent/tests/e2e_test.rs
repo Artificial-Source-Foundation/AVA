@@ -7,6 +7,8 @@ use ava_agent::agent_loop::AgentEvent;
 use ava_agent::stack::{AgentStack, AgentStackConfig};
 use ava_llm::provider::LLMProvider;
 use ava_llm::providers::mock::MockProvider;
+use ava_permissions::tags::RiskLevel;
+use ava_tools::permission_middleware::{ApprovalRequest, ToolApproval};
 use ava_types::{AvaError, Message, Result, StreamChunk};
 use futures::Stream;
 use tokio::sync::mpsc;
@@ -16,6 +18,25 @@ fn completion_response(result: &str) -> String {
     format!(
         r#"{{"tool_calls":[{{"name":"attempt_completion","arguments":{{"result":"{result}"}}}}]}}"#
     )
+}
+
+fn spawn_recording_unattended_approval_resolver(
+    mut approval_rx: mpsc::UnboundedReceiver<ApprovalRequest>,
+    seen_risks: Arc<tokio::sync::Mutex<Vec<RiskLevel>>>,
+) {
+    tokio::spawn(async move {
+        while let Some(req) = approval_rx.recv().await {
+            seen_risks.lock().await.push(req.inspection.risk_level);
+            let decision = match req.inspection.risk_level {
+                RiskLevel::Safe | RiskLevel::Low | RiskLevel::Medium => ToolApproval::Allowed,
+                RiskLevel::High | RiskLevel::Critical => ToolApproval::Rejected(Some(format!(
+                    "Headless mode rejected dangerous action '{}': {} (risk: {:?})",
+                    req.call.name, req.inspection.reason, req.inspection.risk_level
+                ))),
+            };
+            let _ = req.reply.send(decision);
+        }
+    });
 }
 
 #[tokio::test]
@@ -116,6 +137,128 @@ async fn agent_run_with_bash_tool() {
         .messages
         .iter()
         .any(|msg| msg.content.contains("hello")));
+}
+
+#[tokio::test]
+async fn non_interactive_runtime_keeps_safe_bash_unattended() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let responses = vec![
+        r#"{"tool_calls":[{"name":"bash","arguments":{"command":"printf safe-headless"}}]}"#
+            .to_string(),
+        completion_response("safe bash done"),
+    ];
+
+    let seen_risks = Arc::new(tokio::sync::Mutex::new(Vec::new()));
+    let (stack, _question_rx, approval_rx, _plan_rx) = AgentStack::new(AgentStackConfig {
+        data_dir: dir.path().to_path_buf(),
+        yolo: true,
+        non_interactive_approvals: true,
+        injected_provider: Some(Arc::new(MockProvider::new("test-model", responses))),
+        working_dir: Some(dir.path().to_path_buf()),
+        max_turns: 4,
+        ..Default::default()
+    })
+    .await
+    .expect("stack init should succeed");
+    spawn_recording_unattended_approval_resolver(approval_rx, seen_risks.clone());
+
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let result = stack
+        .run(
+            "run safe bash",
+            4,
+            Some(tx),
+            CancellationToken::new(),
+            Vec::new(),
+            None,
+            Vec::new(),
+            None,
+            None,
+        )
+        .await
+        .expect("run should succeed");
+
+    assert!(result.success);
+    assert!(
+        result
+            .session
+            .messages
+            .iter()
+            .any(|msg| msg.content.contains("safe-headless")),
+        "safe bash output should be preserved in the session"
+    );
+
+    let mut events = Vec::new();
+    while let Ok(event) = rx.try_recv() {
+        events.push(event);
+    }
+    assert!(events.iter().any(
+        |event| matches!(event, AgentEvent::ToolResult(result) if !result.is_error && result.content.contains("safe-headless"))
+    ));
+    assert!(
+        seen_risks.lock().await.is_empty(),
+        "safe bash should stay on the normal allow path without approval bridging"
+    );
+}
+
+#[tokio::test]
+async fn non_interactive_runtime_rejects_dangerous_bash_even_with_yolo() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let responses = vec![
+        r#"{"tool_calls":[{"name":"bash","arguments":{"command":"rm -rf /tmp/ava-headless-dangerous-path"}}]}"#
+            .to_string(),
+        completion_response("dangerous bash handled"),
+    ];
+
+    let seen_risks = Arc::new(tokio::sync::Mutex::new(Vec::new()));
+    let (stack, _question_rx, approval_rx, _plan_rx) = AgentStack::new(AgentStackConfig {
+        data_dir: dir.path().to_path_buf(),
+        yolo: true,
+        non_interactive_approvals: true,
+        injected_provider: Some(Arc::new(MockProvider::new("test-model", responses))),
+        working_dir: Some(dir.path().to_path_buf()),
+        max_turns: 4,
+        ..Default::default()
+    })
+    .await
+    .expect("stack init should succeed");
+    spawn_recording_unattended_approval_resolver(approval_rx, seen_risks.clone());
+
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let result = stack
+        .run(
+            "run dangerous bash",
+            4,
+            Some(tx),
+            CancellationToken::new(),
+            Vec::new(),
+            None,
+            Vec::new(),
+            None,
+            None,
+        )
+        .await
+        .expect("run should succeed after the rejected tool result");
+
+    assert!(result.success);
+
+    let mut events = Vec::new();
+    while let Ok(event) = rx.try_recv() {
+        events.push(event);
+    }
+
+    assert!(events
+        .iter()
+        .any(|event| matches!(event, AgentEvent::ToolCall(call) if call.name == "bash")));
+    assert!(events
+        .iter()
+        .any(|event| matches!(event, AgentEvent::ToolResult(result)
+            if result.is_error
+                && result.content.contains("Headless mode rejected dangerous action 'bash'")
+                && result.content.contains("risk: High"))));
+
+    let seen_risks = seen_risks.lock().await;
+    assert_eq!(seen_risks.as_slice(), &[RiskLevel::High]);
 }
 
 #[tokio::test]

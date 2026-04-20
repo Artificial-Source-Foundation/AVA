@@ -43,7 +43,7 @@ describe('CommandOutputRow', () => {
   })
 
   describe('accessibility - interactive attributes', () => {
-    it('has role="button" and tabIndex when command has output (expandable)', async () => {
+    it('uses a native enabled button when command has output (expandable)', async () => {
       container = document.createElement('div')
       document.body.appendChild(container)
 
@@ -60,13 +60,13 @@ describe('CommandOutputRow', () => {
       render(() => <CommandOutputRow toolCall={toolCall} />, container)
       await flush()
 
-      const header = container.querySelector('[role="button"]')
+      const header = container.querySelector('button.tool-card-header')
       expect(header).not.toBeNull()
-      expect(header?.getAttribute('tabIndex')).toBe('0')
+      expect((header as HTMLButtonElement | null)?.disabled).toBe(false)
       expect(header?.getAttribute('aria-expanded')).toBe('false')
     })
 
-    it('has NO role="button" or tabIndex when command has no output (not expandable)', async () => {
+    it('disables the native button when command has no output (not expandable)', async () => {
       container = document.createElement('div')
       document.body.appendChild(container)
 
@@ -82,9 +82,8 @@ describe('CommandOutputRow', () => {
       render(() => <CommandOutputRow toolCall={toolCall} />, container)
       await flush()
 
-      const header = container.querySelector('.tool-card-header')
-      expect(header?.getAttribute('role')).toBeNull()
-      expect(header?.getAttribute('tabIndex')).toBeNull()
+      const header = container.querySelector('button.tool-card-header') as HTMLButtonElement | null
+      expect(header?.disabled).toBe(true)
       expect(header?.getAttribute('aria-expanded')).toBeNull()
     })
 
@@ -149,10 +148,10 @@ describe('CommandOutputRow', () => {
       render(() => <CommandOutputRow toolCall={toolCall} />, container)
       await flush()
 
-      const header = container.querySelector('[role="button"]')
+      const header = container.querySelector('button.tool-card-header')
       expect(header).not.toBeNull()
-      expect(header?.getAttribute('tabIndex')).toBe('0')
       // With streaming output, it should be expandable
+      expect((header as HTMLButtonElement | null)?.disabled).toBe(false)
       expect(header?.classList.contains('cursor-pointer')).toBe(true)
       expect(header?.classList.contains('focus-visible:ring-2')).toBe(true)
     })
@@ -175,9 +174,9 @@ describe('CommandOutputRow', () => {
       await flush()
 
       // Should be expandable because it has error text
-      const header = container.querySelector('[role="button"]')
+      const header = container.querySelector('button.tool-card-header')
       expect(header).not.toBeNull()
-      expect(header?.getAttribute('tabIndex')).toBe('0')
+      expect((header as HTMLButtonElement | null)?.disabled).toBe(false)
       expect(header?.classList.contains('cursor-pointer')).toBe(true)
 
       // Error text should be visible in the output body (auto-expanded for errors)
@@ -227,7 +226,7 @@ describe('CommandOutputRow', () => {
       await flush()
 
       // Should be expandable even though output is undefined
-      const header = container.querySelector('[role="button"]')
+      const header = container.querySelector('button.tool-card-header')
       expect(header).not.toBeNull()
       expect(header?.getAttribute('aria-expanded')).toBe('false')
 

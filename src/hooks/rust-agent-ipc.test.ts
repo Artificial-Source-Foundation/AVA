@@ -1,5 +1,9 @@
 import { createRoot, createSignal } from 'solid-js'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import {
+  clearAllSessionIdMappings,
+  registerBackendSessionId,
+} from '../services/web-session-identity'
 import type { ToolCall } from '../types'
 import type { AgentEvent, AgentStatus, SubmitGoalResult } from '../types/rust-ipc'
 import { createAgentIpc } from './rust-agent-ipc'
@@ -185,6 +189,7 @@ describe('createAgentIpc', () => {
     isTauriRuntime = false
     vi.clearAllMocks()
     vi.useRealTimers()
+    clearAllSessionIdMappings()
   })
 
   it('rehydrates frontend running state from backend status', async () => {
@@ -219,6 +224,69 @@ describe('createAgentIpc', () => {
     })
     expect(harness.isRunning()).toBe(true)
     expect(harness.currentRunId()).toBe('web-run-rehydrate')
+
+    harness.dispose()
+  })
+
+  it('resolves frontend session aliases before browser status rehydrate calls and restores pending interactive state', async () => {
+    registerBackendSessionId('session-front', 'session-back')
+
+    const socket = new FakeWebSocket()
+    createEventSocketMock.mockReturnValueOnce(socket as unknown as WebSocket)
+    apiInvokeMock
+      .mockResolvedValueOnce({
+        running: true,
+        provider: 'openai',
+        model: 'gpt-5',
+        runId: 'web-run-rehydrate',
+      })
+      .mockResolvedValueOnce({
+        running: true,
+        provider: 'openai',
+        model: 'gpt-5',
+        runId: 'web-run-rehydrate',
+        pendingApproval: {
+          type: 'approval_request',
+          id: 'approval-aliased',
+          tool_call_id: 'tool-1',
+          tool_name: 'bash',
+          args: { command: 'pwd' },
+          risk_level: 'low',
+          reason: 'Need confirmation',
+          warnings: [],
+          run_id: 'web-run-rehydrate',
+        },
+      })
+
+    const harness = createIpcHarness()
+    const rehydratePromise = harness.ipc.rehydrateStatus('session-front')
+    await flushPromises()
+    socket.emitOpen()
+    const rehydrateResult = await rehydratePromise
+
+    expect(apiInvokeMock).toHaveBeenNthCalledWith(1, 'get_agent_status', {
+      sessionId: 'session-back',
+    })
+    expect(apiInvokeMock).toHaveBeenNthCalledWith(2, 'get_agent_status', {
+      sessionId: 'session-back',
+      runId: 'web-run-rehydrate',
+    })
+    expect(rehydrateResult).toEqual({
+      sessionId: 'session-front',
+      running: true,
+      runId: 'web-run-rehydrate',
+      pendingApproval: expect.objectContaining({
+        id: 'approval-aliased',
+      }),
+      pendingQuestion: null,
+      pendingPlan: null,
+    })
+    expect(harness.handledEvents).toContainEqual(
+      expect.objectContaining({
+        type: 'approval_request',
+        id: 'approval-aliased',
+      })
+    )
 
     harness.dispose()
   })
@@ -1056,6 +1124,96 @@ describe('createAgentIpc', () => {
     harness.dispose()
   })
 
+  it('forwards per-run thinking and compaction options through browser submit_goal', async () => {
+    const socket = new FakeWebSocket()
+    createEventSocketMock.mockReturnValueOnce(socket as unknown as WebSocket)
+    apiInvokeMock.mockResolvedValueOnce({ success: true, turns: 1, sessionId: 'session-web' })
+
+    const harness = createIpcHarness()
+    const runPromise = harness.ipc.run('ship web', {
+      provider: 'openai',
+      model: 'gpt-5.4',
+      thinkingLevel: 'high',
+      sessionId: 'session-front',
+      autoCompact: false,
+      compactionThreshold: 72,
+      compactionProvider: 'anthropic',
+      compactionModel: 'claude-sonnet-4.6',
+    })
+
+    await flushPromises()
+    socket.emitOpen()
+    await flushPromises()
+
+    expect(apiInvokeMock).toHaveBeenCalledWith('submit_goal', {
+      args: expect.objectContaining({
+        goal: 'ship web',
+        provider: 'openai',
+        model: 'gpt-5.4',
+        thinkingLevel: 'high',
+        sessionId: 'session-front',
+        autoCompact: false,
+        compactionThreshold: 72,
+        compactionProvider: 'anthropic',
+        compactionModel: 'claude-sonnet-4.6',
+        runId: expect.any(String),
+      }),
+    })
+
+    socket.emitMessage({
+      type: 'complete',
+      run_id: harness.currentRunId() ?? undefined,
+      session: { id: 'session-web', messages: [], completed: true },
+    })
+
+    await expect(runPromise).resolves.toEqual({
+      success: true,
+      turns: 0,
+      sessionId: 'session-web',
+    })
+
+    harness.dispose()
+  })
+
+  it('resolves frontend session aliases before browser submit_goal invocation', async () => {
+    registerBackendSessionId('session-front', 'session-back')
+
+    const socket = new FakeWebSocket()
+    createEventSocketMock.mockReturnValueOnce(socket as unknown as WebSocket)
+    apiInvokeMock.mockResolvedValueOnce({ success: true, turns: 1, sessionId: 'session-back' })
+
+    const harness = createIpcHarness()
+    const runPromise = harness.ipc.run('ship web', {
+      sessionId: 'session-front',
+    })
+
+    await flushPromises()
+    socket.emitOpen()
+    await flushPromises()
+
+    expect(apiInvokeMock).toHaveBeenCalledWith('submit_goal', {
+      args: expect.objectContaining({
+        goal: 'ship web',
+        sessionId: 'session-back',
+        runId: expect.any(String),
+      }),
+    })
+
+    socket.emitMessage({
+      type: 'complete',
+      run_id: harness.currentRunId() ?? undefined,
+      session: { id: 'session-back', messages: [], completed: true },
+    })
+
+    await expect(runPromise).resolves.toEqual({
+      success: true,
+      turns: 0,
+      sessionId: 'session-back',
+    })
+
+    harness.dispose()
+  })
+
   it('forwards explicit session ownership through browser replay commands', async () => {
     const socket = new FakeWebSocket()
     createEventSocketMock.mockReturnValue(socket as unknown as WebSocket)
@@ -1134,6 +1292,86 @@ describe('createAgentIpc', () => {
     harness.dispose()
   })
 
+  it('resolves frontend session aliases before invoking browser replay commands', async () => {
+    registerBackendSessionId('session-front', 'session-back')
+
+    const socket = new FakeWebSocket()
+    createEventSocketMock.mockReturnValue(socket as unknown as WebSocket)
+    const harness = createIpcHarness()
+
+    apiInvokeMock.mockResolvedValueOnce({ success: true, turns: 1, sessionId: 'session-back' })
+    const retryPromise = harness.ipc.retryRun('session-front')
+    await flushPromises()
+    socket.emitOpen()
+    await flushPromises()
+
+    expect(apiInvokeMock).toHaveBeenNthCalledWith(1, 'retry_last_message', {
+      args: expect.objectContaining({
+        sessionId: 'session-back',
+        runId: expect.any(String),
+      }),
+    })
+
+    socket.emitMessage({
+      type: 'complete',
+      run_id: harness.currentRunId() ?? undefined,
+      session: { id: 'session-back', messages: [], completed: true },
+    })
+    await expect(retryPromise).resolves.toEqual({
+      success: true,
+      turns: 0,
+      sessionId: 'session-back',
+    })
+
+    apiInvokeMock.mockResolvedValueOnce({ success: true, turns: 1, sessionId: 'session-back' })
+    const editPromise = harness.ipc.editAndResendRun('user-1', 'retry this', 'session-front')
+    await flushPromises()
+
+    expect(apiInvokeMock).toHaveBeenNthCalledWith(2, 'edit_and_resend', {
+      args: expect.objectContaining({
+        messageId: 'user-1',
+        newContent: 'retry this',
+        sessionId: 'session-back',
+        runId: expect.any(String),
+      }),
+    })
+
+    socket.emitMessage({
+      type: 'complete',
+      run_id: harness.currentRunId() ?? undefined,
+      session: { id: 'session-back', messages: [], completed: true },
+    })
+    await expect(editPromise).resolves.toEqual({
+      success: true,
+      turns: 0,
+      sessionId: 'session-back',
+    })
+
+    apiInvokeMock.mockResolvedValueOnce({ success: true, turns: 1, sessionId: 'session-back' })
+    const regeneratePromise = harness.ipc.regenerateRun('session-front')
+    await flushPromises()
+
+    expect(apiInvokeMock).toHaveBeenNthCalledWith(3, 'regenerate_response', {
+      args: expect.objectContaining({
+        sessionId: 'session-back',
+        runId: expect.any(String),
+      }),
+    })
+
+    socket.emitMessage({
+      type: 'complete',
+      run_id: harness.currentRunId() ?? undefined,
+      session: { id: 'session-back', messages: [], completed: true },
+    })
+    await expect(regeneratePromise).resolves.toEqual({
+      success: true,
+      turns: 0,
+      sessionId: 'session-back',
+    })
+
+    harness.dispose()
+  })
+
   it('forwards provider/model through Tauri submit_goal and settles on the matching terminal event', async () => {
     isTauriRuntime = true
     let listener: ((evt: { payload: AgentEvent }) => void) | null = null
@@ -1157,6 +1395,7 @@ describe('createAgentIpc', () => {
       provider: 'openai',
       model: 'gpt-5.4',
       sessionId: 'session-front',
+      images: [{ data: 'base64-image', mediaType: 'image/png' }],
     })
 
     await waitForInvokeCall(0)
@@ -1166,6 +1405,7 @@ describe('createAgentIpc', () => {
         provider: 'openai',
         model: 'gpt-5.4',
         sessionId: 'session-front',
+        images: [{ data: 'base64-image', mediaType: 'image/png' }],
         runId: expect.any(String),
       }),
     })

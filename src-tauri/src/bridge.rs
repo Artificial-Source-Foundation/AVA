@@ -1,6 +1,6 @@
 //! Bridge between the Tauri desktop frontend and the Rust agent backend.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::ops::Deref;
 use std::path::PathBuf;
 use std::sync::{
@@ -85,10 +85,12 @@ pub struct DesktopBridgeInner {
     pub stack: Arc<AgentStack>,
     pub startup_lock: Mutex<()>,
     pub queue_lifecycle_lock: Mutex<()>,
+    pub session_context_lock: Mutex<()>,
     pub interactive_lifecycle_lock: Arc<Mutex<()>>,
     pub runs: RwLock<HashMap<String, Arc<DesktopRunState>>>,
     pub session_runs: RwLock<HashMap<Uuid, String>>,
     pub session_permission_contexts: Arc<RwLock<HashMap<Uuid, Arc<RwLock<InspectionContext>>>>>,
+    pub explicitly_unbound_sessions: Arc<RwLock<HashSet<Uuid>>>,
     pub pending_approval_reply: PendingApprovalReply,
     pub pending_question_reply: PendingQuestionReply,
     pub pending_plan_reply: PendingPlanReply,
@@ -143,10 +145,12 @@ impl DesktopBridge {
                 stack: Arc::new(stack),
                 startup_lock: Mutex::new(()),
                 queue_lifecycle_lock: Mutex::new(()),
+                session_context_lock: Mutex::new(()),
                 interactive_lifecycle_lock: Arc::new(Mutex::new(())),
                 runs: RwLock::new(HashMap::new()),
                 session_runs: RwLock::new(HashMap::new()),
                 session_permission_contexts: Arc::new(RwLock::new(HashMap::new())),
+                explicitly_unbound_sessions: Arc::new(RwLock::new(HashSet::new())),
                 pending_approval_reply: InteractiveRequestStore::new(
                     InteractiveRequestKind::Approval,
                 ),
@@ -170,6 +174,18 @@ impl DesktopBridge {
         provider: String,
         model: String,
     ) -> Result<Arc<DesktopRunState>, String> {
+        let _session_context_guard = self.session_context_lock.lock().await;
+        if self
+            .explicitly_unbound_sessions
+            .read()
+            .await
+            .contains(&session_id)
+        {
+            return Err(format!(
+                "Session {session_id} is not bound to a resolved working directory"
+            ));
+        }
+
         {
             let runs = self.runs.read().await;
             if runs.contains_key(&run_id) {
@@ -219,8 +235,26 @@ impl DesktopBridge {
     }
 
     pub async fn finish_run(&self, run_id: &str) {
+        let _session_context_guard = self.session_context_lock.lock().await;
         let removed = self.runs.write().await.remove(run_id);
         if let Some(run) = removed {
+            if let Some(cached_context) = self
+                .session_permission_contexts
+                .read()
+                .await
+                .get(&run.session_id)
+                .cloned()
+            {
+                if !Arc::ptr_eq(&cached_context, &run.permission_context) {
+                    let session_approved =
+                        run.permission_context.read().await.session_approved.clone();
+                    cached_context
+                        .write()
+                        .await
+                        .session_approved
+                        .extend(session_approved);
+                }
+            }
             self.session_runs.write().await.remove(&run.session_id);
         }
     }
@@ -231,6 +265,130 @@ impl DesktopBridge {
 
     pub async fn has_active_runs(&self) -> bool {
         self.active_run_count().await > 0
+    }
+
+    pub async fn bind_session_working_directory(&self, session_id: Uuid, working_directory: &str) {
+        let working_directory = working_directory.trim();
+        if working_directory.is_empty() {
+            self.mark_session_working_directory_unbound(session_id)
+                .await;
+            return;
+        }
+
+        let _session_context_guard = self.session_context_lock.lock().await;
+
+        let has_active_run = self.session_runs.read().await.contains_key(&session_id);
+        let context = {
+            let existing = self
+                .session_permission_contexts
+                .read()
+                .await
+                .get(&session_id)
+                .cloned();
+
+            match existing {
+                Some(context) => context,
+                None => self.stack.cloned_permission_context().await,
+            }
+        };
+
+        if has_active_run {
+            let rebound_context = self.stack.cloned_permission_context().await;
+            {
+                let session_approved = context.read().await.session_approved.clone();
+                let mut rebound = rebound_context.write().await;
+                rebound.workspace_root = PathBuf::from(working_directory);
+                rebound.session_approved = session_approved;
+            }
+            self.session_permission_contexts
+                .write()
+                .await
+                .insert(session_id, rebound_context);
+        } else {
+            context.write().await.workspace_root = PathBuf::from(working_directory);
+            self.session_permission_contexts
+                .write()
+                .await
+                .insert(session_id, context);
+        }
+        self.explicitly_unbound_sessions
+            .write()
+            .await
+            .remove(&session_id);
+    }
+
+    pub async fn clear_session_working_directory_unbound(&self, session_id: Uuid) {
+        let _session_context_guard = self.session_context_lock.lock().await;
+        let has_active_run = self.session_runs.read().await.contains_key(&session_id);
+        let existing_context = self
+            .session_permission_contexts
+            .read()
+            .await
+            .get(&session_id)
+            .cloned();
+        let reset_context = self.stack.cloned_permission_context().await;
+        if has_active_run {
+            if let Some(context) = existing_context {
+                reset_context.write().await.session_approved =
+                    context.read().await.session_approved.clone();
+            }
+            self.session_permission_contexts
+                .write()
+                .await
+                .insert(session_id, reset_context);
+        } else if let Some(context) = existing_context {
+            let session_approved = context.read().await.session_approved.clone();
+            let reset_snapshot = reset_context.read().await.clone();
+            let mut existing = context.write().await;
+            *existing = reset_snapshot;
+            existing.session_approved = session_approved;
+        } else {
+            self.session_permission_contexts
+                .write()
+                .await
+                .insert(session_id, reset_context);
+        }
+        self.explicitly_unbound_sessions
+            .write()
+            .await
+            .remove(&session_id);
+    }
+
+    pub async fn mark_session_working_directory_unbound(&self, session_id: Uuid) {
+        let _session_context_guard = self.session_context_lock.lock().await;
+        let has_active_run = self.session_runs.read().await.contains_key(&session_id);
+        let existing_context = self
+            .session_permission_contexts
+            .read()
+            .await
+            .get(&session_id)
+            .cloned();
+        let reset_context = self.stack.cloned_permission_context().await;
+        if has_active_run {
+            if let Some(context) = existing_context {
+                reset_context.write().await.session_approved =
+                    context.read().await.session_approved.clone();
+            }
+            self.session_permission_contexts
+                .write()
+                .await
+                .insert(session_id, reset_context);
+        } else if let Some(context) = existing_context {
+            let session_approved = context.read().await.session_approved.clone();
+            let reset_snapshot = reset_context.read().await.clone();
+            let mut existing = context.write().await;
+            *existing = reset_snapshot;
+            existing.session_approved = session_approved;
+        } else {
+            self.session_permission_contexts
+                .write()
+                .await
+                .insert(session_id, reset_context);
+        }
+        self.explicitly_unbound_sessions
+            .write()
+            .await
+            .insert(session_id);
     }
 
     pub async fn resolve_run(
@@ -966,6 +1124,195 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn clearing_projectless_unbound_resets_existing_context_in_place() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let bridge = DesktopBridge::init_for_tests(dir.path().to_path_buf())
+            .await
+            .expect("bridge");
+        let session_id = Uuid::new_v4();
+        let project_dir = dir.path().join("bound-project");
+        std::fs::create_dir_all(&project_dir).expect("project dir");
+
+        bridge
+            .bind_session_working_directory(session_id, &project_dir.to_string_lossy())
+            .await;
+
+        let existing_context = bridge
+            .session_permission_contexts
+            .read()
+            .await
+            .get(&session_id)
+            .cloned()
+            .expect("context should exist after binding");
+        existing_context
+            .write()
+            .await
+            .session_approved
+            .insert("bash".to_string());
+
+        bridge
+            .clear_session_working_directory_unbound(session_id)
+            .await;
+
+        let cached_context = bridge
+            .session_permission_contexts
+            .read()
+            .await
+            .get(&session_id)
+            .cloned()
+            .expect("projectless reset should keep a cached default context");
+
+        assert!(Arc::ptr_eq(&existing_context, &cached_context));
+        assert_ne!(cached_context.read().await.workspace_root, project_dir);
+        assert!(cached_context
+            .read()
+            .await
+            .session_approved
+            .contains("bash"));
+    }
+
+    #[tokio::test]
+    async fn clearing_projectless_unbound_does_not_mutate_active_run_context() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let bridge = DesktopBridge::init_for_tests(dir.path().to_path_buf())
+            .await
+            .expect("bridge");
+        let session_id = Uuid::new_v4();
+        let project_dir = dir.path().join("active-project");
+        std::fs::create_dir_all(&project_dir).expect("project dir");
+
+        bridge
+            .bind_session_working_directory(session_id, &project_dir.to_string_lossy())
+            .await;
+
+        let run = bridge
+            .register_run(
+                "desktop-run-active-projectless".to_string(),
+                session_id,
+                "openai".to_string(),
+                "gpt-5.4".to_string(),
+            )
+            .await
+            .expect("run should start");
+        run.permission_context
+            .write()
+            .await
+            .session_approved
+            .insert("bash".to_string());
+
+        bridge
+            .clear_session_working_directory_unbound(session_id)
+            .await;
+
+        assert_eq!(
+            run.permission_context.read().await.workspace_root,
+            project_dir
+        );
+
+        let cached_context = bridge
+            .session_permission_contexts
+            .read()
+            .await
+            .get(&session_id)
+            .cloned()
+            .expect("cache should be updated for next run");
+
+        assert!(!Arc::ptr_eq(&cached_context, &run.permission_context));
+        assert_ne!(cached_context.read().await.workspace_root, project_dir);
+
+        run.permission_context
+            .write()
+            .await
+            .session_approved
+            .insert("read".to_string());
+        bridge.finish_run("desktop-run-active-projectless").await;
+
+        let merged_context = bridge
+            .session_permission_contexts
+            .read()
+            .await
+            .get(&session_id)
+            .cloned()
+            .expect("cache should remain after run finishes");
+        let merged = merged_context.read().await;
+        assert!(merged.session_approved.contains("bash"));
+        assert!(merged.session_approved.contains("read"));
+    }
+
+    #[tokio::test]
+    async fn marking_unbound_does_not_mutate_active_run_context_and_preserves_late_approvals() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let bridge = DesktopBridge::init_for_tests(dir.path().to_path_buf())
+            .await
+            .expect("bridge");
+        let session_id = Uuid::new_v4();
+        let project_dir = dir.path().join("unresolved-project");
+        std::fs::create_dir_all(&project_dir).expect("project dir");
+
+        bridge
+            .bind_session_working_directory(session_id, &project_dir.to_string_lossy())
+            .await;
+
+        let run = bridge
+            .register_run(
+                "desktop-run-active-unbound".to_string(),
+                session_id,
+                "openai".to_string(),
+                "gpt-5.4".to_string(),
+            )
+            .await
+            .expect("run should start");
+        run.permission_context
+            .write()
+            .await
+            .session_approved
+            .insert("bash".to_string());
+
+        bridge
+            .mark_session_working_directory_unbound(session_id)
+            .await;
+
+        assert_eq!(
+            run.permission_context.read().await.workspace_root,
+            project_dir
+        );
+        assert!(bridge
+            .explicitly_unbound_sessions
+            .read()
+            .await
+            .contains(&session_id));
+
+        let cached_context = bridge
+            .session_permission_contexts
+            .read()
+            .await
+            .get(&session_id)
+            .cloned()
+            .expect("unbound cache should remain for next-run approval continuity");
+
+        assert!(!Arc::ptr_eq(&cached_context, &run.permission_context));
+        assert_ne!(cached_context.read().await.workspace_root, project_dir);
+
+        run.permission_context
+            .write()
+            .await
+            .session_approved
+            .insert("read".to_string());
+        bridge.finish_run("desktop-run-active-unbound").await;
+
+        let merged_context = bridge
+            .session_permission_contexts
+            .read()
+            .await
+            .get(&session_id)
+            .cloned()
+            .expect("cache should remain after run finishes");
+        let merged = merged_context.read().await;
+        assert!(merged.session_approved.contains("bash"));
+        assert!(merged.session_approved.contains("read"));
+    }
+
+    #[tokio::test]
     async fn promoted_interactive_event_can_advance_to_different_run() {
         let dir = tempfile::tempdir().expect("tempdir");
         let bridge = DesktopBridge::init_for_tests(dir.path().to_path_buf())
@@ -1022,7 +1369,7 @@ mod tests {
                 assert_eq!(id, second.request_id);
                 assert_eq!(run_id.as_deref(), Some("desktop-run-b"));
             }
-            other => panic!("expected promoted question request, got {other:?}"),
+            _ => panic!("expected promoted question request"),
         }
     }
 

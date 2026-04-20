@@ -3,6 +3,35 @@ import { extractToolCallsFromMetadata } from './tool-call-state'
 
 type RawWebSessionMessage = Record<string, unknown>
 
+function parseMessageImages(rawImages: unknown): Message['images'] | undefined {
+  if (!Array.isArray(rawImages) || rawImages.length === 0) {
+    return undefined
+  }
+
+  const images = rawImages
+    .map((image) => {
+      if (!image || typeof image !== 'object') {
+        return null
+      }
+
+      const record = image as Record<string, unknown>
+      const data = typeof record.data === 'string' ? record.data : undefined
+      const mimeType =
+        typeof record.mimeType === 'string'
+          ? record.mimeType
+          : typeof record.mediaType === 'string'
+            ? record.mediaType
+            : typeof record.media_type === 'string'
+              ? record.media_type
+              : undefined
+
+      return data && mimeType ? { data, mimeType } : null
+    })
+    .filter((image): image is NonNullable<typeof image> => image !== null)
+
+  return images.length > 0 ? images : undefined
+}
+
 function parseMetadataValue(rawMetadata: unknown): Record<string, unknown> | undefined {
   if (typeof rawMetadata === 'string' && rawMetadata.trim().length > 0) {
     try {
@@ -33,11 +62,20 @@ export function buildWebSessionMessageMetadata(
 ): Record<string, unknown> | undefined {
   const metadata = parseMetadataValue(message.metadata)
   const toolCalls = Array.isArray(message.tool_calls) ? message.tool_calls : undefined
+  const images = parseMessageImages(message.images)
 
   if (toolCalls && toolCalls.length > 0) {
     return {
       ...(metadata ?? {}),
       toolCalls,
+      ...(images ? { images } : {}),
+    }
+  }
+
+  if (images) {
+    return {
+      ...(metadata ?? {}),
+      images,
     }
   }
 
@@ -50,6 +88,7 @@ export function mapWebSessionMessages(
 ): Message[] {
   return rawMessages.map((message) => {
     const metadata = buildWebSessionMessageMetadata(message)
+    const images = parseMessageImages(message.images)
 
     return {
       id: message.id as string,
@@ -61,6 +100,7 @@ export function mapWebSessionMessages(
       costUSD: (message.cost_usd as number | null) ?? undefined,
       model: (message.model as string | null) ?? undefined,
       metadata,
+      images,
       toolCalls: extractToolCallsFromMetadata(metadata),
     }
   })

@@ -50,6 +50,36 @@ jobs:
         run: pnpm run test:run
 
   # ---------------------------------------------------------------------------
+  # Deterministic browser parity smoke (minimal web-mode CI coverage)
+  # ---------------------------------------------------------------------------
+  browser-parity:
+    name: Browser Parity (Web Mode Smoke)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright browser
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Run deterministic web-mode browser smoke
+        run: pnpm test:e2e -- --project=chromium --workers=1 --retries=0 e2e/web-mode.spec.ts --grep "frontend with the live web backend renders the chat UI"
+
+  # ---------------------------------------------------------------------------
   # Combined Rust checks (saves 3 separate runner startups)
   # ---------------------------------------------------------------------------
   rust:

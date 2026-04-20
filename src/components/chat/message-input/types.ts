@@ -11,7 +11,8 @@ import type { Shield } from 'lucide-solid'
 // ---------------------------------------------------------------------------
 export const MAX_IMAGE_SIZE = 5 * 1024 * 1024 // 5MB
 export const MAX_IMAGES = 4
-export const ACCEPTED_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp']
+export const ACCEPTED_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'] as const
+export type SupportedImageMimeType = (typeof ACCEPTED_IMAGE_TYPES)[number]
 
 // ---------------------------------------------------------------------------
 // Paste collapse constants
@@ -58,7 +59,7 @@ export const TEXT_EXTENSIONS = new Set([
 // ---------------------------------------------------------------------------
 export interface PendingImage {
   data: string
-  mimeType: string
+  mimeType: SupportedImageMimeType
   name?: string
 }
 

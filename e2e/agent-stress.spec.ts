@@ -9,10 +9,10 @@ import { expect, type Page, test } from '@playwright/test'
  *   3. Test session management during agent runs
  *   4. Test multi-turn conversations
  *
- * Requires `ava serve --port 18080` running.
+ * Requires `ava serve --port 18080 --token playwright-local-token` running.
  *
  * Run:
- *   AVA_WEB_URL=http://localhost:18080 npx playwright test e2e/agent-stress.spec.ts
+ *   AVA_WEB_URL=http://localhost:18080 AVA_WEB_TOKEN=playwright-local-token npx playwright test e2e/agent-stress.spec.ts
  */
 
 // ---------------------------------------------------------------------------
@@ -20,6 +20,7 @@ import { expect, type Page, test } from '@playwright/test'
 // ---------------------------------------------------------------------------
 
 const AVA_WEB_URL = process.env.AVA_WEB_URL ?? 'http://localhost:18080'
+const AVA_WEB_TOKEN = process.env.AVA_WEB_TOKEN ?? 'playwright-local-token'
 const AVA_HEALTH_URL = `${AVA_WEB_URL}/api/health`
 
 /** How long to wait for agent responses (LLM calls can be slow). */
@@ -28,6 +29,30 @@ const AGENT_TIMEOUT = 60_000
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+function authHeaders(headers: Record<string, string> = {}): Record<string, string> {
+  return {
+    Authorization: `Bearer ${AVA_WEB_TOKEN}`,
+    ...headers,
+  }
+}
+
+function authWebSocketUrl(path = '/ws'): string {
+  const url = new URL(path, AVA_WEB_URL.replace(/^http/, 'ws'))
+  url.searchParams.set('token', AVA_WEB_TOKEN)
+  return url.toString()
+}
+
+type AgentStatusScope = {
+  sessionId?: string
+  runId?: string
+}
+
+type AgentStatusResponse = {
+  running?: boolean
+  state?: string
+  runId?: string
+}
 
 async function isBackendRunning(): Promise<boolean> {
   try {
@@ -46,7 +71,7 @@ async function requireBackend(): Promise<void> {
     test.skip(
       true,
       `AVA web server not running at ${AVA_WEB_URL}. ` +
-        'Start with: cargo run --bin ava --features web -- serve --port 18080'
+        'Start with: cargo run --bin ava --features web -- serve --port 18080 --token playwright-local-token'
     )
   }
 }
@@ -74,6 +99,25 @@ async function requireLiveProvider(): Promise<void> {
       `No live providers configured at ${AVA_WEB_URL}; skipping agent submission smoke that would otherwise fail misleadingly.`
     )
   }
+}
+
+async function currentSessionId(page: Page): Promise<string> {
+  const sessionId = await page.evaluate(() => localStorage.getItem('ava_last_session'))
+  expect(sessionId).toBeTruthy()
+  return sessionId!
+}
+
+async function fetchAgentStatus(scope: AgentStatusScope = {}): Promise<AgentStatusResponse> {
+  const params = new URLSearchParams()
+  if (scope.sessionId) params.set('session_id', scope.sessionId)
+  if (scope.runId) params.set('run_id', scope.runId)
+  const query = params.toString()
+
+  const res = await fetch(`${AVA_WEB_URL}/api/agent/status${query ? `?${query}` : ''}`, {
+    headers: authHeaders(),
+  })
+  expect(res.ok).toBe(true)
+  return (await res.json()) as AgentStatusResponse
 }
 
 function composer(page: Page) {
@@ -169,24 +213,19 @@ function expectAssistantSuccessText(response: string, expectedMarker?: string): 
   }
 }
 
-/** Check if the agent is currently running (has a cancel button or loading state). */
-async function isAgentRunning(page: Page): Promise<boolean> {
-  const cancelBtn = page.locator(
-    'button:has-text("Cancel"), button:has-text("Stop"), button[aria-label*="cancel"], button[aria-label*="stop"]'
-  )
-  return cancelBtn.isVisible({ timeout: 500 }).catch(() => false)
-}
-
 /** Wait for the agent to finish running. */
 async function waitForAgentIdle(page: Page, timeout = AGENT_TIMEOUT): Promise<void> {
-  const start = Date.now()
-  while (Date.now() - start < timeout) {
-    const running = await isAgentRunning(page)
-    if (!running) return
-    await page.waitForTimeout(1000)
-  }
+  const sessionId = await currentSessionId(page)
 
-  throw new Error(`Agent did not become idle within ${timeout}ms`)
+  await expect
+    .poll(
+      async () => {
+        const status = await fetchAgentStatus({ sessionId })
+        return status.running ?? null
+      },
+      { timeout }
+    )
+    .toBe(false)
 }
 
 // ---------------------------------------------------------------------------
@@ -216,7 +255,7 @@ test.describe('Agent API Stress Tests', () => {
     // Create a session first
     const sessionRes = await fetch(`${AVA_WEB_URL}/api/sessions/create`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ title: 'Stress Test - API Goal' }),
     })
     expect(sessionRes.ok).toBe(true)
@@ -225,33 +264,27 @@ test.describe('Agent API Stress Tests', () => {
     // Submit a simple goal
     const submitRes = await fetch(`${AVA_WEB_URL}/api/agent/submit`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({
         session_id: session.id,
-        message: 'Reply with exactly: STRESS_TEST_OK',
+        goal: 'Reply with exactly: STRESS_TEST_OK',
       }),
     })
     expect(submitRes.ok).toBe(true)
 
-    // Poll agent status until idle (max 30s)
-    let settled = false
-    let attempts = 0
-    while (attempts < 30) {
-      await new Promise((r) => setTimeout(r, 1000))
-      const statusRes = await fetch(`${AVA_WEB_URL}/api/agent/status`)
-      if (statusRes.ok) {
-        const status = (await statusRes.json()) as { running?: boolean; state?: string }
-        if (!status.running || status.state === 'idle') {
-          settled = true
-          break
-        }
-      }
-      attempts++
-    }
+    await expect
+      .poll(
+        async () => {
+          const status = await fetchAgentStatus({ sessionId: session.id })
+          return status.running ?? null
+        },
+        { timeout: 30_000 }
+      )
+      .toBe(false)
 
-    expect(settled).toBe(true)
-
-    const transcriptRes = await fetch(`${AVA_WEB_URL}/api/sessions/${session.id}/messages`)
+    const transcriptRes = await fetch(`${AVA_WEB_URL}/api/sessions/${session.id}/messages`, {
+      headers: authHeaders(),
+    })
     expect(transcriptRes.ok).toBe(true)
     const transcript = (await transcriptRes.json()) as Array<{ role?: string; content?: string }>
     const latestAssistant = [...transcript]
@@ -267,7 +300,7 @@ test.describe('Agent API Stress Tests', () => {
     const promises = Array.from({ length: 5 }, (_, i) =>
       fetch(`${AVA_WEB_URL}/api/sessions/create`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ title: `Rapid Session ${i}` }),
       })
     )
@@ -278,7 +311,7 @@ test.describe('Agent API Stress Tests', () => {
     }
 
     // Verify all sessions appear in the list
-    const listRes = await fetch(`${AVA_WEB_URL}/api/sessions`)
+    const listRes = await fetch(`${AVA_WEB_URL}/api/sessions`, { headers: authHeaders() })
     expect(listRes.ok).toBe(true)
     const sessions = (await listRes.json()) as { id: string; title?: string }[]
     const stressSessions = sessions.filter((s) => s.title?.startsWith('Rapid Session'))
@@ -286,7 +319,10 @@ test.describe('Agent API Stress Tests', () => {
 
     // Cleanup: delete them
     for (const s of stressSessions) {
-      await fetch(`${AVA_WEB_URL}/api/sessions/${s.id}`, { method: 'DELETE' })
+      await fetch(`${AVA_WEB_URL}/api/sessions/${s.id}`, {
+        method: 'DELETE',
+        headers: authHeaders(),
+      })
     }
   })
 
@@ -294,10 +330,10 @@ test.describe('Agent API Stress Tests', () => {
     // Hit multiple endpoints simultaneously
     const endpoints = [
       fetch(`${AVA_HEALTH_URL}`),
-      fetch(`${AVA_WEB_URL}/api/sessions`),
+      fetch(`${AVA_WEB_URL}/api/sessions`, { headers: authHeaders() }),
       fetch(`${AVA_WEB_URL}/api/models`),
       fetch(`${AVA_WEB_URL}/api/providers`),
-      fetch(`${AVA_WEB_URL}/api/agent/status`),
+      fetch(`${AVA_WEB_URL}/api/agent/status`, { headers: authHeaders() }),
     ]
 
     const results = await Promise.all(endpoints)
@@ -455,46 +491,43 @@ test.describe('WebSocket Streaming Stress', () => {
   test('WebSocket connects and stays alive for 10 seconds', async ({ page }) => {
     await page.goto('/')
 
-    const result = await page.evaluate(
-      async (wsUrl: string) => {
-        return new Promise<{ connected: boolean; messagesReceived: number; errors: number }>(
-          (resolve) => {
-            const ws = new WebSocket(wsUrl)
-            let messagesReceived = 0
-            let errors = 0
+    const result = await page.evaluate(async (wsUrl: string) => {
+      return new Promise<{ connected: boolean; messagesReceived: number; errors: number }>(
+        (resolve) => {
+          const ws = new WebSocket(wsUrl)
+          let messagesReceived = 0
+          let errors = 0
 
-            ws.onopen = () => {
-              // Send periodic pings
-              const interval = setInterval(() => {
-                if (ws.readyState === WebSocket.OPEN) {
-                  ws.send(JSON.stringify({ type: 'ping' }))
-                }
-              }, 2000)
-
-              setTimeout(() => {
-                clearInterval(interval)
-                const wasOpen = ws.readyState === WebSocket.OPEN
-                ws.close()
-                resolve({ connected: wasOpen, messagesReceived, errors })
-              }, 10_000)
-            }
-
-            ws.onmessage = () => {
-              messagesReceived++
-            }
-
-            ws.onerror = () => {
-              errors++
-            }
+          ws.onopen = () => {
+            // Send periodic pings
+            const interval = setInterval(() => {
+              if (ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'ping' }))
+              }
+            }, 2000)
 
             setTimeout(() => {
-              resolve({ connected: false, messagesReceived: 0, errors: 1 })
-            }, 12_000)
+              clearInterval(interval)
+              const wasOpen = ws.readyState === WebSocket.OPEN
+              ws.close()
+              resolve({ connected: wasOpen, messagesReceived, errors })
+            }, 10_000)
           }
-        )
-      },
-      `${AVA_WEB_URL.replace('http', 'ws')}/ws`
-    )
+
+          ws.onmessage = () => {
+            messagesReceived++
+          }
+
+          ws.onerror = () => {
+            errors++
+          }
+
+          setTimeout(() => {
+            resolve({ connected: false, messagesReceived: 0, errors: 1 })
+          }, 12_000)
+        }
+      )
+    }, authWebSocketUrl('/ws'))
 
     expect(result.connected).toBe(true)
     expect(result.errors).toBe(0)
@@ -503,30 +536,27 @@ test.describe('WebSocket Streaming Stress', () => {
   test('multiple WebSocket connections do not crash the server', async ({ page }) => {
     await page.goto('/')
 
-    const result = await page.evaluate(
-      async (wsUrl: string) => {
-        const connections = 3
+    const result = await page.evaluate(async (wsUrl: string) => {
+      const connections = 3
 
-        const promises = Array.from({ length: connections }, () => {
-          return new Promise<boolean>((resolve) => {
-            const ws = new WebSocket(wsUrl)
-            ws.onopen = () => {
-              setTimeout(() => {
-                const wasOpen = ws.readyState === WebSocket.OPEN
-                ws.close()
-                resolve(wasOpen)
-              }, 3000)
-            }
-            ws.onerror = () => resolve(false)
-            setTimeout(() => resolve(false), 5000)
-          })
+      const promises = Array.from({ length: connections }, () => {
+        return new Promise<boolean>((resolve) => {
+          const ws = new WebSocket(wsUrl)
+          ws.onopen = () => {
+            setTimeout(() => {
+              const wasOpen = ws.readyState === WebSocket.OPEN
+              ws.close()
+              resolve(wasOpen)
+            }, 3000)
+          }
+          ws.onerror = () => resolve(false)
+          setTimeout(() => resolve(false), 5000)
         })
+      })
 
-        const res = await Promise.all(promises)
-        return { allConnected: res.every(Boolean), count: res.filter(Boolean).length }
-      },
-      `${AVA_WEB_URL.replace('http', 'ws')}/ws`
-    )
+      const res = await Promise.all(promises)
+      return { allConnected: res.every(Boolean), count: res.filter(Boolean).length }
+    }, authWebSocketUrl('/ws'))
 
     expect(result.count).toBeGreaterThanOrEqual(2)
   })

@@ -163,6 +163,7 @@ async fn ensure_debug_run(
     state: &WebState,
     session_id: uuid::Uuid,
     requested_run_id: Option<&str>,
+    request_kind: &str,
     provider: &str,
     model: &str,
 ) -> Result<(String, bool), (StatusCode, Json<ErrorResponse>)> {
@@ -180,7 +181,7 @@ async fn ensure_debug_run(
 
     let run_id = requested_run_id
         .map(str::to_string)
-        .unwrap_or_else(|| format!("debug-approval-run-{}", uuid::Uuid::new_v4()));
+        .unwrap_or_else(|| format!("debug-{request_kind}-run-{}", uuid::Uuid::new_v4()));
 
     state
         .register_run(
@@ -208,8 +209,15 @@ pub(crate) async fn inject_approval_request(
         .map_err(|e| debug_bad_request(&format!("Invalid session_id: {e}")))?;
     let provider = req.provider.unwrap_or_else(|| "debug".to_string());
     let model = req.model.unwrap_or_else(|| "debug-approval".to_string());
-    let (run_id, synthetic_run) =
-        ensure_debug_run(&state, session_id, req.run_id.as_deref(), &provider, &model).await?;
+    let (run_id, synthetic_run) = ensure_debug_run(
+        &state,
+        session_id,
+        req.run_id.as_deref(),
+        "approval",
+        &provider,
+        &model,
+    )
+    .await?;
 
     let (reply_tx, reply_rx) = oneshot::channel::<ToolApproval>();
     let handle = state
@@ -257,6 +265,93 @@ pub(crate) async fn inject_approval_request(
             risk_level,
             reason,
             warnings,
+            run_id: handle.run_id.clone(),
+        },
+    )
+    .await;
+
+    Ok(Json(serde_json::json!({
+        "ok": true,
+        "requestId": handle.request_id,
+        "runId": run_id,
+        "syntheticRun": synthetic_run,
+    })))
+}
+
+#[cfg(debug_assertions)]
+#[derive(Deserialize)]
+pub struct InjectQuestionRequest {
+    #[serde(alias = "sessionId")]
+    pub session_id: String,
+    #[serde(default)]
+    pub question: Option<String>,
+    #[serde(default)]
+    pub options: Option<Vec<String>>,
+    #[serde(default)]
+    #[serde(alias = "runId")]
+    pub run_id: Option<String>,
+    #[serde(default)]
+    pub provider: Option<String>,
+    #[serde(default)]
+    pub model: Option<String>,
+}
+
+#[cfg(debug_assertions)]
+pub(crate) async fn inject_question_request(
+    State(state): State<WebState>,
+    Json(req): Json<InjectQuestionRequest>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ErrorResponse>)> {
+    use ava_agent::control_plane::interactive::InteractiveRequestKind;
+    use tokio::sync::oneshot;
+
+    let session_id = uuid::Uuid::parse_str(&req.session_id)
+        .map_err(|e| debug_bad_request(&format!("Invalid session_id: {e}")))?;
+    let provider = req.provider.unwrap_or_else(|| "debug".to_string());
+    let model = req.model.unwrap_or_else(|| "debug-question".to_string());
+    let (run_id, synthetic_run) = ensure_debug_run(
+        &state,
+        session_id,
+        req.run_id.as_deref(),
+        "question",
+        &provider,
+        &model,
+    )
+    .await?;
+
+    let (reply_tx, reply_rx) = oneshot::channel::<String>();
+    let handle = state
+        .inner
+        .pending_question_reply
+        .register_with_run_id(reply_tx, Some(run_id.clone()))
+        .await;
+
+    if synthetic_run {
+        let state_for_cleanup = state.clone();
+        let synthetic_run_id = run_id.clone();
+        tokio::spawn(async move {
+            let _ = reply_rx.await;
+            state_for_cleanup.finish_run(&synthetic_run_id).await;
+        });
+    } else {
+        tokio::spawn(async move {
+            let _ = reply_rx.await;
+        });
+    }
+
+    let question = req
+        .question
+        .unwrap_or_else(|| "Deterministic question request for browser E2E".to_string());
+    let options = req.options.unwrap_or_default();
+
+    emit_or_defer_interactive_request_event(
+        &state.inner,
+        &handle.request_id,
+        InteractiveRequestKind::Question,
+        Some(run_id.as_str()),
+        super::state::WebEvent::QuestionRequest {
+            id: handle.request_id.clone(),
+            question,
+            options,
             run_id: handle.run_id.clone(),
         },
     )

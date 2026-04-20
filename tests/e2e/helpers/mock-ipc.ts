@@ -18,6 +18,8 @@ export class MockIpc {
   private invokeCalls: InvokeCall[] = []
 
   install(): void {
+    vi.spyOn(tauriCore, 'isTauri').mockReturnValue(true)
+
     vi.spyOn(tauriCore, 'invoke').mockImplementation(async (command, args) => {
       const key = String(command)
       this.invokeCalls.push({ command: key, args })

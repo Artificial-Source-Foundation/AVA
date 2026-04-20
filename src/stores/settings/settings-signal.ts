@@ -72,6 +72,18 @@ const { settings, setSettingsRaw } = createRoot(() => {
 
 export { settings, setSettingsRaw }
 
+/**
+ * Store-internal commit helper for simple persistent settings writes.
+ * Owns the repeated prev -> next -> setSettingsRaw -> saveSettings transaction.
+ */
+export function commitSettings(nextFromPrev: (prev: AppSettings) => AppSettings): void {
+  setSettingsRaw((prev) => {
+    const next = nextFromPrev(prev)
+    if (next !== prev) saveSettings(next)
+    return next
+  })
+}
+
 /** Keys of AppSettings whose values are plain objects (not arrays/primitives) */
 export type SubObjectKey =
   | 'ui'
@@ -86,9 +98,8 @@ export type SubObjectKey =
 export function updateSubKey<K extends SubObjectKey>(key: K, patch: Partial<AppSettings[K]>): void {
   debugLog('settings', `updateSubKey(${key})`, patch)
   log.info('settings', `Setting changed: ${key}`, { keys: Object.keys(patch) })
-  setSettingsRaw((prev) => {
+  commitSettings((prev) => {
     const next = { ...prev, [key]: { ...prev[key], ...patch } }
-    saveSettings(next)
     return next
   })
 }
@@ -97,9 +108,8 @@ export function updateSettings(patch: Partial<AppSettings>): void {
   debugLog('settings', 'updateSettings', Object.keys(patch))
   log.info('settings', 'Settings updated', { keys: Object.keys(patch) })
   if (patch.theme !== undefined) log.info('settings', 'Theme changed', { theme: patch.theme })
-  setSettingsRaw((prev) => {
+  commitSettings((prev) => {
     const next = { ...prev, ...patch }
-    saveSettings(next)
     return next
   })
   if (patch.mode !== undefined) applyAppearanceToDOM(settings())

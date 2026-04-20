@@ -14,6 +14,7 @@
 import { isTauri } from '@tauri-apps/api/core'
 import { type Accessor, batch, type Setter } from 'solid-js'
 import type { ToolActivity } from '../hooks/agent/agent-types'
+import { apiFetch } from '../lib/api-client'
 import { log } from '../lib/logger'
 import { mapWebSessionMessages } from '../lib/web-session-messages'
 import type { Message, MessageError } from '../types'
@@ -378,23 +379,19 @@ async function persistLatestAssistantMessage(
       ? (target.metadata as Record<string, unknown>)
       : undefined
   const metadata = buildPersistedAssistantMetadata(payload, metadataBase)
-  const apiBase = (import.meta.env.VITE_API_URL as string) || ''
 
   try {
-    const response = await fetch(
-      `${apiBase}/api/sessions/${backendSessionId}/messages/${messageId}`,
-      {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          content: target.content,
-          metadata,
-          tokens_used: payload.tokensUsed,
-          cost_usd: payload.costUSD || null,
-          model: payload.model ?? null,
-        }),
-      }
-    )
+    const response = await apiFetch(`/api/sessions/${backendSessionId}/messages/${messageId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        content: target.content,
+        metadata,
+        tokens_used: payload.tokensUsed,
+        cost_usd: payload.costUSD || null,
+        model: payload.model ?? null,
+      }),
+    })
 
     if (!response.ok) {
       log.warn('agent-settlement', 'Failed to persist enriched assistant metadata', {
@@ -436,8 +433,7 @@ export async function persistAssistantPayloadToBackendSession(
   }
 
   try {
-    const apiBase = (import.meta.env.VITE_API_URL as string) || ''
-    const response = await fetch(`${apiBase}/api/sessions/${backendSessionId}/messages`)
+    const response = await apiFetch(`/api/sessions/${backendSessionId}/messages`)
     if (!response.ok) {
       return false
     }
@@ -467,8 +463,7 @@ export async function syncMessagesFromBackend(
   const originSessionId = options.originSessionId ?? session.currentSession()?.id ?? ''
 
   try {
-    const apiBase = (import.meta.env.VITE_API_URL as string) || ''
-    const res = await fetch(`${apiBase}/api/sessions/${backendSessionId}/messages`)
+    const res = await apiFetch(`/api/sessions/${backendSessionId}/messages`)
 
     if (!res.ok) {
       log.warn('agent-settlement', 'Backend sync fetch failed', {

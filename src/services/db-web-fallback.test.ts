@@ -57,7 +57,10 @@ describe('db-web-fallback message recovery', () => {
       ['session-front']
     )
 
-    expect(fetchMock).toHaveBeenCalledWith('/api/sessions/session-back/messages')
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/sessions/session-back/messages',
+      expect.objectContaining({ headers: expect.any(Object) })
+    )
     expect(rows).toHaveLength(1)
     expect(rows[0]?.session_id).toBe('session-front')
     expect(JSON.parse(rows[0]?.metadata as string)).toEqual(
@@ -100,7 +103,10 @@ describe('db-web-fallback message recovery', () => {
       ['session-origin']
     )
 
-    expect(fetchMock).toHaveBeenCalledWith('/api/sessions/session-backend/messages')
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/sessions/session-backend/messages',
+      expect.objectContaining({ headers: expect.any(Object) })
+    )
     expect(rows[0]?.session_id).toBe('session-origin')
     expect(JSON.parse(rows[0]?.metadata as string)).toEqual(
       expect.objectContaining({ note: 'from backend' })
@@ -135,7 +141,10 @@ describe('db-web-fallback non-message subresources', () => {
     )
 
     // Should call the backend session ID endpoint, not frontend
-    expect(fetchMock).toHaveBeenCalledWith('/api/sessions/be-agents-session/agents')
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/sessions/be-agents-session/agents',
+      expect.objectContaining({ headers: expect.any(Object) })
+    )
     expect(rows).toHaveLength(1)
     expect(rows[0]?.id).toBe('agent-1')
   })
@@ -155,7 +164,10 @@ describe('db-web-fallback non-message subresources', () => {
       ['fe-files-session']
     )
 
-    expect(fetchMock).toHaveBeenCalledWith('/api/sessions/be-files-session/files')
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/sessions/be-files-session/files',
+      expect.objectContaining({ headers: expect.any(Object) })
+    )
   })
 
   it('resolves session alias for rename operation', async () => {
@@ -178,6 +190,138 @@ describe('db-web-fallback non-message subresources', () => {
         body: JSON.stringify({ name: 'New Name' }),
       })
     )
+  })
+
+  it('routes create session writes through the shared create endpoint', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, statusText: 'OK' })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const database = createWebDatabase()
+    await database.execute(
+      'INSERT INTO sessions (id, name, project_id, parent_session_id, created_at, updated_at, status) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      ['fe-created-session', 'Created in browser', null, null, Date.now(), Date.now(), 'active']
+    )
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/sessions/create',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({ 'Content-Type': 'application/json' }),
+      })
+    )
+
+    const request = fetchMock.mock.calls[0]?.[1]
+    expect(JSON.parse(String(request?.body))).toEqual({
+      id: 'fe-created-session',
+      name: 'Created in browser',
+    })
+  })
+
+  it('fails closed on create and rename network write failures', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const fetchMock = vi.fn().mockRejectedValue(new TypeError('Network unavailable'))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const database = createWebDatabase()
+
+    await expect(
+      database.execute(
+        'INSERT INTO sessions (id, name, project_id, parent_session_id, created_at, updated_at, status) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        [
+          'fe-created-session',
+          'Created in browser',
+          'project-1',
+          null,
+          Date.now(),
+          Date.now(),
+          'active',
+        ]
+      )
+    ).rejects.toThrow('[db-web] Failed to create session: Network unavailable')
+
+    await expect(
+      database.execute('UPDATE sessions SET updated_at = ?, name = ? WHERE id = ?', [
+        Date.now(),
+        'Renamed from browser',
+        'fe-created-session',
+      ])
+    ).rejects.toThrow('[db-web] Failed to rename session: Network unavailable')
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      '/api/sessions/create',
+      expect.objectContaining({ method: 'POST' })
+    )
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      '/api/sessions/fe-created-session/rename',
+      expect.objectContaining({ method: 'POST' })
+    )
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[db-web] Failed to create session:',
+      'Network unavailable'
+    )
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[db-web] Failed to rename session:',
+      'Network unavailable'
+    )
+  })
+
+  it('fails closed on archive, unarchive, and delete write failures', async () => {
+    registerBackendSessionId('fe-failing-session', 'be-failing-session')
+
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 500,
+        statusText: 'Internal Server Error',
+        text: async () => 'archive failed',
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 409,
+        statusText: 'Conflict',
+        text: async () => 'unarchive failed',
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 423,
+        statusText: 'Locked',
+        text: async () => 'delete failed',
+      })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const database = createWebDatabase()
+
+    await expect(
+      database.execute('UPDATE sessions SET updated_at = ?, status = ? WHERE id = ?', [
+        Date.now(),
+        'archived',
+        'fe-failing-session',
+      ])
+    ).rejects.toThrow('[db-web] Failed to archive session: archive failed')
+
+    await expect(
+      database.execute('UPDATE sessions SET updated_at = ?, status = ? WHERE id = ?', [
+        Date.now(),
+        'active',
+        'fe-failing-session',
+      ])
+    ).rejects.toThrow('[db-web] Failed to unarchive session: unarchive failed')
+
+    await expect(
+      database.execute('DELETE FROM sessions WHERE id = ?', ['fe-failing-session'])
+    ).rejects.toThrow('[db-web] Failed to delete session: delete failed')
+
+    expect(warnSpy).toHaveBeenCalledWith('[db-web] Failed to archive session:', 'archive failed')
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[db-web] Failed to unarchive session:',
+      'unarchive failed'
+    )
+    expect(warnSpy).toHaveBeenCalledWith('[db-web] Failed to delete session:', 'delete failed')
   })
 
   it('archives mapped sessions through the backend and preserves alias resolution for later unarchive', async () => {
@@ -238,7 +382,11 @@ describe('db-web-fallback non-message subresources', () => {
       '/api/sessions/be-archive-session/archive',
       expect.objectContaining({ method: 'POST' })
     )
-    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/sessions?status=archived')
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      '/api/sessions?status=archived',
+      expect.objectContaining({ headers: expect.any(Object) })
+    )
     expect(archivedRows).toHaveLength(1)
     expect(archivedRows[0]?.status).toBe('archived')
     expect(fetchMock).toHaveBeenNthCalledWith(
@@ -246,6 +394,84 @@ describe('db-web-fallback non-message subresources', () => {
       '/api/sessions/be-archive-session/unarchive',
       expect.objectContaining({ method: 'POST' })
     )
+  })
+
+  it('deletes mapped sessions through the backend session endpoint', async () => {
+    registerBackendSessionId('fe-delete-session', 'be-delete-session')
+
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 204, statusText: 'No Content' })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const database = createWebDatabase()
+    await database.execute('DELETE FROM sessions WHERE id = ?', ['fe-delete-session'])
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/sessions/be-delete-session',
+      expect.objectContaining({ method: 'DELETE' })
+    )
+  })
+
+  it('round-trips project_id through create/list and applies project-scoped list filtering locally', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, status: 200, statusText: 'OK' })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => [
+          {
+            id: 'session-project-1',
+            title: 'Project One',
+            project_id: 'project-1',
+            status: 'active',
+            message_count: 2,
+            created_at: '2026-04-19T10:00:00Z',
+            updated_at: '2026-04-19T10:01:00Z',
+          },
+          {
+            id: 'session-project-2',
+            title: 'Project Two',
+            project_id: 'project-2',
+            status: 'active',
+            message_count: 1,
+            created_at: '2026-04-19T10:02:00Z',
+            updated_at: '2026-04-19T10:03:00Z',
+          },
+        ],
+      })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const database = createWebDatabase()
+    await database.execute(
+      'INSERT INTO sessions (id, name, project_id, parent_session_id, created_at, updated_at, status) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      ['session-project-1', 'Project One', 'project-1', null, Date.now(), Date.now(), 'active']
+    )
+
+    const rows = await database.select<Array<Record<string, unknown>>>(
+      `
+      SELECT s.* FROM sessions s
+      LEFT JOIN messages m ON m.session_id = s.id
+      WHERE s.status != 'archived' AND s.project_id = ?
+      GROUP BY s.id
+    `,
+      ['project-1']
+    )
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      '/api/sessions?status=active&project_id=project-1',
+      expect.objectContaining({ headers: expect.any(Object) })
+    )
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
+      id: 'session-project-1',
+      name: 'Project One',
+      project_id: 'project-1',
+    })
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({
+      id: 'session-project-1',
+      project_id: 'project-1',
+      name: 'Project One',
+    })
   })
 })
 

@@ -22,7 +22,8 @@ use ava_agent::control_plane::queue::{
 };
 use ava_agent::control_plane::sessions::{
     build_edit_replay_payload, build_regenerate_replay_payload, build_retry_replay_payload,
-    resolve_session_precedence, SessionPromptContext, SessionSelectionSource,
+    resolve_session_precedence, run_context_from_session as shared_run_context_from_session,
+    SessionPromptContext, SessionSelectionSource,
 };
 use ava_agent::stack::AgentRunContext;
 use ava_tools::permission_middleware::ToolApproval;
@@ -265,6 +266,8 @@ pub struct SubmitGoalArgs {
     #[serde(default)]
     pub session_id: Option<String>,
     #[serde(default)]
+    pub images: Vec<SubmitGoalImageInput>,
+    #[serde(default)]
     pub auto_compact: Option<bool>,
     #[serde(default)]
     pub compaction_threshold: Option<u8>,
@@ -274,6 +277,13 @@ pub struct SubmitGoalArgs {
     pub compaction_model: Option<String>,
     #[serde(default)]
     pub run_id: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SubmitGoalImageInput {
+    pub data: String,
+    pub media_type: String,
 }
 
 #[derive(Serialize)]
@@ -295,6 +305,28 @@ fn parse_thinking_level(level_str: &str) -> ava_types::ThinkingLevel {
         "max" | "xhigh" => ava_types::ThinkingLevel::Max,
         _ => ava_types::ThinkingLevel::Off,
     }
+}
+
+fn map_submit_image_media_type(media_type: &str) -> Option<ava_types::ImageMediaType> {
+    match media_type {
+        "image/png" => Some(ava_types::ImageMediaType::Png),
+        "image/jpeg" => Some(ava_types::ImageMediaType::Jpeg),
+        "image/gif" => Some(ava_types::ImageMediaType::Gif),
+        "image/webp" => Some(ava_types::ImageMediaType::WebP),
+        _ => None,
+    }
+}
+
+fn map_submit_goal_images(images: &[SubmitGoalImageInput]) -> Vec<ava_types::ImageContent> {
+    images
+        .iter()
+        .filter_map(|image| {
+            Some(ava_types::ImageContent::new(
+                image.data.clone(),
+                map_submit_image_media_type(&image.media_type)?,
+            ))
+        })
+        .collect()
 }
 
 fn desktop_run_context_from_submit_args(args: &SubmitGoalArgs) -> AgentRunContext {
@@ -334,54 +366,7 @@ fn desktop_run_context_with_state(
 }
 
 fn desktop_run_context_from_session(session: &ava_types::Session) -> AgentRunContext {
-    let mut context = AgentRunContext::default();
-    let metadata = session.metadata.get("runContext");
-
-    context.provider = metadata
-        .and_then(|value| value.get("provider"))
-        .and_then(serde_json::Value::as_str)
-        .map(str::to_string)
-        .or_else(|| {
-            session
-                .metadata
-                .get("routing")
-                .and_then(|value| value.get("provider"))
-                .and_then(serde_json::Value::as_str)
-                .map(str::to_string)
-        });
-    context.model = metadata
-        .and_then(|value| value.get("model"))
-        .and_then(serde_json::Value::as_str)
-        .map(str::to_string)
-        .or_else(|| {
-            session
-                .metadata
-                .get("routing")
-                .and_then(|value| value.get("model"))
-                .and_then(serde_json::Value::as_str)
-                .map(str::to_string)
-        });
-    context.thinking_level = metadata
-        .and_then(|value| value.get("thinkingLevel"))
-        .and_then(serde_json::Value::as_str)
-        .map(parse_thinking_level);
-    context.auto_compact = metadata
-        .and_then(|value| value.get("autoCompact"))
-        .and_then(serde_json::Value::as_bool);
-    context.compaction_threshold = metadata
-        .and_then(|value| value.get("compactionThreshold"))
-        .and_then(serde_json::Value::as_u64)
-        .map(|value| value as u8);
-    context.compaction_provider = metadata
-        .and_then(|value| value.get("compactionProvider"))
-        .and_then(serde_json::Value::as_str)
-        .map(str::to_string);
-    context.compaction_model = metadata
-        .and_then(|value| value.get("compactionModel"))
-        .and_then(serde_json::Value::as_str)
-        .map(str::to_string);
-
-    context
+    shared_run_context_from_session(session)
 }
 
 async fn desktop_effective_run_identity(
@@ -607,6 +592,7 @@ pub async fn submit_goal(
     let _startup_guard = bridge.startup_lock.lock().await;
 
     let run_context = desktop_run_context_from_submit_args(&args);
+    let images = map_submit_goal_images(&args.images);
 
     let requested_session_id = args
         .session_id
@@ -635,7 +621,7 @@ pub async fn submit_goal(
 
     let run_id = ensure_desktop_run_id(args.run_id);
     let (provider, model) =
-        desktop_effective_run_identity(&bridge, &args.goal, &[], &run_context).await;
+        desktop_effective_run_identity(&bridge, &args.goal, &images, &run_context).await;
     let run = bridge
         .register_run(run_id.clone(), run_session.session_id, provider, model)
         .await?;
@@ -646,7 +632,7 @@ pub async fn submit_goal(
         &args.goal,
         args.max_turns,
         history,
-        vec![],
+        images,
         run_session.session_id,
         run_id,
         run,
@@ -1483,6 +1469,32 @@ mod tests {
     }
 
     #[test]
+    fn map_submit_goal_images_maps_supported_media_types() {
+        let images = map_submit_goal_images(&[SubmitGoalImageInput {
+            data: "base64-image".to_string(),
+            media_type: "image/png".to_string(),
+        }]);
+
+        assert_eq!(images, vec![sample_image("base64-image")]);
+    }
+
+    #[test]
+    fn map_submit_goal_images_skips_unsupported_media_types() {
+        let images = map_submit_goal_images(&[
+            SubmitGoalImageInput {
+                data: "good".to_string(),
+                media_type: "image/png".to_string(),
+            },
+            SubmitGoalImageInput {
+                data: "bad".to_string(),
+                media_type: "image/tiff".to_string(),
+            },
+        ]);
+
+        assert_eq!(images, vec![sample_image("good")]);
+    }
+
+    #[test]
     fn ensure_desktop_run_id_generates_stable_prefixed_id() {
         let generated = ensure_desktop_run_id(None);
         assert!(generated.starts_with("desktop-run-"));
@@ -1771,7 +1783,7 @@ mod tests {
                 assert_eq!(id, second.request_id);
                 assert_eq!(run_id.as_deref(), Some("desktop-run-b"));
             }
-            other => panic!("expected promoted question request, got {other:?}"),
+            _ => panic!("expected promoted question request"),
         }
     }
 

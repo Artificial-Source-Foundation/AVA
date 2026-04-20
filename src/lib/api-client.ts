@@ -5,12 +5,95 @@
  * webview), all Rust backend communication goes through the HTTP API served
  * by `ava serve --port 8080`.
  *
+ * Privileged control-plane routes use a simple bearer token. The browser can
+ * receive that token either through `VITE_AVA_SERVER_TOKEN` or by visiting the
+ * frontend with `?ava_token=<token>` once; the query token is moved into
+ * session storage and removed from the URL.
+ *
  * This module provides:
  * - `apiInvoke()` — drop-in replacement for Tauri's `invoke()`
  * - `createEventSocket()` — WebSocket factory for agent event streaming
  */
 
 const API_BASE = import.meta.env.VITE_API_URL || ''
+const TOKEN_QUERY_PARAM = 'ava_token'
+const TOKEN_STORAGE_KEY = 'ava_web_server_token'
+
+function readUrlToken(): string | undefined {
+  if (typeof window === 'undefined') return undefined
+
+  const params = new URLSearchParams(window.location.search)
+  const token = params.get(TOKEN_QUERY_PARAM)?.trim()
+  if (!token) return undefined
+
+  try {
+    window.sessionStorage.setItem(TOKEN_STORAGE_KEY, token)
+  } catch {
+    // Ignore storage failures — the token still works for this load.
+  }
+
+  params.delete(TOKEN_QUERY_PARAM)
+  const nextUrl = `${window.location.pathname}${params.toString() ? `?${params}` : ''}${window.location.hash}`
+  window.history.replaceState(null, '', nextUrl)
+  return token
+}
+
+export function getWebServerToken(): string | undefined {
+  const envToken = import.meta.env.VITE_AVA_SERVER_TOKEN?.trim()
+  if (envToken) return envToken
+
+  const urlToken = readUrlToken()
+  if (urlToken) return urlToken
+
+  if (typeof window === 'undefined') return undefined
+
+  try {
+    const stored = window.sessionStorage.getItem(TOKEN_STORAGE_KEY)?.trim()
+    return stored || undefined
+  } catch {
+    return undefined
+  }
+}
+
+function toHeaderObject(headers?: HeadersInit): Record<string, string> {
+  const normalized: Record<string, string> = {}
+  const pairs =
+    headers instanceof Headers
+      ? [...headers.entries()]
+      : Array.isArray(headers)
+        ? headers
+        : Object.entries(headers ?? {})
+
+  for (const [key, value] of pairs) {
+    normalized[key] = String(value)
+  }
+
+  const token = getWebServerToken()
+  const hasAuthHeader = Object.keys(normalized).some(
+    (key) => key.toLowerCase() === 'authorization' || key.toLowerCase() === 'x-ava-token'
+  )
+
+  if (token && !hasAuthHeader) {
+    normalized.Authorization = `Bearer ${token}`
+  }
+  return normalized
+}
+
+export function withWebServerAuth(init: RequestInit = {}): RequestInit {
+  return {
+    ...init,
+    headers: toHeaderObject(init.headers),
+  }
+}
+
+export function buildApiUrl(path: string): string {
+  if (/^https?:\/\//.test(path)) return path
+  return `${API_BASE}${path}`
+}
+
+export async function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {
+  return fetch(buildApiUrl(path), withWebServerAuth(init))
+}
 
 /**
  * Map from Tauri command names to HTTP API endpoints.
@@ -143,7 +226,6 @@ export async function apiInvoke<T>(cmd: string, args?: Record<string, unknown>):
     })
   }
 
-  const url = `${API_BASE}${path}`
   const headers: Record<string, string> = {}
   let body: string | undefined
   const normalizedPayload = payload ? toSnakeCaseRecord(payload) : undefined
@@ -164,9 +246,9 @@ export async function apiInvoke<T>(cmd: string, args?: Record<string, unknown>):
       }
     }
     const qs = params.toString()
-    const separator = url.includes('?') ? '&' : '?'
-    const fullUrl = qs ? `${url}${separator}${qs}` : url
-    const res = await fetch(fullUrl, { method, headers })
+    const separator = path.includes('?') ? '&' : '?'
+    const fullUrl = qs ? `${path}${separator}${qs}` : path
+    const res = await apiFetch(fullUrl, { method, headers })
     if (!res.ok) {
       if (res.status === 404 && !mapping) {
         return undefined as T
@@ -177,7 +259,7 @@ export async function apiInvoke<T>(cmd: string, args?: Record<string, unknown>):
     return res.json() as Promise<T>
   }
 
-  const res = await fetch(url, { method, headers, body })
+  const res = await apiFetch(path, { method, headers, body })
   if (!res.ok) {
     // For unmapped commands that 404, return undefined instead of throwing
     if (res.status === 404 && !mapping) {
@@ -201,8 +283,12 @@ export async function apiInvoke<T>(cmd: string, args?: Record<string, unknown>):
  */
 export function createEventSocket(path = '/ws'): WebSocket {
   const base = API_BASE || window.location.origin
-  const wsUrl = base.replace(/^http/, 'ws') + path
-  return new WebSocket(wsUrl)
+  const wsUrl = new URL(path, base)
+  const token = getWebServerToken()
+  if (token) {
+    wsUrl.searchParams.set('token', token)
+  }
+  return new WebSocket(wsUrl.toString().replace(/^http/, 'ws'))
 }
 
 export interface HealthResponse {
@@ -217,7 +303,7 @@ export interface HealthResponse {
  */
 export async function checkApiHealth(): Promise<HealthResponse | null> {
   try {
-    const res = await fetch(`${API_BASE}/api/health`, { method: 'GET' })
+    const res = await apiFetch('/api/health', { method: 'GET' })
     if (!res.ok) return null
     return (await res.json()) as HealthResponse
   } catch {

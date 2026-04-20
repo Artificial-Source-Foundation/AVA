@@ -1,4 +1,6 @@
 use crate::config::cli::CliArgs;
+use ava_permissions::tags::RiskLevel;
+use ava_tools::permission_middleware::{ApprovalRequest, ToolApproval};
 use color_eyre::eyre::{eyre, Result};
 use tracing::instrument;
 
@@ -10,17 +12,24 @@ mod watch;
 mod voice;
 
 pub(crate) fn spawn_auto_approve_requests(
-    mut approval_rx: tokio::sync::mpsc::UnboundedReceiver<
-        ava_tools::permission_middleware::ApprovalRequest,
-    >,
+    mut approval_rx: tokio::sync::mpsc::UnboundedReceiver<ApprovalRequest>,
 ) {
     tokio::spawn(async move {
         while let Some(req) = approval_rx.recv().await {
-            let _ = req
-                .reply
-                .send(ava_tools::permission_middleware::ToolApproval::Allowed);
+            let decision = headless_tool_approval(&req);
+            let _ = req.reply.send(decision);
         }
     });
+}
+
+fn headless_tool_approval(req: &ApprovalRequest) -> ToolApproval {
+    match req.inspection.risk_level {
+        RiskLevel::Safe | RiskLevel::Low | RiskLevel::Medium => ToolApproval::Allowed,
+        RiskLevel::High | RiskLevel::Critical => ToolApproval::Rejected(Some(format!(
+            "Headless mode rejected dangerous action '{}': {} (risk: {:?})",
+            req.call.name, req.inspection.reason, req.inspection.risk_level
+        ))),
+    }
 }
 
 #[instrument(skip(cli))]
@@ -52,8 +61,78 @@ pub async fn run_headless(cli: CliArgs) -> Result<()> {
 mod tests {
     use super::*;
     use ava_agent::message_queue::MessageQueue;
+    use ava_permissions::inspector::InspectionResult;
+    use ava_permissions::Action;
     use ava_types::MessageTier;
+    use ava_types::ToolCall;
+    use serde_json::json;
     use std::path::Path;
+
+    fn test_tool_call(name: &str) -> ToolCall {
+        ToolCall {
+            id: format!("call-{name}"),
+            name: name.to_string(),
+            arguments: json!({}),
+        }
+    }
+
+    fn test_inspection(risk_level: RiskLevel, reason: &str) -> InspectionResult {
+        InspectionResult {
+            action: Action::Ask,
+            reason: reason.to_string(),
+            risk_level,
+            tags: Vec::new(),
+            warnings: Vec::new(),
+        }
+    }
+
+    async fn resolve_headless_approval(risk_level: RiskLevel) -> ToolApproval {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        spawn_auto_approve_requests(rx);
+
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        tx.send(ApprovalRequest {
+            run_id: None,
+            call: test_tool_call("bash"),
+            inspection: test_inspection(risk_level, "needs approval"),
+            reply: reply_tx,
+        })
+        .expect("send headless approval request");
+
+        reply_rx.await.expect("receive headless approval decision")
+    }
+
+    #[tokio::test]
+    async fn headless_auto_approves_safe_requests() {
+        assert_eq!(
+            resolve_headless_approval(RiskLevel::Medium).await,
+            ToolApproval::Allowed
+        );
+    }
+
+    #[tokio::test]
+    async fn headless_rejects_dangerous_requests() {
+        let decision = resolve_headless_approval(RiskLevel::High).await;
+
+        assert!(matches!(
+            decision,
+            ToolApproval::Rejected(Some(reason))
+                if reason.contains("Headless mode rejected dangerous action")
+                    && reason.contains("risk: High")
+        ));
+    }
+
+    #[tokio::test]
+    async fn headless_keeps_critical_requests_blocked() {
+        let decision = resolve_headless_approval(RiskLevel::Critical).await;
+
+        assert!(matches!(
+            decision,
+            ToolApproval::Rejected(Some(reason))
+                if reason.contains("Headless mode rejected dangerous action")
+                    && reason.contains("risk: Critical")
+        ));
+    }
 
     #[test]
     fn watcher_detects_comment_directive_lines() {

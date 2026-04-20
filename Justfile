@@ -91,6 +91,22 @@ bench-cli-shootout *ARGS:
 smoke:
     cargo run --bin ava -- "Reply with SMOKE_OK" --headless --provider openai --model gpt-5.4 --max-turns 2 --auto-approve
 
+# Run the backend automation gate (no-secrets required, live-provider optional)
+backend-gate:
+    bash scripts/testing/backend-automation-gate.sh
+
+# Run the local V1 preflight aggregate sequence (not wired to CI/hooks)
+v1-gate:
+     bash scripts/testing/verify-v1.sh
+
+# Run benchmark-backed headless V1 signoff (authoritative V1-evals proof path)
+v1-signoff:
+     bash scripts/testing/signoff-v1-headless.sh
+
+# Run focused regression coverage for V1 signoff branch logic
+v1-signoff-regression:
+     bash scripts/testing/signoff-v1-regression.sh
+
 # Install AVA locally
 install:
     cargo install --path crates/ava-tui --bin ava

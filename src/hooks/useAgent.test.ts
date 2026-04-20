@@ -659,6 +659,125 @@ describe('useAgent session attachment', () => {
     ctx.dispose()
   })
 
+  it('replaces stale cached pending approval and plan with authoritative rehydrate state', async () => {
+    const ctx = createRoot((dispose) => ({ agent: useAgent(), dispose }))
+    await flushEffects()
+
+    h.setRunId('web-run-session-1')
+    h.setTrackedRunSessionId('session-1')
+    h.setIsRunning(true)
+    h.emit({
+      type: 'approval_request',
+      id: 'approval-stale',
+      tool_call_id: 'call-stale',
+      tool_name: 'bash',
+      args: { command: 'pwd' },
+      risk_level: 'low',
+      reason: 'read cwd',
+      warnings: [],
+      run_id: 'web-run-session-1',
+    })
+    h.emit({
+      type: 'plan_created',
+      id: 'plan-stale',
+      run_id: 'web-run-session-1',
+      plan: {
+        summary: 'Old plan',
+        steps: [
+          {
+            id: 'step-1',
+            description: 'Do stale thing',
+            files: ['src/stale.ts'],
+            action: 'implement',
+            dependsOn: [],
+          },
+        ],
+        estimatedTurns: 1,
+      },
+    })
+    await flushEffects()
+
+    h.setSessionId('session-2')
+    await flushEffects()
+
+    h.rehydrateStatus.mockClear()
+    h.rehydrateStatus.mockImplementationOnce(async (sessionId?: string | null) => ({
+      sessionId: sessionId ?? null,
+      running: true,
+      runId: 'web-run-session-1',
+      pendingApproval: null,
+      pendingQuestion: null,
+      pendingPlan: null,
+    }))
+
+    h.setSessionId('session-1')
+    await flushEffects()
+
+    expect(ctx.agent.isRunning()).toBe(true)
+    expect(ctx.agent.currentRunId()).toBe('web-run-session-1')
+    expect(ctx.agent.pendingApproval()).toBeNull()
+    expect(ctx.agent.pendingPlan()).toBeNull()
+
+    ctx.dispose()
+  })
+
+  it('keeps hidden interactive approval/question/plan requests out of the visible session', async () => {
+    const ctx = createRoot((dispose) => ({ agent: useAgent(), dispose }))
+    await flushEffects()
+
+    h.setRunId('web-run-hidden')
+    h.setTrackedRunSessionId('session-1')
+    h.setIsRunning(true)
+
+    h.setSessionId('session-2')
+    await flushEffects()
+
+    h.emit({
+      type: 'approval_request',
+      id: 'approval-hidden',
+      tool_call_id: 'call-hidden',
+      tool_name: 'bash',
+      args: { command: 'pwd' },
+      risk_level: 'low',
+      reason: 'read cwd',
+      warnings: [],
+      run_id: 'web-run-hidden',
+    })
+    h.emit({
+      type: 'question_request',
+      id: 'question-hidden',
+      question: 'Continue hidden run?',
+      options: ['Yes', 'No'],
+      run_id: 'web-run-hidden',
+    })
+    h.emit({
+      type: 'plan_created',
+      id: 'plan-hidden',
+      run_id: 'web-run-hidden',
+      plan: {
+        summary: 'Hidden plan',
+        steps: [
+          {
+            id: 'step-hidden',
+            description: 'Do hidden thing',
+            files: ['src/hidden.ts'],
+            action: 'implement',
+            dependsOn: [],
+          },
+        ],
+        estimatedTurns: 1,
+      },
+    })
+    await flushEffects()
+
+    expect(ctx.agent.pendingApproval()).toBeNull()
+    expect(ctx.agent.pendingQuestion()).toBeNull()
+    expect(ctx.agent.pendingPlan()).toBeNull()
+    expect(ctx.agent.eventTimeline()).toEqual([])
+
+    ctx.dispose()
+  })
+
   it('keeps hidden run progression and completion out of the visible session', async () => {
     const ctx = createRoot((dispose) => ({ agent: useAgent(), dispose }))
     await flushEffects()

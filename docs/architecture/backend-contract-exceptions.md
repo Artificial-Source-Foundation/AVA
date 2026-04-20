@@ -2,7 +2,7 @@
 title: "Backend Contract Exceptions"
 description: "Versioned registry of intentional adapter-specific exceptions to the canonical shared-backend contract."
 order: 11
-updated: "2026-04-16"
+updated: "2026-04-19"
 ---
 
 # Backend Contract Exceptions
@@ -34,9 +34,10 @@ Rules:
 - Impacted adapters: headless CLI
 - Rationale: headless is a scoped non-interactive execution path and cannot rely on live user prompts.
 - Current behavior:
-  - tool approvals auto-resolve through the headless auto-approve path
+  - tool approvals may auto-resolve only for non-dangerous approval requests
+  - dangerous approval-requiring actions are rejected/fail closed instead of waiting for interactive approval
   - interactive question/plan UX parity is not required
-- Risk: unattended runs may diverge from interactive policy UX if this path expands beyond the documented scope.
+- Risk: unattended runs still diverge from interactive approval UX, but the exception is now bounded to non-dangerous auto-resolution rather than blanket approval.
 - Owner: backend contract owner
 - Expiry/removal trigger: replace current headless-specific bypasses with a fully contract-owned non-interactive policy module, or explicitly ratify the long-term headless policy in a later contract revision.
 - Required tests:
@@ -60,3 +61,21 @@ Rules:
   - command-contract fixture marks canonical mode and explicit desktop exception
   - desktop/Tauri wrapper timing tests assert current completion-bound behavior remains intentional until exception removal
   - cross-surface conformance test guards web accepted-and-streaming behavior for the same command family
+
+### EX-003 Manual `/compact` remains adapter-local and does not consume per-run run-context metadata
+
+- Contract area: compaction invocation semantics and per-run context reuse
+- Impacted adapters: interactive TUI, headless CLI slash-command path
+- Rationale: desktop and web submit/replay flows now reuse the same persisted per-run thinking/model/auto-compaction context shape, but manual `/compact` in TUI/headless still runs a local heuristic compaction path rather than reusing persisted `runContext` metadata or adapter submit/replay semantics.
+- Current behavior:
+  - per-run `submit_goal` options (`thinkingLevel`, provider/model override, `autoCompact`, compaction threshold/model override) now flow through desktop and web run-start paths
+  - desktop and web replay flows now rehydrate the session's persisted `runContext` metadata before launching retry/edit/regenerate runs
+  - manual `/compact` in TUI/headless remains a separate adapter-local command based on local message condensation
+  - manual `/compact` does not currently rehydrate/apply the session's last persisted per-run compaction model override or auto-compaction threshold metadata
+- Risk: users can reasonably assume a manual `/compact` command will use the same compaction model/settings as the run that created the session, but today that assumption is only valid for submit-triggered auto-compaction, not the manual slash command.
+- Owner: backend contract owner + TUI/headless runtime owner
+- Expiry/removal trigger: move manual `/compact` behind a shared backend-owned compaction invocation contract that can consume persisted run-context metadata (or explicitly redesign the command surface and document the long-term split as canonical instead of exceptional).
+- Required tests:
+  - focused web/desktop submit parity regressions proving per-run context is honored on run start
+  - focused web replay regressions proving retry/edit/regenerate reuse persisted `runContext` metadata
+  - TUI/headless slash-command tests that keep the current adapter-local `/compact` behavior explicit until the exception is removed

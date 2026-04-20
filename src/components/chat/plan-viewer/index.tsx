@@ -14,6 +14,7 @@
 
 import { type Component, createEffect, createSignal, onCleanup, Show } from 'solid-js'
 import { useAgent } from '../../../hooks/useAgent'
+import { apiFetch } from '../../../lib/api-client'
 import { usePlanOverlay } from '../../../stores/planOverlayStore'
 import type { PlanSummary } from '../../../types/rust-ipc'
 import { AnnotationsPanel } from './AnnotationsPanel'
@@ -72,7 +73,7 @@ export const PlanOverlay: Component = () => {
   // Fetch plan history when overlay opens
   createEffect(() => {
     if (isOpen()) {
-      fetch('/api/plans')
+      apiFetch('/api/plans')
         .then((r) => r.json())
         .then((plans: PlanSummary[]) => setPlanHistory(plans))
         .catch(() => {})
@@ -169,7 +170,7 @@ export const PlanOverlay: Component = () => {
   // ─── Helpers ──────────────────────────────────────────────────────
 
   const loadPlanFromHistory = (filename: string): void => {
-    fetch(`/api/plans/${encodeURIComponent(filename)}`)
+    apiFetch(`/api/plans/${encodeURIComponent(filename)}`)
       .then((r) => {
         if (!r.ok) throw new Error('Not found')
         return r.text()

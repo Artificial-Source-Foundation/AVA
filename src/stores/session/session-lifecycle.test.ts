@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { STORAGE_KEYS } from '../../config/constants'
-import type { Session, SessionWithStats } from '../../types'
+import type { Message, Session, SessionWithStats } from '../../types'
 
 let isTauriRuntime = false
 const notifySessionOpenedMock = vi.fn()
@@ -20,6 +20,8 @@ const getMemoryItemsMock = vi.fn()
 const getCheckpointsMock = vi.fn()
 const insertMessagesMock = vi.fn()
 const loadSessionMock = vi.fn()
+const setLastSessionForProjectMock =
+  vi.fn<(projectId: string | null | undefined, sessionId: string) => void>()
 const cancelMock = vi.fn().mockResolvedValue(undefined)
 const statusMock = vi.fn().mockResolvedValue({ running: false, provider: 'openai', model: 'gpt-5' })
 let mockProject = {
@@ -30,6 +32,7 @@ let mockProject = {
   updatedAt: 0,
   lastOpenedAt: 0,
 }
+let mockProjects = [mockProject]
 
 vi.mock('@tauri-apps/api/core', () => ({
   isTauri: () => isTauriRuntime,
@@ -56,7 +59,7 @@ vi.mock('../../services/core-bridge', () => ({
     clearSessionNeedsAuthoritativeRecoveryMock(sessionId),
   markSessionNeedsAuthoritativeRecovery: (sessionId: string) =>
     markSessionNeedsAuthoritativeRecoveryMock(sessionId),
-  notifySessionOpened: (sessionId: string, cwd: string, snapshot?: unknown) =>
+  notifySessionOpened: (sessionId: string, cwd?: string, snapshot?: unknown) =>
     notifySessionOpenedMock(sessionId, cwd, snapshot),
 }))
 
@@ -102,12 +105,14 @@ vi.mock('../../services/web-session-identity', () => ({
 vi.mock('../project', () => ({
   useProject: () => ({
     currentProject: () => mockProject,
+    projects: () => mockProjects,
   }),
 }))
 
 vi.mock('../session-persistence', () => ({
   getLastSessionForProject: vi.fn(),
-  setLastSessionForProject: vi.fn(),
+  setLastSessionForProject: (projectId: string | null | undefined, sessionId: string) =>
+    setLastSessionForProjectMock(projectId, sessionId),
 }))
 
 import { clearSessionArtifactCache } from './session-artifact-cache'
@@ -115,12 +120,14 @@ import {
   archiveSession,
   createNewSession,
   deleteSessionPermanently,
+  getSessionTree,
   restoreForCurrentProject,
   switchSession,
 } from './session-lifecycle'
 import { replaceMessagesFromBackendForSession, updateMessageInSession } from './session-messages'
 import {
   agents,
+  archivedSessions,
   currentSession,
   fileOperations,
   messages,
@@ -208,6 +215,7 @@ describe('session removal fallback rebinding', () => {
       updatedAt: 0,
       lastOpenedAt: 0,
     }
+    mockProjects = [mockProject]
 
     getMessagesMock.mockResolvedValue([])
     getAgentsMock.mockResolvedValue([])
@@ -223,6 +231,65 @@ describe('session removal fallback rebinding', () => {
     markSessionNeedsAuthoritativeRecoveryMock.mockReset()
     statusMock.mockResolvedValue({ running: false, provider: 'openai', model: 'gpt-5' })
     loadSessionMock.mockResolvedValue({ messages: [] })
+  })
+
+  it('groups sessions into roots and children by parentSessionId', () => {
+    const rootA = makeSessionWithStats('root-a', 'Root A')
+    const rootB = makeSessionWithStats('root-b', 'Root B')
+    const rootChildOne = {
+      ...makeSessionWithStats('root-a-child-1', 'Root A Child 1'),
+      parentSessionId: rootA.id,
+    }
+    const rootChildTwo = {
+      ...makeSessionWithStats('root-a-child-2', 'Root A Child 2'),
+      parentSessionId: rootA.id,
+    }
+    const orphanedChild = {
+      ...makeSessionWithStats('root-b-child', 'Root B Child'),
+      parentSessionId: rootB.id,
+    }
+
+    setSessions([rootA, rootB, rootChildTwo, rootChildOne, orphanedChild])
+
+    const { roots, childMap } = getSessionTree()
+
+    expect(roots.map((session) => session.id)).toEqual([rootA.id, rootB.id])
+    expect(childMap.get(rootA.id)?.map((session) => session.id)).toEqual([
+      rootChildTwo.id,
+      rootChildOne.id,
+    ])
+    expect(childMap.get(rootB.id)?.map((session) => session.id)).toEqual([orphanedChild.id])
+  })
+
+  it('recomputes session tree for fresh session snapshots', () => {
+    const firstRoot = makeSessionWithStats('first-root', 'First Root')
+    const firstChild = {
+      ...makeSessionWithStats('shared-child', 'Shared Child 1'),
+      parentSessionId: firstRoot.id,
+    }
+
+    setSessions([firstRoot, firstChild])
+
+    const initialTree = getSessionTree()
+    expect(initialTree.roots.map((session) => session.id)).toEqual([firstRoot.id])
+    expect(initialTree.childMap.get(firstRoot.id)?.map((session) => session.id)).toEqual([
+      firstChild.id,
+    ])
+
+    const secondRoot = makeSessionWithStats('second-root', 'Second Root')
+    const secondChild = {
+      ...makeSessionWithStats('shared-child', 'Shared Child 2'),
+      parentSessionId: secondRoot.id,
+    }
+
+    setSessions([secondRoot, secondChild])
+
+    const refreshedTree = getSessionTree()
+    expect(refreshedTree.roots.map((session) => session.id)).toEqual([secondRoot.id])
+    expect(refreshedTree.childMap.get(secondRoot.id)?.map((session) => session.id)).toEqual([
+      secondChild.id,
+    ])
+    expect(refreshedTree.childMap.has(firstRoot.id)).toBe(false)
   })
 
   afterEach(() => {
@@ -304,6 +371,26 @@ describe('session removal fallback rebinding', () => {
     expect(currentSession()?.id).toBe(replacement.id)
   })
 
+  it('removes deleted archived sessions from archived client state', async () => {
+    const archived = {
+      ...makeSessionWithStats('session-archived-delete', 'Archived delete target'),
+      status: 'archived' as const,
+    }
+    const survivor = {
+      ...makeSessionWithStats('session-archived-keep', 'Archived survivor'),
+      status: 'archived' as const,
+    }
+
+    setSessions([makeSessionWithStats('session-active', 'Active session')])
+    setArchivedSessions([archived, survivor])
+
+    await deleteSessionPermanently(archived.id)
+
+    expect(dbDeleteSessionMock).toHaveBeenCalledWith(archived.id)
+    expect(archivedSessions().map((session) => session.id)).toEqual([survivor.id])
+    expect(unregisterBackendSessionIdMock).toHaveBeenCalledWith(archived.id)
+  })
+
   it('rebinds the desktop backend when deleting the last active session creates a replacement', async () => {
     const deleted = makeSession('session-1', 'Deleted session')
     const replacement = makeSession('session-3', 'New session')
@@ -373,7 +460,7 @@ describe('session removal fallback rebinding', () => {
     expect(sessions().map((session) => session.id)).toEqual([replacement.id])
     expect(notifySessionOpenedMock).toHaveBeenCalledWith(
       replacement.id,
-      '/other-workspace',
+      '/workspace',
       expect.objectContaining({ title: replacement.name, messages: [] })
     )
   })
@@ -410,6 +497,16 @@ describe('session removal fallback rebinding', () => {
 
   it('passes restored session messages into desktop backend sync when switching sessions', async () => {
     const target = makeSessionWithStats('session-10', 'Recovered session')
+    const toolCalls = [
+      {
+        id: 'tool-call-1',
+        name: 'bash',
+        args: { command: 'pwd' },
+        status: 'success' as const,
+        output: '/workspace',
+        startedAt: 1_762_806_001_500,
+      },
+    ]
     const userMessage = {
       id: '00000000-0000-0000-0000-000000000001',
       sessionId: target.id,
@@ -424,15 +521,33 @@ describe('session removal fallback rebinding', () => {
       role: 'assistant' as const,
       content: 'restored reply',
       createdAt: 1_762_806_001_000,
+      toolCalls,
+      metadata: {
+        toolCalls: [
+          { id: 'stale-tool', name: 'read', args: { path: 'ignored' }, status: 'success' },
+        ],
+        agentVisible: false,
+      },
+    }
+    const toolMessage: Message = {
+      id: '00000000-0000-0000-0000-000000000003',
+      sessionId: target.id,
+      role: 'tool',
+      content: '/workspace',
+      createdAt: 1_762_806_002_000,
+      metadata: {
+        toolCallId: 'tool-call-1',
+        userVisible: false,
+      },
     }
 
     notifySessionOpenedMock.mockResolvedValue({
       sessionId: target.id,
       exists: true,
-      messageCount: 2,
+      messageCount: 3,
     })
     setSessions([target])
-    getMessagesMock.mockResolvedValueOnce([userMessage, assistantMessage])
+    getMessagesMock.mockResolvedValueOnce([userMessage, assistantMessage, toolMessage])
 
     await switchSession(target.id)
 
@@ -451,6 +566,20 @@ describe('session removal fallback rebinding', () => {
           role: assistantMessage.role,
           content: assistantMessage.content,
           createdAt: assistantMessage.createdAt,
+          metadata: {
+            agentVisible: false,
+            toolCalls,
+          },
+        },
+        {
+          id: toolMessage.id,
+          role: 'tool',
+          content: toolMessage.content,
+          createdAt: toolMessage.createdAt,
+          metadata: {
+            toolCallId: 'tool-call-1',
+            userVisible: false,
+          },
         },
       ],
     })
@@ -575,6 +704,133 @@ describe('session removal fallback rebinding', () => {
     expect(messages()).toEqual([authoritativeMessage])
   })
 
+  it('ignores a stale late load when a newer overlapping session switch wins', async () => {
+    const sessionOne = makeSessionWithStats('session-1', 'First session')
+    const sessionTwo = makeSessionWithStats('session-2', 'Second session')
+    const sessionThree = makeSessionWithStats('session-3', 'Third session')
+    const olderMessage = {
+      id: 'older-message',
+      sessionId: sessionTwo.id,
+      role: 'assistant' as const,
+      content: 'older session reply',
+      createdAt: 10,
+    }
+    const newerMessage = {
+      id: 'newer-message',
+      sessionId: sessionThree.id,
+      role: 'assistant' as const,
+      content: 'newer session reply',
+      createdAt: 11,
+    }
+    const olderDeferred = createDeferred<Array<typeof olderMessage>>()
+    const newerDeferred = createDeferred<Array<typeof newerMessage>>()
+
+    notifySessionOpenedMock.mockResolvedValue({
+      sessionId: sessionThree.id,
+      exists: true,
+      messageCount: 1,
+    })
+    setSessions([sessionOne, sessionTwo, sessionThree])
+    setCurrentSession(sessionOne)
+    setMessages([
+      {
+        id: 'session-one-message',
+        sessionId: sessionOne.id,
+        role: 'assistant' as const,
+        content: 'first session reply',
+        createdAt: 9,
+      },
+    ])
+    localStorage.setItem(STORAGE_KEYS.LAST_SESSION, sessionOne.id)
+
+    getMessagesMock
+      .mockImplementationOnce(() => olderDeferred.promise)
+      .mockImplementationOnce(() => newerDeferred.promise)
+
+    const olderSwitchPromise = switchSession(sessionTwo.id)
+    const newerSwitchPromise = switchSession(sessionThree.id)
+
+    expect(currentSession()?.id).toBe(sessionThree.id)
+
+    newerDeferred.resolve([newerMessage])
+    await newerSwitchPromise
+
+    expect(currentSession()?.id).toBe(sessionThree.id)
+    expect(messages()).toEqual([newerMessage])
+    expect(localStorage.getItem(STORAGE_KEYS.LAST_SESSION)).toBe(sessionThree.id)
+
+    olderDeferred.resolve([olderMessage])
+    await olderSwitchPromise
+
+    expect(currentSession()?.id).toBe(sessionThree.id)
+    expect(messages()).toEqual([newerMessage])
+    expect(localStorage.getItem(STORAGE_KEYS.LAST_SESSION)).toBe(sessionThree.id)
+    expect(notifySessionOpenedMock).toHaveBeenCalledTimes(1)
+    expect(notifySessionOpenedMock).toHaveBeenCalledWith(
+      sessionThree.id,
+      '/workspace',
+      expect.objectContaining({
+        title: sessionThree.name,
+        messages: expect.arrayContaining([
+          expect.objectContaining({ id: newerMessage.id, content: newerMessage.content }),
+        ]),
+      })
+    )
+  })
+
+  it('persists last-session under the target project even if current project changes mid-switch', async () => {
+    const source = makeSessionWithStats('session-source', 'Source session', 'project-1')
+    const target = makeSessionWithStats('session-target', 'Target session', 'project-1')
+    const deferredMessages =
+      createDeferred<
+        Array<{
+          id: string
+          sessionId: string
+          role: 'assistant'
+          content: string
+          createdAt: number
+        }>
+      >()
+
+    setSessions([source, target])
+    setCurrentSession(source)
+    notifySessionOpenedMock.mockResolvedValue({
+      sessionId: target.id,
+      exists: true,
+      messageCount: 1,
+    })
+    getMessagesMock.mockImplementationOnce(() => deferredMessages.promise)
+
+    const switchPromise = switchSession(target.id)
+
+    mockProject = {
+      ...mockProject,
+      id: 'project-2',
+      directory: '/workspace-2',
+      name: 'Workspace 2',
+    }
+
+    deferredMessages.resolve([
+      {
+        id: 'target-message',
+        sessionId: target.id,
+        role: 'assistant',
+        content: 'loaded after context change',
+        createdAt: 1,
+      },
+    ])
+
+    await switchPromise
+
+    expect(setLastSessionForProjectMock).toHaveBeenCalledWith('project-1', target.id)
+    expect(setLastSessionForProjectMock).not.toHaveBeenCalledWith('project-2', target.id)
+    expect(notifySessionOpenedMock).toHaveBeenCalledWith(
+      target.id,
+      '/workspace',
+      expect.objectContaining({ title: target.name })
+    )
+  })
+
   it('restores cached non-message artifacts immediately and corrects them from storage', async () => {
     const sessionOne = makeSessionWithStats('session-1', 'First session')
     const sessionTwo = makeSessionWithStats('session-2', 'Second session')
@@ -637,6 +893,88 @@ describe('session removal fallback rebinding', () => {
 
     expect(agents()).toEqual([refreshedAgent])
     expect(fileOperations()).toEqual([refreshedFileOperation])
+  })
+
+  it('uses the target session project cwd when switching to a non-current-project session', async () => {
+    const source = makeSessionWithStats('session-source', 'Source session', 'project-1')
+    const target = makeSessionWithStats('session-target', 'Target session', 'project-2')
+
+    mockProjects = [
+      mockProject,
+      {
+        id: 'project-2',
+        name: 'Workspace 2',
+        directory: '/workspace-2',
+        createdAt: 0,
+        updatedAt: 0,
+        lastOpenedAt: 0,
+      },
+    ]
+
+    setSessions([source, target])
+    setCurrentSession(source)
+    getMessagesMock.mockResolvedValueOnce([])
+    notifySessionOpenedMock.mockResolvedValue({
+      sessionId: target.id,
+      exists: true,
+      messageCount: 0,
+    })
+
+    await switchSession(target.id)
+
+    expect(notifySessionOpenedMock).toHaveBeenCalledWith(
+      target.id,
+      '/workspace-2',
+      expect.objectContaining({ title: target.name, messages: [] })
+    )
+  })
+
+  it('does not fall back to the ambient project cwd when switching to an unbound session', async () => {
+    const source = makeSessionWithStats('session-source', 'Source session', 'project-1')
+    const target = {
+      ...makeSessionWithStats('session-target', 'Target session'),
+      projectId: undefined,
+    }
+
+    setSessions([source, target])
+    setCurrentSession(source)
+    getMessagesMock.mockResolvedValueOnce([])
+    notifySessionOpenedMock.mockResolvedValue({
+      sessionId: target.id,
+      exists: true,
+      messageCount: 0,
+    })
+
+    await switchSession(target.id)
+
+    expect(notifySessionOpenedMock).toHaveBeenCalledWith(
+      target.id,
+      undefined,
+      expect.objectContaining({ title: target.name, messages: [] })
+    )
+  })
+
+  it('marks missing project resolution explicitly when switching to a previously bound session', async () => {
+    const source = makeSessionWithStats('session-source', 'Source session', 'project-1')
+    const target = makeSessionWithStats('session-target', 'Target session', 'project-missing')
+
+    mockProjects = [mockProject]
+    setSessions([source, target])
+    setCurrentSession(source)
+    getMessagesMock.mockResolvedValueOnce([])
+    notifySessionOpenedMock.mockResolvedValue({
+      sessionId: target.id,
+      exists: true,
+      messageCount: 0,
+    })
+
+    await switchSession(target.id)
+
+    expect(notifySessionOpenedMock).toHaveBeenCalledWith(
+      target.id,
+      '',
+      expect.objectContaining({ title: target.name, messages: [] })
+    )
   })
 
   it('caches the active session before creating a new chat so hidden web completions survive switch-back', async () => {
@@ -724,7 +1062,7 @@ describe('session removal fallback rebinding', () => {
     notifySessionOpenedMock.mockResolvedValue({
       sessionId: target.id,
       exists: true,
-      messageCount: 2,
+      messageCount: 3,
     })
     sessionNeedsAuthoritativeRecoveryMock.mockReturnValueOnce(true)
     loadSessionMock.mockResolvedValue({
@@ -741,6 +1079,7 @@ describe('session removal fallback rebinding', () => {
           role: 'Assistant',
           content: 'authoritative final answer',
           timestamp: '2026-04-17T10:00:10Z',
+          agent_visible: false,
           tool_calls: [
             {
               id: 'tool-rich-1',
@@ -749,6 +1088,14 @@ describe('session removal fallback rebinding', () => {
               status: 'success',
             },
           ],
+        },
+        {
+          id: 'backend-tool-final',
+          role: 'Tool',
+          content: '/workspace',
+          timestamp: '2026-04-17T10:00:11Z',
+          tool_call_id: 'tool-rich-1',
+          user_visible: false,
         },
       ],
       metadata: {},
@@ -775,12 +1122,20 @@ describe('session removal fallback rebinding', () => {
         role: 'assistant',
         content: 'authoritative final answer',
       }),
+      expect.objectContaining({
+        id: 'backend-tool-final',
+        sessionId: target.id,
+        role: 'tool',
+        content: '/workspace',
+        metadata: expect.objectContaining({ toolCallId: 'tool-rich-1', userVisible: false }),
+      }),
     ])
     expect(currentSession()?.id).toBe(target.id)
-    expect(sessions().find((session) => session.id === target.id)?.messageCount).toBe(2)
+    expect(sessions().find((session) => session.id === target.id)?.messageCount).toBe(3)
     expect(messages().map((message) => message.content)).toEqual([
       'finish the task',
       'authoritative final answer',
+      '/workspace',
     ])
     expect(messages()[1]?.toolCalls).toEqual([
       expect.objectContaining({
@@ -793,6 +1148,20 @@ describe('session removal fallback rebinding', () => {
         contentOffset: 42,
       }),
     ])
+    expect(messages()[1]?.metadata).toEqual(
+      expect.objectContaining({
+        agentVisible: false,
+        toolCalls: [expect.objectContaining({ id: 'tool-rich-1', name: 'bash' })],
+      })
+    )
+    expect(messages()[2]).toEqual(
+      expect.objectContaining({
+        id: 'backend-tool-final',
+        role: 'tool',
+        content: '/workspace',
+        metadata: expect.objectContaining({ toolCallId: 'tool-rich-1', userVisible: false }),
+      })
+    )
   })
 
   it('keeps detached recovery pending when reopening a desktop session before the backend run finishes', async () => {
@@ -982,6 +1351,100 @@ describe('session removal fallback rebinding', () => {
     expect(dbCreateSessionMock).toHaveBeenCalledWith('Another session', 'project-1')
     expect(result.id).toBe(created.id)
     expect(currentSession()?.id).toBe(created.id)
+  })
+
+  it('uses override project metadata for createNewSession project-scoped effects', async () => {
+    const existing = makeSession('session-active', 'Active', 'project-1')
+    const created = makeSession('session-created', 'Override session', 'project-2')
+
+    mockProject = {
+      id: 'project-1',
+      name: 'Workspace 1',
+      directory: '/workspace-1',
+      createdAt: 0,
+      updatedAt: 0,
+      lastOpenedAt: 0,
+    }
+    mockProjects = [
+      mockProject,
+      {
+        id: 'project-2',
+        name: 'Workspace 2',
+        directory: '/workspace-2',
+        createdAt: 0,
+        updatedAt: 0,
+        lastOpenedAt: 0,
+      },
+    ]
+
+    setCurrentSession(existing)
+    setSessions([makeSessionWithStats(existing.id, existing.name, existing.projectId)])
+    dbCreateSessionMock.mockResolvedValue(created)
+    notifySessionOpenedMock.mockResolvedValue({
+      sessionId: created.id,
+      exists: true,
+      messageCount: 0,
+    })
+
+    await createNewSession('Override session', 'project-2')
+
+    expect(dbCreateSessionMock).toHaveBeenCalledWith('Override session', 'project-2')
+    expect(setLastSessionForProjectMock).toHaveBeenCalledWith('project-2', created.id)
+    expect(notifySessionOpenedMock).toHaveBeenCalledWith(
+      created.id,
+      '/workspace-2',
+      expect.objectContaining({ title: created.name, messages: [] })
+    )
+  })
+
+  it('uses captured project cwd when notifying createNewSession after mid-flight project change', async () => {
+    const created = makeSession('session-created', 'Another session')
+    const deferredCreate = createDeferred<Session>()
+
+    dbCreateSessionMock.mockImplementationOnce(() => deferredCreate.promise)
+    notifySessionOpenedMock.mockResolvedValue({
+      sessionId: created.id,
+      exists: true,
+      messageCount: 0,
+    })
+
+    const createPromise = createNewSession('Another session')
+
+    mockProject = {
+      ...mockProject,
+      id: 'project-2',
+      directory: '/workspace-2',
+      name: 'Workspace 2',
+    }
+
+    deferredCreate.resolve(created)
+    await createPromise
+
+    expect(notifySessionOpenedMock).toHaveBeenCalledWith(
+      created.id,
+      '/workspace',
+      expect.objectContaining({ title: created.name, messages: [] })
+    )
+  })
+
+  it('does not fall back to the ambient project cwd when a created session is unbound', async () => {
+    const created = { ...makeSession('session-created', 'Detached session'), projectId: undefined }
+
+    dbCreateSessionMock.mockResolvedValue(created)
+    notifySessionOpenedMock.mockResolvedValue({
+      sessionId: created.id,
+      exists: true,
+      messageCount: 0,
+    })
+
+    await createNewSession('Detached session')
+
+    expect(notifySessionOpenedMock).toHaveBeenCalledWith(
+      created.id,
+      undefined,
+      expect.objectContaining({ title: created.name, messages: [] })
+    )
+    expect(setLastSessionForProjectMock).toHaveBeenCalledWith(undefined, created.id)
   })
 
   it('reuses the current empty untitled session instead of creating duplicates', async () => {

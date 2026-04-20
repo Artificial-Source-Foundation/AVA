@@ -21,5 +21,9 @@ Repository scripts are grouped by purpose instead of collecting at the root of `
 - `scripts/benchmarks/release-benchmark.sh` — release binary benchmark checks.
 - `scripts/testing/git-hooks-regression.sh` — regression coverage for staged/pre-push hook routing.
 - `scripts/testing/verify-mvp.sh` — MVP readiness test pass.
+- `scripts/testing/verify-v1.sh` — local V1 preflight aggregate (`just check` -> `pnpm verify:mvp` -> `just backend-gate` -> deterministic Playwright parity coverage for `e2e/app.spec.ts` + `e2e/web-mode.spec.ts`). This intentionally covers currently wired checks only and does not include full V1 signoff.
+- `scripts/testing/signoff-v1-headless.sh` — benchmark-backed headless V1 signoff entrypoint (authoritative V1-evals proof path) that runs the repo-owned required-now task slice from `docs/project/v1-evals.md` and enforces strict pass/fail from the benchmark JSON report.
+- `scripts/testing/signoff-v1-regression.sh` — focused regression coverage for signoff branch logic (provider/model auth gating plus report-enforcement pass/fail).
 - `scripts/testing/claude-code-integration.sh` — manual Claude Code integration verification.
 - `scripts/testing/rust-migration-smoke.sh` — legacy CLI smoke regression.
+- `scripts/testing/backend-automation-gate.sh` — mandatory no-secrets backend gate with optional live-provider checks.

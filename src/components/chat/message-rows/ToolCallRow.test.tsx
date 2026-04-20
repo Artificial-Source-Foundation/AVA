@@ -43,7 +43,7 @@ describe('ToolCallRow', () => {
   })
 
   describe('accessibility - interactive attributes', () => {
-    it('has role="button" and tabIndex when tool has output (expandable)', async () => {
+    it('uses a native enabled button when tool has output (expandable)', async () => {
       container = document.createElement('div')
       document.body.appendChild(container)
 
@@ -61,14 +61,14 @@ describe('ToolCallRow', () => {
       render(() => <ToolCallRow toolCall={toolCall} />, container)
       await flush()
 
-      const header = container.querySelector('[role="button"]')
+      const header = container.querySelector('button.tool-card-header')
       expect(header).not.toBeNull()
-      expect(header?.getAttribute('tabIndex')).toBe('0')
+      expect((header as HTMLButtonElement | null)?.disabled).toBe(false)
       // Should be collapsed initially (output > AUTO_EXPAND_LINE_THRESHOLD lines)
       expect(header?.getAttribute('aria-expanded')).toBe('false')
     })
 
-    it('has NO role="button" or tabIndex when tool has no output (not expandable)', async () => {
+    it('disables the native button when tool has no output (not expandable)', async () => {
       container = document.createElement('div')
       document.body.appendChild(container)
 
@@ -84,9 +84,8 @@ describe('ToolCallRow', () => {
       render(() => <ToolCallRow toolCall={toolCall} />, container)
       await flush()
 
-      const header = container.querySelector('.tool-card-header')
-      expect(header?.getAttribute('role')).toBeNull()
-      expect(header?.getAttribute('tabIndex')).toBeNull()
+      const header = container.querySelector('button.tool-card-header') as HTMLButtonElement | null
+      expect(header?.disabled).toBe(true)
       expect(header?.getAttribute('aria-expanded')).toBeNull()
     })
 
@@ -108,8 +107,9 @@ describe('ToolCallRow', () => {
       await flush()
 
       // When there's an error, it should be expandable (to show the error)
-      const header = container.querySelector('[role="button"]')
+      const header = container.querySelector('button.tool-card-header')
       expect(header).not.toBeNull()
+      expect((header as HTMLButtonElement | null)?.disabled).toBe(false)
     })
 
     it('has visible focus styles when expandable (cursor-pointer class)', async () => {

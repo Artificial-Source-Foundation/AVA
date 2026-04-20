@@ -35,10 +35,9 @@ import {
   type EnvKeyDetectionResult,
   loadSharedSettingsFromCore as loadSharedFromCoreImpl,
   pushSettingsToCore as pushSettingsToCoreImpl,
-  saveSettings,
   syncAllApiKeys as syncAllApiKeysImpl,
 } from './settings-persistence'
-import { setSettingsRaw, settings, updateSettings } from './settings-signal'
+import { commitSettings, setSettingsRaw, settings, updateSettings } from './settings-signal'
 import type { AppSettings } from './settings-types'
 
 export { resolveMode } from './settings-appearance'
@@ -149,7 +148,7 @@ export async function hydrateSettingsFromFS(): Promise<void> {
   const patch = await loadSharedFromCoreImpl(currentProviders)
   if (!patch) return
 
-  setSettingsRaw((prev) => {
+  commitSettings((prev) => {
     const next = { ...prev }
     // Deep-merge generation sub-object so we don't clobber other generation fields
     if (patch.generation) {
@@ -163,15 +162,13 @@ export async function hydrateSettingsFromFS(): Promise<void> {
     if (patch.providers) {
       next.providers = patch.providers
     }
-    saveSettings(next)
     return next
   })
 }
 
 function resetSettings(): void {
   const fresh = { ...DEFAULT_SETTINGS }
-  setSettingsRaw(fresh)
-  saveSettings(fresh)
+  commitSettings(() => fresh)
 }
 
 // Export Hook
@@ -201,8 +198,7 @@ export function useSettings() {
     exportSettings: () => exportSettingsToFile(settings()),
     importSettings: () =>
       importSettingsFromFile((merged) => {
-        setSettingsRaw(merged)
-        saveSettings(merged)
+        commitSettings(() => merged)
         applyAppearance()
       }),
     exportAgents,

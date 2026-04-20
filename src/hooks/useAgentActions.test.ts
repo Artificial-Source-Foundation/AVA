@@ -1396,7 +1396,8 @@ describe('createAgentActions session sync preflight', () => {
 
     // Verify backend sync was called
     expect(mockFetch).toHaveBeenCalledWith(
-      expect.stringContaining('/api/sessions/backend-session-web/messages')
+      expect.stringContaining('/api/sessions/backend-session-web/messages'),
+      expect.any(Object)
     )
 
     // Verify messages were replaced from backend

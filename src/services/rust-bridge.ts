@@ -274,9 +274,17 @@ export const rustBackend = {
   deleteSession: (id: string): Promise<void> => invokeCommand('delete_session', { id }),
   setActiveSession: (
     id: string,
+    workingDirectory?: string,
     snapshot?: ActiveSessionSyncSnapshot
   ): Promise<ActiveSessionSyncResult> =>
-    invokeCommand('set_active_session', snapshot ? { id, snapshot } : { id }),
+    invokeCommand(
+      'set_active_session',
+      snapshot
+        ? { id, workingDirectory, snapshot }
+        : workingDirectory !== undefined
+          ? { id, workingDirectory }
+          : { id }
+    ),
 
   listModels: (): Promise<ModelInfo[]> => invokeCommand('list_models'),
   getCurrentModel: (): Promise<CurrentModel> => invokeCommand('get_current_model'),

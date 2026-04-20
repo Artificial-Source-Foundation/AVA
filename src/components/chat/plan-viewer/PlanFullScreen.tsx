@@ -25,6 +25,7 @@ import {
   onCleanup,
   Show,
 } from 'solid-js'
+import { apiFetch } from '../../../lib/api-client'
 import { AnnotationsPanel } from './AnnotationsPanel'
 import { AnnotationToolstrip } from './AnnotationToolstrip'
 import { CommentPopover } from './CommentPopover'
@@ -312,7 +313,7 @@ export const PlanFullScreen: Component<PlanFullScreenProps> = (props) => {
   }
 
   const loadPlanFromHistory = (filename: string): void => {
-    fetch(`/api/plans/${encodeURIComponent(filename)}`)
+    apiFetch(`/api/plans/${encodeURIComponent(filename)}`)
       .then((r) => {
         if (!r.ok) throw new Error('Not found')
         return r.text()

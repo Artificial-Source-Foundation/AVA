@@ -26,6 +26,7 @@ import {
 } from '../services/core-bridge'
 import { registerBackendSessionId } from '../services/web-session-identity'
 import type { Message } from '../types'
+import type { ToolIntrospectionImageContext } from '../types/rust-ipc'
 import type { ToolActivity } from './agent'
 import type { QueuedMessage } from './chat/types'
 import type { StreamingOffsets } from './useAgentStreaming'
@@ -100,10 +101,37 @@ export function createAgentRun(deps: RunDeps) {
     runOwnership,
   } = deps
 
+  const mapSubmittedImages = (
+    images?: ToolIntrospectionImageContext[]
+  ): Message['images'] | undefined => {
+    if (!images || images.length === 0) {
+      return undefined
+    }
+
+    return images.map((image) => ({
+      data: image.data,
+      mimeType: image.mediaType,
+    }))
+  }
+
+  const mapQueuedImages = (
+    images?: Message['images']
+  ): ToolIntrospectionImageContext[] | undefined => {
+    if (!images || images.length === 0) {
+      return undefined
+    }
+
+    return images.map((image) => ({
+      data: image.data,
+      mediaType: image.mimeType,
+    }))
+  }
+
   async function run(
     goal: string,
-    config?: { model?: string; provider?: string }
+    config?: { model?: string; provider?: string; images?: ToolIntrospectionImageContext[] }
   ): Promise<unknown> {
+    const submittedImages = mapSubmittedImages(config?.images)
     const activeSessionId = session.currentSession()?.id
     const currentSessionHasActiveRun =
       sessionHasActiveRun?.(activeSessionId ?? null) ??
@@ -113,7 +141,15 @@ export function createAgentRun(deps: RunDeps) {
           null) === (activeSessionId ?? null))
 
     if (currentSessionHasActiveRun) {
-      setMessageQueue((prev) => [...prev, { content: goal, sessionId: activeSessionId }])
+      setMessageQueue((prev) => [
+        ...prev,
+        {
+          content: goal,
+          sessionId: activeSessionId,
+          ...(config?.model ? { model: config.model } : {}),
+          ...(submittedImages ? { images: submittedImages } : {}),
+        },
+      ])
       return null
     }
 
@@ -195,6 +231,12 @@ export function createAgentRun(deps: RunDeps) {
       role: 'user',
       content: goal,
       createdAt: Date.now(),
+      ...(submittedImages
+        ? {
+            images: submittedImages,
+            metadata: { images: submittedImages },
+          }
+        : {}),
     }
     session.addMessage(userMsg)
 
@@ -257,6 +299,7 @@ export function createAgentRun(deps: RunDeps) {
       const result = await rustAgent.run(goal, {
         model: selectedModelId,
         provider: selectedProviderId,
+        ...(config?.images && config.images.length > 0 ? { images: config.images } : {}),
         thinkingLevel,
         sessionId,
         autoCompact: settingsRef.settings().generation.autoCompact,
@@ -555,13 +598,22 @@ export function createAgentRun(deps: RunDeps) {
                   message.sessionId === currentSessionId && message.backendManaged !== true
               ).length - 1,
           })
+          const queuedImages = mapQueuedImages(next.images)
           // In web mode, the backend clears its `running` flag asynchronously
           // after sending the `complete` WebSocket event.  A small delay prevents
           // a 409 "Agent is already running" race when we immediately re-submit.
           if (!isTauri()) {
-            void delay(150).then(() => run(next.content))
+            void delay(150).then(() =>
+              run(next.content, {
+                ...(next.model ? { model: next.model } : {}),
+                ...(queuedImages ? { images: queuedImages } : {}),
+              })
+            )
           } else {
-            void run(next.content)
+            void run(next.content, {
+              ...(next.model ? { model: next.model } : {}),
+              ...(queuedImages ? { images: queuedImages } : {}),
+            })
           }
         } else {
           setMessageQueue((prev) =>

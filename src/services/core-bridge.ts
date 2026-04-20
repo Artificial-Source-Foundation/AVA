@@ -14,6 +14,7 @@ let _budget: ContextBudget | null = null
 let _cleanup: (() => void) | null = null
 let _activeSessionSyncPromise: Promise<ActiveSessionSyncResult> | null = null
 let _activeSessionSyncSessionId: string | null = null
+let _activeSessionSyncWorkingDirectory: string | null = null
 let _activeSessionSyncSnapshot: ActiveSessionSyncSnapshot | null = null
 let _activeSessionSyncError: BackendSessionSyncError | null = null
 let _activeSessionSyncRequestToken = 0
@@ -69,10 +70,17 @@ function classifySessionSyncError(sessionId: string, error: unknown): BackendSes
 
 async function syncActiveSession(
   sessionId: string,
+  workingDirectory: string | undefined,
   snapshot: ActiveSessionSyncSnapshot | null
 ): Promise<ActiveSessionSyncResult> {
-  return snapshot
-    ? await rustBackend.setActiveSession(sessionId, snapshot)
+  if (snapshot) {
+    return workingDirectory !== undefined
+      ? await rustBackend.setActiveSession(sessionId, workingDirectory, snapshot)
+      : await rustBackend.setActiveSession(sessionId, undefined, snapshot)
+  }
+
+  return workingDirectory !== undefined
+    ? await rustBackend.setActiveSession(sessionId, workingDirectory)
     : await rustBackend.setActiveSession(sessionId)
 }
 
@@ -139,7 +147,11 @@ function scheduleLatestSessionRepair(staleSessionId: string, staleRequestToken: 
     latestSessionId,
   })
 
-  _activeSessionSyncPromise = syncActiveSession(latestSessionId, _activeSessionSyncSnapshot)
+  _activeSessionSyncPromise = syncActiveSession(
+    latestSessionId,
+    _activeSessionSyncWorkingDirectory ?? undefined,
+    _activeSessionSyncSnapshot
+  )
     .then((result) => {
       if (!isCurrentSessionSync(latestRequestToken, latestSessionId)) {
         scheduleLatestSessionRepair(latestSessionId, latestRequestToken)
@@ -168,9 +180,10 @@ function scheduleLatestSessionRepair(staleSessionId: string, staleRequestToken: 
 function startActiveSessionSync(
   sessionId: string,
   requestToken: number,
+  workingDirectory: string | undefined,
   snapshot: ActiveSessionSyncSnapshot | null
 ): Promise<ActiveSessionSyncResult> {
-  const syncPromise = syncActiveSession(sessionId, snapshot)
+  const syncPromise = syncActiveSession(sessionId, workingDirectory, snapshot)
     .then((result) => {
       if (!isCurrentSessionSync(requestToken, sessionId)) {
         scheduleLatestSessionRepair(sessionId, requestToken)
@@ -201,6 +214,7 @@ export async function initCoreBridge(opts: CoreBridgeOptions = {}): Promise<() =
     _budget = null
     _activeSessionSyncPromise = null
     _activeSessionSyncSessionId = null
+    _activeSessionSyncWorkingDirectory = null
     _activeSessionSyncSnapshot = null
     _activeSessionSyncError = null
     _activeSessionSyncRequestToken = 0
@@ -226,7 +240,7 @@ export function updateCoreBudgetLimit(contextWindow: number): void {
 
 export function notifySessionOpened(
   sessionId: string,
-  _workingDirectory: string,
+  workingDirectory?: string,
   snapshot?: ActiveSessionSyncSnapshot
 ): Promise<ActiveSessionSyncResult> {
   if (!sessionId || !isTauri()) {
@@ -237,9 +251,10 @@ export function notifySessionOpened(
     snapshot ?? (_activeSessionSyncSessionId === sessionId ? _activeSessionSyncSnapshot : null)
   const requestToken = ++_activeSessionSyncRequestToken
   _activeSessionSyncSessionId = sessionId
+  _activeSessionSyncWorkingDirectory = workingDirectory ?? null
   _activeSessionSyncSnapshot = effectiveSnapshot
   _activeSessionSyncError = null
-  return startActiveSessionSync(sessionId, requestToken, effectiveSnapshot)
+  return startActiveSessionSync(sessionId, requestToken, workingDirectory, effectiveSnapshot)
 }
 
 export async function ensureActiveSessionSynced(
@@ -257,7 +272,12 @@ export async function ensureActiveSessionSynced(
   const result: ActiveSessionSyncResult =
     canReuseCachedSync && _activeSessionSyncPromise
       ? await _activeSessionSyncPromise
-      : await notifySessionOpened(sessionId, '')
+      : await notifySessionOpened(
+          sessionId,
+          _activeSessionSyncSessionId === sessionId
+            ? (_activeSessionSyncWorkingDirectory ?? undefined)
+            : undefined
+        )
 
   if (_activeSessionSyncSessionId === sessionId && _activeSessionSyncError) {
     throw _activeSessionSyncError
@@ -278,6 +298,7 @@ export function markActiveSessionSynced(sessionId: string, messageCount = 0): vo
   if (!sessionId) return
   _activeSessionSyncRequestToken += 1
   _activeSessionSyncSessionId = sessionId
+  _activeSessionSyncWorkingDirectory = null
   _activeSessionSyncSnapshot = null
   _activeSessionSyncError = null
   _activeSessionRepairToken = null

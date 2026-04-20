@@ -64,8 +64,13 @@ async fn main() -> Result<()> {
         Some(Command::Auth { action }) => return run_auth(action).await,
         Some(Command::Plugin { action }) => return run_plugin(action).await,
         #[cfg(feature = "web")]
-        Some(Command::Serve { port, host }) => {
-            return ava_tui::web::run_server(&host, port).await;
+        Some(Command::Serve {
+            port,
+            host,
+            token,
+            insecure_open_cors,
+        }) => {
+            return ava_tui::web::run_server(&host, port, token, insecure_open_cors).await;
         }
         #[cfg(not(feature = "web"))]
         Some(Command::Serve { .. }) => {

@@ -4,7 +4,6 @@
  */
 
 import { isTauri } from '@tauri-apps/api/core'
-import { STORAGE_KEYS } from '../../config/constants'
 import {
   createSession as dbCreateSession,
   insertMessages as dbInsertMessages,
@@ -15,18 +14,36 @@ import {
   branchSessionAtMessageInWebMode,
   cloneSessionInWebMode,
 } from '../../services/web-session-mutations'
-import type { Session, SessionWithStats } from '../../types'
-import { useProject } from '../project'
-import { setLastSessionForProject } from '../session-persistence'
-import {
-  currentSession,
-  messages,
-  sessions,
-  setCurrentSession,
-  setIsLoadingMessages,
-  setMessages,
-  setSessions,
-} from './session-state'
+import type { Message, Session, SessionWithStats } from '../../types'
+import { activatePersistedSessionMessages, finalizeSessionActivation } from './session-activation'
+import { currentSession, messages, sessions, setMessages, setSessions } from './session-state'
+
+function remapClonedMessageReferences(
+  message: Message,
+  idMap: Map<string, string>,
+  newSessionId: string
+): Message {
+  const remappedMetadata = message.metadata ? { ...message.metadata } : undefined
+
+  for (const key of ['parentId', 'parent_id']) {
+    const sourceId = remappedMetadata?.[key]
+    if (typeof sourceId === 'string' && idMap.has(sourceId)) {
+      remappedMetadata![key] = idMap.get(sourceId)
+    }
+  }
+
+  return {
+    ...message,
+    id: idMap.get(message.id) ?? crypto.randomUUID(),
+    sessionId: newSessionId,
+    metadata: remappedMetadata,
+  }
+}
+
+function cloneMessagesForSession(sourceMessages: Message[], newSessionId: string): Message[] {
+  const idMap = new Map(sourceMessages.map((message) => [message.id, crypto.randomUUID()]))
+  return sourceMessages.map((message) => remapClonedMessageReferences(message, idMap, newSessionId))
+}
 
 // ============================================================================
 // Capability Contract
@@ -67,18 +84,7 @@ async function activateClonedSession(
   }
   setSessions((prev) => [sessionWithStats, ...prev])
 
-  setCurrentSession(newSession)
-  setIsLoadingMessages(true)
-  try {
-    const dbMessages = await getMessages(newSession.id)
-    setMessages(dbMessages)
-  } catch {
-    setMessages([])
-  } finally {
-    setIsLoadingMessages(false)
-  }
-  localStorage.setItem(STORAGE_KEYS.LAST_SESSION, newSession.id)
-  setLastSessionForProject(projectId, newSession.id)
+  await activatePersistedSessionMessages(newSession, projectId, getMessages)
 }
 
 // ============================================================================
@@ -89,8 +95,7 @@ export async function duplicateSession(sourceSessionId: string): Promise<void> {
   const source = sessions().find((s) => s.id === sourceSessionId)
   if (!source) return
 
-  const { currentProject } = useProject()
-  const projectId = currentProject()?.id
+  const projectId = source.projectId
 
   if (!isTauri()) {
     const clone = await cloneSessionInWebMode({
@@ -107,13 +112,7 @@ export async function duplicateSession(sourceSessionId: string): Promise<void> {
   const newSession = await dbCreateSession(newName, projectId)
 
   if (sourceMessages.length > 0) {
-    await dbInsertMessages(
-      sourceMessages.map((m) => ({
-        ...m,
-        id: crypto.randomUUID(),
-        sessionId: newSession.id,
-      }))
-    )
+    await dbInsertMessages(cloneMessagesForSession(sourceMessages, newSession.id))
   }
 
   const totalTokens = sourceMessages.reduce((sum, m) => sum + (m.tokensUsed || 0), 0)
@@ -137,8 +136,7 @@ export async function forkSession(sourceSessionId: string, name?: string): Promi
   const source = sessions().find((s) => s.id === sourceSessionId)
   if (!source) return
 
-  const { currentProject } = useProject()
-  const projectId = currentProject()?.id
+  const projectId = source.projectId
 
   if (!isTauri()) {
     const clone = await cloneSessionInWebMode({
@@ -157,13 +155,7 @@ export async function forkSession(sourceSessionId: string, name?: string): Promi
   const newSession = await dbCreateSession(forkName, projectId, sourceSessionId)
 
   if (sourceMessages.length > 0) {
-    await dbInsertMessages(
-      sourceMessages.map((m) => ({
-        ...m,
-        id: crypto.randomUUID(),
-        sessionId: newSession.id,
-      }))
-    )
+    await dbInsertMessages(cloneMessagesForSession(sourceMessages, newSession.id))
   }
 
   const totalTokens = sourceMessages.reduce((sum, m) => sum + (m.tokensUsed || 0), 0)
@@ -196,14 +188,14 @@ export async function branchAtMessage(messageId: string): Promise<void> {
   const index = msgs.findIndex((m) => m.id === messageId)
   if (index === -1) return
 
-  const { currentProject } = useProject()
-  const projectId = currentProject()?.id
+  const projectId = session.projectId
 
   const messagesToCopy = msgs.slice(0, index + 1)
   const branchName = `${session.name} (branch)`
   const newSession = await dbCreateSession(branchName, projectId, session.id)
+  const branchMessages = cloneMessagesForSession(messagesToCopy, newSession.id)
 
-  await dbInsertMessages(messagesToCopy.map((m) => ({ ...m, sessionId: newSession.id })))
+  await dbInsertMessages(branchMessages)
 
   const totalTokens = messagesToCopy.reduce((sum, m) => sum + (m.tokensUsed || 0), 0)
   const sessionWithStats: SessionWithStats = {
@@ -214,10 +206,12 @@ export async function branchAtMessage(messageId: string): Promise<void> {
   }
   setSessions((prev) => [sessionWithStats, ...prev])
 
-  setCurrentSession(newSession)
-  setMessages(messagesToCopy.map((m) => ({ ...m, sessionId: newSession.id })))
-  localStorage.setItem(STORAGE_KEYS.LAST_SESSION, newSession.id)
-  setLastSessionForProject(projectId, newSession.id)
+  finalizeSessionActivation(newSession, {
+    projectId,
+    applyActiveState: () => {
+      setMessages(branchMessages)
+    },
+  })
 
   logInfo('Session', `Branched at message ${index + 1}/${msgs.length} → ${newSession.id}`)
 }

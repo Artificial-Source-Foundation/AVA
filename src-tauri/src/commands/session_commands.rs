@@ -4,7 +4,7 @@
 
 use chrono::{TimeZone, Utc};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Map, Value};
 use tauri::State;
 use tokio::task;
 use uuid::Uuid;
@@ -39,6 +39,8 @@ pub struct ActiveSessionSyncMessage {
     pub created_at: i64,
     #[serde(default)]
     pub images: Vec<ActiveSessionSyncImage>,
+    #[serde(default = "empty_json_object")]
+    pub metadata: Value,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -55,6 +57,10 @@ pub struct ActiveSessionSyncSnapshot {
     pub title: Option<String>,
     #[serde(default)]
     pub messages: Vec<ActiveSessionSyncMessage>,
+}
+
+fn empty_json_object() -> Value {
+    Value::Object(Map::new())
 }
 
 fn session_to_summary(s: &ava_types::Session) -> SessionSummary {
@@ -94,6 +100,7 @@ where
 
 async fn set_active_session_inner(
     id: String,
+    working_directory: Option<String>,
     snapshot: Option<ActiveSessionSyncSnapshot>,
     bridge: &DesktopBridge,
 ) -> Result<ActiveSessionSyncResult, String> {
@@ -118,6 +125,14 @@ async fn set_active_session_inner(
             message_count: 0,
         });
     };
+
+    if let Some(working_directory) = working_directory.as_deref() {
+        bridge
+            .bind_session_working_directory(uuid, working_directory)
+            .await;
+    } else {
+        bridge.clear_session_working_directory_unbound(uuid).await;
+    }
 
     *bridge.last_session_id.write().await = Some(uuid);
     Ok(ActiveSessionSyncResult {
@@ -164,6 +179,7 @@ fn materialize_session_message(
         "user" => ava_types::Role::User,
         "assistant" => ava_types::Role::Assistant,
         "system" => ava_types::Role::System,
+        "tool" => ava_types::Role::Tool,
         other => return Err(format!("unsupported session message role '{other}'")),
     };
 
@@ -182,7 +198,86 @@ fn materialize_session_message(
         .into_iter()
         .map(materialize_session_image)
         .collect::<Result<Vec<_>, _>>()?;
+    apply_materialized_session_message_metadata(&mut message, snapshot.metadata)?;
     Ok(message)
+}
+
+fn apply_materialized_session_message_metadata(
+    message: &mut ava_types::Message,
+    metadata: Value,
+) -> Result<(), String> {
+    let metadata = match metadata {
+        Value::Object(map) => Value::Object(map),
+        Value::Null => empty_json_object(),
+        _ => empty_json_object(),
+    };
+
+    message.tool_calls = message_tool_calls_from_metadata(&metadata);
+    message.tool_call_id = metadata
+        .get("toolCallId")
+        .or_else(|| metadata.get("tool_call_id"))
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    message.agent_visible = metadata
+        .get("agentVisible")
+        .or_else(|| metadata.get("agent_visible"))
+        .and_then(Value::as_bool)
+        .unwrap_or(message.agent_visible);
+    message.user_visible = metadata
+        .get("userVisible")
+        .or_else(|| metadata.get("user_visible"))
+        .and_then(Value::as_bool)
+        .unwrap_or(message.user_visible);
+    message.original_content = metadata
+        .get("originalContent")
+        .or_else(|| metadata.get("original_content"))
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    message.parent_id = metadata
+        .get("parentId")
+        .or_else(|| metadata.get("parent_id"))
+        .and_then(Value::as_str)
+        .map(|value| Uuid::parse_str(value).map_err(|e| format!("invalid parent message ID: {e}")))
+        .transpose()?;
+    message.structured_content = metadata
+        .get("structuredContent")
+        .or_else(|| metadata.get("structured_content"))
+        .cloned()
+        .map(serde_json::from_value)
+        .transpose()
+        .map_err(|e| format!("invalid structured session message content: {e}"))?
+        .unwrap_or_default();
+    message.metadata = metadata;
+    Ok(())
+}
+
+fn message_tool_calls_from_metadata(metadata: &Value) -> Vec<ava_types::ToolCall> {
+    metadata
+        .as_object()
+        .and_then(|map| map.get("toolCalls"))
+        .and_then(Value::as_array)
+        .map(|tool_calls| {
+            tool_calls
+                .iter()
+                .filter_map(|tool_call| {
+                    let record = tool_call.as_object()?;
+                    let id = record.get("id")?.as_str()?.to_string();
+                    let name = record.get("name")?.as_str()?.to_string();
+                    let arguments = record
+                        .get("arguments")
+                        .or_else(|| record.get("args"))
+                        .cloned()
+                        .unwrap_or_else(|| Value::Object(Map::new()));
+
+                    Some(ava_types::ToolCall {
+                        id,
+                        name,
+                        arguments,
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn materialize_session_image(
@@ -245,10 +340,11 @@ pub async fn create_session(bridge: State<'_, DesktopBridge>) -> Result<SessionS
 #[tauri::command]
 pub async fn set_active_session(
     id: String,
+    working_directory: Option<String>,
     snapshot: Option<ActiveSessionSyncSnapshot>,
     bridge: State<'_, DesktopBridge>,
 ) -> Result<ActiveSessionSyncResult, String> {
-    set_active_session_inner(id, snapshot, &bridge).await
+    set_active_session_inner(id, working_directory, snapshot, &bridge).await
 }
 
 /// Delete a session by ID.
@@ -291,14 +387,18 @@ pub async fn search_sessions(
 
 #[cfg(test)]
 mod tests {
+    use ava_agent::control_plane::sessions::build_retry_replay_payload;
+    use ava_types::{repair_conversation, Role, ToolCall};
+    use serde_json::json;
     use serde_json::Value;
     use tempfile::tempdir;
 
     use crate::bridge::DesktopBridge;
 
     use super::{
-        create_session_inner, run_session_blocking, set_active_session_inner,
-        ActiveSessionSyncImage, ActiveSessionSyncMessage, ActiveSessionSyncSnapshot,
+        create_session_inner, empty_json_object, materialize_session_snapshot,
+        run_session_blocking, set_active_session_inner, ActiveSessionSyncImage,
+        ActiveSessionSyncMessage, ActiveSessionSyncSnapshot,
     };
 
     #[tokio::test]
@@ -312,7 +412,7 @@ mod tests {
             .await
             .expect("session should be created and persisted");
 
-        let result = set_active_session_inner(created.id.clone(), None, &bridge)
+        let result = set_active_session_inner(created.id.clone(), None, None, &bridge)
             .await
             .expect("freshly created session should bind immediately");
 
@@ -337,7 +437,7 @@ mod tests {
         .expect("session should be created and persisted");
         let session_id = session.id.to_string();
 
-        let result = set_active_session_inner(session_id.clone(), None, &bridge)
+        let result = set_active_session_inner(session_id.clone(), None, None, &bridge)
             .await
             .expect("active session should sync");
 
@@ -355,7 +455,7 @@ mod tests {
             .expect("bridge should initialize");
         let missing = uuid::Uuid::new_v4().to_string();
 
-        let result = set_active_session_inner(missing.clone(), None, &bridge)
+        let result = set_active_session_inner(missing.clone(), None, None, &bridge)
             .await
             .expect("missing session should be reported as a result");
 
@@ -377,6 +477,7 @@ mod tests {
 
         let result = set_active_session_inner(
             missing.clone(),
+            None,
             Some(ActiveSessionSyncSnapshot {
                 title: Some("Recovered desktop session".to_string()),
                 messages: vec![
@@ -389,6 +490,7 @@ mod tests {
                             data: "base64-image".to_string(),
                             media_type: "image/png".to_string(),
                         }],
+                        metadata: empty_json_object(),
                     },
                     ActiveSessionSyncMessage {
                         id: assistant_id.clone(),
@@ -396,6 +498,7 @@ mod tests {
                         content: "hi from backend".to_string(),
                         created_at: 1_762_806_001_000,
                         images: vec![],
+                        metadata: empty_json_object(),
                     },
                 ],
             }),
@@ -431,5 +534,384 @@ mod tests {
         assert_eq!(session.messages[1].id.to_string(), assistant_id);
         assert_eq!(session.messages[1].content, "hi from backend");
         assert_eq!(session.messages[1].role, ava_types::Role::Assistant);
+    }
+
+    #[test]
+    fn materialized_session_snapshot_preserves_tool_replay_context() {
+        let session_id = uuid::Uuid::new_v4();
+        let session = materialize_session_snapshot(
+            session_id,
+            ActiveSessionSyncSnapshot {
+                title: Some("Recovered tool session".to_string()),
+                messages: vec![
+                    ActiveSessionSyncMessage {
+                        id: uuid::Uuid::new_v4().to_string(),
+                        role: "user".to_string(),
+                        content: "inspect the workspace".to_string(),
+                        created_at: 1,
+                        images: vec![],
+                        metadata: empty_json_object(),
+                    },
+                    ActiveSessionSyncMessage {
+                        id: uuid::Uuid::new_v4().to_string(),
+                        role: "assistant".to_string(),
+                        content: "".to_string(),
+                        created_at: 2,
+                        images: vec![],
+                        metadata: json!({
+                            "agentVisible": false,
+                            "toolCalls": [
+                                {
+                                    "id": "tool-call-1",
+                                    "name": "bash",
+                                    "arguments": { "command": "pwd" },
+                                    "status": "success"
+                                }
+                            ]
+                        }),
+                    },
+                    ActiveSessionSyncMessage {
+                        id: uuid::Uuid::new_v4().to_string(),
+                        role: "tool".to_string(),
+                        content: "/workspace".to_string(),
+                        created_at: 3,
+                        images: vec![],
+                        metadata: json!({
+                            "toolCallId": "tool-call-1",
+                            "userVisible": false
+                        }),
+                    },
+                    ActiveSessionSyncMessage {
+                        id: uuid::Uuid::new_v4().to_string(),
+                        role: "user".to_string(),
+                        content: "continue".to_string(),
+                        created_at: 4,
+                        images: vec![],
+                        metadata: empty_json_object(),
+                    },
+                ],
+            },
+        )
+        .expect("snapshot should materialize");
+
+        assert_eq!(session.messages[1].role, Role::Assistant);
+        assert_eq!(session.messages[1].tool_calls.len(), 1);
+        assert_eq!(
+            session.messages[1].tool_calls,
+            vec![ToolCall {
+                id: "tool-call-1".to_string(),
+                name: "bash".to_string(),
+                arguments: json!({ "command": "pwd" }),
+            }]
+        );
+        assert!(!session.messages[1].agent_visible);
+        assert_eq!(session.messages[2].role, Role::Tool);
+        assert_eq!(
+            session.messages[2].tool_call_id.as_deref(),
+            Some("tool-call-1")
+        );
+        assert!(!session.messages[2].user_visible);
+
+        let replay = build_retry_replay_payload(&session).expect("retry replay should build");
+        assert_eq!(replay.goal, "continue");
+        assert_eq!(replay.history.len(), 3);
+        assert_eq!(replay.history[1].tool_calls, session.messages[1].tool_calls);
+        assert_eq!(replay.history[2].role, Role::Tool);
+        assert_eq!(
+            replay.history[2].tool_call_id.as_deref(),
+            Some("tool-call-1")
+        );
+
+        let mut repaired_history = replay.history.clone();
+        repair_conversation(&mut repaired_history);
+        assert_eq!(repaired_history.len(), 3);
+        assert_eq!(repaired_history[2].role, Role::Tool);
+        assert_eq!(
+            repaired_history[2].tool_call_id.as_deref(),
+            Some("tool-call-1")
+        );
+    }
+
+    #[tokio::test]
+    async fn set_active_session_command_binds_forwarded_working_directory_to_session_context() {
+        let dir = tempdir().expect("temp dir should be created");
+        let bridge = DesktopBridge::init_for_tests(dir.path().to_path_buf())
+            .await
+            .expect("bridge should initialize");
+        let project_dir = dir.path().join("project-two");
+        std::fs::create_dir_all(&project_dir).expect("project dir should exist");
+
+        let session = run_session_blocking(&bridge, |sm| {
+            let session = sm.create()?;
+            sm.save(&session)?;
+            Ok(session)
+        })
+        .await
+        .expect("session should be created and persisted");
+
+        let result = set_active_session_inner(
+            session.id.to_string(),
+            Some(project_dir.to_string_lossy().to_string()),
+            None,
+            &bridge,
+        )
+        .await
+        .expect("active session should sync with cwd binding");
+
+        assert!(result.exists);
+
+        let run = bridge
+            .register_run(
+                "desktop-run-cwd".to_string(),
+                session.id,
+                "openai".to_string(),
+                "gpt-5.4".to_string(),
+            )
+            .await
+            .expect("run should reuse bound session context");
+
+        assert_eq!(
+            run.permission_context.read().await.workspace_root,
+            project_dir
+        );
+    }
+
+    #[tokio::test]
+    async fn set_active_session_command_marks_missing_working_directory_as_unbound() {
+        let dir = tempdir().expect("temp dir should be created");
+        let bridge = DesktopBridge::init_for_tests(dir.path().to_path_buf())
+            .await
+            .expect("bridge should initialize");
+        let project_dir = dir.path().join("project-two");
+        std::fs::create_dir_all(&project_dir).expect("project dir should exist");
+
+        let session = run_session_blocking(&bridge, |sm| {
+            let session = sm.create()?;
+            sm.save(&session)?;
+            Ok(session)
+        })
+        .await
+        .expect("session should be created and persisted");
+
+        set_active_session_inner(
+            session.id.to_string(),
+            Some(project_dir.to_string_lossy().to_string()),
+            None,
+            &bridge,
+        )
+        .await
+        .expect("active session should bind cwd before unbinding");
+
+        let first_run = bridge
+            .register_run(
+                "desktop-run-bound".to_string(),
+                session.id,
+                "openai".to_string(),
+                "gpt-5.4".to_string(),
+            )
+            .await
+            .expect("bound session should allow runs");
+
+        assert_eq!(
+            first_run.permission_context.read().await.workspace_root,
+            project_dir
+        );
+
+        bridge.finish_run("desktop-run-bound").await;
+
+        let result =
+            set_active_session_inner(session.id.to_string(), Some(String::new()), None, &bridge)
+                .await
+                .expect("active session should still sync when cwd is unresolved");
+
+        assert!(result.exists);
+        assert!(
+            bridge
+                .session_permission_contexts
+                .read()
+                .await
+                .get(&session.id)
+                .is_some(),
+            "unresolved-bound sessions should keep a reset cached context while failing closed"
+        );
+
+        let err = match bridge
+            .register_run(
+                "desktop-run-unbound".to_string(),
+                session.id,
+                "openai".to_string(),
+                "gpt-5.4".to_string(),
+            )
+            .await
+        {
+            Ok(_) => panic!("explicitly unbound sessions should fail closed"),
+            Err(err) => err,
+        };
+
+        assert!(err.contains("resolved working directory"));
+    }
+
+    #[tokio::test]
+    async fn set_active_session_command_keeps_never_bound_sessions_runnable_after_recovery() {
+        let dir = tempdir().expect("temp dir should be created");
+        let bridge = DesktopBridge::init_for_tests(dir.path().to_path_buf())
+            .await
+            .expect("bridge should initialize");
+
+        let session = run_session_blocking(&bridge, |sm| {
+            let session = sm.create()?;
+            sm.save(&session)?;
+            Ok(session)
+        })
+        .await
+        .expect("session should be created and persisted");
+
+        bridge
+            .mark_session_working_directory_unbound(session.id)
+            .await;
+
+        let legacy_err = match bridge
+            .register_run(
+                "desktop-run-projectless-legacy".to_string(),
+                session.id,
+                "openai".to_string(),
+                "gpt-5.4".to_string(),
+            )
+            .await
+        {
+            Ok(_) => {
+                panic!("legacy incorrectly-unbound projectless session should fail before reopen")
+            }
+            Err(err) => err,
+        };
+
+        assert!(legacy_err.contains("resolved working directory"));
+
+        let result = set_active_session_inner(session.id.to_string(), None, None, &bridge)
+            .await
+            .expect("projectless session should still sync");
+
+        assert!(result.exists);
+        assert!(
+            bridge
+                .session_permission_contexts
+                .read()
+                .await
+                .get(&session.id)
+                .is_some(),
+            "projectless reopen should rebuild the permission context with a safe default root"
+        );
+        assert!(
+            !bridge
+                .explicitly_unbound_sessions
+                .read()
+                .await
+                .contains(&session.id),
+            "reopening a never-bound/projectless session should clear stale unbound state"
+        );
+
+        bridge
+            .register_run(
+                "desktop-run-projectless-recovered".to_string(),
+                session.id,
+                "openai".to_string(),
+                "gpt-5.4".to_string(),
+            )
+            .await
+            .expect("reopened never-bound/projectless session should remain runnable");
+    }
+
+    #[tokio::test]
+    async fn set_active_session_command_clears_stale_workspace_binding_when_reopening_projectless_session(
+    ) {
+        let dir = tempdir().expect("temp dir should be created");
+        let bridge = DesktopBridge::init_for_tests(dir.path().to_path_buf())
+            .await
+            .expect("bridge should initialize");
+        let project_dir = dir.path().join("project-three");
+        std::fs::create_dir_all(&project_dir).expect("project dir should exist");
+
+        let session = run_session_blocking(&bridge, |sm| {
+            let session = sm.create()?;
+            sm.save(&session)?;
+            Ok(session)
+        })
+        .await
+        .expect("session should be created and persisted");
+
+        set_active_session_inner(
+            session.id.to_string(),
+            Some(project_dir.to_string_lossy().to_string()),
+            None,
+            &bridge,
+        )
+        .await
+        .expect("active session should bind cwd before projectless reopen");
+
+        let first_run = bridge
+            .register_run(
+                "desktop-run-project-bound".to_string(),
+                session.id,
+                "openai".to_string(),
+                "gpt-5.4".to_string(),
+            )
+            .await
+            .expect("bound session should allow runs");
+
+        assert_eq!(
+            first_run.permission_context.read().await.workspace_root,
+            project_dir
+        );
+        first_run
+            .permission_context
+            .write()
+            .await
+            .session_approved
+            .insert("bash".to_string());
+
+        bridge.finish_run("desktop-run-project-bound").await;
+
+        let result = set_active_session_inner(session.id.to_string(), None, None, &bridge)
+            .await
+            .expect("projectless reopen should sync");
+
+        assert!(result.exists);
+        assert!(
+            !bridge
+                .explicitly_unbound_sessions
+                .read()
+                .await
+                .contains(&session.id),
+            "projectless reopen should not leave the session explicitly unbound"
+        );
+
+        let projectless_run = bridge
+            .register_run(
+                "desktop-run-projectless-reopen".to_string(),
+                session.id,
+                "openai".to_string(),
+                "gpt-5.4".to_string(),
+            )
+            .await
+            .expect("projectless reopen should remain runnable");
+
+        assert_ne!(
+            projectless_run
+                .permission_context
+                .read()
+                .await
+                .workspace_root,
+            project_dir,
+            "projectless reopen should not inherit the old bound workspace root"
+        );
+        assert!(
+            projectless_run
+                .permission_context
+                .read()
+                .await
+                .session_approved
+                .contains("bash"),
+            "projectless reopen should preserve session-scoped approvals while resetting the workspace root"
+        );
     }
 }

@@ -8,15 +8,14 @@ import { segmentedBtnClass as segmentedBtn } from '../../../ui/SegmentedControl'
 describe('segmentedBtn', () => {
   it('returns active classes when true', () => {
     const result = segmentedBtn(true)
-    expect(result).toContain('bg-[var(--accent)]')
+    expect(result).toContain('bg-[#0A84FF]')
     expect(result).toContain('text-white')
   })
 
   it('returns inactive classes when false', () => {
     const result = segmentedBtn(false)
-    expect(result).toContain('bg-[var(--surface-raised)]')
-    expect(result).toContain('text-[var(--text-secondary)]')
-    expect(result).toContain('hover:bg-')
+    expect(result).toContain('text-[#48484A]')
+    expect(result).toContain('hover:text-[#C8C8CC]')
   })
 
   it('always includes shared base classes', () => {

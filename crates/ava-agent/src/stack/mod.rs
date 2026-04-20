@@ -363,9 +363,13 @@ impl AgentStack {
         let (plan_bridge, plan_rx) = PlanBridge::new();
         let (question_bridge, question_rx) = QuestionBridge::new();
         let (approval_bridge, approval_rx) = ApprovalBridge::new();
+        // Headless/benchmark callers are unattended, but they still need
+        // dangerous approval-worthy actions to reach the approval bridge so the
+        // existing risk-aware non-interactive policy can fail closed.
+        let interactive_yolo_short_circuit = config.yolo && !config.non_interactive_approvals;
         let permission_context = Arc::new(RwLock::new(InspectionContext {
             workspace_root: effective_cwd.clone(),
-            auto_approve: config.yolo,
+            auto_approve: interactive_yolo_short_circuit,
             session_approved: std::collections::HashSet::new(),
             safety_profiles: core_tool_profiles(),
             persistent_rules: ava_permissions::persistent::PersistentRules::load_merged(
@@ -406,7 +410,7 @@ impl AgentStack {
         }));
         let permission_inspector: Arc<dyn PermissionInspector> = Arc::new(DefaultInspector::new(
             PermissionSystem::load(effective_cwd.clone(), vec![]),
-            if config.yolo {
+            if interactive_yolo_short_circuit {
                 PermissionPolicy::permissive()
             } else {
                 PermissionPolicy::standard()

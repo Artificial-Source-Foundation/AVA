@@ -95,10 +95,11 @@ export interface ActiveSessionSyncResult {
 
 export interface ActiveSessionSyncMessageSnapshot {
   id: string
-  role: 'user' | 'assistant' | 'system'
+  role: 'user' | 'assistant' | 'system' | 'tool'
   content: string
   createdAt: number
   images?: ActiveSessionSyncImageSnapshot[]
+  metadata?: Record<string, unknown>
 }
 
 export interface ActiveSessionSyncImageSnapshot {
@@ -455,6 +456,7 @@ export interface SubmitGoalArgs {
   model?: string
   thinkingLevel?: string
   sessionId?: string
+  images?: ToolIntrospectionImageContext[]
   autoCompact?: boolean
   compactionThreshold?: number
   compactionProvider?: string

@@ -2,7 +2,7 @@
 title: "Backlog"
 description: "Active AVA 0.6 work for the V1 push, plus an archive of the previous detailed backlog."
 order: 3
-updated: "2026-04-18"
+updated: "2026-04-19"
 ---
 
 # AVA Backlog
@@ -23,11 +23,19 @@ Source of truth for direction: `docs/project/roadmap.md`
 6. Keep a repeatable AVA-vs-OpenCode comparison path so quality can be measured, not argued.
 7. Finish the docs reset around the `0.6` story so roadmap, backlog, README, and release language all describe the same product stage.
 
+Current bounded parity note: web submit and replay flows now honor the shared persisted per-run thinking/model/compaction context used by desktop session runs; the remaining bounded divergence is the manual TUI/headless `/compact` path tracked in `docs/architecture/backend-contract-exceptions.md` as `EX-003`.
+
+Current web hardening note: `ava serve` now defaults to loopback-only bind/origin exposure, token-protects sensitive session/history/status reads plus persisted plan listing/loading routes, high-risk plugin/CLI discovery + plugin route surfaces, and privileged HTTP control-plane routes (and `/ws`), redacts raw control tokens from normal logs, and still keeps broader browser-origin exposure as an explicit `--insecure-open-cors` opt-in.
+
+Current multi-chat correctness note: overlapping frontend session switches now gate async persisted-session finalization on the winning switch/current session, so an older load finishing late cannot re-select the stale session, overwrite the visible session artifacts, or re-persist the old last-session selection after a newer switch has already won.
+
+Current web session note: the browser fallback/session-adapter path now fails closed for backend session writes, archived-session deletion clears archived client state too, and web create/list session payloads now preserve `project_id` through the existing metadata seam so project-scoped browser lists do not silently drift.
+
 ## Milestone 1 Proof Definition
 
 1. **Backend scope is headless-first**: the authoritative proof path is `ava` headless/benchmark execution.
 2. **Proof is real work**: milestone evidence comes from realistic coding suites (`normal_coding`, `small_coding`, `stress_coding`, `test_heavy`) with compile/test validation, plus selected `tool_reliability` coverage and a minimal product smoke (`prompt -> tools -> edit -> verify -> persist`) as the required proof set; contract checks support but do not drive the milestone gate.
-3. **Approval policy baseline**: only dangerous commands/actions require explicit approval; ordinary safe tool calls and workspace-preserving edits remain low-friction by default.
+3. **Approval policy baseline**: only dangerous commands/actions require explicit approval; ordinary safe tool calls and workspace-preserving edits remain low-friction by default, and unattended headless proof must exercise that real runtime path rather than silently upgrading dangerous asks through yolo wiring.
 4. **Primary comparison reference**: `OpenCode` is the main baseline for backend/runtime contract and automation parity.
 5. **Secondary execution reference**: `Goose` is useful as a supplemental reference for execution modes and automation pattern parity.
 

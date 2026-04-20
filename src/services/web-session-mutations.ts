@@ -1,6 +1,7 @@
 import type { Session, SessionWithStats } from '../types'
 import { logWarn } from './logger'
-import { buildSessionBaseEndpoint, canonicalizeSessionId } from './web-session-identity'
+import { canonicalizeSessionId } from './web-session-identity'
+import { writeBrowserSession } from './web-session-write-client'
 
 export type WebSessionMutationKind = 'duplicate' | 'fork'
 
@@ -25,6 +26,21 @@ interface DuplicateSessionResponse {
   last_preview?: string | null
   created_at: string
   updated_at: string
+}
+
+function isValidDuplicateSessionResponse(data: unknown): data is DuplicateSessionResponse {
+  if (!data || typeof data !== 'object') return false
+
+  const candidate = data as Record<string, unknown>
+  return (
+    typeof candidate.id === 'string' &&
+    candidate.id.length > 0 &&
+    typeof candidate.title === 'string' &&
+    typeof candidate.message_count === 'number' &&
+    Number.isFinite(candidate.message_count) &&
+    typeof candidate.created_at === 'string' &&
+    typeof candidate.updated_at === 'string'
+  )
 }
 
 function parseTimestamp(value: string, fallback: number): number {
@@ -53,43 +69,60 @@ function buildCloneName(kind: WebSessionMutationKind, sourceSessionName: string)
 export async function cloneSessionInWebMode(
   options: CloneSessionInWebModeOptions
 ): Promise<WebSessionCloneResult> {
-  const requestedName = options.name || buildCloneName(options.kind, options.sourceSessionName)
-  const requestedId = crypto.randomUUID()
-  const endpoint = buildSessionBaseEndpoint(options.sourceSessionId, 'duplicate')
-  const response = await fetch(endpoint, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ id: requestedId, kind: options.kind, name: requestedName }),
-  })
+  try {
+    const requestedName = options.name || buildCloneName(options.kind, options.sourceSessionName)
+    const requestedId = crypto.randomUUID()
+    const result = await writeBrowserSession<DuplicateSessionResponse>({
+      frontendSessionId: options.sourceSessionId,
+      action: 'duplicate',
+      method: 'POST',
+      jsonBody: { id: requestedId, kind: options.kind, name: requestedName },
+      parseJson: true,
+    })
 
-  if (!response.ok) {
-    const detail = await response.text()
-    throw new WebSessionMutationError(
-      `Web ${options.kind} failed (${response.status}): ${detail || response.statusText}`
-    )
-  }
+    if (!result.ok) {
+      throw new WebSessionMutationError(
+        `Web ${options.kind} failed (${result.status}): ${result.errorText || result.statusText}`
+      )
+    }
 
-  const data = (await response.json()) as DuplicateSessionResponse
-  const now = Date.now()
+    const data = result.data
+    if (!data) {
+      throw new WebSessionMutationError(`Web ${options.kind} failed: empty response payload`)
+    }
 
-  return {
-    session: {
-      id: data.id,
-      name: data.title,
-      projectId: options.projectId,
-      parentSessionId: data.parent_session_id
-        ? canonicalizeSessionId(data.parent_session_id)
-        : undefined,
-      createdAt: parseTimestamp(data.created_at, now),
-      updatedAt: parseTimestamp(data.updated_at, now),
-      status: 'active',
-      metadata: {},
-    },
-    stats: {
-      messageCount: data.message_count,
-      totalTokens: 0,
-      lastPreview: data.last_preview || '',
-    },
+    if (!isValidDuplicateSessionResponse(data)) {
+      throw new WebSessionMutationError(`Web ${options.kind} failed: malformed response payload`)
+    }
+
+    const now = Date.now()
+
+    return {
+      session: {
+        id: data.id,
+        name: data.title,
+        projectId: options.projectId,
+        parentSessionId: data.parent_session_id
+          ? canonicalizeSessionId(data.parent_session_id)
+          : undefined,
+        createdAt: parseTimestamp(data.created_at, now),
+        updatedAt: parseTimestamp(data.updated_at, now),
+        status: 'active',
+        metadata: {},
+      },
+      stats: {
+        messageCount: data.message_count,
+        totalTokens: 0,
+        lastPreview: data.last_preview || '',
+      },
+    }
+  } catch (error) {
+    if (error instanceof WebSessionMutationError) {
+      throw error
+    }
+
+    const message = error instanceof Error ? error.message : String(error)
+    throw new WebSessionMutationError(`Web ${options.kind} failed: ${message}`)
   }
 }
 

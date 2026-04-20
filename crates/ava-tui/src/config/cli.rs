@@ -397,8 +397,14 @@ pub enum Command {
         #[arg(long, default_value_t = 8080)]
         port: u16,
         /// Host/IP to bind to
-        #[arg(long, default_value = "0.0.0.0")]
+        #[arg(long, default_value = "127.0.0.1")]
         host: String,
+        /// Control token for privileged HTTP routes and WebSocket access
+        #[arg(long)]
+        token: Option<String>,
+        /// Insecure: allow any browser origin instead of loopback-only origins
+        #[arg(long, default_value_t = false)]
+        insecure_open_cors: bool,
     },
 }
 

@@ -137,15 +137,11 @@ test.describe('Chat View', () => {
   })
 
   test('toolbar strip renders with multiple controls', async ({ page }) => {
-    // The toolbar strip is inside the <form> below the message composer
-    // It contains model selector, Plan/Act slider, permissions, etc.
     const form = page.locator('form')
     await expect(form).toBeVisible()
 
-    const buttons = form.locator('button')
-    const count = await buttons.count()
-    // Expect multiple toolbar controls (model selector, plan/act, permission, sandbox, etc.)
-    expect(count).toBeGreaterThan(3)
+    await expect(page.locator('button[aria-label="Open model selector"]')).toBeVisible()
+    await expect(form.locator('button[aria-label="Send message"]')).toBeVisible()
   })
 
   test('Plan/Act slider is visible', async ({ page }) => {
@@ -187,28 +183,26 @@ test.describe('Activity Bar', () => {
     await dismissChangelog(page)
   })
 
-  test('renders with Sessions and Explorer icons', async ({ page }) => {
-    await expect(page.locator('button[aria-label="Sessions"]')).toBeVisible()
-    await expect(page.locator('button[aria-label="Explorer"]')).toBeVisible()
+  test('renders with dashboard and session search controls', async ({ page }) => {
+    await expect(page.locator('button[aria-label="Dashboard"]')).toBeVisible()
+    await expect(page.locator('button[aria-label="Search sessions"]')).toBeVisible()
   })
 
   test('settings button is visible', async ({ page }) => {
     await expect(page.locator('button[aria-label="Settings"]')).toBeVisible()
   })
 
-  test('sidebar toggle button works', async ({ page }) => {
-    const toggleBtn = page.locator('button[aria-label="Toggle Sidebar"]')
+  test('search sessions button toggles the inline search control', async ({ page }) => {
+    const toggleBtn = page.locator('button[aria-label="Search sessions"]')
+    const searchInput = page.locator('input[aria-label="Search sessions"]')
     await expect(toggleBtn).toBeVisible()
+    await expect(searchInput).toHaveCount(0)
 
-    // Click to toggle sidebar
     await toggleBtn.click()
-    await page.waitForTimeout(200)
+    await expect(searchInput).toBeVisible()
 
-    // Click again to restore
     await toggleBtn.click()
-    await page.waitForTimeout(200)
-
-    await expect(toggleBtn).toBeVisible()
+    await expect(searchInput).toHaveCount(0)
   })
 })
 
@@ -234,12 +228,12 @@ test.describe('Settings Modal', () => {
     await expect(page.locator('button:has-text("Back to Chat")')).toBeVisible({ timeout: 3000 })
 
     const sidebar = page.locator('nav')
-    await expect(sidebar.locator('text=General')).toBeVisible()
-    await expect(sidebar.locator('text=Models')).toBeVisible()
-    await expect(sidebar.locator('text=Tools')).toBeVisible()
-    await expect(sidebar.locator('text=Permissions')).toBeVisible()
-    await expect(sidebar.locator('text=Appearance')).toBeVisible()
-    await expect(sidebar.locator('text=Advanced')).toBeVisible()
+    await expect(sidebar.getByText('General', { exact: true }).first()).toBeVisible()
+    await expect(sidebar.getByText('Models', { exact: true })).toBeVisible()
+    await expect(sidebar.getByText('Tools', { exact: true })).toBeVisible()
+    await expect(sidebar.getByText('Permissions', { exact: true })).toBeVisible()
+    await expect(sidebar.getByText('Appearance', { exact: true }).first()).toBeVisible()
+    await expect(sidebar.getByText('Advanced', { exact: true }).first()).toBeVisible()
   })
 
   test('General tab is visible in sidebar', async ({ page }) => {

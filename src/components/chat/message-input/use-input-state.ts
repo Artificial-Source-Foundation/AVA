@@ -459,6 +459,13 @@ export function useInputState(): InputState {
 
     // Mid-stream messaging: queue for next turn when agent is running (Enter)
     if (isProcessing()) {
+      if (hasImages) {
+        notify.error(
+          'Images unavailable while agent is running',
+          'Wait for the current response to finish before sending images.'
+        )
+        return
+      }
       const sessionId = sessionStore.currentSession()?.id ?? ''
       void queueFollowUpMessage(message, sessionId).catch((error) => {
         handleQueuedRequestFailure(message, error)
@@ -472,9 +479,16 @@ export function useInputState(): InputState {
     setHistoryIndex(-1)
     if (textareaRef) textareaRef.style.height = 'auto'
     agent.clearError()
-    const { files, pastes } = attachments.clearAll()
+    const { images, files, pastes } = attachments.clearAll()
     try {
-      await agent.run(buildFullMessage(message, files, pastes), { model: selectedModel() })
+      await agent.run(buildFullMessage(message, files, pastes), {
+        model: selectedModel(),
+        ...(images.length > 0
+          ? {
+              images: images.map((image) => ({ data: image.data, mediaType: image.mimeType })),
+            }
+          : {}),
+      })
     } finally {
       submitting = false
     }

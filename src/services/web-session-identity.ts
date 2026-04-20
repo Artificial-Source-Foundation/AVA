@@ -17,7 +17,7 @@
  * permanently deleted.
  */
 
-const API_BASE = import.meta.env.VITE_API_URL || ''
+import { buildApiUrl } from '../lib/api-client'
 
 /** localStorage key prefix for per-alias storage. */
 const ALIAS_KEY_PREFIX = 'ava_sa:'
@@ -28,10 +28,10 @@ const LEGACY_ALIAS_KEY = 'ava_session_id_aliases'
 /**
  * Maps frontend session IDs to backend session IDs.
  *
- * With the session ID pass-through fix, submit_goal now uses the frontend's
- * session ID so IDs should always match. This map is kept as a fallback for
- * edge cases (e.g., retry/regenerate creating new sessions) but should
- * rarely be populated.
+ * Frontend session IDs remain canonical in UI state. Browser IPC resolves
+ * frontend IDs through this map before calling backend session-scoped paths
+ * (submit/replay/status correlation) when IDs diverge. Most sessions still
+ * match 1:1, but this fallback is required after backend-owned replay forks.
  *
  * This map is automatically hydrated from localStorage on module load and
  * stays synchronized across tabs via the storage event.
@@ -270,7 +270,7 @@ export function canonicalizeSessionId(potentialBackendId: string): string {
  */
 export function buildSessionEndpoint(frontendSessionId: string, path: string): string {
   const backendSessionId = resolveBackendSessionId(frontendSessionId)
-  return `${API_BASE}/api/sessions/${backendSessionId}/${path}`
+  return buildApiUrl(`/api/sessions/${backendSessionId}/${path}`)
 }
 
 /**
@@ -283,6 +283,6 @@ export function buildSessionEndpoint(frontendSessionId: string, path: string): s
  */
 export function buildSessionBaseEndpoint(frontendSessionId: string, suffix?: string): string {
   const backendSessionId = resolveBackendSessionId(frontendSessionId)
-  const base = `${API_BASE}/api/sessions/${backendSessionId}`
+  const base = buildApiUrl(`/api/sessions/${backendSessionId}`)
   return suffix ? `${base}/${suffix}` : base
 }

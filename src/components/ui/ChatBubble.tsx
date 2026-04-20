@@ -7,11 +7,12 @@
 
 import { type Component, type JSX, Show, splitProps } from 'solid-js'
 import { Motion } from 'solid-motionone'
+import type { MessageRole } from '../../types'
 import { Avatar } from './Avatar'
 
 export interface ChatBubbleProps {
   /** Message role */
-  role: 'user' | 'assistant' | 'system'
+  role: MessageRole
   /** Message content */
   children: JSX.Element
   /** Timestamp */

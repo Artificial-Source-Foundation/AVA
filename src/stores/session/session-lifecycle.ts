@@ -5,7 +5,7 @@
  */
 
 import { isTauri } from '@tauri-apps/api/core'
-import { batch, createMemo } from 'solid-js'
+import { batch } from 'solid-js'
 import { DEFAULTS, STORAGE_KEYS } from '../../config/constants'
 import { clearTodos } from '../../hooks/use-rust-agent'
 import { log } from '../../lib/logger'
@@ -38,6 +38,7 @@ import type { ActiveSessionSyncSnapshot } from '../../types/rust-ipc'
 import { useProject } from '../project'
 import { getLastSessionForProject, setLastSessionForProject } from '../session-persistence'
 import { createLatestRequestGate } from './request-gate'
+import { activatePersistedSession, persistSelectedSession } from './session-activation'
 import {
   cacheSessionArtifacts,
   deleteCachedSessionArtifacts,
@@ -59,7 +60,6 @@ import {
   setCurrentSession,
   setEditingMessageId,
   setFileOperations,
-  setIsLoadingMessages,
   setIsLoadingSessions,
   setMemoryItems,
   setMessages,
@@ -77,7 +77,10 @@ export {
   forkSession,
 } from './session-branching'
 
-export const getSessionTree = createMemo(() => {
+export const getSessionTree = (): {
+  roots: SessionWithStats[]
+  childMap: Map<string, SessionWithStats[]>
+} => {
   const all = sessions()
   const childMap = new Map<string, SessionWithStats[]>()
   const roots: SessionWithStats[] = []
@@ -91,7 +94,7 @@ export const getSessionTree = createMemo(() => {
     }
   }
   return { roots, childMap }
-})
+}
 
 const sessionListGate = createLatestRequestGate()
 const sessionSwitchGate = createLatestRequestGate()
@@ -107,12 +110,63 @@ function asString(value: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined
 }
 
+function asBoolean(value: unknown): boolean | undefined {
+  return typeof value === 'boolean' ? value : undefined
+}
+
 function parseSessionMessageRole(value: unknown): Message['role'] | null {
   const normalized = asString(value)?.toLowerCase()
-  if (normalized === 'user' || normalized === 'assistant' || normalized === 'system') {
+  if (
+    normalized === 'user' ||
+    normalized === 'assistant' ||
+    normalized === 'system' ||
+    normalized === 'tool'
+  ) {
     return normalized
   }
   return null
+}
+
+function buildDesktopSyncMessageMetadata(
+  message: Pick<Message, 'metadata' | 'toolCalls'>
+): ActiveSessionSyncSnapshot['messages'][number]['metadata'] {
+  const metadata = asRecord(message.metadata)
+  const merged = {
+    ...(metadata ?? {}),
+    ...(message.toolCalls && message.toolCalls.length > 0 ? { toolCalls: message.toolCalls } : {}),
+  }
+
+  return Object.keys(merged).length > 0 ? merged : undefined
+}
+
+function parseRecoveredDesktopMessageMetadata(
+  record: Record<string, unknown>,
+  toolCalls: ToolCall[] | undefined
+): Message['metadata'] {
+  const metadata = asRecord(record.metadata)
+  const toolCallId = asString(record.tool_call_id) ?? asString(record.toolCallId)
+  const agentVisible = asBoolean(record.agent_visible) ?? asBoolean(record.agentVisible)
+  const userVisible = asBoolean(record.user_visible) ?? asBoolean(record.userVisible)
+  const originalContent = asString(record.original_content) ?? asString(record.originalContent)
+  const parentId = asString(record.parent_id) ?? asString(record.parentId)
+  const structuredContent = Array.isArray(record.structured_content)
+    ? record.structured_content
+    : Array.isArray(record.structuredContent)
+      ? record.structuredContent
+      : undefined
+
+  const merged = {
+    ...(metadata ?? {}),
+    ...(toolCalls ? { toolCalls } : {}),
+    ...(toolCallId ? { toolCallId } : {}),
+    ...(agentVisible !== undefined ? { agentVisible } : {}),
+    ...(userVisible !== undefined ? { userVisible } : {}),
+    ...(originalContent ? { originalContent } : {}),
+    ...(parentId ? { parentId } : {}),
+    ...(structuredContent ? { structuredContent } : {}),
+  }
+
+  return Object.keys(merged).length > 0 ? merged : undefined
 }
 
 function parseSessionMessageImages(value: unknown): Message['images'] | undefined {
@@ -166,13 +220,7 @@ function mapDesktopBackendSessionMessages(sessionId: string, rawSession: unknown
       const metadata = asRecord(record.metadata) ?? undefined
       const toolCalls =
         parseSessionMessageToolCalls(record.tool_calls) ?? normalizeToolCalls(metadata?.toolCalls)
-      const mergedMetadata =
-        metadata || toolCalls
-          ? {
-              ...(metadata ?? {}),
-              ...(toolCalls ? { toolCalls } : {}),
-            }
-          : undefined
+      const mergedMetadata = parseRecoveredDesktopMessageMetadata(record, toolCalls)
 
       return {
         id,
@@ -303,6 +351,7 @@ function buildDesktopSessionSnapshot(
       role: message.role,
       content: message.content,
       createdAt: message.createdAt,
+      metadata: buildDesktopSyncMessageMetadata(message),
       images: message.images?.map((image) => ({
         data: image.data,
         mediaType: image.mimeType,
@@ -391,10 +440,16 @@ export async function createNewSession(
   }
 
   const createPromise = (async () => {
-    const { currentProject } = useProject()
-    const project = currentProject()
-    const projectId = projectIdOverride ?? requestedProjectId ?? project?.id
+    const { currentProject, projects } = useProject()
+    const ambientProject = currentProject()
+    const overrideProject = projectIdOverride
+      ? projects().find((project) => project.id === projectIdOverride)
+      : undefined
+    const projectForSession = overrideProject ?? ambientProject
+    const projectId = projectIdOverride ?? requestedProjectId ?? projectForSession?.id
     const session = await dbCreateSession(requestedName, projectId)
+    const sessionProjectId = session.projectId
+    const notifyCwd = resolveSessionProjectCwd(sessionProjectId)
     const sessionWithStats: SessionWithStats = { ...session, messageCount: 0, totalTokens: 0 }
     const fromSessionId = currentSession()?.id
 
@@ -417,17 +472,15 @@ export async function createNewSession(
     logInfo('session', 'Session created', {
       id: session.id,
       name: session.name,
-      project: project?.name ?? 'unknown',
+      project: projectForSession?.name ?? 'unknown',
     })
 
-    const { currentProject: getProject } = useProject()
-    const cwd = getProject()?.directory || '.'
-    await notifySessionOpened(session.id, cwd, buildDesktopSessionSnapshot(session, []))
+    await notifySessionOpened(session.id, notifyCwd, buildDesktopSessionSnapshot(session, []))
     if (currentSession()?.id !== session.id) {
       return session
     }
     localStorage.setItem(STORAGE_KEYS.LAST_SESSION, session.id)
-    setLastSessionForProject(projectId, session.id)
+    setLastSessionForProject(sessionProjectId, session.id)
     return session
   })()
   createSessionInFlightByKey.set(requestKey, createPromise)
@@ -439,6 +492,15 @@ export async function createNewSession(
       createSessionInFlightByKey.delete(requestKey)
     }
   }
+}
+
+function resolveSessionProjectCwd(projectId?: string): string | undefined {
+  if (!projectId) {
+    return undefined
+  }
+
+  const { projects } = useProject()
+  return projects().find((project) => project.id === projectId)?.directory ?? ''
 }
 
 export async function switchSession(
@@ -455,8 +517,12 @@ export async function switchSession(
     logWarn('session', 'Session not found', { id })
     return
   }
+  const targetProjectId = session.projectId
+  const targetSessionCwd = resolveSessionProjectCwd(targetProjectId)
 
   const requestToken = sessionSwitchGate.begin()
+  const isCurrentSwitch = () =>
+    sessionSwitchGate.isCurrent(requestToken) && currentSession()?.id === id
   let loadedMessages: Awaited<ReturnType<typeof getMessages>> = []
   if (fromSessionId && fromSessionId !== id) {
     cacheCurrentSessionArtifacts(fromSessionId)
@@ -465,58 +531,69 @@ export async function switchSession(
   loadedMessages = cachedArtifacts?.messages ?? []
   setEditingMessageId(null)
   setRetryingMessageId(null)
-  setCurrentSession(session)
-  if (cachedArtifacts) {
-    hydrateSessionArtifacts(cachedArtifacts)
-  } else {
-    resetSessionArtifacts()
-  }
+  await activatePersistedSession(session, {
+    projectId: targetProjectId,
+    startLoading: !cachedArtifacts,
+    persistSelection: false,
+    isCurrent: isCurrentSwitch,
+    beforeLoad: () => {
+      if (cachedArtifacts) {
+        hydrateSessionArtifacts(cachedArtifacts)
+      } else {
+        resetSessionArtifacts()
+      }
 
-  // Switch to per-session log file
-  import('../../lib/logger').then((m) => m.setSessionLogFile(id)).catch(() => {})
+      // Switch to per-session log file
+      import('../../lib/logger').then((m) => m.setSessionLogFile(id)).catch(() => {})
+    },
+    load: async (sessionId) => {
+      const [dbMessages, dbAgents, dbFileOps, dbTerminalExecs, dbMemItems, dbCheckpoints] =
+        await Promise.all([
+          getMessages(sessionId),
+          getAgents(sessionId),
+          getFileOperations(sessionId),
+          getTerminalExecutions(sessionId),
+          getMemoryItems(sessionId),
+          getCheckpoints(sessionId),
+        ])
 
-  setIsLoadingMessages(!cachedArtifacts)
-  try {
-    const [dbMessages, dbAgents, dbFileOps, dbTerminalExecs, dbMemItems, dbCheckpoints] =
-      await Promise.all([
-        getMessages(id),
-        getAgents(id),
-        getFileOperations(id),
-        getTerminalExecutions(id),
-        getMemoryItems(id),
-        getCheckpoints(id),
-      ])
-    if (!sessionSwitchGate.isCurrent(requestToken) || currentSession()?.id !== id) {
-      return
-    }
-    loadedMessages = dbMessages
-    log.debug('session', `switchSession: loaded ${dbMessages.length} messages from DB for ${id}`)
-    const freshArtifacts = {
-      messages: dbMessages,
-      agents: dbAgents,
-      fileOps: dbFileOps,
-      terminalExecutions: dbTerminalExecs,
-      memoryItems: dbMemItems,
-      checkpoints: dbCheckpoints,
-    }
-    hydrateSessionArtifacts(freshArtifacts)
-    cacheSessionArtifacts(id, freshArtifacts)
-    log.info('session', 'Session loaded', { id, messageCount: dbMessages.length })
-    logInfo('session', 'Session switched', {
-      from: fromSessionId ?? 'none',
-      to: id,
-      messageCount: dbMessages.length,
-    })
-  } catch (err) {
-    if (!sessionSwitchGate.isCurrent(requestToken) || currentSession()?.id !== id) {
-      return
-    }
-    logError('Session', 'Failed to load messages', err)
-    resetSessionArtifacts()
-  } finally {
-    if (sessionSwitchGate.isCurrent(requestToken) && currentSession()?.id === id) {
-      setIsLoadingMessages(false)
-    }
+      return {
+        messages: dbMessages,
+        agents: dbAgents,
+        fileOps: dbFileOps,
+        terminalExecutions: dbTerminalExecs,
+        memoryItems: dbMemItems,
+        checkpoints: dbCheckpoints,
+      }
+    },
+    applyLoaded: (freshArtifacts) => {
+      loadedMessages = freshArtifacts.messages
+      log.debug(
+        'session',
+        `switchSession: loaded ${freshArtifacts.messages.length} messages from DB for ${id}`
+      )
+      hydrateSessionArtifacts(freshArtifacts)
+      cacheSessionArtifacts(id, freshArtifacts)
+      log.info('session', 'Session loaded', { id, messageCount: freshArtifacts.messages.length })
+      logInfo('session', 'Session switched', {
+        from: fromSessionId ?? 'none',
+        to: id,
+        messageCount: freshArtifacts.messages.length,
+      })
+    },
+    onLoadError: (err) => {
+      if (!isCurrentSwitch()) {
+        return
+      }
+
+      logError('Session', 'Failed to load messages', err)
+      resetSessionArtifacts()
+    },
+    shouldSettle: isCurrentSwitch,
+  })
+
+  if (!isCurrentSwitch()) {
+    return
   }
 
   // Perform detached session recovery BEFORE notifying the backend, so the
@@ -524,34 +601,34 @@ export async function switchSession(
   // transcript rather than stale pre-recovery messages.
   if (isTauri()) {
     const recovered = await recoverDetachedDesktopSessionIfNeeded(id)
-    if (recovered && sessionSwitchGate.isCurrent(requestToken) && currentSession()?.id === id) {
+    if (recovered && isCurrentSwitch()) {
       // Update loadedMessages to reflect the recovered authoritative state
       loadedMessages = messages()
     }
-    if (!sessionSwitchGate.isCurrent(requestToken) || currentSession()?.id !== id) {
+    if (!isCurrentSwitch()) {
       return
     }
   } else {
     const recovered = await recoverWebSessionFromBackendIfNeeded(id)
-    if (recovered && sessionSwitchGate.isCurrent(requestToken) && currentSession()?.id === id) {
+    if (recovered && isCurrentSwitch()) {
       // Update loadedMessages to reflect the recovered authoritative state
       loadedMessages = messages()
     }
-    if (!sessionSwitchGate.isCurrent(requestToken) || currentSession()?.id !== id) {
+    if (!isCurrentSwitch()) {
       return
     }
   }
 
-  const { currentProject: getProject } = useProject()
-  const cwd = getProject()?.directory || '.'
-  await notifySessionOpened(id, cwd, buildDesktopSessionSnapshot(session, loadedMessages))
-  if (!sessionSwitchGate.isCurrent(requestToken) || currentSession()?.id !== id) {
+  await notifySessionOpened(
+    id,
+    targetSessionCwd,
+    buildDesktopSessionSnapshot(session, loadedMessages)
+  )
+  if (!isCurrentSwitch()) {
     return
   }
 
-  localStorage.setItem(STORAGE_KEYS.LAST_SESSION, id)
-  const { currentProject } = useProject()
-  setLastSessionForProject(currentProject()?.id, id)
+  persistSelectedSession(targetProjectId, id)
 }
 
 /** Switch to most-recent or create new session after removal */
@@ -640,6 +717,7 @@ export async function deleteSessionPermanently(id: string): Promise<void> {
   unregisterBackendSessionId(id)
   deleteCachedSessionArtifacts(id)
   setSessions((prev) => prev.filter((s) => s.id !== id))
+  setArchivedSessions((prev) => prev.filter((s) => s.id !== id))
   if (currentSession()?.id === id) await switchAfterRemoval(projectId)
 }
 

@@ -39,10 +39,12 @@ export interface SessionWithStats extends Session {
   lastPreview?: string
 }
 
+export type MessageRole = 'user' | 'assistant' | 'system' | 'tool'
+
 export interface Message {
   id: string
   sessionId: string
-  role: 'user' | 'assistant' | 'system'
+  role: MessageRole
   content: string
   agentId?: string
   createdAt: number

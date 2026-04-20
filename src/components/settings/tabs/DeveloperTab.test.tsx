@@ -92,12 +92,18 @@ function clickButtonByText(label: string): void {
   button.click()
 }
 
-function getRegionText(ariaLabel: string): string {
-  const region = document.querySelector(`[aria-label="${ariaLabel}"]`)
-  if (!(region instanceof HTMLElement)) {
-    throw new Error(`Could not find region with aria-label: ${ariaLabel}`)
+function getPanelText(title: string): string {
+  const heading = Array.from(document.querySelectorAll('div')).find(
+    (candidate) => candidate.textContent?.trim() === title
+  )
+  if (!(heading instanceof HTMLElement)) {
+    throw new Error(`Could not find panel heading: ${title}`)
   }
-  return region.textContent ?? ''
+  const panel = heading.nextElementSibling
+  if (!(panel instanceof HTMLElement)) {
+    throw new Error(`Could not find panel body for heading: ${title}`)
+  }
+  return panel.textContent ?? ''
 }
 
 async function flush(): Promise<void> {
@@ -162,9 +168,7 @@ describe('DeveloperTab diagnostics', () => {
     dispose = render(() => <DeveloperTab />, container)
     await flush()
 
-    expect(getRegionText('Latest backend log tail scrollable region')).toContain(
-      'backend mount line'
-    )
+    expect(getPanelText('Latest backend log tail')).toContain('backend mount line')
 
     clickButtonByText('Refresh')
     await flush()
@@ -172,16 +176,12 @@ describe('DeveloperTab diagnostics', () => {
     expect(readLatestBackendLogsMock).toHaveBeenCalledTimes(2)
     expect(readLatestBackendLogsMock).toHaveBeenNthCalledWith(1, 120)
     expect(readLatestBackendLogsMock).toHaveBeenNthCalledWith(2, 120)
-    expect(getRegionText('Latest backend log tail scrollable region')).toContain(
-      'backend mount line'
-    )
+    expect(getPanelText('Latest backend log tail')).toContain('backend mount line')
 
     pendingRefresh.resolve('backend refreshed line')
     await flush()
 
-    expect(getRegionText('Latest backend log tail scrollable region')).toContain(
-      'backend refreshed line'
-    )
+    expect(getPanelText('Latest backend log tail')).toContain('backend refreshed line')
   })
 
   it('ignores stale backend log refresh completions that resolve out-of-order', async () => {
@@ -205,19 +205,13 @@ describe('DeveloperTab diagnostics', () => {
     fastRefresh.resolve('latest backend line')
     await flush()
 
-    expect(getRegionText('Latest backend log tail scrollable region')).toContain(
-      'latest backend line'
-    )
+    expect(getPanelText('Latest backend log tail')).toContain('latest backend line')
 
     slowRefresh.resolve('stale backend line')
     await flush()
 
-    expect(getRegionText('Latest backend log tail scrollable region')).toContain(
-      'latest backend line'
-    )
-    expect(getRegionText('Latest backend log tail scrollable region')).not.toContain(
-      'stale backend line'
-    )
+    expect(getPanelText('Latest backend log tail')).toContain('latest backend line')
+    expect(getPanelText('Latest backend log tail')).not.toContain('stale backend line')
   })
 
   it('copies a meaningful diagnostics payload to clipboard', async () => {
@@ -289,17 +283,13 @@ describe('DeveloperTab diagnostics', () => {
     await flush()
 
     expect(readLatestBackendLogsMock).toHaveBeenCalledTimes(1)
-    expect(getRegionText('Latest backend log tail scrollable region')).toContain(
-      '(failed to read backend logs)'
-    )
+    expect(getPanelText('Latest backend log tail')).toContain('(failed to read backend logs)')
 
     clickButtonByText('Refresh')
     await flush()
 
     expect(readLatestBackendLogsMock).toHaveBeenCalledTimes(2)
-    expect(getRegionText('Latest backend log tail scrollable region')).toContain(
-      'backend recovered line'
-    )
+    expect(getPanelText('Latest backend log tail')).toContain('backend recovered line')
   })
 
   it('serializes populated diagnostics payload with recent event tail', async () => {
@@ -336,7 +326,7 @@ describe('DeveloperTab diagnostics', () => {
     dispose = render(() => <DeveloperTab />, container)
     await flush()
 
-    const payload = JSON.parse(getRegionText('Diagnostics payload scrollable region')) as {
+    const payload = JSON.parse(getPanelText('Diagnostics payload')) as {
       runId?: string
       runState?: string
       isRunning?: boolean

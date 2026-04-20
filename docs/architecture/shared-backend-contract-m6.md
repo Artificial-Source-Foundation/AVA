@@ -204,10 +204,11 @@ Contract requirements:
 
 Headless is explicitly non-interactive and follows these contract rules:
 
-1. Auto-approval behavior is allowed as a documented non-interactive exception path.
+1. Auto-approval behavior is allowed only for non-dangerous approval-requiring work as a documented non-interactive exception path.
 2. Headless is not required to provide interactive approval/question/plan UX parity.
-3. Headless still MUST obey canonical command meaning, event correctness, and session continuity semantics.
-4. No headless behavior may require interactive prompts/TTY input in normal operation.
+3. Dangerous approval-requiring actions MUST fail closed instead of hanging for interactive approval.
+4. Headless still MUST obey canonical command meaning, event correctness, and session continuity semantics.
+5. No headless behavior may require interactive prompts/TTY input in normal operation.
 
 ## 11) Explicit open decisions
 

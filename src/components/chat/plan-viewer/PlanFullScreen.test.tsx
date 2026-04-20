@@ -452,7 +452,7 @@ describe('PlanFullScreen wrapper contract', () => {
     document.body.removeChild(container)
   })
 
-  it('uses role="region" and accurate aria-label (not aria-modal)', () => {
+  it('uses the top-level plan review section label without aria-modal', () => {
     const onApprove = vi.fn()
     const onRevise = vi.fn()
     const onClose = vi.fn()
@@ -472,10 +472,9 @@ describe('PlanFullScreen wrapper contract', () => {
       container
     )
 
-    const region = document.querySelector('[role="region"]')
+    const region = document.querySelector('section[aria-label^="Plan review:"]')
     expect(region).not.toBeNull()
     expect(region?.getAttribute('aria-label')).toContain('TEST-001')
-    // Should NOT have aria-modal (it's not a true modal)
     expect(region?.hasAttribute('aria-modal')).toBe(false)
 
     document.body.removeChild(container)

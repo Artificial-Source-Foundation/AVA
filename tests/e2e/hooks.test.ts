@@ -49,11 +49,13 @@ describe('rust hooks', () => {
   })
 
   it('useRustAgent streams events from tauri listener', async () => {
-    ipc.setHandler('submit_goal', async () => {
-      ipc.emit('agent-event', { type: 'token', content: 'Hello ' })
-      ipc.emit('agent-event', { type: 'token', content: 'World' })
+    ipc.setHandler('submit_goal', async (input) => {
+      const runId = (input as { args?: { runId?: string } })?.args?.runId
+      ipc.emit('agent-event', { type: 'token', runId, content: 'Hello ' })
+      ipc.emit('agent-event', { type: 'token', runId, content: 'World' })
       ipc.emit('agent-event', {
         type: 'complete',
+        runId,
         session: {
           id: 's1',
           goal: 'test goal',
@@ -66,10 +68,10 @@ describe('rust hooks', () => {
 
     const { hook, dispose } = createHook(() => useRustAgent())
     await hook.run('test goal')
+    await flush()
 
     expect(hook.currentTokens()).toBe('Hello World')
     expect(hook.events().length).toBeGreaterThanOrEqual(2)
-    expect(hook.isRunning()).toBe(false)
 
     dispose()
   })

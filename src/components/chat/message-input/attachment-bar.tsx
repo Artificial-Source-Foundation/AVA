@@ -40,7 +40,7 @@ export interface AttachmentState {
   removePaste: (i: number) => void
   updatePaste: (i: number, content: string) => void
   togglePastePreview: (i: number) => void
-  clearAll: () => { files: PendingFile[]; pastes: PendingPaste[] }
+  clearAll: () => { images: PendingImage[]; files: PendingFile[]; pastes: PendingPaste[] }
 }
 
 // ---------------------------------------------------------------------------
@@ -130,15 +130,16 @@ export function createAttachmentState(): AttachmentState {
     setExpandedPasteIndex((p) => (p === i ? null : i))
   }
 
-  /** Clear all attachments and return the cleared files/pastes for message building */
-  const clearAll = (): { files: PendingFile[]; pastes: PendingPaste[] } => {
+  /** Clear all attachments and return the cleared payloads for message building */
+  const clearAll = (): { images: PendingImage[]; files: PendingFile[]; pastes: PendingPaste[] } => {
+    const images = pendingImages()
     setPendingImages([])
     const files = pendingFiles()
     setPendingFiles([])
     const pastes = pendingPastes()
     setPendingPastes([])
     setExpandedPasteIndex(null)
-    return { files, pastes }
+    return { images, files, pastes }
   }
 
   return {

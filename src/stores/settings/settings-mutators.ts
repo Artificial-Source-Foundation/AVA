@@ -17,8 +17,8 @@ import { getModelsDevModels } from '../../services/providers/curated-model-catal
 import { enrichWithCatalog, fetchModels } from '../../services/providers/model-fetcher'
 import type { Credentials, LLMProvider } from '../../types/llm'
 import { applyAppearanceToDOM } from './settings-appearance'
-import { saveSettings, syncProviderCredentials } from './settings-persistence'
-import { setSettingsRaw, settings, updateSettings, updateSubKey } from './settings-signal'
+import { syncProviderCredentials } from './settings-persistence'
+import { commitSettings, settings, updateSettings, updateSubKey } from './settings-signal'
 import type { AppSettings, MCPServerConfig } from './settings-types'
 
 // ── Provider ─────────────────────────────────────────────────────────────────
@@ -58,12 +58,11 @@ export function updateProvider(id: string, patch: Partial<LLMProviderConfig>): v
       `Provider ${patch.status === 'connected' ? 'connected' : 'disconnected'}`,
       { provider: id }
     )
-  setSettingsRaw((prev) => {
+  commitSettings((prev) => {
     const next = {
       ...prev,
       providers: prev.providers.map((p) => (p.id === id ? { ...p, ...patch } : p)),
     }
-    saveSettings(next)
     return next
   })
   if ('apiKey' in patch) {
@@ -373,28 +372,25 @@ export function populateModelsFromCatalog(): number {
 // ── Agents ───────────────────────────────────────────────────────────────────
 
 export function updateAgent(id: string, patch: Partial<AgentPreset>): void {
-  setSettingsRaw((prev) => {
+  commitSettings((prev) => {
     const next = {
       ...prev,
       agents: prev.agents.map((a) => (a.id === id ? { ...a, ...patch } : a)),
     }
-    saveSettings(next)
     return next
   })
 }
 
 export function addAgent(agent: AgentPreset): void {
-  setSettingsRaw((prev) => {
+  commitSettings((prev) => {
     const next = { ...prev, agents: [...prev.agents, agent] }
-    saveSettings(next)
     return next
   })
 }
 
 export function removeAgent(id: string): void {
-  setSettingsRaw((prev) => {
+  commitSettings((prev) => {
     const next = { ...prev, agents: prev.agents.filter((a) => a.id !== id) }
-    saveSettings(next)
     return next
   })
 }
@@ -402,10 +398,9 @@ export function removeAgent(id: string): void {
 // ── Permissions ──────────────────────────────────────────────────────────────
 
 export function addAutoApprovedTool(toolName: string): void {
-  setSettingsRaw((prev) => {
+  commitSettings((prev) => {
     if (prev.autoApprovedTools.includes(toolName)) return prev
     const next = { ...prev, autoApprovedTools: [...prev.autoApprovedTools, toolName] }
-    saveSettings(next)
     return next
   })
 }
@@ -415,22 +410,20 @@ export function isToolAutoApproved(toolName: string): boolean {
 }
 
 export function removeAutoApprovedTool(toolName: string): void {
-  setSettingsRaw((prev) => {
+  commitSettings((prev) => {
     const next = {
       ...prev,
       autoApprovedTools: prev.autoApprovedTools.filter((t) => t !== toolName),
     }
-    saveSettings(next)
     return next
   })
 }
 
 export function cyclePermissionMode(): void {
   const modes: Array<'ask' | 'auto-approve' | 'bypass'> = ['ask', 'auto-approve', 'bypass']
-  setSettingsRaw((prev) => {
+  commitSettings((prev) => {
     const idx = modes.indexOf(prev.permissionMode)
     const next = { ...prev, permissionMode: modes[(idx + 1) % modes.length] }
-    saveSettings(next)
     return next
   })
 }

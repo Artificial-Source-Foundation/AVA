@@ -16,6 +16,7 @@ import { expect, type Page, test } from '@playwright/test'
 
 /** URL of the AVA web server when running `ava serve`. Overridable via env. */
 const AVA_WEB_URL = process.env.AVA_WEB_URL ?? 'http://localhost:18080'
+const AVA_WEB_TOKEN = process.env.AVA_WEB_TOKEN ?? 'playwright-local-token'
 const APP_VERSION = '2.2.6'
 
 /** Health endpoint exposed by `ava serve`. */
@@ -24,6 +25,19 @@ const AVA_HEALTH_URL = `${AVA_WEB_URL}/api/health`
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+function authHeaders(headers: Record<string, string> = {}): Record<string, string> {
+  return {
+    Authorization: `Bearer ${AVA_WEB_TOKEN}`,
+    ...headers,
+  }
+}
+
+function authWebSocketUrl(path = '/ws'): string {
+  const url = new URL(path, AVA_WEB_URL.replace(/^http/, 'ws'))
+  url.searchParams.set('token', AVA_WEB_TOKEN)
+  return url.toString()
+}
 
 /**
  * Check whether the AVA web server is running by hitting its /api/health
@@ -50,7 +64,7 @@ async function requireBackend(): Promise<void> {
     test.skip(
       true,
       `AVA web server not running at ${AVA_WEB_URL}. ` +
-        'Start with `cargo run --bin ava --features web -- serve --port 18080` to run this test.'
+        'Start with `cargo run --bin ava --features web -- serve --port 18080 --token playwright-local-token` to run this test.'
     )
   }
 }
@@ -75,7 +89,7 @@ async function currentSessionId(page: Page): Promise<string> {
 async function injectDeterministicApproval(sessionId: string, runId: string): Promise<void> {
   const res = await fetch(`${AVA_WEB_URL}/api/debug/inject-approval`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({
       sessionId,
       runId,
@@ -89,21 +103,55 @@ async function injectDeterministicApproval(sessionId: string, runId: string): Pr
   expect(res.ok).toBe(true)
 }
 
+async function injectDeterministicQuestion(
+  sessionId: string,
+  runId: string,
+  options?: { question?: string; options?: string[] }
+): Promise<void> {
+  const res = await fetch(`${AVA_WEB_URL}/api/debug/inject-question`, {
+    method: 'POST',
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({
+      sessionId,
+      runId,
+      question: options?.question ?? 'Deterministic question for browser E2E?',
+      options: options?.options ?? [],
+    }),
+  })
+  expect(res.ok).toBe(true)
+}
+
 async function finishDebugRun(runId: string): Promise<void> {
   const res = await fetch(`${AVA_WEB_URL}/api/debug/finish-run`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ runId }),
   })
   expect(res.ok).toBe(true)
 }
 
-async function fetchAgentStatus(sessionId: string): Promise<{ running?: boolean }> {
-  const res = await fetch(
-    `${AVA_WEB_URL}/api/agent/status?session_id=${encodeURIComponent(sessionId)}`
-  )
+type AgentStatusScope = {
+  sessionId?: string
+  runId?: string
+}
+
+type AgentStatusResponse = {
+  running?: boolean
+  state?: string
+  runId?: string
+}
+
+async function fetchAgentStatus(scope: AgentStatusScope = {}): Promise<AgentStatusResponse> {
+  const params = new URLSearchParams()
+  if (scope.sessionId) params.set('session_id', scope.sessionId)
+  if (scope.runId) params.set('run_id', scope.runId)
+  const query = params.toString()
+
+  const res = await fetch(`${AVA_WEB_URL}/api/agent/status${query ? `?${query}` : ''}`, {
+    headers: authHeaders(),
+  })
   expect(res.ok).toBe(true)
-  return (await res.json()) as { running?: boolean }
+  return (await res.json()) as AgentStatusResponse
 }
 
 function composer(page: Page) {
@@ -400,11 +448,296 @@ test.describe('4. Tool Approval UI (ApprovalDock)', () => {
 
       await expect
         .poll(async () => {
-          const status = await fetchAgentStatus(sessionId)
+          const status = await fetchAgentStatus({ sessionId })
           return status.running ?? null
         })
         .toBe(false)
     } finally {
+      await finishDebugRun(runId)
+    }
+  })
+})
+
+test.describe('4b. Question UI (QuestionDock)', () => {
+  test.beforeEach(async ({ page }) => {
+    await bypassOnboarding(page)
+    await page.goto('/')
+    await waitForAppShell(page)
+    await dismissChangelog(page)
+  })
+
+  test('QuestionDock appears, accepts an answer, and clears on resolve', async ({ page }) => {
+    await requireBackend()
+
+    const sessionId = await currentSessionId(page)
+    const runId = `playwright-question-${Date.now()}`
+
+    try {
+      await injectDeterministicQuestion(sessionId, runId)
+      await page.reload()
+      await waitForAppShell(page)
+      await dismissChangelog(page)
+
+      const dock = page.locator('[data-testid="question-dock"]')
+      await expect(dock).toBeVisible()
+      await expect(dock).toContainText('Deterministic question for browser E2E?')
+
+      await dock.locator('textarea[placeholder="Type your answer..."]').fill('Yes, continue')
+      await dock.locator('button:has-text("Answer")').click()
+
+      await expect(dock).not.toBeVisible()
+
+      await expect
+        .poll(async () => {
+          const status = await fetchAgentStatus({ sessionId })
+          return status.running ?? null
+        })
+        .toBe(false)
+    } finally {
+      await finishDebugRun(runId)
+    }
+  })
+
+  test('QuestionDock multiple-choice: select option and submit (backend required)', async ({
+    page,
+  }) => {
+    await requireBackend()
+
+    const sessionId = await currentSessionId(page)
+    const runId = `playwright-question-mc-${Date.now()}`
+
+    try {
+      await injectDeterministicQuestion(sessionId, runId, {
+        question: 'Which option should be selected?',
+        options: ['Option A', 'Option B', 'Option C'],
+      })
+      await page.reload()
+      await waitForAppShell(page)
+      await dismissChangelog(page)
+
+      const dock = page.locator('[data-testid="question-dock"]')
+      await expect(dock).toBeVisible()
+      await expect(dock).toContainText('Which option should be selected?')
+
+      // Verify all three options are rendered
+      await expect(dock.locator('text=Option A')).toBeVisible()
+      await expect(dock.locator('text=Option B')).toBeVisible()
+      await expect(dock.locator('text=Option C')).toBeVisible()
+
+      // Select Option B by clicking its label (radio input is visually hidden)
+      await dock.locator('label', { hasText: 'Option B' }).click()
+
+      // Submit the answer
+      await dock.locator('button:has-text("Answer")').click()
+
+      // Dock should disappear after submission
+      await expect(dock).not.toBeVisible()
+
+      await expect
+        .poll(async () => {
+          const status = await fetchAgentStatus({ sessionId })
+          return status.running ?? null
+        })
+        .toBe(false)
+    } finally {
+      await finishDebugRun(runId)
+    }
+  })
+
+  test('QuestionDock keyboard navigation: arrow keys move selection, Enter submits (backend required)', async ({
+    page,
+  }) => {
+    await requireBackend()
+
+    const sessionId = await currentSessionId(page)
+    const runId = `playwright-question-kb-${Date.now()}`
+
+    // Set up request capture before submission
+    const resolveRequestPromise = page.waitForRequest(
+      (req) => req.url().includes('/api/agent/resolve-question') && req.method() === 'POST'
+    )
+
+    try {
+      await injectDeterministicQuestion(sessionId, runId, {
+        question: 'Navigate with keyboard?',
+        options: ['First', 'Second', 'Third'],
+      })
+      await page.reload()
+      await waitForAppShell(page)
+      await dismissChangelog(page)
+
+      const dock = page.locator('[data-testid="question-dock"]')
+      await expect(dock).toBeVisible()
+      await expect(dock).toContainText('Navigate with keyboard?')
+
+      // Get all radio inputs in the dock
+      const radios = dock.locator('input[type="radio"]')
+      await expect(radios).toHaveCount(4) // 3 options + freeform
+
+      // Focus the first radio option
+      await radios.first().focus()
+      await expect(radios.first()).toBeFocused()
+
+      // Press ArrowDown to move to second option
+      await page.keyboard.press('ArrowDown')
+      await expect(radios.nth(1)).toBeFocused()
+
+      // Press ArrowDown to move to third option
+      await page.keyboard.press('ArrowDown')
+      await expect(radios.nth(2)).toBeFocused()
+
+      // Press Enter to submit the selected option
+      await page.keyboard.press('Enter')
+
+      // Capture and assert the request body
+      const resolveRequest = await resolveRequestPromise
+      const requestBody = JSON.parse(resolveRequest.postData() ?? '{}') as {
+        answer?: string
+        request_id?: string
+      }
+      expect(requestBody.answer).toBe('Third')
+      expect(requestBody.request_id).toBeTruthy()
+
+      // Dock should disappear after submission
+      await expect(dock).not.toBeVisible()
+
+      await expect
+        .poll(async () => {
+          const status = await fetchAgentStatus({ sessionId })
+          return status.running ?? null
+        })
+        .toBe(false)
+    } finally {
+      await finishDebugRun(runId)
+    }
+  })
+
+  test('QuestionDock keyboard: Enter on focused Answer button uses native activation (backend required)', async ({
+    page,
+  }) => {
+    await requireBackend()
+
+    const sessionId = await currentSessionId(page)
+    const runId = `playwright-question-btn-${Date.now()}`
+
+    // Set up request capture before submission
+    const resolveRequestPromise = page.waitForRequest(
+      (req) => req.url().includes('/api/agent/resolve-question') && req.method() === 'POST'
+    )
+
+    try {
+      await injectDeterministicQuestion(sessionId, runId, {
+        question: 'Select an option and use button?',
+        options: ['Choice 1', 'Choice 2'],
+      })
+      await page.reload()
+      await waitForAppShell(page)
+      await dismissChangelog(page)
+
+      const dock = page.locator('[data-testid="question-dock"]')
+      await expect(dock).toBeVisible()
+
+      // Click on the first option to select it
+      await dock.locator('label', { hasText: 'Choice 1' }).click()
+
+      // Focus the Answer button
+      const answerBtn = dock.locator('button:has-text("Answer")')
+      await answerBtn.focus()
+      await expect(answerBtn).toBeFocused()
+
+      // Press Enter while button is focused - should trigger native button click
+      await page.keyboard.press('Enter')
+
+      // Capture and assert the request body
+      const resolveRequest = await resolveRequestPromise
+      const requestBody = JSON.parse(resolveRequest.postData() ?? '{}') as {
+        answer?: string
+        request_id?: string
+      }
+      expect(requestBody.answer).toBe('Choice 1')
+      expect(requestBody.request_id).toBeTruthy()
+
+      // Dock should disappear (submitted via native button activation)
+      await expect(dock).not.toBeVisible()
+
+      await expect
+        .poll(async () => {
+          const status = await fetchAgentStatus({ sessionId })
+          return status.running ?? null
+        })
+        .toBe(false)
+    } finally {
+      await finishDebugRun(runId)
+    }
+  })
+
+  /**
+   * Follow-up 21: Negative test - Enter in composer must not submit a pending QuestionDock.
+   * When the dock is submit-ready (option selected) and focus moves to the main composer,
+   * pressing Enter should NOT trigger question resolution. This prevents accidental
+   * submission when the user intends to send a chat message instead.
+   */
+  test('QuestionDock: Enter in main composer does not submit pending question (backend required)', async ({
+    page,
+  }) => {
+    await requireBackend()
+
+    const sessionId = await currentSessionId(page)
+    const runId = `playwright-question-fu21-${Date.now()}`
+
+    // Track whether a resolve request was made
+    let resolveRequestMade = false
+    const trackResolveRequests = (req: { url(): string; method(): string }) => {
+      if (req.url().includes('/api/agent/resolve-question') && req.method() === 'POST') {
+        resolveRequestMade = true
+      }
+    }
+    page.on('request', trackResolveRequests)
+
+    try {
+      await injectDeterministicQuestion(sessionId, runId, {
+        question: 'Should this submit when pressing Enter in composer?',
+        options: ['Yes', 'No', 'Maybe'],
+      })
+      await page.reload()
+      await waitForAppShell(page)
+      await dismissChangelog(page)
+
+      const dock = page.locator('[data-testid="question-dock"]')
+      await expect(dock).toBeVisible()
+      await expect(dock).toContainText('Should this submit when pressing Enter in composer?')
+
+      // Select an option to make the dock submit-ready
+      const optionToSelect = 'No'
+      await dock.locator('label', { hasText: optionToSelect }).click()
+
+      // Verify option is selected via accessible radio locator (label provides accessible name)
+      const selectedRadio = dock.getByRole('radio', { name: optionToSelect })
+      await expect(selectedRadio).toBeChecked()
+
+      // Move focus to the main composer (simulates user clicking in composer to type)
+      const mainComposer = composer(page)
+      await mainComposer.click()
+
+      // Type some text and press Enter - this should submit the composer message, NOT the question
+      const messageText = 'My chat message'
+      await mainComposer.fill(messageText)
+      await page.keyboard.press('Enter')
+
+      // Enter in the main composer must not hijack the pending question submission.
+      // The typed composer text should remain intact until the normal composer flow handles it.
+      await expect(mainComposer).toHaveValue(messageText)
+
+      // ASSERT: Dock must still be visible (not submitted)
+      await expect(dock).toBeVisible()
+
+      // ASSERT: Selected option must still be selected
+      await expect(selectedRadio).toBeChecked()
+
+      // ASSERT: No resolve-question request should have been fired
+      expect(resolveRequestMade).toBe(false)
+    } finally {
+      page.off('request', trackResolveRequests)
       await finishDebugRun(runId)
     }
   })
@@ -796,7 +1129,7 @@ test.describe('9. WebSocket & Backend API (backend required)', () => {
   test('GET /api/sessions returns an array', async ({ page: _page }) => {
     await requireBackend()
 
-    const res = await fetch(`${AVA_WEB_URL}/api/sessions`)
+    const res = await fetch(`${AVA_WEB_URL}/api/sessions`, { headers: authHeaders() })
     expect(res.ok).toBe(true)
 
     const sessions = (await res.json()) as unknown[]
@@ -808,7 +1141,7 @@ test.describe('9. WebSocket & Backend API (backend required)', () => {
 
     const res = await fetch(`${AVA_WEB_URL}/api/sessions/create`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ title: 'E2E Test Session' }),
     })
     expect(res.ok).toBe(true)
@@ -826,14 +1159,16 @@ test.describe('9. WebSocket & Backend API (backend required)', () => {
     // Create a new session
     const createRes = await fetch(`${AVA_WEB_URL}/api/sessions/create`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ title: 'E2E Round-Trip Session' }),
     })
     const created = (await createRes.json()) as Record<string, unknown>
     const sessionId = created.id as string
 
     // Fetch it back
-    const getRes = await fetch(`${AVA_WEB_URL}/api/sessions/${sessionId}`)
+    const getRes = await fetch(`${AVA_WEB_URL}/api/sessions/${sessionId}`, {
+      headers: authHeaders(),
+    })
     expect(getRes.ok).toBe(true)
 
     const session = (await getRes.json()) as Record<string, unknown>
@@ -846,7 +1181,7 @@ test.describe('9. WebSocket & Backend API (backend required)', () => {
     // Create a throwaway session
     const createRes = await fetch(`${AVA_WEB_URL}/api/sessions/create`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ title: 'E2E Delete Test' }),
     })
     const created = (await createRes.json()) as Record<string, unknown>
@@ -855,11 +1190,14 @@ test.describe('9. WebSocket & Backend API (backend required)', () => {
     // Delete it
     const delRes = await fetch(`${AVA_WEB_URL}/api/sessions/${sessionId}`, {
       method: 'DELETE',
+      headers: authHeaders(),
     })
     expect(delRes.ok).toBe(true)
 
     // Fetching it now should return 404
-    const getRes = await fetch(`${AVA_WEB_URL}/api/sessions/${sessionId}`)
+    const getRes = await fetch(`${AVA_WEB_URL}/api/sessions/${sessionId}`, {
+      headers: authHeaders(),
+    })
     expect(getRes.status).toBe(404)
   })
 
@@ -876,7 +1214,7 @@ test.describe('9. WebSocket & Backend API (backend required)', () => {
   test('GET /api/permissions returns current permission level', async ({ page: _page }) => {
     await requireBackend()
 
-    const res = await fetch(`${AVA_WEB_URL}/api/permissions`)
+    const res = await fetch(`${AVA_WEB_URL}/api/permissions`, { headers: authHeaders() })
     expect(res.ok).toBe(true)
 
     const perms = (await res.json()) as Record<string, unknown>
@@ -891,37 +1229,34 @@ test.describe('9. WebSocket & Backend API (backend required)', () => {
     // Open a page context so we can use the browser's WebSocket API
     await page.goto(AVA_WEB_URL)
 
-    const wsResult = await page.evaluate(
-      async (wsUrl: string) => {
-        return new Promise<{ connected: boolean; firstMessage: string | null }>((resolve) => {
-          const ws = new WebSocket(wsUrl)
-          let firstMessage: string | null = null
+    const wsResult = await page.evaluate(async (wsUrl: string) => {
+      return new Promise<{ connected: boolean; firstMessage: string | null }>((resolve) => {
+        const ws = new WebSocket(wsUrl)
+        let firstMessage: string | null = null
 
-          ws.onopen = () => {
-            // Connection established — send a ping text frame to keep alive
-            ws.send(JSON.stringify({ type: 'ping' }))
-          }
+        ws.onopen = () => {
+          // Connection established — send a ping text frame to keep alive
+          ws.send(JSON.stringify({ type: 'ping' }))
+        }
 
-          ws.onmessage = (event) => {
-            firstMessage = String(event.data)
-            ws.close()
-            resolve({ connected: true, firstMessage })
-          }
+        ws.onmessage = (event) => {
+          firstMessage = String(event.data)
+          ws.close()
+          resolve({ connected: true, firstMessage })
+        }
 
-          ws.onerror = () => {
-            resolve({ connected: false, firstMessage: null })
-          }
+        ws.onerror = () => {
+          resolve({ connected: false, firstMessage: null })
+        }
 
-          // If no message arrives within 3s the connection is still valid
-          setTimeout(() => {
-            const isOpen = ws.readyState === WebSocket.OPEN
-            ws.close()
-            resolve({ connected: isOpen, firstMessage })
-          }, 3000)
-        })
-      },
-      `${AVA_WEB_URL.replace('http', 'ws')}/ws`
-    )
+        // If no message arrives within 3s the connection is still valid
+        setTimeout(() => {
+          const isOpen = ws.readyState === WebSocket.OPEN
+          ws.close()
+          resolve({ connected: isOpen, firstMessage })
+        }, 3000)
+      })
+    }, authWebSocketUrl('/ws'))
 
     expect(wsResult.connected).toBe(true)
   })

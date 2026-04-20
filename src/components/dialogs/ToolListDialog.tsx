@@ -11,7 +11,11 @@ import { type Component, createMemo, createResource, createSignal, For, Show } f
 import { rustBackend } from '../../services/rust-bridge'
 import { useSession } from '../../stores/session'
 import type { Message } from '../../types'
-import type { AgentToolInfo, ToolIntrospectionContext } from '../../types/rust-ipc'
+import type {
+  AgentToolInfo,
+  ToolIntrospectionContext,
+  ToolIntrospectionMessageContext,
+} from '../../types/rust-ipc'
 
 interface ToolListDialogProps {
   open: boolean
@@ -59,6 +63,12 @@ function lastUserMessageIndex(messages: Message[]): number {
   return -1
 }
 
+function isToolIntrospectionRole(
+  role: Message['role']
+): role is ToolIntrospectionMessageContext['role'] {
+  return role === 'user' || role === 'assistant' || role === 'system'
+}
+
 function buildToolIntrospectionContext(
   sessionId: string | undefined,
   messageList: Message[]
@@ -69,14 +79,23 @@ function buildToolIntrospectionContext(
   }
 
   const goalMessage = messageList[index]
-  const history = messageList.slice(0, index).map((message) => {
-    const agentVisible = message.metadata?.agentVisible
-    return {
-      role: message.role,
-      content: message.content,
-      ...(typeof agentVisible === 'boolean' ? { agentVisible } : {}),
-    }
-  })
+  const history = messageList
+    .slice(0, index)
+    .filter(
+      (
+        message
+      ): message is Message & {
+        role: ToolIntrospectionMessageContext['role']
+      } => isToolIntrospectionRole(message.role)
+    )
+    .map((message) => {
+      const agentVisible = message.metadata?.agentVisible
+      return {
+        role: message.role,
+        content: message.content,
+        ...(typeof agentVisible === 'boolean' ? { agentVisible } : {}),
+      }
+    })
 
   const images = (goalMessage.images ?? []).map((image) => ({
     data: image.data,

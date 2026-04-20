@@ -23,7 +23,7 @@ import {
 describe('notifySessionOpened', () => {
   beforeEach(async () => {
     isTauriRuntime = false
-    await initCoreBridge()
+    ;(await initCoreBridge())()
     vi.clearAllMocks()
   })
 
@@ -41,7 +41,7 @@ describe('notifySessionOpened', () => {
       messageCount: 4,
     })
 
-    expect(setActiveSessionMock).toHaveBeenCalledWith('session-123')
+    expect(setActiveSessionMock).toHaveBeenCalledWith('session-123', '/workspace')
   })
 
   it('forwards restored frontend session snapshots when opening a desktop session', async () => {
@@ -76,7 +76,7 @@ describe('notifySessionOpened', () => {
       messageCount: 2,
     })
 
-    expect(setActiveSessionMock).toHaveBeenCalledWith('session-123', {
+    expect(setActiveSessionMock).toHaveBeenCalledWith('session-123', '/workspace', {
       title: 'Recovered session',
       messages: [
         {
@@ -120,6 +120,7 @@ describe('notifySessionOpened', () => {
     const ensuredPromise = ensureActiveSessionSynced('session-123')
 
     expect(setActiveSessionMock).toHaveBeenCalledTimes(1)
+    expect(setActiveSessionMock).toHaveBeenCalledWith('session-123', '/workspace')
     if (!resolveSync) {
       throw new Error('Active session sync promise was not captured')
     }
@@ -157,8 +158,8 @@ describe('notifySessionOpened', () => {
     const firstPromise = notifySessionOpened('session-a', '/workspace')
     const secondPromise = notifySessionOpened('session-b', '/workspace')
 
-    expect(setActiveSessionMock).toHaveBeenNthCalledWith(1, 'session-a')
-    expect(setActiveSessionMock).toHaveBeenNthCalledWith(2, 'session-b')
+    expect(setActiveSessionMock).toHaveBeenNthCalledWith(1, 'session-a', '/workspace')
+    expect(setActiveSessionMock).toHaveBeenNthCalledWith(2, 'session-b', '/workspace')
 
     resolvers[1]?.({ sessionId: 'session-b', exists: true, messageCount: 3 })
     await expect(secondPromise).resolves.toEqual({
@@ -176,7 +177,7 @@ describe('notifySessionOpened', () => {
 
     await Promise.resolve()
 
-    expect(setActiveSessionMock).toHaveBeenNthCalledWith(3, 'session-b')
+    expect(setActiveSessionMock).toHaveBeenNthCalledWith(3, 'session-b', '/workspace')
 
     resolvers[2]?.({ sessionId: 'session-b', exists: true, messageCount: 3 })
     await expect(ensureActiveSessionSynced('session-b')).resolves.toEqual({
@@ -202,8 +203,8 @@ describe('notifySessionOpened', () => {
     const firstPromise = notifySessionOpened('session-a', '/workspace')
     const secondPromise = notifySessionOpened('session-b', '/workspace')
 
-    expect(setActiveSessionMock).toHaveBeenNthCalledWith(1, 'session-a')
-    expect(setActiveSessionMock).toHaveBeenNthCalledWith(2, 'session-b')
+    expect(setActiveSessionMock).toHaveBeenNthCalledWith(1, 'session-a', '/workspace')
+    expect(setActiveSessionMock).toHaveBeenNthCalledWith(2, 'session-b', '/workspace')
 
     settlements[1]?.resolve({ sessionId: 'session-b', exists: true, messageCount: 5 })
     await expect(secondPromise).resolves.toEqual({
@@ -221,7 +222,7 @@ describe('notifySessionOpened', () => {
 
     await Promise.resolve()
 
-    expect(setActiveSessionMock).toHaveBeenNthCalledWith(3, 'session-b')
+    expect(setActiveSessionMock).toHaveBeenNthCalledWith(3, 'session-b', '/workspace')
 
     settlements[2]?.resolve({ sessionId: 'session-b', exists: true, messageCount: 5 })
     await expect(ensureActiveSessionSynced('session-b')).resolves.toEqual({
@@ -256,9 +257,9 @@ describe('notifySessionOpened', () => {
     const secondPromise = notifySessionOpened('session-b', '/workspace')
     const thirdPromise = notifySessionOpened('session-c', '/workspace')
 
-    expect(setActiveSessionMock).toHaveBeenNthCalledWith(1, 'session-a')
-    expect(setActiveSessionMock).toHaveBeenNthCalledWith(2, 'session-b')
-    expect(setActiveSessionMock).toHaveBeenNthCalledWith(3, 'session-c')
+    expect(setActiveSessionMock).toHaveBeenNthCalledWith(1, 'session-a', '/workspace')
+    expect(setActiveSessionMock).toHaveBeenNthCalledWith(2, 'session-b', '/workspace')
+    expect(setActiveSessionMock).toHaveBeenNthCalledWith(3, 'session-c', '/workspace')
 
     const cCallsBeforeRepair = syncCalls.filter((call) => call.sessionId === 'session-c')
     expect(cCallsBeforeRepair).toHaveLength(1)
@@ -382,8 +383,8 @@ describe('notifySessionOpened', () => {
     })
 
     expect(setActiveSessionMock).toHaveBeenCalledTimes(2)
-    expect(setActiveSessionMock).toHaveBeenNthCalledWith(1, 'session-123')
-    expect(setActiveSessionMock).toHaveBeenNthCalledWith(2, 'session-123')
+    expect(setActiveSessionMock).toHaveBeenNthCalledWith(1, 'session-123', '/workspace')
+    expect(setActiveSessionMock).toHaveBeenNthCalledWith(2, 'session-123', '/workspace')
   })
 
   it('retries same-session preflight after a missing-session result without reopening the session', async () => {
@@ -413,7 +414,7 @@ describe('notifySessionOpened', () => {
     })
 
     expect(setActiveSessionMock).toHaveBeenCalledTimes(2)
-    expect(setActiveSessionMock).toHaveBeenNthCalledWith(1, 'missing-session')
-    expect(setActiveSessionMock).toHaveBeenNthCalledWith(2, 'missing-session')
+    expect(setActiveSessionMock).toHaveBeenNthCalledWith(1, 'missing-session', '/workspace')
+    expect(setActiveSessionMock).toHaveBeenNthCalledWith(2, 'missing-session', '/workspace')
   })
 })

@@ -111,6 +111,24 @@ describe('rustBackend set/list argument shaping', () => {
     })
   })
 
+  it('calls set_active_session with workingDirectory when provided', async () => {
+    await rustBackend.setActiveSession('session-1', '/workspace-2')
+
+    expect(invokeMock).toHaveBeenCalledWith('set_active_session', {
+      id: 'session-1',
+      workingDirectory: '/workspace-2',
+    })
+  })
+
+  it('preserves an explicitly empty workingDirectory when desktop activation marks unresolved bindings', async () => {
+    await rustBackend.setActiveSession('session-1', '')
+
+    expect(invokeMock).toHaveBeenCalledWith('set_active_session', {
+      id: 'session-1',
+      workingDirectory: '',
+    })
+  })
+
   it('calls set_active_session with snapshot when provided', async () => {
     const snapshot: ActiveSessionSyncSnapshot = {
       title: 'Recovered desktop session',
@@ -126,15 +144,26 @@ describe('rustBackend set/list argument shaping', () => {
           role: 'assistant',
           content: 'hi',
           createdAt: 1_762_806_001_000,
+          metadata: {
+            toolCalls: [{ id: 'tool-1', name: 'bash', arguments: { command: 'pwd' } }],
+          },
           images: [{ data: 'base64', mediaType: 'image/png' }],
+        },
+        {
+          id: '00000000-0000-0000-0000-000000000003',
+          role: 'tool',
+          content: '/workspace',
+          createdAt: 1_762_806_002_000,
+          metadata: { toolCallId: 'tool-1' },
         },
       ],
     }
 
-    await rustBackend.setActiveSession('session-2', snapshot)
+    await rustBackend.setActiveSession('session-2', '/workspace', snapshot)
 
     expect(invokeMock).toHaveBeenCalledWith('set_active_session', {
       id: 'session-2',
+      workingDirectory: '/workspace',
       snapshot,
     })
   })

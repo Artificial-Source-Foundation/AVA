@@ -15,6 +15,10 @@ pub struct AgentStackConfig {
     pub max_turns: usize,
     pub max_budget_usd: f64,
     pub yolo: bool,
+    /// When true, keep non-interactive runs risk-aware by routing dangerous
+    /// approval-worthy actions through the approval bridge instead of using the
+    /// interactive yolo short-circuit. Safe work still proceeds automatically.
+    pub non_interactive_approvals: bool,
     pub injected_provider: Option<Arc<dyn LLMProvider>>,
     /// Override the working directory for the agent. When set, the agent uses
     /// this path instead of `std::env::current_dir()` for project-root detection,
@@ -54,6 +58,7 @@ impl AgentStackConfig {
             max_turns,
             max_budget_usd,
             yolo,
+            non_interactive_approvals: false,
             include_project_instructions,
             eager_codebase_indexing,
             discover_cli_agents: false,
@@ -78,6 +83,7 @@ impl AgentStackConfig {
             max_turns,
             max_budget_usd,
             yolo,
+            non_interactive_approvals: true,
             include_project_instructions,
             eager_codebase_indexing,
             discover_cli_agents: false,
@@ -97,6 +103,7 @@ impl AgentStackConfig {
             model,
             max_turns,
             yolo: true,
+            non_interactive_approvals: false,
             include_project_instructions: false,
             eager_codebase_indexing: false,
             discover_cli_agents: false,
@@ -118,6 +125,7 @@ impl AgentStackConfig {
             model: Some(model),
             max_turns,
             yolo: true,
+            non_interactive_approvals: true,
             working_dir: Some(working_dir),
             include_project_instructions: false,
             eager_codebase_indexing: false,
@@ -158,6 +166,7 @@ impl AgentStackConfig {
             max_turns,
             max_budget_usd,
             yolo: false,
+            non_interactive_approvals: false,
             working_dir: Some(working_dir),
             include_project_instructions: true,
             eager_codebase_indexing: true,
@@ -183,6 +192,7 @@ impl Default for AgentStackConfig {
             max_turns: 0,
             max_budget_usd: 0.0,
             yolo: false,
+            non_interactive_approvals: false,
             injected_provider: None,
             working_dir: None,
             compaction_threshold_pct: 80,
@@ -232,6 +242,7 @@ mod tests {
         assert!(!cfg.discover_cli_agents);
         assert!(!cfg.include_project_instructions);
         assert!(!cfg.eager_codebase_indexing);
+        assert!(cfg.non_interactive_approvals);
     }
 
     #[test]
@@ -259,6 +270,7 @@ mod tests {
             None,
         );
         assert!(cfg.yolo);
+        assert!(cfg.non_interactive_approvals);
         assert_eq!(cfg.working_dir, Some(PathBuf::from("/tmp/worktree")));
         assert!(!cfg.include_project_instructions);
         assert!(!cfg.eager_codebase_indexing);

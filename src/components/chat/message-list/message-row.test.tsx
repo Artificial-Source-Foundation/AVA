@@ -250,4 +250,32 @@ describe('MessageRow context menu branch capability', () => {
     // @ts-expect-error Restoring clipboard
     navigator.clipboard = originalClipboard
   })
+
+  it('labels tool-role rows honestly without user-or-assistant-only actions', () => {
+    const container = document.createElement('div')
+    document.body.append(container)
+
+    const toolMessage: Message = {
+      id: 'msg-tool-1',
+      sessionId: 'session-1',
+      role: 'tool',
+      content: '/workspace',
+      createdAt: Date.now(),
+    }
+
+    dispose = render(
+      () => MessageRow(createProps({ canBranch: false, message: toolMessage })),
+      container
+    )
+
+    const article = container.querySelector('article')
+    expect(article?.getAttribute('aria-label')).toBe('Tool message')
+
+    triggerContextMenu(article!)
+
+    expect(findMenuItemByLabel('Copy')).toBeDefined()
+    expect(findMenuItemByLabel('Delete message')).toBeDefined()
+    expect(findMenuItemByLabel('Edit')).toBeUndefined()
+    expect(findMenuItemByLabel('Retry')).toBeUndefined()
+  })
 })

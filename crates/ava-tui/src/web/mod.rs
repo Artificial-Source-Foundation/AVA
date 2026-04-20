@@ -69,68 +69,64 @@ mod api_plans;
 mod api_plugin_host;
 mod api_sessions;
 mod api_tools;
+mod security;
 pub mod state;
 pub mod ws;
 
-use axum::http::Method;
+use axum::middleware::from_fn_with_state;
 use axum::routing::{get, patch, post};
 use axum::Router;
 use color_eyre::Result;
-use tower_http::cors::{Any, CorsLayer};
+use std::io::IsTerminal;
 use tower_http::trace::TraceLayer;
 use tracing::info;
+use uuid::Uuid;
 
+use self::security::WebSecurityConfig;
 use self::state::WebState;
 
 /// Build the axum router with all API routes and WebSocket endpoint.
-fn build_router(state: WebState) -> Router {
-    let cors = CorsLayer::new()
-        .allow_origin(Any)
-        .allow_methods([
-            Method::GET,
-            Method::POST,
-            Method::PUT,
-            Method::PATCH,
-            Method::DELETE,
-            Method::OPTIONS,
-        ])
-        .allow_headers(Any);
+fn build_router_with_security(state: WebState, security: WebSecurityConfig) -> Router {
+    let public_routes = Router::new()
+        .route("/api/mcp", get(api::list_mcp_servers))
+        .route("/api/plugins", get(api::list_plugins))
+        .route("/api/models", get(api::list_models))
+        .route("/api/models/current", get(api::get_current_model))
+        .route("/api/providers", get(api::list_providers))
+        .route("/api/tools/agent", post(api::list_agent_tools))
+        .route("/api/log", post(api::ingest_frontend_log))
+        .route("/api/health", get(api::health));
 
-    let router = Router::new()
-        // Agent endpoints
+    let protected_routes = Router::new()
+        .route("/api/agent/status", get(api::agent_status))
         .route("/api/agent/submit", post(api::submit_goal))
         .route("/api/agent/cancel", post(api::cancel_agent))
-        .route("/api/agent/status", get(api::agent_status))
-        // Interactive approval / question / plan resolution
         .route("/api/agent/resolve-approval", post(api::resolve_approval))
         .route("/api/agent/resolve-question", post(api::resolve_question))
         .route("/api/agent/resolve-plan", post(api::resolve_plan))
-        // Retry / edit-resend / regenerate / undo
         .route("/api/agent/retry", post(api::retry_last_message))
         .route("/api/agent/edit-resend", post(api::edit_and_resend))
         .route("/api/agent/regenerate", post(api::regenerate_response))
         .route("/api/agent/undo", post(api::undo_last_edit))
-        // Mid-stream messaging (3-tier)
         .route("/api/agent/steer", post(api::steer_agent))
         .route("/api/agent/follow-up", post(api::follow_up_agent))
         .route("/api/agent/post-complete", post(api::post_complete_agent))
         .route("/api/agent/queue", get(api::get_message_queue))
         .route("/api/agent/queue/clear", post(api::clear_message_queue))
-        // Context compaction
         .route("/api/context/compact", post(api::compact_context))
-        // Session CRUD endpoints
         .route("/api/sessions", get(api::list_sessions))
         .route("/api/sessions/create", post(api::create_session))
         .route("/api/sessions/search", post(api::search_sessions))
+        .route("/api/sessions/load", post(api::load_session_body))
+        .route("/api/sessions/{id}", get(api::get_session))
         .route(
             "/api/sessions/{id}",
-            get(api::get_session).delete(api::delete_session),
+            axum::routing::delete(api::delete_session),
         )
         .route("/api/sessions/{id}/rename", post(api::rename_session))
         .route("/api/sessions/{id}/archive", post(api::archive_session))
         .route("/api/sessions/{id}/unarchive", post(api::unarchive_session))
         .route("/api/sessions/{id}/duplicate", post(api::duplicate_session))
-        // Message endpoints
         .route(
             "/api/sessions/{id}/messages",
             get(api::get_session_messages),
@@ -140,7 +136,6 @@ fn build_router(state: WebState) -> Router {
             "/api/sessions/{id}/messages/{msg_id}",
             patch(api::update_message),
         )
-        // Session sub-resource stubs (web DB parity)
         .route("/api/sessions/{id}/agents", get(api::list_session_agents))
         .route("/api/sessions/{id}/files", get(api::list_session_files))
         .route(
@@ -152,12 +147,8 @@ fn build_router(state: WebState) -> Router {
             "/api/sessions/{id}/checkpoints",
             get(api::list_session_checkpoints),
         )
-        // Body-based session operations (for frontend apiInvoke compatibility)
         .route("/api/sessions/delete", post(api::delete_session_body))
         .route("/api/sessions/rename", post(api::rename_session_body))
-        .route("/api/sessions/load", post(api::load_session_body))
-        // MCP endpoints
-        .route("/api/mcp", get(api::list_mcp_servers))
         .route("/api/mcp/reload", post(api::reload_mcp))
         .route(
             "/api/mcp/servers/{name}/enable",
@@ -167,28 +158,24 @@ fn build_router(state: WebState) -> Router {
             "/api/mcp/servers/{name}/disable",
             post(api::disable_mcp_server),
         )
-        // Plugins endpoint
-        .route("/api/plugins", get(api::list_plugins))
-        .route("/api/plugins/mounts", get(api::list_plugin_mounts))
         .route(
             "/api/plugins/{plugin}/commands/{command}",
             post(api::invoke_plugin_command),
         )
+        .route("/api/plugins/mounts", get(api::list_plugin_mounts))
         .route(
             "/api/plugins/{plugin}/routes/{*route_path}",
-            get(api::get_plugin_route).post(api::post_plugin_route),
+            get(api::get_plugin_route),
         )
-        // Model/provider endpoints
-        .route("/api/models", get(api::list_models))
-        .route("/api/models/current", get(api::get_current_model))
-        .route("/api/models/switch", post(api::switch_model))
-        .route("/api/providers", get(api::list_providers))
+        .route(
+            "/api/plugins/{plugin}/routes/{*route_path}",
+            post(api::post_plugin_route),
+        )
         .route("/api/cli-agents", get(api::list_cli_agents))
-        // Config
+        .route("/api/models/switch", post(api::switch_model))
         .route("/api/config", get(api::get_config))
-        // Tools
-        .route("/api/tools/agent", post(api::list_agent_tools))
-        // Permission level
+        .route("/api/plans", get(api_plans::list_plans))
+        .route("/api/plans/{filename}", get(api_plans::get_plan))
         .route(
             "/api/permissions",
             get(api::get_permission_level).post(api::set_permission_level),
@@ -197,27 +184,59 @@ fn build_router(state: WebState) -> Router {
             "/api/permissions/toggle",
             post(api::toggle_permission_level),
         )
-        // Plan persistence
-        .route("/api/plans", get(api_plans::list_plans))
-        .route("/api/plans/{filename}", get(api_plans::get_plan))
-        // WebSocket
-        .route("/ws", get(ws::ws_handler))
-        // Frontend log ingestion
-        .route("/api/log", post(api::ingest_frontend_log))
-        // Health check
-        .route("/api/health", get(api::health))
-        .layer(cors)
-        .layer(TraceLayer::new_for_http());
+        .layer(from_fn_with_state(
+            security.clone(),
+            security::require_control_plane_http_access,
+        ));
 
     #[cfg(debug_assertions)]
-    let router = router
+    let protected_routes = protected_routes
         .route(
             "/api/debug/inject-approval",
             post(api::inject_approval_request),
         )
+        .route(
+            "/api/debug/inject-question",
+            post(api::inject_question_request),
+        )
         .route("/api/debug/finish-run", post(api::finish_debug_run));
 
-    router.with_state(state)
+    public_routes
+        .merge(protected_routes)
+        .route(
+            "/ws",
+            get(ws::ws_handler).route_layer(from_fn_with_state(
+                security.clone(),
+                security::require_control_plane_ws_access,
+            )),
+        )
+        .layer(security.cors_layer())
+        .layer(TraceLayer::new_for_http())
+        .with_state(state)
+}
+
+#[cfg(test)]
+fn build_router(state: WebState) -> Router {
+    build_router_with_security(state, WebSecurityConfig::permissive_for_tests())
+}
+
+fn announce_control_token(control_token: &str, generated: bool) {
+    let stderr_is_terminal = std::io::stderr().is_terminal();
+
+    if generated && stderr_is_terminal {
+        eprintln!("  Control token (shown only on this terminal): {control_token}");
+    }
+
+    if generated {
+        if stderr_is_terminal {
+            info!("  Control token: [generated; shown only on the live terminal]");
+        } else {
+            info!("  Control token: [generated; redacted from non-terminal logs]");
+            info!("  Supply --token <token> for unattended or reconnectable web sessions.");
+        }
+    } else {
+        info!("  Control token: [provided via --token; redacted]");
+    }
 }
 
 /// Start the AVA web server on the given host and port.
@@ -226,7 +245,12 @@ fn build_router(state: WebState) -> Router {
 /// port is claimed immediately.  MCP servers connect lazily on the first API
 /// call (background task, 30 s timeout per server, all in parallel) — the web
 /// server never waits for MCP at startup.
-pub async fn run_server(host: &str, port: u16) -> Result<()> {
+pub async fn run_server(
+    host: &str,
+    port: u16,
+    token: Option<String>,
+    insecure_open_cors: bool,
+) -> Result<()> {
     let data_dir = dirs::home_dir().unwrap_or_default().join(".ava");
 
     // Ensure the logs directory exists for frontend log ingestion
@@ -237,10 +261,21 @@ pub async fn run_server(host: &str, port: u16) -> Result<()> {
     let addr = format!("{host}:{port}");
     let listener = tokio::net::TcpListener::bind(&addr).await?;
 
+    let token_was_generated = token.is_none();
+    let control_token = token.unwrap_or_else(|| Uuid::new_v4().simple().to_string());
+    let security = WebSecurityConfig::new(control_token.clone(), insecure_open_cors);
+
     info!("AVA web server listening on http://{addr}");
     info!("  API:       http://{addr}/api/");
-    info!("  WebSocket: ws://{addr}/ws");
+    info!("  WebSocket: ws://{addr}/ws?token=<token> (alias: access_token)");
     info!("  Health:    http://{addr}/api/health");
+    announce_control_token(&control_token, token_was_generated);
+    info!("  Privileged HTTP routes require Authorization: Bearer <token> (or x-ava-token).");
+    if insecure_open_cors {
+        info!("  Browser origins: open to any origin (--insecure-open-cors).");
+    } else {
+        info!("  Browser origins: localhost / 127.0.0.1 / [::1] only.");
+    }
     info!("Press Ctrl+C to stop.");
     info!("Initialising agent stack (MCP connects lazily on first use)…");
 
@@ -250,7 +285,7 @@ pub async fn run_server(host: &str, port: u16) -> Result<()> {
     let state = WebState::init(data_dir).await?;
     info!("Agent stack ready — serving requests.");
 
-    let app = build_router(state);
+    let app = build_router_with_security(state, security);
 
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
@@ -273,15 +308,23 @@ mod tests {
     use crate::web::api_agent::{
         emit_promoted_interactive_request_event, spawn_interactive_forwarders,
     };
+    use crate::web::security::TOKEN_HEADER;
     use crate::web::state::WebEvent;
     use ava_agent::control_plane::interactive::{
         InteractiveRequestKind, InteractiveRequestStore, InteractiveTimeoutPolicy,
     };
+    use ava_agent::stack::{AgentStack, AgentStackConfig};
+    use ava_llm::providers::mock::MockProvider;
     use ava_tools::core::{plan::PlanRequest, question::QuestionRequest};
     use ava_tools::permission_middleware::{ApprovalRequest, ToolApproval};
     use ava_types::PlanDecision;
     use axum::body::{to_bytes, Body};
-    use axum::http::{Request, StatusCode};
+    use axum::http::header::{
+        ACCESS_CONTROL_ALLOW_ORIGIN, CONNECTION, ORIGIN, SEC_WEBSOCKET_KEY, SEC_WEBSOCKET_VERSION,
+        UPGRADE,
+    };
+    use axum::http::{Method, Request, StatusCode};
+    use serde_json::json;
     use std::collections::HashMap;
     use std::sync::Arc;
     use std::time::Duration;
@@ -342,6 +385,522 @@ mod tests {
             .await
             .expect("body");
         serde_json::from_slice(&body).expect("json body")
+    }
+
+    fn websocket_upgrade_request(uri: &str) -> Request<Body> {
+        Request::builder()
+            .method(Method::GET)
+            .uri(uri)
+            .header(CONNECTION, "upgrade")
+            .header(UPGRADE, "websocket")
+            .header(SEC_WEBSOCKET_VERSION, "13")
+            .header(SEC_WEBSOCKET_KEY, "dGhlIHNhbXBsZSBub25jZQ==")
+            .body(Body::empty())
+            .expect("websocket request")
+    }
+
+    async fn mock_run_test_state(data_dir: std::path::PathBuf) -> WebState {
+        let db = ava_db::Database::create_at(data_dir.join("ava.db"))
+            .await
+            .expect("db");
+        db.run_migrations().await.expect("migrations");
+
+        let mut config = AgentStackConfig::for_web(data_dir);
+        config.provider = Some("openai".to_string());
+        config.model = Some("gpt-5.4".to_string());
+        config.injected_provider = Some(Arc::new(MockProvider::new(
+            "test-model",
+            vec!["done".to_string()],
+        )));
+
+        let (stack, question_rx, approval_rx, plan_rx) =
+            AgentStack::new(config).await.expect("stack");
+        let (event_tx, _) = broadcast::channel(256);
+
+        let inner = Arc::new(crate::web::state::WebStateInner {
+            stack: Arc::new(stack),
+            db: Arc::new(db),
+            startup_lock: Mutex::new(()),
+            queue_lifecycle_lock: Mutex::new(()),
+            interactive_lifecycle_lock: Arc::new(Mutex::new(())),
+            runs: RwLock::new(HashMap::new()),
+            session_runs: RwLock::new(HashMap::new()),
+            event_tx,
+            pending_approval_reply: InteractiveRequestStore::new(InteractiveRequestKind::Approval),
+            pending_question_reply: InteractiveRequestStore::new(InteractiveRequestKind::Question),
+            pending_plan_reply: InteractiveRequestStore::new(InteractiveRequestKind::Plan),
+            deferred_interactive_events: Mutex::new(HashMap::new()),
+            last_session_id: RwLock::new(None),
+            edit_history: Arc::new(RwLock::new(HashMap::new())),
+            deferred_queue: Arc::new(RwLock::new(HashMap::new())),
+            in_flight_deferred: Arc::new(RwLock::new(HashMap::new())),
+        });
+
+        spawn_interactive_forwarders(inner.clone(), approval_rx, question_rx, plan_rx);
+
+        WebState { inner }
+    }
+
+    async fn wait_for_no_active_runs(state: &WebState) {
+        tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                if state.active_run_count().await == 0 {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("run cleanup");
+    }
+
+    async fn alternate_replay_run_identity(state: &WebState) -> (String, String) {
+        let current = state.inner.stack.current_model().await;
+        for (provider, model) in [
+            ("openai", "gpt-5.4-nano"),
+            ("openai", "gpt-5.4-mini"),
+            ("anthropic", "claude-sonnet-4.6"),
+        ] {
+            if current == (provider.to_string(), model.to_string()) {
+                continue;
+            }
+            if state
+                .inner
+                .stack
+                .router
+                .route_required(provider, model)
+                .await
+                .is_ok()
+            {
+                return (provider.to_string(), model.to_string());
+            }
+        }
+
+        panic!("no alternate replay route available for test state");
+    }
+
+    #[tokio::test]
+    async fn protected_control_routes_require_valid_token() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let state = WebState::init(temp.path().to_path_buf())
+            .await
+            .expect("web state");
+        let app = build_router_with_security(
+            state,
+            WebSecurityConfig::new("secret-token".to_string(), false),
+        );
+
+        let unauthorized = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/sessions/create")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"name":"Needs Auth"}"#))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(unauthorized.status(), StatusCode::UNAUTHORIZED);
+
+        let authorized = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/sessions/create")
+                    .header("content-type", "application/json")
+                    .header(TOKEN_HEADER, "secret-token")
+                    .body(Body::from(r#"{"name":"Authorized"}"#))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(authorized.status(), StatusCode::OK);
+
+        let body = to_bytes(authorized.into_body(), 8 * 1024)
+            .await
+            .expect("session body");
+        let created: serde_json::Value = serde_json::from_slice(&body).expect("session json");
+        let session_id = created["id"].as_str().expect("session id");
+
+        for (method, uri, body) in [
+            (Method::GET, "/api/agent/status".to_string(), None),
+            (Method::GET, "/api/agent/queue".to_string(), None),
+            (Method::GET, "/api/sessions".to_string(), None),
+            (Method::GET, "/api/plans".to_string(), None),
+            (
+                Method::GET,
+                "/api/plans/2026-04-19-example-plan.md".to_string(),
+                None,
+            ),
+            (
+                Method::POST,
+                "/api/sessions/search".to_string(),
+                Some(r#"{"query":"Authorized"}"#.to_string()),
+            ),
+            (Method::GET, "/api/cli-agents".to_string(), None),
+            (Method::GET, "/api/plugins/mounts".to_string(), None),
+            (
+                Method::GET,
+                "/api/plugins/example/routes/v1/status".to_string(),
+                None,
+            ),
+            (Method::GET, format!("/api/sessions/{session_id}"), None),
+            (
+                Method::GET,
+                format!("/api/sessions/{session_id}/messages"),
+                None,
+            ),
+            (
+                Method::GET,
+                format!("/api/sessions/{session_id}/files"),
+                None,
+            ),
+        ] {
+            let mut unauthorized = Request::builder().method(method.clone()).uri(&uri);
+            if body.is_some() {
+                unauthorized = unauthorized.header("content-type", "application/json");
+            }
+            let unauthorized = app
+                .clone()
+                .oneshot(
+                    unauthorized
+                        .body(body.clone().map_or_else(Body::empty, Body::from))
+                        .expect("request"),
+                )
+                .await
+                .expect("response");
+            assert_eq!(
+                unauthorized.status(),
+                StatusCode::UNAUTHORIZED,
+                "expected {uri} to require auth"
+            );
+
+            let mut authorized = Request::builder()
+                .method(method)
+                .uri(&uri)
+                .header(TOKEN_HEADER, "secret-token");
+            if body.is_some() {
+                authorized = authorized.header("content-type", "application/json");
+            }
+            let authorized = app
+                .clone()
+                .oneshot(
+                    authorized
+                        .body(body.map_or_else(Body::empty, Body::from))
+                        .expect("request"),
+                )
+                .await
+                .expect("response");
+            assert_ne!(
+                authorized.status(),
+                StatusCode::UNAUTHORIZED,
+                "expected {uri} to accept a valid token"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn plan_route_rejects_traversal_filename_even_with_valid_token() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let state = WebState::init(temp.path().to_path_buf())
+            .await
+            .expect("web state");
+        let app = build_router_with_security(
+            state,
+            WebSecurityConfig::new("secret-token".to_string(), false),
+        );
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/api/plans/..%2F..%2FCargo.toml")
+                    .header(TOKEN_HEADER, "secret-token")
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn protected_control_routes_reject_non_local_browser_origins_by_default() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let state = WebState::init(temp.path().to_path_buf())
+            .await
+            .expect("web state");
+        let app = build_router_with_security(
+            state,
+            WebSecurityConfig::new("secret-token".to_string(), false),
+        );
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/sessions/create")
+                    .header("content-type", "application/json")
+                    .header(TOKEN_HEADER, "secret-token")
+                    .header(ORIGIN, "https://example.com")
+                    .body(Body::from(r#"{"name":"Blocked Origin"}"#))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn protected_control_routes_reject_query_token_auth() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let state = WebState::init(temp.path().to_path_buf())
+            .await
+            .expect("web state");
+        let app = build_router_with_security(
+            state,
+            WebSecurityConfig::new("secret-token".to_string(), false),
+        );
+
+        for uri in [
+            "/api/sessions/create?token=secret-token",
+            "/api/sessions/create?access_token=secret-token",
+        ] {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method(Method::POST)
+                        .uri(uri)
+                        .header("content-type", "application/json")
+                        .body(Body::from(r#"{"name":"Should Be Rejected"}"#))
+                        .expect("request"),
+                )
+                .await
+                .expect("response");
+
+            assert_eq!(
+                response.status(),
+                StatusCode::UNAUTHORIZED,
+                "expected {uri} to reject query token auth"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn health_route_emits_cors_header_for_local_origins_only() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let state = WebState::init(temp.path().to_path_buf())
+            .await
+            .expect("web state");
+        let app = build_router_with_security(
+            state,
+            WebSecurityConfig::new("secret-token".to_string(), false),
+        );
+
+        let allowed = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/api/health")
+                    .header(ORIGIN, "http://localhost:11420")
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(allowed.status(), StatusCode::OK);
+        assert_eq!(
+            allowed.headers().get(ACCESS_CONTROL_ALLOW_ORIGIN),
+            Some(&axum::http::HeaderValue::from_static(
+                "http://localhost:11420"
+            )),
+        );
+
+        let blocked = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/api/health")
+                    .header(ORIGIN, "https://example.com")
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(blocked.status(), StatusCode::OK);
+        assert!(blocked.headers().get(ACCESS_CONTROL_ALLOW_ORIGIN).is_none());
+    }
+
+    #[tokio::test]
+    async fn websocket_handshake_requires_token_and_local_origin() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let state = WebState::init(temp.path().to_path_buf())
+            .await
+            .expect("web state");
+        let app = build_router_with_security(
+            state,
+            WebSecurityConfig::new("secret-token".to_string(), false),
+        );
+
+        let unauthorized = app
+            .clone()
+            .oneshot(websocket_upgrade_request("/ws"))
+            .await
+            .expect("response");
+        assert_eq!(unauthorized.status(), StatusCode::UNAUTHORIZED);
+
+        let forbidden_origin = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/ws?token=secret-token")
+                    .header(CONNECTION, "upgrade")
+                    .header(UPGRADE, "websocket")
+                    .header(SEC_WEBSOCKET_VERSION, "13")
+                    .header(SEC_WEBSOCKET_KEY, "dGhlIHNhbXBsZSBub25jZQ==")
+                    .header(ORIGIN, "https://example.com")
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(forbidden_origin.status(), StatusCode::FORBIDDEN);
+
+        let authorized = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/ws?token=secret-token")
+                    .header(CONNECTION, "upgrade")
+                    .header(UPGRADE, "websocket")
+                    .header(SEC_WEBSOCKET_VERSION, "13")
+                    .header(SEC_WEBSOCKET_KEY, "dGhlIHNhbXBsZSBub25jZQ==")
+                    .header(ORIGIN, "http://127.0.0.1:1490")
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(authorized.status(), StatusCode::SWITCHING_PROTOCOLS);
+
+        let alias_authorized = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/ws?access_token=secret-token")
+                    .header(CONNECTION, "upgrade")
+                    .header(UPGRADE, "websocket")
+                    .header(SEC_WEBSOCKET_VERSION, "13")
+                    .header(SEC_WEBSOCKET_KEY, "dGhlIHNhbXBsZSBub25jZQ==")
+                    .header(ORIGIN, "http://127.0.0.1:1490")
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(alias_authorized.status(), StatusCode::SWITCHING_PROTOCOLS);
+    }
+
+    fn replay_run_context_metadata(provider: &str, model: &str) -> serde_json::Value {
+        json!({
+            "runContext": {
+                "provider": provider,
+                "model": model,
+                "thinkingLevel": "high",
+                "autoCompact": false,
+                "compactionThreshold": 72,
+                "compactionProvider": provider,
+                "compactionModel": model
+            }
+        })
+    }
+
+    #[tokio::test]
+    async fn session_create_and_list_round_trip_project_id() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let session_id = uuid::Uuid::new_v4();
+        let other_session_id = uuid::Uuid::new_v4();
+        let project_id = "project-web-1";
+
+        let state = WebState::init(temp.path().to_path_buf())
+            .await
+            .expect("web state");
+        let app = build_router(state.clone());
+
+        let created = response_json(
+            app.clone()
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/api/sessions/create")
+                        .header("content-type", "application/json")
+                        .body(Body::from(format!(
+                            r#"{{"id":"{session_id}","name":"Project Session","project_id":"{project_id}"}}"#
+                        )))
+                        .expect("request"),
+                )
+                .await
+                .expect("response"),
+        )
+        .await;
+
+        assert_eq!(
+            created["project_id"],
+            serde_json::Value::String(project_id.to_string())
+        );
+
+        let other_created = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/sessions/create")
+                    .header("content-type", "application/json")
+                    .body(Body::from(format!(
+                        r#"{{"id":"{other_session_id}","name":"Other Project Session","project_id":"project-web-2"}}"#
+                    )))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(other_created.status(), StatusCode::OK);
+
+        let listed = response_json(
+            app.clone()
+                .oneshot(
+                    Request::builder()
+                        .method("GET")
+                        .uri("/api/sessions?project_id=project-web-1")
+                        .body(Body::empty())
+                        .expect("request"),
+                )
+                .await
+                .expect("response"),
+        )
+        .await;
+
+        let listed = listed.as_array().expect("session list array");
+        assert!(listed
+            .iter()
+            .all(|session| session["id"] != other_session_id.to_string()));
+        let listed = listed
+            .iter()
+            .find(|session| session["id"] == session_id.to_string())
+            .expect("created session in list");
+        assert_eq!(
+            listed["project_id"],
+            serde_json::Value::String(project_id.to_string())
+        );
     }
 
     #[tokio::test]
@@ -604,7 +1163,7 @@ mod tests {
         let reloaded_state = WebState::init(temp.path().to_path_buf())
             .await
             .expect("reloaded web state");
-        let reloaded_app = build_router(reloaded_state);
+        let reloaded_app = build_router(reloaded_state.clone());
 
         let listed_sessions = response_json(
             reloaded_app
@@ -671,6 +1230,276 @@ mod tests {
                 && !message.user_visible
                 && message.content == "hidden tool payload that should persist in cloned session"
         }));
+    }
+
+    #[tokio::test]
+    async fn duplicate_and_fork_preserve_replay_metadata_while_overriding_clone_fields() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let source_id = uuid::Uuid::new_v4();
+        let duplicate_id = uuid::Uuid::new_v4();
+        let fork_id = uuid::Uuid::new_v4();
+        let root_message_id = uuid::Uuid::new_v4();
+        let child_message_id = uuid::Uuid::new_v4();
+
+        let state = WebState::init(temp.path().to_path_buf())
+            .await
+            .expect("web state");
+        let source_metadata = json!({
+            "title": "Source Session",
+            "status": "archived",
+            "runContext": {
+                "provider": "test-provider",
+                "model": "test-model",
+                "thinkingLevel": "high",
+                "autoCompact": false,
+                "compactionThreshold": 72,
+                "compactionProvider": "test-provider",
+                "compactionModel": "test-model"
+            },
+            "routing": {
+                "provider": "fallback-provider",
+                "model": "fallback-model"
+            },
+            "customKey": "preserve-me",
+            "parentSessionId": "stale-parent"
+        });
+        let mut root_message = ava_types::Message::new(ava_types::Role::User, "root message");
+        root_message.id = root_message_id;
+        let mut child_message =
+            ava_types::Message::new(ava_types::Role::Assistant, "child message")
+                .with_parent(root_message_id)
+                .with_metadata(json!({ "parentId": root_message_id.to_string() }));
+        child_message.id = child_message_id;
+        child_message.metadata["parent_id"] =
+            serde_json::Value::String(root_message_id.to_string());
+
+        let mut source_session = ava_types::Session::new()
+            .with_id(source_id)
+            .with_metadata(source_metadata.clone());
+        source_session.add_message(root_message);
+        source_session.add_message(child_message);
+        state
+            .inner
+            .stack
+            .session_manager
+            .save(&source_session)
+            .expect("save source session");
+
+        let app = build_router(state.clone());
+
+        let duplicate_response = response_json(
+            app.clone()
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri(&format!("/api/sessions/{source_id}/duplicate"))
+                        .header("content-type", "application/json")
+                        .body(Body::from(format!(
+                            r#"{{"id":"{duplicate_id}","name":"Duplicate Session","kind":"duplicate"}}"#
+                        )))
+                        .expect("request"),
+                )
+                .await
+                .expect("response"),
+        )
+        .await;
+        assert_eq!(
+            duplicate_response["title"],
+            serde_json::Value::String("Duplicate Session".to_string())
+        );
+        assert_eq!(
+            duplicate_response["parent_session_id"],
+            serde_json::Value::Null
+        );
+
+        let persisted_duplicate = state
+            .inner
+            .stack
+            .session_manager
+            .get(duplicate_id)
+            .expect("load duplicate session")
+            .expect("duplicate session persisted");
+        assert_eq!(
+            persisted_duplicate.metadata["runContext"],
+            source_metadata["runContext"]
+        );
+        assert_eq!(
+            persisted_duplicate.metadata["routing"],
+            source_metadata["routing"]
+        );
+        assert_eq!(
+            persisted_duplicate.metadata["customKey"],
+            source_metadata["customKey"]
+        );
+        assert_eq!(
+            persisted_duplicate.metadata["title"],
+            serde_json::Value::String("Duplicate Session".to_string())
+        );
+        assert_eq!(
+            persisted_duplicate.metadata["status"],
+            serde_json::Value::String("active".to_string())
+        );
+        assert!(persisted_duplicate
+            .metadata
+            .get("parentSessionId")
+            .is_none());
+        assert!(persisted_duplicate
+            .metadata
+            .get("parent_session_id")
+            .is_none());
+        let duplicated_child = persisted_duplicate
+            .messages
+            .iter()
+            .find(|message| message.content == "child message")
+            .expect("duplicated child message persisted");
+        let duplicated_root = persisted_duplicate
+            .messages
+            .iter()
+            .find(|message| message.content == "root message")
+            .expect("duplicated root message persisted");
+        assert_eq!(duplicated_child.parent_id, Some(duplicated_root.id));
+        assert_eq!(
+            duplicated_child.metadata["parentId"],
+            serde_json::Value::String(duplicated_root.id.to_string())
+        );
+        assert_eq!(
+            duplicated_child.metadata["parent_id"],
+            serde_json::Value::String(duplicated_root.id.to_string())
+        );
+
+        let fork_response = response_json(
+            app.clone()
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri(&format!("/api/sessions/{source_id}/duplicate"))
+                        .header("content-type", "application/json")
+                        .body(Body::from(format!(
+                            r#"{{"id":"{fork_id}","name":"Fork Session","kind":"fork"}}"#
+                        )))
+                        .expect("request"),
+                )
+                .await
+                .expect("response"),
+        )
+        .await;
+        assert_eq!(
+            fork_response["title"],
+            serde_json::Value::String("Fork Session".to_string())
+        );
+        assert_eq!(
+            fork_response["parent_session_id"],
+            serde_json::Value::String(source_id.to_string())
+        );
+
+        let persisted_fork = state
+            .inner
+            .stack
+            .session_manager
+            .get(fork_id)
+            .expect("load fork session")
+            .expect("fork session persisted");
+        assert_eq!(
+            persisted_fork.metadata["runContext"],
+            source_metadata["runContext"]
+        );
+        assert_eq!(
+            persisted_fork.metadata["routing"],
+            source_metadata["routing"]
+        );
+        assert_eq!(
+            persisted_fork.metadata["customKey"],
+            source_metadata["customKey"]
+        );
+        assert_eq!(
+            persisted_fork.metadata["title"],
+            serde_json::Value::String("Fork Session".to_string())
+        );
+        assert_eq!(
+            persisted_fork.metadata["status"],
+            serde_json::Value::String("active".to_string())
+        );
+        assert_eq!(
+            persisted_fork.metadata["parentSessionId"],
+            serde_json::Value::String(source_id.to_string())
+        );
+        let forked_child = persisted_fork
+            .messages
+            .iter()
+            .find(|message| message.content == "child message")
+            .expect("forked child message persisted");
+        let forked_root = persisted_fork
+            .messages
+            .iter()
+            .find(|message| message.content == "root message")
+            .expect("forked root message persisted");
+        assert_eq!(forked_child.parent_id, Some(forked_root.id));
+        assert_eq!(
+            forked_child.metadata["parentId"],
+            serde_json::Value::String(forked_root.id.to_string())
+        );
+        assert_eq!(
+            forked_child.metadata["parent_id"],
+            serde_json::Value::String(forked_root.id.to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn session_message_endpoints_round_trip_images() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let session_id = uuid::Uuid::new_v4();
+        let state = WebState::init(temp.path().to_path_buf())
+            .await
+            .expect("web state");
+        let mut session = ava_types::Session::new().with_id(session_id);
+        session.add_message(
+            ava_types::Message::new(ava_types::Role::User, "describe this").with_images(vec![
+                ava_types::ImageContent::new("base64-image", ava_types::ImageMediaType::Png),
+            ]),
+        );
+        state
+            .inner
+            .stack
+            .session_manager
+            .save(&session)
+            .expect("save source session");
+
+        let app = build_router(state);
+
+        let detail = response_json(
+            app.clone()
+                .oneshot(
+                    Request::builder()
+                        .method("GET")
+                        .uri(format!("/api/sessions/{session_id}"))
+                        .body(Body::empty())
+                        .expect("request"),
+                )
+                .await
+                .expect("response"),
+        )
+        .await;
+        assert_eq!(
+            detail["messages"][0]["images"],
+            json!([{ "data": "base64-image", "media_type": "image/png" }])
+        );
+
+        let messages = response_json(
+            app.oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(format!("/api/sessions/{session_id}/messages"))
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response"),
+        )
+        .await;
+        assert_eq!(
+            messages[0]["images"],
+            json!([{ "data": "base64-image", "media_type": "image/png" }])
+        );
     }
 
     #[tokio::test]
@@ -1281,6 +2110,134 @@ mod tests {
             } => {
                 assert_eq!(cleared_request_id, request_id);
                 assert_eq!(request_kind, "approval");
+                assert!(!timed_out);
+                assert_eq!(cleared_run_id.as_deref(), Some(run_id));
+            }
+            other => panic!("expected interactive_request_cleared event, got {other:?}"),
+        }
+
+        tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                if state.active_run_count().await == 0 {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("synthetic run cleanup");
+    }
+
+    #[cfg(debug_assertions)]
+    #[tokio::test]
+    async fn debug_injected_question_creates_correlated_run_and_cleans_up_after_resolution() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let state = WebState::init(temp.path().to_path_buf())
+            .await
+            .expect("web state");
+        let mut events = state.inner.event_tx.subscribe();
+        let session_id = uuid::Uuid::new_v4();
+        let run_id = "debug-run-question";
+
+        let app = build_router(state.clone());
+        let inject_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/debug/inject-question")
+                    .header("content-type", "application/json")
+                    .body(Body::from(format!(
+                        r#"{{"session_id":"{}","run_id":"{}","question":"Continue?","options":["yes","no"]}}"#,
+                        session_id, run_id
+                    )))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+
+        assert_eq!(inject_response.status(), StatusCode::OK);
+        let inject_body = to_bytes(inject_response.into_body(), 8 * 1024)
+            .await
+            .expect("inject body");
+        let inject_payload: serde_json::Value =
+            serde_json::from_slice(&inject_body).expect("inject payload");
+        let request_id = inject_payload["requestId"]
+            .as_str()
+            .expect("requestId")
+            .to_string();
+
+        match events.recv().await.expect("question event") {
+            WebEvent::QuestionRequest {
+                id,
+                question,
+                options,
+                run_id: event_run_id,
+            } => {
+                assert_eq!(id, request_id);
+                assert_eq!(question, "Continue?");
+                assert_eq!(options, vec!["yes", "no"]);
+                assert_eq!(event_run_id.as_deref(), Some(run_id));
+            }
+            other => panic!("expected question_request event, got {other:?}"),
+        }
+
+        let status_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(format!("/api/agent/status?session_id={session_id}"))
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+
+        assert_eq!(status_response.status(), StatusCode::OK);
+        let status_body = to_bytes(status_response.into_body(), 8 * 1024)
+            .await
+            .expect("status body");
+        let status_payload: serde_json::Value =
+            serde_json::from_slice(&status_body).expect("status payload");
+        assert_eq!(status_payload["running"], serde_json::json!(true));
+        assert_eq!(status_payload["runId"], serde_json::json!(run_id));
+        assert_eq!(
+            status_payload["pendingQuestion"]["id"],
+            serde_json::json!(request_id)
+        );
+        assert_eq!(
+            status_payload["pendingQuestion"]["question"],
+            serde_json::json!("Continue?")
+        );
+
+        let resolve_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/agent/resolve-question")
+                    .header("content-type", "application/json")
+                    .body(Body::from(format!(
+                        r#"{{"request_id":"{}","answer":"yes"}}"#,
+                        request_id
+                    )))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+
+        assert_eq!(resolve_response.status(), StatusCode::OK);
+
+        match events.recv().await.expect("clear event") {
+            WebEvent::InteractiveRequestCleared {
+                request_id: cleared_request_id,
+                request_kind,
+                timed_out,
+                run_id: cleared_run_id,
+            } => {
+                assert_eq!(cleared_request_id, request_id);
+                assert_eq!(request_kind, "question");
                 assert!(!timed_out);
                 assert_eq!(cleared_run_id.as_deref(), Some(run_id));
             }
@@ -2189,6 +3146,57 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn retry_route_reuses_persisted_run_context_metadata() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let state = mock_run_test_state(temp.path().to_path_buf()).await;
+        let (provider, model) = alternate_replay_run_identity(&state).await;
+        let expected_metadata = replay_run_context_metadata(&provider, &model);
+
+        let session_id = uuid::Uuid::new_v4();
+        let mut session = ava_types::Session::new()
+            .with_id(session_id)
+            .with_metadata(expected_metadata.clone());
+        session.add_message(ava_types::Message::new(ava_types::Role::User, "retry me"));
+        state
+            .inner
+            .stack
+            .session_manager
+            .save(&session)
+            .expect("save session");
+
+        let app = build_router(state.clone());
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/agent/retry")
+                    .header("content-type", "application/json")
+                    .body(Body::from(format!(
+                        r#"{{"session_id":"{session_id}","run_id":"web-retry-context"}}"#
+                    )))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        wait_for_no_active_runs(&state).await;
+
+        let persisted = state
+            .inner
+            .stack
+            .session_manager
+            .get(session_id)
+            .expect("load session")
+            .expect("persisted session");
+        assert_eq!(
+            persisted.metadata["runContext"],
+            expected_metadata["runContext"]
+        );
+    }
+
+    #[tokio::test]
     async fn edit_resend_route_rejects_invalid_message_targets() {
         let temp = tempfile::tempdir().expect("tempdir");
         let state = WebState::init(temp.path().to_path_buf())
@@ -2230,6 +3238,60 @@ mod tests {
             .await
             .expect("body");
         assert!(String::from_utf8_lossy(&body).contains("Invalid message ID"));
+    }
+
+    #[tokio::test]
+    async fn edit_resend_route_reuses_persisted_run_context_metadata() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let state = mock_run_test_state(temp.path().to_path_buf()).await;
+        let (provider, model) = alternate_replay_run_identity(&state).await;
+        let expected_metadata = replay_run_context_metadata(&provider, &model);
+
+        let session_id = uuid::Uuid::new_v4();
+        let user = ava_types::Message::new(ava_types::Role::User, "before");
+        let user_id = user.id;
+        let mut session = ava_types::Session::new()
+            .with_id(session_id)
+            .with_metadata(expected_metadata.clone());
+        session.add_message(user);
+        session.add_message(ava_types::Message::new(ava_types::Role::Assistant, "done"));
+        state
+            .inner
+            .stack
+            .session_manager
+            .save(&session)
+            .expect("save session");
+
+        let app = build_router(state.clone());
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/agent/edit-resend")
+                    .header("content-type", "application/json")
+                    .body(Body::from(format!(
+                        r#"{{"session_id":"{session_id}","message_id":"{user_id}","new_content":"after","run_id":"web-edit-context"}}"#
+                    )))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        wait_for_no_active_runs(&state).await;
+
+        let persisted = state
+            .inner
+            .stack
+            .session_manager
+            .get(session_id)
+            .expect("load session")
+            .expect("persisted session");
+        assert_eq!(
+            persisted.metadata["runContext"],
+            expected_metadata["runContext"]
+        );
     }
 
     #[tokio::test]
@@ -2355,6 +3417,58 @@ mod tests {
             .await
             .expect("body");
         assert!(String::from_utf8_lossy(&body).contains("session_id is required"));
+    }
+
+    #[tokio::test]
+    async fn regenerate_route_reuses_persisted_run_context_metadata() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let state = mock_run_test_state(temp.path().to_path_buf()).await;
+        let (provider, model) = alternate_replay_run_identity(&state).await;
+        let expected_metadata = replay_run_context_metadata(&provider, &model);
+
+        let session_id = uuid::Uuid::new_v4();
+        let mut session = ava_types::Session::new()
+            .with_id(session_id)
+            .with_metadata(expected_metadata.clone());
+        session.add_message(ava_types::Message::new(ava_types::Role::User, "regen me"));
+        session.add_message(ava_types::Message::new(ava_types::Role::Assistant, "done"));
+        state
+            .inner
+            .stack
+            .session_manager
+            .save(&session)
+            .expect("save session");
+
+        let app = build_router(state.clone());
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/agent/regenerate")
+                    .header("content-type", "application/json")
+                    .body(Body::from(format!(
+                        r#"{{"session_id":"{session_id}","run_id":"web-regen-context"}}"#
+                    )))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        wait_for_no_active_runs(&state).await;
+
+        let persisted = state
+            .inner
+            .stack
+            .session_manager
+            .get(session_id)
+            .expect("load session")
+            .expect("persisted session");
+        assert_eq!(
+            persisted.metadata["runContext"],
+            expected_metadata["runContext"]
+        );
     }
 
     #[tokio::test]

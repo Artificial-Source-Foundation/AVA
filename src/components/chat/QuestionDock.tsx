@@ -12,7 +12,15 @@
  */
 
 import { CircleHelp } from 'lucide-solid'
-import { type Component, createEffect, createSignal, For, onCleanup, Show } from 'solid-js'
+import {
+  type Component,
+  createEffect,
+  createSignal,
+  createUniqueId,
+  For,
+  onCleanup,
+  Show,
+} from 'solid-js'
 import type { QuestionRequest } from '../../hooks/useAgent'
 
 // ============================================================================
@@ -32,6 +40,13 @@ export const QuestionDock: Component<QuestionDockProps> = (props) => {
   const [answer, setAnswer] = createSignal('')
   const [selectedOption, setSelectedOption] = createSignal<number | null>(null)
   const [freeformActive, setFreeformActive] = createSignal(false)
+
+  // Unique IDs for this QuestionDock instance (supports multiple QuestionDocks on page)
+  const groupId = createUniqueId()
+  const textId = createUniqueId()
+
+  // Ref to the dock root for focus containment checks
+  let dockRef: HTMLDivElement | undefined
 
   const isMultipleChoice = (): boolean => {
     const req = props.request
@@ -77,43 +92,52 @@ export const QuestionDock: Component<QuestionDockProps> = (props) => {
   }
 
   // Keyboard shortcuts
+  //   Enter           → Submit selected option / freeform (only when QuestionDock owns focus)
+  //   Escape          → Dismiss with empty answer (always works)
   createEffect(() => {
     if (!props.request) return
 
     const handleKeyDown = (e: KeyboardEvent): void => {
-      const target = e.target
-
-      // For free-text mode, Enter submits (unless in textarea with shift)
-      if (!isMultipleChoice() && target instanceof HTMLTextAreaElement) {
-        if (e.key === 'Enter' && !e.shiftKey) {
-          e.preventDefault()
-          handleSubmit()
-        }
-      }
-
-      // Freeform input in multiple-choice mode
-      if (freeformActive() && target instanceof HTMLInputElement) {
-        if (e.key === 'Enter') {
-          e.preventDefault()
-          handleSubmit()
-        }
-      }
-
-      // Escape always dismisses
+      // Escape always dismisses regardless of focus
       if (e.key === 'Escape') {
         e.preventDefault()
         handleDismiss()
+        return
       }
 
-      // For multiple-choice, Enter submits the selected option
-      if (
-        isMultipleChoice() &&
-        !freeformActive() &&
-        e.key === 'Enter' &&
-        selectedOption() !== null
-      ) {
-        e.preventDefault()
-        handleSubmit()
+      // Enter submission is gated by dock focus ownership
+      if (e.key === 'Enter') {
+        // Check if focus is within the dock (dock-root containment gate)
+        const activeElement = document.activeElement
+        const dockOwnsFocus = dockRef && activeElement && dockRef.contains(activeElement)
+
+        // If focus is outside the dock, do not intercept Enter
+        if (!dockOwnsFocus) return
+
+        // When focus is on a button, preserve native button activation
+        if (activeElement instanceof HTMLButtonElement) return
+
+        // For free-text mode, Enter submits (unless in textarea with shift)
+        if (!isMultipleChoice() && activeElement instanceof HTMLTextAreaElement) {
+          if (!e.shiftKey) {
+            e.preventDefault()
+            handleSubmit()
+          }
+          return
+        }
+
+        // Freeform input in multiple-choice mode
+        if (freeformActive() && activeElement instanceof HTMLInputElement) {
+          e.preventDefault()
+          handleSubmit()
+          return
+        }
+
+        // For multiple-choice with a selected option, Enter submits
+        if (isMultipleChoice() && !freeformActive() && selectedOption() !== null) {
+          e.preventDefault()
+          handleSubmit()
+        }
       }
     }
 
@@ -140,10 +164,10 @@ export const QuestionDock: Component<QuestionDockProps> = (props) => {
 
   return (
     <Show when={props.request}>
-      <div
-        role="dialog"
-        aria-label="Agent question"
-        aria-labelledby="question-dock-text"
+      <section
+        ref={dockRef}
+        aria-labelledby={textId}
+        data-testid="question-dock"
         style={{
           width: '620px',
           'max-width': '100%',
@@ -184,7 +208,7 @@ export const QuestionDock: Component<QuestionDockProps> = (props) => {
         >
           {/* Question text */}
           <p
-            id="question-dock-text"
+            id={textId}
             style={{
               color: 'var(--text-secondary)',
               'font-size': '13px',
@@ -207,6 +231,7 @@ export const QuestionDock: Component<QuestionDockProps> = (props) => {
                   value={answer()}
                   onInput={(e) => setAnswer(e.currentTarget.value)}
                   placeholder="Type your answer..."
+                  aria-labelledby={textId}
                   rows={2}
                   style={{
                     flex: '1',
@@ -219,22 +244,30 @@ export const QuestionDock: Component<QuestionDockProps> = (props) => {
                     color: 'var(--text-primary)',
                     outline: 'none',
                   }}
+                  class="question-dock-textarea"
                 />
+                <style>{`
+                  .question-dock-textarea:focus-visible {
+                    outline: 2px solid var(--accent);
+                    outline-offset: -2px;
+                  }
+                `}</style>
               </div>
             }
           >
-            {/* Multiple-choice radio options */}
-            <div style={{ display: 'flex', 'flex-direction': 'column', gap: '6px' }}>
+            {/* Multiple-choice radio options — native radio inputs for proper accessibility */}
+            <div
+              role="radiogroup"
+              aria-labelledby={textId}
+              style={{ display: 'flex', 'flex-direction': 'column', gap: '6px' }}
+            >
               <For each={props.request!.options}>
                 {(option, index) => {
                   const isSelected = () => selectedOption() === index() && !freeformActive()
+                  const optionId = `${groupId}-opt-${index()}`
                   return (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSelectedOption(index())
-                        setFreeformActive(false)
-                      }}
+                    <label
+                      for={optionId}
                       class="flex items-center transition-colors"
                       style={{
                         width: '100%',
@@ -246,10 +279,32 @@ export const QuestionDock: Component<QuestionDockProps> = (props) => {
                         border: `1px solid ${isSelected() ? 'var(--accent-border)' : 'var(--border-subtle)'}`,
                         cursor: 'pointer',
                         'text-align': 'left',
+                        position: 'relative',
                       }}
                     >
-                      {/* Radio circle */}
+                      {/* Native radio input (visually hidden but keyboard accessible) */}
+                      <input
+                        id={optionId}
+                        type="radio"
+                        name={`${groupId}-question`}
+                        checked={isSelected()}
+                        onChange={() => {
+                          setSelectedOption(index())
+                          setFreeformActive(false)
+                        }}
+                        style={{
+                          position: 'absolute',
+                          opacity: '0',
+                          width: '0',
+                          height: '0',
+                          margin: '0',
+                          padding: '0',
+                          border: 'none',
+                        }}
+                      />
+                      {/* Custom radio circle visual */}
                       <div
+                        aria-hidden="true"
                         style={{
                           width: '14px',
                           height: '14px',
@@ -259,7 +314,6 @@ export const QuestionDock: Component<QuestionDockProps> = (props) => {
                           'align-items': 'center',
                           'justify-content': 'center',
                           'flex-shrink': '0',
-                          position: 'relative',
                         }}
                       >
                         <Show when={isSelected()}>
@@ -282,58 +336,77 @@ export const QuestionDock: Component<QuestionDockProps> = (props) => {
                       >
                         {option}
                       </span>
-                    </button>
+                      {/* Focus-visible indicator for the label when input is focused */}
+                      <style>{`
+                        input[type="radio"]:focus-visible + div + span::before,
+                        input[type="radio"]:focus-visible + div::before {
+                          content: '';
+                          position: absolute;
+                          inset: -2px;
+                          border-radius: 8px;
+                          border: 2px solid var(--accent);
+                          pointer-events: none;
+                        }
+                      `}</style>
+                    </label>
                   )
                 }}
               </For>
 
               {/* Freeform option — always last */}
-              <button
-                type="button"
-                onClick={() => {
-                  setFreeformActive(true)
-                  setSelectedOption(null)
-                }}
-                class="flex items-center transition-colors"
-                style={{
-                  width: '100%',
-                  height: '36px',
-                  padding: '0 12px',
-                  gap: '10px',
-                  'border-radius': '6px',
-                  background: 'var(--background-subtle)',
-                  border: `1px solid ${freeformActive() ? 'var(--accent-border)' : 'var(--border-subtle)'}`,
-                  cursor: 'pointer',
-                  'text-align': 'left',
-                }}
-              >
-                {/* Radio circle */}
-                <div
-                  style={{
-                    width: '14px',
-                    height: '14px',
-                    'border-radius': '50%',
-                    border: `${freeformActive() ? '2px' : '1.5px'} solid ${freeformActive() ? 'var(--accent)' : 'var(--text-muted)'}`,
-                    display: 'flex',
-                    'align-items': 'center',
-                    'justify-content': 'center',
-                    'flex-shrink': '0',
-                  }}
-                >
-                  <Show when={freeformActive()}>
-                    <div
+              <Show
+                when={freeformActive()}
+                fallback={
+                  <label
+                    for={`${groupId}-freeform`}
+                    class="flex items-center transition-colors"
+                    style={{
+                      width: '100%',
+                      height: '36px',
+                      padding: '0 12px',
+                      gap: '10px',
+                      'border-radius': '6px',
+                      background: 'var(--background-subtle)',
+                      border: '1px solid var(--border-subtle)',
+                      cursor: 'pointer',
+                      'text-align': 'left',
+                      position: 'relative',
+                    }}
+                  >
+                    {/* Native radio input (visually hidden but keyboard accessible) */}
+                    <input
+                      id={`${groupId}-freeform`}
+                      type="radio"
+                      name={`${groupId}-question`}
+                      checked={false}
+                      onChange={() => {
+                        setFreeformActive(true)
+                        setSelectedOption(null)
+                      }}
                       style={{
-                        width: '6px',
-                        height: '6px',
-                        'border-radius': '50%',
-                        background: 'var(--accent)',
+                        position: 'absolute',
+                        opacity: '0',
+                        width: '0',
+                        height: '0',
+                        margin: '0',
+                        padding: '0',
+                        border: 'none',
                       }}
                     />
-                  </Show>
-                </div>
-                <Show
-                  when={freeformActive()}
-                  fallback={
+                    {/* Custom radio circle visual */}
+                    <div
+                      aria-hidden="true"
+                      style={{
+                        width: '14px',
+                        height: '14px',
+                        'border-radius': '50%',
+                        border: '1.5px solid var(--text-muted)',
+                        display: 'flex',
+                        'align-items': 'center',
+                        'justify-content': 'center',
+                        'flex-shrink': '0',
+                      }}
+                    />
                     <span
                       style={{
                         color: 'var(--text-muted)',
@@ -343,14 +416,68 @@ export const QuestionDock: Component<QuestionDockProps> = (props) => {
                     >
                       Type your own answer...
                     </span>
-                  }
+                    {/* Focus-visible indicator */}
+                    <style>{`
+                      input[type="radio"]:focus-visible + div + span::before {
+                        content: '';
+                        position: absolute;
+                        inset: -2px;
+                        border-radius: 8px;
+                        border: 2px solid var(--accent);
+                        pointer-events: none;
+                      }
+                    `}</style>
+                  </label>
+                }
+              >
+                {/* Active freeform input row */}
+                <div
+                  class="flex items-center transition-colors"
+                  style={{
+                    width: '100%',
+                    height: '36px',
+                    padding: '0 12px',
+                    gap: '10px',
+                    'border-radius': '6px',
+                    background: 'var(--background-subtle)',
+                    border: '1px solid var(--accent-border)',
+                  }}
                 >
+                  {/* Selected radio circle visual */}
+                  <div
+                    aria-hidden="true"
+                    style={{
+                      width: '14px',
+                      height: '14px',
+                      'border-radius': '50%',
+                      border: '2px solid var(--accent)',
+                      display: 'flex',
+                      'align-items': 'center',
+                      'justify-content': 'center',
+                      'flex-shrink': '0',
+                    }}
+                  >
+                    <div
+                      style={{
+                        width: '6px',
+                        height: '6px',
+                        'border-radius': '50%',
+                        background: 'var(--accent)',
+                      }}
+                    />
+                  </div>
                   <input
                     ref={freeformInputRef}
                     type="text"
                     value={answer()}
                     onInput={(e) => setAnswer(e.currentTarget.value)}
+                    onFocus={() => {
+                      setFreeformActive(true)
+                      setSelectedOption(null)
+                    }}
+                    aria-label="Type your own answer"
                     placeholder="Type your own answer..."
+                    class="question-dock-freeform-input"
                     style={{
                       flex: '1',
                       background: 'transparent',
@@ -361,8 +488,14 @@ export const QuestionDock: Component<QuestionDockProps> = (props) => {
                       'font-style': 'italic',
                     }}
                   />
-                </Show>
-              </button>
+                  <style>{`
+                    .question-dock-freeform-input:focus-visible {
+                      outline: 2px solid var(--accent);
+                      outline-offset: 2px;
+                    }
+                  `}</style>
+                </div>
+              </Show>
             </div>
           </Show>
 
@@ -372,7 +505,7 @@ export const QuestionDock: Component<QuestionDockProps> = (props) => {
             <button
               type="button"
               onClick={handleDismiss}
-              class="inline-flex items-center justify-center transition-colors"
+              class="inline-flex items-center justify-center transition-colors question-dock-btn-ghost"
               style={{
                 padding: '8px 16px',
                 'border-radius': '6px',
@@ -393,7 +526,7 @@ export const QuestionDock: Component<QuestionDockProps> = (props) => {
               type="button"
               onClick={handleSubmit}
               disabled={!canSubmit()}
-              class="inline-flex items-center justify-center transition-colors"
+              class="inline-flex items-center justify-center transition-colors question-dock-btn-primary"
               style={{
                 padding: '8px 20px',
                 'border-radius': '6px',
@@ -409,9 +542,22 @@ export const QuestionDock: Component<QuestionDockProps> = (props) => {
             >
               Answer
             </button>
+            <style>{`
+              .question-dock-btn-ghost:focus-visible {
+                outline: 2px solid var(--accent);
+                outline-offset: 2px;
+              }
+              .question-dock-btn-primary:focus-visible {
+                outline: 2px solid white;
+                outline-offset: 2px;
+              }
+              .question-dock-btn-primary:focus-visible:not(:disabled) {
+                outline-color: white;
+              }
+            `}</style>
           </div>
         </div>
-      </div>
+      </section>
     </Show>
   )
 }

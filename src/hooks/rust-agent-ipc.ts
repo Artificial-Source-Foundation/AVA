@@ -20,8 +20,14 @@ import type { Accessor, Setter } from 'solid-js'
 import { batch } from 'solid-js'
 import { apiInvoke, createEventSocket } from '../lib/api-client'
 import { log } from '../lib/logger'
+import { resolveBackendSessionId } from '../services/web-session-identity'
 import type { ToolCall } from '../types'
-import type { AgentEvent, AgentStatus, SubmitGoalResult } from '../types/rust-ipc'
+import type {
+  AgentEvent,
+  AgentStatus,
+  SubmitGoalResult,
+  ToolIntrospectionImageContext,
+} from '../types/rust-ipc'
 import type { CompletionResolver, StreamingMetrics } from './rust-agent-events'
 
 /** Invoke the backend — Tauri IPC or HTTP API depending on runtime. */
@@ -80,6 +86,7 @@ export interface AgentIpc {
       maxTurns?: number
       thinkingLevel?: string
       sessionId?: string
+      images?: ToolIntrospectionImageContext[]
       autoCompact?: boolean
       compactionThreshold?: number
       compactionProvider?: string
@@ -301,12 +308,21 @@ export function createAgentIpc(deps: IpcDeps): AgentIpc {
     }
   }
 
+  const resolveBrowserSessionId = (sessionId?: string | null): string | null => {
+    if (!sessionId || isTauri()) {
+      return sessionId ?? null
+    }
+
+    return resolveBackendSessionId(sessionId)
+  }
+
   const withWebRunCorrelation = (
     payload?: Record<string, unknown>,
     sessionId?: string | null
   ): Record<string, unknown> | undefined => {
     const runId = activeRunId
-    if (!runId && !sessionId) {
+    const correlatedSessionId = resolveBrowserSessionId(sessionId)
+    if (!runId && !correlatedSessionId) {
       return payload
     }
 
@@ -314,8 +330,8 @@ export function createAgentIpc(deps: IpcDeps): AgentIpc {
     if (runId) {
       correlation.runId = runId
     }
-    if (sessionId) {
-      correlation.sessionId = sessionId
+    if (correlatedSessionId) {
+      correlation.sessionId = correlatedSessionId
     }
 
     const base = payload ?? {}
@@ -356,13 +372,18 @@ export function createAgentIpc(deps: IpcDeps): AgentIpc {
     }
   }
 
+  const resolveBrowserReplaySessionId = (sessionId?: string): string | undefined => {
+    return resolveBrowserSessionId(sessionId) ?? undefined
+  }
+
   const statusCorrelation = (
     sessionId?: string | null,
     runId?: string | null
   ): Record<string, unknown> | undefined => {
     const correlation: Record<string, unknown> = {}
-    if (sessionId) {
-      correlation.sessionId = sessionId
+    const correlatedSessionId = resolveBrowserSessionId(sessionId)
+    if (correlatedSessionId) {
+      correlation.sessionId = correlatedSessionId
     }
     if (runId) {
       correlation.runId = runId
@@ -702,6 +723,7 @@ export function createAgentIpc(deps: IpcDeps): AgentIpc {
       maxTurns?: number
       thinkingLevel?: string
       sessionId?: string
+      images?: ToolIntrospectionImageContext[]
       autoCompact?: boolean
       compactionThreshold?: number
       compactionProvider?: string
@@ -712,6 +734,7 @@ export function createAgentIpc(deps: IpcDeps): AgentIpc {
     invalidateInFlightRehydrates()
     attachedSessionId = opts?.sessionId ?? null
     setTrackedSessionId(attachedSessionId)
+    const requestSessionId = resolveBrowserSessionId(opts?.sessionId ?? null)
     setIsRunning(true)
     resetMetrics()
     log.info('streaming', 'Stream started', { model: opts?.model, provider: opts?.provider })
@@ -724,7 +747,8 @@ export function createAgentIpc(deps: IpcDeps): AgentIpc {
           provider: opts?.provider ?? null,
           model: opts?.model ?? null,
           thinkingLevel: opts?.thinkingLevel ?? null,
-          sessionId: opts?.sessionId ?? null,
+          sessionId: requestSessionId,
+          images: opts?.images ?? [],
           autoCompact: opts?.autoCompact ?? null,
           compactionThreshold: opts?.compactionThreshold ?? null,
           compactionProvider: opts?.compactionProvider ?? null,
@@ -749,6 +773,7 @@ export function createAgentIpc(deps: IpcDeps): AgentIpc {
   const rehydrateStatus = async (sessionId?: string | null): Promise<RehydrateResult> => {
     const requestGeneration = ++rehydrateGeneration
     const targetSessionId = sessionId ?? null
+    const requestSessionId = resolveBrowserSessionId(targetSessionId)
     let optimisticStateApplied = false
     const previousRunId = activeRunId
 
@@ -768,7 +793,7 @@ export function createAgentIpc(deps: IpcDeps): AgentIpc {
     try {
       const status = await invoke<AgentStatus>(
         'get_agent_status',
-        statusCorrelation(targetSessionId, null)
+        statusCorrelation(requestSessionId, null)
       )
 
       if (requestGeneration !== rehydrateGeneration) {
@@ -820,7 +845,7 @@ export function createAgentIpc(deps: IpcDeps): AgentIpc {
 
       const reconciledStatus = await invoke<AgentStatus>(
         'get_agent_status',
-        statusCorrelation(targetSessionId, runId)
+        statusCorrelation(requestSessionId, runId)
       )
 
       if (requestGeneration !== rehydrateGeneration) {
@@ -878,6 +903,7 @@ export function createAgentIpc(deps: IpcDeps): AgentIpc {
     newContent: string,
     sessionId?: string
   ): Promise<SubmitGoalResult | null> => {
+    const requestSessionId = resolveBrowserReplaySessionId(sessionId)
     resetState()
     invalidateInFlightRehydrates()
     attachedSessionId = sessionId ?? null
@@ -891,7 +917,7 @@ export function createAgentIpc(deps: IpcDeps): AgentIpc {
         args: {
           messageId,
           newContent,
-          sessionId: sessionId ?? null,
+          sessionId: requestSessionId ?? null,
         },
       }
 
@@ -915,6 +941,7 @@ export function createAgentIpc(deps: IpcDeps): AgentIpc {
    * captured and the caller can settle the response into a placeholder message.
    */
   const retryRun = async (sessionId?: string): Promise<SubmitGoalResult | null> => {
+    const requestSessionId = resolveBrowserReplaySessionId(sessionId)
     resetState()
     invalidateInFlightRehydrates()
     attachedSessionId = sessionId ?? null
@@ -927,7 +954,7 @@ export function createAgentIpc(deps: IpcDeps): AgentIpc {
 
       return await invokeStreamingCommand(
         'retry_last_message',
-        sessionId ? { args: { sessionId } } : undefined
+        requestSessionId ? { args: { sessionId: requestSessionId } } : undefined
       )
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
@@ -947,6 +974,7 @@ export function createAgentIpc(deps: IpcDeps): AgentIpc {
    * Same streaming infrastructure as retryRun().
    */
   const regenerateRun = async (sessionId?: string): Promise<SubmitGoalResult | null> => {
+    const requestSessionId = resolveBrowserReplaySessionId(sessionId)
     resetState()
     invalidateInFlightRehydrates()
     attachedSessionId = sessionId ?? null
@@ -959,7 +987,7 @@ export function createAgentIpc(deps: IpcDeps): AgentIpc {
 
       return await invokeStreamingCommand(
         'regenerate_response',
-        sessionId ? { args: { sessionId } } : undefined
+        requestSessionId ? { args: { sessionId: requestSessionId } } : undefined
       )
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)

@@ -15,8 +15,9 @@ use ava_agent::control_plane::queue::{
 };
 use ava_agent::control_plane::sessions::{
     build_edit_replay_payload, build_regenerate_replay_payload, build_retry_replay_payload,
-    resolve_existing_session, resolve_session_precedence, SessionPromptContext, SessionSelection,
-    SessionSelectionSource,
+    resolve_existing_session, resolve_session_precedence,
+    run_context_from_session as shared_run_context_from_session, SessionPromptContext,
+    SessionSelection, SessionSelectionSource,
 };
 use ava_agent::stack::AgentRunContext;
 use ava_tools::core::plan::PlanRequest;
@@ -46,11 +47,16 @@ use super::api::{error_response, ErrorResponse};
 pub struct SubmitGoalRequest {
     pub goal: String,
     #[serde(default)]
+    #[serde(alias = "maxTurns")]
     pub max_turns: usize,
     #[serde(default)]
     pub provider: Option<String>,
     #[serde(default)]
     pub model: Option<String>,
+    /// Thinking/reasoning level: "off", "low", "medium", "high", "xhigh"
+    #[serde(default)]
+    #[serde(alias = "thinkingLevel")]
+    pub thinking_level: Option<String>,
     /// Optional explicit session ID. When omitted, the shared session
     /// For web-backed sessions, omitting `session_id` now creates a new
     /// session rather than inheriting the process-wide last active session.
@@ -60,6 +66,27 @@ pub struct SubmitGoalRequest {
     #[serde(default)]
     #[serde(alias = "runId")]
     pub run_id: Option<String>,
+    #[serde(default)]
+    pub images: Vec<SubmitGoalImageInput>,
+    #[serde(default)]
+    #[serde(alias = "autoCompact")]
+    pub auto_compact: Option<bool>,
+    #[serde(default)]
+    #[serde(alias = "compactionThreshold")]
+    pub compaction_threshold: Option<u8>,
+    #[serde(default)]
+    #[serde(alias = "compactionProvider")]
+    pub compaction_provider: Option<String>,
+    #[serde(default)]
+    #[serde(alias = "compactionModel")]
+    pub compaction_model: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct SubmitGoalImageInput {
+    pub data: String,
+    #[serde(alias = "mediaType")]
+    pub media_type: String,
 }
 
 #[derive(Serialize)]
@@ -75,22 +102,76 @@ fn ensure_web_run_id(run_id: Option<String>) -> String {
     run_id.unwrap_or_else(|| format!("web-run-{}", uuid::Uuid::new_v4()))
 }
 
+fn map_submit_image_media_type(media_type: &str) -> Option<ava_types::ImageMediaType> {
+    match media_type {
+        "image/png" => Some(ava_types::ImageMediaType::Png),
+        "image/jpeg" => Some(ava_types::ImageMediaType::Jpeg),
+        "image/gif" => Some(ava_types::ImageMediaType::Gif),
+        "image/webp" => Some(ava_types::ImageMediaType::WebP),
+        _ => None,
+    }
+}
+
+fn map_submit_goal_images(images: &[SubmitGoalImageInput]) -> Vec<ava_types::ImageContent> {
+    images
+        .iter()
+        .filter_map(|image| {
+            Some(ava_types::ImageContent::new(
+                image.data.clone(),
+                map_submit_image_media_type(&image.media_type)?,
+            ))
+        })
+        .collect()
+}
+
+fn parse_thinking_level(level_str: &str) -> ava_types::ThinkingLevel {
+    match level_str {
+        "off" => ava_types::ThinkingLevel::Off,
+        "low" => ava_types::ThinkingLevel::Low,
+        "medium" => ava_types::ThinkingLevel::Medium,
+        "high" => ava_types::ThinkingLevel::High,
+        "max" | "xhigh" => ava_types::ThinkingLevel::Max,
+        _ => ava_types::ThinkingLevel::Off,
+    }
+}
+
+fn web_run_context_from_submit_request(req: &SubmitGoalRequest) -> AgentRunContext {
+    let mut context = AgentRunContext {
+        provider: req.provider.clone(),
+        model: req.model.clone(),
+        thinking_level: req.thinking_level.as_deref().map(parse_thinking_level),
+        auto_compact: None,
+        compaction_threshold: None,
+        compaction_provider: None,
+        compaction_model: None,
+        todo_state: None,
+        permission_context: None,
+    };
+
+    if req.auto_compact.is_some()
+        || req.compaction_threshold.is_some()
+        || req.compaction_provider.is_some()
+        || req.compaction_model.is_some()
+    {
+        context.auto_compact = Some(req.auto_compact.unwrap_or(true));
+        context.compaction_threshold = Some(req.compaction_threshold.unwrap_or(80));
+        context.compaction_provider = req.compaction_provider.clone();
+        context.compaction_model = req.compaction_model.clone();
+    }
+
+    context
+}
+
 async fn web_effective_run_identity(
     state: &WebState,
     goal: &str,
     images: &[ava_types::ImageContent],
-    model_override: Option<&(String, String)>,
+    run_context: Option<&AgentRunContext>,
 ) -> (String, String) {
-    let run_context = AgentRunContext {
-        provider: model_override.map(|(provider, _)| provider.clone()),
-        model: model_override.map(|(_, model)| model.clone()),
-        ..AgentRunContext::default()
-    };
-
     if let Ok(decision) = state
         .inner
         .stack
-        .resolve_model_route(goal, images, Some(&run_context))
+        .resolve_model_route(goal, images, run_context)
         .await
     {
         if state
@@ -677,25 +758,11 @@ async fn launch_web_run(
     images: Vec<ava_types::ImageContent>,
     max_turns: usize,
     run_id: String,
-    model_override: Option<(String, String)>,
+    run_context: Option<AgentRunContext>,
 ) -> Result<Json<SubmitGoalResponse>, (StatusCode, Json<ErrorResponse>)> {
     let startup_guard = state.inner.startup_lock.lock().await;
-    if let Some((provider, model)) = model_override.as_ref() {
-        if state.has_active_runs().await {
-            return Err(error_response(
-                StatusCode::CONFLICT,
-                "Cannot switch models while web runs are active.",
-            ));
-        }
-        state
-            .inner
-            .stack
-            .switch_model(&provider, &model)
-            .await
-            .map_err(|e| error_response(StatusCode::BAD_REQUEST, &e.to_string()))?;
-    }
     let (provider, model) =
-        web_effective_run_identity(state, &goal, &images, model_override.as_ref()).await;
+        web_effective_run_identity(state, &goal, &images, run_context.as_ref()).await;
     let run = state
         .register_run(run_id.clone(), session_id, provider, model)
         .await
@@ -802,7 +869,7 @@ async fn launch_web_run(
         });
 
         let result = stack
-            .run(
+            .run_with_context(
                 &goal,
                 max_turns,
                 Some(tx),
@@ -812,6 +879,7 @@ async fn launch_web_run(
                 images,
                 Some(session_id),
                 Some(run_id.clone()),
+                run_context,
             )
             .await;
 
@@ -881,8 +949,6 @@ pub(crate) async fn submit_goal(
     State(state): State<WebState>,
     Json(req): Json<SubmitGoalRequest>,
 ) -> Result<Json<SubmitGoalResponse>, (StatusCode, Json<ErrorResponse>)> {
-    let run_id = ensure_web_run_id(req.run_id);
-
     let requested_session_id = req
         .session_id
         .as_deref()
@@ -907,16 +973,19 @@ pub(crate) async fn submit_goal(
     };
 
     let max_turns = if req.max_turns > 0 { req.max_turns } else { 0 };
+    let images = map_submit_goal_images(&req.images);
+    let run_context = web_run_context_from_submit_request(&req);
+    let run_id = ensure_web_run_id(req.run_id);
 
     launch_web_run(
         &state,
         session_uuid,
         req.goal.clone(),
         history,
-        vec![],
+        images,
         max_turns,
         run_id,
-        req.provider.zip(req.model),
+        Some(run_context),
     )
     .await
 }
@@ -1070,9 +1139,20 @@ pub(crate) async fn run_agent_from_history(
     history: Vec<ava_types::Message>,
     images: Vec<ava_types::ImageContent>,
     run_id: Option<String>,
+    run_context: AgentRunContext,
 ) -> Result<Json<SubmitGoalResponse>, (StatusCode, Json<ErrorResponse>)> {
     let run_id = ensure_web_run_id(run_id);
-    launch_web_run(state, session_id, goal, history, images, 0, run_id, None).await
+    launch_web_run(
+        state,
+        session_id,
+        goal,
+        history,
+        images,
+        0,
+        run_id,
+        Some(run_context),
+    )
+    .await
 }
 
 #[derive(Deserialize, Default)]
@@ -1122,9 +1202,19 @@ pub(crate) async fn retry_last_message(
         images,
     } = build_retry_replay_payload(&session)
         .map_err(|error| error_response(StatusCode::CONFLICT, &error.to_string()))?;
+    let run_context = shared_run_context_from_session(&session);
 
     info!(goal = %goal, %session_id, "Web: retry_last_message");
-    run_agent_from_history(&state, session_id, goal, history, images, req.run_id).await
+    run_agent_from_history(
+        &state,
+        session_id,
+        goal,
+        history,
+        images,
+        req.run_id,
+        run_context,
+    )
+    .await
 }
 
 #[derive(Deserialize)]
@@ -1166,8 +1256,18 @@ pub(crate) async fn edit_and_resend(
         build_edit_replay_payload(&session, target_id, req.new_content)
             .map_err(|error| error_response(StatusCode::CONFLICT, &error.to_string()))?
     };
+    let run_context = shared_run_context_from_session(&session);
     info!(new_content = %goal, message_id = %req.message_id, "Web: edit_and_resend");
-    run_agent_from_history(&state, session_id, goal, history, images, req.run_id).await
+    run_agent_from_history(
+        &state,
+        session_id,
+        goal,
+        history,
+        images,
+        req.run_id,
+        run_context,
+    )
+    .await
 }
 
 /// Regenerate the last assistant response.
@@ -1189,9 +1289,19 @@ pub(crate) async fn regenerate_response(
         images,
     } = build_regenerate_replay_payload(&session)
         .map_err(|error| error_response(StatusCode::CONFLICT, &error.to_string()))?;
+    let run_context = shared_run_context_from_session(&session);
 
     info!(goal = %goal, %session_id, "Web: regenerate_response");
-    run_agent_from_history(&state, session_id, goal, history, images, req.run_id).await
+    run_agent_from_history(
+        &state,
+        session_id,
+        goal,
+        history,
+        images,
+        req.run_id,
+        run_context,
+    )
+    .await
 }
 
 // ============================================================================
@@ -1841,6 +1951,129 @@ mod tests {
             post_complete.session_id.as_deref(),
             Some("00000000-0000-0000-0000-000000000003")
         );
+    }
+
+    #[test]
+    fn submit_goal_request_accepts_image_aliases() {
+        let parsed: SubmitGoalRequest = serde_json::from_value(serde_json::json!({
+            "goal": "describe screenshot",
+            "images": [
+                {
+                    "data": "camel",
+                    "mediaType": "image/png"
+                },
+                {
+                    "data": "snake",
+                    "media_type": "image/jpeg"
+                }
+            ]
+        }))
+        .expect("submit payload should deserialize");
+
+        assert_eq!(parsed.images.len(), 2);
+        assert_eq!(parsed.images[0].data, "camel");
+        assert_eq!(parsed.images[0].media_type, "image/png");
+        assert_eq!(parsed.images[1].data, "snake");
+        assert_eq!(parsed.images[1].media_type, "image/jpeg");
+    }
+
+    #[test]
+    fn submit_goal_request_accepts_per_run_context_aliases() {
+        let parsed: SubmitGoalRequest = serde_json::from_value(serde_json::json!({
+            "goal": "ship it",
+            "provider": "openai",
+            "model": "gpt-5.4",
+            "thinkingLevel": "high",
+            "autoCompact": false,
+            "compactionThreshold": 72,
+            "compactionProvider": "anthropic",
+            "compactionModel": "claude-sonnet-4.6",
+            "sessionId": "00000000-0000-0000-0000-000000000001",
+            "runId": "web-run-1"
+        }))
+        .expect("submit payload should deserialize");
+
+        assert_eq!(parsed.provider.as_deref(), Some("openai"));
+        assert_eq!(parsed.model.as_deref(), Some("gpt-5.4"));
+        assert_eq!(parsed.thinking_level.as_deref(), Some("high"));
+        assert_eq!(parsed.auto_compact, Some(false));
+        assert_eq!(parsed.compaction_threshold, Some(72));
+        assert_eq!(parsed.compaction_provider.as_deref(), Some("anthropic"));
+        assert_eq!(
+            parsed.compaction_model.as_deref(),
+            Some("claude-sonnet-4.6")
+        );
+        assert_eq!(
+            parsed.session_id.as_deref(),
+            Some("00000000-0000-0000-0000-000000000001")
+        );
+        assert_eq!(parsed.run_id.as_deref(), Some("web-run-1"));
+    }
+
+    #[test]
+    fn web_run_context_from_submit_request_maps_desktop_parity_fields() {
+        let req: SubmitGoalRequest = serde_json::from_value(serde_json::json!({
+            "goal": "ship it",
+            "provider": "openai",
+            "model": "gpt-5.4",
+            "thinking_level": "high",
+            "auto_compact": false,
+            "compaction_threshold": 72,
+            "compaction_provider": "anthropic",
+            "compaction_model": "claude-sonnet-4.6"
+        }))
+        .expect("submit payload should deserialize");
+
+        let context = web_run_context_from_submit_request(&req);
+
+        assert_eq!(context.provider.as_deref(), Some("openai"));
+        assert_eq!(context.model.as_deref(), Some("gpt-5.4"));
+        assert_eq!(context.thinking_level, Some(ava_types::ThinkingLevel::High));
+        assert_eq!(context.auto_compact, Some(false));
+        assert_eq!(context.compaction_threshold, Some(72));
+        assert_eq!(context.compaction_provider.as_deref(), Some("anthropic"));
+        assert_eq!(
+            context.compaction_model.as_deref(),
+            Some("claude-sonnet-4.6")
+        );
+    }
+
+    #[test]
+    fn map_submit_goal_images_maps_supported_media_types() {
+        let images = map_submit_goal_images(&[
+            SubmitGoalImageInput {
+                data: "png-data".to_string(),
+                media_type: "image/png".to_string(),
+            },
+            SubmitGoalImageInput {
+                data: "jpeg-data".to_string(),
+                media_type: "image/jpeg".to_string(),
+            },
+        ]);
+
+        assert_eq!(images.len(), 2);
+        assert_eq!(images[0].data, "png-data");
+        assert_eq!(images[0].media_type, ava_types::ImageMediaType::Png);
+        assert_eq!(images[1].data, "jpeg-data");
+        assert_eq!(images[1].media_type, ava_types::ImageMediaType::Jpeg);
+    }
+
+    #[test]
+    fn map_submit_goal_images_skips_unsupported_media_types() {
+        let images = map_submit_goal_images(&[
+            SubmitGoalImageInput {
+                data: "supported".to_string(),
+                media_type: "image/webp".to_string(),
+            },
+            SubmitGoalImageInput {
+                data: "unsupported".to_string(),
+                media_type: "image/svg+xml".to_string(),
+            },
+        ]);
+
+        assert_eq!(images.len(), 1);
+        assert_eq!(images[0].data, "supported");
+        assert_eq!(images[0].media_type, ava_types::ImageMediaType::WebP);
     }
 
     fn sample_user_message(

@@ -1027,7 +1027,12 @@ describe('createAgentRun', () => {
       sessionId: 'backend-session-a',
     })
 
-    expect(fetchMock).toHaveBeenCalledWith('/api/sessions/backend-session-a/messages')
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/sessions/backend-session-a/messages',
+      expect.objectContaining({
+        headers: expect.any(Object),
+      })
+    )
     expect(replaceMessagesFromBackend).toHaveBeenCalledWith([
       expect.objectContaining({ id: 'backend-user-1', sessionId: 'session-a' }),
     ])
@@ -1423,5 +1428,180 @@ describe('createAgentRun', () => {
       expect.objectContaining({ sessionId: 'session-b' })
     )
     expect(runMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('retains submitted images in optimistic local user message state', async () => {
+    const addMessage = vi.fn()
+    const runMock = vi.fn().mockResolvedValue({ success: true, turns: 1, sessionId: 'session-a' })
+
+    const runModule = createAgentRun({
+      rustAgent: {
+        isRunning: () => false,
+        run: runMock,
+        error: () => null,
+        streamingContent: () => 'final answer',
+        thinkingContent: () => '',
+        thinkingSegments: () => [],
+        activeToolCalls: () => [],
+        tokenUsage: () => ({ output: 0, cost: 0 }),
+        endRun: vi.fn(),
+      },
+      session: {
+        currentSession: () => ({ id: 'session-a', name: 'Session A' }),
+        createNewSession: vi.fn(),
+        addMessage,
+        updateMessage: vi.fn(),
+        deleteMessage: vi.fn(),
+        selectedModel: () => 'gpt-5.4',
+        selectedProvider: () => 'openai',
+        messages: () => [],
+        renameSession: vi.fn(),
+      },
+      settingsRef: {
+        settings: () => ({
+          behavior: { sessionAutoTitle: false },
+          generation: {
+            reasoningEffort: 'off',
+            autoCompact: true,
+            compactionThreshold: 80,
+            compactionModel: null,
+          },
+        }),
+      },
+      isPlanMode: () => false,
+      setCurrentThought: vi.fn(),
+      setDoomLoopDetected: vi.fn(),
+      setToolActivity: vi.fn(),
+      setStreamingTokenEstimate: vi.fn(),
+      streamingStartedAt: () => null,
+      setStreamingStartedAt: vi.fn(),
+      messageQueue: () => [],
+      setMessageQueue: vi.fn(),
+      liveMessageId: () => 'asst-live',
+      setLiveMessageId: vi.fn(),
+      streaming: {
+        streamingContentOffset: () => 0,
+        setStreamingContentOffset: vi.fn(),
+        toolCallsOffset: () => 0,
+        setToolCallsOffset: vi.fn(),
+        thinkingSegmentsOffset: () => 0,
+        setThinkingSegmentsOffset: vi.fn(),
+      },
+      runOwnership: {
+        beginRun: () => 1,
+        isCurrentRun: () => true,
+      },
+    } as unknown as Parameters<typeof createAgentRun>[0])
+
+    await runModule.run('describe screenshot', {
+      images: [{ data: 'base64-image', mediaType: 'image/png' }],
+    })
+
+    expect(addMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        role: 'user',
+        content: 'describe screenshot',
+        images: [{ data: 'base64-image', mimeType: 'image/png' }],
+        metadata: {
+          images: [{ data: 'base64-image', mimeType: 'image/png' }],
+        },
+      })
+    )
+    expect(runMock).toHaveBeenCalledWith(
+      'describe screenshot',
+      expect.objectContaining({
+        images: [{ data: 'base64-image', mediaType: 'image/png' }],
+      })
+    )
+  })
+
+  it('preserves image attachments when submit is queued behind an active run', async () => {
+    let queue: Array<{ content: string; sessionId?: string; model?: string; images?: unknown[] }> =
+      []
+    const setMessageQueue = vi.fn((updater: unknown) => {
+      if (typeof updater === 'function') {
+        queue = (updater as (prev: typeof queue) => typeof queue)(queue)
+      } else {
+        queue = updater as typeof queue
+      }
+      return queue
+    })
+
+    const runModule = createAgentRun({
+      rustAgent: {
+        isRunning: () => true,
+        trackedSessionId: () => 'session-a',
+        run: vi.fn(),
+        error: () => null,
+        streamingContent: () => '',
+        thinkingContent: () => '',
+        thinkingSegments: () => [],
+        activeToolCalls: () => [],
+        tokenUsage: () => ({ output: 0, cost: 0 }),
+        endRun: vi.fn(),
+      },
+      session: {
+        currentSession: () => ({ id: 'session-a', name: 'Session A' }),
+        createNewSession: vi.fn(),
+        addMessage: vi.fn(),
+        updateMessage: vi.fn(),
+        deleteMessage: vi.fn(),
+        selectedModel: () => 'gpt-5.4',
+        selectedProvider: () => 'openai',
+        messages: () => [],
+        renameSession: vi.fn(),
+      },
+      settingsRef: {
+        settings: () => ({
+          behavior: { sessionAutoTitle: false },
+          generation: {
+            reasoningEffort: 'off',
+            autoCompact: true,
+            compactionThreshold: 80,
+            compactionModel: null,
+          },
+        }),
+      },
+      isPlanMode: () => false,
+      setCurrentThought: vi.fn(),
+      setDoomLoopDetected: vi.fn(),
+      setToolActivity: vi.fn(),
+      setStreamingTokenEstimate: vi.fn(),
+      streamingStartedAt: () => null,
+      setStreamingStartedAt: vi.fn(),
+      messageQueue: () => queue,
+      setMessageQueue,
+      liveMessageId: () => null,
+      setLiveMessageId: vi.fn(),
+      streaming: {
+        streamingContentOffset: () => 0,
+        setStreamingContentOffset: vi.fn(),
+        toolCallsOffset: () => 0,
+        setToolCallsOffset: vi.fn(),
+        thinkingSegmentsOffset: () => 0,
+        setThinkingSegmentsOffset: vi.fn(),
+      },
+      runOwnership: {
+        beginRun: () => 1,
+        isCurrentRun: () => true,
+      },
+    } as unknown as Parameters<typeof createAgentRun>[0])
+
+    await expect(
+      runModule.run('queued screenshot prompt', {
+        model: 'gpt-5.4',
+        images: [{ data: 'base64-image', mediaType: 'image/png' }],
+      })
+    ).resolves.toBeNull()
+
+    expect(setMessageQueue).toHaveBeenCalledTimes(1)
+    expect(queue).toEqual([
+      {
+        content: 'queued screenshot prompt',
+        sessionId: 'session-a',
+        model: 'gpt-5.4',
+        images: [{ data: 'base64-image', mimeType: 'image/png' }],
+      },
+    ])
   })
 })

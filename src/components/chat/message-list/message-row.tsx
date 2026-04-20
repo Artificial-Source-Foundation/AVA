@@ -39,6 +39,18 @@ export interface MessageRowProps {
 
 export const MessageRow: Component<MessageRowProps> = (props) => {
   const [ctxMenu, setCtxMenu] = createSignal<{ x: number; y: number } | null>(null)
+  const ariaRoleLabel = (): string => {
+    switch (props.message.role) {
+      case 'assistant':
+        return 'Assistant'
+      case 'system':
+        return 'System'
+      case 'tool':
+        return 'Tool'
+      default:
+        return 'User'
+    }
+  }
 
   const handleContextMenu = (e: MouseEvent): void => {
     if (props.readOnly) return
@@ -114,7 +126,7 @@ export const MessageRow: Component<MessageRowProps> = (props) => {
       }}
       data-message-id={props.message.id}
       onContextMenu={handleContextMenu}
-      aria-label={`${props.message.role === 'assistant' ? 'Assistant' : 'User'} message`}
+      aria-label={`${ariaRoleLabel()} message`}
       aria-current={props.isCurrentSearchMatch ? 'true' : undefined}
       style={{
         // Virtual scrolling foundation: browser skips layout/paint for off-screen

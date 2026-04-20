@@ -356,20 +356,6 @@ impl App {
                         self.send_queued_message(text, ava_types::MessageTier::Steering);
                     }
                 } else {
-                    if self.state.input.buffer.is_empty()
-                        && matches!(self.state.view_mode, ViewMode::Main)
-                    {
-                        let last_completed = self
-                            .state
-                            .agent
-                            .sub_agents
-                            .iter()
-                            .rposition(|sa| !sa.is_running && !sa.session_messages.is_empty());
-                        if let Some(idx) = last_completed {
-                            self.enter_sub_agent_view(idx);
-                            return false;
-                        }
-                    }
                     if let Some(goal) = self.state.input.submit() {
                         self.submit_goal(goal, app_tx, agent_tx);
                     }

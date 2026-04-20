@@ -1,6 +1,7 @@
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
+use std::{env, sync::OnceLock};
 
 use async_trait::async_trait;
 use ava_agent::message_queue::MessageQueue;
@@ -17,6 +18,11 @@ use futures::Stream;
 use tokio::sync::mpsc;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
+
+fn env_lock() -> &'static std::sync::Mutex<()> {
+    static ENV_LOCK: OnceLock<std::sync::Mutex<()>> = OnceLock::new();
+    ENV_LOCK.get_or_init(|| std::sync::Mutex::new(()))
+}
 
 fn write_plugin_manifest(root: &std::path::Path, name: &str) {
     let plugin_dir = root.join(".ava").join("plugins").join(name);
@@ -776,12 +782,28 @@ struct UsageProvider {
     usage: TokenUsage,
 }
 
+struct RecordingPromptProvider {
+    model: String,
+    response: String,
+    recorded_messages: Arc<Mutex<Vec<Message>>>,
+}
+
 impl UsageProvider {
     fn new(model: &str, response: String, usage: TokenUsage) -> Self {
         Self {
             model: model.to_string(),
             response,
             usage,
+        }
+    }
+}
+
+impl RecordingPromptProvider {
+    fn new(model: &str, response: String, recorded_messages: Arc<Mutex<Vec<Message>>>) -> Self {
+        Self {
+            model: model.to_string(),
+            response,
+            recorded_messages,
         }
     }
 }
@@ -974,6 +996,36 @@ impl LLMProvider for UsageProvider {
     }
 }
 
+#[async_trait]
+impl LLMProvider for RecordingPromptProvider {
+    async fn generate(&self, messages: &[Message]) -> Result<String> {
+        *self.recorded_messages.lock().await = messages.to_vec();
+        Ok(self.response.clone())
+    }
+
+    async fn generate_stream(
+        &self,
+        messages: &[Message],
+    ) -> Result<Pin<Box<dyn Stream<Item = StreamChunk> + Send>>> {
+        let out = self.generate(messages).await?;
+        Ok(Box::pin(futures::stream::iter(vec![StreamChunk::text(
+            out,
+        )])))
+    }
+
+    fn estimate_tokens(&self, input: &str) -> usize {
+        input.len() / 4
+    }
+
+    fn estimate_cost(&self, _input_tokens: usize, _output_tokens: usize) -> f64 {
+        0.0
+    }
+
+    fn model_name(&self) -> &str {
+        &self.model
+    }
+}
+
 #[tokio::test]
 async fn agent_stack_initializes_with_plugin_manager() {
     let dir = tempfile::tempdir().expect("tempdir");
@@ -991,6 +1043,77 @@ async fn agent_stack_initializes_with_plugin_manager() {
     let pm = stack.plugin_manager.lock().await;
     assert_eq!(pm.running_count(), 0);
     assert!(pm.list_plugins().is_empty());
+}
+
+#[tokio::test]
+async fn headless_stack_includes_trusted_agents_chain_from_repo_root_to_working_dir() {
+    let _guard = env_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let home = tempfile::tempdir().expect("temp home");
+    let repo = tempfile::tempdir().expect("temp repo");
+    let nested = repo.path().join("a").join("b");
+    std::fs::create_dir_all(&nested).unwrap();
+    std::fs::create_dir_all(repo.path().join(".git")).unwrap();
+    std::fs::write(repo.path().join("AGENTS.md"), "Repo root guidance.").unwrap();
+    std::fs::write(repo.path().join("a").join("AGENTS.md"), "A guidance.").unwrap();
+    std::fs::write(nested.join("AGENTS.md"), "B guidance.").unwrap();
+
+    let old_home = env::var_os("HOME");
+    env::set_var("HOME", home.path());
+    ava_config::trust_project(repo.path()).expect("trust temp repo");
+
+    let recorded_messages = Arc::new(Mutex::new(Vec::new()));
+    let provider = Arc::new(RecordingPromptProvider::new(
+        "test-model",
+        completion_response("done"),
+        recorded_messages.clone(),
+    ));
+    let mut cfg = AgentStackConfig::for_headless(
+        home.path().join(".ava"),
+        None,
+        None,
+        5,
+        0.0,
+        true,
+        true,
+        false,
+    );
+    cfg.injected_provider = Some(provider);
+    cfg.working_dir = Some(nested.clone());
+
+    let (stack, _question_rx, _approval_rx, _plan_rx) = AgentStack::new(cfg)
+        .await
+        .expect("stack init should succeed");
+    let run_result = stack
+        .run(
+            "finish task",
+            5,
+            None,
+            CancellationToken::new(),
+            Vec::new(),
+            None,
+            Vec::new(),
+            None,
+            None,
+        )
+        .await;
+
+    match old_home {
+        Some(value) => env::set_var("HOME", value),
+        None => env::remove_var("HOME"),
+    }
+
+    let result = run_result.expect("run should succeed");
+    assert!(result.success);
+
+    let recorded = recorded_messages.lock().await;
+    let combined = recorded
+        .iter()
+        .map(|message| message.content.as_str())
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    assert!(combined.contains("Repo root guidance."));
+    assert!(combined.contains("A guidance."));
+    assert!(combined.contains("B guidance."));
 }
 
 #[tokio::test]

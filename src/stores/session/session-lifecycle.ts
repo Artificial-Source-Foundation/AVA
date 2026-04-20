@@ -417,6 +417,7 @@ export async function createNewSession(
   _options: SessionTransitionOptions = {}
 ): Promise<Session> {
   const requestedName = name || DEFAULTS.SESSION_NAME
+  const titlePlaceholder = name === undefined
   const requestedProjectId = projectIdOverride ?? useProject().currentProject()?.id
   const requestKey = `${requestedProjectId ?? '<no-project>'}::${requestedName}`
 
@@ -447,10 +448,22 @@ export async function createNewSession(
       : undefined
     const projectForSession = overrideProject ?? ambientProject
     const projectId = projectIdOverride ?? requestedProjectId ?? projectForSession?.id
-    const session = await dbCreateSession(requestedName, projectId)
+    const session = await dbCreateSession(
+      requestedName,
+      projectId,
+      undefined,
+      titlePlaceholder ? { titlePlaceholder: true } : undefined
+    )
     const sessionProjectId = session.projectId
     const notifyCwd = resolveSessionProjectCwd(sessionProjectId)
-    const sessionWithStats: SessionWithStats = { ...session, messageCount: 0, totalTokens: 0 }
+    const sessionWithStats: SessionWithStats = {
+      ...session,
+      metadata: titlePlaceholder
+        ? { ...(session.metadata ?? {}), titlePlaceholder: true }
+        : session.metadata,
+      messageCount: 0,
+      totalTokens: 0,
+    }
     const fromSessionId = currentSession()?.id
 
     if (fromSessionId && fromSessionId !== session.id) {
@@ -458,7 +471,7 @@ export async function createNewSession(
     }
 
     setSessions((prev) => [sessionWithStats, ...prev])
-    setCurrentSession(session)
+    setCurrentSession(sessionWithStats)
     resetSessionArtifacts()
     cacheSessionArtifacts(session.id, {
       messages: [],
@@ -475,13 +488,17 @@ export async function createNewSession(
       project: projectForSession?.name ?? 'unknown',
     })
 
-    await notifySessionOpened(session.id, notifyCwd, buildDesktopSessionSnapshot(session, []))
+    await notifySessionOpened(
+      session.id,
+      notifyCwd,
+      buildDesktopSessionSnapshot(sessionWithStats, [])
+    )
     if (currentSession()?.id !== session.id) {
-      return session
+      return sessionWithStats
     }
     localStorage.setItem(STORAGE_KEYS.LAST_SESSION, session.id)
     setLastSessionForProject(sessionProjectId, session.id)
-    return session
+    return sessionWithStats
   })()
   createSessionInFlightByKey.set(requestKey, createPromise)
 
@@ -654,13 +671,19 @@ async function switchAfterRemoval(projectId?: string): Promise<void> {
 export async function renameSession(id: string, newName: string): Promise<void> {
   const trimmedName = newName.trim()
   if (!trimmedName) return
-  await dbUpdateSession(id, { name: trimmedName })
+  const existing = sessions().find((s) => s.id === id) ?? currentSession()
+  const metadata = existing?.metadata
+    ? { ...existing.metadata, titlePlaceholder: false }
+    : { titlePlaceholder: false }
+  await dbUpdateSession(id, { name: trimmedName, metadata })
   setSessions((prev) =>
-    prev.map((s) => (s.id === id ? { ...s, name: trimmedName, updatedAt: Date.now() } : s))
+    prev.map((s) =>
+      s.id === id ? { ...s, name: trimmedName, metadata, updatedAt: Date.now() } : s
+    )
   )
   if (currentSession()?.id === id) {
     setCurrentSession((prev) =>
-      prev ? { ...prev, name: trimmedName, updatedAt: Date.now() } : null
+      prev ? { ...prev, name: trimmedName, metadata, updatedAt: Date.now() } : null
     )
   }
   logInfo('session', 'Session renamed', { id, name: trimmedName })

@@ -132,6 +132,11 @@ impl App {
                 // Track sub-agent spawns from the subagent tool.
                 // Keep `task` as a compatibility alias for older sessions/tests.
                 if matches!(call.name.as_str(), "subagent" | "task") {
+                    let agent_type = call
+                        .arguments
+                        .get("agent")
+                        .and_then(|value| value.as_str())
+                        .map(String::from);
                     let description = call
                         .arguments
                         .get("prompt")
@@ -151,6 +156,8 @@ impl App {
                         self.fire_hooks_async(HookEvent::SubagentStart, ctx, app_tx.clone());
                     }
                     self.state.agent.sub_agents.push(SubAgentInfo {
+                        call_id: call.id.clone(),
+                        agent_type: agent_type.clone(),
                         description: description.clone(),
                         background,
                         is_running: true,
@@ -171,6 +178,7 @@ impl App {
                     let mut msg = UiMessage::new(MessageKind::SubAgent, String::new());
                     msg.is_streaming = true;
                     msg.sub_agent = Some(crate::state::messages::SubAgentData {
+                        agent_type,
                         description,
                         background,
                         tool_count: 0,
@@ -370,6 +378,7 @@ impl App {
                 input_tokens,
                 output_tokens,
                 cost_usd,
+                agent_type,
                 provider,
                 resumed,
                 ..
@@ -397,31 +406,17 @@ impl App {
                 self.state.agent.cost += cost_usd;
 
                 // Convert agent messages to UI messages for storage
-                let ui_messages: Vec<UiMessage> = messages
-                    .iter()
-                    .filter_map(|m| {
-                        let kind = match m.role {
-                            ava_types::Role::User => MessageKind::User,
-                            ava_types::Role::Assistant => MessageKind::Assistant,
-                            ava_types::Role::Tool => MessageKind::ToolResult,
-                            ava_types::Role::System => return None,
-                        };
-                        Some(UiMessage::new(kind, m.content.clone()))
-                    })
-                    .collect();
+                let ui_messages = crate::app::session_messages_to_ui_messages(&messages);
 
                 // Update the SubAgentInfo in agent state
-                if let Some(sa) = self
-                    .state
-                    .agent
-                    .sub_agents
-                    .iter_mut()
-                    .rev()
-                    .find(|s| subagent_descriptions_match(&s.description, &description))
-                {
+                if let Some(sa) = self.state.agent.sub_agents.iter_mut().rev().find(|s| {
+                    (!call_id.is_empty() && s.call_id == call_id)
+                        || subagent_descriptions_match(&s.description, &description)
+                }) {
                     sa.is_running = false;
                     sa.elapsed = Some(sa.started_at.elapsed());
                     sa.current_tool = None;
+                    sa.agent_type = agent_type.clone();
                     sa.session_id = Some(session_id.clone());
                     sa.session_messages = ui_messages.clone();
                     sa.provider = provider.clone();
@@ -450,6 +445,7 @@ impl App {
                     msg.is_streaming = false;
                     if let Some(data) = msg.sub_agent.as_mut() {
                         data.is_running = false;
+                        data.agent_type = agent_type;
                         data.session_id = Some(session_id);
                         data.session_messages = ui_messages;
                         data.current_tool = None;

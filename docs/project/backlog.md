@@ -27,6 +27,8 @@ Current bounded parity note: web submit and replay flows now honor the shared pe
 
 Current TUI delegation note: subagent cards now open child conversations on click and child-session views reconstruct stored tool-call/tool-result history instead of degrading into result-only rows, but the broader “show the delegated run as richly as OpenCode” polish pass is still part of the active desktop/TUI fit-and-finish queue.
 
+Current session-title note: first-message auto-titling now treats both `New Chat` and legacy `New Session` placeholders as renameable defaults and the web backend no longer cements the placeholder into persisted metadata before the first real prompt, but broader conversation-list/session-polish work remains in the active desktop app fit-and-finish queue.
+
 Current web hardening note: `ava serve` now defaults to loopback-only bind/origin exposure, token-protects sensitive session/history/status reads plus persisted plan listing/loading routes, high-risk plugin/CLI discovery + plugin route surfaces, and privileged HTTP control-plane routes (and `/ws`), redacts raw control tokens from normal logs, and still keeps broader browser-origin exposure as an explicit `--insecure-open-cors` opt-in.
 
 Current multi-chat correctness note: overlapping frontend session switches now gate async persisted-session finalization on the winning switch/current session, so an older load finishing late cannot re-select the stale session, overwrite the visible session artifacts, or re-persist the old last-session selection after a newer switch has already won.

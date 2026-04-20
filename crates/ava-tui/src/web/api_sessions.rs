@@ -137,25 +137,33 @@ fn parse_list_filter(
 }
 
 fn session_title(session: &ava_types::Session) -> String {
+    if !session_title_needs_generation(&session.metadata) {
+        if let Some(title) = session.metadata.get("title").and_then(|v| v.as_str()) {
+            return title.to_string();
+        }
+    }
+
     session
-        .metadata
+        .messages
+        .iter()
+        .find(|message| message.role == ava_types::Role::User)
+        .map(|message| ava_session::generate_title(&message.content))
+        .unwrap_or_else(|| default_session_name())
+}
+
+pub(crate) fn session_title_needs_generation(metadata: &serde_json::Value) -> bool {
+    if let Some(flag) = metadata.get("titlePlaceholder").and_then(|v| v.as_bool()) {
+        return flag;
+    }
+
+    metadata
         .get("title")
         .and_then(|v| v.as_str())
-        .map(String::from)
-        .unwrap_or_else(|| {
-            session
-                .messages
-                .first()
-                .map(|message| {
-                    let content = &message.content;
-                    if content.len() > 80 {
-                        format!("{}...", &content[..77])
-                    } else {
-                        content.clone()
-                    }
-                })
-                .unwrap_or_else(|| "New session".to_string())
-        })
+        .is_none_or(is_default_session_title)
+}
+
+fn is_default_session_title(title: &str) -> bool {
+    matches!(title.trim(), "New Chat" | "New Session")
 }
 
 fn session_parent_session_id(session: &ava_types::Session) -> Option<String> {
@@ -480,10 +488,12 @@ pub struct CreateSessionRequest {
     pub id: Option<String>,
     #[serde(default)]
     pub project_id: Option<String>,
+    #[serde(default)]
+    pub metadata: Option<serde_json::Value>,
 }
 
 fn default_session_name() -> String {
-    "New Session".to_string()
+    "New Chat".to_string()
 }
 
 /// Create a new session.
@@ -505,8 +515,10 @@ pub(crate) async fn create_session(
         }
     }
 
-    // Set the title in metadata
     if let Some(map) = session.metadata.as_object_mut() {
+        if let Some(extra) = req.metadata.as_ref().and_then(|value| value.as_object()) {
+            map.extend(extra.clone());
+        }
         map.insert(
             "title".to_string(),
             serde_json::Value::String(req.name.clone()),
@@ -594,12 +606,28 @@ pub(crate) async fn rename_session(
     Json(req): Json<RenameSessionRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ErrorResponse>)> {
     let uuid = parse_session_uuid(&id)?;
-
+    let mut session = state
+        .inner
+        .stack
+        .session_manager
+        .get(uuid)
+        .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?
+        .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "Session not found"))?;
+    if let Some(map) = session.metadata.as_object_mut() {
+        map.insert(
+            "title".to_string(),
+            serde_json::Value::String(req.name.clone()),
+        );
+        map.insert(
+            "titlePlaceholder".to_string(),
+            serde_json::Value::Bool(false),
+        );
+    }
     state
         .inner
         .stack
         .session_manager
-        .rename(uuid, &req.name)
+        .save(&session)
         .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
 
     Ok(Json(serde_json::json!({ "ok": true })))
@@ -686,12 +714,28 @@ pub(crate) async fn rename_session_body(
     Json(req): Json<RenameSessionBody>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ErrorResponse>)> {
     let uuid = parse_session_uuid(&req.id)?;
-
+    let mut session = state
+        .inner
+        .stack
+        .session_manager
+        .get(uuid)
+        .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?
+        .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "Session not found"))?;
+    if let Some(map) = session.metadata.as_object_mut() {
+        map.insert(
+            "title".to_string(),
+            serde_json::Value::String(req.title.clone()),
+        );
+        map.insert(
+            "titlePlaceholder".to_string(),
+            serde_json::Value::Bool(false),
+        );
+    }
     state
         .inner
         .stack
         .session_manager
-        .rename(uuid, &req.title)
+        .save(&session)
         .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
 
     Ok(Json(serde_json::json!({ "ok": true })))
@@ -1046,6 +1090,10 @@ pub(crate) async fn duplicate_session(
         .unwrap_or_else(Map::new);
     cloned_metadata.insert("title".to_string(), serde_json::Value::String(title));
     cloned_metadata.insert(
+        "titlePlaceholder".to_string(),
+        serde_json::Value::Bool(false),
+    );
+    cloned_metadata.insert(
         "status".to_string(),
         serde_json::Value::String(PersistedSessionStatus::Active.as_str().to_string()),
     );
@@ -1106,4 +1154,40 @@ pub(crate) async fn duplicate_session(
         created_at: persisted_session.created_at.to_rfc3339(),
         updated_at: persisted_session.updated_at.to_rfc3339(),
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn session_title_prefers_generated_first_user_title_when_metadata_missing() {
+        let mut session = ava_types::Session::new();
+        session.messages.push(ava_types::Message::new(
+            ava_types::Role::User,
+            "Build OAuth flow",
+        ));
+
+        assert_eq!(session_title(&session), "Build OAuth flow");
+    }
+
+    #[test]
+    fn recognizes_legacy_and_current_default_titles() {
+        assert!(is_default_session_title("New Chat"));
+        assert!(is_default_session_title("New Session"));
+        assert!(!is_default_session_title("Build OAuth flow"));
+    }
+
+    #[test]
+    fn session_title_ignores_placeholder_metadata_titles() {
+        let mut session = ava_types::Session::new();
+        session.metadata["title"] = serde_json::Value::String("New Session".to_string());
+        session.messages.push(ava_types::Message::new(
+            ava_types::Role::User,
+            "Build OAuth flow",
+        ));
+
+        assert_eq!(session_title(&session), "Build OAuth flow");
+        assert!(session_title_needs_generation(&session.metadata));
+    }
 }

@@ -1,5 +1,22 @@
 use super::*;
 
+fn subagent_descriptions_match(a: &str, b: &str) -> bool {
+    fn normalize_subagent_description(value: &str) -> &str {
+        let trimmed = value.trim();
+        if let Some(rest) = trimmed
+            .strip_prefix('[')
+            .and_then(|rest| rest.split_once(']').map(|(_, tail)| tail.trim()))
+        {
+            if !rest.is_empty() {
+                return rest;
+            }
+        }
+        trimmed
+    }
+
+    normalize_subagent_description(a) == normalize_subagent_description(b)
+}
+
 impl App {
     pub(super) fn handle_event(
         &mut self,
@@ -111,18 +128,144 @@ impl App {
                                 return;
                             }
                             if let Some(idx) = self.state.messages.message_index_at_row(mouse.row) {
-                                if let Some(msg) = self.state.messages.messages.get(idx) {
-                                    match msg.kind {
-                                        // Toggle thinking block expand/collapse.
-                                        crate::state::messages::MessageKind::Thinking => {
+                                enum ClickedMessage {
+                                    Main(crate::state::messages::MessageKind),
+                                    SubAgent {
+                                        call_id: String,
+                                        session_id: Option<String>,
+                                        description: String,
+                                    },
+                                }
+
+                                let clicked_message = match &self.state.view_mode {
+                                    ViewMode::Main => {
+                                        self.state.messages.messages.get(idx).map(|msg| {
+                                            match msg.kind.clone() {
+                                                crate::state::messages::MessageKind::SubAgent => {
+                                                    ClickedMessage::SubAgent {
+                                                        call_id: msg
+                                                            .sub_agent
+                                                            .as_ref()
+                                                            .map(|sub| sub.call_id.clone())
+                                                            .unwrap_or_default(),
+                                                        session_id: msg
+                                                            .sub_agent
+                                                            .as_ref()
+                                                            .and_then(|sub| sub.session_id.clone()),
+                                                        description: msg
+                                                            .sub_agent
+                                                            .as_ref()
+                                                            .map(|sub| sub.description.clone())
+                                                            .unwrap_or_else(|| msg.content.clone()),
+                                                    }
+                                                }
+                                                kind => ClickedMessage::Main(kind),
+                                            }
+                                        })
+                                    }
+                                    ViewMode::SubAgent { agent_index, .. } => self
+                                        .state
+                                        .agent
+                                        .sub_agents
+                                        .get(*agent_index)
+                                        .and_then(|sa| sa.session_messages.get(idx))
+                                        .and_then(|msg| match msg.kind {
+                                            crate::state::messages::MessageKind::SubAgent => {
+                                                Some(ClickedMessage::SubAgent {
+                                                    call_id: msg
+                                                        .sub_agent
+                                                        .as_ref()
+                                                        .map(|sub| sub.call_id.clone())
+                                                        .unwrap_or_default(),
+                                                    session_id: msg
+                                                        .sub_agent
+                                                        .as_ref()
+                                                        .and_then(|sub| sub.session_id.clone()),
+                                                    description: msg
+                                                        .sub_agent
+                                                        .as_ref()
+                                                        .map(|sub| sub.description.clone())
+                                                        .unwrap_or_else(|| msg.content.clone()),
+                                                })
+                                            }
+                                            _ => None,
+                                        }),
+                                    ViewMode::BackgroundTask { task_id, .. } => {
+                                        let bg = self
+                                            .state
+                                            .background
+                                            .lock()
+                                            .unwrap_or_else(|e| e.into_inner());
+                                        bg.tasks
+                                            .iter()
+                                            .find(|task| task.id == *task_id)
+                                            .and_then(|task| task.messages.get(idx))
+                                            .and_then(|msg| match msg.kind {
+                                                crate::state::messages::MessageKind::SubAgent => {
+                                                    Some(ClickedMessage::SubAgent {
+                                                        call_id: msg
+                                                            .sub_agent
+                                                            .as_ref()
+                                                            .map(|sub| sub.call_id.clone())
+                                                            .unwrap_or_default(),
+                                                        session_id: msg
+                                                            .sub_agent
+                                                            .as_ref()
+                                                            .and_then(|sub| sub.session_id.clone()),
+                                                        description: msg
+                                                            .sub_agent
+                                                            .as_ref()
+                                                            .map(|sub| sub.description.clone())
+                                                            .unwrap_or_else(|| msg.content.clone()),
+                                                    })
+                                                }
+                                                _ => None,
+                                            })
+                                    }
+                                };
+
+                                if let Some(clicked_message) = clicked_message {
+                                    match clicked_message {
+                                        ClickedMessage::SubAgent {
+                                            call_id,
+                                            session_id,
+                                            description,
+                                        } => {
+                                            let agent_index = if !call_id.is_empty() {
+                                                self.state
+                                                    .agent
+                                                    .sub_agents
+                                                    .iter()
+                                                    .rposition(|sa| sa.call_id == call_id)
+                                            } else if let Some(session_id) = session_id {
+                                                self.state.agent.sub_agents.iter().rposition(|sa| {
+                                                    sa.session_id.as_deref()
+                                                        == Some(session_id.as_str())
+                                                })
+                                            } else {
+                                                self.state.agent.sub_agents.iter().rposition(|sa| {
+                                                    subagent_descriptions_match(
+                                                        &sa.description,
+                                                        &description,
+                                                    )
+                                                })
+                                            };
+                                            if let Some(agent_index) = agent_index {
+                                                self.enter_sub_agent_view(agent_index);
+                                            }
+                                        }
+                                        ClickedMessage::Main(
+                                            crate::state::messages::MessageKind::Thinking,
+                                        ) => {
                                             self.state.messages.toggle_thinking_at(idx);
                                         }
-                                        // Toggle tool action group expand/collapse.
-                                        crate::state::messages::MessageKind::ToolCall
-                                        | crate::state::messages::MessageKind::ToolResult => {
+                                        ClickedMessage::Main(
+                                            crate::state::messages::MessageKind::ToolCall
+                                            | crate::state::messages::MessageKind::ToolResult,
+                                        ) => {
                                             self.state.messages.toggle_tool_group_at(idx);
                                         }
-                                        _ => {}
+                                        ClickedMessage::Main(_) => {}
                                     }
                                 }
                             }
@@ -326,16 +469,9 @@ impl App {
                     self.state.agent.apply_session_summary(&loaded.session);
                     self.state.messages.messages.clear();
                     self.state.messages.reset_scroll();
-                    for msg in &loaded.session.messages {
-                        let kind = match msg.role {
-                            ava_types::Role::User => MessageKind::User,
-                            ava_types::Role::Assistant => MessageKind::Assistant,
-                            ava_types::Role::Tool => MessageKind::ToolResult,
-                            ava_types::Role::System => MessageKind::System,
-                        };
-                        self.state
-                            .messages
-                            .push(UiMessage::new(kind, msg.content.clone()));
+                    for msg in crate::app::session_messages_to_ui_messages(&loaded.session.messages)
+                    {
+                        self.state.messages.push(msg);
                     }
                     if let Some((provider, model)) = loaded.restore_model {
                         self.spawn_model_switch(

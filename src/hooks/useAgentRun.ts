@@ -9,11 +9,10 @@
 import { isTauri } from '@tauri-apps/api/core'
 import { type Accessor, batch, type Setter } from 'solid-js'
 
-import { DEFAULTS } from '../config/constants'
 import { debugLog } from '../lib/debug-log'
 import { generateMessageId } from '../lib/ids'
 import { log } from '../lib/logger'
-import { deriveSessionTitle } from '../lib/title-utils'
+import { deriveSessionTitle, sessionHasPlaceholderTitle } from '../lib/title-utils'
 import {
   persistAssistantPayloadToBackendSession,
   syncMessagesFromBackend,
@@ -242,7 +241,7 @@ export function createAgentRun(deps: RunDeps) {
 
     // Auto-title the session from the first user message
     if (settingsRef.settings().behavior.sessionAutoTitle && currentSess) {
-      const isDefaultName = currentSess.name === DEFAULTS.SESSION_NAME
+      const isDefaultName = sessionHasPlaceholderTitle(currentSess)
       const isFirstMessage = session.messages().length <= 1
       if (isDefaultName && isFirstMessage) {
         const title = deriveSessionTitle(goal)

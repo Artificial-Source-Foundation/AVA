@@ -8,6 +8,68 @@ use ratatui::text::{Line, Span};
 use super::spinner::inline_spinner_frame;
 use super::{MessageKind, UiMessage};
 
+fn normalize_subagent_title(description: &str, agent_type: Option<&str>) -> (String, String) {
+    let trimmed = description.trim();
+    let parsed = trimmed
+        .strip_prefix('[')
+        .and_then(|rest| rest.split_once(']'))
+        .map(|(label, tail)| (label.trim(), tail.trim()));
+
+    let agent_label = agent_type
+        .filter(|value| !value.trim().is_empty())
+        .map(|value| value.trim().to_string())
+        .or_else(|| {
+            parsed
+                .as_ref()
+                .map(|(label, _)| (*label).to_string())
+                .filter(|value| !value.is_empty())
+        })
+        .unwrap_or_else(|| "subagent".to_string());
+
+    let prompt = parsed
+        .map(|(_, tail)| tail.to_string())
+        .filter(|tail| !tail.is_empty())
+        .unwrap_or_else(|| trimmed.to_string());
+
+    (agent_label, prompt)
+}
+
+fn format_subagent_agent_label(agent_label: &str) -> String {
+    agent_label
+        .split(|ch: char| matches!(ch, '-' | '_' | ' '))
+        .filter(|part| !part.is_empty())
+        .map(|part| {
+            let mut chars = part.chars();
+            match chars.next() {
+                Some(first) => format!(
+                    "{}{}",
+                    first.to_ascii_uppercase(),
+                    chars.as_str().to_ascii_lowercase()
+                ),
+                None => String::new(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("-")
+}
+
+fn recent_subagent_activity_lines(data: Option<&super::SubAgentData>) -> Vec<String> {
+    let Some(data) = data else {
+        return Vec::new();
+    };
+
+    data.session_messages
+        .iter()
+        .filter(|message| matches!(message.kind, MessageKind::ToolCall))
+        .rev()
+        .take(2)
+        .map(|message| crate::widgets::message::tool_activity_line(&message.content, false))
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect()
+}
+
 /// Left-border character for message grouping.
 const LEFT_BAR: &str = "│";
 /// Padding after the left bar (design: content padding 16px ≈ 2 chars).
@@ -589,6 +651,11 @@ impl UiMessage {
                 let description = data
                     .map(|d| d.description.as_str())
                     .unwrap_or(&self.content);
+                let (agent_label, prompt) = normalize_subagent_title(
+                    description,
+                    data.and_then(|d| d.agent_type.as_deref()),
+                );
+                let agent_label = format_subagent_agent_label(&agent_label);
                 let is_running = data.map(|d| d.is_running).unwrap_or(false);
                 let is_failed = data.map(|d| d.failed).unwrap_or(false);
 
@@ -603,7 +670,8 @@ impl UiMessage {
                 let meta_style = Style::default().fg(theme.text_dimmed);
                 let tree = "├─ ";
                 let desc_budget = width_budget.saturating_sub(display_width(tree)).max(1);
-                let desc_display = crate::text_utils::truncate_display(description, desc_budget);
+                let title = format!("{} Task - {}", agent_label, prompt);
+                let desc_display = crate::text_utils::truncate_display(&title, desc_budget);
 
                 let mut result = vec![Line::from(vec![
                     Span::styled(tree, Style::default().fg(theme.text_dimmed)),
@@ -696,13 +764,29 @@ impl UiMessage {
                     }
                 }
 
+                for activity in recent_subagent_activity_lines(data) {
+                    result.push(Line::from(vec![
+                        Span::styled("│  ", Style::default().fg(theme.text_dimmed)),
+                        Span::styled(
+                            crate::text_utils::truncate_display(
+                                &activity,
+                                width_budget.saturating_sub(2),
+                            ),
+                            Style::default().fg(theme.text_dimmed),
+                        ),
+                    ]));
+                }
+
                 let has_conversation = data
                     .map(|d| !d.session_messages.is_empty())
                     .unwrap_or(false);
                 if has_conversation {
                     result.push(Line::from(vec![
                         Span::styled("└─ ", Style::default().fg(theme.text_dimmed)),
-                        Span::styled("Enter to view", Style::default().fg(theme.text_dimmed)),
+                        Span::styled(
+                            "Click to open transcript",
+                            Style::default().fg(theme.text_dimmed),
+                        ),
                     ]));
                 }
 

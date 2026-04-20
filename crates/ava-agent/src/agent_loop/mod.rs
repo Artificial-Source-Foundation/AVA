@@ -388,6 +388,12 @@ impl AgentLoop {
     ) -> Self {
         let project_root = config.project_root.clone();
         let enable_dynamic_rules = config.enable_dynamic_rules;
+        let mut activated_context_paths = HashSet::new();
+        if let Some(ref root) = project_root {
+            if let Some(path) = crate::instructions::contextual_agents_path(root) {
+                activated_context_paths.insert(path);
+            }
+        }
         Self {
             llm,
             tools: Arc::new(tools),
@@ -404,7 +410,7 @@ impl AgentLoop {
             session_id: None,
             snapshot_manager: ava_tools::core::file_snapshot::new_shared_snapshot_manager(),
             project_root,
-            activated_context_paths: std::sync::Mutex::new(HashSet::new()),
+            activated_context_paths: std::sync::Mutex::new(activated_context_paths),
             activated_rule_paths: std::sync::Mutex::new(HashSet::new()),
             suppress_next_tokens: false,
             enable_dynamic_rules,
@@ -471,10 +477,16 @@ impl AgentLoop {
     }
 
     fn reset_dynamic_instruction_activation(&self) {
-        self.activated_context_paths
+        let mut activated_context = self
+            .activated_context_paths
             .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .clear();
+            .unwrap_or_else(|error| error.into_inner());
+        activated_context.clear();
+        if let Some(ref root) = self.project_root {
+            if let Some(path) = crate::instructions::contextual_agents_path(root) {
+                activated_context.insert(path);
+            }
+        }
         self.activated_rule_paths
             .lock()
             .unwrap_or_else(|error| error.into_inner())
@@ -1136,7 +1148,11 @@ fn correction_hint_parts(result: &ToolResult) -> (&'static str, &str) {
 mod tests {
     use super::*;
     use std::collections::hash_map::DefaultHasher;
+    use std::fs;
     use std::hash::{Hash, Hasher};
+
+    use ava_llm::providers::mock::MockProvider;
+    use tempfile::TempDir;
 
     use crate::stuck::StuckAction;
 
@@ -1445,6 +1461,127 @@ mod tests {
         assert!(json.contains("1000"));
         assert!(json.contains("200"));
         assert!(json.contains("0.015"));
+    }
+
+    #[test]
+    fn agent_loop_preseeds_workspace_agents_and_skips_reinjecting_it() {
+        let tmp = TempDir::new().unwrap();
+        let src_dir = tmp.path().join("src");
+        fs::create_dir_all(&src_dir).unwrap();
+        fs::write(tmp.path().join("AGENTS.md"), "Root guidance.").unwrap();
+        fs::write(src_dir.join("main.rs"), "fn main() {}\n").unwrap();
+
+        let config = AgentConfig {
+            max_turns: 10,
+            token_limit: 128_000,
+            provider: String::new(),
+            model: "mock".to_string(),
+            max_budget_usd: 0.0,
+            max_cost_usd: 10.0,
+            loop_detection: true,
+            custom_system_prompt: None,
+            thinking_level: ThinkingLevel::Off,
+            thinking_budget_tokens: None,
+            system_prompt_suffix: None,
+            benchmark_prompt_override: None,
+            project_root: Some(tmp.path().to_path_buf()),
+            enable_dynamic_rules: false,
+            extended_tools: false,
+            plan_mode: false,
+            post_edit_validation: None,
+            auto_compact: true,
+            stream_timeout_secs: LLM_STREAM_TIMEOUT_SECS,
+            prompt_caching: true,
+            headless: false,
+            is_subagent: false,
+        };
+
+        let agent = AgentLoop::new(
+            Box::new(MockProvider::new("mock", vec![])),
+            ToolRegistry::new(),
+            ContextManager::new(4_096),
+            config,
+        );
+
+        let root_agents = fs::canonicalize(tmp.path().join("AGENTS.md")).unwrap();
+        {
+            let activated = agent
+                .activated_context_paths
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            assert!(activated.contains(&root_agents));
+        }
+
+        let mut activated = agent
+            .activated_context_paths
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let result = crate::instructions::contextual_instructions_for_file_once(
+            &src_dir.join("main.rs"),
+            tmp.path(),
+            &mut activated,
+        );
+        assert!(
+            result.is_none(),
+            "startup-loaded workspace AGENTS.md should not be re-injected on first file touch"
+        );
+    }
+
+    #[test]
+    fn reset_dynamic_instruction_activation_reseeds_workspace_agents() {
+        let tmp = TempDir::new().unwrap();
+        fs::write(tmp.path().join("AGENTS.md"), "Root guidance.").unwrap();
+
+        let config = AgentConfig {
+            max_turns: 10,
+            token_limit: 128_000,
+            provider: String::new(),
+            model: "mock".to_string(),
+            max_budget_usd: 0.0,
+            max_cost_usd: 10.0,
+            loop_detection: true,
+            custom_system_prompt: None,
+            thinking_level: ThinkingLevel::Off,
+            thinking_budget_tokens: None,
+            system_prompt_suffix: None,
+            benchmark_prompt_override: None,
+            project_root: Some(tmp.path().to_path_buf()),
+            enable_dynamic_rules: false,
+            extended_tools: false,
+            plan_mode: false,
+            post_edit_validation: None,
+            auto_compact: true,
+            stream_timeout_secs: LLM_STREAM_TIMEOUT_SECS,
+            prompt_caching: true,
+            headless: false,
+            is_subagent: false,
+        };
+
+        let agent = AgentLoop::new(
+            Box::new(MockProvider::new("mock", vec![])),
+            ToolRegistry::new(),
+            ContextManager::new(4_096),
+            config,
+        );
+
+        let root_agents = fs::canonicalize(tmp.path().join("AGENTS.md")).unwrap();
+        {
+            let mut activated = agent
+                .activated_context_paths
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            activated.clear();
+            activated.insert(tmp.path().join("other"));
+        }
+
+        agent.reset_dynamic_instruction_activation();
+
+        let activated = agent
+            .activated_context_paths
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        assert_eq!(activated.len(), 1);
+        assert!(activated.contains(&root_agents));
     }
 
     // --- Plan mode tests ---

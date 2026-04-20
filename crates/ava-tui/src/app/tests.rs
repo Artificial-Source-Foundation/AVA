@@ -1,4 +1,5 @@
 use super::*;
+use crate::state::agent::SubAgentInfo;
 use ava_agent::control_plane::commands::{queue_message_tier, ControlPlaneCommand};
 use ava_agent::control_plane::events::{required_backend_event_kinds, CanonicalEventKind};
 use ava_agent::control_plane::interactive::InteractiveRequestKind;
@@ -226,7 +227,7 @@ fn background_subagent_events_follow_real_tool_sequence() {
                     ava_types::Role::Assistant,
                     "AGENTS summary",
                 )],
-                description: "Read AGENTS.md and summarize it.".to_string(),
+                description: "[scout] Read AGENTS.md and summarize it.".to_string(),
                 input_tokens: 13,
                 output_tokens: 9,
                 cost_usd: 0.02,
@@ -462,6 +463,497 @@ fn foreground_background_subagent_events_stay_running_until_complete() {
         .expect("subagent state should be tracked");
     assert_eq!(sub_state.session_id.as_deref(), Some("sub-session-1"));
     assert_eq!(sub_state.provider.as_deref(), Some("openai"));
+}
+
+#[test]
+fn subagent_completion_reconstructs_tool_history_for_child_view() {
+    let temp = tempdir().expect("tempdir");
+    let db_path = temp.path().join("data.db");
+    let mut app = App::test_new(&db_path);
+    let (app_tx, _) = mpsc::unbounded_channel();
+    let (agent_tx, _) = mpsc::unbounded_channel();
+
+    app.state.agent.is_running = true;
+    app.foreground_run_id = Some(7);
+
+    app.handle_event(
+        AppEvent::AgentRunEvent {
+            run_id: 7,
+            event: ava_agent::AgentEvent::ToolCall(ava_types::ToolCall {
+                id: "call_subagent_1".to_string(),
+                name: "subagent".to_string(),
+                arguments: serde_json::json!({"prompt": "Inspect files.", "agent": "scout", "background": false}),
+            }),
+        },
+        app_tx.clone(),
+        agent_tx.clone(),
+    );
+
+    app.handle_event(
+        AppEvent::AgentRunEvent {
+            run_id: 7,
+            event: ava_agent::AgentEvent::SubAgentComplete {
+                call_id: "call_subagent_1".to_string(),
+                session_id: "child-session-1".to_string(),
+                messages: vec![
+                    ava_types::Message::new(ava_types::Role::Assistant, "I'll inspect the repo.")
+                        .with_tool_calls(vec![ava_types::ToolCall {
+                            id: "tool-1".to_string(),
+                            name: "glob".to_string(),
+                            arguments: serde_json::json!({"pattern": "src/**/*.rs"}),
+                        }]),
+                    ava_types::Message::new(ava_types::Role::Tool, "")
+                        .with_tool_results(vec![ava_types::ToolResult {
+                            call_id: "tool-1".to_string(),
+                            content: "src/main.rs".to_string(),
+                            is_error: false,
+                        }])
+                        .with_tool_call_id("tool-1"),
+                    ava_types::Message::new(ava_types::Role::Assistant, "Done."),
+                ],
+                description: "[scout] Inspect files.".to_string(),
+                input_tokens: 11,
+                output_tokens: 7,
+                cost_usd: 0.01,
+                agent_type: Some("scout".to_string()),
+                provider: Some("openai".to_string()),
+                resumed: false,
+            },
+        },
+        app_tx,
+        agent_tx,
+    );
+
+    let sub_msg = app
+        .state
+        .messages
+        .messages
+        .iter()
+        .find(|msg| matches!(msg.kind, MessageKind::SubAgent))
+        .expect("subagent message should still exist");
+    let sub_data = sub_msg
+        .sub_agent
+        .as_ref()
+        .expect("subagent data should still exist");
+
+    assert_eq!(sub_data.agent_type.as_deref(), Some("scout"));
+    assert_eq!(sub_data.session_messages.len(), 4);
+    assert!(matches!(
+        sub_data.session_messages[0].kind,
+        MessageKind::Assistant
+    ));
+    assert!(matches!(
+        sub_data.session_messages[1].kind,
+        MessageKind::ToolCall
+    ));
+    assert_eq!(
+        sub_data.session_messages[1].tool_name.as_deref(),
+        Some("glob")
+    );
+    assert!(matches!(
+        sub_data.session_messages[2].kind,
+        MessageKind::ToolResult
+    ));
+    assert_eq!(
+        sub_data.session_messages[2].tool_name.as_deref(),
+        Some("glob")
+    );
+    assert!(matches!(
+        sub_data.session_messages[3].kind,
+        MessageKind::Assistant
+    ));
+}
+
+#[test]
+fn clicking_subagent_card_enters_matching_child_view_without_enter_shortcut() {
+    let temp = tempdir().expect("tempdir");
+    let db_path = temp.path().join("data.db");
+    let mut app = App::test_new(&db_path);
+    let (app_tx, _) = mpsc::unbounded_channel();
+    let (agent_tx, _) = mpsc::unbounded_channel();
+
+    app.state.agent.sub_agents.push(SubAgentInfo {
+        call_id: "call-subagent-old".to_string(),
+        agent_type: Some("reviewer".to_string()),
+        description: "Review the patch.".to_string(),
+        background: false,
+        is_running: false,
+        tool_count: 1,
+        current_tool: None,
+        started_at: std::time::Instant::now(),
+        elapsed: None,
+        session_id: Some("child-session-1".to_string()),
+        session_messages: vec![UiMessage::new(MessageKind::Assistant, "Older run.")],
+        provider: None,
+        resumed: false,
+        cost_usd: None,
+        input_tokens: None,
+        output_tokens: None,
+    });
+
+    app.state.agent.sub_agents.push(SubAgentInfo {
+        call_id: "call-subagent-click".to_string(),
+        agent_type: Some("reviewer".to_string()),
+        description: "Review the patch.".to_string(),
+        background: false,
+        is_running: false,
+        tool_count: 1,
+        current_tool: None,
+        started_at: std::time::Instant::now(),
+        elapsed: None,
+        session_id: Some("child-session-2".to_string()),
+        session_messages: vec![UiMessage::new(MessageKind::Assistant, "Looks good.")],
+        provider: None,
+        resumed: false,
+        cost_usd: None,
+        input_tokens: None,
+        output_tokens: None,
+    });
+
+    let mut subagent_message = UiMessage::new(MessageKind::SubAgent, "summary");
+    subagent_message.sub_agent = Some(crate::state::messages::SubAgentData {
+        agent_type: Some("reviewer".to_string()),
+        description: "Review the patch.".to_string(),
+        background: false,
+        tool_count: 1,
+        current_tool: None,
+        duration: None,
+        is_running: false,
+        failed: false,
+        call_id: "call-subagent-click".to_string(),
+        session_id: Some("child-session-2".to_string()),
+        session_messages: vec![UiMessage::new(MessageKind::Assistant, "Looks good.")],
+        provider: None,
+        resumed: false,
+        cost_usd: None,
+        input_tokens: None,
+        output_tokens: None,
+    });
+    app.state.messages.push(subagent_message);
+    app.state.messages.messages_area = ratatui::layout::Rect::new(0, 0, 80, 10);
+    app.state.messages.message_line_ranges = vec![(0, 3)];
+
+    let enter = crossterm::event::KeyEvent::new(
+        crossterm::event::KeyCode::Enter,
+        crossterm::event::KeyModifiers::NONE,
+    );
+    app.handle_event(AppEvent::Key(enter), app_tx.clone(), agent_tx.clone());
+    assert!(matches!(app.state.view_mode, ViewMode::Main));
+
+    app.handle_event(
+        AppEvent::Mouse(crossterm::event::MouseEvent {
+            kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+            column: 1,
+            row: 1,
+            modifiers: crossterm::event::KeyModifiers::NONE,
+        }),
+        app_tx,
+        agent_tx,
+    );
+
+    assert!(matches!(
+        app.state.view_mode,
+        ViewMode::SubAgent { agent_index: 1, .. }
+    ));
+}
+
+#[test]
+fn clicking_background_subagent_card_enters_matching_child_view() {
+    let temp = tempdir().expect("tempdir");
+    let db_path = temp.path().join("data.db");
+    let mut app = App::test_new(&db_path);
+    let (app_tx, _) = mpsc::unbounded_channel();
+    let (agent_tx, _) = mpsc::unbounded_channel();
+
+    app.state.agent.sub_agents.push(SubAgentInfo {
+        call_id: "call-background-click".to_string(),
+        agent_type: Some("scout".to_string()),
+        description: "Inspect files.".to_string(),
+        background: true,
+        is_running: false,
+        tool_count: 1,
+        current_tool: None,
+        started_at: std::time::Instant::now(),
+        elapsed: None,
+        session_id: Some("bg-child-session".to_string()),
+        session_messages: vec![UiMessage::new(MessageKind::Assistant, "Finished.")],
+        provider: None,
+        resumed: false,
+        cost_usd: None,
+        input_tokens: None,
+        output_tokens: None,
+    });
+
+    let task_id = {
+        let mut bg = app.state.background.lock().unwrap();
+        let task_id = bg.add_task("Background audit".to_string());
+        let mut subagent_message = UiMessage::new(MessageKind::SubAgent, "summary");
+        subagent_message.sub_agent = Some(crate::state::messages::SubAgentData {
+            agent_type: Some("scout".to_string()),
+            description: "Inspect files.".to_string(),
+            background: true,
+            tool_count: 1,
+            current_tool: None,
+            duration: None,
+            is_running: false,
+            failed: false,
+            call_id: "call-background-click".to_string(),
+            session_id: Some("bg-child-session".to_string()),
+            session_messages: vec![UiMessage::new(MessageKind::Assistant, "Finished.")],
+            provider: None,
+            resumed: false,
+            cost_usd: None,
+            input_tokens: None,
+            output_tokens: None,
+        });
+        bg.append_message(task_id, subagent_message);
+        task_id
+    };
+
+    app.state.view_mode = ViewMode::BackgroundTask {
+        task_id,
+        goal: "Background audit".to_string(),
+    };
+    app.state.messages.messages_area = ratatui::layout::Rect::new(0, 0, 80, 10);
+    app.state.messages.message_line_ranges = vec![(0, 3)];
+
+    app.handle_event(
+        AppEvent::Mouse(crossterm::event::MouseEvent {
+            kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+            column: 1,
+            row: 1,
+            modifiers: crossterm::event::KeyModifiers::NONE,
+        }),
+        app_tx,
+        agent_tx,
+    );
+
+    assert!(matches!(
+        app.state.view_mode,
+        ViewMode::SubAgent { agent_index: 0, .. }
+    ));
+}
+
+#[test]
+fn clicking_subagent_card_without_session_id_matches_normalized_description() {
+    let temp = tempdir().expect("tempdir");
+    let db_path = temp.path().join("data.db");
+    let mut app = App::test_new(&db_path);
+    let (app_tx, _) = mpsc::unbounded_channel();
+    let (agent_tx, _) = mpsc::unbounded_channel();
+
+    app.state.agent.sub_agents.push(SubAgentInfo {
+        call_id: "call-normalized".to_string(),
+        agent_type: Some("scout".to_string()),
+        description: "Inspect files.".to_string(),
+        background: false,
+        is_running: false,
+        tool_count: 1,
+        current_tool: None,
+        started_at: std::time::Instant::now(),
+        elapsed: None,
+        session_id: None,
+        session_messages: vec![UiMessage::new(MessageKind::Assistant, "Finished.")],
+        provider: None,
+        resumed: false,
+        cost_usd: None,
+        input_tokens: None,
+        output_tokens: None,
+    });
+
+    let mut subagent_message = UiMessage::new(MessageKind::SubAgent, "summary");
+    subagent_message.sub_agent = Some(crate::state::messages::SubAgentData {
+        agent_type: Some("scout".to_string()),
+        description: "[scout] Inspect files.".to_string(),
+        background: false,
+        tool_count: 1,
+        current_tool: None,
+        duration: None,
+        is_running: false,
+        failed: false,
+        call_id: "call-normalized".to_string(),
+        session_id: None,
+        session_messages: vec![UiMessage::new(MessageKind::Assistant, "Finished.")],
+        provider: None,
+        resumed: false,
+        cost_usd: None,
+        input_tokens: None,
+        output_tokens: None,
+    });
+    app.state.messages.push(subagent_message);
+    app.state.messages.messages_area = ratatui::layout::Rect::new(0, 0, 80, 10);
+    app.state.messages.message_line_ranges = vec![(0, 3)];
+
+    app.handle_event(
+        AppEvent::Mouse(crossterm::event::MouseEvent {
+            kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+            column: 1,
+            row: 1,
+            modifiers: crossterm::event::KeyModifiers::NONE,
+        }),
+        app_tx,
+        agent_tx,
+    );
+
+    assert!(matches!(
+        app.state.view_mode,
+        ViewMode::SubAgent { agent_index: 0, .. }
+    ));
+}
+
+#[test]
+fn clicking_inflight_duplicate_subagent_card_uses_call_id() {
+    let temp = tempdir().expect("tempdir");
+    let db_path = temp.path().join("data.db");
+    let mut app = App::test_new(&db_path);
+    let (app_tx, _) = mpsc::unbounded_channel();
+    let (agent_tx, _) = mpsc::unbounded_channel();
+
+    for (call_id, text) in [("call-older", "Older run"), ("call-newer", "Newer run")] {
+        app.state.agent.sub_agents.push(SubAgentInfo {
+            call_id: call_id.to_string(),
+            agent_type: Some("scout".to_string()),
+            description: "Inspect files.".to_string(),
+            background: false,
+            is_running: true,
+            tool_count: 0,
+            current_tool: None,
+            started_at: std::time::Instant::now(),
+            elapsed: None,
+            session_id: None,
+            session_messages: vec![UiMessage::new(MessageKind::Assistant, text)],
+            provider: None,
+            resumed: false,
+            cost_usd: None,
+            input_tokens: None,
+            output_tokens: None,
+        });
+    }
+
+    let mut older_message = UiMessage::new(MessageKind::SubAgent, "summary");
+    older_message.sub_agent = Some(crate::state::messages::SubAgentData {
+        agent_type: Some("scout".to_string()),
+        description: "Inspect files.".to_string(),
+        background: false,
+        tool_count: 0,
+        current_tool: None,
+        duration: None,
+        is_running: true,
+        failed: false,
+        call_id: "call-older".to_string(),
+        session_id: None,
+        session_messages: vec![],
+        provider: None,
+        resumed: false,
+        cost_usd: None,
+        input_tokens: None,
+        output_tokens: None,
+    });
+    app.state.messages.push(older_message);
+
+    let mut newer_message = UiMessage::new(MessageKind::SubAgent, "summary");
+    newer_message.sub_agent = Some(crate::state::messages::SubAgentData {
+        agent_type: Some("scout".to_string()),
+        description: "Inspect files.".to_string(),
+        background: false,
+        tool_count: 0,
+        current_tool: None,
+        duration: None,
+        is_running: true,
+        failed: false,
+        call_id: "call-newer".to_string(),
+        session_id: None,
+        session_messages: vec![],
+        provider: None,
+        resumed: false,
+        cost_usd: None,
+        input_tokens: None,
+        output_tokens: None,
+    });
+    app.state.messages.push(newer_message);
+
+    app.state.messages.messages_area = ratatui::layout::Rect::new(0, 0, 80, 10);
+    app.state.messages.message_line_ranges = vec![(0, 3), (3, 6)];
+
+    app.handle_event(
+        AppEvent::Mouse(crossterm::event::MouseEvent {
+            kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+            column: 1,
+            row: 1,
+            modifiers: crossterm::event::KeyModifiers::NONE,
+        }),
+        app_tx,
+        agent_tx,
+    );
+
+    assert!(matches!(
+        app.state.view_mode,
+        ViewMode::SubAgent { agent_index: 0, .. }
+    ));
+}
+
+#[test]
+fn subagent_completion_uses_call_id_before_duplicate_description() {
+    let temp = tempdir().expect("tempdir");
+    let db_path = temp.path().join("data.db");
+    let mut app = App::test_new(&db_path);
+    let (app_tx, _) = mpsc::unbounded_channel();
+    let (agent_tx, _) = mpsc::unbounded_channel();
+    app.state.agent.is_running = true;
+    app.foreground_run_id = Some(7);
+
+    for (call_id, summary) in [
+        ("call-older", "Older result"),
+        ("call-newer", "Newer result"),
+    ] {
+        app.handle_event(
+            AppEvent::AgentRunEvent {
+                run_id: 7,
+                event: ava_agent::AgentEvent::ToolCall(ava_types::ToolCall {
+                    id: call_id.to_string(),
+                    name: "subagent".to_string(),
+                    arguments: serde_json::json!({"prompt": "Inspect files.", "agent": "scout", "background": false}),
+                }),
+            },
+            app_tx.clone(),
+            agent_tx.clone(),
+        );
+
+        app.handle_event(
+            AppEvent::AgentRunEvent {
+                run_id: 7,
+                event: ava_agent::AgentEvent::SubAgentComplete {
+                    call_id: call_id.to_string(),
+                    session_id: format!("session-{call_id}"),
+                    messages: vec![ava_types::Message::new(ava_types::Role::Assistant, summary)],
+                    description: "[scout] Inspect files.".to_string(),
+                    input_tokens: 1,
+                    output_tokens: 1,
+                    cost_usd: 0.01,
+                    agent_type: Some("scout".to_string()),
+                    provider: Some("openai".to_string()),
+                    resumed: false,
+                },
+            },
+            app_tx.clone(),
+            agent_tx.clone(),
+        );
+    }
+
+    let first = &app.state.agent.sub_agents[0];
+    let second = &app.state.agent.sub_agents[1];
+    assert_eq!(first.call_id, "call-older");
+    assert_eq!(first.session_id.as_deref(), Some("session-call-older"));
+    assert_eq!(
+        first.session_messages.last().map(|m| m.content.as_str()),
+        Some("Older result")
+    );
+    assert_eq!(second.call_id, "call-newer");
+    assert_eq!(second.session_id.as_deref(), Some("session-call-newer"));
+    assert_eq!(
+        second.session_messages.last().map(|m| m.content.as_str()),
+        Some("Newer result")
+    );
 }
 
 // /bg command removed — tests removed

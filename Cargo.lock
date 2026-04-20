@@ -266,7 +266,7 @@ checksum = "c08606f8c3cbf4ce6ec8e28fb0014a2c086708fe954eaa885384a6165172e7e8"
 
 [[package]]
 name = "ava-acp"
-version = "3.3.0"
+version = "0.6.0"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -287,7 +287,7 @@ dependencies = [
 
 [[package]]
 name = "ava-agent"
-version = "3.3.0"
+version = "0.6.0"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -324,7 +324,7 @@ dependencies = [
 
 [[package]]
 name = "ava-auth"
-version = "3.3.0"
+version = "0.6.0"
 dependencies = [
  "base64",
  "open",
@@ -343,7 +343,7 @@ dependencies = [
 
 [[package]]
 name = "ava-codebase"
-version = "3.3.0"
+version = "0.6.0"
 dependencies = [
  "petgraph",
  "regex",
@@ -356,7 +356,7 @@ dependencies = [
 
 [[package]]
 name = "ava-config"
-version = "3.3.0"
+version = "0.6.0"
 dependencies = [
  "aes-gcm",
  "ava-auth",
@@ -380,7 +380,7 @@ dependencies = [
 
 [[package]]
 name = "ava-context"
-version = "3.3.0"
+version = "0.6.0"
 dependencies = [
  "async-trait",
  "ava-types",
@@ -395,7 +395,7 @@ dependencies = [
 
 [[package]]
 name = "ava-db"
-version = "3.3.0"
+version = "0.6.0"
 dependencies = [
  "ava-types",
  "chrono",
@@ -410,7 +410,7 @@ dependencies = [
 
 [[package]]
 name = "ava-extensions"
-version = "3.3.0"
+version = "0.6.0"
 dependencies = [
  "chrono",
  "dirs-next",
@@ -426,7 +426,7 @@ dependencies = [
 
 [[package]]
 name = "ava-hq"
-version = "3.3.0"
+version = "0.6.0"
 dependencies = [
  "async-trait",
  "ava-acp",
@@ -452,7 +452,7 @@ dependencies = [
 
 [[package]]
 name = "ava-llm"
-version = "3.3.0"
+version = "0.6.0"
 dependencies = [
  "async-trait",
  "ava-auth",
@@ -475,7 +475,7 @@ dependencies = [
 
 [[package]]
 name = "ava-mcp"
-version = "3.3.0"
+version = "0.6.0"
 dependencies = [
  "async-trait",
  "ava-tools",
@@ -500,7 +500,7 @@ dependencies = [
 
 [[package]]
 name = "ava-memory"
-version = "3.3.0"
+version = "0.6.0"
 dependencies = [
  "rusqlite",
  "tempfile",
@@ -509,7 +509,7 @@ dependencies = [
 
 [[package]]
 name = "ava-permissions"
-version = "3.3.0"
+version = "0.6.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -531,7 +531,7 @@ dependencies = [
 
 [[package]]
 name = "ava-platform"
-version = "3.3.0"
+version = "0.6.0"
 dependencies = [
  "async-trait",
  "ava-types",
@@ -547,7 +547,7 @@ dependencies = [
 
 [[package]]
 name = "ava-plugin"
-version = "3.3.0"
+version = "0.6.0"
 dependencies = [
  "async-trait",
  "ava-types",
@@ -564,7 +564,7 @@ dependencies = [
 
 [[package]]
 name = "ava-review"
-version = "3.3.0"
+version = "0.6.0"
 dependencies = [
  "ava-agent",
  "ava-context",
@@ -582,7 +582,7 @@ dependencies = [
 
 [[package]]
 name = "ava-sandbox"
-version = "3.3.0"
+version = "0.6.0"
 dependencies = [
  "serde",
  "thiserror 1.0.69",
@@ -592,7 +592,7 @@ dependencies = [
 
 [[package]]
 name = "ava-session"
-version = "3.3.0"
+version = "0.6.0"
 dependencies = [
  "ava-types",
  "chrono",
@@ -606,7 +606,7 @@ dependencies = [
 
 [[package]]
 name = "ava-tools"
-version = "3.3.0"
+version = "0.6.0"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -645,7 +645,7 @@ dependencies = [
 
 [[package]]
 name = "ava-tui"
-version = "3.3.0"
+version = "0.6.0"
 dependencies = [
  "arboard",
  "async-trait",
@@ -706,11 +706,12 @@ dependencies = [
  "unicode-width",
  "uuid",
  "whisper-rs",
+ "xz2",
 ]
 
 [[package]]
 name = "ava-types"
-version = "3.3.0"
+version = "0.6.0"
 dependencies = [
  "base64",
  "chrono",
@@ -724,7 +725,7 @@ dependencies = [
 
 [[package]]
 name = "ava-validator"
-version = "3.3.0"
+version = "0.6.0"
 dependencies = [
  "criterion",
  "tracing",
@@ -3089,6 +3090,17 @@ name = "lz4_flex"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "db9a0d582c2874f68138a16ce1867e0ffde6c0bb0a0df85e1f36d04146db488a"
+
+[[package]]
+name = "lzma-sys"
+version = "0.1.20"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5fda04ab3764e6cde78b9974eec4f779acaba7c4e84b36eca3cf77c581b85d27"
+dependencies = [
+ "cc",
+ "libc",
+ "pkg-config",
+]
 
 [[package]]
 name = "mac_address"
@@ -6983,6 +6995,15 @@ checksum = "32e45ad4206f6d2479085147f02bc2ef834ac85886624a23575ae137c8aa8156"
 dependencies = [
  "libc",
  "rustix 1.1.4",
+]
+
+[[package]]
+name = "xz2"
+version = "0.1.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "388c44dc09d76f1536602ead6d325eb532f5c122f17782bd57fb47baeeb767e2"
+dependencies = [
+ "lzma-sys",
 ]
 
 [[package]]

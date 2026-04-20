@@ -102,12 +102,12 @@ export class DesktopSessionStorage implements SessionStorage {
 
     if (existing.length === 0) {
       // Create new session row
-      await createSession(session.name ?? 'New Session')
+      await createSession(session.name ?? 'New Chat')
     }
 
     // Update session fields
     await updateSession(session.id, {
-      name: session.name ?? 'New Session',
+      name: session.name ?? 'New Chat',
       status:
         session.status === 'active'
           ? 'active'

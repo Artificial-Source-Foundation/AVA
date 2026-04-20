@@ -273,11 +273,14 @@ export function createWebDatabase(): WebDatabase {
       const q = query.trim().toLowerCase()
 
       // Create session
-      // Params: [id, name, projectId, parentSessionId, createdAt, updatedAt, status]
+      // Params: [id, name, projectId, parentSessionId, createdAt, updatedAt, status, metadata]
       if (q.includes('insert into sessions')) {
         const id = params?.[0] as string
-        const name = (params?.[1] as string) || 'New Session'
+        const name = (params?.[1] as string) || 'New Chat'
         const projectId = ((params?.[2] as string | null | undefined) ?? null) || undefined
+        const metadata = params?.[7]
+          ? (JSON.parse(params[7] as string) as Record<string, unknown>)
+          : undefined
         if (!id) {
           throw new Error(buildWriteFailureMessage('create session', 'missing frontend session ID'))
         }
@@ -287,7 +290,7 @@ export function createWebDatabase(): WebDatabase {
           writeBrowserSessionCollection({
             action: 'create',
             method: 'POST',
-            jsonBody: { name, id, project_id: projectId },
+            jsonBody: { name, id, project_id: projectId, metadata },
           })
         )
 

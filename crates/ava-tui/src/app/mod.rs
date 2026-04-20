@@ -256,6 +256,60 @@ pub enum ViewMode {
     },
 }
 
+pub(crate) fn session_messages_to_ui_messages(messages: &[ava_types::Message]) -> Vec<UiMessage> {
+    let mut ui_messages = Vec::new();
+    let mut tool_names_by_call_id: HashMap<String, String> = HashMap::new();
+
+    for msg in messages {
+        match msg.role {
+            ava_types::Role::System => {
+                if !msg.content.trim().is_empty() {
+                    ui_messages.push(UiMessage::new(MessageKind::System, msg.content.clone()));
+                }
+            }
+            ava_types::Role::User => {
+                ui_messages.push(UiMessage::new(MessageKind::User, msg.content.clone()));
+            }
+            ava_types::Role::Assistant => {
+                if !msg.content.trim().is_empty() {
+                    ui_messages.push(UiMessage::new(MessageKind::Assistant, msg.content.clone()));
+                }
+
+                for call in &msg.tool_calls {
+                    tool_names_by_call_id.insert(call.id.clone(), call.name.clone());
+                    let mut ui_msg = UiMessage::new(
+                        MessageKind::ToolCall,
+                        format!("{} {}", call.name, call.arguments),
+                    );
+                    ui_msg.tool_name = Some(call.name.clone());
+                    ui_messages.push(ui_msg);
+                }
+            }
+            ava_types::Role::Tool => {
+                if !msg.tool_results.is_empty() {
+                    for result in &msg.tool_results {
+                        let mut ui_msg =
+                            UiMessage::new(MessageKind::ToolResult, result.content.clone());
+                        ui_msg.tool_name = tool_names_by_call_id.get(&result.call_id).cloned();
+                        ui_messages.push(ui_msg);
+                    }
+                    continue;
+                }
+
+                let mut ui_msg = UiMessage::new(MessageKind::ToolResult, msg.content.clone());
+                if let Some(call_id) = &msg.tool_call_id {
+                    ui_msg.tool_name = tool_names_by_call_id.get(call_id).cloned();
+                } else if let Some(call) = msg.tool_calls.first() {
+                    ui_msg.tool_name = Some(call.name.clone());
+                }
+                ui_messages.push(ui_msg);
+            }
+        }
+    }
+
+    ui_messages
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ModalType {
     CommandPalette,
@@ -580,39 +634,7 @@ impl App {
         // Load session messages if resuming
         if let Some(ref session) = self.state.session.current_session {
             self.state.agent.apply_session_summary(session);
-            for msg in &session.messages {
-                let kind = match msg.role {
-                    ava_types::Role::User => MessageKind::User,
-                    ava_types::Role::Assistant => {
-                        // Assistant messages with non-empty tool_calls are tool invocations,
-                        // but we display them as Assistant (the tool call details are in
-                        // separate ToolCall UI messages created during the live run).
-                        MessageKind::Assistant
-                    }
-                    ava_types::Role::Tool => {
-                        // Distinguish tool calls from tool results using stored metadata.
-                        // Messages with a tool_call_id are results returned by a tool.
-                        // Messages with non-empty tool_calls are the call itself.
-                        if msg.tool_call_id.is_some() || !msg.tool_results.is_empty() {
-                            MessageKind::ToolResult
-                        } else if !msg.tool_calls.is_empty() {
-                            MessageKind::ToolCall
-                        } else {
-                            // Fallback heuristic: if content looks like a tool result
-                            // (typically shorter, no JSON tool structure), treat as ToolResult.
-                            MessageKind::ToolResult
-                        }
-                    }
-                    ava_types::Role::System => MessageKind::System,
-                };
-                let mut ui_msg = UiMessage::new(kind.clone(), msg.content.clone());
-                // Populate tool name for ToolCall/ToolResult messages so they render
-                // with the correct tool badge in the message list.
-                if matches!(kind, MessageKind::ToolCall | MessageKind::ToolResult) {
-                    if let Some(tc) = msg.tool_calls.first() {
-                        ui_msg.tool_name = Some(tc.name.clone());
-                    }
-                }
+            for ui_msg in session_messages_to_ui_messages(&session.messages) {
                 self.state.messages.push(ui_msg);
             }
             // Restore model from session metadata

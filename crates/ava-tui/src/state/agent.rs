@@ -33,6 +33,8 @@ pub struct BudgetAlertState {
 /// Tracks the state of a sub-agent spawned by the task tool.
 #[derive(Debug, Clone)]
 pub struct SubAgentInfo {
+    pub call_id: String,
+    pub agent_type: Option<String>,
     pub description: String,
     pub background: bool,
     pub is_running: bool,
@@ -820,6 +822,8 @@ mod tests {
             budget_usd: 0.5,
         });
         state.sub_agents.push(SubAgentInfo {
+            call_id: String::new(),
+            agent_type: None,
             description: "demo".to_string(),
             background: false,
             is_running: false,

@@ -15,6 +15,8 @@ pub enum MessageKind {
 /// Extra data for sub-agent (task tool) messages.
 #[derive(Debug, Clone)]
 pub struct SubAgentData {
+    /// Specialist/subagent type label when known.
+    pub agent_type: Option<String>,
     /// The task prompt/description sent to the sub-agent.
     pub description: String,
     /// Whether the sub-agent was launched in background mode.

@@ -13,18 +13,37 @@ import { initDatabase } from './db-init'
 export async function createSession(
   name: string,
   projectId?: string,
-  parentSessionId?: string
+  parentSessionId?: string,
+  metadata?: Record<string, unknown>
 ): Promise<Session> {
   const database = await initDatabase()
   const id = crypto.randomUUID()
   const now = Date.now()
 
   await database.execute(
-    'INSERT INTO sessions (id, name, project_id, parent_session_id, created_at, updated_at, status) VALUES (?, ?, ?, ?, ?, ?, ?)',
-    [id, name, projectId || null, parentSessionId || null, now, now, 'active']
+    'INSERT INTO sessions (id, name, project_id, parent_session_id, created_at, updated_at, status, metadata) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    [
+      id,
+      name,
+      projectId || null,
+      parentSessionId || null,
+      now,
+      now,
+      'active',
+      metadata ? JSON.stringify(metadata) : null,
+    ]
   )
 
-  return { id, projectId, parentSessionId, name, createdAt: now, updatedAt: now, status: 'active' }
+  return {
+    id,
+    projectId,
+    parentSessionId,
+    name,
+    createdAt: now,
+    updatedAt: now,
+    status: 'active',
+    metadata,
+  }
 }
 
 /** Map a session row to SessionWithStats */

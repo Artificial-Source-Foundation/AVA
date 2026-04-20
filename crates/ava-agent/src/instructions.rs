@@ -8,6 +8,13 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct InstructionScope {
+    boundary_root: PathBuf,
+    current_dir: PathBuf,
+    project_trusted: bool,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuntimeSkillScope {
     Global,
@@ -467,14 +474,14 @@ pub fn load_startup_project_instructions_from_root_with_profile(
     }
 
     let home = dirs::home_dir();
-    let project_trusted = ava_config::is_project_trusted(root);
-    if !project_trusted {
+    let scope = resolve_instruction_scope(root);
+    if !scope.project_trusted {
         tracing::warn!(
             "Skipping project-local instructions — project not trusted. \
              Run with --trust to approve."
         );
     }
-    load_startup_from_root_with_extras(root, home.as_deref(), extra_paths, project_trusted, profile)
+    load_startup_from_scope_with_extras(&scope, home.as_deref(), extra_paths, profile)
 }
 
 /// Load project instructions with additional user-configured paths.
@@ -499,11 +506,10 @@ pub fn load_project_instructions_with_config(extra_paths: &[String]) -> Option<S
     load_from_root_with_extras(&cwd, home.as_deref(), extra_paths, project_trusted)
 }
 
-fn load_startup_from_root_with_extras(
-    root: &Path,
+fn load_startup_from_scope_with_extras(
+    scope: &InstructionScope,
     home: Option<&Path>,
     extra_paths: &[String],
-    project_trusted: bool,
     profile: StartupInstructionProfile,
 ) -> Option<String> {
     let mut seen = HashSet::new();
@@ -514,44 +520,66 @@ fn load_startup_from_root_with_extras(
         try_load_file(&global, &mut seen, &mut sections);
     }
 
-    if project_trusted {
-        let project_agents = root.join("AGENTS.md");
-        try_load_file_bounded(&project_agents, root, &mut seen, &mut sections);
+    if scope.project_trusted {
+        for project_agents in collect_agents_chain(&scope.boundary_root, &scope.current_dir) {
+            try_load_file_bounded(
+                &project_agents,
+                &scope.boundary_root,
+                &mut seen,
+                &mut sections,
+            );
+        }
 
-        let project_ava_agents = root.join(".ava").join("AGENTS.md");
-        try_load_file_bounded(&project_ava_agents, root, &mut seen, &mut sections);
+        let project_ava_agents = scope.boundary_root.join(".ava").join("AGENTS.md");
+        try_load_file_bounded(
+            &project_ava_agents,
+            &scope.boundary_root,
+            &mut seen,
+            &mut sections,
+        );
 
         if profile == StartupInstructionProfile::Full {
             for extra in extra_paths {
                 if extra.contains('*') {
-                    let full_pattern = root.join(extra);
+                    let full_pattern = scope.boundary_root.join(extra);
                     if let Ok(paths) = glob::glob(&full_pattern.to_string_lossy()) {
                         let mut matched: Vec<PathBuf> = paths.filter_map(|p| p.ok()).collect();
                         matched.sort();
                         for path in matched {
-                            try_load_file_bounded(&path, root, &mut seen, &mut sections);
+                            try_load_file_bounded(
+                                &path,
+                                &scope.boundary_root,
+                                &mut seen,
+                                &mut sections,
+                            );
                         }
                     }
                 } else {
-                    let path = root.join(extra);
-                    try_load_file_bounded(&path, root, &mut seen, &mut sections);
+                    let path = scope.boundary_root.join(extra);
+                    try_load_file_bounded(&path, &scope.boundary_root, &mut seen, &mut sections);
                 }
             }
         }
     }
 
     if profile == StartupInstructionProfile::Full {
-        load_skill_sections(root, home, project_trusted, &mut seen, &mut sections);
+        load_skill_sections(
+            &scope.boundary_root,
+            home,
+            scope.project_trusted,
+            &mut seen,
+            &mut sections,
+        );
     }
 
     // Local override files — HIGHEST priority, loaded last.
     // These are intended to be gitignored (personal developer overrides).
-    if project_trusted {
+    if scope.project_trusted {
         for name in LOCAL_OVERRIDE_FILES {
-            let path = root.join(name);
-            try_load_file_bounded(&path, root, &mut seen, &mut sections);
-            let ava_path = root.join(".ava").join(name);
-            try_load_file_bounded(&ava_path, root, &mut seen, &mut sections);
+            let path = scope.boundary_root.join(name);
+            try_load_file_bounded(&path, &scope.boundary_root, &mut seen, &mut sections);
+            let ava_path = scope.boundary_root.join(".ava").join(name);
+            try_load_file_bounded(&ava_path, &scope.boundary_root, &mut seen, &mut sections);
         }
     }
 
@@ -1055,33 +1083,17 @@ pub fn matching_rule_instructions_for_file(
 
 /// Load contextual instructions for a specific file path.
 ///
-/// Walks from the file's parent directory up to `project_root`, looking for `AGENTS.md`.
-/// Returns the first one found (most specific / closest to the file), or `None`.
+/// Walks from `project_root` down to the file's parent directory, collecting any
+/// `AGENTS.md` files along that path. Returns the concatenated guidance, or `None`.
 /// This is intended to be called when the agent reads a file, so that per-directory
 /// instructions can be injected into the tool result context.
 pub fn contextual_instructions_for_file(file_path: &Path, project_root: &Path) -> Option<String> {
-    let mut dir = file_path.parent()?;
-    loop {
-        let agents_md = dir.join("AGENTS.md");
-        if agents_md.is_file() {
-            if let Ok(content) = fs::read_to_string(&agents_md) {
-                let trimmed = content.trim();
-                if !trimmed.is_empty() {
-                    return Some(format!(
-                        "# Context from {}\n\n{}",
-                        agents_md.display(),
-                        trimmed
-                    ));
-                }
-            }
-        }
-        // Don't go above project root
-        if dir == project_root {
-            break;
-        }
-        dir = dir.parent()?;
+    let sections = contextual_instruction_sections(file_path, project_root, None);
+    if sections.is_empty() {
+        None
+    } else {
+        Some(sections.join("\n\n"))
     }
-    None
 }
 
 /// Load contextual instructions for a specific file path, but only once per
@@ -1091,39 +1103,161 @@ pub fn contextual_instructions_for_file_once(
     project_root: &Path,
     activated_instruction_paths: &mut HashSet<PathBuf>,
 ) -> Option<String> {
-    let mut dir = file_path.parent()?;
-    let project_root =
-        fs::canonicalize(project_root).unwrap_or_else(|_| project_root.to_path_buf());
+    let sections =
+        contextual_instruction_sections(file_path, project_root, Some(activated_instruction_paths));
+    if sections.is_empty() {
+        None
+    } else {
+        Some(sections.join("\n\n"))
+    }
+}
 
-    loop {
-        let agents_md = dir.join("AGENTS.md");
-        if agents_md.is_file() {
-            let canonical = fs::canonicalize(&agents_md).ok()?;
-            if !canonical.starts_with(&project_root) {
-                return None;
-            }
-            if activated_instruction_paths.contains(&canonical) {
-                return None;
-            }
-            let content = fs::read_to_string(&agents_md).ok()?;
-            let trimmed = content.trim();
-            if trimmed.is_empty() {
-                return None;
-            }
-            activated_instruction_paths.insert(canonical);
-            return Some(format!(
-                "# Context from {}\n\n{}",
-                agents_md.display(),
-                trimmed
-            ));
+pub fn contextual_agents_path(project_root: &Path) -> Option<PathBuf> {
+    let agents_md = project_root.join("AGENTS.md");
+    let canonical = fs::canonicalize(&agents_md).ok()?;
+    if fs::read_to_string(&agents_md).ok()?.trim().is_empty() {
+        return None;
+    }
+    Some(canonical)
+}
+
+fn resolve_instruction_scope(root: &Path) -> InstructionScope {
+    let current_dir = fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+
+    let (boundary_root, project_trusted) = if let Some(repo_root) =
+        discover_repository_root(&current_dir)
+    {
+        if let Some(trusted_root) = find_highest_trusted_ancestor_within(&current_dir, &repo_root) {
+            (trusted_root, true)
+        } else {
+            (repo_root, false)
         }
-        if dir == project_root {
+    } else if let Some(trusted_root) = find_highest_trusted_ancestor(&current_dir) {
+        (trusted_root, true)
+    } else {
+        (current_dir.clone(), false)
+    };
+
+    InstructionScope {
+        boundary_root,
+        current_dir,
+        project_trusted,
+    }
+}
+
+fn discover_repository_root(start: &Path) -> Option<PathBuf> {
+    for dir in start.ancestors() {
+        if dir.join(".git").exists() {
+            return Some(dir.to_path_buf());
+        }
+    }
+    None
+}
+
+fn find_highest_trusted_ancestor(start: &Path) -> Option<PathBuf> {
+    let mut trusted = None;
+    for dir in start.ancestors() {
+        if ava_config::is_project_trusted(dir) {
+            trusted = Some(dir.to_path_buf());
+        }
+    }
+    trusted
+}
+
+fn find_highest_trusted_ancestor_within(start: &Path, boundary_root: &Path) -> Option<PathBuf> {
+    let mut trusted = None;
+    for dir in start.ancestors() {
+        if !dir.starts_with(boundary_root) {
             break;
         }
-        dir = dir.parent()?;
+        if ava_config::is_project_trusted(dir) {
+            trusted = Some(dir.to_path_buf());
+        }
+        if dir == boundary_root {
+            break;
+        }
+    }
+    trusted
+}
+
+fn collect_agents_chain(boundary_root: &Path, current_dir: &Path) -> Vec<PathBuf> {
+    collect_directory_chain(boundary_root, current_dir)
+        .into_iter()
+        .map(|dir| dir.join("AGENTS.md"))
+        .collect()
+}
+
+fn collect_directory_chain(boundary_root: &Path, current_dir: &Path) -> Vec<PathBuf> {
+    if !current_dir.starts_with(boundary_root) {
+        return vec![current_dir.to_path_buf()];
     }
 
-    None
+    let mut chain = Vec::new();
+    let mut dir = current_dir;
+    loop {
+        chain.push(dir.to_path_buf());
+        if dir == boundary_root {
+            break;
+        }
+        let Some(parent) = dir.parent() else {
+            break;
+        };
+        dir = parent;
+    }
+    chain.reverse();
+    chain
+}
+
+fn contextual_instruction_sections(
+    file_path: &Path,
+    project_root: &Path,
+    mut activated_instruction_paths: Option<&mut HashSet<PathBuf>>,
+) -> Vec<String> {
+    let Some(current_dir) = file_path.parent() else {
+        return Vec::new();
+    };
+    let project_root =
+        fs::canonicalize(project_root).unwrap_or_else(|_| project_root.to_path_buf());
+    let mut sections = Vec::new();
+
+    for agents_md in collect_agents_chain(&project_root, current_dir) {
+        if !agents_md.is_file() {
+            continue;
+        }
+
+        let Ok(canonical) = fs::canonicalize(&agents_md) else {
+            continue;
+        };
+        if !canonical.starts_with(&project_root) {
+            continue;
+        }
+
+        if let Some(ref mut activated) = activated_instruction_paths {
+            if activated.contains(&canonical) {
+                continue;
+            }
+        }
+
+        let Ok(content) = fs::read_to_string(&agents_md) else {
+            continue;
+        };
+        let trimmed = content.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        if let Some(ref mut activated) = activated_instruction_paths {
+            activated.insert(canonical);
+        }
+
+        sections.push(format!(
+            "# Context from {}\n\n{}",
+            agents_md.display(),
+            trimmed
+        ));
+    }
+
+    sections
 }
 
 /// Try to read a single file and append it as a section.
@@ -1431,11 +1565,15 @@ mod tests {
         fs::create_dir_all(&rules).unwrap();
         fs::write(rules.join("rust.md"), "Always use anyhow.").unwrap();
 
-        let result = load_startup_from_root_with_extras(
-            tmp.path(),
+        let scope = InstructionScope {
+            boundary_root: tmp.path().to_path_buf(),
+            current_dir: tmp.path().to_path_buf(),
+            project_trusted: true,
+        };
+        let result = load_startup_from_scope_with_extras(
+            &scope,
             Some(fake_home.path()),
             &[],
-            true,
             StartupInstructionProfile::Full,
         )
         .unwrap();
@@ -1809,12 +1947,12 @@ mod tests {
     }
 
     #[test]
-    fn test_contextual_instructions_most_specific_wins() {
+    fn test_contextual_instructions_include_parent_chain() {
         let tmp = TempDir::new().unwrap();
         let src_dir = tmp.path().join("src");
         let api_dir = src_dir.join("api");
         fs::create_dir_all(&api_dir).unwrap();
-        // AGENTS.md in both src/ and src/api/ — the closer one should win
+        // AGENTS.md in both src/ and src/api/ — both should be included root-to-leaf
         fs::write(src_dir.join("AGENTS.md"), "General source rules.").unwrap();
         fs::write(api_dir.join("AGENTS.md"), "API-specific rules.").unwrap();
         fs::write(api_dir.join("handler.rs"), "fn handle() {}").unwrap();
@@ -1824,11 +1962,11 @@ mod tests {
         let text = result.unwrap();
         assert!(
             text.contains("API-specific rules."),
-            "Most specific (closest) AGENTS.md should be returned"
+            "Most specific AGENTS.md should be included"
         );
         assert!(
-            !text.contains("General source rules."),
-            "Parent AGENTS.md should NOT be included when a closer one exists"
+            text.contains("General source rules."),
+            "Parent AGENTS.md should be included when cascading guidance exists"
         );
     }
 
@@ -1893,6 +2031,7 @@ mod tests {
         )
         .expect("more specific nested guidance should still load once");
         assert!(second.contains("API guidance."));
+        assert!(!second.contains("General source guidance."));
     }
 
     // --- trust gate tests ---
@@ -2143,7 +2282,7 @@ mod tests {
     }
 
     #[test]
-    fn test_startup_ancestor_agents_outside_trusted_root_are_skipped() {
+    fn test_startup_instructions_include_agents_chain_from_boundary_to_current_dir() {
         let tmp = TempDir::new().unwrap();
         let repo = tmp.path().join("repo");
         let child = repo.join("child");
@@ -2151,15 +2290,19 @@ mod tests {
         fs::write(repo.join("AGENTS.md"), "Repo rules.").unwrap();
         fs::write(child.join("AGENTS.md"), "Child rules.").unwrap();
 
-        let text = load_startup_from_root_with_extras(
-            &child,
+        let scope = InstructionScope {
+            boundary_root: repo,
+            current_dir: child,
+            project_trusted: true,
+        };
+        let text = load_startup_from_scope_with_extras(
+            &scope,
             None,
             &[],
-            true,
             StartupInstructionProfile::AgentsOnly,
         )
         .unwrap();
-        assert!(!text.contains("Repo rules."));
+        assert!(text.contains("Repo rules."));
         assert!(text.contains("Child rules."));
     }
 

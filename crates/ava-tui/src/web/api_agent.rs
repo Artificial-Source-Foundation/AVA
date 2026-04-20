@@ -894,13 +894,34 @@ async fn launch_web_run(
                     &inner.in_flight_deferred,
                 )
                 .await;
-                match stack.session_manager.save(&run_result.session) {
+                let mut session_to_save = run_result.session;
+                if let Some(meta) = session_to_save.metadata.as_object_mut() {
+                    let needs_title = super::api_sessions::session_title_needs_generation(
+                        &serde_json::Value::Object(meta.clone()),
+                    );
+                    if needs_title {
+                        if let Some(first_user_msg) = session_to_save
+                            .messages
+                            .iter()
+                            .find(|message| message.role == ava_types::Role::User)
+                            .map(|message| message.content.as_str())
+                        {
+                            meta.insert(
+                                "title".to_string(),
+                                serde_json::Value::String(ava_session::generate_title(
+                                    first_user_msg,
+                                )),
+                            );
+                        }
+                    }
+                }
+                match stack.session_manager.save(&session_to_save) {
                     Ok(()) => {
-                        *inner.last_session_id.write().await = Some(run_result.session.id);
+                        *inner.last_session_id.write().await = Some(session_to_save.id);
                     }
                     Err(e) => {
-                        tracing::error!("Failed to persist session {}: {e}", run_result.session.id);
-                        *inner.last_session_id.write().await = Some(run_result.session.id);
+                        tracing::error!("Failed to persist session {}: {e}", session_to_save.id);
+                        *inner.last_session_id.write().await = Some(session_to_save.id);
                     }
                 }
             }

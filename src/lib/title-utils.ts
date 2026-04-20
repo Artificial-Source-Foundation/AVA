@@ -1,3 +1,5 @@
+import type { Session } from '../types'
+
 /**
  * Session Title Utilities
  *
@@ -7,6 +9,7 @@
  */
 
 const MAX_TITLE_LENGTH = 60
+const DEFAULT_SESSION_TITLES = new Set(['New Chat', 'New Session'])
 
 /**
  * Derive a session title from the user's first message.
@@ -51,4 +54,22 @@ export function deriveSessionTitle(message: string): string | null {
   }
 
   return title || null
+}
+
+export function isDefaultSessionTitle(title?: string | null): boolean {
+  if (!title) return false
+  return DEFAULT_SESSION_TITLES.has(title.trim())
+}
+
+export function sessionHasPlaceholderTitle(
+  session?: Pick<Session, 'name' | 'metadata'> | null
+): boolean {
+  if (!session) return false
+
+  const explicitFlag = session.metadata?.titlePlaceholder
+  if (typeof explicitFlag === 'boolean') {
+    return explicitFlag
+  }
+
+  return isDefaultSessionTitle(session.name)
 }

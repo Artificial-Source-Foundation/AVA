@@ -23,6 +23,7 @@ pub struct UpdateInfo {
 #[derive(Debug, Serialize, Deserialize, Default)]
 struct UpdateCheckCache {
     last_check_unix: u64,
+    current_version: Option<String>,
     latest_version: Option<String>,
     download_url: Option<String>,
 }
@@ -74,11 +75,23 @@ fn save_cache(cache: &UpdateCheckCache) {
 
 fn should_check() -> bool {
     let cache = load_cache();
+    if cache.current_version.as_deref() != Some(current_version()) {
+        return true;
+    }
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs();
     now - cache.last_check_unix > CHECK_INTERVAL_SECS
+}
+
+fn asset_candidates(triple: &str) -> Vec<String> {
+    vec![
+        format!("ava-{triple}.tar.gz"),
+        format!("ava-{triple}.tar.xz"),
+        format!("ava-tui-{triple}.tar.gz"),
+        format!("ava-tui-{triple}.tar.xz"),
+    ]
 }
 
 fn target_triple() -> Option<&'static str> {
@@ -112,12 +125,15 @@ pub async fn check_for_update() -> color_eyre::Result<Option<UpdateInfo>> {
 
     // Save cache
     let triple = target_triple().unwrap_or("unknown");
-    let asset_name = format!("ava-{triple}.tar.gz");
-    let download_url = release
-        .assets
-        .iter()
-        .find(|a| a.name == asset_name)
-        .map(|a| a.browser_download_url.clone())
+    let download_url = asset_candidates(triple)
+        .into_iter()
+        .find_map(|name| {
+            release
+                .assets
+                .iter()
+                .find(|a| a.name == name)
+                .map(|a| a.browser_download_url.clone())
+        })
         .unwrap_or_default();
 
     let now = std::time::SystemTime::now()
@@ -126,6 +142,7 @@ pub async fn check_for_update() -> color_eyre::Result<Option<UpdateInfo>> {
         .as_secs();
     save_cache(&UpdateCheckCache {
         last_check_unix: now,
+        current_version: Some(current.clone()),
         latest_version: Some(latest.clone()),
         download_url: Some(download_url.clone()),
     });
@@ -235,9 +252,12 @@ pub async fn download_and_replace(info: &UpdateInfo) -> color_eyre::Result<()> {
     let size_mb = bytes.len() as f64 / 1_048_576.0;
     eprintln!("\r\x1b[2K  \x1b[1;32m\u{2022}\x1b[0m Downloaded {size_mb:.1} MB");
 
-    // Extract tarball
-    let decoder = flate2::read::GzDecoder::new(&bytes[..]);
-    let mut archive = tar::Archive::new(decoder);
+    let reader: Box<dyn std::io::Read> = if info.download_url.ends_with(".tar.xz") {
+        Box::new(xz2::read::XzDecoder::new(&bytes[..]))
+    } else {
+        Box::new(flate2::read::GzDecoder::new(&bytes[..]))
+    };
+    let mut archive = tar::Archive::new(reader);
 
     let current_exe = std::env::current_exe()?;
     let temp_path = current_exe.with_extension("new");

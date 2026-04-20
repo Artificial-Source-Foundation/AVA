@@ -51,6 +51,18 @@ use crate::system_prompt::BenchmarkPromptOverride;
 
 const CONFIG_HOOK_TIMEOUT_MS: u64 = 150;
 
+fn env_var_enabled(name: &str) -> bool {
+    std::env::var(name)
+        .ok()
+        .map(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
+        .unwrap_or(false)
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct AgentRunContext {
     pub provider: Option<String>,
@@ -293,7 +305,10 @@ impl AgentStack {
 
         // Initialize plugin manager and load plugins from default directories.
         let mut plugin_mgr = PluginManager::new();
-        let plugin_dirs = if project_trusted {
+        let plugin_dirs = if env_var_enabled("AVA_PURE") {
+            info!("AVA_PURE enabled; skipping plugin auto-load");
+            Vec::new()
+        } else if project_trusted {
             vec![
                 config.data_dir.join("plugins"),
                 effective_cwd.join(".ava").join("plugins"),

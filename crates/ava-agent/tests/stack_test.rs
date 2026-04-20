@@ -26,6 +26,10 @@ fn env_lock() -> &'static std::sync::Mutex<()> {
 
 fn write_plugin_manifest(root: &std::path::Path, name: &str) {
     let plugin_dir = root.join(".ava").join("plugins").join(name);
+    write_plugin_manifest_at(&plugin_dir, name);
+}
+
+fn write_plugin_manifest_at(plugin_dir: &std::path::Path, name: &str) {
     std::fs::create_dir_all(&plugin_dir).unwrap();
     std::fs::write(
         plugin_dir.join("plugin.toml"),
@@ -1043,6 +1047,46 @@ async fn agent_stack_initializes_with_plugin_manager() {
     let pm = stack.plugin_manager.lock().await;
     assert_eq!(pm.running_count(), 0);
     assert!(pm.list_plugins().is_empty());
+}
+
+#[tokio::test]
+async fn agent_stack_skips_all_plugins_for_truthy_ava_pure_values() {
+    let _guard = env_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let old_ava_pure = env::var_os("AVA_PURE");
+
+    for ava_pure in ["1", "true", "yes", "on", " TrUe "] {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let data_dir = tempfile::tempdir().expect("data dir");
+
+        write_plugin_manifest(dir.path(), "local-plugin");
+        write_plugin_manifest_at(
+            &data_dir.path().join("plugins").join("global-plugin"),
+            "global-plugin",
+        );
+        env::set_var("AVA_PURE", ava_pure);
+
+        let (stack, _question_rx, _approval_rx, _plan_rx) = AgentStack::new(AgentStackConfig {
+            data_dir: data_dir.path().to_path_buf(),
+            working_dir: Some(dir.path().to_path_buf()),
+            yolo: true,
+            injected_provider: Some(Arc::new(MockProvider::new("test", vec![]))),
+            ..Default::default()
+        })
+        .await
+        .expect("stack init should succeed");
+
+        let pm = stack.plugin_manager.lock().await;
+        assert_eq!(pm.running_count(), 0, "AVA_PURE={ava_pure:?}");
+        assert!(
+            pm.list_plugins().is_empty(),
+            "AVA_PURE={ava_pure:?} must skip both global and project-local plugin auto-loading"
+        );
+    }
+
+    match old_ava_pure {
+        Some(value) => env::set_var("AVA_PURE", value),
+        None => env::remove_var("AVA_PURE"),
+    }
 }
 
 #[tokio::test]

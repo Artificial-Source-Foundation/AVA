@@ -2,7 +2,7 @@
 title: "Backlog"
 description: "Active AVA 0.6 work for the V1 push, plus an archive of the previous detailed backlog."
 order: 3
-updated: "2026-04-19"
+updated: "2026-04-20"
 ---
 
 # AVA Backlog
@@ -34,6 +34,8 @@ Current web hardening note: `ava serve` now defaults to loopback-only bind/origi
 Current multi-chat correctness note: overlapping frontend session switches now gate async persisted-session finalization on the winning switch/current session, so an older load finishing late cannot re-select the stale session, overwrite the visible session artifacts, or re-persist the old last-session selection after a newer switch has already won.
 
 Current web session note: the browser fallback/session-adapter path now fails closed for backend session writes, archived-session deletion clears archived client state too, and web create/list session payloads now preserve `project_id` through the existing metadata seam so project-scoped browser lists do not silently drift.
+
+Current runtime-isolation note: setting `AVA_PURE=1` now starts AVA without auto-loading any global or project-local power plugins, giving headless or automation runs a simple no-plugins mode without moving or uninstalling plugin directories.
 
 ## Milestone 1 Proof Definition
 

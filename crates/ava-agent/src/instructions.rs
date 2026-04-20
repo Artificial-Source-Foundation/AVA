@@ -474,6 +474,7 @@ pub fn load_startup_project_instructions_from_root_with_profile(
     }
 
     let home = dirs::home_dir();
+    let config_dir = dirs::config_dir();
     let scope = resolve_instruction_scope(root);
     if !scope.project_trusted {
         tracing::warn!(
@@ -481,7 +482,13 @@ pub fn load_startup_project_instructions_from_root_with_profile(
              Run with --trust to approve."
         );
     }
-    load_startup_from_scope_with_extras(&scope, home.as_deref(), extra_paths, profile)
+    load_startup_from_scope_with_extras(
+        &scope,
+        home.as_deref(),
+        config_dir.as_deref(),
+        extra_paths,
+        profile,
+    )
 }
 
 /// Load project instructions with additional user-configured paths.
@@ -491,11 +498,12 @@ pub fn load_startup_project_instructions_from_root_with_profile(
 ///
 /// Project-local instruction files (AGENTS.md, .cursorrules,
 /// .github/copilot-instructions.md, .ava/rules/*.md, .ava/skills/) are only
-/// loaded when the project is trusted. Global instructions (~/.ava/AGENTS.md)
-/// always load regardless of trust.
+/// loaded when the project is trusted. Global instructions
+/// ($XDG_CONFIG_HOME/AVA/AGENTS.md) always load regardless of trust.
 pub fn load_project_instructions_with_config(extra_paths: &[String]) -> Option<String> {
     let cwd = std::env::current_dir().ok()?;
     let home = dirs::home_dir();
+    let config_dir = dirs::config_dir();
     let project_trusted = ava_config::is_project_trusted(&cwd);
     if !project_trusted {
         tracing::warn!(
@@ -503,20 +511,26 @@ pub fn load_project_instructions_with_config(extra_paths: &[String]) -> Option<S
              Run with --trust to approve."
         );
     }
-    load_from_root_with_extras(&cwd, home.as_deref(), extra_paths, project_trusted)
+    load_from_root_with_extras(
+        &cwd,
+        home.as_deref(),
+        config_dir.as_deref(),
+        extra_paths,
+        project_trusted,
+    )
 }
 
 fn load_startup_from_scope_with_extras(
     scope: &InstructionScope,
     home: Option<&Path>,
+    config_dir: Option<&Path>,
     extra_paths: &[String],
     profile: StartupInstructionProfile,
 ) -> Option<String> {
     let mut seen = HashSet::new();
     let mut sections = Vec::new();
 
-    if let Some(home) = home {
-        let global = home.join(".ava").join("AGENTS.md");
+    for global in global_agents_candidates(config_dir) {
         try_load_file(&global, &mut seen, &mut sections);
     }
 
@@ -598,24 +612,25 @@ fn load_startup_from_scope_with_extras(
 /// Defaults to `project_trusted = true` for backward-compatible tests.
 #[cfg(test)]
 fn load_from_root(root: &Path, home: Option<&Path>) -> Option<String> {
-    load_from_root_with_extras(root, home, &[], true)
+    load_from_root_with_extras(root, home, None, &[], true)
 }
 
 /// Internal implementation that accepts explicit root, home, extra instruction paths,
 /// and a trust flag. When `project_trusted` is `false`, only global instructions
-/// (~/.ava/AGENTS.md and global skills) are loaded; all project-local files are skipped.
+/// ($XDG_CONFIG_HOME/AVA/AGENTS.md, plus global skills) are loaded; all
+/// project-local files are skipped.
 fn load_from_root_with_extras(
     root: &Path,
     home: Option<&Path>,
+    config_dir: Option<&Path>,
     extra_paths: &[String],
     project_trusted: bool,
 ) -> Option<String> {
     let mut seen = HashSet::new();
     let mut sections = Vec::new();
 
-    // 1. Global user-level instructions: ~/.ava/AGENTS.md (always loaded)
-    if let Some(home) = home {
-        let global = home.join(".ava").join("AGENTS.md");
+    // 1. Global user-level instructions: $XDG_CONFIG_HOME/AVA/AGENTS.md
+    for global in global_agents_candidates(config_dir) {
         try_load_file(&global, &mut seen, &mut sections);
     }
 
@@ -697,6 +712,16 @@ fn load_from_root_with_extras(
         "# Project Instructions\n\nFollow the instructions below for this project.\n\n{}",
         content
     ))
+}
+
+fn global_agents_candidates(config_dir: Option<&Path>) -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+
+    if let Some(config_dir) = config_dir {
+        candidates.push(config_dir.join("AVA").join("AGENTS.md"));
+    }
+
+    candidates
 }
 
 /// Load discovered skill files as additional instruction sections.
@@ -1438,16 +1463,23 @@ mod tests {
 
         // Simulate home also pointing at the same file via symlink
         let fake_home = TempDir::new().unwrap();
-        let ava_dir = fake_home.path().join(".ava");
+        let fake_config = TempDir::new().unwrap();
+        let ava_dir = fake_config.path().join("AVA");
         fs::create_dir_all(&ava_dir).unwrap();
 
-        // Create a symlink from ~/.ava/AGENTS.md -> project/AGENTS.md
+        // Create a symlink from $XDG_CONFIG_HOME/AVA/AGENTS.md -> project/AGENTS.md
         #[cfg(unix)]
         {
             std::os::unix::fs::symlink(tmp.path().join("AGENTS.md"), ava_dir.join("AGENTS.md"))
                 .unwrap();
 
-            let result = load_from_root(tmp.path(), Some(fake_home.path()));
+            let result = load_from_root_with_extras(
+                tmp.path(),
+                Some(fake_home.path()),
+                Some(fake_config.path()),
+                &[],
+                true,
+            );
             let text = result.unwrap();
 
             // "Instructions here." should appear exactly once
@@ -1556,7 +1588,8 @@ mod tests {
     fn test_startup_instructions_skip_rules() {
         let tmp = TempDir::new().unwrap();
         let fake_home = TempDir::new().unwrap();
-        let ava_dir = fake_home.path().join(".ava");
+        let fake_config = TempDir::new().unwrap();
+        let ava_dir = fake_config.path().join("AVA");
         fs::create_dir_all(&ava_dir).unwrap();
         fs::write(ava_dir.join("AGENTS.md"), "Global rules.").unwrap();
         fs::write(tmp.path().join("AGENTS.md"), "Project rules.").unwrap();
@@ -1573,6 +1606,7 @@ mod tests {
         let result = load_startup_from_scope_with_extras(
             &scope,
             Some(fake_home.path()),
+            Some(fake_config.path()),
             &[],
             StartupInstructionProfile::Full,
         )
@@ -1641,14 +1675,15 @@ mod tests {
     #[test]
     fn test_global_and_project_files() {
         let tmp = TempDir::new().unwrap();
-        let fake_home = TempDir::new().unwrap();
-        let ava_dir = fake_home.path().join(".ava");
+        let fake_config = TempDir::new().unwrap();
+        let ava_dir = fake_config.path().join("AVA");
         fs::create_dir_all(&ava_dir).unwrap();
 
         fs::write(ava_dir.join("AGENTS.md"), "Global rules.").unwrap();
         fs::write(tmp.path().join("AGENTS.md"), "Project rules.").unwrap();
 
-        let result = load_from_root(tmp.path(), Some(fake_home.path()));
+        let result =
+            load_from_root_with_extras(tmp.path(), None, Some(fake_config.path()), &[], true);
         let text = result.unwrap();
 
         assert!(text.contains("Global rules."));
@@ -1658,6 +1693,49 @@ mod tests {
         let global_pos = text.find("Global rules.").unwrap();
         let project_pos = text.find("Project rules.").unwrap();
         assert!(global_pos < project_pos);
+    }
+
+    #[test]
+    fn test_global_agents_require_xdg_config_dir() {
+        let tmp = TempDir::new().unwrap();
+        let fake_home = TempDir::new().unwrap();
+        let legacy_dir = fake_home.path().join(".ava");
+        fs::create_dir_all(&legacy_dir).unwrap();
+        fs::write(legacy_dir.join("AGENTS.md"), "Legacy global rules.").unwrap();
+
+        let result =
+            load_from_root_with_extras(tmp.path(), Some(fake_home.path()), None, &[], false);
+        assert!(
+            result.is_none(),
+            "legacy ~/.ava/AGENTS.md should not load without XDG config"
+        );
+    }
+
+    #[test]
+    fn test_global_agents_ignore_legacy_home_path_even_when_xdg_exists() {
+        let tmp = TempDir::new().unwrap();
+        let fake_home = TempDir::new().unwrap();
+        let fake_config = TempDir::new().unwrap();
+
+        let legacy_dir = fake_home.path().join(".ava");
+        fs::create_dir_all(&legacy_dir).unwrap();
+        fs::write(legacy_dir.join("AGENTS.md"), "Legacy global rules.").unwrap();
+
+        let xdg_dir = fake_config.path().join("AVA");
+        fs::create_dir_all(&xdg_dir).unwrap();
+        fs::write(xdg_dir.join("AGENTS.md"), "XDG global rules.").unwrap();
+
+        let text = load_from_root_with_extras(
+            tmp.path(),
+            Some(fake_home.path()),
+            Some(fake_config.path()),
+            &[],
+            false,
+        )
+        .unwrap();
+
+        assert!(text.contains("XDG global rules."));
+        assert!(!text.contains("Legacy global rules."));
     }
 
     #[test]
@@ -1672,7 +1750,7 @@ mod tests {
         .unwrap();
 
         let extras = vec!["team/conventions.md".to_string()];
-        let result = load_from_root_with_extras(tmp.path(), None, &extras, true);
+        let result = load_from_root_with_extras(tmp.path(), None, None, &extras, true);
         assert!(result.is_some());
         let text = result.unwrap();
         assert!(
@@ -1695,7 +1773,7 @@ mod tests {
         fs::write(docs_dir.join("notes.txt"), "Not a markdown file.").unwrap();
 
         let extras = vec!["docs/*.md".to_string()];
-        let result = load_from_root_with_extras(tmp.path(), None, &extras, true);
+        let result = load_from_root_with_extras(tmp.path(), None, None, &extras, true);
         assert!(result.is_some());
         let text = result.unwrap();
         assert!(
@@ -1717,7 +1795,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         // No files created — the extra path points to a nonexistent file
         let extras = vec!["nonexistent/file.md".to_string()];
-        let result = load_from_root_with_extras(tmp.path(), None, &extras, true);
+        let result = load_from_root_with_extras(tmp.path(), None, None, &extras, true);
         assert!(
             result.is_none(),
             "Missing extra files should be silently skipped"
@@ -1731,7 +1809,7 @@ mod tests {
         fs::write(tmp.path().join("AGENTS.md"), "Standard rules.").unwrap();
 
         let extras = vec!["AGENTS.md".to_string()];
-        let result = load_from_root_with_extras(tmp.path(), None, &extras, true);
+        let result = load_from_root_with_extras(tmp.path(), None, None, &extras, true);
         assert!(result.is_some());
         let text = result.unwrap();
         let count = text.matches("Standard rules.").count();
@@ -2040,7 +2118,8 @@ mod tests {
     fn test_untrusted_project_skips_local_instructions() {
         let tmp = TempDir::new().unwrap();
         let fake_home = TempDir::new().unwrap();
-        let ava_dir = fake_home.path().join(".ava");
+        let fake_config = TempDir::new().unwrap();
+        let ava_dir = fake_config.path().join("AVA");
         fs::create_dir_all(&ava_dir).unwrap();
 
         // Global instructions (should always load)
@@ -2059,7 +2138,13 @@ mod tests {
         fs::write(skill_dir.join("SKILL.md"), "Rust skill.").unwrap();
 
         // Load with project_trusted = false
-        let result = load_from_root_with_extras(tmp.path(), Some(fake_home.path()), &[], false);
+        let result = load_from_root_with_extras(
+            tmp.path(),
+            Some(fake_home.path()),
+            Some(fake_config.path()),
+            &[],
+            false,
+        );
         assert!(result.is_some(), "Global instructions should still load");
         let text = result.unwrap();
 
@@ -2091,7 +2176,7 @@ mod tests {
         // Project-local only, no global
         fs::write(tmp.path().join("AGENTS.md"), "Project rules.").unwrap();
 
-        let result = load_from_root_with_extras(tmp.path(), None, &[], false);
+        let result = load_from_root_with_extras(tmp.path(), None, None, &[], false);
         assert!(
             result.is_none(),
             "Untrusted project with no global instructions should return None"
@@ -2113,7 +2198,8 @@ mod tests {
         fs::create_dir_all(&project_skill).unwrap();
         fs::write(project_skill.join("SKILL.md"), "Local skill guidance.").unwrap();
 
-        let result = load_from_root_with_extras(tmp.path(), Some(fake_home.path()), &[], false);
+        let result =
+            load_from_root_with_extras(tmp.path(), Some(fake_home.path()), None, &[], false);
         assert!(result.is_some());
         let text = result.unwrap();
 
@@ -2275,7 +2361,7 @@ mod tests {
         )
         .unwrap();
 
-        let text = load_from_root_with_extras(&project, None, &[], true).unwrap();
+        let text = load_from_root_with_extras(&project, None, None, &[], true).unwrap();
         assert!(text.contains("Local include."));
         assert!(!text.contains("Outside boundary."));
         assert!(text.contains("@../secret.md"));
@@ -2298,6 +2384,7 @@ mod tests {
         let text = load_startup_from_scope_with_extras(
             &scope,
             None,
+            None,
             &[],
             StartupInstructionProfile::AgentsOnly,
         )
@@ -2313,7 +2400,8 @@ mod tests {
         fs::create_dir_all(&project).unwrap();
 
         let fake_home = TempDir::new().unwrap();
-        let ava_dir = fake_home.path().join(".ava");
+        let fake_config = TempDir::new().unwrap();
+        let ava_dir = fake_config.path().join("AVA");
         fs::create_dir_all(&ava_dir).unwrap();
         fs::write(fake_home.path().join("shared.md"), "Shared home include.").unwrap();
         fs::write(
@@ -2322,8 +2410,14 @@ mod tests {
         )
         .unwrap();
 
-        let text =
-            load_from_root_with_extras(&project, Some(fake_home.path()), &[], false).unwrap();
+        let text = load_from_root_with_extras(
+            &project,
+            Some(fake_home.path()),
+            Some(fake_config.path()),
+            &[],
+            false,
+        )
+        .unwrap();
         assert!(text.contains("Shared home include."));
     }
 

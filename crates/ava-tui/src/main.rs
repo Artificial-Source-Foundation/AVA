@@ -8,16 +8,42 @@ use ava_tui::plugin_commands::run_plugin;
 use ava_tui::review::run_review;
 use clap::Parser;
 use color_eyre::Result;
+use std::ffi::OsString;
 use std::io::IsTerminal;
+use std::path::Path;
+use std::path::PathBuf;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::Layer;
+
+fn resolve_cwd_override(cwd: Option<&Path>, env_cwd: Option<OsString>) -> Option<PathBuf> {
+    cwd.map(Path::to_path_buf)
+        .or_else(|| env_cwd.map(PathBuf::from))
+}
+
+fn apply_cwd_override(cwd: Option<&Path>) -> Result<()> {
+    if let Some(path) = cwd {
+        std::env::set_current_dir(path).map_err(|err| {
+            color_eyre::eyre::eyre!(
+                "Failed to switch AVA to working directory '{}': {err}",
+                path.display()
+            )
+        })?;
+    }
+
+    Ok(())
+}
 
 #[tokio::main]
 async fn main() -> Result<()> {
     color_eyre::install()?;
 
     let cli = CliArgs::parse();
+    let cwd_override = resolve_cwd_override(
+        cli.cwd.as_deref(),
+        std::env::var_os("AVA_WORKING_DIRECTORY"),
+    );
+    apply_cwd_override(cwd_override.as_deref())?;
 
     let is_benchmark = cfg!(feature = "benchmark") && (cli.benchmark || cli.harness);
     let is_tui = cli.command.is_none()
@@ -244,6 +270,34 @@ async fn main() -> Result<()> {
 
     let mut app = App::new(cli).await?;
     app.run().await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_cwd_override;
+    use std::ffi::OsString;
+    use std::path::{Path, PathBuf};
+
+    #[test]
+    fn cwd_flag_takes_precedence_over_environment() {
+        let resolved = resolve_cwd_override(
+            Some(Path::new("/flag/path")),
+            Some(OsString::from("/env/path")),
+        );
+        assert_eq!(resolved, Some(PathBuf::from("/flag/path")));
+    }
+
+    #[test]
+    fn environment_cwd_is_used_when_flag_missing() {
+        let resolved = resolve_cwd_override(None, Some(OsString::from("/env/path")));
+        assert_eq!(resolved, Some(PathBuf::from("/env/path")));
+    }
+
+    #[test]
+    fn ambient_cwd_is_preserved_when_no_override_is_given() {
+        let resolved = resolve_cwd_override(None, None);
+        assert_eq!(resolved, None);
+    }
 }
 
 /// Initialize logging:

@@ -1,4 +1,5 @@
 use clap::{Parser, Subcommand, ValueEnum};
+use std::path::PathBuf;
 use tracing::debug;
 
 #[derive(Debug, Clone, Parser)]
@@ -6,6 +7,11 @@ use tracing::debug;
 pub struct CliArgs {
     /// Goal to execute immediately
     pub goal: Option<String>,
+
+    /// Override the working directory AVA should run in. Takes precedence over
+    /// `AVA_WORKING_DIRECTORY` when both are set.
+    #[arg(long, value_name = "PATH")]
+    pub cwd: Option<PathBuf>,
 
     /// Resume last session
     #[arg(short = 'c', long = "continue")]
@@ -277,6 +283,7 @@ mod tests {
     fn base_cli() -> CliArgs {
         CliArgs {
             goal: Some("Reply exactly with ok".to_string()),
+            cwd: None,
             resume: false,
             session: None,
             model: None,
@@ -369,6 +376,12 @@ mod tests {
         assert!(!settings.auto_lean);
         assert!(settings.include_project_instructions);
         assert!(!settings.eager_codebase_indexing);
+    }
+
+    #[test]
+    fn cli_parses_cwd_override() {
+        let cli = CliArgs::parse_from(["ava", "--cwd", "/tmp/project", "--headless"]);
+        assert_eq!(cli.cwd, Some(PathBuf::from("/tmp/project")));
     }
 }
 

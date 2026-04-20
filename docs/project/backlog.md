@@ -27,6 +27,8 @@ Current bounded parity note: web submit and replay flows now honor the shared pe
 
 Current TUI delegation note: subagent cards now open child conversations on click and child-session views reconstruct stored tool-call/tool-result history instead of degrading into result-only rows, but the broader “show the delegated run as richly as OpenCode” polish pass is still part of the active desktop/TUI fit-and-finish queue.
 
+Current subagent rework note: the next backend-first delegation cleanup is now scoped in `docs/architecture/subagent-rework-blueprint-m1.md`; the intended order is backend catalog/config unification first, headless validation second, and TUI/desktop/web settings adoption after the backend seam is proven.
+
 Current session-title note: first-message auto-titling now treats both `New Chat` and legacy `New Session` placeholders as renameable defaults and the web backend no longer cements the placeholder into persisted metadata before the first real prompt, but broader conversation-list/session-polish work remains in the active desktop app fit-and-finish queue.
 
 Current web hardening note: `ava serve` now defaults to loopback-only bind/origin exposure, token-protects sensitive session/history/status reads plus persisted plan listing/loading routes, high-risk plugin/CLI discovery + plugin route surfaces, and privileged HTTP control-plane routes (and `/ws`), redacts raw control tokens from normal logs, and still keeps broader browser-origin exposure as an explicit `--insecure-open-cors` opt-in.
@@ -36,6 +38,10 @@ Current multi-chat correctness note: overlapping frontend session switches now g
 Current web session note: the browser fallback/session-adapter path now fails closed for backend session writes, archived-session deletion clears archived client state too, and web create/list session payloads now preserve `project_id` through the existing metadata seam so project-scoped browser lists do not silently drift.
 
 Current runtime-isolation note: setting `AVA_PURE=1` now starts AVA without auto-loading any global or project-local power plugins, giving headless or automation runs a simple no-plugins mode without moving or uninstalling plugin directories.
+
+Current config note: global instruction loading now reads `$XDG_CONFIG_HOME/AVA/AGENTS.md`; `~/.ava/AGENTS.md` is no longer part of global instruction discovery.
+
+Current CLI note: `ava` now accepts `--cwd <path>`, and `AVA_WORKING_DIRECTORY` provides the same cwd override for automation; both set the actual runtime working directory, and AVA still infers the repository/worktree from that cwd instead of taking a separate repo-root argument.
 
 ## Milestone 1 Proof Definition
 

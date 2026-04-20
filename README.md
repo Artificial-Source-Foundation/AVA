@@ -54,6 +54,8 @@ Run AVA:
 ```bash
 ava
 ava "fix the login bug" --headless
+ava --cwd /path/to/project "fix the login bug" --headless
+AVA_WORKING_DIRECTORY=/path/to/project ava "fix the login bug" --headless
 ```
 
 To verify the install:
@@ -180,13 +182,17 @@ Plugins are a core part of AVA's identity, but plugin-owned UI and settings shou
 ## Configuration
 
 ```text
+$XDG_CONFIG_HOME/ava/
+├── config.yaml          # core settings
+
+$XDG_CONFIG_HOME/AVA/
+└── AGENTS.md            # global instructions
+
 ~/.ava/
 ├── credentials.json     # API keys
-├── config.yaml          # core settings
 ├── mcp.json             # MCP servers
 ├── tools/               # custom tool definitions
-├── themes/              # custom themes
-└── AGENTS.md            # global instructions
+└── themes/              # custom themes
 ```
 
 ## Documentation

@@ -55,7 +55,7 @@ If your shell has not picked up the PATH update yet, reload it or run:
 
 ```bash
 export PATH="$HOME/.ava/bin:$PATH"
-ava --version
+ava --help
 ```
 
 Grounding: [`../../install.sh`](../../install.sh), [`../../dist-workspace.toml`](../../dist-workspace.toml)
@@ -85,15 +85,15 @@ This route is also the fallback for platforms not handled by `install.sh`.
 
 ### Exact CLI asset examples
 
-AVA's CLI release archives follow the target-triple naming used by `install.sh` and `cargo-dist`.
+AVA's current CLI release archives follow the target-triple naming used by `cargo-dist`. The installer also accepts the older `ava-...tar.gz` naming from earlier releases.
 
 Examples:
 
-1. macOS Apple Silicon: `ava-aarch64-apple-darwin.tar.gz`
-2. macOS Intel: `ava-x86_64-apple-darwin.tar.gz`
-3. Linux ARM64: `ava-aarch64-unknown-linux-gnu.tar.gz`
-4. Linux x64: `ava-x86_64-unknown-linux-gnu.tar.gz`
-5. Windows x64: `ava-x86_64-pc-windows-msvc.zip` or the generated Windows installer on the release page
+1. macOS Apple Silicon: `ava-tui-aarch64-apple-darwin.tar.xz`
+2. macOS Intel: `ava-tui-x86_64-apple-darwin.tar.xz`
+3. Linux ARM64: `ava-tui-aarch64-unknown-linux-gnu.tar.xz`
+4. Linux x64: `ava-tui-x86_64-unknown-linux-gnu.tar.xz`
+5. Windows x64: `ava-tui-x86_64-pc-windows-msvc.zip` or the generated Windows installer on the release page
 
 If you are scanning a release page quickly, these names are the fastest way to map OS and architecture to the right CLI download.
 
@@ -198,7 +198,6 @@ Run:
 
 ```bash
 ava --help
-ava --version
 ```
 
 If the command is not found after using `install.sh`, your current shell probably has not reloaded the PATH update yet.

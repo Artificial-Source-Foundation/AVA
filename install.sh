@@ -227,9 +227,6 @@ main() {
     _target=$(get_target "${_os}" "${_arch}")
     info "Detected platform: ${_os} ${_arch} (${_target})"
 
-    # Asset name
-    _archive="ava-${_target}.tar.gz"
-
     # Resolve candidate releases
     _tags=$(get_release_tags)
     _latest_tag=$(printf '%s\n' "${_tags}" | head -1)
@@ -238,21 +235,28 @@ main() {
     # Create temp directory
     TMP_DIR=$(mktemp -d 2>/dev/null || mktemp -d -t 'ava-install')
 
-    # Download archive from the newest release that contains this platform asset.
-    info "Downloading ${_archive}..."
+    # Download the newest release asset that matches the current CLI archive naming.
+    _archive_candidates="ava-${_target}.tar.gz ava-${_target}.tar.xz ava-tui-${_target}.tar.gz ava-tui-${_target}.tar.xz"
+    _archive=""
     _tag=""
-    for _candidate_tag in ${_tags}; do
-        if download_asset "${_archive}" "${TMP_DIR}/${_archive}" "${_candidate_tag}"; then
-            _tag="${_candidate_tag}"
-            break
-        fi
+    for _candidate_archive in ${_archive_candidates}; do
+        info "Trying ${_candidate_archive}..."
+        for _candidate_tag in ${_tags}; do
+            if download_asset "${_candidate_archive}" "${TMP_DIR}/${_candidate_archive}" "${_candidate_tag}"; then
+                _archive="${_candidate_archive}"
+                _tag="${_candidate_tag}"
+                break 2
+            fi
+        done
     done
 
-    if [ -z "${_tag}" ]; then
-        die "Failed to download ${_archive} from the latest published releases.
+    if [ -z "${_tag}" ] || [ -z "${_archive}" ]; then
+        die "Failed to download a CLI archive for ${_target} from the latest published releases.
 No binary available for ${_target}.
 Build from source: cargo build --release --bin ava"
     fi
+
+    info "Using ${_archive} from ${_tag}."
 
     if [ "${_tag}" != "${_latest_tag}" ]; then
         warn "Latest release ${_latest_tag} does not include ${_archive}; using ${_tag}."
@@ -267,7 +271,11 @@ Build from source: cargo build --release --bin ava"
 
     # Extract
     info "Extracting..."
-    tar -xzf "${TMP_DIR}/${_archive}" -C "${TMP_DIR}"
+    case "${_archive}" in
+        *.tar.gz) tar -xzf "${TMP_DIR}/${_archive}" -C "${TMP_DIR}" ;;
+        *.tar.xz) tar -xJf "${TMP_DIR}/${_archive}" -C "${TMP_DIR}" ;;
+        *) die "Unsupported archive format: ${_archive}" ;;
+    esac
 
     # Find the binary
     _binary=""
@@ -296,9 +304,8 @@ Build from source: cargo build --release --bin ava"
     printf '\n'
 
     # Check if it works
-    if "${INSTALL_DIR}/ava" --version >/dev/null 2>&1; then
-        _version=$("${INSTALL_DIR}/ava" --version 2>/dev/null || echo "${_tag}")
-        ok "AVA ${_version} is ready!"
+    if "${INSTALL_DIR}/ava" --help >/dev/null 2>&1; then
+        ok "AVA ${_tag} is ready!"
     else
         ok "AVA ${_tag} installed."
     fi

@@ -57,7 +57,7 @@ ava serve
 
 | Surface | Linux | macOS | Windows |
 |---|---|---|---|
-| `ava` CLI/TUI | `ava-x86_64-unknown-linux-gnu.tar.gz` or `ava-aarch64-unknown-linux-gnu.tar.gz` | `ava-x86_64-apple-darwin.tar.gz` or `ava-aarch64-apple-darwin.tar.gz` | `ava-x86_64-pc-windows-msvc.zip` or generated Windows installer |
+| `ava` CLI/TUI | `ava-tui-x86_64-unknown-linux-gnu.tar.xz` or `ava-tui-aarch64-unknown-linux-gnu.tar.xz` | `ava-tui-x86_64-apple-darwin.tar.xz` or `ava-tui-aarch64-apple-darwin.tar.xz` | `ava-tui-x86_64-pc-windows-msvc.zip` or generated Windows installer |
 | AVA Desktop | `.deb`, `.rpm`, or `.AppImage` when published | `.dmg` when published | `.msi` or `.exe` when published |
 
 ### CLI / TUI

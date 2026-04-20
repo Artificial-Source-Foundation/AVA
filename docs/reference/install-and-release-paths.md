@@ -37,7 +37,7 @@ Current behavior in `install.sh`:
 1. Supports `linux` and `macos`
 2. Supports `x86_64` and `aarch64`
 3. Resolves latest GitHub release tag
-4. Downloads `ava-<target>.tar.gz` (plus optional `.sha256`)
+4. Downloads the newest matching CLI archive, supporting both legacy `ava-<target>.tar.gz` assets and current `ava-tui-<target>.tar.xz` assets (plus optional `.sha256`)
 5. Installs to `~/.ava/bin` by default
 
 Script usage is documented in the script header:
@@ -68,11 +68,11 @@ Grounding: [`../../.github/workflows/release.yml`](../../.github/workflows/relea
 
 The CLI release archives use target-triple naming. Current examples are:
 
-1. `ava-aarch64-apple-darwin.tar.gz`
-2. `ava-x86_64-apple-darwin.tar.gz`
-3. `ava-aarch64-unknown-linux-gnu.tar.gz`
-4. `ava-x86_64-unknown-linux-gnu.tar.gz`
-5. `ava-x86_64-pc-windows-msvc.zip` or an equivalent generated Windows installer entry on the release page
+1. `ava-tui-aarch64-apple-darwin.tar.xz`
+2. `ava-tui-x86_64-apple-darwin.tar.xz`
+3. `ava-tui-aarch64-unknown-linux-gnu.tar.xz`
+4. `ava-tui-x86_64-unknown-linux-gnu.tar.xz`
+5. `ava-tui-x86_64-pc-windows-msvc.zip` or an equivalent generated Windows installer entry on the release page
 
 ## CLI Source Install Path
 

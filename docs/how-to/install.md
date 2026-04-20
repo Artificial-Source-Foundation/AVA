@@ -62,6 +62,37 @@ For the CLI, there are four normal paths:
 
 If you downloaded the source and want the normal developer workflow, use `cargo build` first, not `cargo install`.
 
+## For Developers With Their Own Build Workflow
+
+If you already have your own shell functions, build wrappers, or local automation, use these as the primitive commands for this repo.
+
+Build without installing:
+
+```bash
+cargo build --release --bin ava
+```
+
+Run the built binary:
+
+```bash
+./target/release/ava
+```
+
+Use a separate build directory:
+
+```bash
+CARGO_TARGET_DIR=build cargo build --release --bin ava
+./build/release/ava
+```
+
+Install the binary only if you explicitly want it on your `PATH`:
+
+```bash
+cargo install --path crates/ava-tui --bin ava
+```
+
+`install-from-source.sh` is optional convenience only. It is not the canonical build path.
+
 ## Prerequisites
 
 For binary install:

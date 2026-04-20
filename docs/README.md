@@ -2,43 +2,30 @@
 title: "Docs"
 description: "Entry point for AVA's documentation, organized by audience and purpose."
 order: 1
-updated: "2026-04-19"
+updated: "2026-04-20"
 ---
 
 # AVA Docs
 
-AVA's documentation is organized by purpose so the repo is easier to navigate for users, contributors, and maintainers.
+AVA's documentation is organized by purpose so the repo is easier to navigate for users, contributors, maintainers, and AI coding agents.
 
 Public-facing entrypoint: [docs/index.md](index.md)
 
 ## Start Here
 
-1. [Public docs index](index.md) - Diátaxis-style public layer (tutorial/how-to/explanation/reference)
-2. [Root README](../README.md) - public project overview and quick start
-3. [AGENTS.md](../AGENTS.md) - source of truth for repo workflow, architecture, and coding conventions
-4. [Project roadmap](project/roadmap.md) - current product direction and locked decisions
-5. [Project backlog](project/backlog.md) - active `0.6 -> V1` checklist plus archived prior backlog
-6. [Desktop testing guide](testing/desktop-testing.md) - practical desktop regression pass after refactors
-7. [Testing docs](testing/README.md) - Rust, frontend, desktop, and benchmark verification guidance
-8. [Current eval plan](project/v1-evals.md) - validation and benchmark expansion plan
-9. [Benchmark docs](benchmark/README.md) - how the benchmark system works, how to run it, and how to compare reports
-10. [Provider prompt benchmarking](project/provider-prompt-benchmarking.md) - implementation and usage docs for provider-family and system-prompt evals
-11. [Architecture docs](architecture/README.md) - crate maps, capability audits, and architecture notes
-12. [Cross-surface runtime map (Milestone 4)](architecture/cross-surface-runtime-map-m4.md) - interactive TUI, headless CLI, desktop, and web wiring map into the shared backend seam
-13. [Cross-surface behavior audit (Milestone 5)](architecture/cross-surface-behavior-audit-m5.md) - canonical M5 shared-vs-divergent behavior audit with P0/P1/P2 drift classification for contract work
-14. [Cross-surface runtime audit (supporting M5 detail)](architecture/cross-surface-runtime-audit-m5.md) - supporting parity-audit detail behind the canonical M5 behavior audit
-15. [Canonical shared-backend contract (Milestone 6)](architecture/shared-backend-contract-m6.md) - concrete shared-backend contract-definition artifact based on Milestones 4 and 5
-16. [Backend correction implementation roadmap (Milestone 7)](architecture/backend-correction-roadmap-m7.md) - implementation-ready backend correction roadmap derived from M5 audit and M6 contract
-17. [Backend contract exceptions](architecture/backend-contract-exceptions.md) - versioned registry of intentional adapter-specific backend contract exceptions
-18. [Operations docs](operations/README.md) - maintainer runbooks and operational guidance
-19. [Docs manifest](manifest.md) - list of new public Diátaxis pages and purpose
-20. [How-to: Install AVA](how-to/install.md) - binary, release, and source install paths
-21. [How-to: Download AVA Desktop](how-to/download-desktop.md) - desktop-specific download and source-build path
-22. [How-to: Use local models with Ollama](how-to/ollama-local-models.md) - Ollama-only local-model setup and verification path
-23. [How-to: Run AVA in CI/headless automation](how-to/ci-headless-automation.md) - non-interactive CI/script usage with JSON mode and conservative behavior assumptions
-24. [Troubleshooting: Common errors](troubleshooting/common-errors.md) - fast recovery for common runtime failures
-25. [Reference: Install and release paths](reference/install-and-release-paths.md) - grounded install/release surface map
-26. [Changelog](../CHANGELOG.md) - shipped changes and release history
+1. [Public docs index](index.md) - public tutorials, how-to guides, explanations, and reference pages
+2. [Root README](../README.md) - project overview and fastest install paths
+3. [How-to: Install AVA](how-to/install.md) - choose the right CLI, web, source, or desktop install path
+4. [How-to: Download AVA Desktop](how-to/download-desktop.md) - desktop download and source-build path
+5. [Troubleshooting: Common errors](troubleshooting/common-errors.md) - fast recovery for common runtime failures
+6. [Reference: Install and release paths](reference/install-and-release-paths.md) - release artifacts and source-of-truth install surface map
+7. [AGENTS.md](../AGENTS.md) - repo workflow, architecture, and coding conventions for contributors and AI coding agents
+8. [Testing docs](testing/README.md) - Rust, frontend, desktop, and benchmark verification guidance
+9. [Architecture docs](architecture/README.md) - crate maps, capability audits, and architecture notes
+10. [Project roadmap](project/roadmap.md) - current product direction and locked decisions
+11. [Project backlog](project/backlog.md) - active `0.6 -> V1` checklist plus archived prior backlog
+12. [Operations docs](operations/README.md) - maintainer runbooks and operational guidance
+13. [Changelog](../CHANGELOG.md) - shipped changes and release history
 
 ## Sections
 
@@ -54,7 +41,7 @@ Public-facing entrypoint: [docs/index.md](index.md)
 
 ## Recommended Reading By Audience
 
-1. Users: `../README.md`, then `project/roadmap.md` if you want product context
+1. Users: `../README.md`, then `index.md`, then the relevant tutorial or how-to page
 2. Contributors: `../AGENTS.md`, `testing/desktop-testing.md`, `testing/README.md`, `architecture/README.md`, `benchmark/README.md`, `architecture/crate-map.md`
 3. Maintainers: `project/backlog.md`, `testing/desktop-testing.md`, `architecture/README.md`, `architecture/agent-backend-capability-comparison-m2.md`, `architecture/cross-surface-runtime-map-m4.md`, `architecture/cross-surface-behavior-audit-m5.md`, `architecture/shared-backend-contract-m6.md`, `architecture/backend-correction-roadmap-m7.md`, `operations/README.md`, `benchmark/README.md`, `../CHANGELOG.md`
 

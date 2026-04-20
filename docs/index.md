@@ -2,14 +2,26 @@
 title: "AVA Documentation"
 description: "Public-facing docs entrypoint organized with a Diátaxis-style layout."
 order: 1
-updated: "2026-04-19"
+updated: "2026-04-20"
 ---
 
 # AVA Documentation
 
 This is the public-facing documentation entrypoint for AVA.
 
-It adds a Diátaxis-style layer without replacing existing contributor/maintainer docs.
+Use this page when you want user-facing docs first. Contributor, maintainer, and architecture material is linked separately below.
+
+## Choose by goal
+
+| I want to... | Start here |
+|---|---|
+| Install AVA for terminal use | [How-to: Install AVA](how-to/install.md) |
+| Download or build the desktop app | [How-to: Download AVA Desktop](how-to/download-desktop.md) |
+| Get running quickly | [Tutorial: First run](tutorials/first-run.md) |
+| Learn the first practical workflow | [Tutorial: Your first workflow](tutorials/your-first-workflow.md) |
+| Configure providers and auth | [How-to: Configure providers and local settings](how-to/configure.md) |
+| Run AVA in CI or scripts | [How-to: Run AVA in CI/headless automation](how-to/ci-headless-automation.md) |
+| Troubleshoot common setup/runtime failures | [Troubleshooting: Common errors](troubleshooting/common-errors.md) |
 
 ## Start here (public)
 
@@ -19,7 +31,7 @@ It adds a Diátaxis-style layer without replacing existing contributor/maintaine
 4. [How-to: Download AVA Desktop](how-to/download-desktop.md)
 5. [How-to: Configure providers and local settings](how-to/configure.md)
 6. [How-to: Use local models with Ollama](how-to/ollama-local-models.md)
-7. [How-to: Run locally](how-to/run-locally.md)
+7. [How-to: Run AVA Locally](how-to/run-locally.md)
 8. [How-to: Run tests and checks](how-to/test.md)
 9. [How-to: Run AVA in CI/headless automation](how-to/ci-headless-automation.md)
 10. [How-to: Run your first workflow](how-to/first-workflow.md)
@@ -30,7 +42,7 @@ It adds a Diátaxis-style layer without replacing existing contributor/maintaine
 15. [Troubleshooting: Common errors](troubleshooting/common-errors.md)
 16. [Troubleshooting: Ollama local models](troubleshooting/ollama-local-models.md)
 
-The tutorial and how-to pages are the main public layer. The reference section includes both stable command/provider pages and factual implementation-grounded pages for configuration, env vars, filesystem layout, scripts/build workflows, and the current web API surface. Troubleshooting stays focused on quick recovery paths and links to platform-specific pages when the issue is Linux/Tauri-specific.
+The tutorial and how-to pages are the main public layer. Reference pages are the factual source of truth for commands, providers, install artifacts, filesystem layout, and other stable details. Troubleshooting pages stay focused on recovery steps.
 
 ## Internal and maintainer material (kept separate)
 

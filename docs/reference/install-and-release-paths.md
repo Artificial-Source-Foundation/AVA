@@ -2,17 +2,24 @@
 title: "Install And Release Paths"
 description: "Current binary install and release distribution paths for AVA CLI and desktop surfaces."
 order: 7
-updated: "2026-04-19"
+updated: "2026-04-20"
 ---
 
 # Install And Release Paths
 
 This page maps AVA's public install and release paths to the actual files and automation in this repository.
 
+Use this page when you want the factual source of truth for install surfaces, release artifacts, and which repo files own each path.
+
 AVA currently has two user-facing install surfaces:
 
 1. `ava` CLI/TUI
 2. AVA Desktop
+
+Practical reading guide:
+
+1. If you want step-by-step instructions, use [How-to: Install AVA](../how-to/install.md) or [How-to: Download AVA Desktop](../how-to/download-desktop.md).
+2. If you want the authoritative artifact and ownership map, stay on this page.
 
 Current state: release-related files in this checkout use the `Artificial-Source/AVA` org/repo slug consistently.
 
@@ -22,6 +29,7 @@ Current state: release-related files in this checkout use the `Artificial-Source
 |---|---|---|---|
 | CLI binary install on Linux/macOS | `install.sh` | `cargo-dist` + GitHub Actions release workflow | `install.sh`, `dist-workspace.toml`, `.github/workflows/release.yml` |
 | CLI binary install on Windows/manual installs | GitHub Releases assets or generated installer | `cargo-dist` + GitHub Actions release workflow | `dist-workspace.toml`, `.github/workflows/release.yml` |
+| CLI web-enabled source install | `cargo install --path crates/ava-tui --bin ava --features web --force` | Local developer workflow | `crates/ava-tui/Cargo.toml`, `docs/how-to/install.md` |
 | CLI source install | `cargo install --path crates/ava-tui --bin ava` | Local developer workflow | `README.md`, `crates/ava-tui/Cargo.toml` |
 | Guided source build | `./install-from-source.sh` | Local developer workflow | `install-from-source.sh` |
 | Desktop app release/download path | GitHub Releases when maintainers publish desktop bundles | Manual maintainer flow | `docs/contributing/releasing.md`, `src-tauri/` |

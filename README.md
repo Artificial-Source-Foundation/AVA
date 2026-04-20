@@ -16,21 +16,36 @@ AVA reads code, edits files, runs commands, and helps you finish software work w
 
 AVA is a Rust-first coding agent built for real repository work.
 
-- Use `ava` in the terminal for interactive or headless runs
+- Use the `ava` CLI for terminal work: TUI by default, headless with `--headless`
 - Use AVA Desktop for a native desktop shell on top of the same backend
-- Use web mode when you want browser access from `ava serve`
+- Use web mode with `ava serve` when you build AVA with the `web` feature
 
 ## Get Started
 
-### Fastest Path
+### Choose Your Path
 
-Install the CLI/TUI:
+| I want to... | Use this | Notes |
+|---|---|---|
+| Try AVA quickly in the terminal on Linux/macOS | `curl -fsSL https://raw.githubusercontent.com/Artificial-Source/AVA/develop/install.sh | sh` | Prebuilt CLI binary, no Rust toolchain required |
+| Try AVA quickly in the terminal on Windows | [GitHub Releases](https://github.com/Artificial-Source/AVA/releases) | Download the Windows CLI asset |
+| Build the CLI from source | `cargo build --release --bin ava` | Best loop for contributors and power users |
+| Install the CLI from source | `cargo install --path crates/ava-tui --bin ava` | Installs `ava` onto your `PATH` |
+| Use the desktop app | [GitHub Releases](https://github.com/Artificial-Source/AVA/releases) or [desktop guide](docs/how-to/download-desktop.md) | Desktop bundles are not published on every release |
+
+### Quick Start
+
+Install the `ava` CLI on Linux/macOS:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Artificial-Source/AVA/develop/install.sh | sh
 ```
 
-Download desktop builds from <https://github.com/Artificial-Source/AVA/releases> when bundles are published.
+On Windows, use <https://github.com/Artificial-Source/AVA/releases> and download the CLI asset for your platform.
+
+Requires:
+
+1. Linux or macOS plus `curl` and `tar` for the one-line installer
+2. GitHub Releases download for Windows
 
 Add credentials:
 
@@ -43,59 +58,75 @@ Run AVA:
 ```bash
 ava
 ava "fix the login bug" --headless
-ava serve
 ```
 
-### Install Surfaces
+To verify the install:
 
-| Surface | Best for | Fastest path | More options |
-|---|---|---|---|
-| `ava` CLI/TUI | Terminal and headless usage | `curl -fsSL https://raw.githubusercontent.com/Artificial-Source/AVA/develop/install.sh` piped to `sh` | [Install guide](docs/how-to/install.md) |
-| AVA Desktop | Native desktop app usage | Download from <https://github.com/Artificial-Source/AVA/releases> | [Desktop guide](docs/how-to/download-desktop.md) |
+```bash
+ava --help
+```
 
-### Release Artifacts
+Web mode is available through `ava serve`, but it requires a web-enabled source build. See [docs/how-to/install.md](docs/how-to/install.md#install-with-web-support).
 
-| Surface | Linux | macOS | Windows |
-|---|---|---|---|
-| `ava` CLI/TUI | `ava-tui-x86_64-unknown-linux-gnu.tar.xz` or `ava-tui-aarch64-unknown-linux-gnu.tar.xz` | `ava-tui-x86_64-apple-darwin.tar.xz` or `ava-tui-aarch64-apple-darwin.tar.xz` | `ava-tui-x86_64-pc-windows-msvc.zip` or generated Windows installer |
-| AVA Desktop | `.deb`, `.rpm`, or `.AppImage` when published | `.dmg` when published | `.msi` or `.exe` when published |
+### Products
 
-### CLI / TUI
+AVA ships two user-facing products:
 
-Other install paths:
+1. `ava` CLI for terminal use
+2. AVA Desktop for a native Tauri app
 
-1. Manual binary install on Windows, Linux, or macOS from <https://github.com/Artificial-Source/AVA/releases>
-2. Source install:
+If you only want the terminal app, use the CLI install path above. A full repo clone or source build also includes the desktop/web frontend files under `src/`, such as `.ts` and `.tsx`, because this repository contains both products.
+
+### CLI Install Options
+
+1. Binary install on Linux/macOS:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Artificial-Source/AVA/develop/install.sh | sh
+```
+
+2. Manual binary download on Windows, Linux, or macOS from <https://github.com/Artificial-Source/AVA/releases>
+3. Source build without installing:
+
+```bash
+git clone https://github.com/Artificial-Source/AVA.git && cd AVA
+cargo build --release --bin ava
+./target/release/ava
+```
+
+4. Source install:
 
 ```bash
 git clone https://github.com/Artificial-Source/AVA.git && cd AVA
 cargo install --path crates/ava-tui --bin ava
 ```
 
-3. Guided source build:
+5. Optional source-build helper:
 
 ```bash
 ./install-from-source.sh --help
 ```
 
-Full install details: [docs/how-to/install.md](docs/how-to/install.md)
+Use `install-from-source.sh` only if you want a repo-provided convenience wrapper. For explicit control, use the Cargo commands above.
+
+Full CLI install details: [docs/how-to/install.md](docs/how-to/install.md)
 
 ### Desktop
 
 Desktop is the native desktop shell for AVA.
 
-Quick path:
+Quick path when a release includes desktop bundles:
 
 1. Open <https://github.com/Artificial-Source/AVA/releases>
 2. Download the desktop bundle for your platform when that release includes one
 
-Fallback path:
+Desktop bundles are not published on every release. If the release you want does not include one, build it from source instead:
 
 ```bash
 ./install-from-source.sh --desktop
 ```
 
-Desktop build and release details: [docs/how-to/download-desktop.md](docs/how-to/download-desktop.md), [docs/contributing/releasing.md](docs/contributing/releasing.md)
+Desktop build and release details: [docs/how-to/download-desktop.md](docs/how-to/download-desktop.md), [docs/reference/install-and-release-paths.md](docs/reference/install-and-release-paths.md)
 
 Release-repo note: release-related links in this checkout are aligned to `Artificial-Source/AVA`.
 
@@ -160,13 +191,14 @@ Start here:
 
 - [docs/README.md](docs/README.md) - main documentation entrypoint
 - [docs/how-to/install.md](docs/how-to/install.md) - installation and platform notes
+- [docs/how-to/download-desktop.md](docs/how-to/download-desktop.md) - desktop download and source-build paths
 - [docs/reference/providers-and-auth.md](docs/reference/providers-and-auth.md) - providers, aliases, and auth
 - [docs/reference/commands.md](docs/reference/commands.md) - slash commands and CLI surfaces
 - [docs/testing/README.md](docs/testing/README.md) - testing and verification
-- [AGENTS.md](AGENTS.md) - repo workflow, conventions, and architecture
 
 Project and architecture material:
 
+- [AGENTS.md](AGENTS.md) - repo workflow, conventions, and architecture for contributors and AI coding agents
 - [docs/project/roadmap.md](docs/project/roadmap.md)
 - [docs/project/backlog.md](docs/project/backlog.md)
 - [docs/architecture/README.md](docs/architecture/README.md)

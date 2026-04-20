@@ -1,55 +1,77 @@
 ---
 title: "How-to: Install AVA"
-description: "Build, run, and install AVA with explicit Cargo-first workflows for power users and source-based development."
+description: "Choose the right AVA install path for CLI, desktop, binaries, and source builds."
 order: 1
-updated: "2026-04-19"
+updated: "2026-04-20"
 ---
 
 # How-to: Install AVA
 
-Use this page when you want explicit Cargo-first workflows: build in place, run from the build output, or install only when you actually want an installed binary.
+Use this page when you need to choose the right AVA install path: prebuilt CLI binary, source build, source install, web-enabled build, or desktop app.
 
-AVA has two install surfaces:
+AVA has two product surfaces:
 
 1. `ava` CLI/TUI for terminal and headless use
 2. AVA Desktop for the Tauri app
 
+Important distinction:
+
+1. The CLI/TUI release install paths on this page give you the `ava` binary, not the desktop frontend source tree.
+2. If you clone the repository or build from source, you will also see the desktop/web frontend files under `src/` such as `.ts` and `.tsx` because this repo contains both products.
+3. If you only want the terminal app, prefer the release-binary install or build only the `ava` CLI target with Cargo.
+4. If you want the desktop app, use the desktop download path or work from a full repository checkout.
+
 See also: [Tutorial: First run](../tutorials/first-run.md), [How-to: Download AVA Desktop](download-desktop.md), [How-to: Run AVA locally](run-locally.md), [Reference: Install and release paths](../reference/install-and-release-paths.md)
 
-This page is intentionally written for power users.
+This page is public-facing, but it keeps the commands explicit so power users can see exactly what happens.
+
+## Choose Your Install Path
+
+| I want to... | Use this path | Notes |
+|---|---|---|
+| Install the terminal app quickly on Linux/macOS | [Fast install from release binaries](#fast-install-from-release-binaries-linuxmacos) | No Rust toolchain required |
+| Install the terminal app on Windows | [Manual binary download from GitHub Releases](#manual-binary-download-from-github-releases) | `install.sh` is Unix-only |
+| Build the CLI from source without installing | [Build from source without installing](#build-from-source-without-installing) | Best loop for contributors and power users |
+| Install the CLI from source onto your `PATH` | [Build and install from source](#build-and-install-from-source) | Uses `cargo install` |
+| Use `ava serve` web mode | [Install with web support](#install-with-web-support) | Requires a web-enabled source build |
+| Use the desktop app | [Install AVA Desktop](#install-ava-desktop) | Desktop bundles are not published on every release |
 
 If you downloaded the source, the primary workflow is:
 
 1. build with Cargo
 2. run the built binary from the build output directory
-3. only use `cargo install` if you specifically want an installed binary on your `PATH`
+3. use `cargo install` only if you specifically want an installed binary on your `PATH`
 
-## Quick Path
+## Quick Paths
 
 If you already know what you want, use one of these:
 
-1. Fast binary install on Linux/macOS:
+1. Fast CLI binary install on Linux/macOS:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Artificial-Source/AVA/develop/install.sh | sh
 ```
 
-2. Manual source build without installing:
+2. Fast CLI binary install on Windows:
+
+Open <https://github.com/Artificial-Source/AVA/releases> and download the Windows CLI asset.
+
+3. Manual source build without installing:
 
 ```bash
 cargo build --release --bin ava
 ./target/release/ava
 ```
 
-3. Manual source install:
+4. Manual source install:
 
 ```bash
 cargo install --path crates/ava-tui --bin ava
 ```
 
-4. Windows or manual binary download:
+5. Desktop app:
 
-Open <https://github.com/Artificial-Source/AVA/releases>
+Use [How-to: Download AVA Desktop](download-desktop.md).
 
 ## Install AVA CLI
 
@@ -61,6 +83,16 @@ For the CLI, there are four normal paths:
 4. Optional convenience wrapper using `install-from-source.sh`
 
 If you downloaded the source and want the normal developer workflow, use `cargo build` first, not `cargo install`.
+
+## CLI Run Modes
+
+The `ava` CLI can run in multiple modes:
+
+1. TUI mode: `ava`
+2. Headless mode: `ava "task" --headless`
+3. Web mode: `ava serve` after building with the `web` feature
+
+If you use the default release binary install, expect TUI and headless mode. Web mode needs the dedicated web-enabled build documented below.
 
 ## For Developers With Their Own Build Workflow
 
@@ -155,6 +187,7 @@ Use this path when you want to inspect the asset yourself, pin a specific releas
 2. Pick the release version you want
 3. Download the asset that matches your OS and architecture
 4. Put the extracted `ava` binary on your `PATH`
+5. Verify with `ava --help`
 
 Current CLI release targets are:
 
@@ -274,6 +307,8 @@ Grounding: [`../../install-from-source.sh`](../../install-from-source.sh)
 ## Install with web support
 
 The `serve` command is feature-gated behind the `web` feature in [`../../crates/ava-tui/Cargo.toml`](../../crates/ava-tui/Cargo.toml).
+
+Use this path only when you need browser access from `ava serve`. The standard CLI install paths above do not include web mode by default.
 
 Manual source install with web support:
 

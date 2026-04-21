@@ -32,12 +32,12 @@ For desktop/Linux-specific setup and rendering issues, use:
 **Symptom**
 
 ```text
-No provider configured. Set defaults in ~/.ava/config.yaml or use --provider/--model flags.
+No provider configured. Set defaults in $XDG_CONFIG_HOME/ava/config.yaml (legacy ~/.ava/config.yaml still works) or use --provider/--model flags.
 ```
 
 **Fix**
 
-1. Set a default in `~/.ava/config.yaml`, or
+1. Set a default in `$XDG_CONFIG_HOME/ava/config.yaml` for fresh installs, or `~/.ava/config.yaml` if you are still on the legacy path, or
 2. Pass flags explicitly:
 
 ```bash
@@ -91,7 +91,7 @@ See: [How-to: Configure AVA](../how-to/configure.md), [Credential storage](../re
 **Symptom**
 
 ```text
-OpenAI OAuth token has expired. Reconnect with /connect openai or set an API key in ~/.ava/credentials.json
+OpenAI OAuth token has expired. Reconnect with /connect openai or set an API key in $XDG_CONFIG_HOME/ava/credentials.json (legacy ~/.ava/credentials.json still works)
 ```
 
 **Fix**
@@ -137,7 +137,7 @@ CARGO_TARGET_DIR=/path/to/build cargo install --path /path/to/AVA/crates/ava-tui
 Or run directly from source with a web-enabled cargo path:
 
 ```bash
-cargo run -p ava-tui --features web -- serve --host 127.0.0.1 --port 8080
+cargo run --manifest-path /path/to/AVA/Cargo.toml -p ava-tui --features web -- serve --host 127.0.0.1 --port 8080
 ```
 
 See: [How-to: Install AVA](../how-to/install.md), [How-to: Run AVA locally](../how-to/run-locally.md)

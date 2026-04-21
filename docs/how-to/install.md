@@ -71,6 +71,7 @@ Notes:
 1. Plain `cargo build` uses Cargo's default dev profile, which is the best default for local debugging and fast incremental rebuilds.
 2. Add `--release` when you want an optimized binary closer to release artifact behavior.
 3. If you want explicit control over parallelism or artifact location, set `CARGO_BUILD_JOBS` and `CARGO_TARGET_DIR` yourself.
+4. On Windows, use the same command shape with Windows paths such as `C:\src\AVA\Cargo.toml` and `C:\src\AVA\target\debug\ava.exe`.
 
 ## Install the CLI from source
 
@@ -81,6 +82,8 @@ CARGO_TARGET_DIR=/path/to/build cargo install --path /path/to/AVA/crates/ava-tui
 ```
 
 Use this when you want `ava` available on your `PATH` from a local checkout.
+
+On Windows, use Windows paths instead, for example `C:\build` and `C:\src\AVA\crates\ava-tui`.
 
 ## Install AVA Desktop
 
@@ -100,6 +103,8 @@ Web mode is not included in the default CLI build. Build or install with the `we
 CARGO_TARGET_DIR=/path/to/build cargo install --path /path/to/AVA/crates/ava-tui --bin ava --features web --force
 ava serve --host 127.0.0.1 --port 8080 --token dev-local-token
 ```
+
+If you use `./install-from-source.sh --cli`, that helper intentionally builds a release-mode CLI and installs it to `~/.local/bin/ava`.
 
 ## What most users should do
 

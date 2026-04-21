@@ -42,6 +42,8 @@ CARGO_TARGET_DIR=/path/to/build cargo install --path /path/to/AVA/crates/ava-tui
 
 Why this command: it installs the `ava` binary from this local checkout onto your `PATH`.
 
+On Windows, use Windows paths instead, for example `C:\build` and `C:\src\AVA\crates\ava-tui`.
+
 ## Step 2: Add provider credentials
 
 Log in to a provider (example: OpenRouter):

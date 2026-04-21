@@ -115,6 +115,8 @@ Current script scope:
 3. Installs into user-owned locations under `$HOME`
 4. Defaults `CARGO_BUILD_JOBS` to detected CPU count unless the caller already set it
 5. Enables `sccache` automatically when available unless the caller already set `RUSTC_WRAPPER`
+6. Installs the CLI helper output to `~/.local/bin/ava`
+7. Builds the CLI helper path in `--release` mode by default
 
 ## Desktop Release Path
 

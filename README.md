@@ -88,25 +88,27 @@ curl -fsSL https://raw.githubusercontent.com/Artificial-Source/AVA/develop/insta
 
 ```bash
 git clone https://github.com/Artificial-Source/AVA.git && cd AVA
-cargo build --manifest-path "$PWD/Cargo.toml" --bin ava
-./target/debug/ava
+cargo build --manifest-path /absolute/path/to/AVA/Cargo.toml --bin ava
+/absolute/path/to/AVA/target/debug/ava
 ```
 
 Optional compiler-cache variant for repeat source builds:
 
 ```bash
 git clone https://github.com/Artificial-Source/AVA.git && cd AVA
-RUSTC_WRAPPER=sccache CARGO_BUILD_JOBS="$(nproc 2>/dev/null || sysctl -n hw.ncpu)" cargo build --release --manifest-path "$PWD/Cargo.toml" --bin ava
-./target/release/ava
+CARGO_BUILD_JOBS=16 RUSTC_WRAPPER=sccache cargo build --release --manifest-path /absolute/path/to/AVA/Cargo.toml --bin ava
+/absolute/path/to/AVA/target/release/ava
 ```
 
 Use plain `cargo build` for the normal dev profile with debug info and faster incremental builds. Add `--release` when you want an optimized binary that behaves more like published release artifacts. Cargo does not have a built-in `--debug` or CMake-style `RelWithDebInfo` flag; use `cargo build --profile <name>` if you define an additional profile.
+
+On Windows, use the same commands with Windows paths, for example `C:\src\AVA\Cargo.toml` and `C:\src\AVA\target\debug\ava.exe`.
 
 4. Source install:
 
 ```bash
 git clone https://github.com/Artificial-Source/AVA.git && cd AVA
-CARGO_TARGET_DIR="$PWD/build" cargo install --path "$PWD/crates/ava-tui" --bin ava
+CARGO_TARGET_DIR=/absolute/path/to/build cargo install --path /absolute/path/to/AVA/crates/ava-tui --bin ava
 ```
 
 5. Optional source-build helper:
@@ -116,6 +118,8 @@ CARGO_TARGET_DIR="$PWD/build" cargo install --path "$PWD/crates/ava-tui" --bin a
 ```
 
 Use `install-from-source.sh` only if you want a repo-provided convenience wrapper. For explicit control, use the Cargo commands above.
+
+The source-install helper is intentionally end-user oriented: it builds the CLI in `--release` mode and installs it to `~/.local/bin/ava`.
 
 Full CLI install details: [docs/how-to/install.md](docs/how-to/install.md)
 

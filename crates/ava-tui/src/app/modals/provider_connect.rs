@@ -1,7 +1,13 @@
 use super::*;
 use crate::widgets::provider_connect::{ConnectField, ConnectScreen};
 use ava_auth::config::AuthFlow;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::Instant;
+
+fn auth_attempt_is_current(tracker: &Arc<AtomicU64>, attempt: u64) -> bool {
+    tracker.load(Ordering::SeqCst) == attempt
+}
 
 impl App {
     pub(crate) fn handle_provider_connect_key(
@@ -115,6 +121,7 @@ impl App {
                         let Some(state) = self.state.provider_connect.as_mut() else {
                             return false;
                         };
+                        state.cancel_auth_attempt();
                         state.screen = ConnectScreen::List;
                         state.message = None;
                     }
@@ -233,6 +240,7 @@ impl App {
                     let Some(state) = self.state.provider_connect.as_mut() else {
                         return false;
                     };
+                    state.cancel_auth_attempt();
                     state.screen = ConnectScreen::List;
                     state.message = Some("OAuth flow cancelled".to_string());
                 }
@@ -244,6 +252,7 @@ impl App {
                     let Some(state) = self.state.provider_connect.as_mut() else {
                         return false;
                     };
+                    state.cancel_auth_attempt();
                     state.screen = ConnectScreen::List;
                     state.message = Some("Device code flow cancelled".to_string());
                 }
@@ -265,6 +274,8 @@ impl App {
     ) {
         match flow {
             AuthFlow::Pkce => {
+                let attempt = state.begin_auth_attempt();
+                let tracker = state.auth_attempt_tracker();
                 let pkce = ava_auth::pkce::generate_pkce();
                 if let Some(cfg) = ava_auth::config::oauth_config(provider_id) {
                     let auth_url = ava_auth::config::build_auth_url(cfg, &pkce);
@@ -278,9 +289,13 @@ impl App {
                     let client_id = cfg.client_id.to_string();
                     let redirect_path = cfg.redirect_path.to_string();
                     let redirect_port = cfg.redirect_port;
-                    tokio::spawn(async move {
+                    let callback_tracker = Arc::clone(&tracker);
+                    let task = tokio::spawn(async move {
                         match ava_auth::callback::listen_for_callback(port, &path, 120).await {
                             Ok(callback) => {
+                                if !auth_attempt_is_current(&callback_tracker, attempt) {
+                                    return;
+                                }
                                 if callback.state != pkce.state {
                                     let _ = tx.send(AppEvent::OAuthError {
                                         provider: pid,
@@ -306,27 +321,34 @@ impl App {
                                 .await
                                 {
                                     Ok(tokens) => {
-                                        let _ = tx.send(AppEvent::OAuthSuccess {
-                                            provider: pid,
-                                            tokens,
-                                        });
+                                        if auth_attempt_is_current(&callback_tracker, attempt) {
+                                            let _ = tx.send(AppEvent::OAuthSuccess {
+                                                provider: pid,
+                                                tokens,
+                                            });
+                                        }
                                     }
                                     Err(e) => {
-                                        let _ = tx.send(AppEvent::OAuthError {
-                                            provider: pid,
-                                            error: e.to_string(),
-                                        });
+                                        if auth_attempt_is_current(&callback_tracker, attempt) {
+                                            let _ = tx.send(AppEvent::OAuthError {
+                                                provider: pid,
+                                                error: e.to_string(),
+                                            });
+                                        }
                                     }
                                 }
                             }
                             Err(e) => {
-                                let _ = tx.send(AppEvent::OAuthError {
-                                    provider: pid,
-                                    error: e.to_string(),
-                                });
+                                if auth_attempt_is_current(&callback_tracker, attempt) {
+                                    let _ = tx.send(AppEvent::OAuthError {
+                                        provider: pid,
+                                        error: e.to_string(),
+                                    });
+                                }
                             }
                         }
                     });
+                    state.set_auth_task(task.abort_handle());
 
                     state.screen = ConnectScreen::OAuthBrowser {
                         provider_id: provider_id.to_string(),
@@ -337,10 +359,12 @@ impl App {
                 }
             }
             AuthFlow::DeviceCode => {
+                let attempt = state.begin_auth_attempt();
+                let tracker = state.auth_attempt_tracker();
                 let pid = provider_id.to_string();
                 state.message = Some("Requesting device code...".to_string());
                 let tx = app_tx.clone();
-                tokio::spawn(async move {
+                let task = tokio::spawn(async move {
                     let Some(cfg) = ava_auth::config::oauth_config(&pid) else {
                         let _ = tx.send(AppEvent::ProviderConnectFinished(
                             crate::event::ProviderConnectResult::InlineError(format!(
@@ -353,61 +377,141 @@ impl App {
 
                     match ava_auth::device_code::request_device_code(cfg).await {
                         Ok(device) => {
-                            let poll_tx = tx.clone();
-                            let poll_pid = pid.clone();
-                            let device_code = device.device_code.clone();
-                            let interval = device.interval;
-                            let expires = device.expires_in;
-                            tokio::spawn(async move {
-                                if let Some(cfg) = ava_auth::config::oauth_config(&poll_pid) {
-                                    match ava_auth::device_code::poll_device_code(
-                                        cfg,
-                                        &device_code,
-                                        interval,
-                                        expires,
-                                    )
-                                    .await
-                                    {
-                                        Ok(Some(tokens)) => {
-                                            let _ = poll_tx.send(AppEvent::OAuthSuccess {
-                                                provider: poll_pid,
-                                                tokens,
-                                            });
-                                        }
-                                        Ok(None) => {
-                                            let _ = poll_tx.send(AppEvent::OAuthError {
-                                                provider: poll_pid,
-                                                error: "Device code expired".to_string(),
-                                            });
-                                        }
-                                        Err(e) => {
-                                            let _ = poll_tx.send(AppEvent::OAuthError {
-                                                provider: poll_pid,
-                                                error: e.to_string(),
-                                            });
-                                        }
+                            if auth_attempt_is_current(&tracker, attempt) {
+                                let _ = tx.send(AppEvent::ProviderConnectFinished(
+                                    crate::event::ProviderConnectResult::DeviceCodeReady {
+                                        provider_id: pid,
+                                        device,
+                                        attempt,
+                                    },
+                                ));
+                            }
+
+                            match ava_auth::device_code::poll_device_code(
+                                cfg,
+                                &device.device_code,
+                                device.interval,
+                                device.expires_in,
+                            )
+                            .await
+                            {
+                                Ok(Some(tokens)) => {
+                                    if auth_attempt_is_current(&tracker, attempt) {
+                                        let _ = tx.send(AppEvent::OAuthSuccess {
+                                            provider: pid,
+                                            tokens,
+                                        });
                                     }
                                 }
-                            });
-
-                            let _ = tx.send(AppEvent::ProviderConnectFinished(
-                                crate::event::ProviderConnectResult::DeviceCodeReady {
-                                    provider_id: pid,
-                                    device,
-                                },
-                            ));
+                                Ok(None) => {
+                                    if auth_attempt_is_current(&tracker, attempt) {
+                                        let _ = tx.send(AppEvent::OAuthError {
+                                            provider: pid,
+                                            error: "Device code expired".to_string(),
+                                        });
+                                    }
+                                }
+                                Err(e) => {
+                                    if auth_attempt_is_current(&tracker, attempt) {
+                                        let _ = tx.send(AppEvent::OAuthError {
+                                            provider: pid,
+                                            error: e.to_string(),
+                                        });
+                                    }
+                                }
+                            }
                         }
                         Err(err) => {
-                            let _ = tx.send(AppEvent::ProviderConnectFinished(
-                                crate::event::ProviderConnectResult::InlineError(format!(
-                                    "Failed: {err}"
-                                )),
-                            ));
+                            if auth_attempt_is_current(&tracker, attempt) {
+                                let _ = tx.send(AppEvent::ProviderConnectFinished(
+                                    crate::event::ProviderConnectResult::InlineError(format!(
+                                        "Failed: {err}"
+                                    )),
+                                ));
+                            }
                         }
                     }
                 });
+                state.set_auth_task(task.abort_handle());
+            }
+            AuthFlow::OpenAiHeadless => {
+                let attempt = state.begin_auth_attempt();
+                let tracker = state.auth_attempt_tracker();
+                let pid = provider_id.to_string();
+                state.message = Some("Requesting headless login code...".to_string());
+                let tx = app_tx.clone();
+                let task = tokio::spawn(async move {
+                    let Some(cfg) = ava_auth::config::oauth_config(&pid) else {
+                        let _ = tx.send(AppEvent::ProviderConnectFinished(
+                            crate::event::ProviderConnectResult::InlineError(format!(
+                                "Failed: {}",
+                                ava_auth::AuthError::NoOAuthConfig(pid.clone())
+                            )),
+                        ));
+                        return;
+                    };
+
+                    match ava_auth::openai_headless::request_code(cfg.client_id).await {
+                        Ok(device) => {
+                            if auth_attempt_is_current(&tracker, attempt) {
+                                let _ = tx.send(AppEvent::ProviderConnectFinished(
+                                    crate::event::ProviderConnectResult::DeviceCodeReady {
+                                        provider_id: pid,
+                                        device,
+                                        attempt,
+                                    },
+                                ));
+                            }
+
+                            match ava_auth::openai_headless::poll_code(
+                                cfg.client_id,
+                                &device.device_code,
+                                &device.user_code,
+                                device.interval,
+                            )
+                            .await
+                            {
+                                Ok(Some(tokens)) => {
+                                    if auth_attempt_is_current(&tracker, attempt) {
+                                        let _ = tx.send(AppEvent::OAuthSuccess {
+                                            provider: pid,
+                                            tokens,
+                                        });
+                                    }
+                                }
+                                Ok(None) => {
+                                    if auth_attempt_is_current(&tracker, attempt) {
+                                        let _ = tx.send(AppEvent::OAuthError {
+                                            provider: pid,
+                                            error: "Headless login expired".to_string(),
+                                        });
+                                    }
+                                }
+                                Err(err) => {
+                                    if auth_attempt_is_current(&tracker, attempt) {
+                                        let _ = tx.send(AppEvent::OAuthError {
+                                            provider: pid,
+                                            error: err.to_string(),
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                        Err(err) => {
+                            if auth_attempt_is_current(&tracker, attempt) {
+                                let _ = tx.send(AppEvent::ProviderConnectFinished(
+                                    crate::event::ProviderConnectResult::InlineError(format!(
+                                        "Failed: {err}"
+                                    )),
+                                ));
+                            }
+                        }
+                    }
+                });
+                state.set_auth_task(task.abort_handle());
             }
             AuthFlow::ApiKey => {
+                state.cancel_auth_attempt();
                 state.screen = ConnectScreen::Configure(provider_id.to_string());
                 state.key_input.clear();
                 state.base_url_input.clear();

@@ -9,6 +9,8 @@ use crate::pkce::PkceParams;
 pub enum AuthFlow {
     /// PKCE browser-based OAuth (e.g., OpenAI).
     Pkce,
+    /// OpenAI-specific headless ChatGPT login.
+    OpenAiHeadless,
     /// Device code flow (e.g., GitHub Copilot).
     DeviceCode,
     /// Simple API key (most providers).

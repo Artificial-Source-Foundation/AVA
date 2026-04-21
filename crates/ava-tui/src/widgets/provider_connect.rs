@@ -3,13 +3,28 @@ use ava_auth::ProviderGroup;
 use ava_config::{provider_name, redact_key, standard_env_var, CredentialStore};
 use ratatui::prelude::*;
 use ratatui::widgets::Paragraph;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::Instant;
+use tokio::task::AbortHandle;
 
 use crate::app::AppState;
 use crate::widgets::safe_render::{clamp_line, truncate_str};
 use crate::widgets::select_list::{
     render_select_list, ItemStatus, KeybindHint, SelectItem, SelectListConfig, SelectListState,
 };
+
+fn auth_flow_choice_meta(flow: AuthFlow) -> (&'static str, &'static str) {
+    match flow {
+        AuthFlow::ApiKey => ("Manually enter API Key", "Paste your API key"),
+        AuthFlow::Pkce => ("ChatGPT Pro/Plus (browser)", "Sign in with your browser"),
+        AuthFlow::OpenAiHeadless => (
+            "ChatGPT Pro/Plus (headless)",
+            "Get a code and finish sign-in without a callback server",
+        ),
+        AuthFlow::DeviceCode => ("Device Code", "Enter code on provider website"),
+    }
+}
 
 /// Provider status for display.
 #[derive(Debug, Clone)]
@@ -69,6 +84,8 @@ pub struct ProviderConnectState {
     pub base_url_input: String,
     pub active_field: ConnectField,
     pub message: Option<String>,
+    auth_attempt_generation: Arc<AtomicU64>,
+    auth_attempt_task: Option<AbortHandle>,
 }
 
 impl ProviderConnectState {
@@ -92,6 +109,8 @@ impl ProviderConnectState {
             base_url_input: String::new(),
             active_field: ConnectField::ApiKey,
             message: None,
+            auth_attempt_generation: Arc::new(AtomicU64::new(0)),
+            auth_attempt_task: None,
         }
     }
 
@@ -103,14 +122,24 @@ impl ProviderConnectState {
             .get(provider)
             .and_then(|c| c.base_url.clone())
             .unwrap_or_default();
+        let screen = match ava_auth::provider_info(provider) {
+            Some(info) if info.auth_flows.len() > 1 => ConnectScreen::AuthMethodChoice {
+                provider_id: provider.to_string(),
+                selected: 0,
+            },
+            _ => ConnectScreen::Configure(provider.to_string()),
+        };
+
         Self {
-            screen: ConnectScreen::Configure(provider.to_string()),
+            screen,
             list: SelectListState::new(items),
             providers,
             key_input: String::new(),
             base_url_input: base_url,
             active_field: ConnectField::ApiKey,
             message: None,
+            auth_attempt_generation: Arc::new(AtomicU64::new(0)),
+            auth_attempt_task: None,
         }
     }
 
@@ -127,6 +156,32 @@ impl ProviderConnectState {
     pub fn selected_provider(&self) -> Option<&ProviderStatus> {
         let provider_id = self.list.selected_value()?;
         self.providers.iter().find(|p| &p.id == provider_id)
+    }
+
+    pub fn begin_auth_attempt(&mut self) -> u64 {
+        if let Some(task) = self.auth_attempt_task.take() {
+            task.abort();
+        }
+        self.auth_attempt_generation.fetch_add(1, Ordering::SeqCst) + 1
+    }
+
+    pub fn cancel_auth_attempt(&mut self) {
+        if let Some(task) = self.auth_attempt_task.take() {
+            task.abort();
+        }
+        self.auth_attempt_generation.fetch_add(1, Ordering::SeqCst);
+    }
+
+    pub fn auth_attempt_tracker(&self) -> Arc<AtomicU64> {
+        Arc::clone(&self.auth_attempt_generation)
+    }
+
+    pub fn current_auth_attempt(&self) -> u64 {
+        self.auth_attempt_generation.load(Ordering::SeqCst)
+    }
+
+    pub fn set_auth_task(&mut self, task: AbortHandle) {
+        self.auth_attempt_task = Some(task);
     }
 }
 
@@ -231,11 +286,7 @@ pub fn render_provider_connect(frame: &mut Frame<'_>, area: Rect, state: &mut Ap
 
             for (idx, flow) in flows.iter().enumerate() {
                 let is_sel = idx == *selected;
-                let (label, hint) = match flow {
-                    AuthFlow::ApiKey => ("API Key", "Paste your API key"),
-                    AuthFlow::Pkce => ("Browser Login", "Sign in with your browser"),
-                    AuthFlow::DeviceCode => ("Device Code", "Enter code on provider website"),
-                };
+                let (label, hint) = auth_flow_choice_meta(*flow);
 
                 let name_style = if is_sel {
                     Style::default()
@@ -631,4 +682,33 @@ fn spinner_char(elapsed: u64) -> char {
 
 fn truncate_url(url: &str, max_len: usize) -> String {
     crate::text_utils::truncate_display(url, max_len)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{auth_flow_choice_meta, ConnectScreen, ProviderConnectState};
+    use ava_auth::config::AuthFlow;
+    use ava_config::CredentialStore;
+
+    #[test]
+    fn openai_headless_auth_choice_has_expected_copy() {
+        let (label, hint) = auth_flow_choice_meta(AuthFlow::OpenAiHeadless);
+        assert_eq!(label, "ChatGPT Pro/Plus (headless)");
+        assert!(hint.contains("without a callback server"));
+    }
+
+    #[test]
+    fn for_provider_uses_auth_method_choice_for_multi_flow_provider() {
+        let state = ProviderConnectState::for_provider(&CredentialStore::default(), "openai");
+        match state.screen {
+            ConnectScreen::AuthMethodChoice {
+                provider_id,
+                selected,
+            } => {
+                assert_eq!(provider_id, "openai");
+                assert_eq!(selected, 0);
+            }
+            other => panic!("expected auth method choice, got {other:?}"),
+        }
+    }
 }

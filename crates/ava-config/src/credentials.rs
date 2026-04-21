@@ -357,6 +357,36 @@ impl CredentialStore {
         self.providers.insert(provider.to_string(), cred);
     }
 
+    /// Set OAuth tokens for a provider, preserving existing API key/base_url and
+    /// extracting account metadata when available.
+    pub fn set_oauth_tokens(&mut self, provider: &str, tokens: &ava_auth::tokens::OAuthTokens) {
+        let mut cred =
+            self.providers
+                .get(provider)
+                .cloned()
+                .unwrap_or_else(|| ProviderCredential {
+                    api_key: String::new(),
+                    base_url: None,
+                    org_id: None,
+                    oauth_token: None,
+                    oauth_refresh_token: None,
+                    oauth_expires_at: None,
+                    oauth_account_id: None,
+                    litellm_compatible: None,
+                    loop_prone: None,
+                });
+        cred.oauth_token = Some(tokens.access_token.clone());
+        cred.oauth_refresh_token = tokens.refresh_token.clone();
+        cred.oauth_expires_at = tokens.expires_at;
+        cred.oauth_account_id = tokens
+            .id_token
+            .as_deref()
+            .and_then(ava_auth::tokens::extract_account_id)
+            .or_else(|| ava_auth::tokens::extract_account_id(tokens.access_token.as_str()))
+            .or(cred.oauth_account_id);
+        self.providers.insert(provider.to_string(), cred);
+    }
+
     pub fn remove(&mut self, provider: &str) -> bool {
         self.providers.remove(provider).is_some()
     }
@@ -754,5 +784,28 @@ mod tests {
 
         assert_eq!(resolved.effective_api_key(), Some("static-key"));
         assert_eq!(resolved.oauth_token.as_deref(), Some("expired-token"));
+    }
+
+    #[test]
+    fn set_oauth_tokens_extracts_openai_account_id_from_id_token() {
+        let mut store = CredentialStore::default();
+        let header = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(b"{}");
+        let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .encode(br#"{"chatgpt_account_id":"acct-123"}"#);
+        let sig = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(b"sig");
+
+        store.set_oauth_tokens(
+            "openai",
+            &ava_auth::tokens::OAuthTokens {
+                access_token: "access-token".to_string(),
+                refresh_token: Some("refresh-token".to_string()),
+                expires_at: Some(123),
+                id_token: Some(format!("{header}.{payload}.{sig}")),
+            },
+        );
+
+        let credential = store.get("openai").expect("credential saved");
+        assert_eq!(credential.oauth_token.as_deref(), Some("access-token"));
+        assert_eq!(credential.oauth_account_id.as_deref(), Some("acct-123"));
     }
 }

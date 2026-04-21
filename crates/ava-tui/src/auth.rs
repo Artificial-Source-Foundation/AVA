@@ -3,10 +3,9 @@
 use ava_auth::config::AuthFlow;
 use ava_config::{
     execute_credential_command, provider_name, redact_key, CredentialCommand, CredentialStore,
-    ProviderCredential,
 };
 use color_eyre::Result;
-use std::io::{self, Write};
+use std::io::{self, IsTerminal, Write};
 
 use crate::config::cli::AuthCommand;
 
@@ -33,52 +32,54 @@ async fn auth_login(provider_id: &str) -> Result<()> {
 
     println!("Signing in to {}...", info.name);
 
-    // For providers with multiple flows, prefer PKCE (browser OAuth) over API key
-    // when invoked via `auth login` (the user explicitly wants to log in, not paste a key).
-    let flow = if info.auth_flows.contains(&AuthFlow::Pkce) {
-        AuthFlow::Pkce
-    } else {
-        info.primary_flow()
-    };
+    let flow = select_auth_flow(info)?;
 
     match flow {
         AuthFlow::Pkce => {
             let result = ava_auth::authenticate_with_flow(provider_id, AuthFlow::Pkce).await;
             match result {
                 Ok(ava_auth::AuthResult::OAuth(tokens)) => {
-                    // Store OAuth tokens for ChatGPT subscription access.
-                    let mut store = CredentialStore::load_default().await.unwrap_or_default();
-                    let account_id = tokens
-                        .id_token
-                        .as_deref()
-                        .and_then(ava_auth::tokens::extract_account_id)
-                        .or_else(|| {
-                            ava_auth::tokens::extract_account_id(tokens.access_token.as_str())
-                        });
-
-                    // OAuth tokens are always stored in oauth_token.
-                    // The provider creation path detects OAuth-only credentials
-                    // and routes to the ChatGPT backend API accordingly.
-                    store.set(
-                        provider_id,
-                        ProviderCredential {
-                            api_key: String::new(),
-                            base_url: None,
-                            org_id: None,
-                            oauth_token: Some(tokens.access_token),
-                            oauth_refresh_token: tokens.refresh_token,
-                            oauth_expires_at: tokens.expires_at,
-                            oauth_account_id: account_id,
-                            litellm_compatible: None,
-                            loop_prone: None,
-                        },
-                    );
-                    store.save_default().await?;
+                    store_oauth_tokens(provider_id, tokens).await?;
                     println!("{}: Connected via OAuth", provider_name(provider_id));
                 }
                 Ok(_) => unreachable!("PKCE flow should return OAuth result"),
                 Err(err) => {
                     eprintln!("Authentication failed: {err}");
+                    std::process::exit(1);
+                }
+            }
+        }
+        AuthFlow::OpenAiHeadless => {
+            let cfg = ava_auth::config::oauth_config(provider_id)
+                .ok_or_else(|| color_eyre::eyre::eyre!("No OAuth config for {provider_id}"))?;
+
+            let device = ava_auth::openai_headless::request_code(cfg.client_id).await?;
+            println!();
+            println!("  Enter this code: {}", device.user_code);
+            println!("  Visit: {}", device.verification_uri);
+            println!();
+
+            let _ = ava_auth::browser::open_browser(&device.verification_uri);
+
+            println!("Waiting for authorization...");
+
+            match ava_auth::openai_headless::poll_code(
+                cfg.client_id,
+                &device.device_code,
+                &device.user_code,
+                device.interval,
+            )
+            .await?
+            {
+                Some(tokens) => {
+                    store_oauth_tokens(provider_id, tokens).await?;
+                    println!(
+                        "{}: Connected via headless ChatGPT login",
+                        provider_name(provider_id)
+                    );
+                }
+                None => {
+                    eprintln!("Headless login expired. Please try again.");
                     std::process::exit(1);
                 }
             }
@@ -107,29 +108,7 @@ async fn auth_login(provider_id: &str) -> Result<()> {
             .await?
             {
                 Some(tokens) => {
-                    let mut store = CredentialStore::load_default().await.unwrap_or_default();
-                    let account_id = tokens
-                        .id_token
-                        .as_deref()
-                        .and_then(ava_auth::tokens::extract_account_id)
-                        .or_else(|| {
-                            ava_auth::tokens::extract_account_id(tokens.access_token.as_str())
-                        });
-                    store.set(
-                        provider_id,
-                        ProviderCredential {
-                            api_key: String::new(),
-                            base_url: None,
-                            org_id: None,
-                            oauth_token: Some(tokens.access_token),
-                            oauth_refresh_token: tokens.refresh_token,
-                            oauth_expires_at: tokens.expires_at,
-                            oauth_account_id: account_id,
-                            litellm_compatible: None,
-                            loop_prone: None,
-                        },
-                    );
-                    store.save_default().await?;
+                    store_oauth_tokens(provider_id, tokens).await?;
                     println!("{}: Connected via device code", provider_name(provider_id));
                 }
                 None => {
@@ -168,6 +147,119 @@ async fn auth_login(provider_id: &str) -> Result<()> {
     }
 
     Ok(())
+}
+
+async fn store_oauth_tokens(
+    provider_id: &str,
+    tokens: ava_auth::tokens::OAuthTokens,
+) -> Result<()> {
+    let mut store = CredentialStore::load_default().await.unwrap_or_default();
+    store.set_oauth_tokens(provider_id, &tokens);
+    store.save_default().await?;
+    Ok(())
+}
+
+fn select_auth_flow(info: &ava_auth::ProviderInfo) -> Result<AuthFlow> {
+    select_auth_flow_with_input(info, io::stdin().is_terminal(), || {
+        let mut input = String::new();
+        io::stdin().read_line(&mut input)?;
+        Ok(input)
+    })
+}
+
+fn select_auth_flow_with_input<F>(
+    info: &ava_auth::ProviderInfo,
+    stdin_is_terminal: bool,
+    read_input: F,
+) -> Result<AuthFlow>
+where
+    F: FnOnce() -> io::Result<String>,
+{
+    if info.auth_flows.len() <= 1 {
+        return Ok(info.primary_flow());
+    }
+
+    if !stdin_is_terminal {
+        return Ok(info.primary_flow());
+    }
+
+    println!("Choose an auth method:");
+    for (idx, flow) in info.auth_flows.iter().enumerate() {
+        println!("  {}. {}", idx + 1, auth_flow_label(*flow));
+    }
+    print!("Select [1-{}] (default 1): ", info.auth_flows.len());
+    io::stdout().flush()?;
+
+    let input = read_input()?;
+    resolve_auth_flow_selection(info, stdin_is_terminal, Some(input.trim()))
+}
+
+fn resolve_auth_flow_selection(
+    info: &ava_auth::ProviderInfo,
+    stdin_is_terminal: bool,
+    selection: Option<&str>,
+) -> Result<AuthFlow> {
+    if info.auth_flows.len() <= 1 {
+        return Ok(info.primary_flow());
+    }
+
+    if !stdin_is_terminal {
+        return Ok(info.primary_flow());
+    }
+
+    let trimmed = selection.unwrap_or("").trim();
+    if trimmed.is_empty() {
+        return Ok(info.primary_flow());
+    }
+
+    let selection = trimmed.parse::<usize>().map_err(|_| {
+        color_eyre::eyre::eyre!(
+            "Invalid auth method selection: {trimmed}. Enter a number between 1 and {}.",
+            info.auth_flows.len()
+        )
+    })?;
+    info.auth_flows
+        .get(selection.saturating_sub(1))
+        .copied()
+        .ok_or_else(|| {
+            color_eyre::eyre::eyre!(
+                "Invalid auth method selection: {selection}. Enter a number between 1 and {}.",
+                info.auth_flows.len()
+            )
+        })
+}
+
+fn auth_flow_label(flow: AuthFlow) -> &'static str {
+    match flow {
+        AuthFlow::Pkce => "ChatGPT Pro/Plus (browser)",
+        AuthFlow::OpenAiHeadless => "ChatGPT Pro/Plus (headless)",
+        AuthFlow::ApiKey => "Manually enter API key",
+        AuthFlow::DeviceCode => "Device code",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{resolve_auth_flow_selection, select_auth_flow_with_input};
+    use ava_auth::config::AuthFlow;
+
+    #[test]
+    fn non_interactive_openai_login_defaults_to_primary_flow() {
+        let info = ava_auth::provider_info("openai").expect("openai provider metadata");
+        let selected = select_auth_flow_with_input(info, false, || {
+            panic!("non-interactive flow selection should not read stdin")
+        })
+        .expect("flow selection");
+        assert_eq!(selected, AuthFlow::Pkce);
+    }
+
+    #[test]
+    fn interactive_openai_login_accepts_headless_choice() {
+        let info = ava_auth::provider_info("openai").expect("openai provider metadata");
+        let selected =
+            resolve_auth_flow_selection(info, true, Some("2")).expect("headless flow selection");
+        assert_eq!(selected, AuthFlow::OpenAiHeadless);
+    }
 }
 
 async fn auth_logout(provider_id: &str) -> Result<()> {

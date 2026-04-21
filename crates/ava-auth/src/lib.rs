@@ -1,13 +1,15 @@
 //! OAuth and provider authentication for AVA.
 //!
 //! Shared crate used by both the CLI/TUI and Desktop app.
-//! Supports PKCE browser login, device code flow, and API key management.
+//! Supports PKCE browser login, OpenAI headless login, device code flow, and
+//! API key management.
 
 pub mod browser;
 pub mod callback;
 pub mod config;
 pub mod copilot;
 pub mod device_code;
+pub mod openai_headless;
 pub mod pkce;
 pub mod tokens;
 
@@ -105,7 +107,7 @@ pub fn all_providers() -> &'static [ProviderInfo] {
             id: "openai",
             name: "OpenAI",
             description: "ChatGPT Plus/Pro or API key",
-            auth_flows: &[AuthFlow::ApiKey, AuthFlow::Pkce],
+            auth_flows: &[AuthFlow::Pkce, AuthFlow::OpenAiHeadless, AuthFlow::ApiKey],
             env_var: Some("OPENAI_API_KEY"),
             default_base_url: Some("https://api.openai.com/v1"),
             group: ProviderGroup::Popular,
@@ -263,6 +265,12 @@ pub async fn authenticate_with_flow(
 
             Ok(AuthResult::OAuth(oauth_tokens))
         }
+        AuthFlow::OpenAiHeadless => {
+            let cfg = oauth_config(normalized)
+                .ok_or_else(|| AuthError::NoOAuthConfig(provider_id.to_string()))?;
+            let device = openai_headless::request_code(cfg.client_id).await?;
+            Ok(AuthResult::DeviceCodePending(device))
+        }
         AuthFlow::DeviceCode => {
             let cfg = oauth_config(normalized)
                 .ok_or_else(|| AuthError::NoOAuthConfig(provider_id.to_string()))?;
@@ -292,8 +300,9 @@ mod tests {
         let info = provider_info("openai").unwrap();
         assert_eq!(info.name, "OpenAI");
         assert!(info.has_multiple_flows());
-        assert_eq!(info.primary_flow(), AuthFlow::ApiKey);
+        assert_eq!(info.primary_flow(), AuthFlow::Pkce);
         assert!(info.auth_flows.contains(&AuthFlow::Pkce));
+        assert!(info.auth_flows.contains(&AuthFlow::OpenAiHeadless));
 
         let info = provider_info("copilot").unwrap();
         assert_eq!(info.primary_flow(), AuthFlow::DeviceCode);

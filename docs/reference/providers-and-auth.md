@@ -2,7 +2,7 @@
 title: "Providers And Auth"
 description: "Canonical provider IDs, aliases, base URLs, and authentication behavior in AVA."
 order: 2
-updated: "2026-04-18"
+updated: "2026-04-21"
 ---
 
 # Providers And Auth
@@ -86,7 +86,7 @@ Credential entries can store both API-key and OAuth fields.
 1. If a valid OAuth token exists, it is preferred over `api_key`.
 2. OAuth tokens are treated as expired 30 seconds before their actual expiry timestamp.
 3. If an OAuth token is expired and a refresh token is present, AVA can attempt refresh flows before falling back.
-4. OpenAI has a special ChatGPT OAuth path when OAuth exists but no API key is set.
+4. OpenAI exposes three user-facing auth choices in the TUI: ChatGPT browser login, ChatGPT headless login, and manual API key entry.
 5. `ollama` is treated as a local endpoint and can be considered configured with only a base URL.
 
 For an Ollama-only, task-oriented setup path, use [How-to: Use local models with Ollama](../how-to/ollama-local-models.md).

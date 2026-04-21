@@ -70,6 +70,7 @@ pub enum ProviderConnectResult {
     DeviceCodeReady {
         provider_id: String,
         device: ava_auth::device_code::DeviceCodeResponse,
+        attempt: u64,
     },
     InlineError(String),
 }

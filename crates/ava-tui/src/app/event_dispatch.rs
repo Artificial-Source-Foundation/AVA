@@ -1,5 +1,22 @@
 use super::*;
 
+fn apply_device_code_ready(
+    pc: &mut crate::widgets::provider_connect::ProviderConnectState,
+    provider_id: String,
+    device: ava_auth::device_code::DeviceCodeResponse,
+    attempt: u64,
+) {
+    if pc.current_auth_attempt() == attempt {
+        pc.screen = crate::widgets::provider_connect::ConnectScreen::DeviceCode {
+            provider_id,
+            user_code: device.user_code,
+            verification_uri: device.verification_uri,
+            started: std::time::Instant::now(),
+        };
+        pc.message = None;
+    }
+}
+
 impl App {
     pub(super) fn handle_event(
         &mut self,
@@ -572,15 +589,10 @@ impl App {
                 crate::event::ProviderConnectResult::DeviceCodeReady {
                     provider_id,
                     device,
+                    attempt,
                 } => {
                     if let Some(ref mut pc) = self.state.provider_connect {
-                        pc.screen = crate::widgets::provider_connect::ConnectScreen::DeviceCode {
-                            provider_id,
-                            user_code: device.user_code,
-                            verification_uri: device.verification_uri,
-                            started: std::time::Instant::now(),
-                        };
-                        pc.message = None;
+                        apply_device_code_ready(pc, provider_id, device, attempt);
                     }
                 }
                 crate::event::ProviderConnectResult::InlineError(err) => {
@@ -628,12 +640,7 @@ impl App {
                     let mut store = ava_config::CredentialStore::load_default()
                         .await
                         .unwrap_or_default();
-                    store.set_oauth(
-                        &provider,
-                        &tokens.access_token,
-                        tokens.refresh_token.as_deref(),
-                        tokens.expires_at,
-                    );
+                    store.set_oauth_tokens(&provider, &tokens);
                     let _ = tx.send(AppEvent::ProviderConnectFinished(
                         crate::event::ProviderConnectResult::OAuthStored {
                             provider,
@@ -721,5 +728,39 @@ impl App {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::apply_device_code_ready;
+    use crate::widgets::provider_connect::{ConnectScreen, ProviderConnectState};
+    use ava_config::CredentialStore;
+
+    #[test]
+    fn stale_device_code_ready_is_ignored_after_cancel() {
+        let mut state = ProviderConnectState::for_provider(&CredentialStore::default(), "openai");
+        let attempt = state.begin_auth_attempt();
+        state.cancel_auth_attempt();
+        state.message = Some("cancelled".to_string());
+
+        apply_device_code_ready(
+            &mut state,
+            "openai".to_string(),
+            ava_auth::device_code::DeviceCodeResponse {
+                device_code: "device-auth".to_string(),
+                user_code: "CODE-123".to_string(),
+                verification_uri: "https://auth.openai.com/codex/device".to_string(),
+                expires_in: 300,
+                interval: 5,
+            },
+            attempt,
+        );
+
+        assert!(matches!(
+            state.screen,
+            ConnectScreen::AuthMethodChoice { .. }
+        ));
+        assert_eq!(state.message.as_deref(), Some("cancelled"));
     }
 }

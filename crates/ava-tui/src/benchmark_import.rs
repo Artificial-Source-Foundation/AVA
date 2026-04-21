@@ -7,10 +7,10 @@
 //!
 //! ```bash
 //! # Clone the benchmark repo first:
-//! git clone https://github.com/Aider-AI/polyglot-benchmark ~/.ava/benchmarks/polyglot
+//! git clone https://github.com/Aider-AI/polyglot-benchmark $XDG_CACHE_HOME/ava/benchmarks/polyglot
 //!
 //! # Then run with --import-polyglot:
-//! cargo run --bin ava -- --benchmark --import-polyglot ~/.ava/benchmarks/polyglot \
+//! cargo run --bin ava -- --benchmark --import-polyglot $XDG_CACHE_HOME/ava/benchmarks/polyglot \
 //!   --models "inception:mercury-2,openrouter:anthropic/claude-haiku-4.5"
 //! ```
 //!

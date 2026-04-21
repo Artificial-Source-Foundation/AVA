@@ -3,10 +3,11 @@ use crate::state::agent::SubAgentInfo;
 use ava_agent::control_plane::commands::{queue_message_tier, ControlPlaneCommand};
 use ava_agent::control_plane::events::{required_backend_event_kinds, CanonicalEventKind};
 use ava_agent::control_plane::interactive::InteractiveRequestKind;
+use ava_agent::stack::AgentRunResult;
 use ava_permissions::tags::RiskLevel;
 use std::time::Duration;
 use tempfile::tempdir;
-use tokio::sync::oneshot;
+use tokio::sync::{mpsc, oneshot};
 
 fn sample_plan(summary: &str) -> ava_types::Plan {
     ava_types::Plan {
@@ -21,6 +22,131 @@ fn sample_plan(summary: &str) -> ava_types::Plan {
         estimated_turns: Some(2),
         codename: Some("Milestone-3".to_string()),
     }
+}
+
+#[test]
+fn resume_restore_uses_session_metadata_without_cli_agent_override() {
+    let metadata = serde_json::json!({
+        "provider": "openrouter",
+        "model": "anthropic/claude-sonnet-4",
+        "primaryAgentId": "architect",
+        "primaryAgentPrompt": "You are the architect profile"
+    });
+
+    let (primary_agent_id, primary_agent_prompt, restore_model) =
+        resume_restore_from_metadata(&metadata, None);
+
+    assert_eq!(primary_agent_id.as_deref(), Some("architect"));
+    assert_eq!(
+        primary_agent_prompt.as_deref(),
+        Some("You are the architect profile")
+    );
+    assert_eq!(
+        restore_model,
+        Some((
+            "openrouter".to_string(),
+            "anthropic/claude-sonnet-4".to_string()
+        ))
+    );
+}
+
+#[test]
+fn resume_restore_skips_session_metadata_when_cli_agent_override_present() {
+    let metadata = serde_json::json!({
+        "provider": "openrouter",
+        "model": "anthropic/claude-sonnet-4",
+        "primaryAgentId": "architect",
+        "primaryAgentPrompt": "You are the architect profile"
+    });
+
+    let (primary_agent_id, primary_agent_prompt, restore_model) =
+        resume_restore_from_metadata(&metadata, Some("coder"));
+
+    assert!(primary_agent_id.is_none());
+    assert!(primary_agent_prompt.is_none());
+    assert!(restore_model.is_none());
+}
+
+#[test]
+fn persisted_primary_agent_prompt_round_trips_and_cli_agent_override_wins() {
+    let temp = tempdir().expect("tempdir");
+    let db_path = temp.path().join("data.db");
+    let mut app = App::test_new(&db_path);
+    let session = app.state.session.create_session().expect("session");
+
+    app.state.agent.provider_name = "openrouter".to_string();
+    app.state.agent.model_name = "anthropic/claude-sonnet-4".to_string();
+    app.state.agent.set_primary_agent_profile(
+        Some("architect".to_string()),
+        Some("You are the architect profile".to_string()),
+        None,
+    );
+
+    app.finish_run(AgentRunResult {
+        success: true,
+        turns: 1,
+        session,
+    });
+
+    let saved = app
+        .state
+        .session
+        .list_recent(1)
+        .expect("load saved session")
+        .into_iter()
+        .next()
+        .expect("saved session");
+
+    let (id_from_metadata, prompt_from_metadata, model_from_metadata) =
+        resume_restore_from_metadata(&saved.metadata, None);
+    assert_eq!(id_from_metadata.as_deref(), Some("architect"));
+    assert_eq!(
+        prompt_from_metadata.as_deref(),
+        Some("You are the architect profile")
+    );
+    assert_eq!(
+        model_from_metadata,
+        Some((
+            "openrouter".to_string(),
+            "anthropic/claude-sonnet-4".to_string()
+        ))
+    );
+
+    let (id_with_override, prompt_with_override, model_with_override) =
+        resume_restore_from_metadata(&saved.metadata, Some("coder"));
+    assert!(id_with_override.is_none());
+    assert!(prompt_with_override.is_none());
+    assert!(model_with_override.is_none());
+}
+
+#[test]
+fn session_loaded_event_restores_primary_agent_prompt_metadata() {
+    let temp = tempdir().expect("tempdir");
+    let db_path = temp.path().join("data.db");
+    let mut app = App::test_new(&db_path);
+    let session = ava_types::Session::new();
+    let (app_tx, _) = mpsc::unbounded_channel();
+    let (agent_tx, _) = mpsc::unbounded_channel();
+
+    app.handle_event(
+        AppEvent::SessionLoaded(Ok(crate::event::SessionLoadResult {
+            session,
+            restore_model: None,
+            restore_primary_agent_id: Some("architect".to_string()),
+            restore_primary_agent_prompt: Some("You are the architect profile".to_string()),
+        })),
+        app_tx,
+        agent_tx,
+    );
+
+    assert_eq!(
+        app.state.agent.primary_agent_id.as_deref(),
+        Some("architect")
+    );
+    assert_eq!(
+        app.state.agent.primary_agent_prompt.as_deref(),
+        Some("You are the architect profile")
+    );
 }
 
 fn sample_approval_request(
@@ -890,6 +1016,60 @@ fn clicking_inflight_duplicate_subagent_card_uses_call_id() {
         app.state.view_mode,
         ViewMode::SubAgent { agent_index: 0, .. }
     ));
+}
+
+#[test]
+fn enter_subagent_view_allows_running_agent_without_completed_transcript() {
+    let temp = tempdir().expect("tempdir");
+    let db_path = temp.path().join("data.db");
+    let mut app = App::test_new(&db_path);
+
+    app.state.agent.sub_agents.push(SubAgentInfo {
+        call_id: "call-running".to_string(),
+        agent_type: Some("scout".to_string()),
+        description: "Inspect files.".to_string(),
+        background: false,
+        is_running: true,
+        tool_count: 0,
+        current_tool: None,
+        started_at: std::time::Instant::now(),
+        elapsed: None,
+        session_id: None,
+        session_messages: vec![],
+        provider: None,
+        resumed: false,
+        cost_usd: None,
+        input_tokens: None,
+        output_tokens: None,
+    });
+
+    assert!(app.enter_sub_agent_view(0));
+    assert!(matches!(app.state.view_mode, ViewMode::SubAgent { .. }));
+}
+
+#[test]
+fn typing_is_ignored_while_viewing_subagent_transcript() {
+    let temp = tempdir().expect("tempdir");
+    let db_path = temp.path().join("data.db");
+    let mut app = App::test_new(&db_path);
+    let (app_tx, _) = mpsc::unbounded_channel();
+    let (agent_tx, _) = mpsc::unbounded_channel();
+
+    app.state.view_mode = ViewMode::SubAgent {
+        agent_index: 0,
+        description: "Inspect files.".to_string(),
+    };
+
+    app.handle_event(
+        AppEvent::Key(crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Char('x'),
+            crossterm::event::KeyModifiers::NONE,
+        )),
+        app_tx,
+        agent_tx,
+    );
+
+    assert!(app.state.input.buffer.is_empty());
 }
 
 #[test]

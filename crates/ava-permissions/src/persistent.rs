@@ -1,12 +1,12 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-/// Persistent permission rules saved to `~/.ava/permissions.toml` (user-global).
+/// Persistent permission rules saved to `$XDG_CONFIG_HOME/ava/permissions.toml` (user-global).
 ///
 /// These survive across sessions — when a user selects "Allow always" in the
 /// approval dock, the rule is written here and auto-loaded on next startup.
 ///
-/// SEC: Allowlists are stored in the user-global path (`~/.ava/permissions.toml`)
+/// SEC: Allowlists are stored in the user-global path (`$XDG_CONFIG_HOME/ava/permissions.toml`)
 /// to prevent malicious repositories from pre-populating allowlists via a
 /// repo-local `.ava/permissions.toml`. Project-local rules (via `load_project`)
 /// can only *restrict* (add blocked tools/commands), never expand permissions.
@@ -27,20 +27,30 @@ pub struct PersistentRules {
 }
 
 impl PersistentRules {
-    /// Return the user-global permissions path: `~/.ava/permissions.toml`.
-    fn global_path() -> PathBuf {
-        dirs::home_dir()
-            .unwrap_or_default()
-            .join(".ava/permissions.toml")
+    /// Return the user-global permissions path: `$XDG_CONFIG_HOME/ava/permissions.toml`.
+    fn global_path() -> Option<PathBuf> {
+        let preferred = dirs::config_dir()?.join("ava/permissions.toml");
+        if preferred.exists() {
+            return Some(preferred);
+        }
+
+        let legacy = dirs::home_dir()?.join(".ava/permissions.toml");
+        if legacy.exists() {
+            return Some(legacy);
+        }
+
+        Some(preferred)
     }
 
-    /// Load persistent rules from `~/.ava/permissions.toml` (user-global).
+    /// Load persistent rules from `$XDG_CONFIG_HOME/ava/permissions.toml` (user-global).
     /// Returns default (empty) rules if the file doesn't exist or can't be parsed.
     ///
     /// SEC: This reads from the user's home directory, NOT from the repository,
     /// so a malicious repo cannot pre-populate allowlists.
     pub fn load() -> Self {
-        Self::load_from(&Self::global_path())
+        Self::global_path()
+            .map(|path| Self::load_from(&path))
+            .unwrap_or_default()
     }
 
     /// Load rules from an arbitrary path (used internally and for testing).
@@ -77,11 +87,13 @@ impl PersistentRules {
         global
     }
 
-    /// Save persistent rules to `~/.ava/permissions.toml` (user-global).
+    /// Save persistent rules to `$XDG_CONFIG_HOME/ava/permissions.toml` (user-global).
     ///
     /// SEC: Always writes to the user's home directory, never to the repository.
     pub fn save(&self) -> std::io::Result<()> {
-        let path = Self::global_path();
+        let path = Self::global_path().ok_or_else(|| {
+            std::io::Error::other("could not determine XDG config directory for permissions")
+        })?;
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }

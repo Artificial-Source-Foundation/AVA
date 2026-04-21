@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 /// OAuth authentication configuration for a remote MCP server.
 ///
 /// Used when an MCP server requires OAuth 2.0 authentication (PKCE flow).
-/// Tokens are stored in `~/.ava/credentials.json` under a key derived from
+/// Tokens are stored in AVA's XDG data credentials file under a key derived from
 /// the server name (`mcp:{server_name}`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct McpOAuthConfig {
@@ -37,7 +37,7 @@ fn default_redirect_port() -> u16 {
 // MCP server configuration
 // ---------------------------------------------------------------------------
 
-/// Whether a server was loaded from the global (`~/.ava/mcp.json`) or local
+/// Whether a server was loaded from the global (`$XDG_CONFIG_HOME/ava/mcp.json`) or local
 /// (`.ava/mcp.json`) config file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum McpServerScope {

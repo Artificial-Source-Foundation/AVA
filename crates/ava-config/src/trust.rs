@@ -2,13 +2,11 @@
 //!
 //! Untrusted projects must not auto-load project-local MCP servers (`.ava/mcp.json`)
 //! or hooks (`.ava/hooks/*.toml`) because they can execute arbitrary code.
-//! Trust state is persisted in `~/.ava/trusted_projects.json`.
+//! Trust state is persisted in the XDG config dir at `.../ava/trusted_projects.json`.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::RwLock;
-
-const TRUSTED_FILE: &str = "trusted_projects.json";
 
 /// Process-scoped cache of trusted project paths.
 ///
@@ -18,12 +16,7 @@ static TRUST_CACHE: RwLock<Option<HashSet<PathBuf>>> = RwLock::new(None);
 
 /// Load the trusted project set from disk, bypassing the in-process cache.
 fn load_trusted_set() -> HashSet<PathBuf> {
-    let Some(trust_path) = dirs::home_dir().map(|h| {
-        h.canonicalize()
-            .unwrap_or(h)
-            .join(".ava")
-            .join(TRUSTED_FILE)
-    }) else {
+    let Ok(trust_path) = crate::trusted_projects_path() else {
         return HashSet::new();
     };
 
@@ -74,17 +67,12 @@ pub fn is_project_trusted(project_root: &Path) -> bool {
     trusted
 }
 
-/// Mark `project_root` as trusted. Appends to `~/.ava/trusted_projects.json`.
+/// Mark `project_root` as trusted. Appends to the XDG config trust store.
 ///
 /// Invalidates the in-process trust cache so subsequent calls to
 /// [`is_project_trusted`] reflect the updated state.
 pub fn trust_project(project_root: &Path) -> std::io::Result<()> {
-    let trust_path = dirs::home_dir()
-        .unwrap_or_default()
-        .canonicalize()
-        .unwrap_or_else(|_| dirs::home_dir().unwrap_or_default())
-        .join(".ava")
-        .join(TRUSTED_FILE);
+    let trust_path = crate::trusted_projects_path().map_err(std::io::Error::other)?;
 
     let canonical = project_root
         .canonicalize()

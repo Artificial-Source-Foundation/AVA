@@ -73,7 +73,7 @@ async fn plugin_add(source: &str) -> Result<()> {
     Ok(())
 }
 
-/// Copy a local plugin directory to `~/.ava/plugins/<name>/`.
+/// Copy a local plugin directory to `$XDG_CONFIG_HOME/ava/plugins/<name>/`.
 fn install_from_local(source: &Path) -> Result<()> {
     let manifest_path = source.join("plugin.toml");
     if !manifest_path.exists() {
@@ -196,7 +196,7 @@ async fn install_from_npm(package: &str) -> Result<()> {
     install_from_local(&source_dir)
 }
 
-/// Remove a plugin by name from `~/.ava/plugins/<name>/`.
+/// Remove a plugin by name from `$XDG_CONFIG_HOME/ava/plugins/<name>/`.
 fn plugin_remove(name: &str) -> Result<()> {
     let dest = global_plugin_dir()?.join(name);
 
@@ -661,10 +661,8 @@ done
 // -- helpers --
 
 fn global_plugin_dir() -> Result<PathBuf> {
-    let dir = dirs::home_dir()
-        .ok_or_else(|| color_eyre::eyre::eyre!("Cannot determine home directory"))?
-        .join(".ava")
-        .join("plugins");
+    let dir =
+        ava_config::global_plugins_dir().map_err(|e| color_eyre::eyre::eyre!(e.to_string()))?;
     std::fs::create_dir_all(&dir)?;
     Ok(dir)
 }

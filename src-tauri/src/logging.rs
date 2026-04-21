@@ -74,8 +74,9 @@ impl std::io::Write for RotatingBackendLogWriter {
     }
 }
 
-pub fn init_backend_logging(app_data_dir: &Path) -> Result<BackendLoggingState, String> {
-    let log_dir = app_data_dir.join("logs");
+pub fn init_backend_logging(_app_data_dir: &Path) -> Result<BackendLoggingState, String> {
+    let log_dir = ava_config::logs_dir()
+        .map_err(|error| format!("failed to resolve backend log directory: {error}"))?;
     std::fs::create_dir_all(&log_dir)
         .map_err(|error| format!("failed to create backend log directory: {error}"))?;
 

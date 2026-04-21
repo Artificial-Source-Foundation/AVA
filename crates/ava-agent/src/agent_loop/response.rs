@@ -374,11 +374,16 @@ impl AgentLoop {
             all_tools
         };
 
+        let subagent_visible = tools.iter().any(|tool| tool.name == "subagent");
+
         tools = match self.tool_visibility_profile {
             crate::routing::ToolVisibilityProfile::Full => tools,
             crate::routing::ToolVisibilityProfile::ReadOnly => tools
                 .into_iter()
-                .filter(|t| crate::agent_loop::READ_ONLY_TOOLS.contains(&t.name.as_str()))
+                .filter(|tool| {
+                    crate::agent_loop::READ_ONLY_TOOLS.contains(&tool.name.as_str())
+                        || (subagent_visible && tool.name == "subagent")
+                })
                 .collect(),
             crate::routing::ToolVisibilityProfile::AnswerOnly => Vec::new(),
         };

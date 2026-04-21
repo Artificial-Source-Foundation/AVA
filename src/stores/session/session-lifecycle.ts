@@ -448,19 +448,13 @@ export async function createNewSession(
       : undefined
     const projectForSession = overrideProject ?? ambientProject
     const projectId = projectIdOverride ?? requestedProjectId ?? projectForSession?.id
-    const session = await dbCreateSession(
-      requestedName,
-      projectId,
-      undefined,
-      titlePlaceholder ? { titlePlaceholder: true } : undefined
-    )
+    const sessionMetadata = { titlePlaceholder }
+    const session = await dbCreateSession(requestedName, projectId, undefined, sessionMetadata)
     const sessionProjectId = session.projectId
     const notifyCwd = resolveSessionProjectCwd(sessionProjectId)
     const sessionWithStats: SessionWithStats = {
       ...session,
-      metadata: titlePlaceholder
-        ? { ...(session.metadata ?? {}), titlePlaceholder: true }
-        : session.metadata,
+      metadata: { ...(session.metadata ?? {}), ...sessionMetadata },
       messageCount: 0,
       totalTokens: 0,
     }

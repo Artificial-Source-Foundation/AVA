@@ -8,8 +8,10 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 pub(super) async fn run_voice_loop(cli: CliArgs) -> Result<()> {
-    let data_dir = dirs::home_dir().unwrap_or_default().join(".ava");
-    let (provider, model) = cli.resolve_provider_model().await?;
+    let data_dir = ava_config::data_dir().unwrap_or_default();
+    let startup = cli.resolve_startup_selection().await?;
+    let provider = startup.provider;
+    let model = startup.model;
     let runtime_lean = cli.runtime_lean_settings();
     if provider.is_none() {
         return Err(eyre!(crate::config::cli::NO_PROVIDER_ERROR));
@@ -90,6 +92,9 @@ pub(super) async fn run_voice_loop(cli: CliArgs) -> Result<()> {
                 runtime_lean.eager_codebase_indexing,
             ))
             .await?;
+        let _ = stack
+            .set_startup_prompt_suffix(startup.primary_agent_prompt.clone())
+            .await;
         spawn_auto_approve_requests(approval_rx);
 
         let (tx, mut rx) = mpsc::unbounded_channel();

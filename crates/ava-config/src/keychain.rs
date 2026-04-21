@@ -19,9 +19,6 @@ const KEYCHAIN_SERVICE: &str = "ava-cli";
 /// Username for the provider index entry in the OS keychain.
 const INDEX_USERNAME: &str = "__ava_provider_index";
 
-/// File name for the encrypted credential store.
-const ENCRYPTED_FILE: &str = "credentials.enc";
-
 /// PBKDF2 iteration count for key derivation.
 #[cfg(not(test))]
 const PBKDF2_ITERATIONS: u32 = 600_000;
@@ -53,7 +50,7 @@ struct EncryptedEnvelope {
 
 /// Manages credential storage with OS keychain primary and encrypted file fallback.
 pub struct KeychainManager {
-    /// Path to the encrypted fallback file (typically ~/.ava/credentials.enc).
+    /// Path to the encrypted fallback file in AVA's XDG data dir.
     encrypted_path: PathBuf,
     /// Whether the OS keychain is available (detected at construction).
     os_keychain_available: bool,
@@ -62,9 +59,7 @@ pub struct KeychainManager {
 impl KeychainManager {
     /// Create a new KeychainManager, probing OS keychain availability.
     pub fn new() -> Result<Self> {
-        let home = dirs::home_dir()
-            .ok_or_else(|| AvaError::ConfigError("Could not resolve home directory".to_string()))?;
-        let encrypted_path = home.join(".ava").join(ENCRYPTED_FILE);
+        let encrypted_path = crate::encrypted_credentials_path()?;
         let os_keychain_available = probe_os_keychain();
 
         if os_keychain_available {
@@ -267,9 +262,7 @@ impl KeychainManager {
 
     /// Check if migration is needed (plaintext file exists but secure storage is empty).
     pub fn needs_migration(&self) -> bool {
-        let plaintext_path = dirs::home_dir()
-            .map(|h| h.join(".ava").join("credentials.json"))
-            .unwrap_or_default();
+        let plaintext_path = crate::credentials_path().unwrap_or_default();
         plaintext_path.exists()
     }
 

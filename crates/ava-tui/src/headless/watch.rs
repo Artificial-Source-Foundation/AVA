@@ -172,6 +172,9 @@ async fn run_watch_trigger(cli: &CliArgs, directive: &str) -> Result<()> {
     if let Some(model) = &cli.model {
         cmd.arg("--model").arg(model);
     }
+    if let Some(agent) = &cli.agent {
+        cmd.arg("--agent").arg(agent);
+    }
     if cli.max_turns > 0 {
         cmd.arg("--max-turns").arg(cli.max_turns.to_string());
     }

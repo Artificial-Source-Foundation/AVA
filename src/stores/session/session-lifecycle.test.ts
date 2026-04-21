@@ -455,7 +455,9 @@ describe('session removal fallback rebinding', () => {
     await deletePromise
 
     expect(dbDeleteSessionMock).toHaveBeenCalledWith(deleted.id)
-    expect(dbCreateSessionMock).toHaveBeenCalledWith('New Chat', 'project-1')
+    expect(dbCreateSessionMock).toHaveBeenCalledWith('New Chat', 'project-1', undefined, {
+      titlePlaceholder: true,
+    })
     expect(currentSession()?.id).toBe(replacement.id)
     expect(sessions().map((session) => session.id)).toEqual([replacement.id])
     expect(notifySessionOpenedMock).toHaveBeenCalledWith(
@@ -1348,7 +1350,9 @@ describe('session removal fallback rebinding', () => {
 
     expect(statusMock).not.toHaveBeenCalled()
     expect(cancelMock).not.toHaveBeenCalled()
-    expect(dbCreateSessionMock).toHaveBeenCalledWith('Another session', 'project-1')
+    expect(dbCreateSessionMock).toHaveBeenCalledWith('Another session', 'project-1', undefined, {
+      titlePlaceholder: false,
+    })
     expect(result.id).toBe(created.id)
     expect(currentSession()?.id).toBe(created.id)
   })
@@ -1388,7 +1392,9 @@ describe('session removal fallback rebinding', () => {
 
     await createNewSession('Override session', 'project-2')
 
-    expect(dbCreateSessionMock).toHaveBeenCalledWith('Override session', 'project-2')
+    expect(dbCreateSessionMock).toHaveBeenCalledWith('Override session', 'project-2', undefined, {
+      titlePlaceholder: false,
+    })
     expect(setLastSessionForProjectMock).toHaveBeenCalledWith('project-2', created.id)
     expect(notifySessionOpenedMock).toHaveBeenCalledWith(
       created.id,
@@ -1480,7 +1486,9 @@ describe('session removal fallback rebinding', () => {
 
     expect(result.id).toBe(created.id)
     expect(dbCreateSessionMock).toHaveBeenCalledTimes(1)
-    expect(dbCreateSessionMock).toHaveBeenCalledWith('New Chat', 'project-1')
+    expect(dbCreateSessionMock).toHaveBeenCalledWith('New Chat', 'project-1', undefined, {
+      titlePlaceholder: true,
+    })
     expect(notifySessionOpenedMock).toHaveBeenCalledWith(
       created.id,
       '/workspace',
@@ -1552,8 +1560,12 @@ describe('session removal fallback rebinding', () => {
     await Promise.resolve()
 
     expect(dbCreateSessionMock).toHaveBeenCalledTimes(2)
-    expect(dbCreateSessionMock).toHaveBeenNthCalledWith(1, 'New Chat', 'project-1')
-    expect(dbCreateSessionMock).toHaveBeenNthCalledWith(2, 'New Chat', 'project-2')
+    expect(dbCreateSessionMock).toHaveBeenNthCalledWith(1, 'New Chat', 'project-1', undefined, {
+      titlePlaceholder: false,
+    })
+    expect(dbCreateSessionMock).toHaveBeenNthCalledWith(2, 'New Chat', 'project-2', undefined, {
+      titlePlaceholder: false,
+    })
 
     resolveProject1?.(createdProject1)
     resolveProject2?.(createdProject2)
@@ -1598,8 +1610,12 @@ describe('session removal fallback rebinding', () => {
     await Promise.resolve()
 
     expect(dbCreateSessionMock).toHaveBeenCalledTimes(2)
-    expect(dbCreateSessionMock).toHaveBeenNthCalledWith(1, 'New Chat', 'project-1')
-    expect(dbCreateSessionMock).toHaveBeenNthCalledWith(2, 'New Chat', 'project-2')
+    expect(dbCreateSessionMock).toHaveBeenNthCalledWith(1, 'New Chat', 'project-1', undefined, {
+      titlePlaceholder: false,
+    })
+    expect(dbCreateSessionMock).toHaveBeenNthCalledWith(2, 'New Chat', 'project-2', undefined, {
+      titlePlaceholder: false,
+    })
 
     resolveProject1?.(createdProject1)
     resolveProject2?.(createdProject2)

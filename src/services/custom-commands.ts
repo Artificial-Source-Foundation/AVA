@@ -30,10 +30,10 @@ async function getFs() {
 export async function getCommandsDir(): Promise<string> {
   const fs = await getFs()
   if (!fs) return ''
-  const dir = '.config/ava/commands'
-  const exists = await fs.exists(dir, { baseDir: fs.BaseDirectory.Home })
+  const dir = 'ava/commands'
+  const exists = await fs.exists(dir, { baseDir: fs.BaseDirectory.Config })
   if (!exists) {
-    await fs.mkdir(dir, { baseDir: fs.BaseDirectory.Home, recursive: true })
+    await fs.mkdir(dir, { baseDir: fs.BaseDirectory.Config, recursive: true })
   }
   return dir
 }
@@ -129,7 +129,7 @@ function serializeToToml(cmd: Omit<CustomCommandFile, 'filePath'>): string {
   return lines.join('\n')
 }
 
-/** List all custom commands from ~/.config/ava/commands/ */
+/** List all custom commands from $XDG_CONFIG_HOME/ava/commands/. */
 export async function listCommands(): Promise<CustomCommandFile[]> {
   const fs = await getFs()
   if (!fs) return []
@@ -137,14 +137,14 @@ export async function listCommands(): Promise<CustomCommandFile[]> {
   if (!dir) return []
 
   try {
-    const entries = await fs.readDir(dir, { baseDir: fs.BaseDirectory.Home })
+    const entries = await fs.readDir(dir, { baseDir: fs.BaseDirectory.Config })
     const commands: CustomCommandFile[] = []
 
     for (const entry of entries) {
       if (!entry.name?.endsWith('.toml')) continue
       const filePath = `${dir}/${entry.name}`
       try {
-        const content = await fs.readTextFile(filePath, { baseDir: fs.BaseDirectory.Home })
+        const content = await fs.readTextFile(filePath, { baseDir: fs.BaseDirectory.Config })
         const cmd = parseToml(content, filePath)
         if (cmd) commands.push(cmd)
       } catch {
@@ -169,7 +169,7 @@ export async function saveCommand(
 
   const fileName = existingPath || `${dir}/${cmd.name.replace(/\s+/g, '-').toLowerCase()}.toml`
   const content = serializeToToml(cmd)
-  await fs.writeTextFile(fileName, content, { baseDir: fs.BaseDirectory.Home })
+  await fs.writeTextFile(fileName, content, { baseDir: fs.BaseDirectory.Config })
   return fileName
 }
 
@@ -177,5 +177,5 @@ export async function saveCommand(
 export async function deleteCommand(filePath: string): Promise<void> {
   const fs = await getFs()
   if (!fs) return
-  await fs.remove(filePath, { baseDir: fs.BaseDirectory.Home })
+  await fs.remove(filePath, { baseDir: fs.BaseDirectory.Config })
 }

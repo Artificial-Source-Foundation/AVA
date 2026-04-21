@@ -4,7 +4,7 @@
 //! tool calls, session start/end, agent completion, model switches, and more.
 //!
 //! Hook files are loaded from `.ava/hooks/*.toml` (project) and
-//! `~/.ava/hooks/*.toml` (global). Project hooks take precedence.
+//! `$XDG_CONFIG_HOME/ava/hooks/*.toml` (global). Project hooks take precedence.
 //!
 //! ## Hook types
 //!

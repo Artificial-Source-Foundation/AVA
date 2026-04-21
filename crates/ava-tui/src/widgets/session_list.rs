@@ -83,15 +83,24 @@ fn relative_date(dt: &chrono::DateTime<chrono::Utc>) -> String {
 
 /// Get the session title from metadata, or fall back to deriving one from the first user message.
 fn session_title(session: &Session) -> String {
-    // Check for a stored title in metadata first
-    if let Some(title) = session
+    let placeholder = session
         .metadata
         .as_object()
-        .and_then(|m| m.get("title"))
-        .and_then(|v| v.as_str())
-    {
-        if !title.is_empty() {
-            return title.to_string();
+        .and_then(|m| m.get("titlePlaceholder"))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    // Check for a stored title in metadata first
+    if !placeholder {
+        if let Some(title) = session
+            .metadata
+            .as_object()
+            .and_then(|m| m.get("title"))
+            .and_then(|v| v.as_str())
+        {
+            if !title.is_empty() {
+                return title.to_string();
+            }
         }
     }
 

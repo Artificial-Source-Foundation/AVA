@@ -66,16 +66,26 @@ impl AuditStore {
         Ok(store)
     }
 
-    /// Open the default audit database at `~/.ava/audit.db`.
+    /// Open the default audit database in AVA's XDG data dir.
     pub async fn open_default() -> Result<Self, AuditStoreError> {
         let path = Self::default_path()
-            .ok_or_else(|| AuditStoreError::Io("cannot determine home directory".into()))?;
+            .ok_or_else(|| AuditStoreError::Io("cannot determine data directory".into()))?;
         Self::open(&path).await
     }
 
-    /// Returns the default database path: `~/.ava/audit.db`.
+    /// Returns the default database path in AVA's XDG data dir.
     pub fn default_path() -> Option<PathBuf> {
-        dirs::home_dir().map(|h| h.join(".ava/audit.db"))
+        let preferred = dirs::data_dir()?.join("ava").join("audit.db");
+        if preferred.exists() {
+            return Some(preferred);
+        }
+
+        let legacy = dirs::home_dir()?.join(".ava").join("audit.db");
+        if legacy.exists() {
+            return Some(legacy);
+        }
+
+        Some(preferred)
     }
 
     /// Create the audit_log table if it doesn't exist.

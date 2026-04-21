@@ -732,11 +732,13 @@ enum BenchmarkArtifactKind {
 }
 
 fn benchmark_workspace_dir() -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_default()
-        .join(".ava")
-        .join("benchmarks")
-        .join("workspace")
+    ava_config::benchmark_workspace_dir().unwrap_or_else(|_| {
+        dirs::cache_dir()
+            .unwrap_or_default()
+            .join("ava")
+            .join("benchmarks")
+            .join("workspace")
+    })
 }
 
 fn build_task_list(
@@ -1049,7 +1051,7 @@ async fn run_single_task(
     prompt: &BenchmarkPromptConfig,
     run_index: usize,
 ) -> Result<BenchmarkResult> {
-    let data_dir = dirs::home_dir().unwrap_or_default().join(".ava");
+    let data_dir = ava_config::data_dir().unwrap_or_default();
 
     let effective_turns = if task.needs_tools { max_turns } else { 3 };
 
@@ -1687,7 +1689,7 @@ fn summarize_validation_error(error: &str) -> String {
         .unwrap_or_else(|| "unknown validation error".to_string())
 }
 
-/// Save the full results as JSON to ~/.ava/benchmarks/.
+/// Save the full results as JSON to AVA's XDG cache benchmark directory.
 async fn save_results_json(
     report: &mut BenchmarkReport,
     output_path: Option<&Path>,
@@ -1729,10 +1731,12 @@ async fn save_results_json(
 }
 
 fn default_report_path(report: &BenchmarkReport, artifact_kind: BenchmarkArtifactKind) -> PathBuf {
-    let benchmarks_dir = dirs::home_dir()
-        .unwrap_or_default()
-        .join(".ava")
-        .join("benchmarks");
+    let benchmarks_dir = ava_config::benchmarks_dir().unwrap_or_else(|_| {
+        dirs::cache_dir()
+            .unwrap_or_default()
+            .join("ava")
+            .join("benchmarks")
+    });
     let date = report.timestamp.get(..10).unwrap_or("unknown-date");
     let suite = sanitize_path_segment(report.suite_name.as_deref().unwrap_or("benchmark"));
     let provider = sanitize_path_segment(report.provider.as_deref().unwrap_or("mixed-provider"));

@@ -58,6 +58,20 @@ pub fn set_cwd(path: String) -> Result<(), String> {
     std::env::set_current_dir(p).map_err(|e| format!("Failed to change directory to {path}: {e}"))
 }
 
+#[tauri::command]
+pub fn get_state_logs_dir() -> Result<String, String> {
+    ava_config::logs_dir()
+        .map(|path| path.to_string_lossy().to_string())
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn get_global_plugins_dir() -> Result<String, String> {
+    ava_config::global_plugins_dir()
+        .map(|path| path.to_string_lossy().to_string())
+        .map_err(|e| e.to_string())
+}
+
 /// Append text to a log file, creating parent directories if needed.
 ///
 /// TODO(security): This command accepts caller-supplied paths with no

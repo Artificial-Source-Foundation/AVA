@@ -6,6 +6,23 @@ use serde_json::{json, Value};
 
 use crate::registry::Tool;
 
+/// Internal argument key used to thread the originating tool-call ID through
+/// the subagent tool execution path.
+pub const INTERNAL_TOOL_CALL_ID_ARG: &str = "__ava_internal_call_id";
+
+tokio::task_local! {
+    static ORIGINATING_TOOL_CALL_ID: Option<String>;
+}
+
+/// Returns the current originating tool-call ID when the subagent tool is
+/// executing in a scoped context.
+pub fn current_originating_tool_call_id() -> Option<String> {
+    ORIGINATING_TOOL_CALL_ID
+        .try_with(|call_id| call_id.clone())
+        .ok()
+        .flatten()
+}
+
 /// Result returned by a sub-agent task spawn, containing both the final
 /// response text and the full conversation session for storage/display.
 #[derive(Debug, Clone)]
@@ -30,7 +47,8 @@ pub trait TaskSpawner: Send + Sync {
     async fn spawn(&self, prompt: &str) -> ava_types::Result<TaskResult>;
 
     /// Spawn a named sub-agent with the given prompt. The `agent_type` is
-    /// looked up in `agents.toml` to resolve model overrides, custom prompts,
+    /// looked up in `subagents.toml` (legacy `agents.toml` compatible) to
+    /// resolve model overrides, custom prompts,
     /// and max turns. Falls back to `spawn()` if the agent type has no special
     /// configuration.
     async fn spawn_named(&self, agent_type: &str, prompt: &str) -> ava_types::Result<TaskResult> {
@@ -51,9 +69,9 @@ pub trait TaskSpawner: Send + Sync {
 
 /// Tool that spawns a sub-agent to work on a task autonomously.
 ///
-/// The sub-agent gets a subset of tools (read, write, edit, bash, glob, grep,
-/// apply_patch) but NOT subagent, todo_write, todo_read, or question — preventing
-/// infinite recursion and user-facing interactions from child agents.
+/// The sub-agent gets a focused execution tool surface and does not get
+/// user-facing interactive tools like `question`, `todo_write`, or `todo_read`.
+/// Delegation remains bounded by backend depth/spawn policy limits.
 ///
 /// Supports two modes:
 /// - **Foreground** (default): blocks the main agent until the sub-agent completes
@@ -82,7 +100,7 @@ impl Tool for TaskTool {
           grep, apply_patch). Use this when a chunk of work is easier to delegate than to \
           keep in the main thread — for example, codebase reconnaissance, a focused \
           implementation slice, or a final review pass. Avoid using it for tiny single-file \
-          edits. The sub-agent cannot ask the user questions or spawn further sub-agents.\n\n\
+          edits. Sub-agents cannot ask the user questions, and any further delegation is bounded by backend depth and spawn-budget policy limits.\n\n\
           By default, the sub-agent runs in the foreground: the main agent waits for it to \
           finish and receives the result. Set `background: true` to run the sub-agent in \
           parallel — the main agent keeps working and gets notified when the background \
@@ -90,7 +108,7 @@ impl Tool for TaskTool {
           background when the work is independent.\n\n\
           Optionally specify an agent type (for example `scout`, `explore`, `plan`, `review`, \
           `worker`, or `build`) to use a specialist with its own model, prompt, and turn limits \
-          configured in agents.toml."
+          configured in subagents.toml (legacy agents.toml is still accepted as compatibility input)."
     }
 
     fn parameters(&self) -> Value {
@@ -104,7 +122,7 @@ impl Tool for TaskTool {
                 },
                 "agent": {
                     "type": "string",
-                    "description": "Optional agent type to use (e.g. 'scout', 'explore', 'plan', 'review', 'worker', or 'build'). Each agent type can have its own model, system prompt, and turn limits configured in agents.toml. Defaults to 'subagent'."
+                    "description": "Optional agent type to use (e.g. 'scout', 'explore', 'plan', 'review', 'worker', or 'build'). Each agent type can have its own model, system prompt, and turn limits configured in subagents.toml (legacy agents.toml is still accepted as compatibility input). Defaults to 'subagent'."
                 },
                 "background": {
                     "type": "boolean",
@@ -133,6 +151,11 @@ impl Tool for TaskTool {
             .get("background")
             .and_then(Value::as_bool)
             .unwrap_or(false);
+        let originating_call_id = args
+            .get(INTERNAL_TOOL_CALL_ID_ARG)
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .map(str::to_owned);
 
         if background {
             tracing::debug!(
@@ -140,7 +163,16 @@ impl Tool for TaskTool {
                 mode = "background",
                 "spawning background sub-agent"
             );
-            self.spawner.spawn_background(agent_type, prompt).await?;
+            if let Some(call_id) = originating_call_id {
+                ORIGINATING_TOOL_CALL_ID
+                    .scope(
+                        Some(call_id),
+                        self.spawner.spawn_background(agent_type, prompt),
+                    )
+                    .await?;
+            } else {
+                self.spawner.spawn_background(agent_type, prompt).await?;
+            }
             Ok(ToolResult {
                 call_id: String::new(),
                 content: "Background sub-agent launched. \
@@ -154,7 +186,13 @@ impl Tool for TaskTool {
                 mode = "foreground",
                 "spawning foreground sub-agent"
             );
-            let task_result = self.spawner.spawn_named(agent_type, prompt).await?;
+            let task_result = if let Some(call_id) = originating_call_id {
+                ORIGINATING_TOOL_CALL_ID
+                    .scope(Some(call_id), self.spawner.spawn_named(agent_type, prompt))
+                    .await?
+            } else {
+                self.spawner.spawn_named(agent_type, prompt).await?
+            };
             Ok(ToolResult {
                 call_id: String::new(),
                 content: task_result.text,

@@ -228,8 +228,21 @@ fn store_path(store_path_override: Option<&Path>) -> PathBuf {
         return PathBuf::from(path);
     }
 
-    let home = env::var("HOME").unwrap_or_else(|_| ".".to_string());
-    Path::new(&home).join(".ava").join("acp-sessions.json")
+    if let Ok(state_home) = env::var("XDG_STATE_HOME") {
+        return PathBuf::from(state_home)
+            .join("ava")
+            .join("acp-sessions.json");
+    }
+
+    if let Ok(home) = env::var("HOME") {
+        return Path::new(&home)
+            .join(".local")
+            .join("state")
+            .join("ava")
+            .join("acp-sessions.json");
+    }
+
+    Path::new(".").join("acp-sessions.json")
 }
 
 fn now_ms() -> u64 {

@@ -5,16 +5,18 @@ use std::{env, sync::OnceLock};
 
 use async_trait::async_trait;
 use ava_agent::message_queue::MessageQueue;
-use ava_agent::stack::{AgentRunContext, AgentStack, AgentStackConfig};
+use ava_agent::stack::{AgentRunContext, AgentStack, AgentStackConfig, SubagentConfigScope};
 use ava_config::{Config, CredentialStore, ProviderCredential, RoutingMode};
 use ava_llm::provider::LLMProvider;
+use ava_llm::provider::LLMResponse;
 use ava_llm::providers::mock::MockProvider;
 use ava_llm::RouteSource;
 use ava_llm::ThinkingConfig;
 use ava_types::{
-    AvaError, Message, MessageTier, QueuedMessage, Result, Role, StreamChunk, TokenUsage,
+    AvaError, Message, MessageTier, QueuedMessage, Result, Role, StreamChunk, TokenUsage, ToolCall,
 };
 use futures::Stream;
+use serde_json::json;
 use tokio::sync::mpsc;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
@@ -60,6 +62,75 @@ fn subagent_response(prompt: &str) -> String {
     format!(r#"{{"tool_calls":[{{"name":"subagent","arguments":{{"prompt":"{prompt}"}}}}]}}"#)
 }
 
+struct RecordingToolSurfaceProvider {
+    model: String,
+    recorded_tool_names: Arc<Mutex<Vec<Vec<String>>>>,
+}
+
+impl RecordingToolSurfaceProvider {
+    fn new(model: &str, recorded_tool_names: Arc<Mutex<Vec<Vec<String>>>>) -> Self {
+        Self {
+            model: model.to_string(),
+            recorded_tool_names,
+        }
+    }
+}
+
+#[async_trait]
+impl LLMProvider for RecordingToolSurfaceProvider {
+    async fn generate(&self, _messages: &[Message]) -> Result<String> {
+        Ok(String::new())
+    }
+
+    async fn generate_stream(
+        &self,
+        _messages: &[Message],
+    ) -> Result<Pin<Box<dyn Stream<Item = StreamChunk> + Send>>> {
+        Ok(Box::pin(futures::stream::iter(vec![
+            StreamChunk::finished(),
+        ])))
+    }
+
+    fn estimate_tokens(&self, input: &str) -> usize {
+        input.len() / 4
+    }
+
+    fn estimate_cost(&self, _input_tokens: usize, _output_tokens: usize) -> f64 {
+        0.0
+    }
+
+    fn model_name(&self) -> &str {
+        &self.model
+    }
+
+    fn supports_tools(&self) -> bool {
+        true
+    }
+
+    async fn generate_with_tools(
+        &self,
+        _messages: &[Message],
+        tools: &[ava_types::Tool],
+    ) -> Result<LLMResponse> {
+        self.recorded_tool_names.lock().await.push(
+            tools
+                .iter()
+                .map(|tool| tool.name.clone())
+                .collect::<Vec<_>>(),
+        );
+        Ok(LLMResponse {
+            content: String::new(),
+            tool_calls: vec![ToolCall {
+                id: "call-attempt-completion".to_string(),
+                name: "attempt_completion".to_string(),
+                arguments: json!({ "result": "done" }),
+            }],
+            usage: None,
+            thinking: None,
+        })
+    }
+}
+
 async fn write_credentials(dir: &tempfile::TempDir, providers: &[&str]) {
     let mut store = CredentialStore::default();
     for provider in providers {
@@ -101,6 +172,7 @@ async fn agent_stack_new_initializes_components() {
     let dir = tempfile::tempdir().expect("tempdir");
     let (stack, _question_rx, _approval_rx, _plan_rx) = AgentStack::new(AgentStackConfig {
         data_dir: dir.path().to_path_buf(),
+        config_dir: Some(dir.path().to_path_buf()),
         yolo: true,
         injected_provider: Some(Arc::new(MockProvider::new("test", vec![]))),
         ..Default::default()
@@ -282,16 +354,82 @@ async fn agent_stack_run_dispatches_subagent_when_enabled() {
         .iter()
         .any(|m| m.content.contains("scout summary")));
 
+    let expected_subagent_call_id = result
+        .session
+        .messages
+        .iter()
+        .flat_map(|message| message.tool_calls.iter())
+        .find(|tool_call| tool_call.name == "subagent")
+        .map(|tool_call| tool_call.id.clone())
+        .expect("expected a subagent tool call id in session");
+
     let mut saw_subagent_complete = false;
     while let Ok(event) = rx.try_recv() {
-        if let ava_agent::AgentEvent::SubAgentComplete { description, .. } = event {
+        if let ava_agent::AgentEvent::SubAgentComplete {
+            call_id,
+            session_id,
+            messages,
+            description,
+            agent_type,
+            provider,
+            resumed,
+            ..
+        } = event
+        {
             if description.contains("Read AGENTS.md and summarize it.") {
+                assert_eq!(call_id, expected_subagent_call_id);
+                assert!(!session_id.trim().is_empty());
+                assert!(!messages.is_empty());
+                assert_eq!(agent_type.as_deref(), Some("subagent"));
+                assert!(provider.is_none());
+                assert!(!resumed);
                 saw_subagent_complete = true;
                 break;
             }
         }
     }
     assert!(saw_subagent_complete, "expected subagent completion event");
+}
+
+#[tokio::test]
+async fn explicit_read_only_subagent_request_still_exposes_subagent_tool() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let recorded_tool_names = Arc::new(tokio::sync::Mutex::new(Vec::new()));
+    let provider = Arc::new(RecordingToolSurfaceProvider::new(
+        "test-model",
+        recorded_tool_names.clone(),
+    ));
+    let (stack, _question_rx, _approval_rx, _plan_rx) = AgentStack::new(AgentStackConfig {
+        data_dir: dir.path().to_path_buf(),
+        injected_provider: Some(provider),
+        ..Default::default()
+    })
+    .await
+    .expect("stack init should succeed");
+
+    let result = stack
+        .run(
+            "Use a scout subagent to read files and summarize what it finds.",
+            2,
+            None,
+            CancellationToken::new(),
+            Vec::new(),
+            None,
+            Vec::new(),
+            None,
+            None,
+        )
+        .await
+        .expect("run should succeed");
+
+    assert!(result.success);
+
+    let snapshots = recorded_tool_names.lock().await.clone();
+    assert_eq!(snapshots.len(), 1, "expected one tool snapshot for the run");
+    assert!(snapshots[0].iter().any(|name| name == "subagent"));
+    assert!(snapshots[0].iter().any(|name| name == "read"));
+    assert!(!snapshots[0].iter().any(|name| name == "write"));
+    assert!(!snapshots[0].iter().any(|name| name == "edit"));
 }
 
 #[tokio::test]
@@ -337,19 +475,20 @@ async fn agent_stack_run_honors_cancellation() {
 async fn test_agents_config_loaded() {
     let dir = tempfile::tempdir().expect("tempdir");
 
-    // Write an agents.toml into the data_dir (simulating ~/.ava/agents.toml)
+    // Write a subagents.toml into the data_dir (simulating ~/.ava/subagents.toml)
     let agents_toml = r#"
 [defaults]
 max_turns = 8
 
-[agents.task]
+[subagents.task]
 max_turns = 5
 prompt = "Custom task prompt."
 "#;
-    std::fs::write(dir.path().join("agents.toml"), agents_toml).unwrap();
+    std::fs::write(dir.path().join("subagents.toml"), agents_toml).unwrap();
 
     let (stack, _question_rx, _approval_rx, _plan_rx) = AgentStack::new(AgentStackConfig {
         data_dir: dir.path().to_path_buf(),
+        config_dir: Some(dir.path().to_path_buf()),
         yolo: true,
         injected_provider: Some(Arc::new(MockProvider::new("test", vec![]))),
         ..Default::default()
@@ -367,18 +506,294 @@ prompt = "Custom task prompt."
 async fn test_agents_config_defaults_without_file() {
     let dir = tempfile::tempdir().expect("tempdir");
 
-    // No agents.toml file — should use defaults
+    // No subagents.toml / agents.toml files — should use defaults
     let (stack, _question_rx, _approval_rx, _plan_rx) = AgentStack::new(AgentStackConfig {
         data_dir: dir.path().to_path_buf(),
+        config_dir: Some(dir.path().to_path_buf()),
         yolo: true,
         injected_provider: Some(Arc::new(MockProvider::new("test", vec![]))),
         ..Default::default()
     })
     .await
-    .expect("stack init should succeed without agents.toml");
+    .expect("stack init should succeed without subagent config files");
 
     // Stack should initialize fine even without agents.toml
     assert!(!stack.tools.read().await.list_tools().is_empty());
+}
+
+#[tokio::test]
+async fn test_untrusted_project_ignores_project_subagent_files() {
+    let _guard = env_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let old_home = env::var_os("HOME");
+
+    let home = tempfile::tempdir().expect("temp home");
+    env::set_var("HOME", home.path());
+
+    let data_dir = tempfile::tempdir().expect("data dir");
+    let project = tempfile::tempdir().expect("project dir");
+    let project_ava = project.path().join(".ava");
+    std::fs::create_dir_all(&project_ava).unwrap();
+
+    std::fs::write(
+        data_dir.path().join("subagents.toml"),
+        r#"
+[subagents.review]
+max_turns = 7
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        project_ava.join("subagents.toml"),
+        r#"
+[subagents.review]
+max_turns = 2
+"#,
+    )
+    .unwrap();
+
+    let stack_result = AgentStack::new(AgentStackConfig {
+        data_dir: data_dir.path().to_path_buf(),
+        config_dir: Some(data_dir.path().to_path_buf()),
+        working_dir: Some(project.path().to_path_buf()),
+        yolo: true,
+        injected_provider: Some(Arc::new(MockProvider::new("test", vec![]))),
+        ..Default::default()
+    })
+    .await;
+
+    match old_home {
+        Some(value) => env::set_var("HOME", value),
+        None => env::remove_var("HOME"),
+    }
+
+    let (stack, _question_rx, _approval_rx, _plan_rx) =
+        stack_result.expect("stack init should succeed");
+    let review = stack.agents_config().await.get_agent("review");
+    assert_eq!(review.max_turns, Some(7));
+}
+
+#[tokio::test]
+async fn test_untrusted_project_ignores_project_legacy_agents_toml() {
+    let _guard = env_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let old_home = env::var_os("HOME");
+
+    let home = tempfile::tempdir().expect("temp home");
+    env::set_var("HOME", home.path());
+
+    let data_dir = tempfile::tempdir().expect("data dir");
+    let project = tempfile::tempdir().expect("project dir");
+    let project_ava = project.path().join(".ava");
+    std::fs::create_dir_all(&project_ava).unwrap();
+
+    std::fs::write(
+        data_dir.path().join("subagents.toml"),
+        r#"
+[subagents.review]
+max_turns = 7
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        project_ava.join("agents.toml"),
+        r#"
+[agents.review]
+max_turns = 2
+"#,
+    )
+    .unwrap();
+
+    let stack_result = AgentStack::new(AgentStackConfig {
+        data_dir: data_dir.path().to_path_buf(),
+        config_dir: Some(data_dir.path().to_path_buf()),
+        working_dir: Some(project.path().to_path_buf()),
+        yolo: true,
+        injected_provider: Some(Arc::new(MockProvider::new("test", vec![]))),
+        ..Default::default()
+    })
+    .await;
+
+    match old_home {
+        Some(value) => env::set_var("HOME", value),
+        None => env::remove_var("HOME"),
+    }
+
+    let (stack, _question_rx, _approval_rx, _plan_rx) =
+        stack_result.expect("stack init should succeed");
+    let review = stack.agents_config().await.get_agent("review");
+    assert_eq!(review.max_turns, Some(7));
+}
+
+#[tokio::test]
+async fn test_trusted_project_applies_project_subagents_toml_overrides() {
+    let _guard = env_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let old_home = env::var_os("HOME");
+
+    let home = tempfile::tempdir().expect("temp home");
+    env::set_var("HOME", home.path());
+
+    let data_dir = tempfile::tempdir().expect("data dir");
+    let project = tempfile::tempdir().expect("project dir");
+    let project_ava = project.path().join(".ava");
+    std::fs::create_dir_all(&project_ava).unwrap();
+
+    std::fs::write(
+        data_dir.path().join("subagents.toml"),
+        r#"
+[subagents.review]
+max_turns = 7
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        project_ava.join("subagents.toml"),
+        r#"
+[subagents.review]
+max_turns = 2
+"#,
+    )
+    .unwrap();
+
+    ava_config::trust_project(project.path()).expect("trust project");
+
+    let stack_result = AgentStack::new(AgentStackConfig {
+        data_dir: data_dir.path().to_path_buf(),
+        config_dir: Some(data_dir.path().to_path_buf()),
+        working_dir: Some(project.path().to_path_buf()),
+        yolo: true,
+        injected_provider: Some(Arc::new(MockProvider::new("test", vec![]))),
+        ..Default::default()
+    })
+    .await;
+
+    match old_home {
+        Some(value) => env::set_var("HOME", value),
+        None => env::remove_var("HOME"),
+    }
+
+    let (stack, _question_rx, _approval_rx, _plan_rx) =
+        stack_result.expect("stack init should succeed");
+    let review = stack.agents_config().await.get_agent("review");
+    assert_eq!(review.max_turns, Some(2));
+}
+
+#[tokio::test]
+async fn test_trusted_project_uses_project_legacy_when_project_subagents_missing() {
+    let _guard = env_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let old_home = env::var_os("HOME");
+
+    let home = tempfile::tempdir().expect("temp home");
+    env::set_var("HOME", home.path());
+
+    let data_dir = tempfile::tempdir().expect("data dir");
+    let project = tempfile::tempdir().expect("project dir");
+    let project_ava = project.path().join(".ava");
+    std::fs::create_dir_all(&project_ava).unwrap();
+
+    std::fs::write(
+        data_dir.path().join("subagents.toml"),
+        r#"
+[subagents.review]
+max_turns = 7
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        project_ava.join("agents.toml"),
+        r#"
+[agents.review]
+max_turns = 2
+"#,
+    )
+    .unwrap();
+
+    ava_config::trust_project(project.path()).expect("trust project");
+
+    let stack_result = AgentStack::new(AgentStackConfig {
+        data_dir: data_dir.path().to_path_buf(),
+        config_dir: Some(data_dir.path().to_path_buf()),
+        working_dir: Some(project.path().to_path_buf()),
+        yolo: true,
+        injected_provider: Some(Arc::new(MockProvider::new("test", vec![]))),
+        ..Default::default()
+    })
+    .await;
+
+    match old_home {
+        Some(value) => env::set_var("HOME", value),
+        None => env::remove_var("HOME"),
+    }
+
+    let (stack, _question_rx, _approval_rx, _plan_rx) =
+        stack_result.expect("stack init should succeed");
+    let review = stack.agents_config().await.get_agent("review");
+    assert_eq!(review.max_turns, Some(2));
+}
+
+#[tokio::test]
+async fn test_effective_subagents_exposes_backend_catalog() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::write(
+        dir.path().join("subagents.toml"),
+        r#"
+[subagents.review]
+model = "openai/gpt-5.3-codex"
+"#,
+    )
+    .unwrap();
+
+    let (stack, _question_rx, _approval_rx, _plan_rx) = AgentStack::new(AgentStackConfig {
+        data_dir: dir.path().to_path_buf(),
+        config_dir: Some(dir.path().to_path_buf()),
+        yolo: true,
+        injected_provider: Some(Arc::new(MockProvider::new("test", vec![]))),
+        ..Default::default()
+    })
+    .await
+    .expect("stack init should succeed");
+
+    let defs = stack.effective_subagents().await;
+    let review = defs.iter().find(|def| def.id == "review").expect("review");
+    assert_eq!(review.model.as_deref(), Some("openai/gpt-5.3-codex"));
+}
+
+#[tokio::test]
+async fn test_backend_subagent_config_read_write_surface_reloads_runtime() {
+    let dir = tempfile::tempdir().expect("tempdir");
+
+    let (stack, _question_rx, _approval_rx, _plan_rx) = AgentStack::new(AgentStackConfig {
+        data_dir: dir.path().to_path_buf(),
+        config_dir: Some(dir.path().to_path_buf()),
+        yolo: true,
+        injected_provider: Some(Arc::new(MockProvider::new("test", vec![]))),
+        ..Default::default()
+    })
+    .await
+    .expect("stack init should succeed");
+
+    let written = stack
+        .write_subagent_config_raw(
+            SubagentConfigScope::Global,
+            r#"
+[subagents.review]
+max_turns = 4
+"#,
+        )
+        .await
+        .expect("global subagent config write should succeed");
+
+    assert!(written.ends_with("subagents.toml"));
+
+    let doc = stack
+        .read_subagent_config_document(SubagentConfigScope::Global)
+        .await
+        .expect("read should succeed")
+        .expect("document should exist");
+    assert!(!doc.legacy);
+    assert!(doc.path.ends_with("subagents.toml"));
+    assert!(doc.content.contains("[subagents.review]"));
+
+    let review = stack.agents_config().await.get_agent("review");
+    assert_eq!(review.max_turns, Some(4));
 }
 
 #[tokio::test]

@@ -135,5 +135,108 @@ async fn main() -> Result<()> {
         result.success, result.turns
     );
 
+    run_delegated_subagent_smoke().await?;
+
+    Ok(())
+}
+
+async fn run_delegated_subagent_smoke() -> Result<()> {
+    println!("Running delegated sub-agent smoke...");
+    let temp_dir = tempfile::tempdir()?;
+
+    let provider = Arc::new(MockProvider::new(
+        "mock-model",
+        vec![
+            r#"{"tool_calls":[{"name":"subagent","arguments":{"prompt":"Read AGENTS.md and summarize it.","agent":"scout"}}]}"#
+                .to_string(),
+            r#"{"tool_calls":[{"name":"attempt_completion","arguments":{"result":"scout summary"}}]}"#
+                .to_string(),
+            r#"{"tool_calls":[{"name":"attempt_completion","arguments":{"result":"delegation smoke complete"}}]}"#
+                .to_string(),
+        ],
+    ));
+
+    let (stack, _question_rx, _approval_rx, _plan_rx) = AgentStack::new(AgentStackConfig {
+        data_dir: temp_dir.path().to_path_buf(),
+        injected_provider: Some(provider),
+        ..Default::default()
+    })
+    .await?;
+
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let result = stack
+        .run(
+            "Use a scout subagent to inspect the repo, then implement a follow-up patch and finish the task.",
+            5,
+            Some(tx),
+            CancellationToken::new(),
+            Vec::new(),
+            None,
+            Vec::new(),
+            None,
+            None,
+        )
+        .await?;
+
+    if !result.success {
+        return Err(eyre!("delegated smoke run did not complete successfully"));
+    }
+
+    let mut saw_subagent_complete = false;
+    let mut saw_any_subagent_complete = false;
+    let mut last_subagent_description = None;
+    while let Some(event) = rx.recv().await {
+        match event {
+            AgentEvent::SubAgentComplete {
+                session_id,
+                messages,
+                description,
+                agent_type,
+                provider,
+                resumed,
+                ..
+            } => {
+                saw_any_subagent_complete = true;
+                last_subagent_description = Some(description.clone());
+                if description.contains("Read AGENTS.md and summarize it.") {
+                    if session_id.trim().is_empty() {
+                        return Err(eyre!("delegated smoke emitted empty subagent session_id"));
+                    }
+                    if messages.is_empty() {
+                        return Err(eyre!("delegated smoke emitted empty subagent message list"));
+                    }
+                    if agent_type.as_deref() != Some("scout") {
+                        return Err(eyre!(
+                            "delegated smoke emitted unexpected subagent type: {:?}",
+                            agent_type
+                        ));
+                    }
+                    if provider.is_some() {
+                        return Err(eyre!(
+                            "delegated smoke expected native provider=None, got {:?}",
+                            provider
+                        ));
+                    }
+                    if resumed {
+                        return Err(eyre!(
+                            "delegated smoke unexpectedly marked subagent as resumed"
+                        ));
+                    }
+                    saw_subagent_complete = true;
+                }
+            }
+            AgentEvent::Complete(_) => break,
+            _ => {}
+        }
+    }
+
+    if !saw_subagent_complete {
+        return Err(eyre!(
+            "delegated smoke did not observe expected SubAgentComplete event (saw_any={}, last_description={:?})",
+            saw_any_subagent_complete,
+            last_subagent_description
+        ));
+    }
+
     Ok(())
 }

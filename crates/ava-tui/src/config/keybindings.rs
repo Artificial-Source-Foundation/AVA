@@ -8,10 +8,16 @@ use std::collections::HashMap;
 struct RawBindings(HashMap<String, Vec<String>>);
 
 pub fn load_keybind_overrides() -> Result<HashMap<Action, Vec<KeyBinding>>> {
-    let Some(home) = dirs::home_dir() else {
-        return Ok(HashMap::new());
+    let preferred = ava_config::config_dir()
+        .map(|dir| dir.join("keybindings.json"))
+        .ok();
+    let legacy = dirs::home_dir().map(|home| home.join(".ava/keybindings.json"));
+    let path = match (&preferred, &legacy) {
+        (Some(path), _) if path.exists() => path.clone(),
+        (_, Some(path)) if path.exists() => path.clone(),
+        (Some(path), _) => path.clone(),
+        _ => return Ok(HashMap::new()),
     };
-    let path = home.join(".ava/keybindings.json");
     if !path.exists() {
         return Ok(HashMap::new());
     }

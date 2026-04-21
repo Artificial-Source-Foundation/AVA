@@ -207,10 +207,12 @@ pub(super) async fn run_single_agent(cli: CliArgs, goal: &str) -> Result<()> {
         }
     };
 
-    let data_dir = dirs::home_dir().unwrap_or_default().join(".ava");
+    let data_dir = ava_config::data_dir().unwrap_or_default();
     let runtime_lean = cli.runtime_lean_settings();
 
-    let (provider, model) = cli.resolve_provider_model().await?;
+    let startup = cli.resolve_startup_selection().await?;
+    let provider = startup.provider;
+    let model = startup.model;
     if provider.is_none() {
         warn!("no provider configured — cannot run agent");
         return Err(eyre!(crate::config::cli::NO_PROVIDER_ERROR));
@@ -244,6 +246,9 @@ pub(super) async fn run_single_agent(cli: CliArgs, goal: &str) -> Result<()> {
             runtime_lean.eager_codebase_indexing,
         ))
         .await?;
+    let _ = stack
+        .set_startup_prompt_suffix(startup.primary_agent_prompt.clone())
+        .await;
     spawn_auto_approve_requests(approval_rx);
 
     // Apply thinking level from CLI flag
@@ -671,6 +676,7 @@ async fn run_post_completion_review(cli: &CliArgs) -> Option<String> {
     let (provider, model) = match crate::config::cli::resolve_provider_model(
         cli.provider.as_deref(),
         cli.model.as_deref(),
+        cli.agent.as_deref(),
     )
     .await
     {
@@ -681,7 +687,7 @@ async fn run_post_completion_review(cli: &CliArgs) -> Option<String> {
         }
     };
 
-    let data_dir = dirs::home_dir().unwrap_or_default().join(".ava");
+    let data_dir = ava_config::data_dir().unwrap_or_default();
     let (review_stack, _q, _a, _p) =
         match AgentStack::new(AgentStackConfig::for_review(data_dir, provider, model, 5)).await {
             Ok(s) => s,

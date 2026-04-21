@@ -94,7 +94,7 @@ pub enum HookSource {
     /// Project-local: `.ava/hooks/`
     #[default]
     Project,
-    /// User-global: `~/.ava/hooks/`
+    /// User-global: `$XDG_CONFIG_HOME/ava/hooks/`
     Global,
 }
 
@@ -114,14 +114,13 @@ pub struct HookRegistry {
 }
 
 impl HookRegistry {
-    /// Load hooks from both global (`~/.ava/hooks/`) and project (`.ava/hooks/`)
+    /// Load hooks from both global (`$XDG_CONFIG_HOME/ava/hooks/`) and project (`.ava/hooks/`)
     /// directories. Project hooks take precedence on name collisions (by filename).
     pub fn load() -> Self {
         let mut hooks = Vec::new();
 
         // Load global hooks first
-        if let Some(home) = dirs::home_dir() {
-            let global_dir = home.join(".ava").join("hooks");
+        if let Ok(global_dir) = ava_config::global_hooks_dir() {
             Self::load_from_dir(&global_dir, HookSource::Global, &mut hooks);
         }
 

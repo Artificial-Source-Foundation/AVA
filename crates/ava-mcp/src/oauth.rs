@@ -1,7 +1,7 @@
 //! OAuth 2.0 PKCE flow for remote MCP servers.
 //!
 //! Handles token acquisition, storage, refresh, and the 401-triggered re-auth
-//! cycle. Tokens are persisted to `~/.ava/credentials.json` under the key
+//! cycle. Tokens are persisted to AVA's XDG data credentials file under the key
 //! `mcp:{server_name}`.
 //!
 //! # Flow
@@ -317,17 +317,25 @@ async fn refresh_access_token(
 // Credential store helpers
 // ---------------------------------------------------------------------------
 
-/// Key used in `~/.ava/credentials.json` for MCP server tokens.
+/// Key used in AVA's XDG data credentials file for MCP server tokens.
 fn cred_key(server_name: &str) -> String {
     format!("mcp:{server_name}")
 }
 
-/// Load stored tokens from `~/.ava/credentials.json`.
+/// Load stored tokens from AVA's XDG data credentials file.
 ///
 /// Returns `None` if no tokens are stored for this server, the file doesn't
 /// exist, or the stored JSON is unreadable.
 pub fn load_stored_tokens(server_name: &str) -> Option<McpTokens> {
-    let path = dirs::home_dir()?.join(".ava").join("credentials.json");
+    let preferred = dirs::data_dir()?.join("ava").join("credentials.json");
+    let legacy = dirs::home_dir()?.join(".ava").join("credentials.json");
+    let path = if preferred.exists() {
+        preferred
+    } else if legacy.exists() {
+        legacy
+    } else {
+        preferred
+    };
     let text = std::fs::read_to_string(&path).ok()?;
     let obj: serde_json::Value = serde_json::from_str(&text).ok()?;
     let key = cred_key(server_name);
@@ -335,13 +343,25 @@ pub fn load_stored_tokens(server_name: &str) -> Option<McpTokens> {
     serde_json::from_value(tokens_val.clone()).ok()
 }
 
-/// Persist tokens to `~/.ava/credentials.json` under `mcp_tokens.{key}`.
+/// Persist tokens to AVA's XDG data credentials file under `mcp_tokens.{key}`.
 pub fn store_tokens(server_name: &str, tokens: &McpTokens) -> Result<()> {
-    let home = dirs::home_dir()
-        .ok_or_else(|| AvaError::ToolError("MCP OAuth: cannot find home directory".to_string()))?;
-    let ava_dir = home.join(".ava");
-    std::fs::create_dir_all(&ava_dir)
-        .map_err(|e| AvaError::IoError(format!("MCP OAuth: failed to create ~/.ava: {e}")))?;
+    let preferred_dir = dirs::data_dir()
+        .ok_or_else(|| AvaError::ToolError("MCP OAuth: cannot find data directory".to_string()))?
+        .join("ava");
+    let legacy_dir = dirs::home_dir().map(|home| home.join(".ava"));
+    let ava_dir = if preferred_dir.exists() {
+        preferred_dir
+    } else if let Some(legacy_dir) = legacy_dir.filter(|path| path.exists()) {
+        legacy_dir
+    } else {
+        preferred_dir
+    };
+    std::fs::create_dir_all(&ava_dir).map_err(|e| {
+        AvaError::IoError(format!(
+            "MCP OAuth: failed to create {}: {e}",
+            ava_dir.display()
+        ))
+    })?;
 
     let path = ava_dir.join("credentials.json");
     let mut obj: serde_json::Value = if path.exists() {

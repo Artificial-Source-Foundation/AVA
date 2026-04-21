@@ -465,15 +465,25 @@ impl App {
             },
             AppEvent::SessionLoaded(result) => match result {
                 Ok(loaded) => {
-                    self.state.session.current_session = Some(loaded.session.clone());
-                    self.state.agent.apply_session_summary(&loaded.session);
+                    let crate::event::SessionLoadResult {
+                        session,
+                        restore_model,
+                        restore_primary_agent_id,
+                        restore_primary_agent_prompt,
+                    } = loaded;
+                    self.state.session.current_session = Some(session.clone());
+                    self.state.agent.apply_session_summary(&session);
                     self.state.messages.messages.clear();
                     self.state.messages.reset_scroll();
-                    for msg in crate::app::session_messages_to_ui_messages(&loaded.session.messages)
-                    {
+                    for msg in crate::app::session_messages_to_ui_messages(&session.messages) {
                         self.state.messages.push(msg);
                     }
-                    if let Some((provider, model)) = loaded.restore_model {
+                    self.state.agent.set_primary_agent_profile(
+                        restore_primary_agent_id,
+                        restore_primary_agent_prompt,
+                        Some(app_tx.clone()),
+                    );
+                    if let Some((provider, model)) = restore_model {
                         self.spawn_model_switch(
                             provider,
                             model,

@@ -237,6 +237,13 @@ impl App {
             return false;
         }
 
+        if matches!(
+            self.state.view_mode,
+            ViewMode::SubAgent { .. } | ViewMode::BackgroundTask { .. }
+        ) {
+            return false;
+        }
+
         if self.state.input.has_slash_autocomplete() {
             match key.code {
                 KeyCode::Esc => {

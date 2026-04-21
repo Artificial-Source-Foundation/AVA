@@ -145,6 +145,10 @@ pub struct AgentState {
     pub activity: AgentActivity,
     pub provider_name: String,
     pub model_name: String,
+    /// Active startup primary-agent profile id, if any.
+    pub primary_agent_id: Option<String>,
+    /// Active startup primary-agent prompt suffix, if any.
+    pub primary_agent_prompt: Option<String>,
     /// Context window size for the current model (from registry).
     pub context_window: Option<usize>,
     pub mcp_server_count: usize,
@@ -248,6 +252,8 @@ impl AgentState {
                 activity: AgentActivity::Idle,
                 provider_name,
                 model_name,
+                primary_agent_id: None,
+                primary_agent_prompt: None,
                 context_window,
                 mcp_server_count,
                 mcp_tool_count,
@@ -660,6 +666,8 @@ impl AgentState {
             activity: AgentActivity::Idle,
             provider_name: provider.to_string(),
             model_name: model.to_string(),
+            primary_agent_id: None,
+            primary_agent_prompt: None,
             context_window: lookup_context_window(provider, model),
             mcp_server_count: 0,
             mcp_tool_count: 0,
@@ -723,6 +731,37 @@ impl AgentState {
                         status: Some((StatusLevel::Error, format!("Mode switch error: {msg}"))),
                         transient: true,
                     }));
+                }
+            });
+        }
+    }
+
+    /// Set startup primary-agent profile metadata and sync prompt behavior to the stack.
+    pub fn set_primary_agent_profile(
+        &mut self,
+        id: Option<String>,
+        prompt: Option<String>,
+        app_tx: Option<mpsc::UnboundedSender<AppEvent>>,
+    ) {
+        self.primary_agent_id = id;
+        self.primary_agent_prompt = prompt.clone();
+
+        if let Some(stack) = &self.stack {
+            let stack = stack.clone();
+            tokio::spawn(async move {
+                if let Err(e) = stack.set_startup_prompt_suffix(prompt).await {
+                    warn!("set_primary_agent_profile: set_startup_prompt_suffix failed: {e}");
+                    if let Some(tx) = app_tx {
+                        let _ = tx.send(AppEvent::CommandMessage(CommandMessageResult {
+                            kind: crate::state::messages::MessageKind::Error,
+                            content: format!("Failed to apply primary-agent profile: {e}"),
+                            status: Some((
+                                StatusLevel::Error,
+                                format!("Primary-agent profile error: {e}"),
+                            )),
+                            transient: true,
+                        }));
+                    }
                 }
             });
         }

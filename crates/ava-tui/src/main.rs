@@ -34,6 +34,22 @@ fn apply_cwd_override(cwd: Option<&Path>) -> Result<()> {
     Ok(())
 }
 
+fn fallback_state_dir(name: &str) -> PathBuf {
+    if let Ok(state_home) = std::env::var("XDG_STATE_HOME") {
+        return PathBuf::from(state_home).join("ava").join(name);
+    }
+
+    if let Ok(home) = std::env::var("HOME") {
+        return PathBuf::from(home)
+            .join(".local")
+            .join("state")
+            .join("ava")
+            .join(name);
+    }
+
+    std::env::temp_dir().join("ava").join(name)
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     color_eyre::install()?;
@@ -301,18 +317,15 @@ mod tests {
 }
 
 /// Initialize logging:
-/// - **File**: Always writes to `~/.ava/logs/ava-YYYY-MM-DD.log` (daily rotation, non-blocking)
+/// - **File**: Always writes to the XDG state log dir as `.../ava/logs/ava-YYYY-MM-DD.log`
 /// - **Stderr**: Only in headless/CLI mode, controlled by `RUST_LOG` (default: warn).
 ///   NEVER enabled in TUI mode — stderr output corrupts the alternate screen.
-/// - **Crash logs**: Written to `~/.ava/logs/crash-YYYY-MM-DDTHH-MM-SS.log` on panic.
+/// - **Crash logs**: Written to the XDG state log dir as `.../ava/logs/crash-YYYY-MM-DDTHH-MM-SS.log`.
 ///
 /// Returns a guard that MUST be held for the lifetime of `main()`.
 /// Dropping it flushes and closes the non-blocking file writer.
 fn init_logging(is_tui: bool, verbose: u8) -> tracing_appender::non_blocking::WorkerGuard {
-    let log_dir = dirs::home_dir()
-        .unwrap_or_else(|| std::path::PathBuf::from("."))
-        .join(".ava")
-        .join("logs");
+    let log_dir = ava_config::logs_dir().unwrap_or_else(|_| fallback_state_dir("logs"));
     std::fs::create_dir_all(&log_dir).ok();
 
     // Non-blocking file writer with daily rotation.

@@ -31,7 +31,7 @@ pub(crate) fn format_mcp_server_list(servers: &[MCPServerInfo]) -> String {
 /// Format discovered runtime skills for display.
 pub(crate) fn format_skill_list(discovery: &RuntimeSkillDiscovery) -> String {
     if discovery.skills.is_empty() {
-        let mut text = "No skills discovered.\n\nAVA looks for SKILL.md files in ~/.claude/skills, ~/.agents/skills, ~/.ava/skills, and trusted project-local skill directories.".to_string();
+        let mut text = "No skills discovered.\n\nAVA looks for SKILL.md files in ~/.claude/skills, ~/.agents/skills, $XDG_CONFIG_HOME/ava/skills, and trusted project-local skill directories.".to_string();
         if !discovery.project_trusted {
             text.push_str(
                 "\n\nProject-local skills are currently skipped because this project is not trusted. Run `ava --trust` to include them.",
@@ -428,9 +428,9 @@ impl App {
                     let content = if rules.is_empty() {
                         "No glob permission rules active.\n\n\
                          Define rules in:\n  \
-                         ~/.ava/permissions.toml   (global)\n  \
-                         .ava/permissions.toml     (project)\n  \
-                         ~/.ava/config.yaml        (permissions.path_rules)"
+                         $XDG_CONFIG_HOME/ava/permissions.toml   (global)\n  \
+                         .ava/permissions.toml                   (project)\n  \
+                         $XDG_CONFIG_HOME/ava/config.yaml        (permissions.path_rules)"
                             .to_string()
                     } else {
                         let mut lines = vec![format!("{} active path rules:\n", rules.len())];
@@ -444,7 +444,9 @@ impl App {
                         }
                         lines.push(String::new());
                         lines.push("Sources (in priority order):".to_string());
-                        lines.push("  1. ~/.ava/permissions.toml (global)".to_string());
+                        lines.push(
+                            "  1. $XDG_CONFIG_HOME/ava/permissions.toml (global)".to_string(),
+                        );
                         lines.push("  2. .ava/permissions.toml  (project, allow->ask)".to_string());
                         lines.push("  3. config.yaml permissions.path_rules".to_string());
                         lines.join("\n")

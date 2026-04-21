@@ -19,7 +19,9 @@
         { "path": "$APPDATA/**" },
         { "path": "$HOME/.ava/**" },
         { "path": "$HOME/.estela/**" },
-        { "path": "$HOME/.config/ava/**" }
+        { "path": "$CONFIG/ava/**" },
+        { "path": "$DATA/ava/**" },
+        { "path": "$CACHE/ava/**" }
       ]
     },
     {
@@ -28,7 +30,9 @@
         { "path": "$APPDATA/**" },
         { "path": "$HOME/.ava/**" },
         { "path": "$HOME/.estela/**" },
-        { "path": "$HOME/.config/ava/**" }
+        { "path": "$CONFIG/ava/**" },
+        { "path": "$DATA/ava/**" },
+        { "path": "$CACHE/ava/**" }
       ]
     },
     {
@@ -37,7 +41,9 @@
         { "path": "$APPDATA/**" },
         { "path": "$HOME/.ava/**" },
         { "path": "$HOME/.estela/**" },
-        { "path": "$HOME/.config/ava/**" }
+        { "path": "$CONFIG/ava/**" },
+        { "path": "$DATA/ava/**" },
+        { "path": "$CACHE/ava/**" }
       ]
     },
     {
@@ -46,7 +52,9 @@
         { "path": "$APPDATA/**" },
         { "path": "$HOME/.ava/**" },
         { "path": "$HOME/.estela/**" },
-        { "path": "$HOME/.config/ava/**" }
+        { "path": "$CONFIG/ava/**" },
+        { "path": "$DATA/ava/**" },
+        { "path": "$CACHE/ava/**" }
       ]
     },
     {
@@ -54,7 +62,10 @@
       "allow": [
         { "path": "$APPDATA/**" },
         { "path": "$HOME/.ava/**" },
-        { "path": "$HOME/.estela/**" }
+        { "path": "$HOME/.estela/**" },
+        { "path": "$CONFIG/ava/**" },
+        { "path": "$DATA/ava/**" },
+        { "path": "$CACHE/ava/**" }
       ]
     },
     {
@@ -62,7 +73,10 @@
       "allow": [
         { "path": "$APPDATA/**" },
         { "path": "$HOME/.ava/**" },
-        { "path": "$HOME/.estela/**" }
+        { "path": "$HOME/.estela/**" },
+        { "path": "$CONFIG/ava/**" },
+        { "path": "$DATA/ava/**" },
+        { "path": "$CACHE/ava/**" }
       ]
     },
     {
@@ -71,7 +85,9 @@
         { "path": "$APPDATA/**" },
         { "path": "$HOME/.ava/**" },
         { "path": "$HOME/.estela/**" },
-        { "path": "$HOME/.config/ava/**" }
+        { "path": "$CONFIG/ava/**" },
+        { "path": "$DATA/ava/**" },
+        { "path": "$CACHE/ava/**" }
       ]
     },
     {
@@ -80,7 +96,9 @@
         { "path": "$APPDATA/**" },
         { "path": "$HOME/.ava/**" },
         { "path": "$HOME/.estela/**" },
-        { "path": "$HOME/.config/ava/**" }
+        { "path": "$CONFIG/ava/**" },
+        { "path": "$DATA/ava/**" },
+        { "path": "$CACHE/ava/**" }
       ]
     },
     "fs:allow-watch",

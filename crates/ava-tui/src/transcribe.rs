@@ -22,7 +22,7 @@ impl WhisperApiClient {
     ///
     /// Looks for the API key in:
     /// 1. `OPENAI_API_KEY` environment variable
-    /// 2. `~/.ava/credentials.json` under the "openai" provider
+    /// 2. `$XDG_DATA_HOME/ava/credentials.json` under the "openai" provider
     pub async fn new(model: String) -> Result<Self> {
         let api_key = Self::resolve_api_key().await?;
         Ok(Self { api_key, model })
@@ -44,7 +44,7 @@ impl WhisperApiClient {
         }
 
         Err(ava_types::AvaError::ConfigError(
-            "No OpenAI API key found. Set OPENAI_API_KEY or add openai credentials to ~/.ava/credentials.json".to_string(),
+            "No OpenAI API key found. Set OPENAI_API_KEY or add openai credentials to $XDG_DATA_HOME/ava/credentials.json".to_string(),
         ))
     }
 }
@@ -114,10 +114,8 @@ pub struct LocalWhisper {
 #[cfg(feature = "local-whisper")]
 impl LocalWhisper {
     pub fn new(model_name: &str) -> Result<Self> {
-        let model_path = dirs::home_dir()
+        let model_path = ava_config::models_dir()
             .unwrap_or_default()
-            .join(".ava")
-            .join("models")
             .join(format!("ggml-{model_name}.bin"));
 
         if !model_path.exists() {
@@ -191,10 +189,8 @@ impl Transcriber for LocalWhisper {
 pub async fn create_transcriber(config: &ava_config::VoiceConfig) -> Result<Box<dyn Transcriber>> {
     #[cfg(feature = "local-whisper")]
     {
-        let model_path = dirs::home_dir()
+        let model_path = ava_config::models_dir()
             .unwrap_or_default()
-            .join(".ava")
-            .join("models")
             .join(format!("ggml-{}.bin", config.model));
 
         if model_path.exists() {

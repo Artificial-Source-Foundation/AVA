@@ -1,6 +1,6 @@
 //! Wildcard/glob permission rules for file path access control.
 //!
-//! Users define rules in `~/.ava/permissions.toml` (global) and
+//! Users define rules in `$XDG_CONFIG_HOME/ava/permissions.toml` (global) and
 //! `.ava/permissions.toml` (project-local). Each rule maps a glob pattern
 //! to an action (allow, ask, deny). First matching rule wins.
 //!
@@ -106,11 +106,21 @@ impl GlobRuleset {
         Self::parse_toml(&content)
     }
 
-    /// Load user-global rules from `~/.ava/permissions.toml`.
+    /// Load user-global rules from `$XDG_CONFIG_HOME/ava/permissions.toml`.
     pub fn load_global() -> Self {
-        let path = dirs::home_dir()
-            .unwrap_or_default()
-            .join(".ava/permissions.toml");
+        let Some(preferred) = dirs::config_dir().map(|dir| dir.join("ava/permissions.toml")) else {
+            return Self::empty();
+        };
+        let path = if preferred.exists() {
+            preferred
+        } else if let Some(legacy) = dirs::home_dir()
+            .map(|home| home.join(".ava/permissions.toml"))
+            .filter(|path| path.exists())
+        {
+            legacy
+        } else {
+            preferred
+        };
         Self::load_from(&path)
     }
 

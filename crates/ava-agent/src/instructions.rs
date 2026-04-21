@@ -389,21 +389,28 @@ pub fn load_project_instructions() -> Option<String> {
 pub fn discover_runtime_skills() -> RuntimeSkillDiscovery {
     let root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let home = dirs::home_dir();
+    let config_dir = dirs::config_dir();
     let project_trusted = ava_config::is_project_trusted(&root);
-    discover_runtime_skills_from_root(&root, home.as_deref(), project_trusted)
+    discover_runtime_skills_from_root(
+        &root,
+        home.as_deref(),
+        config_dir.as_deref(),
+        project_trusted,
+    )
 }
 
 /// Discover the runtime-visible skill files for an explicit project root.
 pub fn discover_runtime_skills_from_root(
     root: &Path,
     home: Option<&Path>,
+    config_dir: Option<&Path>,
     project_trusted: bool,
 ) -> RuntimeSkillDiscovery {
     let mut seen = HashSet::new();
     let mut skills = Vec::new();
 
     if let Some(home) = home {
-        for skill_dir in SKILL_DIRS {
+        for skill_dir in [".claude/skills", ".agents/skills"] {
             collect_discovered_skill_files(
                 &home.join(skill_dir),
                 None,
@@ -412,6 +419,25 @@ pub fn discover_runtime_skills_from_root(
                 &mut seen,
             );
         }
+    }
+
+    let global_skill_dir = config_dir.map(|dir| dir.join("ava").join("skills"));
+    let legacy_skill_dir = home.map(|dir| dir.join(".ava").join("skills"));
+    let chosen_global_skill_dir = match (&global_skill_dir, &legacy_skill_dir) {
+        (Some(dir), _) if dir.exists() => Some(dir.clone()),
+        (_, Some(dir)) if dir.exists() => Some(dir.clone()),
+        (Some(dir), _) => Some(dir.clone()),
+        _ => None,
+    };
+
+    if let Some(skill_dir) = chosen_global_skill_dir {
+        collect_discovered_skill_files(
+            &skill_dir,
+            None,
+            RuntimeSkillScope::Global,
+            &mut skills,
+            &mut seen,
+        );
     }
 
     if project_trusted {
@@ -499,7 +525,7 @@ pub fn load_startup_project_instructions_from_root_with_profile(
 /// Project-local instruction files (AGENTS.md, .cursorrules,
 /// .github/copilot-instructions.md, .ava/rules/*.md, .ava/skills/) are only
 /// loaded when the project is trusted. Global instructions
-/// ($XDG_CONFIG_HOME/AVA/AGENTS.md) always load regardless of trust.
+/// ($XDG_CONFIG_HOME/ava/AGENTS.md) always load regardless of trust.
 pub fn load_project_instructions_with_config(extra_paths: &[String]) -> Option<String> {
     let cwd = std::env::current_dir().ok()?;
     let home = dirs::home_dir();
@@ -530,7 +556,7 @@ fn load_startup_from_scope_with_extras(
     let mut seen = HashSet::new();
     let mut sections = Vec::new();
 
-    for global in global_agents_candidates(config_dir) {
+    for global in global_agents_candidates(config_dir, home) {
         try_load_file(&global, &mut seen, &mut sections);
     }
 
@@ -580,6 +606,7 @@ fn load_startup_from_scope_with_extras(
         load_skill_sections(
             &scope.boundary_root,
             home,
+            config_dir,
             scope.project_trusted,
             &mut seen,
             &mut sections,
@@ -617,7 +644,7 @@ fn load_from_root(root: &Path, home: Option<&Path>) -> Option<String> {
 
 /// Internal implementation that accepts explicit root, home, extra instruction paths,
 /// and a trust flag. When `project_trusted` is `false`, only global instructions
-/// ($XDG_CONFIG_HOME/AVA/AGENTS.md, plus global skills) are loaded; all
+/// ($XDG_CONFIG_HOME/ava/AGENTS.md, plus global skills) are loaded; all
 /// project-local files are skipped.
 fn load_from_root_with_extras(
     root: &Path,
@@ -629,8 +656,8 @@ fn load_from_root_with_extras(
     let mut seen = HashSet::new();
     let mut sections = Vec::new();
 
-    // 1. Global user-level instructions: $XDG_CONFIG_HOME/AVA/AGENTS.md
-    for global in global_agents_candidates(config_dir) {
+    // 1. Global user-level instructions: $XDG_CONFIG_HOME/ava/AGENTS.md
+    for global in global_agents_candidates(config_dir, home) {
         try_load_file(&global, &mut seen, &mut sections);
     }
 
@@ -688,7 +715,14 @@ fn load_from_root_with_extras(
 
     // 5. Skill discovery (global first, then project — project gated on trust).
     // Supported roots: .claude/skills, .agents/skills, .ava/skills
-    load_skill_sections(root, home, project_trusted, &mut seen, &mut sections);
+    load_skill_sections(
+        root,
+        home,
+        config_dir,
+        project_trusted,
+        &mut seen,
+        &mut sections,
+    );
 
     // 6. Local override files — HIGHEST priority, loaded last.
     // These are intended to be gitignored (personal developer overrides).
@@ -714,14 +748,17 @@ fn load_from_root_with_extras(
     ))
 }
 
-fn global_agents_candidates(config_dir: Option<&Path>) -> Vec<PathBuf> {
-    let mut candidates = Vec::new();
+fn global_agents_candidates(config_dir: Option<&Path>, home: Option<&Path>) -> Vec<PathBuf> {
+    let preferred = config_dir.map(|config_dir| config_dir.join("ava").join("AGENTS.md"));
+    let legacy = home.map(|home| home.join(".ava").join("AGENTS.md"));
 
-    if let Some(config_dir) = config_dir {
-        candidates.push(config_dir.join("AVA").join("AGENTS.md"));
+    match (&preferred, &legacy) {
+        (Some(path), _) if path.exists() => vec![path.clone()],
+        (_, Some(path)) if path.exists() => vec![path.clone()],
+        (Some(path), _) => vec![path.clone()],
+        (_, Some(path)) => vec![path.clone()],
+        _ => Vec::new(),
     }
-
-    candidates
 }
 
 /// Load discovered skill files as additional instruction sections.
@@ -729,14 +766,31 @@ fn global_agents_candidates(config_dir: Option<&Path>) -> Vec<PathBuf> {
 fn load_skill_sections(
     root: &Path,
     home: Option<&Path>,
+    config_dir: Option<&Path>,
     project_trusted: bool,
     seen: &mut HashSet<PathBuf>,
     sections: &mut Vec<String>,
 ) {
     // Global skills always load
     if let Some(home) = home {
-        for skill_dir in SKILL_DIRS {
+        for skill_dir in [".claude/skills", ".agents/skills"] {
             collect_skill_files(&home.join(skill_dir), None, sections, seen);
+        }
+    }
+
+    if let Some(config_dir) = config_dir {
+        let preferred = config_dir.join("ava").join("skills");
+        if preferred.exists() {
+            collect_skill_files(&preferred, None, sections, seen);
+        } else if let Some(home) = home {
+            let legacy = home.join(".ava").join("skills");
+            if legacy.exists() {
+                collect_skill_files(&legacy, None, sections, seen);
+            } else {
+                collect_skill_files(&preferred, None, sections, seen);
+            }
+        } else {
+            collect_skill_files(&preferred, None, sections, seen);
         }
     }
 
@@ -1464,10 +1518,10 @@ mod tests {
         // Simulate home also pointing at the same file via symlink
         let fake_home = TempDir::new().unwrap();
         let fake_config = TempDir::new().unwrap();
-        let ava_dir = fake_config.path().join("AVA");
+        let ava_dir = fake_config.path().join("ava");
         fs::create_dir_all(&ava_dir).unwrap();
 
-        // Create a symlink from $XDG_CONFIG_HOME/AVA/AGENTS.md -> project/AGENTS.md
+        // Create a symlink from $XDG_CONFIG_HOME/ava/AGENTS.md -> project/AGENTS.md
         #[cfg(unix)]
         {
             std::os::unix::fs::symlink(tmp.path().join("AGENTS.md"), ava_dir.join("AGENTS.md"))
@@ -1589,7 +1643,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let fake_home = TempDir::new().unwrap();
         let fake_config = TempDir::new().unwrap();
-        let ava_dir = fake_config.path().join("AVA");
+        let ava_dir = fake_config.path().join("ava");
         fs::create_dir_all(&ava_dir).unwrap();
         fs::write(ava_dir.join("AGENTS.md"), "Global rules.").unwrap();
         fs::write(tmp.path().join("AGENTS.md"), "Project rules.").unwrap();
@@ -1676,7 +1730,7 @@ mod tests {
     fn test_global_and_project_files() {
         let tmp = TempDir::new().unwrap();
         let fake_config = TempDir::new().unwrap();
-        let ava_dir = fake_config.path().join("AVA");
+        let ava_dir = fake_config.path().join("ava");
         fs::create_dir_all(&ava_dir).unwrap();
 
         fs::write(ava_dir.join("AGENTS.md"), "Global rules.").unwrap();
@@ -1696,19 +1750,16 @@ mod tests {
     }
 
     #[test]
-    fn test_global_agents_require_xdg_config_dir() {
+    fn test_global_agents_fall_back_to_legacy_home_path_without_xdg() {
         let tmp = TempDir::new().unwrap();
         let fake_home = TempDir::new().unwrap();
         let legacy_dir = fake_home.path().join(".ava");
         fs::create_dir_all(&legacy_dir).unwrap();
         fs::write(legacy_dir.join("AGENTS.md"), "Legacy global rules.").unwrap();
 
-        let result =
-            load_from_root_with_extras(tmp.path(), Some(fake_home.path()), None, &[], false);
-        assert!(
-            result.is_none(),
-            "legacy ~/.ava/AGENTS.md should not load without XDG config"
-        );
+        let text = load_from_root_with_extras(tmp.path(), Some(fake_home.path()), None, &[], false)
+            .expect("legacy ~/.ava/AGENTS.md should load as fallback");
+        assert!(text.contains("Legacy global rules."));
     }
 
     #[test]
@@ -1721,7 +1772,7 @@ mod tests {
         fs::create_dir_all(&legacy_dir).unwrap();
         fs::write(legacy_dir.join("AGENTS.md"), "Legacy global rules.").unwrap();
 
-        let xdg_dir = fake_config.path().join("AVA");
+        let xdg_dir = fake_config.path().join("ava");
         fs::create_dir_all(&xdg_dir).unwrap();
         fs::write(xdg_dir.join("AGENTS.md"), "XDG global rules.").unwrap();
 
@@ -1905,10 +1956,11 @@ mod tests {
     fn test_runtime_skill_discovery_lists_live_project_and_global_skills() {
         let tmp = TempDir::new().unwrap();
         let fake_home = TempDir::new().unwrap();
+        let fake_config = TempDir::new().unwrap();
 
-        let global_skill = fake_home
+        let global_skill = fake_config
             .path()
-            .join(".ava")
+            .join("ava")
             .join("skills")
             .join("global-debug");
         let project_skill = tmp.path().join(".agents").join("skills").join("local-rust");
@@ -1918,7 +1970,12 @@ mod tests {
         fs::write(global_skill.join("SKILL.md"), "Global debugging guidance.").unwrap();
         fs::write(project_skill.join("SKILL.md"), "Local Rust guidance.").unwrap();
 
-        let discovery = discover_runtime_skills_from_root(tmp.path(), Some(fake_home.path()), true);
+        let discovery = discover_runtime_skills_from_root(
+            tmp.path(),
+            Some(fake_home.path()),
+            Some(fake_config.path()),
+            true,
+        );
 
         assert!(discovery.project_trusted);
         assert_eq!(discovery.skills.len(), 2);
@@ -1934,6 +1991,7 @@ mod tests {
     fn test_runtime_skill_discovery_respects_trust_gate() {
         let tmp = TempDir::new().unwrap();
         let fake_home = TempDir::new().unwrap();
+        let fake_config = TempDir::new().unwrap();
 
         let global_skill = fake_home
             .path()
@@ -1947,8 +2005,12 @@ mod tests {
         fs::write(global_skill.join("SKILL.md"), "Shared guidance.").unwrap();
         fs::write(project_skill.join("SKILL.md"), "Private guidance.").unwrap();
 
-        let discovery =
-            discover_runtime_skills_from_root(tmp.path(), Some(fake_home.path()), false);
+        let discovery = discover_runtime_skills_from_root(
+            tmp.path(),
+            Some(fake_home.path()),
+            Some(fake_config.path()),
+            false,
+        );
 
         assert!(!discovery.project_trusted);
         assert_eq!(discovery.skills.len(), 1);
@@ -2119,7 +2181,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let fake_home = TempDir::new().unwrap();
         let fake_config = TempDir::new().unwrap();
-        let ava_dir = fake_config.path().join("AVA");
+        let ava_dir = fake_config.path().join("ava");
         fs::create_dir_all(&ava_dir).unwrap();
 
         // Global instructions (should always load)
@@ -2401,7 +2463,7 @@ mod tests {
 
         let fake_home = TempDir::new().unwrap();
         let fake_config = TempDir::new().unwrap();
-        let ava_dir = fake_config.path().join("AVA");
+        let ava_dir = fake_config.path().join("ava");
         fs::create_dir_all(&ava_dir).unwrap();
         fs::write(fake_home.path().join("shared.md"), "Shared home include.").unwrap();
         fs::write(
@@ -2425,11 +2487,17 @@ mod tests {
     fn test_runtime_skill_discovery_flat_layout_uses_generic_skill_name() {
         let tmp = TempDir::new().unwrap();
         let fake_home = TempDir::new().unwrap();
-        let flat_skill = fake_home.path().join(".ava").join("skills");
+        let fake_config = TempDir::new().unwrap();
+        let flat_skill = fake_config.path().join("ava").join("skills");
         fs::create_dir_all(&flat_skill).unwrap();
         fs::write(flat_skill.join("SKILL.md"), "Shared flat-layout guidance.").unwrap();
 
-        let discovery = discover_runtime_skills_from_root(tmp.path(), Some(fake_home.path()), true);
+        let discovery = discover_runtime_skills_from_root(
+            tmp.path(),
+            Some(fake_home.path()),
+            Some(fake_config.path()),
+            true,
+        );
 
         assert_eq!(discovery.skills.len(), 1);
         assert_eq!(discovery.skills[0].name, "SKILL");

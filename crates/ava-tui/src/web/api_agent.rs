@@ -912,6 +912,10 @@ async fn launch_web_run(
                                     first_user_msg,
                                 )),
                             );
+                            meta.insert(
+                                "titlePlaceholder".to_string(),
+                                serde_json::Value::Bool(false),
+                            );
                         }
                     }
                 }

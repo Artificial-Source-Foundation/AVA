@@ -3,7 +3,7 @@ use serde::Deserialize;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
-/// Cached list of custom themes loaded from ~/.ava/themes/*.toml.
+/// Cached list of custom themes loaded from AVA's XDG config theme directory.
 static CUSTOM_THEMES: OnceLock<Vec<Theme>> = OnceLock::new();
 
 /// Built-in theme names (ordering matters for cycle).
@@ -1531,7 +1531,7 @@ impl Theme {
         })
     }
 
-    /// Scan `~/.ava/themes/` for `.toml` files and load them all.
+    /// Scan the global XDG theme directory for `.toml` files and load them all.
     /// Errors in individual files are logged and skipped.
     pub fn load_all_custom() -> Vec<Self> {
         let Some(themes_dir) = themes_dir() else {
@@ -1565,9 +1565,9 @@ impl Theme {
     }
 }
 
-/// Return the path to `~/.ava/themes/`.
+/// Return the path to the global XDG theme directory.
 fn themes_dir() -> Option<PathBuf> {
-    dirs::home_dir().map(|h| h.join(".ava").join("themes"))
+    ava_config::global_themes_dir().ok()
 }
 
 /// Get the cached custom themes, loading them on first access.

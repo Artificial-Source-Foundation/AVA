@@ -6,7 +6,7 @@
  * Uses Tauri FS + fetch APIs.
  */
 
-import { isTauri } from '@tauri-apps/api/core'
+import { invoke, isTauri } from '@tauri-apps/api/core'
 import type { PluginManifest } from '../types/plugin'
 import { logInfo, logWarn } from './logger'
 import { fetchAndExtractTarball } from './tarball'
@@ -19,15 +19,13 @@ async function getTauriFs() {
   return import('@tauri-apps/plugin-fs')
 }
 
-async function getHomeDir(): Promise<string> {
-  const { homeDir } = await import('@tauri-apps/api/path')
-  return homeDir()
+async function getPluginsRootDir(): Promise<string> {
+  return invoke<string>('get_global_plugins_dir')
 }
 
 async function ensurePluginsDir(): Promise<string> {
   const fs = await getTauriFs()
-  const home = await getHomeDir()
-  const dir = `${home}.ava/plugins`
+  const dir = await getPluginsRootDir()
   try {
     await fs.mkdir(dir, { recursive: true })
   } catch {
@@ -94,7 +92,7 @@ async function saveGitMeta(meta: Record<string, GitExtensionMeta>): Promise<void
 
 /**
  * Clone (install) an extension from a GitHub repo URL.
- * Fetches the tarball, extracts to ~/.ava/plugins/<name>/.
+ * Fetches the tarball, extracts to the global XDG plugin dir.
  */
 export async function cloneExtension(repoUrl: string): Promise<{ name: string; path: string }> {
   if (!isTauri()) {
@@ -180,7 +178,7 @@ export async function updateExtension(name: string): Promise<boolean> {
 }
 
 /**
- * Link a local directory to ~/.ava/plugins/<name>/ via symlink.
+ * Link a local directory into the global XDG plugin dir via symlink.
  * Useful for plugin developers.
  */
 export async function linkLocalExtension(localPath: string): Promise<{ name: string }> {

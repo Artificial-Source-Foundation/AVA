@@ -1,7 +1,7 @@
 /**
  * File Logger Service
  *
- * Writes errors and debug info to daily log files in $APPDATA/ava/logs/.
+ * Writes errors and debug info to daily log files in AVA's XDG state log dir.
  * Uses Rust IPC (`invoke('append_log')`) for proper O(1) append.
  * Daily files: ava-YYYY-MM-DD.log with 7-day retention.
  */
@@ -30,7 +30,6 @@ function formatCoreLogEntry(entry: CoreLogEntry): string {
   return `[${entry.level}] [${entry.source}] ${entry.message}`
 }
 
-import { appDataDir } from '@tauri-apps/api/path'
 import {
   formatLogEntry,
   isLogLevelEnabled,
@@ -140,14 +139,13 @@ function pushEntry(level: LogLevel, source: string, message: string, data?: unkn
 
 /**
  * Initialize the logger. Call once at app startup (after Tauri is ready).
- * Resolves $APPDATA, sets up daily log file path, and starts periodic flush.
+ * Resolves AVA's XDG state log dir, sets up the daily log file path, and starts periodic flush.
  */
 export async function initLogger(meta: LoggerInitMeta = {}): Promise<void> {
   if (initialized) return
 
   try {
-    const appData = await appDataDir()
-    logDirPath = `${appData}logs`
+    logDirPath = await invoke<string>('get_state_logs_dir')
     logFilePath = `${logDirPath}/ava-${todayDateString()}.log`
 
     // Periodic flush for non-error entries
@@ -241,8 +239,7 @@ export async function flushLogs(): Promise<void> {
 export async function readLogFile(): Promise<string> {
   if (!logFilePath) return '(logger not initialized)'
   try {
-    const { readTextFile } = await import('@tauri-apps/plugin-fs')
-    return await readTextFile(logFilePath)
+    return await invoke<string>('read_latest_logs', { path: logFilePath, lines: 5000 })
   } catch {
     return '(failed to read log file)'
   }

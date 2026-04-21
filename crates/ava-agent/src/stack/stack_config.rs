@@ -10,6 +10,7 @@ use crate::system_prompt::BenchmarkPromptOverride;
 
 pub struct AgentStackConfig {
     pub data_dir: PathBuf,
+    pub config_dir: Option<PathBuf>,
     pub provider: Option<String>,
     pub model: Option<String>,
     pub max_turns: usize,
@@ -53,6 +54,7 @@ impl AgentStackConfig {
     ) -> Self {
         Self {
             data_dir,
+            config_dir: None,
             provider,
             model,
             max_turns,
@@ -78,6 +80,7 @@ impl AgentStackConfig {
     ) -> Self {
         Self {
             data_dir,
+            config_dir: None,
             provider,
             model,
             max_turns,
@@ -99,6 +102,7 @@ impl AgentStackConfig {
     ) -> Self {
         Self {
             data_dir,
+            config_dir: None,
             provider,
             model,
             max_turns,
@@ -121,6 +125,7 @@ impl AgentStackConfig {
     ) -> Self {
         Self {
             data_dir,
+            config_dir: None,
             provider: Some(provider),
             model: Some(model),
             max_turns,
@@ -138,6 +143,7 @@ impl AgentStackConfig {
     pub fn for_web(data_dir: PathBuf) -> Self {
         Self {
             data_dir,
+            config_dir: None,
             discover_cli_agents: false,
             ..Self::default()
         }
@@ -146,6 +152,7 @@ impl AgentStackConfig {
     pub fn for_desktop(data_dir: PathBuf) -> Self {
         Self {
             data_dir,
+            config_dir: None,
             discover_cli_agents: false,
             ..Self::default()
         }
@@ -161,6 +168,7 @@ impl AgentStackConfig {
     ) -> Self {
         Self {
             data_dir,
+            config_dir: None,
             provider,
             model,
             max_turns,
@@ -186,7 +194,8 @@ pub struct AgentRunResult {
 impl Default for AgentStackConfig {
     fn default() -> Self {
         Self {
-            data_dir: dirs::home_dir().unwrap_or_default().join(".ava"),
+            data_dir: ava_config::data_dir().unwrap_or_else(|_| PathBuf::from(".")),
+            config_dir: None,
             provider: None,
             model: None,
             max_turns: 0,

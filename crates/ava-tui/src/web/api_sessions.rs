@@ -519,9 +519,17 @@ pub(crate) async fn create_session(
         if let Some(extra) = req.metadata.as_ref().and_then(|value| value.as_object()) {
             map.extend(extra.clone());
         }
+        let title_placeholder = map
+            .get("titlePlaceholder")
+            .and_then(|value| value.as_bool())
+            .unwrap_or(false);
         map.insert(
             "title".to_string(),
             serde_json::Value::String(req.name.clone()),
+        );
+        map.insert(
+            "titlePlaceholder".to_string(),
+            serde_json::Value::Bool(title_placeholder),
         );
         map.insert(
             "status".to_string(),
@@ -1182,6 +1190,7 @@ mod tests {
     fn session_title_ignores_placeholder_metadata_titles() {
         let mut session = ava_types::Session::new();
         session.metadata["title"] = serde_json::Value::String("New Session".to_string());
+        session.metadata["titlePlaceholder"] = serde_json::Value::Bool(true);
         session.messages.push(ava_types::Message::new(
             ava_types::Role::User,
             "Build OAuth flow",
@@ -1189,5 +1198,19 @@ mod tests {
 
         assert_eq!(session_title(&session), "Build OAuth flow");
         assert!(session_title_needs_generation(&session.metadata));
+    }
+
+    #[test]
+    fn explicit_placeholder_looking_titles_are_preserved_when_flag_false() {
+        let mut session = ava_types::Session::new();
+        session.metadata["title"] = serde_json::Value::String("New Session".to_string());
+        session.metadata["titlePlaceholder"] = serde_json::Value::Bool(false);
+        session.messages.push(ava_types::Message::new(
+            ava_types::Role::User,
+            "Build OAuth flow",
+        ));
+
+        assert_eq!(session_title(&session), "New Session");
+        assert!(!session_title_needs_generation(&session.metadata));
     }
 }

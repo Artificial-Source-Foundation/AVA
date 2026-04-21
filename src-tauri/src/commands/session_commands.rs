@@ -66,17 +66,25 @@ fn empty_json_object() -> Value {
 fn session_to_summary(s: &ava_types::Session) -> SessionSummary {
     // Prefer an explicit title stored in metadata (set by rename_session),
     // falling back to auto-generating from the first message.
-    let title = s
+    let placeholder = s
         .metadata
-        .get("title")
-        .and_then(|v| v.as_str())
-        .map(String::from)
-        .unwrap_or_else(|| {
-            s.messages
-                .first()
-                .map(|m| ava_session::generate_title(&m.content))
-                .unwrap_or_else(|| "New session".to_string())
-        });
+        .get("titlePlaceholder")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let title = if !placeholder {
+        s.metadata
+            .get("title")
+            .and_then(|v| v.as_str())
+            .map(String::from)
+    } else {
+        None
+    }
+    .unwrap_or_else(|| {
+        s.messages
+            .first()
+            .map(|m| ava_session::generate_title(&m.content))
+            .unwrap_or_else(|| "New session".to_string())
+    });
     SessionSummary {
         id: s.id.to_string(),
         title,

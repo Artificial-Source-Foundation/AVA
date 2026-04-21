@@ -8,7 +8,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use ava_acp::{
     attach_delegation_record, transport_for_builtin_agent, AgentQuery, ExternalRunDescriptor,
-    ExternalSessionMapper, PermissionMode,
+    ExternalSessionMapper,
 };
 use ava_config::AgentsConfig;
 use ava_context::ContextManager;
@@ -17,7 +17,7 @@ use ava_llm::{ModelRouter, RouteDecision, RouteSource};
 use ava_platform::Platform;
 use ava_session::SessionManager;
 use ava_tools::core::register_core_tools;
-use ava_tools::core::task::{TaskResult, TaskSpawner};
+use ava_tools::core::task::{current_originating_tool_call_id, TaskResult, TaskSpawner};
 use ava_tools::core::{
     file_backup::new_backup_session, register_custom_tools_with_plugins, register_plan_tool,
     register_question_tool, register_task_tool, register_todo_tools,
@@ -38,8 +38,25 @@ use super::{AgentRunContext, AgentRunResult, AgentStack};
 use crate::agent_loop::{AgentConfig, AgentEvent, AgentLoop, LLM_STREAM_TIMEOUT_SECS};
 use crate::budget::BudgetTelemetry;
 use crate::routing::{analyze_task, analyze_task_full_with_history, EXPLICIT_DELEGATION_REASON};
+use crate::subagents::{
+    apply_runtime_profile_to_registry, build_subagent_system_prompt,
+    default_external_allowed_tools, external_permission_mode, parse_model_spec, runtime_guidance,
+    runtime_profile_for, tool_visibility_profile, MAX_AGENT_DEPTH,
+};
 
 const ADAPTIVE_DELEGATION_LOOKBACK: usize = 8;
+
+fn compose_prompt_suffix_layers(
+    startup_suffix: Option<String>,
+    mode_suffix: Option<String>,
+) -> Option<String> {
+    match (startup_suffix, mode_suffix) {
+        (Some(startup), Some(mode)) => Some(format!("{startup}\n\n{mode}")),
+        (Some(startup), None) => Some(startup),
+        (None, Some(mode)) => Some(mode),
+        (None, None) => None,
+    }
+}
 
 impl AgentStack {
     pub(crate) async fn runtime_tool_access_profile(
@@ -390,7 +407,9 @@ impl AgentStack {
         let run_todo_state = run_context
             .and_then(|context| context.todo_state.clone())
             .unwrap_or_else(|| self.todo_state.clone());
+        let startup_suffix = self.startup_prompt_suffix.read().await.clone();
         let mode_suffix = self.mode_prompt_suffix.read().await.clone();
+        let combined_suffix = compose_prompt_suffix_layers(startup_suffix, mode_suffix);
         let project_root = run_permission_context.read().await.workspace_root.clone();
         // Consume any pending plan context (one-shot: only applies to this run).
         let plan_context = self.plan_context.write().await.take();
@@ -400,7 +419,7 @@ impl AgentStack {
         // on synchronous file I/O while reading instruction files.
         let prompt_suffix_start = std::time::Instant::now();
         let prompt_suffix_fut = crate::instruction_resolver::build_system_prompt_suffix_async(
-            mode_suffix,
+            combined_suffix,
             provider.model_name().to_string(),
             project_root.clone(),
             cfg.instructions.clone(),
@@ -576,7 +595,7 @@ impl AgentStack {
                     model_name: provider.model_name().to_string(),
                     benchmark_prompt_override: self.benchmark_prompt_override.clone(),
                     max_turns: turns_limit,
-                    agents_config: self.agents_config.clone(),
+                    agents_config: self.agents_config.read().await.clone(),
                     router: self.router.clone(),
                     event_tx: event_tx.clone(),
                     session_manager: Some(self.session_manager.clone()),
@@ -654,7 +673,7 @@ impl AgentStack {
         if let Some(sid) = session_id {
             agent = agent.with_session_id(sid);
             // Populate file backup sessions so write/edit tools save pre-mutation
-            // snapshots to ~/.ava/file-history/{session_id}/
+            // snapshots to AVA's global file-history/{session_id}/
             let sid_str = sid.to_string();
             *run_backup_session.write().await = Some(sid_str.clone());
             *self.file_backup_session.write().await = Some(sid_str);
@@ -942,16 +961,6 @@ impl AgentStack {
     }
 }
 
-/// Maximum nesting depth for sub-agent spawning. Prevents unbounded recursion
-/// even if future refactors accidentally expose the task tool to sub-agents.
-const MAX_AGENT_DEPTH: u32 = 3;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SubAgentRuntimeProfile {
-    Full,
-    ReadOnly,
-}
-
 struct AgentTaskSpawner {
     provider: Arc<dyn LLMProvider>,
     platform: Arc<dyn Platform>,
@@ -959,7 +968,8 @@ struct AgentTaskSpawner {
     benchmark_prompt_override: Option<crate::system_prompt::BenchmarkPromptOverride>,
     max_turns: usize,
     agents_config: AgentsConfig,
-    /// Router for resolving per-agent model overrides from agents.toml.
+    /// Router for resolving per-agent model overrides from subagents.toml
+    /// (with legacy agents.toml compatibility input).
     router: Arc<ModelRouter>,
     /// Optional event sender to emit `SubAgentComplete` events for TUI consumption.
     event_tx: Option<mpsc::UnboundedSender<AgentEvent>>,
@@ -982,6 +992,145 @@ impl TaskSpawner for AgentTaskSpawner {
     }
 
     async fn spawn_named(&self, agent_type: &str, prompt: &str) -> Result<TaskResult> {
+        self.spawn_named_with_originating_call_id(
+            agent_type,
+            prompt,
+            current_originating_tool_call_id().as_deref(),
+        )
+        .await
+    }
+
+    async fn spawn_background(&self, agent_type: &str, prompt: &str) -> Result<String> {
+        // Validate budget/depth upfront before spawning the background task.
+        if self.depth >= MAX_AGENT_DEPTH {
+            return Err(AvaError::ToolError(format!(
+                "Maximum sub-agent depth reached ({MAX_AGENT_DEPTH}). Cannot spawn deeper."
+            )));
+        }
+
+        if self.max_spawns == 0 {
+            return Err(AvaError::ToolError(
+                "Sub-agent delegation is disabled for this task.".to_string(),
+            ));
+        }
+
+        let resolved = self.agents_config.get_agent(agent_type);
+        if !resolved.enabled {
+            return Err(AvaError::ToolError(format!(
+                "Sub-agent '{agent_type}' is disabled in subagents.toml (legacy agents.toml is also supported as compatibility input)"
+            )));
+        }
+
+        if self
+            .spawn_count
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |current| {
+                (current < self.max_spawns).then_some(current + 1)
+            })
+            .is_err()
+        {
+            return Err(AvaError::ToolError(format!(
+                "Sub-agent budget exhausted (max {}).",
+                self.max_spawns
+            )));
+        }
+
+        let originating_call_id = current_originating_tool_call_id();
+
+        // Generate a session ID upfront so we can return it immediately.
+        let session_id = uuid::Uuid::new_v4().to_string();
+        let session_id_clone = session_id.clone();
+
+        // Clone everything needed for the background task.
+        let provider = self.provider.clone();
+        let platform = self.platform.clone();
+        let model_name = self.model_name.clone();
+        let max_turns = self.max_turns;
+        let agents_config = self.agents_config.clone();
+        let router = self.router.clone();
+        let event_tx = self.event_tx.clone();
+        let session_manager = self.session_manager.clone();
+        let parent_session_id = self.parent_session_id.clone();
+        let benchmark_prompt_override = self.benchmark_prompt_override.clone();
+        let agent_type = agent_type.to_string();
+        let prompt = prompt.to_string();
+        let background_depth = self.background_child_depth();
+
+        tokio::spawn(async move {
+            info!(
+                agent_type = %agent_type,
+                session_id = %session_id_clone,
+                "background sub-agent started"
+            );
+
+            // Build a temporary inline spawner to reuse spawn_named logic.
+            let spawner = AgentTaskSpawner {
+                provider,
+                platform,
+                model_name,
+                benchmark_prompt_override,
+                max_turns,
+                agents_config,
+                router,
+                event_tx: event_tx.clone(),
+                session_manager,
+                parent_session_id,
+                // Preserve parent depth context; background sub-agents must obey
+                // the same recursion ceiling as foreground delegation.
+                depth: background_depth,
+                // Allow this background child to spawn once via `spawn_named`, but no further.
+                max_spawns: 1,
+                spawn_count: Arc::new(AtomicUsize::new(0)),
+            };
+
+            match spawner
+                .spawn_named_with_originating_call_id(
+                    &agent_type,
+                    &prompt,
+                    originating_call_id.as_deref(),
+                )
+                .await
+            {
+                Ok(result) => {
+                    info!(
+                        agent_type = %agent_type,
+                        session_id = %session_id_clone,
+                        result_len = result.text.len(),
+                        "background sub-agent completed successfully"
+                    );
+                    // The SubAgentComplete event is already emitted by spawn_named.
+                }
+                Err(e) => {
+                    warn!(
+                        agent_type = %agent_type,
+                        session_id = %session_id_clone,
+                        error = %e,
+                        "background sub-agent failed"
+                    );
+                    // Emit an error event so the TUI knows the background agent failed.
+                    if let Some(ref tx) = event_tx {
+                        let _ = tx.send(AgentEvent::Error(format!(
+                            "Background sub-agent [{agent_type}] failed: {e}"
+                        )));
+                    }
+                }
+            }
+        });
+
+        Ok(session_id)
+    }
+}
+
+impl AgentTaskSpawner {
+    fn background_child_depth(&self) -> u32 {
+        self.depth
+    }
+
+    async fn spawn_named_with_originating_call_id(
+        &self,
+        agent_type: &str,
+        prompt: &str,
+        originating_call_id: Option<&str>,
+    ) -> Result<TaskResult> {
         if self.depth >= MAX_AGENT_DEPTH {
             return Err(AvaError::ToolError(format!(
                 "Maximum sub-agent depth reached ({MAX_AGENT_DEPTH}). Cannot spawn deeper."
@@ -999,7 +1148,7 @@ impl TaskSpawner for AgentTaskSpawner {
 
         if !resolved.enabled {
             return Err(AvaError::ToolError(format!(
-                "Sub-agent '{agent_type}' is disabled in agents.toml"
+                "Sub-agent '{agent_type}' is disabled in subagents.toml (legacy agents.toml is also supported as compatibility input)"
             )));
         }
 
@@ -1018,12 +1167,18 @@ impl TaskSpawner for AgentTaskSpawner {
 
         if let Some(ref external_provider) = resolved.provider {
             return self
-                .spawn_external_named(agent_type, prompt, external_provider, &resolved)
+                .spawn_external_named(
+                    agent_type,
+                    prompt,
+                    external_provider,
+                    &resolved,
+                    originating_call_id,
+                )
                 .await;
         }
 
         // Resolve per-agent model override. If the agent has a model configured
-        // in agents.toml (e.g. `model = "openrouter/google/gemini-flash-1.5"`),
+        // in subagents.toml (legacy agents.toml also accepted as compatibility input),
         // create a provider for that model. Otherwise, use the parent's provider.
         let (provider, effective_model) = if let Some(ref model_spec) = resolved.model {
             match self.resolve_agent_provider(model_spec).await {
@@ -1055,10 +1210,10 @@ impl TaskSpawner for AgentTaskSpawner {
             model = %effective_model,
             "spawning sub-agent for task tool"
         );
-        let runtime_profile = subagent_runtime_profile(agent_type);
+        let runtime_profile = runtime_profile_for(agent_type);
         let mut registry = ToolRegistry::new();
         register_core_tools(&mut registry, self.platform.clone());
-        apply_subagent_runtime_profile(&mut registry, runtime_profile);
+        apply_runtime_profile_to_registry(&mut registry, runtime_profile);
         registry.unregister("todo_write");
         registry.unregister("todo_read");
         let context = ContextManager::new(128_000);
@@ -1074,8 +1229,8 @@ impl TaskSpawner for AgentTaskSpawner {
         // Use configured prompt if set, otherwise fall back to default.
         let mut system_prompt = resolved
             .prompt
-            .unwrap_or_else(|| build_sub_agent_system_prompt(agent_type));
-        system_prompt.push_str(subagent_runtime_guidance(runtime_profile));
+            .unwrap_or_else(|| build_subagent_system_prompt(agent_type));
+        system_prompt.push_str(runtime_guidance(runtime_profile));
 
         let sub_agent_context_window = {
             let reg = ava_config::model_catalog::registry::registry();
@@ -1117,7 +1272,7 @@ impl TaskSpawner for AgentTaskSpawner {
             context,
             config,
         )
-        .with_tool_visibility_profile(subagent_tool_visibility_profile(runtime_profile));
+        .with_tool_visibility_profile(tool_visibility_profile(runtime_profile));
         let started_at = std::time::Instant::now();
         let mut session = agent.run(prompt).await?;
 
@@ -1189,11 +1344,9 @@ impl TaskSpawner for AgentTaskSpawner {
         }
 
         // Emit SubAgentComplete event so the TUI can store the conversation.
-        // The call_id is not available here (it's set by the tool registry),
-        // so we use an empty string — the TUI matches by description instead.
         if let Some(ref tx) = self.event_tx {
             let _ = tx.send(AgentEvent::SubAgentComplete {
-                call_id: String::new(),
+                call_id: originating_call_id.unwrap_or_default().to_string(),
                 session_id: session_id.clone(),
                 messages: messages.clone(),
                 description: description.clone(),
@@ -1213,115 +1366,6 @@ impl TaskSpawner for AgentTaskSpawner {
         })
     }
 
-    async fn spawn_background(&self, agent_type: &str, prompt: &str) -> Result<String> {
-        // Validate budget/depth upfront before spawning the background task.
-        if self.depth >= MAX_AGENT_DEPTH {
-            return Err(AvaError::ToolError(format!(
-                "Maximum sub-agent depth reached ({MAX_AGENT_DEPTH}). Cannot spawn deeper."
-            )));
-        }
-
-        if self.max_spawns == 0 {
-            return Err(AvaError::ToolError(
-                "Sub-agent delegation is disabled for this task.".to_string(),
-            ));
-        }
-
-        let resolved = self.agents_config.get_agent(agent_type);
-        if !resolved.enabled {
-            return Err(AvaError::ToolError(format!(
-                "Sub-agent '{agent_type}' is disabled in agents.toml"
-            )));
-        }
-
-        if self
-            .spawn_count
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |current| {
-                (current < self.max_spawns).then_some(current + 1)
-            })
-            .is_err()
-        {
-            return Err(AvaError::ToolError(format!(
-                "Sub-agent budget exhausted (max {}).",
-                self.max_spawns
-            )));
-        }
-
-        // Generate a session ID upfront so we can return it immediately.
-        let session_id = uuid::Uuid::new_v4().to_string();
-        let session_id_clone = session_id.clone();
-
-        // Clone everything needed for the background task.
-        let provider = self.provider.clone();
-        let platform = self.platform.clone();
-        let model_name = self.model_name.clone();
-        let max_turns = self.max_turns;
-        let agents_config = self.agents_config.clone();
-        let router = self.router.clone();
-        let event_tx = self.event_tx.clone();
-        let session_manager = self.session_manager.clone();
-        let parent_session_id = self.parent_session_id.clone();
-        let benchmark_prompt_override = self.benchmark_prompt_override.clone();
-        let agent_type = agent_type.to_string();
-        let prompt = prompt.to_string();
-
-        tokio::spawn(async move {
-            info!(
-                agent_type = %agent_type,
-                session_id = %session_id_clone,
-                "background sub-agent started"
-            );
-
-            // Build a temporary inline spawner to reuse spawn_named logic.
-            let spawner = AgentTaskSpawner {
-                provider,
-                platform,
-                model_name,
-                benchmark_prompt_override,
-                max_turns,
-                agents_config,
-                router,
-                event_tx: event_tx.clone(),
-                session_manager,
-                parent_session_id,
-                depth: 0, // background agents are top-level from their perspective
-                // Allow this background child to spawn once via `spawn_named`, but no further.
-                max_spawns: 1,
-                spawn_count: Arc::new(AtomicUsize::new(0)),
-            };
-
-            match spawner.spawn_named(&agent_type, &prompt).await {
-                Ok(result) => {
-                    info!(
-                        agent_type = %agent_type,
-                        session_id = %session_id_clone,
-                        result_len = result.text.len(),
-                        "background sub-agent completed successfully"
-                    );
-                    // The SubAgentComplete event is already emitted by spawn_named.
-                }
-                Err(e) => {
-                    warn!(
-                        agent_type = %agent_type,
-                        session_id = %session_id_clone,
-                        error = %e,
-                        "background sub-agent failed"
-                    );
-                    // Emit an error event so the TUI knows the background agent failed.
-                    if let Some(ref tx) = event_tx {
-                        let _ = tx.send(AgentEvent::Error(format!(
-                            "Background sub-agent [{agent_type}] failed: {e}"
-                        )));
-                    }
-                }
-            }
-        });
-
-        Ok(session_id)
-    }
-}
-
-impl AgentTaskSpawner {
     fn lookup_external_resume_session(
         &self,
         agent_type: &str,
@@ -1359,8 +1403,9 @@ impl AgentTaskSpawner {
         prompt: &str,
         external_provider: &str,
         resolved: &ava_config::ResolvedAgent,
+        originating_call_id: Option<&str>,
     ) -> Result<TaskResult> {
-        let runtime_profile = subagent_runtime_profile(agent_type);
+        let runtime_profile = runtime_profile_for(agent_type);
         let cwd = std::env::current_dir().unwrap_or_default();
         let sub_max_turns = if self.max_turns == 0 {
             resolved.max_turns.unwrap_or(10)
@@ -1370,8 +1415,8 @@ impl AgentTaskSpawner {
         let mut system_prompt = resolved
             .prompt
             .clone()
-            .unwrap_or_else(|| build_sub_agent_system_prompt(agent_type));
-        system_prompt.push_str(subagent_runtime_guidance(runtime_profile));
+            .unwrap_or_else(|| build_subagent_system_prompt(agent_type));
+        system_prompt.push_str(runtime_guidance(runtime_profile));
 
         let cwd_str = cwd.to_string_lossy().to_string();
         let (resume_session_id, resume_attempted) = self
@@ -1479,7 +1524,7 @@ impl AgentTaskSpawner {
 
         if let Some(ref tx) = self.event_tx {
             let _ = tx.send(AgentEvent::SubAgentComplete {
-                call_id: String::new(),
+                call_id: originating_call_id.unwrap_or_default().to_string(),
                 session_id: session_id.clone(),
                 messages: messages.clone(),
                 description,
@@ -1503,7 +1548,7 @@ impl AgentTaskSpawner {
         })
     }
 
-    /// Resolve a model spec from agents.toml into a provider and model name.
+    /// Resolve a model spec from subagents.toml into a provider and model name.
     ///
     /// The model spec can be in the form `provider/model` (e.g.
     /// `openrouter/google/gemini-flash-1.5`) or just `model` (uses the parent's
@@ -1519,24 +1564,6 @@ impl AgentTaskSpawner {
             .route_required(&provider_name, &model_name)
             .await?;
         Ok((provider, model_name))
-    }
-}
-
-fn external_permission_mode(profile: SubAgentRuntimeProfile) -> PermissionMode {
-    match profile {
-        SubAgentRuntimeProfile::Full => PermissionMode::AcceptEdits,
-        SubAgentRuntimeProfile::ReadOnly => PermissionMode::Plan,
-    }
-}
-
-fn default_external_allowed_tools(profile: SubAgentRuntimeProfile) -> Option<Vec<String>> {
-    match profile {
-        SubAgentRuntimeProfile::Full => None,
-        SubAgentRuntimeProfile::ReadOnly => Some(vec![
-            "Read".to_string(),
-            "Glob".to_string(),
-            "Grep".to_string(),
-        ]),
     }
 }
 
@@ -1609,40 +1636,41 @@ fn recent_delegation_feedback_score(recent: &[DelegationRecord]) -> f64 {
     total / recent.len() as f64
 }
 
-/// Parse a model spec string into (provider, model).
-///
-/// Supports formats:
-/// - `provider/model` -> ("provider", "model")
-/// - `provider/org/model` -> ("provider", "org/model") (for OpenRouter-style specs)
-/// - `model` (no slash) -> uses model catalog to infer provider, or defaults to "openrouter"
-pub fn parse_model_spec(spec: &str) -> (String, String) {
-    if let Some(idx) = spec.find('/') {
-        let provider = &spec[..idx];
-        let model = &spec[idx + 1..];
-        // Verify the first segment looks like a known provider name
-        if ava_llm::providers::is_known_provider(provider) || provider.starts_with("cli:") {
-            return (provider.to_string(), model.to_string());
-        }
-    }
-    // No slash or first segment is not a known provider — try the model catalog
-    if let Some(entry) = ava_config::model_catalog::registry::registry().find(spec) {
-        return (entry.provider.clone(), entry.id.clone());
-    }
-    // Last resort: treat the whole string as an OpenRouter model path
-    ("openrouter".to_string(), spec.to_string())
-}
-
-fn subagent_runtime_profile(agent_type: &str) -> SubAgentRuntimeProfile {
-    match agent_type {
-        "plan" | "explore" | "scout" | "review" => SubAgentRuntimeProfile::ReadOnly,
-        _ => SubAgentRuntimeProfile::Full,
-    }
-}
-
 #[cfg(test)]
 #[allow(clippy::items_after_test_module)]
 mod tests {
     use super::*;
+    use ava_types::Message;
+    use std::sync::atomic::AtomicUsize;
+
+    struct DummyProvider;
+
+    #[async_trait]
+    impl LLMProvider for DummyProvider {
+        async fn generate(&self, _messages: &[Message]) -> Result<String> {
+            Ok(String::new())
+        }
+
+        async fn generate_stream(
+            &self,
+            _messages: &[Message],
+        ) -> Result<std::pin::Pin<Box<dyn futures::Stream<Item = ava_types::StreamChunk> + Send>>>
+        {
+            Ok(Box::pin(futures::stream::empty()))
+        }
+
+        fn model_name(&self) -> &str {
+            "dummy"
+        }
+
+        fn estimate_tokens(&self, _text: &str) -> usize {
+            0
+        }
+
+        fn estimate_cost(&self, _input_tokens: usize, _output_tokens: usize) -> f64 {
+            0.0
+        }
+    }
 
     #[test]
     fn adaptive_feedback_reduces_subagents_after_weak_history() {
@@ -1677,6 +1705,25 @@ mod tests {
     }
 
     #[test]
+    fn prompt_layers_compose_startup_and_mode_suffixes() {
+        let combined = compose_prompt_suffix_layers(
+            Some("startup profile behavior".to_string()),
+            Some("plan mode behavior".to_string()),
+        );
+        assert_eq!(
+            combined.as_deref(),
+            Some("startup profile behavior\n\nplan mode behavior")
+        );
+    }
+
+    #[test]
+    fn prompt_layers_keep_startup_suffix_when_mode_is_absent() {
+        let combined =
+            compose_prompt_suffix_layers(Some("startup profile behavior".to_string()), None);
+        assert_eq!(combined.as_deref(), Some("startup profile behavior"));
+    }
+
+    #[test]
     fn adaptive_feedback_boosts_subagents_after_strong_history() {
         let policy = crate::routing::SubagentDelegationPolicy {
             enable_subagent_tool: true,
@@ -1708,45 +1755,25 @@ mod tests {
         assert!(adjusted.max_subagents > 1);
         assert!(adjusted.reason.contains("adaptive boost"));
     }
-}
 
-fn apply_subagent_runtime_profile(registry: &mut ToolRegistry, profile: SubAgentRuntimeProfile) {
-    if profile == SubAgentRuntimeProfile::ReadOnly {
-        for tool in ["write", "edit", "bash", "web_fetch", "web_search"] {
-            registry.unregister(tool);
-        }
+    #[test]
+    fn background_spawner_preserves_parent_depth_context() {
+        let spawner = AgentTaskSpawner {
+            provider: Arc::new(DummyProvider),
+            platform: Arc::new(ava_platform::StandardPlatform),
+            model_name: "dummy".to_string(),
+            benchmark_prompt_override: None,
+            max_turns: 4,
+            agents_config: AgentsConfig::default(),
+            router: Arc::new(ModelRouter::new(ava_config::CredentialStore::default())),
+            event_tx: None,
+            session_manager: None,
+            parent_session_id: None,
+            depth: 2,
+            max_spawns: 1,
+            spawn_count: Arc::new(AtomicUsize::new(0)),
+        };
+
+        assert_eq!(spawner.background_child_depth(), 2);
     }
-}
-
-fn subagent_tool_visibility_profile(
-    profile: SubAgentRuntimeProfile,
-) -> crate::routing::ToolVisibilityProfile {
-    match profile {
-        SubAgentRuntimeProfile::Full => crate::routing::ToolVisibilityProfile::Full,
-        SubAgentRuntimeProfile::ReadOnly => crate::routing::ToolVisibilityProfile::ReadOnly,
-    }
-}
-
-fn subagent_runtime_guidance(profile: SubAgentRuntimeProfile) -> &'static str {
-    match profile {
-        SubAgentRuntimeProfile::Full => {
-            "\n\n## Runtime limits\n- Stay focused on the delegated task. Keep changes narrow and summarize the result clearly.\n"
-        }
-        SubAgentRuntimeProfile::ReadOnly => {
-            "\n\n## Runtime limits\n- You are running in read-only specialist mode. Do not edit files, run shell commands, or browse the web. Investigate with read, glob, grep, and git_read, then report back clearly.\n"
-        }
-    }
-}
-
-fn build_sub_agent_system_prompt(agent_type: &str) -> String {
-    format!(
-        "You are the `{agent_type}` sub-agent of AVA, an AI coding assistant. You have been given a specific task \
-         to complete autonomously. Work through it step by step using the available tools.\n\n\
-         ## Rules\n\
-         - Read files before modifying them.\n\
-         - Prefer focused, local changes over broad rewrites.\n\
-         - Be thorough but efficient -- you have a limited number of turns.\n\
-         - When your task is complete, provide a clear summary of what you did as your final response.\n\
-         - Do NOT call attempt_completion -- simply respond with your final answer when done.\n"
-    )
 }

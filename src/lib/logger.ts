@@ -3,8 +3,8 @@
  *
  * Provides a simple `log.debug/info/warn/error(category, message, data?)` API.
  *
- * - In Tauri mode: writes to `~/.ava/logs/frontend.log` via Tauri FS plugin,
- *   with automatic rotation/truncation at 1 MB.
+ * - In Tauri mode: writes to AVA's XDG state log dir via Rust IPC,
+ *   with backend-managed rotation.
  * - In web mode: sends logs to `POST /api/log` endpoint.
  * - Always mirrors to the browser console with the appropriate method.
  *
@@ -14,15 +14,14 @@
  *   log.info('app', 'Initialized', { version: '3.3.0' })
  */
 
+import { invoke } from '@tauri-apps/api/core'
 import { type FlushWriter, LogBuffer, type LogBufferEntry } from './log-buffer'
 
 // ============================================================================
 // Constants
 // ============================================================================
 
-const LOG_DIR_NAME = '.ava/logs'
 let LOG_FILE_NAME = 'app.log'
-const MAX_LOG_FILE_BYTES = 1_024 * 1_024 // 1 MB
 
 // ============================================================================
 // State
@@ -82,36 +81,12 @@ function formatEntry(entry: LogBufferEntry): string {
 // Writers
 // ============================================================================
 
-/** Tauri writer: appends lines via invoke, with size-based rotation. */
+/** Tauri writer: appends lines via invoke. */
 function createTauriWriter(): FlushWriter {
   return async (entries: LogBufferEntry[]) => {
     if (!logFilePath) return
     const { invoke } = await import('@tauri-apps/api/core')
     const lines = `${entries.map(formatEntry).join('\n')}\n`
-
-    // Check file size and truncate if needed (keep last ~half)
-    try {
-      const { stat } = await import('@tauri-apps/plugin-fs')
-      try {
-        const info = await stat(logFilePath)
-        if (info.size >= MAX_LOG_FILE_BYTES) {
-          const { readTextFile, writeTextFile } = await import('@tauri-apps/plugin-fs')
-          const content = await readTextFile(logFilePath)
-          // Keep the last half of the file
-          const halfPoint = Math.floor(content.length / 2)
-          const nextNewline = content.indexOf('\n', halfPoint)
-          const truncated =
-            nextNewline >= 0
-              ? `--- log truncated at ${new Date().toISOString()} ---\n${content.slice(nextNewline + 1)}`
-              : content.slice(halfPoint)
-          await writeTextFile(logFilePath, truncated)
-        }
-      } catch {
-        // File may not exist yet; that is fine.
-      }
-    } catch {
-      // stat/fs import failed; skip rotation check
-    }
 
     await invoke('append_log', { path: logFilePath, content: lines })
   }
@@ -165,11 +140,9 @@ export async function initFrontendLogger(options?: { webBaseUrl?: string }): Pro
 
   if (isTauriEnv) {
     try {
-      const { homeDir } = await import('@tauri-apps/api/path')
-      const home = await homeDir()
-      const logsDir = `${home}${LOG_DIR_NAME}`
+      const logsDir = await invoke<string>('get_state_logs_dir')
 
-      // Ensure ~/.ava/log/ directory exists
+      // Ensure the XDG state log directory exists
       try {
         const { mkdir } = await import('@tauri-apps/plugin-fs')
         await mkdir(logsDir, { recursive: true })
@@ -224,7 +197,7 @@ export function getFrontendLogFilePath(): string {
 
 /**
  * Switch to per-session log file.
- * Creates `~/.ava/log/{sessionId}.log` so each session has its own log.
+ * Creates a per-session log file in AVA's XDG state log directory.
  * Call when a session starts or switches.
  */
 export async function setSessionLogFile(sessionId: string): Promise<void> {
@@ -233,9 +206,8 @@ export async function setSessionLogFile(sessionId: string): Promise<void> {
   const shortId = sessionId.slice(0, 8)
   LOG_FILE_NAME = `${shortId}.log`
   try {
-    const { homeDir } = await import('@tauri-apps/api/path')
-    const home = await homeDir()
-    logFilePath = `${home}${LOG_DIR_NAME}/${LOG_FILE_NAME}`
+    const logsDir = await invoke<string>('get_state_logs_dir')
+    logFilePath = `${logsDir}/${LOG_FILE_NAME}`
     pushEntry('info', 'logger', `Switched to session log: ${LOG_FILE_NAME}`)
   } catch {
     // Keep current log file

@@ -16,7 +16,7 @@ pub struct DiscoveredPlugin {
 /// Scan the given directories for subdirectories containing a `plugin.toml`.
 ///
 /// Each entry in `dirs` is expected to be a plugin root directory (e.g.
-/// `~/.ava/plugins/` or `.ava/plugins/`). Each immediate subdirectory
+/// `$XDG_CONFIG_HOME/ava/plugins/` or `.ava/plugins/`). Each immediate subdirectory
 /// that contains a `plugin.toml` is treated as a discovered plugin.
 ///
 /// Directories that don't exist or can't be read are silently skipped.
@@ -86,13 +86,19 @@ pub fn discover_plugins(dirs: &[PathBuf]) -> Vec<DiscoveredPlugin> {
 
 /// Returns the default plugin directories to scan.
 ///
-/// - `~/.ava/plugins/` (global)
+/// - `$XDG_CONFIG_HOME/ava/plugins/` (global)
 /// - `.ava/plugins/` (project-local, relative to cwd)
 pub fn default_plugin_dirs() -> Vec<PathBuf> {
     let mut dirs = Vec::new();
 
-    if let Some(home) = dirs::home_dir() {
-        dirs.push(home.join(".ava").join("plugins"));
+    let preferred = dirs::config_dir().map(|dir| dir.join("ava").join("plugins"));
+    let legacy = dirs::home_dir().map(|home| home.join(".ava").join("plugins"));
+
+    match (&preferred, &legacy) {
+        (Some(path), _) if path.exists() => dirs.push(path.clone()),
+        (_, Some(path)) if path.exists() => dirs.push(path.clone()),
+        (Some(path), _) => dirs.push(path.clone()),
+        _ => {}
     }
 
     // Project-local

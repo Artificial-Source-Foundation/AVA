@@ -23,6 +23,7 @@ pub mod session_logger;
 pub mod stack;
 pub mod streaming_diff;
 pub mod stuck;
+pub mod subagents;
 pub mod system_prompt;
 pub mod trace;
 pub mod turn_diff;

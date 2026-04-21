@@ -48,11 +48,12 @@ fn current_version() -> &'static str {
 }
 
 fn cache_path() -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_default()
-        .join(".ava")
-        .join("state")
-        .join("update-check.json")
+    ava_config::update_check_cache_path().unwrap_or_else(|_| {
+        dirs::cache_dir()
+            .unwrap_or_default()
+            .join("ava")
+            .join("update-check.json")
+    })
 }
 
 fn load_cache() -> UpdateCheckCache {

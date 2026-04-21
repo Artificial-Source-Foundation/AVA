@@ -37,6 +37,8 @@ pub struct ModelSwitchResult {
 pub struct SessionLoadResult {
     pub session: Session,
     pub restore_model: Option<(String, String)>,
+    pub restore_primary_agent_id: Option<String>,
+    pub restore_primary_agent_prompt: Option<String>,
 }
 
 #[derive(Debug)]

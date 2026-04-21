@@ -46,15 +46,18 @@ pub async fn run_review(args: ReviewArgs) -> Result<()> {
     );
 
     // 4. Resolve provider
-    let (provider, model) =
-        crate::config::cli::resolve_provider_model(args.provider.as_deref(), args.model.as_deref())
-            .await?;
+    let (provider, model) = crate::config::cli::resolve_provider_model(
+        args.provider.as_deref(),
+        args.model.as_deref(),
+        None,
+    )
+    .await?;
 
     if provider.is_none() {
         return Err(eyre!(crate::config::cli::NO_PROVIDER_ERROR));
     }
 
-    let data_dir = dirs::home_dir().unwrap_or_default().join(".ava");
+    let data_dir = ava_config::data_dir().unwrap_or_default();
     let (stack, _question_rx, _approval_rx, _plan_rx) = AgentStack::new(
         AgentStackConfig::for_review(data_dir, provider, model, args.max_turns),
     )

@@ -208,7 +208,7 @@ pub fn create_provider(
                         if entry.is_oauth_configured() && entry.is_oauth_expired() {
                             AvaError::ConfigError(
                                 "OpenAI OAuth token has expired. Reconnect with /connect openai \
-                                 or set an API key in ~/.ava/credentials.json"
+                                 or set an API key in $XDG_DATA_HOME/ava/credentials.json"
                                     .to_string(),
                             )
                         } else {

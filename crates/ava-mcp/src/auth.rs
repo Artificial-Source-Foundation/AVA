@@ -352,17 +352,27 @@ pub async fn refresh_token(token: &str, meta: &OAuthMetadata) -> Result<TokenSet
 }
 
 // ---------------------------------------------------------------------------
-// Token persistence: ~/.ava/mcp-tokens/{server_name}.json
+// Token persistence: $XDG_DATA_HOME/ava/mcp-tokens/{server_name}.json
 // ---------------------------------------------------------------------------
 
 /// Directory for MCP token storage.
 fn mcp_tokens_dir() -> Option<PathBuf> {
-    dirs::home_dir().map(|h| h.join(".ava").join("mcp-tokens"))
+    let preferred = dirs::data_dir()?.join("ava").join("mcp-tokens");
+    if preferred.exists() {
+        return Some(preferred);
+    }
+
+    let legacy = dirs::home_dir()?.join(".ava").join("mcp-tokens");
+    if legacy.exists() {
+        return Some(legacy);
+    }
+
+    Some(preferred)
 }
 
 /// Load stored tokens for an MCP server.
 ///
-/// Reads from `~/.ava/mcp-tokens/{server_name}.json`.
+/// Reads from `$XDG_DATA_HOME/ava/mcp-tokens/{server_name}.json`.
 /// Returns `None` if no stored tokens exist or the file is unreadable.
 pub fn load_mcp_tokens(server_name: &str) -> Option<TokenSet> {
     let path = mcp_tokens_dir()?.join(format!("{server_name}.json"));
@@ -372,10 +382,10 @@ pub fn load_mcp_tokens(server_name: &str) -> Option<TokenSet> {
 
 /// Store tokens for an MCP server.
 ///
-/// Writes to `~/.ava/mcp-tokens/{server_name}.json`.
+/// Writes to `$XDG_DATA_HOME/ava/mcp-tokens/{server_name}.json`.
 pub fn save_mcp_tokens(server_name: &str, tokens: &TokenSet) -> Result<()> {
     let dir = mcp_tokens_dir().ok_or_else(|| {
-        AvaError::IoError("MCP OAuth: cannot determine home directory".to_string())
+        AvaError::IoError("MCP OAuth: cannot determine data directory".to_string())
     })?;
 
     std::fs::create_dir_all(&dir).map_err(|e| {

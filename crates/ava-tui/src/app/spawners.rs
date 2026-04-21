@@ -254,9 +254,21 @@ impl App {
                         meta.get("model")?.as_str()?.to_string(),
                     ))
                 });
+                let restore_primary_agent_id = session
+                    .metadata
+                    .as_object()
+                    .and_then(|meta| meta.get("primaryAgentId").and_then(|v| v.as_str()))
+                    .map(|value| value.to_string());
+                let restore_primary_agent_prompt = session
+                    .metadata
+                    .as_object()
+                    .and_then(|meta| meta.get("primaryAgentPrompt").and_then(|v| v.as_str()))
+                    .map(|value| value.to_string());
                 Ok(crate::event::SessionLoadResult {
                     session,
                     restore_model,
+                    restore_primary_agent_id,
+                    restore_primary_agent_prompt,
                 })
             })
             .await

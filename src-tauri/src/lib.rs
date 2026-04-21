@@ -14,19 +14,19 @@ use commands::{
     discover_cli_agents, edit_and_resend, enable_mcp_server, evaluate_permission,
     execute_browser_tool, execute_git_tool, execute_tool, extensions_register_native,
     extensions_register_wasm, follow_up_agent, get_agent_status, get_config, get_current_model,
-    get_cwd, get_env_var, get_feature_flags, get_message_queue, get_permission_level,
-    get_plugins_state, greet, install_desktop_update, install_plugin, list_agent_tools,
-    list_mcp_servers, list_models, list_plugin_mounts, list_providers, list_sessions, list_tools,
-    load_credentials, load_session, memory_recall, memory_recent, memory_remember, memory_search,
-    oauth_copilot_device_poll, oauth_copilot_device_start, oauth_listen, plugin_host_invoke,
-    post_complete_agent, pty_kill, pty_resize, pty_spawn, pty_write, read_latest_logs,
-    reflection_reflect_and_fix, regenerate_response, reload_mcp_servers, rename_session,
-    resolve_approval, resolve_plan, resolve_question, retry_last_message, sandbox_apply_landlock,
-    search_sessions, set_active_session, set_cwd, set_permission_level, set_plugin_enabled,
-    set_plugins_state, steer_agent, store_provider_auth, submit_goal, switch_model,
-    sync_credentials, toggle_permission_level, undo_last_edit, uninstall_plugin,
-    update_feature_flags, update_llm_config, validation_validate_edit,
-    validation_validate_with_retry,
+    get_cwd, get_env_var, get_feature_flags, get_global_plugins_dir, get_message_queue,
+    get_permission_level, get_plugins_state, get_state_logs_dir, greet, install_desktop_update,
+    install_plugin, list_agent_tools, list_mcp_servers, list_models, list_plugin_mounts,
+    list_providers, list_sessions, list_tools, load_credentials, load_session, memory_recall,
+    memory_recent, memory_remember, memory_search, oauth_copilot_device_poll,
+    oauth_copilot_device_start, oauth_listen, plugin_host_invoke, post_complete_agent, pty_kill,
+    pty_resize, pty_spawn, pty_write, read_latest_logs, reflection_reflect_and_fix,
+    regenerate_response, reload_mcp_servers, rename_session, resolve_approval, resolve_plan,
+    resolve_question, retry_last_message, sandbox_apply_landlock, search_sessions,
+    set_active_session, set_cwd, set_permission_level, set_plugin_enabled, set_plugins_state,
+    steer_agent, store_provider_auth, submit_goal, switch_model, sync_credentials,
+    toggle_permission_level, undo_last_edit, uninstall_plugin, update_feature_flags,
+    update_llm_config, validation_validate_edit, validation_validate_with_retry,
 };
 use pty::PtyManager;
 use tauri::Manager;
@@ -67,12 +67,9 @@ pub fn run() {
             app.manage(state);
 
             // New DesktopBridge — wraps the real AgentStack.
-            // Use ~/.ava as the data dir (same as the TUI) so credentials, config,
-            // sessions, and memory are shared between CLI and desktop.
-            let ava_home = std::env::var("HOME")
-                .map(std::path::PathBuf::from)
-                .unwrap_or_else(|_| app_data_dir.clone())
-                .join(".ava");
+            // Use AVA's canonical XDG data dir so credentials, config, sessions,
+            // and memory stay aligned with the CLI and web surfaces.
+            let ava_home = ava_config::data_dir().unwrap_or(app_data_dir.clone());
             let bridge = tauri::async_runtime::block_on(DesktopBridge::init(
                 ava_home,
                 app.handle().clone(),
@@ -92,6 +89,8 @@ pub fn run() {
             allow_project_path,
             append_log,
             cleanup_old_logs,
+            get_global_plugins_dir,
+            get_state_logs_dir,
             read_latest_logs,
             get_cwd,
             set_cwd,

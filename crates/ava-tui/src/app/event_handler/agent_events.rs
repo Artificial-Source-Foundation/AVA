@@ -1,4 +1,17 @@
 use super::*;
+
+fn initial_subagent_session_messages(description: &str) -> Vec<UiMessage> {
+    vec![
+        UiMessage::new(
+            MessageKind::System,
+            format!("Delegated task: {description}"),
+        ),
+        UiMessage::new(
+            MessageKind::Thinking,
+            "Sub-agent is running. Live transcript details will appear here when available.",
+        ),
+    ]
+}
 use crate::state::agent::SubAgentInfo;
 use crate::state::rewind::{snapshot_file, ChangeType, FileChange};
 use tracing::{debug, info};
@@ -148,6 +161,7 @@ impl App {
                         .get("background")
                         .and_then(|value| value.as_bool())
                         .unwrap_or(false);
+                    let initial_session_messages = initial_subagent_session_messages(&description);
 
                     // Fire SubagentStart hook
                     {
@@ -166,7 +180,7 @@ impl App {
                         started_at: std::time::Instant::now(),
                         elapsed: None,
                         session_id: None,
-                        session_messages: Vec::new(),
+                        session_messages: initial_session_messages.clone(),
                         provider: None,
                         resumed: false,
                         cost_usd: None,
@@ -188,7 +202,7 @@ impl App {
                         failed: false,
                         call_id: call.id.clone(),
                         session_id: None,
-                        session_messages: Vec::new(),
+                        session_messages: initial_session_messages,
                         provider: None,
                         resumed: false,
                         cost_usd: None,

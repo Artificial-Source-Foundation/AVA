@@ -1,7 +1,7 @@
 //! Tool output disk fallback.
 //!
 //! When tool output exceeds a size limit, the full output is saved to disk
-//! under `~/.ava/tool-output/` and the inline content is truncated with a
+//! under AVA's XDG cache `tool-output/` directory and the inline content is truncated with a
 //! pointer to the saved file so the LLM can re-read it if needed.
 
 use std::path::{Path, PathBuf};
@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 /// Save tool output to disk when it exceeds `max_inline_size` bytes.
 ///
 /// Returns the original content unchanged if it fits within the limit.
-/// Otherwise writes the full output to `~/.ava/tool-output/{tool_name}-{timestamp}.txt`
+/// Otherwise writes the full output to AVA's XDG cache `tool-output/` directory
 /// and returns a truncated version with a path reference.
 pub fn save_tool_output_fallback(tool_name: &str, content: &str, max_inline_size: usize) -> String {
     if content.len() <= max_inline_size {
@@ -23,8 +23,8 @@ pub fn save_tool_output_fallback(tool_name: &str, content: &str, max_inline_size
         "F6: truncating tool output (head)"
     );
 
-    let output_dir = match dirs::home_dir() {
-        Some(home) => home.join(".ava/tool-output"),
+    let output_dir = match dirs::cache_dir() {
+        Some(dir) => dir.join("ava/tool-output"),
         None => return truncate_with_path_notice(content, max_inline_size, None),
     };
 
@@ -62,8 +62,8 @@ pub fn save_tool_output_fallback_tail(
         "F6: truncating tool output (tail)"
     );
 
-    let output_dir = match dirs::home_dir() {
-        Some(home) => home.join(".ava/tool-output"),
+    let output_dir = match dirs::cache_dir() {
+        Some(dir) => dir.join("ava/tool-output"),
         None => return truncate_tail_with_path_notice(content, max_inline_size, None),
     };
 
@@ -84,8 +84,8 @@ pub fn save_tool_output_fallback_tail(
 
 /// Clean up tool output files older than the given number of days.
 pub fn cleanup_old_outputs(max_age_days: u64) {
-    let output_dir = match dirs::home_dir() {
-        Some(home) => home.join(".ava/tool-output"),
+    let output_dir = match dirs::cache_dir() {
+        Some(dir) => dir.join("ava/tool-output"),
         None => return,
     };
 
@@ -189,7 +189,7 @@ pub fn spill_large_response(tool_name: &str, content: &str) -> Option<PathBuf> {
         return None;
     }
 
-    let output_dir = dirs::home_dir()?.join(".ava/tool-output");
+    let output_dir = dirs::cache_dir()?.join("ava/tool-output");
     std::fs::create_dir_all(&output_dir).ok()?;
 
     let timestamp = chrono::Utc::now().format("%Y%m%d-%H%M%S%.3f");
@@ -202,7 +202,7 @@ pub fn spill_large_response(tool_name: &str, content: &str) -> Option<PathBuf> {
 
 /// Return the tool-output directory path.
 pub fn output_dir() -> Option<PathBuf> {
-    dirs::home_dir().map(|h| h.join(".ava/tool-output"))
+    dirs::cache_dir().map(|dir| dir.join("ava/tool-output"))
 }
 
 #[cfg(test)]

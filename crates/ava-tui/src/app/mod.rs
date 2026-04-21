@@ -310,6 +310,34 @@ pub(crate) fn session_messages_to_ui_messages(messages: &[ava_types::Message]) -
     ui_messages
 }
 
+fn resume_restore_from_metadata(
+    metadata: &serde_json::Value,
+    cli_agent_override: Option<&str>,
+) -> (Option<String>, Option<String>, Option<(String, String)>) {
+    if cli_agent_override.is_some() {
+        return (None, None, None);
+    }
+
+    let primary_agent_id = metadata
+        .as_object()
+        .and_then(|meta| meta.get("primaryAgentId").and_then(|v| v.as_str()))
+        .map(|value| value.to_string());
+
+    let primary_agent_prompt = metadata
+        .as_object()
+        .and_then(|meta| meta.get("primaryAgentPrompt").and_then(|v| v.as_str()))
+        .map(|value| value.to_string());
+
+    let restore_model = metadata.as_object().and_then(|meta| {
+        Some((
+            meta.get("provider")?.as_str()?.to_string(),
+            meta.get("model")?.as_str()?.to_string(),
+        ))
+    });
+
+    (primary_agent_id, primary_agent_prompt, restore_model)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ModalType {
     CommandPalette,
@@ -344,6 +372,7 @@ pub struct App {
     pub state: AppState,
     should_quit: bool,
     pending_goal: Option<String>,
+    cli_agent_override: Option<String>,
     is_streaming: Arc<AtomicBool>,
     token_buffer: TokenBuffer,
     #[cfg(feature = "voice")]
@@ -385,11 +414,9 @@ pub struct App {
 
 impl App {
     pub async fn new(cli: CliArgs) -> Result<Self> {
-        let data_dir = dirs::home_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join(".ava");
+        let data_dir = ava_config::data_dir().unwrap_or_else(|_| PathBuf::from("."));
         std::fs::create_dir_all(&data_dir)?;
-        let db_path = data_dir.join("data.db");
+        let db_path = ava_config::app_db_path().unwrap_or_else(|_| data_dir.join("data.db"));
 
         let mut keybinds = KeybindState::default();
         if let Ok(overrides) = load_keybind_overrides() {
@@ -412,7 +439,9 @@ impl App {
             ..PermissionState::default()
         };
 
-        let (provider, model) = cli.resolve_provider_model().await?;
+        let startup_selection = cli.resolve_startup_selection().await?;
+        let provider = startup_selection.provider.clone();
+        let model = startup_selection.model.clone();
 
         // Load model catalog (cache-first, async fetch)
         let model_catalog = ava_config::CatalogState::load().await;
@@ -439,7 +468,7 @@ impl App {
 
         let runtime_lean = cli.runtime_lean_settings();
 
-        let (agent, question_rx, approval_rx, plan_rx) = AgentState::new(
+        let (mut agent, question_rx, approval_rx, plan_rx) = AgentState::new(
             data_dir.clone(),
             provider,
             model,
@@ -450,6 +479,11 @@ impl App {
             runtime_lean.eager_codebase_indexing,
         )
         .await?;
+        agent.set_primary_agent_profile(
+            startup_selection.primary_agent_id.clone(),
+            startup_selection.primary_agent_prompt.clone(),
+            None,
+        );
         let mcp_servers = agent.mcp_server_info().await.unwrap_or_default();
         let todo_state = agent.todo_state();
         let workspace = std::env::current_dir().unwrap_or_default();
@@ -529,6 +563,7 @@ impl App {
             state,
             should_quit: false,
             pending_goal: cli.goal.clone(),
+            cli_agent_override: cli.agent.clone(),
             is_streaming: Arc::new(AtomicBool::new(false)),
             token_buffer: TokenBuffer::new(60),
             #[cfg(feature = "voice")]
@@ -597,9 +632,8 @@ impl App {
                 );
             }
 
-            // Write crash log with full backtrace to ~/.ava/logs/crash-<timestamp>.log
-            if let Some(home) = dirs::home_dir() {
-                let crash_dir = home.join(".ava").join("logs");
+            // Write crash log with full backtrace to the XDG state log dir.
+            if let Ok(crash_dir) = ava_config::logs_dir() {
                 let _ = std::fs::create_dir_all(&crash_dir);
                 let now = chrono::Utc::now();
                 let timestamp = now.format("%Y-%m-%dT%H-%M-%S");
@@ -637,15 +671,17 @@ impl App {
             for ui_msg in session_messages_to_ui_messages(&session.messages) {
                 self.state.messages.push(ui_msg);
             }
-            // Restore model from session metadata
-            if let Some(meta) = session.metadata.as_object() {
-                let provider = meta.get("provider").and_then(|v| v.as_str());
-                let model = meta.get("model").and_then(|v| v.as_str());
-                if let (Some(p), Some(m)) = (provider, model) {
-                    let p = p.to_string();
-                    let m = m.to_string();
-                    let _ = self.state.agent.switch_model(&p, &m).await;
-                }
+            // Restore model + primary-agent from session metadata unless an
+            // explicit CLI --agent override was provided.
+            let (restore_primary_agent_id, restore_primary_agent_prompt, restore_model) =
+                resume_restore_from_metadata(&session.metadata, self.cli_agent_override.as_deref());
+            self.state.agent.set_primary_agent_profile(
+                restore_primary_agent_id,
+                restore_primary_agent_prompt,
+                None,
+            );
+            if let Some((provider, model)) = restore_model {
+                let _ = self.state.agent.switch_model(&provider, &model).await;
             }
         }
 
@@ -876,10 +912,6 @@ impl App {
     /// `agent.sub_agents`. Returns `true` if the switch succeeded.
     pub(crate) fn enter_sub_agent_view(&mut self, index: usize) -> bool {
         if let Some(sa) = self.state.agent.sub_agents.get(index) {
-            if sa.session_messages.is_empty() {
-                self.set_status("Sub-agent has no messages yet", StatusLevel::Warn);
-                return false;
-            }
             self.state.view_mode = ViewMode::SubAgent {
                 agent_index: index,
                 description: sa.description.clone(),
@@ -1028,6 +1060,22 @@ impl App {
                 "model".to_string(),
                 serde_json::Value::String(self.state.agent.model_name.clone()),
             );
+            if let Some(primary_agent_id) = self.state.agent.primary_agent_id.clone() {
+                meta.insert(
+                    "primaryAgentId".to_string(),
+                    serde_json::Value::String(primary_agent_id),
+                );
+            } else {
+                meta.remove("primaryAgentId");
+            }
+            if let Some(primary_agent_prompt) = self.state.agent.primary_agent_prompt.clone() {
+                meta.insert(
+                    "primaryAgentPrompt".to_string(),
+                    serde_json::Value::String(primary_agent_prompt),
+                );
+            } else {
+                meta.remove("primaryAgentPrompt");
+            }
             meta.insert(
                 "costSummary".to_string(),
                 serde_json::json!({
@@ -1044,8 +1092,11 @@ impl App {
                 }),
             );
 
-            // Generate a title from the first user message if not already set
-            if !meta.contains_key("title") {
+            let needs_title = meta
+                .get("titlePlaceholder")
+                .and_then(|value| value.as_bool())
+                .unwrap_or_else(|| !meta.contains_key("title"));
+            if needs_title {
                 let first_user_msg = result
                     .session
                     .messages
@@ -1055,6 +1106,10 @@ impl App {
                 if let Some(msg) = first_user_msg {
                     let title = ava_session::generate_title(msg);
                     meta.insert("title".to_string(), serde_json::Value::String(title));
+                    meta.insert(
+                        "titlePlaceholder".to_string(),
+                        serde_json::Value::Bool(false),
+                    );
                 }
             }
         }
@@ -1134,6 +1189,7 @@ impl App {
             state,
             should_quit: false,
             pending_goal: None,
+            cli_agent_override: None,
             is_streaming: Arc::new(AtomicBool::new(false)),
             token_buffer: TokenBuffer::new(60),
             #[cfg(feature = "voice")]

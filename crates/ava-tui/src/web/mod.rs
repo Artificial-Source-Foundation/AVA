@@ -251,10 +251,17 @@ pub async fn run_server(
     token: Option<String>,
     insecure_open_cors: bool,
 ) -> Result<()> {
-    let data_dir = dirs::home_dir().unwrap_or_default().join(".ava");
+    let data_dir = ava_config::data_dir().unwrap_or_default();
 
     // Ensure the logs directory exists for frontend log ingestion
-    let logs_dir = data_dir.join("logs");
+    let logs_dir = ava_config::logs_dir().unwrap_or_else(|_| {
+        std::env::var("XDG_STATE_HOME")
+            .map(PathBuf::from)
+            .or_else(|_| std::env::var("HOME").map(|home| PathBuf::from(home).join(".local/state")))
+            .unwrap_or_else(|_| std::env::temp_dir())
+            .join("ava")
+            .join("logs")
+    });
     std::fs::create_dir_all(&logs_dir).ok();
 
     // Bind the port FIRST so the address is claimed before any slow init.

@@ -19,7 +19,7 @@ pub enum AvaError {
     ProviderError { provider: String, message: String },
 
     /// No API key found for the given provider in credentials.
-    #[error("No API key configured for provider '{provider}'. Add your key to ~/.ava/credentials.json under providers.{provider}.api_key")]
+    #[error("No API key configured for provider '{provider}'. Add your key to $XDG_DATA_HOME/ava/credentials.json under providers.{provider}.api_key")]
     MissingApiKey { provider: String },
 
     /// Provider returned HTTP 429 — retryable after the specified delay.
@@ -278,7 +278,7 @@ impl AvaError {
             }
             AvaError::MissingApiKey { provider } => {
                 format!(
-                    "No API key for {provider}. Add your key to ~/.ava/credentials.json \
+                    "No API key for {provider}. Add your key to $XDG_DATA_HOME/ava/credentials.json \
                      under providers.{provider}.api_key"
                 )
             }

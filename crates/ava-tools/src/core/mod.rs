@@ -86,7 +86,7 @@ pub fn register_default_tools(
 ///
 /// Returns a [`file_backup::FileBackupSession`] handle. Callers should populate
 /// it with the session ID once the agent run starts so that file edits are
-/// backed up to `~/.ava/file-history/{session_id}/`.
+/// backed up to AVA's XDG data `file-history/{session_id}/`.
 pub fn register_default_tools_with_plugins(
     registry: &mut ToolRegistry,
     platform: Arc<dyn Platform>,

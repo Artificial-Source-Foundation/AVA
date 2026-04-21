@@ -181,12 +181,9 @@ impl LoopThresholds {
         ) || model.contains("qwen")
     }
 
-    /// Check `~/.ava/credentials.json` for a provider-level `loop_prone` override.
+    /// Check the XDG data credentials file for a provider-level `loop_prone` override.
     fn provider_loop_prone_override(provider: &str) -> Option<bool> {
-        let home = std::env::var("HOME").ok()?;
-        let cred_path = std::path::PathBuf::from(home)
-            .join(".ava")
-            .join("credentials.json");
+        let cred_path = ava_config::credentials_path().ok()?;
         let content = std::fs::read_to_string(cred_path).ok()?;
         let store: ava_config::CredentialStore = serde_json::from_str(&content).ok()?;
         store.get(provider)?.loop_prone

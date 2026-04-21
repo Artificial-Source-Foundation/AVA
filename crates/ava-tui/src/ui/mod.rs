@@ -1,4 +1,4 @@
-use crate::app::{AppState, ModalType};
+use crate::app::{AppState, ModalType, ViewMode};
 use crate::ui::layout::build_layout;
 use crate::widgets::autocomplete::AutocompleteTrigger;
 use crate::widgets::composer::render_composer;
@@ -35,7 +35,13 @@ pub fn render(frame: &mut Frame<'_>, state: &mut AppState) {
     // When tool approval or plan approval is pending, replace the composer with the dock
     let approval_active = matches!(state.active_modal, Some(ModalType::ToolApproval));
     let plan_approval_active = matches!(state.active_modal, Some(ModalType::PlanApproval));
-    let composer_h = if approval_active {
+    let transcript_view = matches!(
+        state.view_mode,
+        ViewMode::SubAgent { .. } | ViewMode::BackgroundTask { .. }
+    );
+    let composer_h = if transcript_view {
+        1
+    } else if approval_active {
         crate::widgets::tool_approval::APPROVAL_DOCK_HEIGHT
     } else if plan_approval_active {
         crate::widgets::plan_approval::PLAN_APPROVAL_DOCK_HEIGHT
@@ -101,8 +107,17 @@ pub fn render(frame: &mut Frame<'_>, state: &mut AppState) {
         // covering any streaming text that overflows into the composer area.
         let composer_bg = Block::default().style(Style::default().bg(state.theme.bg_elevated));
         frame.render_widget(composer_bg, split.composer);
-
-        render_composer(frame, split.composer, state);
+        if transcript_view {
+            frame.render_widget(
+                Paragraph::new(Line::from(vec![
+                    Span::styled("Esc", Style::default().fg(state.theme.accent)),
+                    Span::styled(" back", Style::default().fg(state.theme.text_dimmed)),
+                ])),
+                split.composer,
+            );
+        } else {
+            render_composer(frame, split.composer, state);
+        }
     }
 
     // Context bar
@@ -128,11 +143,13 @@ pub fn render(frame: &mut Frame<'_>, state: &mut AppState) {
     }
 
     // Render inline slash menu or mention picker above the composer (not a modal)
-    if let Some(ref ac) = state.input.autocomplete {
-        if ac.trigger == AutocompleteTrigger::Slash && !ac.items.is_empty() {
-            render_slash_menu(frame, split.composer, ac, &state.theme);
-        } else if ac.trigger == AutocompleteTrigger::AtMention && !ac.items.is_empty() {
-            render_mention_picker(frame, split.composer, ac, &state.theme);
+    if !transcript_view {
+        if let Some(ref ac) = state.input.autocomplete {
+            if ac.trigger == AutocompleteTrigger::Slash && !ac.items.is_empty() {
+                render_slash_menu(frame, split.composer, ac, &state.theme);
+            } else if ac.trigger == AutocompleteTrigger::AtMention && !ac.items.is_empty() {
+                render_mention_picker(frame, split.composer, ac, &state.theme);
+            }
         }
     }
 
@@ -321,7 +338,7 @@ fn render_modal(frame: &mut Frame<'_>, state: &mut AppState, modal: ModalType) {
                         },
                         KeybindHint {
                             key: "hint".to_string(),
-                            label: "edit .ava/agents.toml to configure".to_string(),
+                            label: "edit .ava/subagents.toml to configure (legacy .ava/agents.toml also loads)".to_string(),
                         },
                     ],
                 };

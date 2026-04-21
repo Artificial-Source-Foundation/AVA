@@ -210,7 +210,7 @@ impl Middleware for PermissionMiddleware {
                         let mut ctx = self.context.write().await;
                         // Add to session approved for immediate effect
                         ctx.session_approved.insert(tool_call.name.clone());
-                        // Persist to ~/.ava/permissions.toml (user-global, not repo-local)
+                        // Persist to $XDG_CONFIG_HOME/ava/permissions.toml (user-global, not repo-local)
                         ctx.persistent_rules.allow_tool(&tool_call.name);
                         if let Err(e) = ctx.persistent_rules.save() {
                             tracing::warn!("Failed to save persistent permission rules: {e}");

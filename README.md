@@ -139,7 +139,7 @@ Release-repo note: release-related links in this checkout are aligned to `Artifi
 Security note:
 
 1. Prefer AVA's connect flow, environment variables, or keychain-backed credential storage.
-2. Avoid manually editing `~/.ava/credentials.json` unless you intentionally want plaintext local storage.
+2. Avoid manually editing `$XDG_DATA_HOME/ava/credentials.json` unless you intentionally want plaintext local storage.
 
 ## What AVA Includes
 
@@ -181,18 +181,35 @@ Plugins are a core part of AVA's identity, but plugin-owned UI and settings shou
 
 ## Configuration
 
+Fresh installs use the lowercase XDG paths below. Existing `~/.ava` installs are still read from the legacy location for compatibility until you migrate that data.
+
 ```text
 $XDG_CONFIG_HOME/ava/
+├── AGENTS.md            # global instructions
 ├── config.yaml          # core settings
-
-$XDG_CONFIG_HOME/AVA/
-└── AGENTS.md            # global instructions
-
-~/.ava/
-├── credentials.json     # API keys
+├── commands/            # custom commands
+├── hooks/               # global hooks
 ├── mcp.json             # MCP servers
-├── tools/               # custom tool definitions
-└── themes/              # custom themes
+├── plugins/             # installed plugins
+├── skills/              # global AVA skills
+├── subagents.toml       # global subagent config
+├── themes/              # custom themes
+├── trusted_projects.json# trust decisions
+└── tools/               # custom tool definitions
+
+$XDG_DATA_HOME/ava/
+├── credentials.enc      # encrypted credentials fallback
+├── credentials.json     # plaintext credentials fallback
+├── data.db              # sessions/runtime data
+└── models/              # local speech/model assets
+
+$XDG_STATE_HOME/ava/
+├── logs/                # app/frontend/crash/per-session JSONL logs
+└── traces/              # run traces
+
+$XDG_CACHE_HOME/ava/
+├── benchmarks/          # benchmark workspace + reports
+└── update-check.json    # updater cache
 ```
 
 ## Documentation

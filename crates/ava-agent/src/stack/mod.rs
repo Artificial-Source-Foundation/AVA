@@ -3,11 +3,11 @@ mod stack_mcp;
 mod stack_run;
 pub(crate) mod stack_tools;
 
+pub use crate::subagents::parse_model_spec;
 pub use stack_config::{AgentRunResult, AgentStackConfig};
 pub use stack_mcp::{MCPServerInfo, McpServerStatus};
-pub use stack_run::parse_model_spec;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -47,6 +47,7 @@ use stack_mcp::AgentMcpRuntime;
 use stack_mcp::MCPRuntime;
 use stack_tools::{build_tool_registry_with_plugins, resolve_workspace_roots};
 
+use crate::subagents::{effective_subagent_definitions, EffectiveSubagentDefinition};
 use crate::system_prompt::BenchmarkPromptOverride;
 
 const CONFIG_HOOK_TIMEOUT_MS: u64 = 150;
@@ -74,6 +75,20 @@ pub struct AgentRunContext {
     pub compaction_model: Option<String>,
     pub todo_state: Option<TodoState>,
     pub permission_context: Option<Arc<RwLock<InspectionContext>>>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SubagentConfigScope {
+    Global,
+    Project,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SubagentConfigDocument {
+    pub scope: SubagentConfigScope,
+    pub path: PathBuf,
+    pub legacy: bool,
+    pub content: String,
 }
 
 impl AgentRunContext {
@@ -110,6 +125,9 @@ pub struct AgentStack {
     mcp_runtime: AgentMcpRuntime,
     custom_tool_dirs: Vec<PathBuf>,
     pub thinking_level: RwLock<ThinkingLevel>,
+    /// Startup prompt suffix layer (e.g. primary-agent profile behavior).
+    pub startup_prompt_suffix: RwLock<Option<String>>,
+    /// Runtime mode prompt suffix layer (e.g. Plan mode instructions).
     pub mode_prompt_suffix: RwLock<Option<String>>,
     /// When true, agent is in Plan mode — write/edit restricted to .ava/plans/*.md.
     pub plan_mode: RwLock<bool>,
@@ -128,8 +146,12 @@ pub struct AgentStack {
     /// Updated whenever tools are registered (init, MCP reconnect, custom reload).
     #[allow(dead_code)] // Stored for future dynamic-registration updates
     shared_tool_sources: SharedToolSources,
-    /// Sub-agent configuration loaded from agents.toml files.
-    agents_config: AgentsConfig,
+    /// Sub-agent configuration loaded from subagents.toml with legacy agents.toml compatibility.
+    agents_config: RwLock<AgentsConfig>,
+    subagent_config_paths: ava_config::SubagentConfigCompatPaths,
+    subagent_config_root: PathBuf,
+    subagent_project_root: PathBuf,
+    subagent_project_trusted: bool,
     /// Compaction threshold as a percentage (50–95). Stored as integer, converted
     /// to fraction (0.50–0.95) when building `CondenserConfig`.
     compaction_threshold_pct: RwLock<u8>,
@@ -155,7 +177,7 @@ pub struct AgentStack {
     pub plan_context: RwLock<Option<String>>,
     /// Shared handle for persistent file edit backups. Populated with the
     /// session ID when `run()` starts so that write/edit tools can save
-    /// pre-mutation snapshots to `~/.ava/file-history/`.
+    /// pre-mutation snapshots to AVA's global file-history directory.
     file_backup_session: FileBackupSession,
     /// Discovered CLI agents (Claude Code, Gemini CLI, etc.) found on PATH.
     cli_agents: Vec<ava_acp::DiscoveredAgent>,
@@ -181,14 +203,42 @@ impl AgentStack {
         mpsc::UnboundedReceiver<ava_tools::permission_middleware::ApprovalRequest>,
         mpsc::UnboundedReceiver<ava_tools::core::plan::PlanRequest>,
     )> {
-        tokio::fs::create_dir_all(&config.data_dir)
+        let default_data_dir = ava_config::data_dir().ok();
+        let use_default_data_paths = default_data_dir
+            .as_ref()
+            .is_some_and(|path| *path == config.data_dir);
+
+        let db_path = if use_default_data_paths {
+            ava_config::app_db_path()?
+        } else {
+            config.data_dir.join("data.db")
+        };
+        let data_dir = db_path
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| config.data_dir.clone());
+        tokio::fs::create_dir_all(&data_dir)
             .await
             .map_err(|e| AvaError::IoError(e.to_string()))?;
 
-        let data_dir = config.data_dir.clone();
-        let db_path = config.data_dir.join("data.db");
-        let config_path = config.data_dir.join("config.yaml");
-        let credentials_path = config.data_dir.join("credentials.json");
+        let config_path = if let Some(config_dir) = config.config_dir.clone() {
+            config_dir.join("config.yaml")
+        } else {
+            ava_config::config_file_path()?
+        };
+        let config_dir = config_path
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| data_dir.clone());
+        tokio::fs::create_dir_all(&config_dir)
+            .await
+            .map_err(|e| AvaError::IoError(e.to_string()))?;
+
+        let credentials_path = if use_default_data_paths {
+            ava_config::credentials_path()?
+        } else {
+            data_dir.join("credentials.json")
+        };
 
         let platform: Arc<dyn Platform> = Arc::new(StandardPlatform);
 
@@ -250,7 +300,11 @@ impl AgentStack {
             }
         }
 
-        let mcp_global_config = config.data_dir.join("mcp.json");
+        let mcp_global_config = if config.config_dir.is_some() {
+            config_dir.join("mcp.json")
+        } else {
+            ava_config::global_mcp_path()?
+        };
         let project_trusted = ava_config::is_project_trusted(&effective_cwd);
         let mcp_project_config = if project_trusted {
             effective_cwd.join(".ava").join("mcp.json")
@@ -263,11 +317,15 @@ impl AgentStack {
                 );
             }
             // Use a non-existent path so the loader finds nothing
-            config.data_dir.join(".mcp-project-skipped.json")
+            config_dir.join(".mcp-project-skipped.json")
         };
         let custom_tool_dirs = if project_trusted {
             vec![
-                config.data_dir.join("tools"),
+                if config.config_dir.is_some() {
+                    config_dir.join("tools")
+                } else {
+                    ava_config::global_tools_dir()?
+                },
                 effective_cwd.join(".ava").join("tools"),
             ]
         } else {
@@ -279,29 +337,29 @@ impl AgentStack {
                 );
             }
             // Only load global custom tools
-            vec![config.data_dir.join("tools")]
+            vec![if config.config_dir.is_some() {
+                config_dir.join("tools")
+            } else {
+                ava_config::global_tools_dir()?
+            }]
         };
 
-        let agents_config = if project_trusted {
-            AgentsConfig::load(
-                &config.data_dir.join("agents.toml"),
-                &effective_cwd.join(".ava").join("agents.toml"),
-            )
-        } else {
-            let candidate = effective_cwd.join(".ava").join("agents.toml");
-            if candidate.exists() {
-                tracing::warn!(
-                    "Skipping project-local agents.toml — project not trusted. \
-                     Run with --trust to approve."
-                );
-            }
-            // Only load global agents config
-            AgentsConfig::load(
-                &config.data_dir.join("agents.toml"),
-                // Use a non-existent path so load_file returns None for the project config
-                &config.data_dir.join(".agents-project-skipped.toml"),
-            )
+        let subagent_paths = ava_config::SubagentConfigCompatPaths {
+            global_subagents: if config.config_dir.is_some() {
+                ava_config::global_subagents_config_path_from(&config_dir)
+            } else {
+                ava_config::global_subagents_config_path()?
+            },
+            global_legacy_agents: if config.config_dir.is_some() {
+                ava_config::global_agents_config_path_from(&config_dir)
+            } else {
+                ava_config::global_agents_config_path()?
+            },
+            project_subagents: ava_config::project_subagents_config_path(&effective_cwd),
+            project_legacy_agents: ava_config::project_legacy_agents_config_path(&effective_cwd),
         };
+        let agents_config =
+            Self::load_subagent_config(&subagent_paths, project_trusted, &config_dir);
 
         // Initialize plugin manager and load plugins from default directories.
         let mut plugin_mgr = PluginManager::new();
@@ -310,7 +368,11 @@ impl AgentStack {
             Vec::new()
         } else if project_trusted {
             vec![
-                config.data_dir.join("plugins"),
+                if config.config_dir.is_some() {
+                    config_dir.join("plugins")
+                } else {
+                    ava_config::global_plugins_dir()?
+                },
                 effective_cwd.join(".ava").join("plugins"),
             ]
         } else {
@@ -321,7 +383,11 @@ impl AgentStack {
                      Run with --trust to approve."
                 );
             }
-            vec![config.data_dir.join("plugins")]
+            vec![if config.config_dir.is_some() {
+                config_dir.join("plugins")
+            } else {
+                ava_config::global_plugins_dir()?
+            }]
         };
         if let Err(e) = plugin_mgr.load_plugins(&plugin_dirs).await {
             warn!("Failed to load plugins: {e}");
@@ -486,6 +552,7 @@ impl AgentStack {
                 mcp_runtime,
                 custom_tool_dirs,
                 thinking_level: RwLock::new(ThinkingLevel::Off),
+                startup_prompt_suffix: RwLock::new(None),
                 mode_prompt_suffix: RwLock::new(None),
                 plan_mode: RwLock::new(false),
                 todo_state,
@@ -496,7 +563,11 @@ impl AgentStack {
                 permission_context,
                 permission_inspector,
                 shared_tool_sources,
-                agents_config,
+                agents_config: RwLock::new(agents_config),
+                subagent_config_paths: subagent_paths,
+                subagent_config_root: config_dir.clone(),
+                subagent_project_root: effective_cwd.clone(),
+                subagent_project_trusted: project_trusted,
                 compaction_threshold_pct: RwLock::new(config.compaction_threshold_pct),
                 auto_compact: RwLock::new(config.auto_compact),
                 compaction_model_override: RwLock::new(None),
@@ -513,6 +584,50 @@ impl AgentStack {
             approval_rx,
             plan_rx,
         ))
+    }
+
+    fn load_subagent_config(
+        paths: &ava_config::SubagentConfigCompatPaths,
+        project_trusted: bool,
+        config_root: &Path,
+    ) -> AgentsConfig {
+        if project_trusted {
+            return AgentsConfig::load_with_compat(
+                &paths.global_subagents,
+                &paths.global_legacy_agents,
+                &paths.project_subagents,
+                &paths.project_legacy_agents,
+            );
+        }
+
+        if paths.project_subagents.exists() || paths.project_legacy_agents.exists() {
+            tracing::warn!(
+                "Skipping project-local subagent config (.ava/subagents.toml and legacy .ava/agents.toml) — project not trusted. \
+                 Run with --trust to approve."
+            );
+        }
+
+        // Only load global subagent config (new + legacy fallback).
+        AgentsConfig::load_with_compat(
+            &paths.global_subagents,
+            &paths.global_legacy_agents,
+            // Use non-existent paths so project config is skipped.
+            &config_root.join(".subagents-project-skipped.toml"),
+            &config_root.join(".agents-project-skipped.toml"),
+        )
+    }
+
+    fn scoped_subagent_paths(&self, scope: SubagentConfigScope) -> (&PathBuf, &PathBuf) {
+        match scope {
+            SubagentConfigScope::Global => (
+                &self.subagent_config_paths.global_subagents,
+                &self.subagent_config_paths.global_legacy_agents,
+            ),
+            SubagentConfigScope::Project => (
+                &self.subagent_config_paths.project_subagents,
+                &self.subagent_config_paths.project_legacy_agents,
+            ),
+        }
     }
 
     // ========================================================================
@@ -707,9 +822,99 @@ impl AgentStack {
         &self.cli_agents
     }
 
-    /// Get the sub-agent configuration loaded from agents.toml files.
-    pub fn agents_config(&self) -> &AgentsConfig {
-        &self.agents_config
+    /// Get the sub-agent configuration loaded from subagents.toml (legacy agents.toml compatible).
+    pub async fn agents_config(&self) -> AgentsConfig {
+        self.agents_config.read().await.clone()
+    }
+
+    /// Backend-owned, effective subagent definitions (built-ins + config overrides).
+    pub async fn effective_subagents(&self) -> Vec<EffectiveSubagentDefinition> {
+        let config = self.agents_config.read().await;
+        effective_subagent_definitions(&config)
+    }
+
+    /// Backend-owned read seam for subagent config files (canonical + legacy fallback).
+    pub async fn read_subagent_config_document(
+        &self,
+        scope: SubagentConfigScope,
+    ) -> Result<Option<SubagentConfigDocument>> {
+        if scope == SubagentConfigScope::Project && !self.subagent_project_trusted {
+            return Ok(None);
+        }
+
+        let (subagents_path, legacy_path) = self.scoped_subagent_paths(scope);
+
+        if tokio::fs::try_exists(subagents_path)
+            .await
+            .map_err(|e| AvaError::IoError(e.to_string()))?
+        {
+            let content = tokio::fs::read_to_string(subagents_path)
+                .await
+                .map_err(|e| AvaError::IoError(e.to_string()))?;
+            return Ok(Some(SubagentConfigDocument {
+                scope,
+                path: subagents_path.clone(),
+                legacy: false,
+                content,
+            }));
+        }
+
+        if tokio::fs::try_exists(legacy_path)
+            .await
+            .map_err(|e| AvaError::IoError(e.to_string()))?
+        {
+            let content = tokio::fs::read_to_string(legacy_path)
+                .await
+                .map_err(|e| AvaError::IoError(e.to_string()))?;
+            return Ok(Some(SubagentConfigDocument {
+                scope,
+                path: legacy_path.clone(),
+                legacy: true,
+                content,
+            }));
+        }
+
+        Ok(None)
+    }
+
+    /// Backend-owned update seam for subagent config writes.
+    ///
+    /// Writes always target canonical `subagents.toml` paths and refresh in-memory
+    /// effective configuration immediately.
+    pub async fn write_subagent_config_raw(
+        &self,
+        scope: SubagentConfigScope,
+        content: &str,
+    ) -> Result<PathBuf> {
+        if scope == SubagentConfigScope::Project && !self.subagent_project_trusted {
+            return Err(AvaError::ValidationError(
+                "Project-local subagent config is unavailable for untrusted projects.".to_string(),
+            ));
+        }
+
+        let written = match scope {
+            SubagentConfigScope::Global => {
+                ava_config::write_global_subagents_config_raw(&self.subagent_config_root, content)
+                    .await?
+            }
+            SubagentConfigScope::Project => {
+                ava_config::write_project_subagents_config_raw(&self.subagent_project_root, content)
+                    .await?
+            }
+        };
+
+        self.reload_subagent_config().await;
+        Ok(written)
+    }
+
+    /// Recompute effective subagent config from canonical layered files.
+    pub async fn reload_subagent_config(&self) {
+        let reloaded = Self::load_subagent_config(
+            &self.subagent_config_paths,
+            self.subagent_project_trusted,
+            &self.subagent_config_root,
+        );
+        *self.agents_config.write().await = reloaded;
     }
 
     // ========================================================================
@@ -727,6 +932,11 @@ impl AgentStack {
         state.last_provider = Some(provider.to_string());
         state.last_model = Some(model.to_string());
         let _ = state.save(&project_root);
+        Ok(())
+    }
+
+    pub async fn set_startup_prompt_suffix(&self, suffix: Option<String>) -> Result<()> {
+        *self.startup_prompt_suffix.write().await = suffix;
         Ok(())
     }
 
@@ -947,11 +1157,14 @@ fn effective_prompt_visible_tools(
         });
     }
 
+    let subagent_visible = tools.iter().any(|(tool, _)| tool.name == "subagent");
+
     match tool_visibility_profile {
         crate::routing::ToolVisibilityProfile::Full => {}
         crate::routing::ToolVisibilityProfile::ReadOnly => {
             tools.retain(|(tool, _)| {
                 crate::agent_loop::READ_ONLY_TOOLS.contains(&tool.name.as_str())
+                    || (subagent_visible && tool.name == "subagent")
             });
         }
         crate::routing::ToolVisibilityProfile::AnswerOnly => tools.clear(),
@@ -988,7 +1201,6 @@ mod tests {
     use ava_types::{StreamChunk, ToolCall};
     use futures::Stream;
     use serde_json::json;
-    use stack_run::parse_model_spec;
     use tokio_util::sync::CancellationToken;
 
     fn test_tool(name: &str) -> ava_types::Tool {
@@ -1247,6 +1459,38 @@ mod tests {
 
         assert!(tools.iter().any(|(tool, _)| tool.name == enabled_name));
         assert!(!tools.iter().any(|(tool, _)| tool.name == disabled_name));
+    }
+
+    #[tokio::test]
+    async fn effective_tools_for_interactive_run_keeps_subagent_for_explicit_read_only_request() {
+        let temp = tempfile::tempdir().expect("temp");
+        let (stack, _question_rx, _approval_rx, _plan_rx) = AgentStack::new(AgentStackConfig {
+            data_dir: temp.path().to_path_buf(),
+            injected_provider: Some(Arc::new(ava_llm::providers::mock::MockProvider::new(
+                "test",
+                vec![],
+            ))),
+            ..Default::default()
+        })
+        .await
+        .expect("stack init should succeed");
+
+        let tools = stack
+            .effective_tools_for_interactive_run(
+                "Use a scout subagent to read files and summarize what it finds.",
+                &[],
+                &[],
+            )
+            .await;
+        let tool_names = tools
+            .iter()
+            .map(|(tool, _)| tool.name.as_str())
+            .collect::<Vec<_>>();
+
+        assert!(tool_names.contains(&"subagent"));
+        assert!(tool_names.contains(&"read"));
+        assert!(!tool_names.contains(&"write"));
+        assert!(!tool_names.contains(&"edit"));
     }
 
     #[tokio::test]

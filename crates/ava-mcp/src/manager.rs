@@ -577,7 +577,7 @@ fn extract_text_content(result: &Value) -> String {
 
 /// Truncate MCP output if it exceeds `MAX_MCP_OUTPUT_CHARS`.
 ///
-/// When truncated, the full output is saved to `~/.ava/mcp-output/` and a
+/// When truncated, the full output is saved to AVA's XDG cache output dir and a
 /// notice is appended to the truncated content.
 fn truncate_mcp_output(content: &str, server_name: &str, tool_name: &str) -> String {
     if content.len() <= MAX_MCP_OUTPUT_CHARS {
@@ -604,7 +604,7 @@ fn truncate_mcp_output(content: &str, server_name: &str, tool_name: &str) -> Str
     truncated
 }
 
-/// Save full MCP output to `~/.ava/mcp-output/{server}-{tool}-{timestamp}.txt`.
+/// Save full MCP output to AVA's XDG cache output dir.
 fn save_mcp_output_fallback(content: &str, server_name: &str, tool_name: &str) -> Option<PathBuf> {
     let dir = mcp_output_dir()?;
     std::fs::create_dir_all(&dir).ok()?;
@@ -622,7 +622,17 @@ fn save_mcp_output_fallback(content: &str, server_name: &str, tool_name: &str) -
 
 /// MCP output directory path.
 fn mcp_output_dir() -> Option<PathBuf> {
-    dirs::home_dir().map(|h| h.join(".ava").join("mcp-output"))
+    let preferred = dirs::cache_dir()?.join("ava").join("mcp-output");
+    if preferred.exists() {
+        return Some(preferred);
+    }
+
+    let legacy = dirs::home_dir()?.join(".ava").join("mcp-output");
+    if legacy.exists() {
+        return Some(legacy);
+    }
+
+    Some(preferred)
 }
 
 // ---------------------------------------------------------------------------

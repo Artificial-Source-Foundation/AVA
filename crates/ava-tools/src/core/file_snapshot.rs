@@ -2,7 +2,7 @@
 //!
 //! Unlike [`GhostSnapshotter`](crate::git::GhostSnapshotter) which stores
 //! individual file blobs in the project's own `.git`, this module maintains a
-//! **separate shadow git repository** at `~/.ava/snapshots/{project-hash}/`
+//! **separate shadow git repository** at AVA's XDG data `snapshots/{project-hash}/`
 //! that captures the full working-tree state as git commits.
 //!
 //! This enables:
@@ -40,7 +40,7 @@ pub struct SnapshotEntry {
 /// providing complete rollback capability.
 #[derive(Debug, Clone)]
 pub struct SnapshotManager {
-    /// Path to the shadow git directory (~/.ava/snapshots/{project-hash}/).
+    /// Path to the shadow git directory in AVA's XDG data dir.
     snapshot_dir: PathBuf,
     /// The real project root (used as GIT_WORK_TREE).
     project_root: PathBuf,
@@ -59,21 +59,16 @@ pub fn new_shared_snapshot_manager() -> SharedSnapshotManager {
 impl SnapshotManager {
     /// Create a new `SnapshotManager` for the given project root.
     ///
-    /// The shadow repo is stored at `~/.ava/snapshots/{hash}/` where `{hash}`
+    /// The shadow repo is stored at AVA's XDG data `snapshots/{hash}/` where `{hash}`
     /// is a stable hash of the canonicalized project root path.
     pub fn new(project_root: &Path) -> Result<Self, String> {
         let canonical = project_root
             .canonicalize()
             .unwrap_or_else(|_| project_root.to_path_buf());
 
-        let home = dirs::home_dir().ok_or("could not determine home directory")?;
+        let data_dir = dirs::data_dir().ok_or("could not determine data directory")?;
         let project_hash = hash_project_root(&canonical);
-        let mut snapshot_dir = home.join(".ava").join("snapshots").join(&project_hash);
-        let legacy_hash = legacy_hash_project_root(&canonical);
-        let legacy_snapshot_dir = home.join(".ava").join("snapshots").join(&legacy_hash);
-        if !snapshot_dir.exists() && legacy_snapshot_dir.exists() {
-            snapshot_dir = legacy_snapshot_dir;
-        }
+        let snapshot_dir = data_dir.join("ava").join("snapshots").join(&project_hash);
 
         Ok(Self {
             snapshot_dir,
@@ -552,13 +547,6 @@ fn hash_project_root(path: &Path) -> String {
         "{:016x}",
         super::fnv1a_64(path.to_string_lossy().as_bytes())
     )
-}
-
-fn legacy_hash_project_root(path: &Path) -> String {
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    use std::hash::{Hash, Hasher};
-    path.to_string_lossy().hash(&mut hasher);
-    format!("{:016x}", hasher.finish())
 }
 
 fn validate_snapshot_hash(snapshot_hash: &str) -> Result<&str, String> {

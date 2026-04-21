@@ -120,7 +120,7 @@ impl ProviderCredential {
     }
 }
 
-/// Credential store loaded from ~/.ava/credentials.json.
+/// Credential store loaded from the XDG data dir at `.../ava/credentials.json`.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct CredentialStore {
     /// Provider name -> credential mapping.
@@ -402,10 +402,7 @@ impl CredentialStore {
     }
 
     pub fn default_path() -> Result<PathBuf> {
-        let home = dirs::home_dir().ok_or_else(|| {
-            AvaError::ConfigError("Could not resolve home directory for credentials".to_string())
-        })?;
-        Ok(home.join(".ava").join("credentials.json"))
+        crate::credentials_path()
     }
 }
 
@@ -595,10 +592,13 @@ mod tests {
     }
 
     #[test]
-    fn default_path_resolves_to_home_ava_credentials() {
+    fn default_path_resolves_to_runtime_credentials_path() {
         let path = CredentialStore::default_path().unwrap();
         let path_str = path.to_string_lossy();
-        assert!(path_str.ends_with(".ava/credentials.json"));
+        assert!(
+            path_str.ends_with("ava/credentials.json")
+                || path_str.ends_with(".ava/credentials.json")
+        );
     }
 
     #[tokio::test]

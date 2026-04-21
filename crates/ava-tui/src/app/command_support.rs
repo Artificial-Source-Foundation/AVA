@@ -76,7 +76,7 @@ impl App {
                 if self.state.hooks.is_empty() {
                     Some((
                         MessageKind::System,
-                        "No hooks loaded.\nAdd .toml files to .ava/hooks/ or ~/.ava/hooks/.\nRun /init to create example templates.".to_string(),
+                        "No hooks loaded.\nAdd .toml files to .ava/hooks/ or $XDG_CONFIG_HOME/ava/hooks/.\nRun /init to create example templates.".to_string(),
                     ))
                 } else {
                     let mut lines = Vec::new();

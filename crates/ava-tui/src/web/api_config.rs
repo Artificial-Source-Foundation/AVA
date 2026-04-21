@@ -399,7 +399,7 @@ pub struct FrontendLogRequest {
     pub timestamp: Option<String>,
 }
 
-/// Receive a frontend log entry and append it to `~/.ava/logs/frontend.log`.
+/// Receive a frontend log entry and append it to the XDG state log dir.
 pub(crate) async fn ingest_frontend_log(Json(req): Json<FrontendLogRequest>) -> impl IntoResponse {
     let timestamp = req
         .timestamp
@@ -414,12 +414,11 @@ pub(crate) async fn ingest_frontend_log(Json(req): Json<FrontendLogRequest>) -> 
         req.category, req.message
     );
 
-    let log_dir = dirs::home_dir()
-        .unwrap_or_default()
-        .join(".ava")
-        .join("logs");
-    let _ = std::fs::create_dir_all(&log_dir);
-    let log_path = log_dir.join("frontend.log");
+    let log_path = ava_config::frontend_log_path()
+        .unwrap_or_else(|_| std::path::PathBuf::from("frontend.log"));
+    if let Some(log_dir) = log_path.parent() {
+        let _ = std::fs::create_dir_all(log_dir);
+    }
 
     // Size-based rotation: if over 1 MB, keep last half
     if let Ok(meta) = std::fs::metadata(&log_path) {

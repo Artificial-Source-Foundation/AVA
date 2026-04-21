@@ -4,11 +4,14 @@
 
 use ava_types::{AvaError, Result};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::fs;
 use tokio::sync::RwLock;
 use uuid::Uuid;
+
+const APP_DIR_NAME: &str = "ava";
 
 pub mod agents;
 pub mod credential_commands;
@@ -19,7 +22,10 @@ pub mod routing;
 pub mod thinking;
 pub mod trust;
 
-pub use agents::{default_agents, AgentOverride, AgentsConfig, ResolvedAgent};
+pub use agents::{
+    default_agents, AgentOverride, AgentsConfig, ResolvedAgent, LEGACY_AGENTS_CONFIG_FILE,
+    SUBAGENTS_CONFIG_FILE,
+};
 pub use ava_auth;
 
 pub(crate) async fn write_file_atomic(path: &Path, content: &str) -> Result<()> {
@@ -83,6 +89,251 @@ pub use model_catalog::{fallback_catalog, CatalogModel, CatalogState, ModelCatal
 pub use routing::{RoutingConfig, RoutingMode, RoutingProfile, RoutingTarget, RoutingTargets};
 pub use thinking::{ProviderThinkingBudgetConfig, ThinkingBudgetConfig};
 pub use trust::{is_project_trusted, trust_project};
+
+fn preferred_app_dir<F>(resolver: F, label: &str) -> Result<PathBuf>
+where
+    F: FnOnce() -> Option<PathBuf>,
+{
+    resolver()
+        .map(|dir| dir.join(APP_DIR_NAME))
+        .ok_or_else(|| AvaError::ConfigError(format!("Could not find {label} directory")))
+}
+
+fn legacy_home_dir() -> Option<PathBuf> {
+    dirs::home_dir().map(|dir| dir.join(".ava"))
+}
+
+fn prefer_existing(preferred: PathBuf, legacy_suffix: impl AsRef<Path>) -> PathBuf {
+    if preferred.exists() {
+        return preferred;
+    }
+
+    if let Some(legacy_root) = legacy_home_dir() {
+        let legacy = legacy_root.join(legacy_suffix);
+        if legacy.exists() {
+            return legacy;
+        }
+    }
+
+    preferred
+}
+
+pub fn config_dir() -> Result<PathBuf> {
+    preferred_app_dir(dirs::config_dir, "config")
+}
+
+pub fn data_dir() -> Result<PathBuf> {
+    preferred_app_dir(dirs::data_dir, "data")
+}
+
+pub fn state_dir() -> Result<PathBuf> {
+    preferred_app_dir(dirs::state_dir, "state")
+}
+
+pub fn cache_dir() -> Result<PathBuf> {
+    preferred_app_dir(dirs::cache_dir, "cache")
+}
+
+pub fn config_file_path() -> Result<PathBuf> {
+    Ok(prefer_existing(
+        config_dir()?.join("config.yaml"),
+        "config.yaml",
+    ))
+}
+
+pub fn global_agents_path() -> Result<PathBuf> {
+    Ok(prefer_existing(
+        config_dir()?.join("AGENTS.md"),
+        "AGENTS.md",
+    ))
+}
+
+pub fn global_mcp_path() -> Result<PathBuf> {
+    Ok(prefer_existing(config_dir()?.join("mcp.json"), "mcp.json"))
+}
+
+pub fn global_tools_dir() -> Result<PathBuf> {
+    Ok(prefer_existing(config_dir()?.join("tools"), "tools"))
+}
+
+pub fn global_commands_dir() -> Result<PathBuf> {
+    Ok(prefer_existing(config_dir()?.join("commands"), "commands"))
+}
+
+pub fn global_hooks_dir() -> Result<PathBuf> {
+    Ok(prefer_existing(config_dir()?.join("hooks"), "hooks"))
+}
+
+pub fn global_subagents_config_path() -> Result<PathBuf> {
+    Ok(prefer_existing(
+        global_subagents_config_path_from(&config_dir()?),
+        SUBAGENTS_CONFIG_FILE,
+    ))
+}
+
+/// Canonical global subagent config path for an explicit config root.
+pub fn global_subagents_config_path_from(config_root: &Path) -> PathBuf {
+    config_root.join(SUBAGENTS_CONFIG_FILE)
+}
+
+/// Canonical project-local subagent config path used for new writes.
+pub fn project_subagents_config_path(project_root: &Path) -> PathBuf {
+    project_root.join(".ava").join(SUBAGENTS_CONFIG_FILE)
+}
+
+/// Legacy compatibility path. New writes should target [`global_subagents_config_path`].
+pub fn global_agents_config_path() -> Result<PathBuf> {
+    Ok(prefer_existing(
+        global_agents_config_path_from(&config_dir()?),
+        LEGACY_AGENTS_CONFIG_FILE,
+    ))
+}
+
+/// Legacy compatibility global agents path for an explicit config root.
+pub fn global_agents_config_path_from(config_root: &Path) -> PathBuf {
+    config_root.join(LEGACY_AGENTS_CONFIG_FILE)
+}
+
+/// Legacy project-local compatibility input path. New writes should target
+/// [`project_subagents_config_path`].
+pub fn project_legacy_agents_config_path(project_root: &Path) -> PathBuf {
+    project_root.join(".ava").join(LEGACY_AGENTS_CONFIG_FILE)
+}
+
+/// Canonical compatibility load paths for layered subagent configuration.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SubagentConfigCompatPaths {
+    pub global_subagents: PathBuf,
+    pub global_legacy_agents: PathBuf,
+    pub project_subagents: PathBuf,
+    pub project_legacy_agents: PathBuf,
+}
+
+/// Build canonical layered load paths for subagent config resolution.
+pub fn subagent_config_compat_paths(
+    config_root: &Path,
+    project_root: &Path,
+) -> SubagentConfigCompatPaths {
+    SubagentConfigCompatPaths {
+        global_subagents: global_subagents_config_path_from(config_root),
+        global_legacy_agents: global_agents_config_path_from(config_root),
+        project_subagents: project_subagents_config_path(project_root),
+        project_legacy_agents: project_legacy_agents_config_path(project_root),
+    }
+}
+
+/// Persist raw subagent TOML content to the canonical global path for the
+/// provided config root.
+pub async fn write_global_subagents_config_raw(
+    config_root: &Path,
+    content: &str,
+) -> Result<PathBuf> {
+    let path = global_subagents_config_path_from(config_root);
+    write_file_atomic(&path, content).await?;
+    Ok(path)
+}
+
+/// Persist raw subagent TOML content to the canonical project-local path.
+pub async fn write_project_subagents_config_raw(
+    project_root: &Path,
+    content: &str,
+) -> Result<PathBuf> {
+    let path = project_subagents_config_path(project_root);
+    write_file_atomic(&path, content).await?;
+    Ok(path)
+}
+
+/// Persist structured subagent config to the canonical global path for the
+/// provided config root.
+pub async fn write_global_subagents_config(
+    config_root: &Path,
+    config: &AgentsConfig,
+) -> Result<PathBuf> {
+    let content = toml::to_string_pretty(config)
+        .map_err(|e| AvaError::ConfigError(format!("Failed to serialize subagents config: {e}")))?;
+    write_global_subagents_config_raw(config_root, &content).await
+}
+
+/// Persist structured subagent config to the canonical project-local path.
+pub async fn write_project_subagents_config(
+    project_root: &Path,
+    config: &AgentsConfig,
+) -> Result<PathBuf> {
+    let content = toml::to_string_pretty(config)
+        .map_err(|e| AvaError::ConfigError(format!("Failed to serialize subagents config: {e}")))?;
+    write_project_subagents_config_raw(project_root, &content).await
+}
+
+pub fn global_plugins_dir() -> Result<PathBuf> {
+    Ok(prefer_existing(config_dir()?.join("plugins"), "plugins"))
+}
+
+pub fn global_themes_dir() -> Result<PathBuf> {
+    Ok(prefer_existing(config_dir()?.join("themes"), "themes"))
+}
+
+pub fn global_skills_dir() -> Result<PathBuf> {
+    Ok(prefer_existing(config_dir()?.join("skills"), "skills"))
+}
+
+pub fn credentials_path() -> Result<PathBuf> {
+    Ok(prefer_existing(
+        data_dir()?.join("credentials.json"),
+        "credentials.json",
+    ))
+}
+
+pub fn encrypted_credentials_path() -> Result<PathBuf> {
+    Ok(prefer_existing(
+        data_dir()?.join("credentials.enc"),
+        "credentials.enc",
+    ))
+}
+
+pub fn app_db_path() -> Result<PathBuf> {
+    Ok(prefer_existing(data_dir()?.join("data.db"), "data.db"))
+}
+
+pub fn models_dir() -> Result<PathBuf> {
+    Ok(prefer_existing(data_dir()?.join("models"), "models"))
+}
+
+pub fn trusted_projects_path() -> Result<PathBuf> {
+    Ok(prefer_existing(
+        config_dir()?.join("trusted_projects.json"),
+        "trusted_projects.json",
+    ))
+}
+
+pub fn logs_dir() -> Result<PathBuf> {
+    Ok(prefer_existing(state_dir()?.join("logs"), "logs"))
+}
+
+pub fn traces_dir() -> Result<PathBuf> {
+    Ok(prefer_existing(state_dir()?.join("traces"), "traces"))
+}
+
+pub fn frontend_log_path() -> Result<PathBuf> {
+    Ok(logs_dir()?.join("frontend.log"))
+}
+
+pub fn update_check_cache_path() -> Result<PathBuf> {
+    Ok(prefer_existing(
+        cache_dir()?.join("update-check.json"),
+        "update-check.json",
+    ))
+}
+
+pub fn benchmarks_dir() -> Result<PathBuf> {
+    Ok(prefer_existing(
+        cache_dir()?.join("benchmarks"),
+        "benchmarks",
+    ))
+}
+
+pub fn benchmark_workspace_dir() -> Result<PathBuf> {
+    Ok(benchmarks_dir()?.join("workspace"))
+}
 
 /// LLM provider configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -154,11 +405,11 @@ pub struct FeaturesConfig {
     pub enable_git: bool,
     pub enable_lsp: bool,
     pub enable_mcp: bool,
-    /// When true (default), audit log entries are persisted to `~/.ava/audit.db`.
+    /// When true (default), audit log entries are persisted to AVA's XDG data dir.
     /// Set to false to keep audit entries in memory only (lost on app close).
     #[serde(default = "default_true")]
     pub audit_logging: bool,
-    /// When true (default), write structured JSONL logs per session to `~/.ava/log/{session-id}.jsonl`.
+    /// When true (default), write structured JSONL logs per session to AVA's XDG state log dir.
     /// Each line records turn number, role, tool calls, token usage, and duration.
     /// Log files older than 7 days are automatically deleted on startup.
     #[serde(default = "default_true")]
@@ -295,6 +546,32 @@ pub struct PermissionsConfig {
     pub path_rules: Vec<PathRule>,
 }
 
+/// Primary agent profile used for top-level startup selection.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct PrimaryAgentConfig {
+    /// Optional provider override for this primary agent.
+    #[serde(default)]
+    pub provider: Option<String>,
+    /// Optional model override for this primary agent.
+    #[serde(default)]
+    pub model: Option<String>,
+    /// Optional prompt suffix injected for this primary agent.
+    #[serde(default)]
+    pub prompt: Option<String>,
+    /// Optional human-readable description.
+    #[serde(default)]
+    pub description: Option<String>,
+}
+
+/// Fully resolved startup primary-agent selection.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedPrimaryAgent {
+    pub id: String,
+    pub provider: Option<String>,
+    pub model: Option<String>,
+    pub prompt: Option<String>,
+}
+
 /// Main configuration struct
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Config {
@@ -325,6 +602,12 @@ pub struct Config {
     /// Paths may be absolute or relative to the active working directory.
     #[serde(default)]
     pub workspace_roots: Vec<String>,
+    /// Default primary agent ID to use for startup when no `--agent` override is provided.
+    #[serde(default)]
+    pub primary_agent: Option<String>,
+    /// Configured primary agent profiles keyed by stable ID.
+    #[serde(default)]
+    pub primary_agents: HashMap<String, PrimaryAgentConfig>,
     /// Path-based permission rules (merged with permissions.toml).
     ///
     /// Example in config.yaml:
@@ -338,6 +621,46 @@ pub struct Config {
     /// ```
     #[serde(default)]
     pub permissions: PermissionsConfig,
+}
+
+impl Config {
+    /// Resolve the selected primary agent by explicit ID (`--agent`) or default
+    /// `primary_agent` from config.
+    ///
+    /// Resolution order: explicit CLI override > config default.
+    pub fn resolve_primary_agent(
+        &self,
+        explicit_id: Option<&str>,
+    ) -> std::result::Result<Option<ResolvedPrimaryAgent>, String> {
+        let selected_id = explicit_id
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
+            .map(|id| id.to_string())
+            .or_else(|| {
+                self.primary_agent
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|id| !id.is_empty())
+                    .map(|id| id.to_string())
+            });
+
+        let Some(id) = selected_id else {
+            return Ok(None);
+        };
+
+        let Some(profile) = self.primary_agents.get(&id) else {
+            return Err(format!(
+                "Unknown primary agent '{id}'. Define it under primary_agents.{id} in config.yaml."
+            ));
+        };
+
+        Ok(Some(ResolvedPrimaryAgent {
+            id,
+            provider: profile.provider.clone(),
+            model: profile.model.clone(),
+            prompt: profile.prompt.clone(),
+        }))
+    }
 }
 
 /// Per-project ephemeral state (stored in `.ava/state.json` in the project root).
@@ -471,10 +794,7 @@ impl ConfigManager {
 
     /// Get default configuration path based on platform
     fn default_config_path() -> Result<PathBuf> {
-        let config_dir = dirs::config_dir()
-            .ok_or_else(|| AvaError::ConfigError("Could not find config directory".to_string()))?;
-
-        Ok(config_dir.join("ava").join("config.yaml"))
+        config_file_path()
     }
 
     fn default_credentials_path() -> Result<PathBuf> {
@@ -665,10 +985,13 @@ mod tests {
     }
 
     #[test]
-    fn test_credentials_path_defaults_to_home_ava_credentials_json() {
+    fn test_credentials_path_defaults_to_xdg_data_dir() {
         let path = ConfigManager::default_credentials_path().unwrap();
         let path_str = path.to_string_lossy();
-        assert!(path_str.ends_with(".ava/credentials.json"));
+        assert!(
+            path_str.ends_with("ava/credentials.json")
+                || path_str.ends_with(".ava/credentials.json")
+        );
     }
 
     #[tokio::test]
@@ -749,5 +1072,180 @@ mod tests {
             config.llm.routing.targets.cheap.model.as_deref(),
             Some("gpt-4o-mini")
         );
+    }
+
+    #[test]
+    fn test_primary_agent_parsing_and_resolution() {
+        let content = r#"
+llm:
+  provider: openai
+  model: gpt-5.3-codex
+  max_tokens: 4096
+  temperature: 0.7
+editor:
+  default_editor: vscode
+  tab_size: 4
+  use_spaces: true
+ui:
+  theme: dark
+  font_size: 14
+  show_line_numbers: true
+features:
+  enable_git: true
+  enable_lsp: true
+  enable_mcp: true
+
+primary_agent: architect
+
+primary_agents:
+  architect:
+    provider: openrouter
+    model: anthropic/claude-sonnet-4
+    prompt: Keep answers architecture-first.
+  coder:
+    provider: openai
+    model: gpt-5.3-codex
+"#;
+
+        let config = serde_yaml::from_str::<Config>(content).expect("config should parse");
+        let resolved = config
+            .resolve_primary_agent(None)
+            .expect("default primary should resolve")
+            .expect("default primary should exist");
+
+        assert_eq!(resolved.id, "architect");
+        assert_eq!(resolved.provider.as_deref(), Some("openrouter"));
+        assert_eq!(resolved.model.as_deref(), Some("anthropic/claude-sonnet-4"));
+    }
+
+    #[test]
+    fn test_primary_agent_cli_override_wins_over_config_default() {
+        let content = r#"
+llm:
+  provider: openai
+  model: gpt-5.3-codex
+  max_tokens: 4096
+  temperature: 0.7
+editor:
+  default_editor: vscode
+  tab_size: 4
+  use_spaces: true
+ui:
+  theme: dark
+  font_size: 14
+  show_line_numbers: true
+features:
+  enable_git: true
+  enable_lsp: true
+  enable_mcp: true
+
+primary_agent: architect
+
+primary_agents:
+  architect:
+    provider: openrouter
+    model: anthropic/claude-sonnet-4
+  coder:
+    provider: openai
+    model: gpt-5.3-codex
+"#;
+
+        let config = serde_yaml::from_str::<Config>(content).expect("config should parse");
+        let resolved = config
+            .resolve_primary_agent(Some("coder"))
+            .expect("explicit primary should resolve")
+            .expect("explicit primary should exist");
+
+        assert_eq!(resolved.id, "coder");
+        assert_eq!(resolved.provider.as_deref(), Some("openai"));
+        assert_eq!(resolved.model.as_deref(), Some("gpt-5.3-codex"));
+    }
+
+    #[test]
+    fn test_primary_agent_unknown_id_returns_error() {
+        let content = r#"
+llm:
+  provider: openai
+  model: gpt-5.3-codex
+  max_tokens: 4096
+  temperature: 0.7
+editor:
+  default_editor: vscode
+  tab_size: 4
+  use_spaces: true
+ui:
+  theme: dark
+  font_size: 14
+  show_line_numbers: true
+features:
+  enable_git: true
+  enable_lsp: true
+  enable_mcp: true
+
+primary_agents:
+  architect:
+    provider: openrouter
+    model: anthropic/claude-sonnet-4
+"#;
+
+        let config = serde_yaml::from_str::<Config>(content).expect("config should parse");
+        let error = config
+            .resolve_primary_agent(Some("missing"))
+            .expect_err("unknown id should error");
+        assert!(error.contains("Unknown primary agent 'missing'"));
+    }
+
+    #[test]
+    fn test_project_subagents_config_path_targets_new_filename() {
+        let root = std::path::Path::new("/tmp/example-project");
+        let path = project_subagents_config_path(root);
+        assert_eq!(path, root.join(".ava").join("subagents.toml"));
+    }
+
+    #[test]
+    fn test_project_legacy_agents_config_path_kept_for_read_compat() {
+        let root = std::path::Path::new("/tmp/example-project");
+        let path = project_legacy_agents_config_path(root);
+        assert_eq!(path, root.join(".ava").join("agents.toml"));
+    }
+
+    #[test]
+    fn test_global_subagents_config_path_from_uses_config_root() {
+        let config_root = std::path::Path::new("/tmp/example-config");
+        assert_eq!(
+            global_subagents_config_path_from(config_root),
+            config_root.join("subagents.toml")
+        );
+    }
+
+    #[test]
+    fn test_subagent_config_compat_paths_are_canonical() {
+        let config_root = std::path::Path::new("/tmp/example-config");
+        let project_root = std::path::Path::new("/tmp/example-project");
+        let paths = subagent_config_compat_paths(config_root, project_root);
+
+        assert_eq!(paths.global_subagents, config_root.join("subagents.toml"));
+        assert_eq!(paths.global_legacy_agents, config_root.join("agents.toml"));
+        assert_eq!(
+            paths.project_subagents,
+            project_root.join(".ava").join("subagents.toml")
+        );
+        assert_eq!(
+            paths.project_legacy_agents,
+            project_root.join(".ava").join("agents.toml")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_write_project_subagents_config_raw_uses_canonical_path() {
+        let tmp = TempDir::new().unwrap();
+        let written =
+            write_project_subagents_config_raw(tmp.path(), "[defaults]\nenabled = true\n")
+                .await
+                .expect("project subagents config write should succeed");
+
+        let expected = tmp.path().join(".ava").join("subagents.toml");
+        assert_eq!(written, expected);
+        assert!(expected.exists());
     }
 }

@@ -22,7 +22,11 @@ import { BUILT_IN_SKILLS } from './skills-tab-data'
 
 /** Directories AVA discovers skill files from (mirroring crates/ava-agent/src/instructions.rs). */
 const SKILL_SOURCES = [
-  { path: '~/.ava/skills/', scope: 'Global', description: 'User-level skills, always loaded' },
+  {
+    path: '$XDG_CONFIG_HOME/ava/skills/',
+    scope: 'Global',
+    description: 'User-level skills, always loaded',
+  },
   { path: '~/.claude/skills/', scope: 'Global', description: 'Claude-compatible global skills' },
   { path: '~/.agents/skills/', scope: 'Global', description: 'Agent-compatible global skills' },
   { path: '.ava/skills/', scope: 'Project', description: 'Project-local skills (requires trust)' },

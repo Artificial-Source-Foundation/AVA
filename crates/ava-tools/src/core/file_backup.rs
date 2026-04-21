@@ -1,7 +1,7 @@
 //! Persistent file edit backups.
 //!
 //! Before every file write or edit, the original content is saved to
-//! `~/.ava/file-history/{session_id}/{path_hash}@v{N}` so that changes survive
+//! AVA's XDG data `file-history/{session_id}/{path_hash}@v{N}` so that changes survive
 //! crashes. A companion `.meta` sidecar records the original absolute path.
 //!
 //! The session ID is held in a shared [`FileBackupSession`] that is set when
@@ -28,7 +28,7 @@ pub fn new_backup_session() -> FileBackupSession {
 /// If the file does not exist yet (new file), this is a no-op.
 /// If no session ID has been set, the backup is silently skipped.
 ///
-/// The backup is written to `~/.ava/file-history/{session_id}/{hash}@v{N}`
+/// The backup is written to AVA's XDG data `file-history/{session_id}/{hash}@v{N}`
 /// with a sidecar `{hash}@v{N}.meta` containing the original path.
 pub async fn backup_file_before_edit(
     session: &FileBackupSession,
@@ -166,10 +166,10 @@ pub async fn list_backups(
 // Internal helpers
 // ---------------------------------------------------------------------------
 
-/// Compute the backup base directory: `~/.ava/file-history/{session_id}/`.
+/// Compute the backup base directory inside AVA's XDG data dir.
 fn backup_dir(session_id: &str) -> Result<PathBuf, String> {
-    let home = dirs::home_dir().ok_or("could not determine home directory")?;
-    Ok(home.join(".ava").join("file-history").join(session_id))
+    let data_dir = dirs::data_dir().ok_or("could not determine data directory")?;
+    Ok(data_dir.join("ava").join("file-history").join(session_id))
 }
 
 /// Produce a stable, filesystem-safe hash of a file path.

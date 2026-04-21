@@ -193,11 +193,13 @@ pub async fn run_harness(
     eprintln!("[harness] Suite: {} | Max turns: {}", suite, max_turns);
 
     // Workspace setup (same pattern as regular benchmark)
-    let workspace_dir = dirs::home_dir()
-        .unwrap_or_default()
-        .join(".ava")
-        .join("benchmarks")
-        .join("workspace");
+    let workspace_dir = ava_config::benchmark_workspace_dir().unwrap_or_else(|_| {
+        dirs::cache_dir()
+            .unwrap_or_default()
+            .join("ava")
+            .join("benchmarks")
+            .join("workspace")
+    });
     tokio::fs::create_dir_all(&workspace_dir)
         .await
         .map_err(|e| eyre!("Failed to create benchmark workspace: {}", e))?;
@@ -353,7 +355,7 @@ async fn run_solo_task(
 ) -> Result<BenchmarkResult> {
     use ava_agent::stack::{AgentStack, AgentStackConfig};
 
-    let data_dir = dirs::home_dir().unwrap_or_default().join(".ava");
+    let data_dir = ava_config::data_dir().unwrap_or_default();
     let effective_turns = if task.needs_tools { max_turns } else { 3 };
 
     let (stack, question_rx, approval_rx, _plan_rx) =
@@ -982,10 +984,12 @@ fn make_error_result(task: &BenchmarkTask, spec: &ModelSpec, error: &str) -> Ben
 
 /// Save harness results as JSON.
 async fn save_harness_json(report: &HarnessReport) -> Result<()> {
-    let benchmarks_dir = dirs::home_dir()
-        .unwrap_or_default()
-        .join(".ava")
-        .join("benchmarks");
+    let benchmarks_dir = ava_config::benchmarks_dir().unwrap_or_else(|_| {
+        dirs::cache_dir()
+            .unwrap_or_default()
+            .join("ava")
+            .join("benchmarks")
+    });
 
     tokio::fs::create_dir_all(&benchmarks_dir)
         .await

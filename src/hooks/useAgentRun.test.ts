@@ -174,7 +174,11 @@ describe('createAgentRun', () => {
         endRun: vi.fn(),
       },
       session: {
-        currentSession: () => ({ id: 'session-a', name: 'New Session' }),
+        currentSession: () => ({
+          id: 'session-a',
+          name: 'New Session',
+          metadata: { titlePlaceholder: true },
+        }),
         createNewSession: vi.fn(),
         addMessage: vi.fn(),
         updateMessage: vi.fn(),
@@ -228,6 +232,83 @@ describe('createAgentRun', () => {
     )
 
     expect(renameSession).toHaveBeenCalledWith('session-a', 'Build OAuth flow')
+  })
+
+  it('does not auto-title explicitly named placeholder-looking sessions', async () => {
+    let currentRunToken = 0
+    const renameSession = vi.fn().mockResolvedValue(undefined)
+
+    const runModule = createAgentRun({
+      rustAgent: {
+        isRunning: () => false,
+        run: vi.fn(async () => ({ success: true, turns: 1, sessionId: 'session-a' })),
+        error: () => null,
+        streamingContent: () => 'done',
+        thinkingContent: () => '',
+        thinkingSegments: () => [],
+        activeToolCalls: () => [],
+        tokenUsage: () => ({ output: 0, cost: 0 }),
+        endRun: vi.fn(),
+      },
+      session: {
+        currentSession: () => ({
+          id: 'session-a',
+          name: 'New Session',
+          metadata: { titlePlaceholder: false },
+        }),
+        createNewSession: vi.fn(),
+        addMessage: vi.fn(),
+        updateMessage: vi.fn(),
+        updateMessageInSession: vi.fn(),
+        addMessageToSession: vi.fn(),
+        deleteMessage: vi.fn(),
+        deleteMessageInSession: vi.fn(),
+        selectedModel: () => 'gpt-5.4',
+        selectedProvider: () => 'openai',
+        messages: () => [],
+        renameSession,
+      },
+      settingsRef: {
+        settings: () => ({
+          behavior: { sessionAutoTitle: true },
+          generation: {
+            reasoningEffort: 'off',
+            autoCompact: true,
+            compactionThreshold: 80,
+            compactionModel: null,
+          },
+        }),
+      },
+      isPlanMode: () => false,
+      setCurrentThought: vi.fn(),
+      setDoomLoopDetected: vi.fn(),
+      setToolActivity: vi.fn(),
+      setStreamingTokenEstimate: vi.fn(),
+      streamingStartedAt: () => null,
+      setStreamingStartedAt: vi.fn(),
+      messageQueue: () => [],
+      setMessageQueue: vi.fn(),
+      liveMessageId: () => null,
+      setLiveMessageId: vi.fn(),
+      streaming: {
+        streamingContentOffset: () => 0,
+        setStreamingContentOffset: vi.fn(),
+        toolCallsOffset: () => 0,
+        setToolCallsOffset: vi.fn(),
+        thinkingSegmentsOffset: () => 0,
+        setThinkingSegmentsOffset: vi.fn(),
+      },
+      runOwnership: {
+        beginRun: () => ++currentRunToken,
+        isCurrentRun: (token: number) => token === currentRunToken,
+      },
+    } as unknown as Parameters<typeof createAgentRun>[0])
+
+    await expect(runModule.run('Build OAuth flow')).resolves.toEqual(
+      expect.objectContaining({ success: true, sessionId: 'session-a' })
+    )
+
+    expect(renameSession).not.toHaveBeenCalled()
   })
 
   it('persists a successful run into its originating session after a fast switch', async () => {

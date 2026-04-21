@@ -38,7 +38,7 @@ pub enum CommandSource {
     /// Project-local: `.ava/commands/`
     #[default]
     Project,
-    /// User-global: `~/.ava/commands/`
+    /// User-global: `$XDG_CONFIG_HOME/ava/commands/`
     Global,
 }
 
@@ -58,15 +58,14 @@ pub struct CustomCommandRegistry {
 }
 
 impl CustomCommandRegistry {
-    /// Load custom commands from both global (`~/.ava/commands/`) and project
+    /// Load custom commands from both global (`$XDG_CONFIG_HOME/ava/commands/`) and project
     /// (`.ava/commands/`) directories. Project commands override global ones
     /// with the same name.
     pub fn load() -> Self {
         let mut commands = Vec::new();
 
-        // Load from ~/.ava/commands/*.toml (global)
-        if let Some(home) = dirs::home_dir() {
-            let global_dir = home.join(".ava").join("commands");
+        // Load from $XDG_CONFIG_HOME/ava/commands/*.toml (global)
+        if let Ok(global_dir) = ava_config::global_commands_dir() {
             Self::load_from_dir(&global_dir, CommandSource::Global, &mut commands);
         }
 

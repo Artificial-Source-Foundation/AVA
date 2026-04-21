@@ -1,7 +1,7 @@
 //! Structured JSONL session logger.
 //!
 //! When enabled via config (`features.session_logging: true`), writes one JSON
-//! line per agent turn to `~/.ava/log/{session-id}.jsonl`. Each line captures
+//! line per agent turn to AVA's XDG state log dir. Each line captures
 //! the turn number, role, tool calls, token usage, and duration.
 
 use std::path::PathBuf;
@@ -44,13 +44,13 @@ pub struct SessionLogger {
 impl SessionLogger {
     /// Create a new session logger for the given session ID.
     ///
-    /// Creates the `~/.ava/log/` directory if it does not exist. Returns `None`
-    /// if the home directory cannot be determined.
+    /// Creates the XDG state `log/` directory if it does not exist. Returns
+    /// `None` if the state directory cannot be determined.
     ///
     /// On creation, runs log rotation: any `.jsonl` files in the log directory
     /// older than 7 days are deleted automatically.
     pub fn new(session_id: &str) -> Option<Self> {
-        let log_dir = dirs::home_dir()?.join(".ava").join("log");
+        let log_dir = ava_config::logs_dir().ok()?;
         if let Err(e) = std::fs::create_dir_all(&log_dir) {
             warn!("Failed to create session log directory: {e}");
             return None;

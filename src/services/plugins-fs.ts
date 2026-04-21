@@ -6,7 +6,7 @@
  * Download and hot-reload logic lives in plugin-download.ts.
  */
 
-import { isTauri } from '@tauri-apps/api/core'
+import { invoke, isTauri } from '@tauri-apps/api/core'
 import type { PluginManifest, PluginState } from '../types/plugin'
 import { logInfo, logWarn } from './logger'
 import {
@@ -15,8 +15,7 @@ import {
 } from './plugin-download'
 
 const STORAGE_KEY = 'ava_plugins_state'
-const PLUGINS_DIR = '.ava/plugins'
-const STATE_FILE = `${PLUGINS_DIR}/state.json`
+const STATE_FILE = 'state.json'
 
 type PluginStateMap = Record<string, PluginState>
 
@@ -46,15 +45,13 @@ async function getTauriFs(): Promise<typeof import('@tauri-apps/plugin-fs')> {
   return import('@tauri-apps/plugin-fs')
 }
 
-async function getHomeDir(): Promise<string> {
-  const { homeDir } = await import('@tauri-apps/api/path')
-  return homeDir()
+async function getPluginsRootDir(): Promise<string> {
+  return invoke<string>('get_global_plugins_dir')
 }
 
 async function ensurePluginsDir(): Promise<string> {
   const fs = await getTauriFs()
-  const home = await getHomeDir()
-  const dir = `${home}${PLUGINS_DIR}`
+  const dir = await getPluginsRootDir()
   try {
     await fs.mkdir(dir, { recursive: true })
   } catch {
@@ -76,8 +73,8 @@ export async function loadPluginsState(): Promise<PluginStateMap> {
   if (!isTauri()) return readLocalState()
   try {
     const fs = await getTauriFs()
-    const home = await getHomeDir()
-    const path = `${home}${STATE_FILE}`
+    const dir = await ensurePluginsDir()
+    const path = `${dir}/${STATE_FILE}`
     const text = await fs.readTextFile(path)
     return JSON.parse(text) as PluginStateMap
   } catch {
@@ -93,8 +90,8 @@ async function savePluginsState(state: PluginStateMap): Promise<void> {
   try {
     const fs = await getTauriFs()
     await ensurePluginsDir()
-    const home = await getHomeDir()
-    const path = `${home}${STATE_FILE}`
+    const dir = await ensurePluginsDir()
+    const path = `${dir}/${STATE_FILE}`
     await fs.writeTextFile(path, JSON.stringify(state, null, 2))
   } catch (err) {
     logWarn('plugins-fs', 'Failed to save state to FS, using localStorage', err)
@@ -106,7 +103,7 @@ async function savePluginsState(state: PluginStateMap): Promise<void> {
 // Plugin FS Operations
 // ============================================================================
 
-/** Download plugin from URL to ~/.ava/plugins/<name>/ */
+/** Download plugin from URL to the global XDG plugin dir. */
 export async function downloadPlugin(url: string, name: string): Promise<string> {
   const dir = await pluginDir(name)
   await downloadPluginImpl(url, dir, name, getTauriFs)
@@ -139,7 +136,7 @@ export async function readPluginManifest(name: string): Promise<PluginManifest |
   }
 }
 
-/** Scan ~/.ava/plugins/ for installed plugins with manifest files */
+/** Scan the global XDG plugin dir for installed plugins with manifest files */
 export async function listInstalledPlugins(): Promise<string[]> {
   if (!isTauri()) return []
   try {

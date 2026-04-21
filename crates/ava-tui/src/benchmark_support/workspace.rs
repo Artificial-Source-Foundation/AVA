@@ -24,42 +24,37 @@ pub(crate) async fn prepare_benchmark_workspace(workspace_dir: &Path) -> Result<
     trust_project(workspace_dir)
         .map_err(|e| eyre!("Failed to trust benchmark workspace: {}", e))?;
 
-    let ava_dir = workspace_dir.join(".ava");
-    tokio::fs::create_dir_all(&ava_dir)
-        .await
-        .map_err(|e| eyre!("Failed to create benchmark .ava dir: {}", e))?;
-    let agents_toml = ava_dir.join("agents.toml");
     let agents_config = r#"
 [defaults]
 enabled = true
 
-[agents.scout]
+[subagents.scout]
 enabled = true
 max_turns = 5
 
-[agents.explore]
+[subagents.explore]
 enabled = true
 max_turns = 5
 
-[agents.plan]
+[subagents.plan]
 enabled = true
 max_turns = 6
 
-[agents.review]
+[subagents.review]
 enabled = true
 max_turns = 6
 
-[agents.worker]
+[subagents.worker]
 enabled = true
 max_turns = 10
 
-[agents.task]
+[subagents.task]
 enabled = true
 max_turns = 10
 "#;
-    tokio::fs::write(&agents_toml, agents_config.trim_start())
+    ava_config::write_project_subagents_config_raw(workspace_dir, agents_config.trim_start())
         .await
-        .map_err(|e| eyre!("Failed to write benchmark agents.toml: {}", e))?;
+        .map_err(|e| eyre!("Failed to write benchmark subagents.toml: {}", e))?;
 
     prepare_mcp_benchmark_fixtures(workspace_dir).await?;
     prepare_lsp_smoke_fixtures(workspace_dir).await?;

@@ -1,4 +1,5 @@
 use clap::{Parser, Subcommand, ValueEnum};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use tracing::debug;
 
@@ -28,6 +29,10 @@ pub struct CliArgs {
     /// Provider to use
     #[arg(long)]
     pub provider: Option<String>,
+
+    /// Startup primary-agent profile id (configured in config.yaml)
+    #[arg(long, value_name = "ID")]
+    pub agent: Option<String>,
 
     /// Maximum agent turns (0 = unlimited)
     #[arg(long, default_value_t = 0)]
@@ -69,7 +74,7 @@ pub struct CliArgs {
     #[arg(long = "watch-path")]
     pub watch_path: Vec<String>,
 
-    /// Trust the current project (allows loading all project-local config: .ava/mcp.json, .ava/hooks/, .ava/tools/, .ava/commands/, .ava/agents.toml, .ava/skills/, AGENTS.md, .ava/rules/)
+    /// Trust the current project (allows loading all project-local config: .ava/mcp.json, .ava/hooks/, .ava/tools/, .ava/commands/, .ava/subagents.toml, legacy .ava/agents.toml, .ava/skills/, AGENTS.md, .ava/rules/)
     #[arg(long)]
     pub trust: bool,
 
@@ -280,6 +285,15 @@ impl CliArgs {
 mod tests {
     use super::*;
 
+    fn setup_startup_resolver_config(config_yaml: &str) -> tempfile::TempDir {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let config_root = temp.path().join("config-root");
+        let config_dir = config_root.join("ava");
+        std::fs::create_dir_all(&config_dir).expect("create config dir");
+        std::fs::write(config_dir.join("config.yaml"), config_yaml).expect("write config");
+        temp
+    }
+
     fn base_cli() -> CliArgs {
         CliArgs {
             goal: Some("Reply exactly with ok".to_string()),
@@ -288,6 +302,7 @@ mod tests {
             session: None,
             model: None,
             provider: None,
+            agent: None,
             max_turns: 3,
             max_budget_usd: 0.0,
             auto_approve: false,
@@ -382,6 +397,155 @@ mod tests {
     fn cli_parses_cwd_override() {
         let cli = CliArgs::parse_from(["ava", "--cwd", "/tmp/project", "--headless"]);
         assert_eq!(cli.cwd, Some(PathBuf::from("/tmp/project")));
+    }
+
+    #[test]
+    fn cli_parses_agent_override() {
+        let cli = CliArgs::parse_from(["ava", "--agent", "architect", "--headless"]);
+        assert_eq!(cli.agent.as_deref(), Some("architect"));
+    }
+
+    #[tokio::test]
+    async fn startup_selection_uses_agent_provider_model_when_only_agent_is_explicit() {
+        let temp = setup_startup_resolver_config(
+            r#"
+primary_agents:
+  architect:
+    provider: openrouter
+    model: anthropic/claude-sonnet-4
+    prompt: You are the architect profile.
+"#,
+        );
+        let workspace = temp.path().join("workspace");
+        std::fs::create_dir_all(&workspace).expect("workspace dir");
+        let config_root = temp.path().join("config-root");
+        let config_path = config_root.join("ava").join("config.yaml");
+
+        let startup = resolve_startup_selection_with_context(
+            None,
+            None,
+            Some("architect"),
+            None,
+            None,
+            config_path,
+            workspace,
+        )
+        .await
+        .expect("resolve startup selection");
+
+        assert_eq!(startup.provider.as_deref(), Some("openrouter"));
+        assert_eq!(startup.model.as_deref(), Some("anthropic/claude-sonnet-4"));
+        assert_eq!(startup.primary_agent_id.as_deref(), Some("architect"));
+        assert_eq!(
+            startup.primary_agent_prompt.as_deref(),
+            Some("You are the architect profile.")
+        );
+    }
+
+    #[tokio::test]
+    async fn startup_selection_preserves_agent_prompt_when_provider_model_flags_override() {
+        let temp = setup_startup_resolver_config(
+            r#"
+primary_agents:
+  architect:
+    provider: openrouter
+    model: anthropic/claude-sonnet-4
+    prompt: You are the architect profile.
+"#,
+        );
+        let workspace = temp.path().join("workspace");
+        std::fs::create_dir_all(&workspace).expect("workspace dir");
+        let config_root = temp.path().join("config-root");
+        let config_path = config_root.join("ava").join("config.yaml");
+
+        let startup = resolve_startup_selection_with_context(
+            Some("openai"),
+            Some("gpt-5.3-codex"),
+            Some("architect"),
+            None,
+            None,
+            config_path,
+            workspace,
+        )
+        .await
+        .expect("resolve startup selection");
+
+        assert_eq!(startup.provider.as_deref(), Some("openai"));
+        assert_eq!(startup.model.as_deref(), Some("gpt-5.3-codex"));
+        assert_eq!(startup.primary_agent_id.as_deref(), Some("architect"));
+        assert_eq!(
+            startup.primary_agent_prompt.as_deref(),
+            Some("You are the architect profile.")
+        );
+    }
+
+    #[tokio::test]
+    async fn startup_selection_explicit_agent_works_when_unrelated_config_sections_are_invalid() {
+        let temp = setup_startup_resolver_config(
+            r#"
+llm: invalid-shape
+primary_agents:
+  architect:
+    provider: openrouter
+    model: anthropic/claude-sonnet-4
+    prompt: You are the architect profile.
+"#,
+        );
+        let workspace = temp.path().join("workspace");
+        std::fs::create_dir_all(&workspace).expect("workspace dir");
+        let config_root = temp.path().join("config-root");
+        let config_path = config_root.join("ava").join("config.yaml");
+
+        let startup = resolve_startup_selection_with_context(
+            None,
+            None,
+            Some("architect"),
+            None,
+            None,
+            config_path,
+            workspace,
+        )
+        .await
+        .expect("resolve startup selection");
+
+        assert_eq!(startup.provider.as_deref(), Some("openrouter"));
+        assert_eq!(startup.model.as_deref(), Some("anthropic/claude-sonnet-4"));
+        assert_eq!(startup.primary_agent_id.as_deref(), Some("architect"));
+        assert_eq!(
+            startup.primary_agent_prompt.as_deref(),
+            Some("You are the architect profile.")
+        );
+    }
+
+    #[tokio::test]
+    async fn startup_selection_explicit_agent_reports_actionable_yaml_parse_errors() {
+        let temp = setup_startup_resolver_config(
+            r#"
+primary_agents:
+  architect
+    provider: openrouter
+"#,
+        );
+        let workspace = temp.path().join("workspace");
+        std::fs::create_dir_all(&workspace).expect("workspace dir");
+        let config_root = temp.path().join("config-root");
+        let config_path = config_root.join("ava").join("config.yaml");
+
+        let err = resolve_startup_selection_with_context(
+            None,
+            None,
+            Some("architect"),
+            None,
+            None,
+            config_path.clone(),
+            workspace,
+        )
+        .await
+        .expect_err("expected parse failure");
+
+        let message = format!("{err:#}");
+        assert!(message.contains("could not be parsed for primary_agents"));
+        assert!(message.contains(&config_path.display().to_string()));
     }
 }
 
@@ -545,26 +709,172 @@ impl FailOnSeverity {
 pub async fn resolve_provider_model(
     provider: Option<&str>,
     model: Option<&str>,
+    agent: Option<&str>,
 ) -> color_eyre::Result<(Option<String>, Option<String>)> {
+    let startup = resolve_startup_selection(provider, model, agent).await?;
+    Ok((startup.provider, startup.model))
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StartupSelection {
+    pub provider: Option<String>,
+    pub model: Option<String>,
+    pub primary_agent_id: Option<String>,
+    pub primary_agent_prompt: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize, Default)]
+struct PrimaryAgentOnlyConfig {
+    #[serde(default)]
+    primary_agent: Option<String>,
+    #[serde(default)]
+    primary_agents: HashMap<String, ava_config::PrimaryAgentConfig>,
+}
+
+impl PrimaryAgentOnlyConfig {
+    fn resolve_primary_agent(
+        &self,
+        explicit_id: Option<&str>,
+    ) -> std::result::Result<Option<ava_config::ResolvedPrimaryAgent>, String> {
+        let mut config = ava_config::Config::default();
+        config.primary_agent = self.primary_agent.clone();
+        config.primary_agents = self.primary_agents.clone();
+        config.resolve_primary_agent(explicit_id)
+    }
+}
+
+/// Resolve startup provider/model + primary-agent metadata from multiple
+/// sources while keeping existing provider/model precedence explicit.
+///
+/// Precedence:
+/// 1. Explicit CLI provider/model flags (`--provider`, `--model`)
+/// 2. Explicit CLI primary agent (`--agent`) provider/model
+/// 3. Environment variables (`AVA_PROVIDER`, `AVA_MODEL`)
+/// 4. Per-project state (`.ava/state.json`)
+/// 5. Config default primary agent (`primary_agent` + `primary_agents.<id>`)
+/// 6. Config `llm.provider` / `llm.model`
+pub async fn resolve_startup_selection(
+    provider: Option<&str>,
+    model: Option<&str>,
+    agent: Option<&str>,
+) -> color_eyre::Result<StartupSelection> {
+    let config_path =
+        ava_config::config_file_path().unwrap_or_else(|_| PathBuf::from("config.yaml"));
+    let env_provider = std::env::var("AVA_PROVIDER").ok();
+    let env_model = std::env::var("AVA_MODEL").ok();
+    let project_root = std::env::current_dir().unwrap_or_default();
+
+    resolve_startup_selection_with_context(
+        provider,
+        model,
+        agent,
+        env_provider,
+        env_model,
+        config_path,
+        project_root,
+    )
+    .await
+}
+
+async fn resolve_startup_selection_with_context(
+    provider: Option<&str>,
+    model: Option<&str>,
+    agent: Option<&str>,
+    env_provider: Option<String>,
+    env_model: Option<String>,
+    config_path: PathBuf,
+    project_root: PathBuf,
+) -> color_eyre::Result<StartupSelection> {
+    let explicit_provider = provider.map(String::from);
+    let explicit_model = model.map(String::from);
+
+    let config_content = if config_path.exists() {
+        Some(tokio::fs::read_to_string(&config_path).await?)
+    } else {
+        None
+    };
+
+    let loaded_config = if let Some(content) = config_content.as_deref() {
+        match serde_yaml::from_str::<ava_config::Config>(content) {
+            Ok(config) => {
+                let raw = serde_yaml::from_str::<serde_json::Value>(content).ok();
+                Some((config, raw))
+            }
+            Err(_) => None,
+        }
+    } else {
+        None
+    };
+
+    let explicit_primary_agent = if let Some(agent_id) = agent {
+        let content = config_content.as_deref().ok_or_else(|| {
+            color_eyre::eyre::eyre!(
+                "--agent '{agent_id}' was provided but config file was not found at {}",
+                config_path.display()
+            )
+        })?;
+
+        // Prefer full config deserialization when available.
+        if let Some((config, _)) = loaded_config.as_ref() {
+            config
+                .resolve_primary_agent(Some(agent_id))
+                .map_err(color_eyre::eyre::Report::msg)?
+        } else {
+            // Fall back to parsing only the primary-agent fields so unrelated
+            // top-level config issues do not break explicit `--agent` startup.
+            let partial = serde_yaml::from_str::<PrimaryAgentOnlyConfig>(content).map_err(|err| {
+                color_eyre::eyre::eyre!(
+                    "--agent '{agent_id}' was provided, but {} could not be parsed for primary_agents: {err}",
+                    config_path.display()
+                )
+            })?;
+
+            partial
+                .resolve_primary_agent(Some(agent_id))
+                .map_err(color_eyre::eyre::Report::msg)?
+        }
+    } else {
+        None
+    };
+
     // Explicit args take precedence
-    if provider.is_some() || model.is_some() {
-        return Ok((provider.map(String::from), model.map(String::from)));
+    if explicit_provider.is_some() || explicit_model.is_some() {
+        return Ok(StartupSelection {
+            provider: explicit_provider,
+            model: explicit_model,
+            primary_agent_id: explicit_primary_agent
+                .as_ref()
+                .map(|entry| entry.id.clone()),
+            primary_agent_prompt: explicit_primary_agent.and_then(|entry| entry.prompt),
+        });
+    }
+
+    // Explicit --agent next
+    if let Some(primary) = explicit_primary_agent {
+        return Ok(StartupSelection {
+            provider: primary.provider,
+            model: primary.model,
+            primary_agent_id: Some(primary.id),
+            primary_agent_prompt: primary.prompt,
+        });
     }
 
     // Env vars next
-    let env_provider = std::env::var("AVA_PROVIDER").ok();
-    let env_model = std::env::var("AVA_MODEL").ok();
     if env_provider.is_some() || env_model.is_some() {
         debug!(
             ?env_provider,
             ?env_model,
             "Using provider/model from env vars"
         );
-        return Ok((env_provider, env_model));
+        return Ok(StartupSelection {
+            provider: env_provider,
+            model: env_model,
+            primary_agent_id: None,
+            primary_agent_prompt: None,
+        });
     }
 
     // Check per-project state (`.ava/state.json`) for last used model
-    let project_root = std::env::current_dir().unwrap_or_default();
     let project_state = ava_config::ProjectState::load(&project_root);
     if project_state.last_provider.is_some() {
         debug!(
@@ -572,52 +882,71 @@ pub async fn resolve_provider_model(
             model = ?project_state.last_model,
             "Using last used provider/model from project state"
         );
-        return Ok((project_state.last_provider, project_state.last_model));
+        return Ok(StartupSelection {
+            provider: project_state.last_provider,
+            model: project_state.last_model,
+            primary_agent_id: None,
+            primary_agent_prompt: None,
+        });
     }
 
-    // Try loading from global config file
-    let data_dir = dirs::home_dir().unwrap_or_default().join(".ava");
-    let config_path = data_dir.join("config.yaml");
+    if let Some((config, raw)) = loaded_config {
+        // Config default primary agent before llm fallback.
+        if let Some(primary) = config
+            .resolve_primary_agent(None)
+            .map_err(color_eyre::eyre::Report::msg)?
+        {
+            return Ok(StartupSelection {
+                provider: primary.provider,
+                model: primary.model,
+                primary_agent_id: Some(primary.id),
+                primary_agent_prompt: primary.prompt,
+            });
+        }
 
-    if config_path.exists() {
-        let content = tokio::fs::read_to_string(&config_path).await?;
-        if let Ok(config) = serde_yaml::from_str::<ava_config::Config>(&content) {
-            // Fall back to explicit llm.provider/llm.model config
-            let provider = if config.llm.provider != "openai" {
-                debug!(provider = %config.llm.provider, "Loaded provider from config file");
-                Some(config.llm.provider)
-            } else if let Ok(value) = serde_yaml::from_str::<serde_json::Value>(&content) {
-                let has_provider = value.get("llm").and_then(|l| l.get("provider")).is_some();
-                if has_provider {
-                    debug!("Loaded provider 'openai' from config file");
-                    Some(config.llm.provider)
-                } else {
-                    None
-                }
-            } else {
-                None
-            };
-            let model = if config.llm.model != "gpt-5.3-codex" {
-                debug!(model = %config.llm.model, "Loaded model from config file");
-                Some(config.llm.model)
-            } else if let Ok(value) = serde_yaml::from_str::<serde_json::Value>(&content) {
-                let has_model = value.get("llm").and_then(|l| l.get("model")).is_some();
-                if has_model {
-                    debug!("Loaded model 'gpt-5.3-codex' from config file");
-                    Some(config.llm.model)
-                } else {
-                    None
-                }
-            } else {
-                None
-            };
-            if provider.is_some() {
-                return Ok((provider, model));
-            }
+        // Fall back to explicit llm.provider/llm.model config.
+        let provider = if config.llm.provider != "openai" {
+            debug!(provider = %config.llm.provider, "Loaded provider from config file");
+            Some(config.llm.provider)
+        } else if raw
+            .as_ref()
+            .and_then(|value| value.get("llm").and_then(|l| l.get("provider")))
+            .is_some()
+        {
+            debug!("Loaded provider 'openai' from config file");
+            Some(config.llm.provider)
+        } else {
+            None
+        };
+        let model = if config.llm.model != "gpt-5.3-codex" {
+            debug!(model = %config.llm.model, "Loaded model from config file");
+            Some(config.llm.model)
+        } else if raw
+            .as_ref()
+            .and_then(|value| value.get("llm").and_then(|l| l.get("model")))
+            .is_some()
+        {
+            debug!("Loaded model 'gpt-5.3-codex' from config file");
+            Some(config.llm.model)
+        } else {
+            None
+        };
+        if provider.is_some() {
+            return Ok(StartupSelection {
+                provider,
+                model,
+                primary_agent_id: None,
+                primary_agent_prompt: None,
+            });
         }
     }
 
-    Ok((None, None))
+    Ok(StartupSelection {
+        provider: None,
+        model: None,
+        primary_agent_id: None,
+        primary_agent_prompt: None,
+    })
 }
 
 impl CliArgs {
@@ -625,15 +954,29 @@ impl CliArgs {
     pub async fn resolve_provider_model(
         &self,
     ) -> color_eyre::Result<(Option<String>, Option<String>)> {
-        resolve_provider_model(self.provider.as_deref(), self.model.as_deref()).await
+        resolve_provider_model(
+            self.provider.as_deref(),
+            self.model.as_deref(),
+            self.agent.as_deref(),
+        )
+        .await
+    }
+
+    pub async fn resolve_startup_selection(&self) -> color_eyre::Result<StartupSelection> {
+        resolve_startup_selection(
+            self.provider.as_deref(),
+            self.model.as_deref(),
+            self.agent.as_deref(),
+        )
+        .await
     }
 }
 
 /// Error message shown when no provider is configured anywhere.
 pub const NO_PROVIDER_ERROR: &str = "\
-No provider configured. Set defaults in ~/.ava/config.yaml or use --provider/--model flags.
+No provider configured. Set defaults in $XDG_CONFIG_HOME/ava/config.yaml or use --provider/--model flags.
 
-Example ~/.ava/config.yaml:
+Example $XDG_CONFIG_HOME/ava/config.yaml:
   llm:
     provider: openrouter
     model: anthropic/claude-sonnet-4

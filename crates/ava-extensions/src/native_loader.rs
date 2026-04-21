@@ -7,18 +7,18 @@ use crate::manager::{Extension, ExtensionError};
 type ExtensionFactory = unsafe fn() -> *mut dyn Extension;
 
 /// The trusted directory for native extensions. Only extensions located under
-/// `~/.ava/extensions/trusted/` are permitted to load.
+/// `$XDG_CONFIG_HOME/ava/extensions/trusted/` are permitted to load.
 const TRUSTED_SUBDIR: &str = "extensions/trusted";
 
 /// Check whether an extension path is inside the trusted extensions directory.
 ///
 /// Returns `Ok(())` if the path is trusted, or `Err(ExtensionError)` if not.
 fn verify_trusted_path(path: &Path) -> Result<(), ExtensionError> {
-    let trusted_dir = dirs_next::home_dir()
-        .map(|home| home.join(".ava").join(TRUSTED_SUBDIR))
+    let trusted_dir = dirs_next::config_dir()
+        .map(|dir| dir.join("ava").join(TRUSTED_SUBDIR))
         .ok_or_else(|| {
             ExtensionError::LoadFailure(
-                "cannot determine home directory for trust check".to_string(),
+                "cannot determine config directory for trust check".to_string(),
             )
         })?;
 
@@ -55,7 +55,7 @@ fn verify_trusted_path(path: &Path) -> Result<(), ExtensionError> {
 /// Loads a native Rust extension from a shared library.
 ///
 /// # Safety
-/// - The extension path must be inside `~/.ava/extensions/trusted/`.
+/// - The extension path must be inside `$XDG_CONFIG_HOME/ava/extensions/trusted/`.
 /// - The extension binary must be built against a compatible Rust toolchain and
 ///   the same `ava-extensions` trait definitions as the host process.
 /// - The `ava_extension_create` symbol must return a valid, non-null pointer

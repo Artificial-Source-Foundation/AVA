@@ -2,6 +2,7 @@ use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::time::Instant;
 
+use ava_tools::core::task::INTERNAL_TOOL_CALL_ID_ARG;
 use ava_tools::monitor::{hash_arguments, ToolExecution};
 use ava_types::{Message, Role, Session, ToolCall, ToolResult};
 use futures::StreamExt;
@@ -409,8 +410,18 @@ impl AgentLoop {
             }
         }
 
+        let mut tool_call_for_execution = tool_call.clone();
+        if tool_call_for_execution.name == "subagent" {
+            if let Some(arguments) = tool_call_for_execution.arguments.as_object_mut() {
+                arguments.insert(
+                    INTERNAL_TOOL_CALL_ID_ARG.to_string(),
+                    Value::String(tool_call.id.clone()),
+                );
+            }
+        }
+
         let start = Instant::now();
-        let mut result = match self.tools.execute(tool_call.clone()).await {
+        let mut result = match self.tools.execute(tool_call_for_execution).await {
             Ok(result) => result,
             Err(error) => ToolResult {
                 call_id: tool_call.id.clone(),

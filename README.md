@@ -24,8 +24,8 @@ AVA is a Rust-first coding agent built for real repository work.
 |---|---|---|
 | Try AVA quickly in the terminal on Linux/macOS | `curl -fsSL https://raw.githubusercontent.com/Artificial-Source/AVA/develop/install.sh | sh` | Prebuilt CLI binary, no Rust toolchain required |
 | Try AVA quickly in the terminal on Windows | [GitHub Releases](https://github.com/Artificial-Source/AVA/releases) | Download the Windows CLI asset |
-| Build the CLI from source | `cargo build --release --bin ava` | Best loop for contributors and power users |
-| Install the CLI from source | `cargo install --path crates/ava-tui --bin ava` | Installs `ava` onto your `PATH` |
+| Build the CLI from source | `cargo build --manifest-path /path/to/AVA/Cargo.toml --bin ava` | Works from any directory; add `--release` for optimized builds |
+| Install the CLI from source | `cargo install --path /path/to/AVA/crates/ava-tui --bin ava` | Works from any directory and installs `ava` onto your `PATH` |
 | Use the desktop app | [GitHub Releases](https://github.com/Artificial-Source/AVA/releases) or [desktop guide](docs/how-to/download-desktop.md) | Desktop bundles are not published on every release |
 
 ### Quick Start
@@ -88,23 +88,25 @@ curl -fsSL https://raw.githubusercontent.com/Artificial-Source/AVA/develop/insta
 
 ```bash
 git clone https://github.com/Artificial-Source/AVA.git && cd AVA
-cargo build --release --bin ava
-./target/release/ava
+cargo build --manifest-path "$PWD/Cargo.toml" --bin ava
+./target/debug/ava
 ```
 
 Optional compiler-cache variant for repeat source builds:
 
 ```bash
 git clone https://github.com/Artificial-Source/AVA.git && cd AVA
-RUSTC_WRAPPER=sccache cargo build --release --bin ava
+RUSTC_WRAPPER=sccache CARGO_BUILD_JOBS="$(nproc 2>/dev/null || sysctl -n hw.ncpu)" cargo build --release --manifest-path "$PWD/Cargo.toml" --bin ava
 ./target/release/ava
 ```
+
+Use plain `cargo build` for the normal dev profile with debug info and faster incremental builds. Add `--release` when you want an optimized binary that behaves more like published release artifacts. Cargo does not have a built-in `--debug` or CMake-style `RelWithDebInfo` flag; use `cargo build --profile <name>` if you define an additional profile.
 
 4. Source install:
 
 ```bash
 git clone https://github.com/Artificial-Source/AVA.git && cd AVA
-cargo install --path crates/ava-tui --bin ava
+CARGO_TARGET_DIR="$PWD/build" cargo install --path "$PWD/crates/ava-tui" --bin ava
 ```
 
 5. Optional source-build helper:

@@ -2,7 +2,7 @@
 title: "Backlog"
 description: "Active AVA 0.6 work for the V1 push, plus an archive of the previous detailed backlog."
 order: 3
-updated: "2026-04-20"
+updated: "2026-04-21"
 ---
 
 # AVA Backlog
@@ -22,6 +22,7 @@ Source of truth for direction: `docs/project/roadmap.md`
 5. Add a simple automated product smoke suite for the core journey: prompt -> tools -> edit -> verify -> persist.
 6. Keep a repeatable AVA-vs-OpenCode comparison path so quality can be measured, not argued.
 7. Finish the docs reset around the `0.6` story so roadmap, backlog, README, release language, and the public docs front door all describe the same product stage without mixing normal-user paths with contributor workflow detail.
+8. Keep the power-user source-build docs aligned with real Cargo usage patterns, including out-of-tree invocation and clear profile guidance.
 
 Current bounded parity note: web submit and replay flows now honor the shared persisted per-run thinking/model/compaction context used by desktop session runs; the remaining bounded divergence is the manual TUI/headless `/compact` path tracked in `docs/architecture/backend-contract-exceptions.md` as `EX-003`.
 
@@ -44,6 +45,8 @@ Current config note: global instruction loading now reads `$XDG_CONFIG_HOME/ava/
 Current CLI note: `ava` now accepts `--cwd <path>`, and `AVA_WORKING_DIRECTORY` provides the same cwd override for automation; both set the actual runtime working directory, and AVA still infers the repository/worktree from that cwd instead of taking a separate repo-root argument.
 
 Current primary-agent note: startup now supports first-class configurable primary agents in `config.yaml` (`primary_agents` + optional `primary_agent`) plus an explicit `--agent <id>` CLI override; resumed/session-switched TUI sessions now persist and restore both `primaryAgentId` and `primaryAgentPrompt` metadata and re-apply primary-agent prompt behavior on restore, Plan/Code mode switching now composes its mode suffix with startup primary-agent behavior instead of overwriting it, and explicit `--agent` still wins over resumed session metadata so startup intent remains deterministic.
+
+Current docs note: user-facing setup/discovery docs for primary agents + subagents are now centralized in `docs/how-to/agents.md`, with targeted reference cross-links for config locations, `subagents.toml` structure, built-ins/defaults, `--agent`, resume/override semantics, and trust/compatibility behavior.
 
 ## Milestone 1 Proof Definition
 

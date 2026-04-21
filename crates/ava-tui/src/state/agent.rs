@@ -767,6 +767,34 @@ impl AgentState {
         }
     }
 
+    /// Set startup primary-agent profile metadata and await prompt propagation to the stack.
+    pub async fn set_primary_agent_profile_awaited(
+        &mut self,
+        id: Option<String>,
+        prompt: Option<String>,
+        app_tx: Option<mpsc::UnboundedSender<AppEvent>>,
+    ) {
+        self.primary_agent_id = id;
+        self.primary_agent_prompt = prompt.clone();
+
+        if let Some(stack) = &self.stack {
+            if let Err(e) = stack.set_startup_prompt_suffix(prompt).await {
+                warn!("set_primary_agent_profile_awaited: set_startup_prompt_suffix failed: {e}");
+                if let Some(tx) = app_tx {
+                    let _ = tx.send(AppEvent::CommandMessage(CommandMessageResult {
+                        kind: crate::state::messages::MessageKind::Error,
+                        content: format!("Failed to apply primary-agent profile: {e}"),
+                        status: Some((
+                            StatusLevel::Error,
+                            format!("Primary-agent profile error: {e}"),
+                        )),
+                        transient: true,
+                    }));
+                }
+            }
+        }
+    }
+
     /// Create tool templates in project .ava/tools directory.
     pub fn create_tool_templates(&self) -> std::result::Result<String, String> {
         let dir = std::env::current_dir()

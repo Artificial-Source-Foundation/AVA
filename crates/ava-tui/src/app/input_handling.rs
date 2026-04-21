@@ -34,6 +34,46 @@ impl App {
             return false;
         }
 
+        if let ViewMode::SubAgent { .. } = self.state.view_mode {
+            if key.modifiers == KeyModifiers::NONE {
+                match key.code {
+                    KeyCode::Left => {
+                        self.cycle_sub_agent_view(-1);
+                        return false;
+                    }
+                    KeyCode::Right => {
+                        self.cycle_sub_agent_view(1);
+                        return false;
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        if matches!(
+            self.state.view_mode,
+            ViewMode::SubAgent { .. } | ViewMode::BackgroundTask { .. }
+        ) {
+            if let Some(action) = self.state.keybinds.action_for(key) {
+                match action {
+                    Action::ScrollUp => {
+                        let half_page = (self.state.messages.visible_height / 2).max(1);
+                        self.state.messages.scroll_up(half_page);
+                    }
+                    Action::ScrollDown => {
+                        let half_page = (self.state.messages.visible_height / 2).max(1);
+                        self.state.messages.scroll_down(half_page);
+                    }
+                    Action::ScrollTop => self.state.messages.scroll_to_top(),
+                    Action::ScrollBottom => self.state.messages.scroll_to_bottom(),
+                    Action::ToggleSidebar => self.state.show_sidebar = !self.state.show_sidebar,
+                    Action::ShowShortcuts => self.show_shortcuts_overlay(),
+                    _ => {}
+                }
+            }
+            return false;
+        }
+
         if key.code == KeyCode::Esc && self.state.agent.is_running {
             // Esc while agent is running: cancel (same as Ctrl+C)
             self.mark_interrupted_messages();
@@ -166,6 +206,8 @@ impl App {
                     let _ = self.state.session.create_session();
                     self.state.agent.clear_session_metrics();
                     self.state.messages.messages.clear();
+                    self.state.view_mode = ViewMode::Main;
+                    self.state.messages.reset_scroll();
                     self.set_status("New session created", StatusLevel::Info);
                 }
                 Action::SessionList => {
@@ -234,13 +276,6 @@ impl App {
                 }
                 _ => {}
             }
-            return false;
-        }
-
-        if matches!(
-            self.state.view_mode,
-            ViewMode::SubAgent { .. } | ViewMode::BackgroundTask { .. }
-        ) {
             return false;
         }
 

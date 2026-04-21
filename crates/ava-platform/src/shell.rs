@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
-use tokio::sync::{mpsc, oneshot, Mutex};
+use tokio::sync::{mpsc, Mutex};
 
 /// Command execution output
 #[derive(Debug, Clone)]
@@ -100,15 +100,24 @@ impl Shell for LocalShell {
             let stderr = child.stderr.take();
 
             let wait_fut = async {
-                let status = child.wait().await?;
-                let mut stdout_buf = Vec::new();
-                let mut stderr_buf = Vec::new();
-                if let Some(mut r) = stdout {
-                    tokio::io::AsyncReadExt::read_to_end(&mut r, &mut stdout_buf).await?;
-                }
-                if let Some(mut r) = stderr {
-                    tokio::io::AsyncReadExt::read_to_end(&mut r, &mut stderr_buf).await?;
-                }
+                let read_stdout = async {
+                    let mut stdout_buf = Vec::new();
+                    if let Some(mut r) = stdout {
+                        tokio::io::AsyncReadExt::read_to_end(&mut r, &mut stdout_buf).await?;
+                    }
+                    Ok::<_, std::io::Error>(stdout_buf)
+                };
+
+                let read_stderr = async {
+                    let mut stderr_buf = Vec::new();
+                    if let Some(mut r) = stderr {
+                        tokio::io::AsyncReadExt::read_to_end(&mut r, &mut stderr_buf).await?;
+                    }
+                    Ok::<_, std::io::Error>(stderr_buf)
+                };
+
+                let (status, stdout_buf, stderr_buf) =
+                    tokio::try_join!(child.wait(), read_stdout, read_stderr)?;
                 Ok::<_, std::io::Error>((status, stdout_buf, stderr_buf))
             };
 
@@ -155,6 +164,8 @@ impl Shell for LocalShell {
         command: &str,
         options: ExecuteOptions,
     ) -> Result<BoxStream<'static, Result<String>>> {
+        let timeout = options.timeout;
+
         let mut cmd = Command::new("sh");
         cmd.arg("-c").arg(command);
         cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
@@ -216,54 +227,39 @@ impl Shell for LocalShell {
             }
         });
 
-        // Apply timeout if specified
-        let mut completion_tx = None;
-        if let Some(timeout) = options.timeout {
-            let tx_timeout = tx.clone();
-            let (done_tx, done_rx) = oneshot::channel::<()>();
-            completion_tx = Some(done_tx);
-            let child_timeout = Arc::clone(&child);
-
-            tokio::spawn(async move {
-                tokio::select! {
-                    _ = tokio::time::sleep(timeout) => {
-                        // Kill the child process to avoid orphans; errors are non-fatal
-                        // (process may have already exited between timeout and kill)
-                        if let Some(mut ch) = child_timeout.lock().await.take() {
-                            if let Err(e) = ch.kill().await {
-                                tracing::trace!("streaming kill after timeout (non-fatal): {e}");
-                            }
-                            if let Err(e) = ch.wait().await {
-                                tracing::trace!("streaming reap after timeout (non-fatal): {e}");
-                            }
-                        }
-                        // Send failure means stream consumer disconnected — acceptable
-                        let _ = tx_timeout.send(Err(AvaError::TimeoutError(format!(
-                            "Command timed out after {timeout:?}"
-                        ))));
-                    }
-                    _ = done_rx => {}
-                }
-            });
-        }
-
         // Spawn task to wait for process and report exit code
         tokio::spawn(async move {
             // Take the child out of the shared slot (may be None if timeout killed it)
             let Some(mut ch) = child.lock().await.take() else {
                 return;
             };
-            match ch.wait().await {
+            let wait_result = if let Some(timeout) = timeout {
+                match tokio::time::timeout(timeout, ch.wait()).await {
+                    Ok(result) => result,
+                    Err(_) => {
+                        if let Err(e) = ch.kill().await {
+                            tracing::trace!("streaming kill after timeout (non-fatal): {e}");
+                        }
+                        if let Err(e) = ch.wait().await {
+                            tracing::trace!("streaming reap after timeout (non-fatal): {e}");
+                        }
+                        let _ = tx.send(Err(AvaError::TimeoutError(format!(
+                            "Command timed out after {timeout:?}"
+                        ))));
+                        return;
+                    }
+                }
+            } else {
+                ch.wait().await
+            };
+
+            match wait_result {
                 Ok(status) => {
-                    // Signal completion to cancel the timeout task (receiver may be gone)
-                    let _ = completion_tx.and_then(|tx_done| tx_done.send(()).ok());
                     // infallible: code() returns None only when killed by signal; -1 is conventional
                     // Send failure means stream consumer disconnected — acceptable
                     let _ = tx.send(Ok(format!("[exit] {}", status.code().unwrap_or(-1))));
                 }
                 Err(e) => {
-                    // Signal completion to cancel the timeout task (receiver may be gone)
-                    let _ = completion_tx.and_then(|tx_done| tx_done.send(()).ok());
                     // Send failure means stream consumer disconnected — acceptable
                     let _ = tx.send(Err(AvaError::PlatformError(format!("Process error: {e}"))));
                 }
@@ -325,6 +321,45 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg(unix)]
+    async fn test_execute_large_output_with_timeout_does_not_deadlock() {
+        let shell = LocalShell::new();
+        let options = ExecuteOptions {
+            timeout: Some(Duration::from_secs(2)),
+            ..Default::default()
+        };
+
+        let command = "dd if=/dev/zero bs=1024 count=1024 2>/dev/null | tr '\\0' 'o'; dd if=/dev/zero bs=1024 count=1024 2>/dev/null | tr '\\0' 'e' >&2";
+
+        let output = tokio::time::timeout(Duration::from_secs(5), shell.execute(command, options))
+            .await
+            .expect("execute should not hang")
+            .expect("command should complete before timeout");
+
+        assert_eq!(output.exit_code, 0);
+        assert!(output.stdout.len() >= 1024 * 1024);
+        assert!(output.stderr.len() >= 1024 * 1024);
+    }
+
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn test_execute_timeout_with_large_output_returns_promptly() {
+        let shell = LocalShell::new();
+        let options = ExecuteOptions {
+            timeout: Some(Duration::from_millis(100)),
+            ..Default::default()
+        };
+
+        let command = "{ yes o | head -c 262144; yes e | head -c 262144 >&2; sleep 5; }";
+
+        let result = tokio::time::timeout(Duration::from_secs(3), shell.execute(command, options))
+            .await
+            .expect("execute should not hang");
+
+        assert!(matches!(result, Err(AvaError::TimeoutError(_))));
+    }
+
+    #[tokio::test]
     async fn test_execute_streaming() {
         let shell = LocalShell::new();
         let stream = shell
@@ -344,5 +379,33 @@ mod tests {
         assert!(lines.iter().any(|l| l.contains("[stdout] line1")));
         assert!(lines.iter().any(|l| l.contains("[stderr] line2")));
         assert!(lines.iter().any(|l| l.contains("[exit]")));
+    }
+
+    #[tokio::test]
+    async fn test_execute_streaming_timeout_reports_once() {
+        let shell = LocalShell::new();
+        let mut stream = shell
+            .execute_streaming(
+                "sleep 5",
+                ExecuteOptions {
+                    timeout: Some(Duration::from_millis(100)),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+
+        let first_event = tokio::time::timeout(Duration::from_secs(2), stream.next())
+            .await
+            .expect("stream should produce a timeout event")
+            .expect("stream should not close before timeout");
+
+        assert!(matches!(first_event, Err(AvaError::TimeoutError(_))));
+
+        let next_event = tokio::time::timeout(Duration::from_millis(250), stream.next()).await;
+        assert!(
+            !matches!(next_event, Ok(Some(Ok(line))) if line.starts_with("[exit]")),
+            "stream should not report a successful exit after timeout"
+        );
     }
 }

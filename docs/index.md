@@ -2,7 +2,7 @@
 title: "AVA Documentation"
 description: "Public-facing docs entrypoint organized with a Diátaxis-style layout."
 order: 1
-updated: "2026-04-20"
+updated: "2026-04-21"
 ---
 
 # AVA Documentation
@@ -20,6 +20,7 @@ Use this page when you want user docs first. Contributor, maintainer, and archit
 | Get running quickly | [Tutorial: First run](tutorials/first-run.md) |
 | Learn the first practical workflow | [Tutorial: Your first workflow](tutorials/your-first-workflow.md) |
 | Configure providers and auth | [How-to: Configure providers and local settings](how-to/configure.md) |
+| Configure primary agents and subagents | [How-to: Configure primary agents and subagents](how-to/agents.md) |
 | Run AVA in CI or scripts | [How-to: Run AVA in CI/headless automation](how-to/ci-headless-automation.md) |
 | Troubleshoot common setup/runtime failures | [Troubleshooting: Common errors](troubleshooting/common-errors.md) |
 
@@ -28,10 +29,11 @@ Use this page when you want user docs first. Contributor, maintainer, and archit
 1. [How-to: Install AVA](how-to/install.md)
 2. [Tutorial: First run](tutorials/first-run.md)
 3. [How-to: Configure providers and local settings](how-to/configure.md)
-4. [How-to: Run AVA locally](how-to/run-locally.md)
-5. [How-to: Download AVA Desktop](how-to/download-desktop.md)
-6. [Troubleshooting: Common errors](troubleshooting/common-errors.md)
-7. [Reference docs](reference/README.md)
+4. [How-to: Configure primary agents and subagents](how-to/agents.md)
+5. [How-to: Run AVA locally](how-to/run-locally.md)
+6. [How-to: Download AVA Desktop](how-to/download-desktop.md)
+7. [Troubleshooting: Common errors](troubleshooting/common-errors.md)
+8. [Reference docs](reference/README.md)
 
 ## More guides
 

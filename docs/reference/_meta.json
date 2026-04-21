@@ -1,0 +1,12 @@
+{
+  "README": "Reference Docs",
+  "overview": "Using This Reference",
+  "configuration": "Configuration",
+  "environment-variables": "Environment Variables",
+  "filesystem-layout": "Filesystem Layout",
+  "install-and-release-paths": "Install And Release Paths",
+  "web-api": "Web API Surface (Feature-Gated)",
+  "providers-and-auth": "Providers And Auth",
+  "commands": "Commands",
+  "credential-storage": "Credential Storage"
+}

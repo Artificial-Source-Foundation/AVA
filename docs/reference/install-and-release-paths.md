@@ -29,8 +29,8 @@ Current state: release-related files in this checkout use the `Artificial-Source
 |---|---|---|
 | CLI binary install on Linux/macOS | `install.sh` | Installer script plus GitHub Releases |
 | CLI binary install on Windows/manual installs | GitHub Releases assets or generated installer | GitHub Releases |
-| CLI web-enabled source install | `cargo install --path crates/ava-tui --bin ava --features web --force` | Local source build |
-| CLI source install | `cargo install --path crates/ava-tui --bin ava` | Local source build |
+| CLI web-enabled source install | `cargo install --path /path/to/AVA/crates/ava-tui --bin ava --features web --force` | Local source build |
+| CLI source install | `cargo install --path /path/to/AVA/crates/ava-tui --bin ava` | Local source build |
 | Guided source build | `./install-from-source.sh` | Local source build helper |
 | Desktop app release/download path | GitHub Releases when desktop bundles are published | GitHub Releases |
 
@@ -83,14 +83,26 @@ The CLI release archives use target-triple naming. Current examples are:
 The documented source install path is:
 
 ```bash
-cargo install --path crates/ava-tui --bin ava
+cargo install --path /path/to/AVA/crates/ava-tui --bin ava
 ```
 
 For web mode, the current docs and crate feature flag indicate an explicit `web` feature build:
 
 ```bash
-cargo install --path crates/ava-tui --bin ava --features web --force
+cargo install --path /path/to/AVA/crates/ava-tui --bin ava --features web --force
 ```
+
+For source builds without installation, the repo-level command is:
+
+```bash
+cargo build --manifest-path /path/to/AVA/Cargo.toml --bin ava
+```
+
+Profile guidance:
+
+1. `cargo build` uses Cargo's normal dev profile with debug info and faster incremental rebuilds.
+2. `cargo build --release` uses the optimized release profile and is the closer match for published binaries.
+3. Cargo does not provide a built-in `--debug` or `RelWithDebInfo` switch; use `--profile <name>` if the repo defines an additional profile.
 
 ## Guided Source Build Path
 

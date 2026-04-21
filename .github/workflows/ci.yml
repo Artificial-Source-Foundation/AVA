@@ -144,6 +144,51 @@ jobs:
       - uses: crate-ci/typos@v1
 
   # ---------------------------------------------------------------------------
+  # Desktop/Tauri PR smoke validation (Ubuntu debug, no release bundling)
+  # ---------------------------------------------------------------------------
+  desktop-smoke:
+    name: Desktop Smoke (Ubuntu Debug)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Cache cargo registry & build
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build workspace packages
+        run: pnpm run build:packages
+
+      - name: Run src-tauri tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml --tests
+
+      - name: Tauri debug smoke build (no bundle)
+        run: pnpm tauri build --debug --no-bundle
+
+  # ---------------------------------------------------------------------------
   # Desktop build (only on master push, not PRs — saves the most minutes)
   # ---------------------------------------------------------------------------
   build:

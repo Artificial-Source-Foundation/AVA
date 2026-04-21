@@ -9,6 +9,7 @@ mod git_commit;
 mod input_handling;
 mod modals;
 mod spawners;
+mod subagent;
 
 use crate::config::cli::CliArgs;
 use crate::config::keybindings::load_keybind_overrides;
@@ -59,9 +60,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc;
-use tracing::debug;
+use tracing::{debug, warn};
 
 pub(crate) use commands::format_skill_list;
+use subagent::{
+    initial_subagent_session_messages, subagent_descriptions_match, subagent_matches_completion,
+};
 
 #[derive(Debug, Clone)]
 pub(crate) struct PendingBackgroundGoal {
@@ -79,6 +83,7 @@ struct BackgroundIsolation {
 pub enum SidebarClickAction {
     ToggleMcpServer { name: String, enabled: bool },
     RefreshLsp,
+    OpenSubAgent { index: usize },
 }
 
 #[derive(Debug, Clone)]
@@ -310,32 +315,70 @@ pub(crate) fn session_messages_to_ui_messages(messages: &[ava_types::Message]) -
     ui_messages
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ResumeRestorePlan {
+    apply_primary_agent: bool,
+    primary_agent_id: Option<String>,
+    primary_agent_prompt: Option<String>,
+    restore_model: Option<(String, String)>,
+}
+
 fn resume_restore_from_metadata(
     metadata: &serde_json::Value,
     cli_agent_override: Option<&str>,
-) -> (Option<String>, Option<String>, Option<(String, String)>) {
-    if cli_agent_override.is_some() {
-        return (None, None, None);
+    cli_provider_model_override: bool,
+) -> ResumeRestorePlan {
+    let apply_primary_agent = cli_agent_override.is_none();
+
+    let primary_agent_id = apply_primary_agent
+        .then(|| {
+            metadata
+                .as_object()
+                .and_then(|meta| meta.get("primaryAgentId").and_then(|v| v.as_str()))
+                .map(|value| value.to_string())
+        })
+        .flatten();
+
+    let primary_agent_prompt = apply_primary_agent
+        .then(|| {
+            metadata
+                .as_object()
+                .and_then(|meta| meta.get("primaryAgentPrompt").and_then(|v| v.as_str()))
+                .map(|value| value.to_string())
+        })
+        .flatten();
+
+    let restore_model = if cli_agent_override.is_some() || cli_provider_model_override {
+        None
+    } else {
+        metadata.as_object().and_then(|meta| {
+            Some((
+                meta.get("provider")?.as_str()?.to_string(),
+                meta.get("model")?.as_str()?.to_string(),
+            ))
+        })
+    };
+
+    ResumeRestorePlan {
+        apply_primary_agent,
+        primary_agent_id,
+        primary_agent_prompt,
+        restore_model,
     }
+}
 
-    let primary_agent_id = metadata
-        .as_object()
-        .and_then(|meta| meta.get("primaryAgentId").and_then(|v| v.as_str()))
-        .map(|value| value.to_string());
-
-    let primary_agent_prompt = metadata
-        .as_object()
-        .and_then(|meta| meta.get("primaryAgentPrompt").and_then(|v| v.as_str()))
-        .map(|value| value.to_string());
-
-    let restore_model = metadata.as_object().and_then(|meta| {
-        Some((
-            meta.get("provider")?.as_str()?.to_string(),
-            meta.get("model")?.as_str()?.to_string(),
-        ))
-    });
-
-    (primary_agent_id, primary_agent_prompt, restore_model)
+async fn resolve_primary_agent_prompt_from_config(primary_agent_id: &str) -> Option<String> {
+    match crate::config::cli::resolve_startup_selection(None, None, Some(primary_agent_id)).await {
+        Ok(startup) => startup.primary_agent_prompt,
+        Err(err) => {
+            warn!(
+                primary_agent_id,
+                error = %err,
+                "failed to rehydrate legacy primary agent prompt during resume"
+            );
+            None
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -373,6 +416,7 @@ pub struct App {
     should_quit: bool,
     pending_goal: Option<String>,
     cli_agent_override: Option<String>,
+    cli_provider_model_override: bool,
     is_streaming: Arc<AtomicBool>,
     token_buffer: TokenBuffer,
     #[cfg(feature = "voice")]
@@ -413,6 +457,62 @@ pub struct App {
 // StatusSummary removed — /status command was removed
 
 impl App {
+    async fn apply_resume_state(&mut self, session: &ava_types::Session) {
+        self.state.agent.apply_session_summary(session);
+        for ui_msg in session_messages_to_ui_messages(&session.messages) {
+            self.state.messages.push(ui_msg);
+        }
+
+        let mut restore_plan = resume_restore_from_metadata(
+            &session.metadata,
+            self.cli_agent_override.as_deref(),
+            self.cli_provider_model_override,
+        );
+
+        if restore_plan.apply_primary_agent
+            && restore_plan.primary_agent_id.is_some()
+            && restore_plan.primary_agent_prompt.is_none()
+        {
+            if let Some(primary_agent_id) = restore_plan.primary_agent_id.as_deref() {
+                restore_plan.primary_agent_prompt =
+                    resolve_primary_agent_prompt_from_config(primary_agent_id).await;
+
+                if restore_plan.primary_agent_prompt.is_none()
+                    && self.state.agent.primary_agent_id.as_deref() == Some(primary_agent_id)
+                {
+                    restore_plan.primary_agent_prompt =
+                        self.state.agent.primary_agent_prompt.clone();
+                }
+            }
+        }
+
+        if restore_plan.apply_primary_agent {
+            self.state
+                .agent
+                .set_primary_agent_profile_awaited(
+                    restore_plan.primary_agent_id,
+                    restore_plan.primary_agent_prompt,
+                    None,
+                )
+                .await;
+        }
+
+        if let Some((provider, model)) = restore_plan.restore_model {
+            if let Err(err) = self.state.agent.switch_model(&provider, &model).await {
+                warn!(
+                    provider = %provider,
+                    model = %model,
+                    error = %err,
+                    "failed to restore model from resumed session"
+                );
+                self.state.messages.push(UiMessage::new(
+                    MessageKind::Error,
+                    format!("Failed to restore resumed session model {provider}/{model}: {err}"),
+                ));
+            }
+        }
+    }
+
     pub async fn new(cli: CliArgs) -> Result<Self> {
         let data_dir = ava_config::data_dir().unwrap_or_else(|_| PathBuf::from("."));
         std::fs::create_dir_all(&data_dir)?;
@@ -424,9 +524,10 @@ impl App {
         }
 
         let mut session = SessionState::new(&db_path)?;
-        if cli.resume {
-            session.current_session = session.list_recent(1)?.first().cloned();
-        } else {
+        if session
+            .resolve_startup_session(cli.resume, cli.session.as_deref())?
+            .is_none()
+        {
             let _ = session.create_session()?;
         }
 
@@ -479,11 +580,13 @@ impl App {
             runtime_lean.eager_codebase_indexing,
         )
         .await?;
-        agent.set_primary_agent_profile(
-            startup_selection.primary_agent_id.clone(),
-            startup_selection.primary_agent_prompt.clone(),
-            None,
-        );
+        agent
+            .set_primary_agent_profile_awaited(
+                startup_selection.primary_agent_id.clone(),
+                startup_selection.primary_agent_prompt.clone(),
+                None,
+            )
+            .await;
         let mcp_servers = agent.mcp_server_info().await.unwrap_or_default();
         let todo_state = agent.todo_state();
         let workspace = std::env::current_dir().unwrap_or_default();
@@ -564,6 +667,7 @@ impl App {
             should_quit: false,
             pending_goal: cli.goal.clone(),
             cli_agent_override: cli.agent.clone(),
+            cli_provider_model_override: cli.provider.is_some() || cli.model.is_some(),
             is_streaming: Arc::new(AtomicBool::new(false)),
             token_buffer: TokenBuffer::new(60),
             #[cfg(feature = "voice")]
@@ -667,22 +771,8 @@ impl App {
 
         // Load session messages if resuming
         if let Some(ref session) = self.state.session.current_session {
-            self.state.agent.apply_session_summary(session);
-            for ui_msg in session_messages_to_ui_messages(&session.messages) {
-                self.state.messages.push(ui_msg);
-            }
-            // Restore model + primary-agent from session metadata unless an
-            // explicit CLI --agent override was provided.
-            let (restore_primary_agent_id, restore_primary_agent_prompt, restore_model) =
-                resume_restore_from_metadata(&session.metadata, self.cli_agent_override.as_deref());
-            self.state.agent.set_primary_agent_profile(
-                restore_primary_agent_id,
-                restore_primary_agent_prompt,
-                None,
-            );
-            if let Some((provider, model)) = restore_model {
-                let _ = self.state.agent.switch_model(&provider, &model).await;
-            }
+            let resumed_session = session.clone();
+            self.apply_resume_state(&resumed_session).await;
         }
 
         // Take the question receiver so we can poll it in the event loop
@@ -921,6 +1011,20 @@ impl App {
         } else {
             false
         }
+    }
+
+    pub(crate) fn cycle_sub_agent_view(&mut self, step: i32) -> bool {
+        let ViewMode::SubAgent { agent_index, .. } = self.state.view_mode else {
+            return false;
+        };
+
+        let total = self.state.agent.sub_agents.len();
+        if total == 0 {
+            return false;
+        }
+
+        let next = (agent_index as i32 + step).rem_euclid(total as i32) as usize;
+        self.enter_sub_agent_view(next)
     }
 
     /// Open the theme selector modal with live preview.
@@ -1190,6 +1294,7 @@ impl App {
             should_quit: false,
             pending_goal: None,
             cli_agent_override: None,
+            cli_provider_model_override: false,
             is_streaming: Arc::new(AtomicBool::new(false)),
             token_buffer: TokenBuffer::new(60),
             #[cfg(feature = "voice")]

@@ -1,5 +1,27 @@
 # Contributing to AVA
 
+## Contributor bootstrap (one-time)
+
+Install these prerequisites first:
+
+1. Rust 1.86+
+2. `just`
+3. `cargo-nextest` (`cargo install cargo-nextest --locked`)
+4. Node.js 20+
+5. `pnpm`
+6. `python3` (required for `just v1-signoff` / `pnpm signoff:v1`)
+
+Then from repo root:
+
+```bash
+pnpm install
+# fallback if hooks were not installed by prepare:
+pnpm exec lefthook install
+pnpm exec playwright install chromium
+```
+
+For Linux desktop development (`pnpm tauri dev`), install the Linux system deps from [Tauri Linux toolchain checklist](../docs/troubleshooting/tauri-toolchain-checklist.md).
+
 Start in:
 
 1. [AGENTS.md](../AGENTS.md) — source of truth for architecture, workflow, and doc-update rules

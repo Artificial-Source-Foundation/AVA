@@ -1,7 +1,7 @@
 ---
 title: "Docs Manifest"
 description: "Machine-readable-for-humans list of public Diataxis pages and why each exists."
-updated: "2026-04-20"
+updated: "2026-04-21"
 ---
 
 # Docs Manifest
@@ -20,6 +20,7 @@ This manifest lists the Diataxis-facing pages in the public docs layer and why e
 | `docs/how-to/install.md` | How-to | Task-focused install entrypoint that splits CLI and desktop surfaces clearly. |
 | `docs/how-to/download-desktop.md` | How-to | Desktop-specific download and local-build guide grounded in the current Tauri release flow and current release-availability limits. |
 | `docs/how-to/configure.md` | How-to | Task-focused provider and local configuration setup. |
+| `docs/how-to/agents.md` | How-to | Practical setup for startup primary-agent profiles and delegated subagent profiles, including trust and legacy compatibility behavior. |
 | `docs/how-to/run-locally.md` | How-to | Task-focused commands for TUI, headless, desktop, and feature-gated web mode. |
 | `docs/how-to/ci-headless-automation.md` | How-to | Task-focused CI/unattended automation guidance grounded in current headless behavior, JSON mode, env setup, and repository workflows. |
 | `docs/how-to/ollama-local-models.md` | How-to | Ollama-only local model usage guide grounded in current provider defaults, env overrides, and verification paths. |
@@ -67,7 +68,7 @@ This manifest lists the Diataxis-facing pages in the public docs layer and why e
 | Section | Current coverage | Notes |
 |---|---|---|
 | Tutorials | 2 guides plus section index | Covers first setup and first workflow. |
-| How-to | 6 guides plus section index | Covers install, desktop download, configure, Ollama local-model usage, local runs, and CI/headless automation. |
+| How-to | 7 guides plus section index | Covers install, desktop download, configure, primary/subagent profile setup, Ollama local-model usage, local runs, and CI/headless automation. |
 | Reference | 9 user-facing pages plus 1 implementation-reference page and navigation metadata | Covers install/release paths, commands, providers, config, env vars, filesystem, credential storage, and the feature-gated web API. |
 | Troubleshooting | 5 pages plus navigation metadata | Covers common runtime failures, Ollama-specific local-model diagnostics, and Linux desktop setup/rendering issues. |
 | Explanation | 2 pages plus section index | Covers docs boundaries plus security/trust concepts. |

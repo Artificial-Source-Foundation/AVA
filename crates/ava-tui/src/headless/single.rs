@@ -1,8 +1,9 @@
 use super::input::{populate_queue_from_cli, spawn_stdin_reader};
-use super::spawn_auto_approve_requests;
+use super::{resolve_headless_startup_selection, spawn_auto_approve_requests};
 use crate::app::{format_skill_list, App, ModalType};
 use crate::config::cli::CliArgs;
 use crate::state::messages::MessageKind;
+use crate::state::session::SessionState;
 use ava_agent::discover_runtime_skills;
 use ava_agent::message_queue::MessageQueue;
 use ava_agent::stack::{AgentStack, AgentStackConfig};
@@ -210,9 +211,15 @@ pub(super) async fn run_single_agent(cli: CliArgs, goal: &str) -> Result<()> {
     let data_dir = ava_config::data_dir().unwrap_or_default();
     let runtime_lean = cli.runtime_lean_settings();
 
-    let startup = cli.resolve_startup_selection().await?;
+    let startup = resolve_headless_startup_selection(&cli).await?;
+    let resume_session_id = startup.resume_session_id;
+    let resume_history = startup.resume_history;
+    let resume_restore_model = startup.resume_restore_model;
+    let startup = startup.startup;
     let provider = startup.provider;
     let model = startup.model;
+    let startup_primary_agent_id = startup.primary_agent_id;
+    let startup_primary_agent_prompt = startup.primary_agent_prompt;
     if provider.is_none() {
         warn!("no provider configured — cannot run agent");
         return Err(eyre!(crate::config::cli::NO_PROVIDER_ERROR));
@@ -247,8 +254,20 @@ pub(super) async fn run_single_agent(cli: CliArgs, goal: &str) -> Result<()> {
         ))
         .await?;
     let _ = stack
-        .set_startup_prompt_suffix(startup.primary_agent_prompt.clone())
+        .set_startup_prompt_suffix(startup_primary_agent_prompt.clone())
         .await;
+
+    if let Some((provider, model)) = resume_restore_model {
+        if let Err(err) = stack.switch_model(&provider, &model).await {
+            warn!(
+                provider = %provider,
+                model = %model,
+                error = %err,
+                "failed to restore model from resumed session in headless mode; continuing with startup model"
+            );
+        }
+    }
+
     spawn_auto_approve_requests(approval_rx);
 
     // Apply thinking level from CLI flag
@@ -295,10 +314,10 @@ pub(super) async fn run_single_agent(cli: CliArgs, goal: &str) -> Result<()> {
                 max_turns,
                 Some(tx),
                 cancel,
-                Vec::new(),
+                resume_history,
                 Some(message_queue),
                 cli_images,
-                None,
+                resume_session_id,
                 None,
             )
             .await
@@ -517,7 +536,15 @@ pub(super) async fn run_single_agent(cli: CliArgs, goal: &str) -> Result<()> {
         }
     }
 
-    let result = handle.await??;
+    let mut result = handle.await??;
+    let (active_provider, active_model) = stack.current_model().await;
+    persist_headless_session(
+        &mut result.session,
+        &active_provider,
+        &active_model,
+        startup_primary_agent_id.as_deref(),
+        startup_primary_agent_prompt.as_deref(),
+    )?;
     let cost_summary = crate::session_summary::cost_summary(&result.session);
     let route_summary = crate::session_summary::route_summary(&result.session);
     info!(
@@ -786,6 +813,66 @@ fn truncate_str(s: &str, max_len: usize) -> String {
     }
 }
 
+fn apply_headless_session_metadata(
+    session: &mut ava_types::Session,
+    provider: &str,
+    model: &str,
+    primary_agent_id: Option<&str>,
+    primary_agent_prompt: Option<&str>,
+) {
+    if let Some(meta) = session.metadata.as_object_mut() {
+        meta.insert(
+            "provider".to_string(),
+            serde_json::Value::String(provider.to_string()),
+        );
+        meta.insert(
+            "model".to_string(),
+            serde_json::Value::String(model.to_string()),
+        );
+
+        if let Some(primary_agent_id) = primary_agent_id {
+            meta.insert(
+                "primaryAgentId".to_string(),
+                serde_json::Value::String(primary_agent_id.to_string()),
+            );
+        } else {
+            meta.remove("primaryAgentId");
+        }
+
+        if let Some(primary_agent_prompt) = primary_agent_prompt {
+            meta.insert(
+                "primaryAgentPrompt".to_string(),
+                serde_json::Value::String(primary_agent_prompt.to_string()),
+            );
+        } else {
+            meta.remove("primaryAgentPrompt");
+        }
+    }
+}
+
+pub(super) fn persist_headless_session(
+    session: &mut ava_types::Session,
+    provider: &str,
+    model: &str,
+    primary_agent_id: Option<&str>,
+    primary_agent_prompt: Option<&str>,
+) -> Result<()> {
+    apply_headless_session_metadata(
+        session,
+        provider,
+        model,
+        primary_agent_id,
+        primary_agent_prompt,
+    );
+
+    let data_dir = ava_config::data_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    std::fs::create_dir_all(&data_dir)?;
+    let db_path = ava_config::app_db_path().unwrap_or_else(|_| data_dir.join("data.db"));
+    let mut session_state = SessionState::new(&db_path)?;
+    session_state.save_session(session);
+    Ok(())
+}
+
 pub(super) fn load_cli_images(paths: &[String]) -> Vec<ImageContent> {
     let mut images = Vec::new();
     for path_str in paths {
@@ -918,5 +1005,67 @@ mod tests {
             }
             _ => panic!("expected TUI-only command rejection in headless mode"),
         }
+    }
+
+    #[test]
+    fn apply_headless_session_metadata_sets_resume_fields() {
+        let mut session = ava_types::Session::new();
+
+        apply_headless_session_metadata(
+            &mut session,
+            "openrouter",
+            "anthropic/claude-sonnet-4",
+            Some("architect"),
+            Some("You are the architect profile"),
+        );
+
+        assert_eq!(
+            session
+                .metadata
+                .get("provider")
+                .and_then(|value| value.as_str()),
+            Some("openrouter")
+        );
+        assert_eq!(
+            session
+                .metadata
+                .get("model")
+                .and_then(|value| value.as_str()),
+            Some("anthropic/claude-sonnet-4")
+        );
+        assert_eq!(
+            session
+                .metadata
+                .get("primaryAgentId")
+                .and_then(|value| value.as_str()),
+            Some("architect")
+        );
+        assert_eq!(
+            session
+                .metadata
+                .get("primaryAgentPrompt")
+                .and_then(|value| value.as_str()),
+            Some("You are the architect profile")
+        );
+    }
+
+    #[test]
+    fn apply_headless_session_metadata_clears_primary_agent_fields_when_absent() {
+        let mut session = ava_types::Session::new();
+        session.metadata = serde_json::json!({
+            "primaryAgentId": "architect",
+            "primaryAgentPrompt": "legacy prompt"
+        });
+
+        apply_headless_session_metadata(
+            &mut session,
+            "openrouter",
+            "anthropic/claude-sonnet-4",
+            None,
+            None,
+        );
+
+        assert!(session.metadata.get("primaryAgentId").is_none());
+        assert!(session.metadata.get("primaryAgentPrompt").is_none());
     }
 }

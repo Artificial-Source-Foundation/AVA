@@ -29,16 +29,7 @@ export default defineConfig({
       exclude: ['node_modules/**', 'src-tauri/**', '**/*.config.{js,ts}', '**/*.d.ts'],
     },
     // Test file patterns
-    include: [
-      'src/**/*.{test,spec}.{ts,tsx}',
-      'packages/core/src/**/*.{test,spec}.ts',
-      'packages/core-v2/src/**/*.{test,spec}.ts',
-      'packages/platform-*/src/**/*.{test,spec}.ts',
-      'packages/extensions/**/*.{test,spec}.ts',
-      'cli/src/**/*.{test,spec}.ts',
-      'docs/examples/**/*.{test,spec}.ts',
-      'tests/e2e/**/*.{test,spec}.ts',
-    ],
+    include: ['src/**/*.{test,spec}.{ts,tsx}', 'tests/e2e/**/*.{test,spec}.ts'],
   },
   resolve: {
     conditions: ['development', 'browser'],

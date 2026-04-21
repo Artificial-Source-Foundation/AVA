@@ -4,6 +4,12 @@ All notable changes to AVA are documented in this file.
 
 ## [Unreleased]
 
+### Changed
+- Reconciled docs-only follow-up inconsistencies across user-facing agent/config references and architecture milestone artifacts: standardized canonical `$XDG_CONFIG_HOME/ava` vs legacy `~/.ava` wording in how-to/reference pages, clarified built-in subagent ID guidance (including `general` and `worker`), and marked Milestone 1/Milestone 5 architecture audit/blueprint docs as historical snapshots rather than active drift plans.
+- Tightened the source-install docs for power users and contributors: Cargo build/install examples now use explicit checkout paths so they work from outside the repo root, the install pages now call out optional `CARGO_TARGET_DIR` and `CARGO_BUILD_JOBS` overrides, and the source-build guidance now explains Cargo's default dev-vs-release profile behavior instead of implying `--release` is the only meaningful mode.
+- Finished the Milestone 5 documentation/verification closeout for agent-profile work: added a dedicated user-facing guide for primary-agent + subagent setup (`docs/how-to/agents.md`), updated reference docs and navigation so users can reliably find config file locations, `subagents.toml` structure, built-in/default delegated agents, `--agent`, resume/override semantics, and trust + legacy compatibility behavior.
+- Closed the remaining Milestone 5 follow-up doc/signoff gaps: added a concise “Using subagents” behavior section to the user-facing agents guide, updated V1 preflight/signoff docs plus `verify-v1` sequencing to include explicit primary-agent `ava-tui` coverage (`cargo test -p ava-tui primary_agent`) alongside backend/subagent checks, and marked `docs/architecture/cross-surface-behavior-audit-m5.md` as a historical/superseded audit artifact linked forward to M6/M7.
+
 ## [0.6.1] - 2026-04-21
 
 ### Changed

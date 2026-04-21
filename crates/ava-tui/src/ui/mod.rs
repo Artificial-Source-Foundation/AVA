@@ -39,12 +39,12 @@ pub fn render(frame: &mut Frame<'_>, state: &mut AppState) {
         state.view_mode,
         ViewMode::SubAgent { .. } | ViewMode::BackgroundTask { .. }
     );
-    let composer_h = if transcript_view {
-        1
-    } else if approval_active {
+    let composer_h = if approval_active {
         crate::widgets::tool_approval::APPROVAL_DOCK_HEIGHT
     } else if plan_approval_active {
         crate::widgets::plan_approval::PLAN_APPROVAL_DOCK_HEIGHT
+    } else if transcript_view {
+        1
     } else {
         layout::composer_height(
             &state.input.buffer,
@@ -108,13 +108,31 @@ pub fn render(frame: &mut Frame<'_>, state: &mut AppState) {
         let composer_bg = Block::default().style(Style::default().bg(state.theme.bg_elevated));
         frame.render_widget(composer_bg, split.composer);
         if transcript_view {
-            frame.render_widget(
-                Paragraph::new(Line::from(vec![
+            let transcript_hint = match state.view_mode {
+                ViewMode::SubAgent { .. } => vec![
                     Span::styled("Esc", Style::default().fg(state.theme.accent)),
                     Span::styled(" back", Style::default().fg(state.theme.text_dimmed)),
-                ])),
-                split.composer,
-            );
+                    Span::styled("  ", Style::default().fg(state.theme.text_dimmed)),
+                    Span::styled("←/→", Style::default().fg(state.theme.accent)),
+                    Span::styled(" sibling", Style::default().fg(state.theme.text_dimmed)),
+                    Span::styled("  ", Style::default().fg(state.theme.text_dimmed)),
+                    Span::styled(
+                        "read-only transcript",
+                        Style::default().fg(state.theme.text_dimmed),
+                    ),
+                ],
+                ViewMode::BackgroundTask { .. } => vec![
+                    Span::styled("Esc", Style::default().fg(state.theme.accent)),
+                    Span::styled(" back", Style::default().fg(state.theme.text_dimmed)),
+                    Span::styled("  ", Style::default().fg(state.theme.text_dimmed)),
+                    Span::styled(
+                        "read-only transcript",
+                        Style::default().fg(state.theme.text_dimmed),
+                    ),
+                ],
+                ViewMode::Main => vec![],
+            };
+            frame.render_widget(Paragraph::new(Line::from(transcript_hint)), split.composer);
         } else {
             render_composer(frame, split.composer, state);
         }

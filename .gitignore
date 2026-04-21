@@ -54,8 +54,7 @@ coverage/
 *.rej
 /workspace/
 
-# Docs (local dev reference, not tracked)
-docs/
+# Docs source is tracked in git
 
 # Local git worktrees
 .worktrees/

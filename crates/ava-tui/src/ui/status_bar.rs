@@ -183,6 +183,32 @@ pub fn render_top(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
         }
     }
 
+    // Sub-agent indicator
+    {
+        let total = state.agent.sub_agents.len();
+        if total > 0 {
+            let running = state
+                .agent
+                .sub_agents
+                .iter()
+                .filter(|sa| sa.is_running)
+                .count();
+            if running > 0 {
+                left_spans.push(Span::styled(
+                    format!(" [SA: {running} running]"),
+                    Style::default()
+                        .fg(state.theme.warning)
+                        .add_modifier(Modifier::BOLD),
+                ));
+            } else {
+                left_spans.push(Span::styled(
+                    format!(" [SA: {total}]"),
+                    Style::default().fg(state.theme.text_dimmed),
+                ));
+            }
+        }
+    }
+
     let mut right_spans: Vec<Span<'_>> = Vec::new();
 
     // Calculate widths and fill remaining space
@@ -316,8 +342,18 @@ pub fn render_context_bar(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
         ViewMode::SubAgent { .. } | ViewMode::BackgroundTask { .. }
     ) {
         // Sub-agent or background task view hints
-        let hints: &[(&str, &str)] = &[("Esc", "back")];
-        render_hints(&mut left_spans, hints, state);
+        let mut hints: Vec<(&str, &str)> = vec![("Esc", "back")];
+        if let ViewMode::SubAgent { .. } = state.view_mode {
+            if state.agent.sub_agents.len() > 1 {
+                hints.push(("←/→", "sibling"));
+            }
+            hints.push(("PgUp/PgDn", "scroll"));
+            hints.push(("ro", "read-only transcript"));
+        } else {
+            hints.push(("PgUp/PgDn", "scroll"));
+            hints.push(("ro", "read-only transcript"));
+        }
+        render_hints(&mut left_spans, &hints, state);
     } else {
         return;
     }

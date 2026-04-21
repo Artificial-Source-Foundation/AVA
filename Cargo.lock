@@ -266,7 +266,7 @@ checksum = "c08606f8c3cbf4ce6ec8e28fb0014a2c086708fe954eaa885384a6165172e7e8"
 
 [[package]]
 name = "ava-acp"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -287,7 +287,7 @@ dependencies = [
 
 [[package]]
 name = "ava-agent"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -324,7 +324,7 @@ dependencies = [
 
 [[package]]
 name = "ava-auth"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "base64",
  "open",
@@ -343,7 +343,7 @@ dependencies = [
 
 [[package]]
 name = "ava-codebase"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "petgraph",
  "regex",
@@ -356,7 +356,7 @@ dependencies = [
 
 [[package]]
 name = "ava-config"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "aes-gcm",
  "ava-auth",
@@ -380,7 +380,7 @@ dependencies = [
 
 [[package]]
 name = "ava-context"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "async-trait",
  "ava-types",
@@ -395,7 +395,7 @@ dependencies = [
 
 [[package]]
 name = "ava-db"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "ava-types",
  "chrono",
@@ -410,7 +410,7 @@ dependencies = [
 
 [[package]]
 name = "ava-extensions"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "chrono",
  "dirs-next",
@@ -426,7 +426,7 @@ dependencies = [
 
 [[package]]
 name = "ava-hq"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "async-trait",
  "ava-acp",
@@ -452,7 +452,7 @@ dependencies = [
 
 [[package]]
 name = "ava-llm"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "async-trait",
  "ava-auth",
@@ -475,7 +475,7 @@ dependencies = [
 
 [[package]]
 name = "ava-mcp"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "async-trait",
  "ava-tools",
@@ -500,7 +500,7 @@ dependencies = [
 
 [[package]]
 name = "ava-memory"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "rusqlite",
  "tempfile",
@@ -509,7 +509,7 @@ dependencies = [
 
 [[package]]
 name = "ava-permissions"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "async-trait",
  "chrono",
@@ -531,7 +531,7 @@ dependencies = [
 
 [[package]]
 name = "ava-platform"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "async-trait",
  "ava-types",
@@ -547,7 +547,7 @@ dependencies = [
 
 [[package]]
 name = "ava-plugin"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "async-trait",
  "ava-types",
@@ -564,7 +564,7 @@ dependencies = [
 
 [[package]]
 name = "ava-review"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "ava-agent",
  "ava-context",
@@ -582,7 +582,7 @@ dependencies = [
 
 [[package]]
 name = "ava-sandbox"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "serde",
  "thiserror 1.0.69",
@@ -592,7 +592,7 @@ dependencies = [
 
 [[package]]
 name = "ava-session"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "ava-types",
  "chrono",
@@ -606,7 +606,7 @@ dependencies = [
 
 [[package]]
 name = "ava-tools"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -645,7 +645,7 @@ dependencies = [
 
 [[package]]
 name = "ava-tui"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "arboard",
  "async-trait",
@@ -711,7 +711,7 @@ dependencies = [
 
 [[package]]
 name = "ava-types"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "base64",
  "chrono",
@@ -725,7 +725,7 @@ dependencies = [
 
 [[package]]
 name = "ava-validator"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "criterion",
  "tracing",

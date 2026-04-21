@@ -2,7 +2,7 @@
 title: "Scripts And Build Commands"
 description: "Canonical repository commands for check, test, run, build, and desktop/frontend workflows."
 order: 3
-updated: "2026-04-20"
+updated: "2026-04-21"
 ---
 
 # Scripts And Build Commands
@@ -10,6 +10,28 @@ updated: "2026-04-20"
 This page is contributor-facing reference for the repository workflow.
 
 Normal product users usually do not need these commands. For user-facing install and run guidance, use [How-to: Install AVA](../how-to/install.md) and [How-to: Run AVA locally](../how-to/run-locally.md).
+
+## Contributor Prerequisites
+
+Required local toolchain:
+
+1. Rust 1.86+
+2. `just`
+3. `cargo-nextest` (`cargo install cargo-nextest --locked`)
+4. Node.js 20+
+5. `pnpm`
+6. `python3` (required for `just v1-signoff` / `pnpm signoff:v1`)
+
+Bootstrap commands:
+
+```bash
+pnpm install
+# fallback if hooks were not installed by prepare:
+pnpm exec lefthook install
+pnpm exec playwright install chromium
+```
+
+Use Linux desktop system dependencies from [Tauri Linux toolchain checklist](../troubleshooting/tauri-toolchain-checklist.md) when working on `pnpm tauri dev`.
 
 ## Primary Repo Commands (`just`)
 

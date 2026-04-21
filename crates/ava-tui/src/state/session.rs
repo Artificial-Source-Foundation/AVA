@@ -31,6 +31,44 @@ impl SessionState {
         Ok(())
     }
 
+    /// Resolve startup session selection from `--session` / `--continue` flags.
+    ///
+    /// Returns the selected existing session when resume/session flags are used,
+    /// or `None` when startup should create/run with a fresh session.
+    pub fn resolve_startup_session(
+        &mut self,
+        resume: bool,
+        requested_session_id: Option<&str>,
+    ) -> Result<Option<Session>> {
+        if let Some(raw_id) = requested_session_id {
+            let session_id = Uuid::parse_str(raw_id).map_err(|err| {
+                eyre!("Invalid --session id '{raw_id}': expected UUID format ({err})")
+            })?;
+
+            let session = self
+                .manager
+                .get(session_id)?
+                .ok_or_else(|| eyre!("Requested --session '{raw_id}' was not found"))?;
+            self.current_session = Some(session.clone());
+            return Ok(Some(session));
+        }
+
+        if resume {
+            let session = self
+                .manager
+                .list_recent(1)?
+                .into_iter()
+                .next()
+                .ok_or_else(|| {
+                    eyre!("--continue was requested but no existing sessions were found")
+                })?;
+            self.current_session = Some(session.clone());
+            return Ok(Some(session));
+        }
+
+        Ok(None)
+    }
+
     pub fn fork_current(&mut self) -> Result<Session> {
         let current = self
             .current_session
@@ -142,5 +180,67 @@ mod tests {
                 .messages,
             session.messages
         );
+    }
+
+    #[test]
+    fn resolve_startup_session_reports_clear_error_when_continue_has_no_sessions() {
+        let temp = tempdir().expect("tempdir");
+        let db_path = temp.path().join("sessions.db");
+        let mut state = SessionState::new(&db_path).expect("session state");
+
+        let err = state
+            .resolve_startup_session(true, None)
+            .expect_err("expected no-session resume error");
+
+        assert!(err
+            .to_string()
+            .contains("--continue was requested but no existing sessions were found"));
+    }
+
+    #[test]
+    fn resolve_startup_session_loads_requested_existing_session() {
+        let temp = tempdir().expect("tempdir");
+        let db_path = temp.path().join("sessions.db");
+        let mut state = SessionState::new(&db_path).expect("session state");
+        let created = state.create_session().expect("create session");
+        state.save_session(&created);
+
+        let loaded = state
+            .resolve_startup_session(false, Some(&created.id.to_string()))
+            .expect("resolve startup session")
+            .expect("loaded session");
+
+        assert_eq!(loaded.id, created.id);
+    }
+
+    #[test]
+    fn resolve_startup_session_rejects_invalid_requested_session_id() {
+        let temp = tempdir().expect("tempdir");
+        let db_path = temp.path().join("sessions.db");
+        let mut state = SessionState::new(&db_path).expect("session state");
+
+        let err = state
+            .resolve_startup_session(false, Some("not-a-uuid"))
+            .expect_err("expected parse error");
+
+        assert!(err
+            .to_string()
+            .contains("Invalid --session id 'not-a-uuid': expected UUID format"));
+    }
+
+    #[test]
+    fn resolve_startup_session_rejects_missing_requested_session() {
+        let temp = tempdir().expect("tempdir");
+        let db_path = temp.path().join("sessions.db");
+        let mut state = SessionState::new(&db_path).expect("session state");
+
+        let missing = Uuid::new_v4().to_string();
+        let err = state
+            .resolve_startup_session(false, Some(&missing))
+            .expect_err("expected missing session error");
+
+        assert!(err
+            .to_string()
+            .contains(&format!("Requested --session '{missing}' was not found")));
     }
 }

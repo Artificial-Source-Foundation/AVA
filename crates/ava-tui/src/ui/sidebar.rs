@@ -296,8 +296,20 @@ pub fn render_sidebar(frame: &mut Frame<'_>, area: Rect, state: &mut AppState) {
 
     // Sub-agents section — only show when there are any sub-agents
     if !state.agent.sub_agents.is_empty() {
+        let running_subagents = state
+            .agent
+            .sub_agents
+            .iter()
+            .filter(|sa| sa.is_running)
+            .count();
         lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled("sub-agents", label_style)));
+        lines.push(Line::from(vec![
+            Span::styled("sub-agents", label_style),
+            Span::styled(
+                format!("  ({} running)", running_subagents),
+                Style::default().fg(state.theme.text_dimmed),
+            ),
+        ]));
 
         let max_desc_len = inner_area.width.saturating_sub(4) as usize;
         let max_visible = 5;
@@ -312,8 +324,31 @@ pub fn render_sidebar(frame: &mut Frame<'_>, area: Rect, state: &mut AppState) {
             )));
         }
 
-        for sa in state.agent.sub_agents.iter().skip(skip) {
+        for (index, sa) in state.agent.sub_agents.iter().enumerate().skip(skip) {
             let desc = truncate_display(&sa.description, max_desc_len);
+            let is_active_view = matches!(state.view_mode, crate::app::ViewMode::SubAgent { agent_index, .. } if agent_index == index);
+            let click_row = inner_area.y + lines.len() as u16;
+            let failed = state
+                .messages
+                .messages
+                .iter()
+                .rev()
+                .find_map(|msg| {
+                    msg.sub_agent.as_ref().and_then(|data| {
+                        if data.call_id == sa.call_id {
+                            Some(data.failed)
+                        } else {
+                            None
+                        }
+                    })
+                })
+                .unwrap_or(false);
+
+            state.sidebar_click_targets.push(SidebarClickTarget {
+                x: inner_area.x..(inner_area.x + inner_area.width),
+                y: click_row..(click_row + 1),
+                action: SidebarClickAction::OpenSubAgent { index },
+            });
 
             // [CC] badge for claude-code-powered sub-agents
             let cc_badge: Vec<Span<'_>> = if sa.provider.as_deref() == Some("claude-code") {
@@ -342,11 +377,28 @@ pub fn render_sidebar(frame: &mut Frame<'_>, area: Rect, state: &mut AppState) {
                     format!(" ({}s)", elapsed)
                 };
                 let mut spans = vec![Span::styled(
-                    format!("  {spinner} "),
-                    Style::default().fg(state.theme.warning),
+                    if is_active_view {
+                        format!("  › {spinner} ")
+                    } else {
+                        format!("  {spinner} ")
+                    },
+                    if is_active_view {
+                        Style::default()
+                            .fg(state.theme.warning)
+                            .add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default().fg(state.theme.warning)
+                    },
                 )];
                 spans.extend(cc_badge);
-                spans.push(Span::styled(desc, value_style));
+                spans.push(Span::styled(
+                    desc,
+                    if is_active_view {
+                        value_style.add_modifier(Modifier::BOLD)
+                    } else {
+                        value_style
+                    },
+                ));
                 spans.push(Span::styled(
                     stats,
                     Style::default().fg(state.theme.text_dimmed),
@@ -360,12 +412,29 @@ pub fn render_sidebar(frame: &mut Frame<'_>, area: Rect, state: &mut AppState) {
                 } else {
                     format!(" ({}s)", secs)
                 };
+                let icon = if failed { "✗" } else { "✓" };
+                let icon_color = if failed {
+                    state.theme.error
+                } else if is_active_view {
+                    state.theme.text_muted
+                } else {
+                    state.theme.success
+                };
                 let dim_modifier = Modifier::DIM;
                 let mut spans = vec![Span::styled(
-                    "  \u{2713} ",
+                    if is_active_view {
+                        format!("  › {icon} ")
+                    } else {
+                        format!("  {icon} ")
+                    },
                     Style::default()
-                        .fg(state.theme.success)
-                        .add_modifier(dim_modifier),
+                        .fg(icon_color)
+                        .add_modifier(dim_modifier)
+                        .add_modifier(if is_active_view {
+                            Modifier::BOLD
+                        } else {
+                            Modifier::empty()
+                        }),
                 )];
                 if sa.provider.as_deref() == Some("claude-code") {
                     spans.push(Span::styled(
@@ -378,8 +447,17 @@ pub fn render_sidebar(frame: &mut Frame<'_>, area: Rect, state: &mut AppState) {
                 spans.push(Span::styled(
                     desc,
                     Style::default()
-                        .fg(state.theme.text_dimmed)
-                        .add_modifier(dim_modifier),
+                        .fg(if is_active_view {
+                            state.theme.text_muted
+                        } else {
+                            state.theme.text_dimmed
+                        })
+                        .add_modifier(dim_modifier)
+                        .add_modifier(if is_active_view {
+                            Modifier::BOLD
+                        } else {
+                            Modifier::empty()
+                        }),
                 ));
                 spans.push(Span::styled(
                     stats,

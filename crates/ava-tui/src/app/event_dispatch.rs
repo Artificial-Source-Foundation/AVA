@@ -1,22 +1,5 @@
 use super::*;
 
-fn subagent_descriptions_match(a: &str, b: &str) -> bool {
-    fn normalize_subagent_description(value: &str) -> &str {
-        let trimmed = value.trim();
-        if let Some(rest) = trimmed
-            .strip_prefix('[')
-            .and_then(|rest| rest.split_once(']').map(|(_, tail)| tail.trim()))
-        {
-            if !rest.is_empty() {
-                return rest;
-            }
-        }
-        trimmed
-    }
-
-    normalize_subagent_description(a) == normalize_subagent_description(b)
-}
-
 impl App {
     pub(super) fn handle_event(
         &mut self,
@@ -123,6 +106,9 @@ impl App {
                                                 Some(std::time::Instant::now());
                                             self.spawn_lsp_sidebar_refresh(app_tx.clone());
                                         }
+                                    }
+                                    SidebarClickAction::OpenSubAgent { index } => {
+                                        self.enter_sub_agent_view(index);
                                     }
                                 }
                                 return;

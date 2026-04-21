@@ -26,6 +26,8 @@ run_playwright_parity() {
 run_step "just check" just check
 run_step "pnpm verify:mvp" pnpm verify:mvp
 run_step "just backend-gate" just backend-gate
+run_step "ava-tui primary-agent coverage" \
+  ionice -c 3 nice -n 15 env CARGO_BUILD_JOBS=4 cargo test -p ava-tui primary_agent
 run_playwright_parity
 
 echo "[verify:v1] local V1 preflight complete (not a full V1 signoff)"

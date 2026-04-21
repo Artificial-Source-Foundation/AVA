@@ -1,0 +1,15 @@
+{
+  "README": "Overview",
+  "crate-map": "Crate Map",
+  "entrypoints": "Entrypoints",
+  "plugin-boundary": "Plugin Boundary",
+  "agent-backend-capability-audit-m1": "Agent Backend Capability Audit (M1)",
+  "agent-backend-capability-comparison-m2": "Agent Backend Capability Comparison (M2)",
+  "subagent-rework-blueprint-m1": "Subagent Rework Blueprint (M1)",
+  "cross-surface-runtime-map-m4": "Cross-Surface Runtime Map (Milestone 4)",
+  "cross-surface-runtime-audit-m5": "Cross-Surface Runtime Audit (Milestone 5)",
+  "cross-surface-behavior-audit-m5": "Cross-Surface Behavior Audit (Milestone 5)",
+  "shared-backend-contract-m6": "Canonical Shared-Backend Contract (M6)",
+  "backend-correction-roadmap-m7": "Backend Correction Implementation Roadmap (M7)",
+  "backend-contract-exceptions": "Backend Contract Exceptions"
+}

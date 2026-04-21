@@ -284,6 +284,8 @@ impl App {
                 let _ = self.state.session.create_session();
                 self.state.agent.clear_session_metrics();
                 self.state.messages.messages.clear();
+                self.state.view_mode = ViewMode::Main;
+                self.state.messages.reset_scroll();
                 self.set_status("New session created", StatusLevel::Info);
             }
             Action::SessionList => {

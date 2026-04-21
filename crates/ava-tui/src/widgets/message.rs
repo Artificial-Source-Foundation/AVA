@@ -117,7 +117,7 @@ pub(crate) fn tool_activity_line(content: &str, active: bool) -> String {
                 "Applied patch".to_string()
             }
         }
-        "task" => {
+        "subagent" | "task" => {
             if active {
                 "Spawning sub-agent...".to_string()
             } else {
@@ -145,6 +145,10 @@ pub(crate) fn tool_activity_line(content: &str, active: bool) -> String {
             }
         }
     }
+}
+
+fn is_subagent_tool_name(tool_name: &str) -> bool {
+    matches!(tool_name, "subagent" | "task")
 }
 
 /// Shorten a file path to just the last 2-3 components for display.
@@ -179,6 +183,7 @@ fn tool_activity_summary(tool_calls: &[&UiMessage]) -> String {
             "edit" | "multiedit" | "apply_patch" => edits += 1,
             "bash" => bashes += 1,
             "glob" | "grep" | "codebase_search" => searches += 1,
+            "subagent" | "task" => {}
             other => {
                 if !others.contains(&other.to_string()) {
                     others.push(other.to_string());
@@ -254,7 +259,7 @@ pub fn render_action_group(
     let non_task_calls: Vec<&UiMessage> = tool_calls
         .iter()
         .copied()
-        .filter(|msg| msg.content.split_whitespace().next().unwrap_or("") != "task")
+        .filter(|msg| !is_subagent_tool_name(msg.content.split_whitespace().next().unwrap_or("")))
         .collect();
     let tool_results: Vec<&UiMessage> = messages
         .iter()
@@ -366,6 +371,41 @@ pub fn render_action_group(
             Span::styled("▸ ", dim),
             Span::styled(summary, dim),
         ])]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::messages::{MessageKind, UiMessage};
+
+    #[test]
+    fn tool_activity_line_treats_subagent_and_task_aliases_equally() {
+        assert_eq!(
+            tool_activity_line("task {\"goal\":\"test\"}", true),
+            "Spawning sub-agent..."
+        );
+        assert_eq!(
+            tool_activity_line("subagent {\"goal\":\"test\"}", true),
+            "Spawning sub-agent..."
+        );
+        assert_eq!(
+            tool_activity_line("task {\"goal\":\"test\"}", false),
+            "Sub-agent completed"
+        );
+        assert_eq!(
+            tool_activity_line("subagent {\"goal\":\"test\"}", false),
+            "Sub-agent completed"
+        );
+    }
+
+    #[test]
+    fn tool_activity_summary_excludes_subagent_and_task() {
+        let task = UiMessage::new(MessageKind::ToolCall, "task {\"goal\":\"legacy\"}");
+        let subagent = UiMessage::new(MessageKind::ToolCall, "subagent {\"goal\":\"new\"}");
+        let calls = vec![&task, &subagent];
+
+        assert_eq!(tool_activity_summary(&calls), "completed");
     }
 }
 

@@ -113,6 +113,18 @@ pub fn render_message_list(frame: &mut Frame<'_>, area: Rect, state: &mut AppSta
             // Sub-agent or background task with no messages — show a hint
             let hint_text = if matches!(state.view_mode, ViewMode::BackgroundTask { .. }) {
                 "No output from this background task yet."
+            } else if let ViewMode::SubAgent { agent_index, .. } = &state.view_mode {
+                if state
+                    .agent
+                    .sub_agents
+                    .get(*agent_index)
+                    .map(|sa| sa.is_running)
+                    .unwrap_or(false)
+                {
+                    "Sub-agent is running — open this view to watch live output."
+                } else {
+                    "No messages in this sub-agent conversation."
+                }
             } else {
                 "No messages in this sub-agent conversation."
             };
@@ -175,8 +187,48 @@ pub fn render_message_list(frame: &mut Frame<'_>, area: Rect, state: &mut AppSta
         lines.push(Line::raw(""));
     }
 
-    if let ViewMode::SubAgent { description, .. } = &state.view_mode {
+    if let ViewMode::SubAgent {
+        agent_index,
+        description,
+    } = &state.view_mode
+    {
         let truncated_desc = crate::text_utils::truncate_display(description, 60);
+        let total = state.agent.sub_agents.len();
+        let index_label = if total > 0 {
+            format!("#{}/{}", *agent_index + 1, total)
+        } else {
+            "#?/?".to_string()
+        };
+        let (status_label, status_style) = state
+            .agent
+            .sub_agents
+            .get(*agent_index)
+            .map(|sa| {
+                if sa.is_running {
+                    let activity = sa
+                        .current_tool
+                        .as_deref()
+                        .map(|tool| format!("running {tool}"))
+                        .unwrap_or_else(|| "running".to_string());
+                    (
+                        activity,
+                        Style::default()
+                            .fg(state.theme.warning)
+                            .add_modifier(Modifier::BOLD),
+                    )
+                } else {
+                    (
+                        "done".to_string(),
+                        Style::default().fg(state.theme.text_muted),
+                    )
+                }
+            })
+            .unwrap_or_else(|| {
+                (
+                    "detached".to_string(),
+                    Style::default().fg(state.theme.error),
+                )
+            });
         lines.push(Line::from(vec![
             Span::styled(
                 "\u{2190} ",
@@ -192,11 +244,13 @@ pub fn render_message_list(frame: &mut Frame<'_>, area: Rect, state: &mut AppSta
             ),
             Span::styled(" > ", Style::default().fg(state.theme.text_dimmed)),
             Span::styled(
-                format!("Sub-agent: {truncated_desc}"),
+                format!("Sub-agent {index_label}: {truncated_desc}"),
                 Style::default()
                     .fg(state.theme.accent)
                     .add_modifier(Modifier::BOLD),
             ),
+            Span::styled(" · ", Style::default().fg(state.theme.text_dimmed)),
+            Span::styled(status_label, status_style),
         ]));
         lines.push(Line::raw(""));
     }

@@ -1,37 +1,7 @@
 use super::*;
-
-fn initial_subagent_session_messages(description: &str) -> Vec<UiMessage> {
-    vec![
-        UiMessage::new(
-            MessageKind::System,
-            format!("Delegated task: {description}"),
-        ),
-        UiMessage::new(
-            MessageKind::Thinking,
-            "Sub-agent is running. Live transcript details will appear here when available.",
-        ),
-    ]
-}
 use crate::state::agent::SubAgentInfo;
 use crate::state::rewind::{snapshot_file, ChangeType, FileChange};
 use tracing::{debug, info};
-
-fn normalize_subagent_description(value: &str) -> &str {
-    let trimmed = value.trim();
-    if let Some(rest) = trimmed
-        .strip_prefix('[')
-        .and_then(|rest| rest.split_once(']').map(|(_, tail)| tail.trim()))
-    {
-        if !rest.is_empty() {
-            return rest;
-        }
-    }
-    trimmed
-}
-
-fn subagent_descriptions_match(a: &str, b: &str) -> bool {
-    normalize_subagent_description(a) == normalize_subagent_description(b)
-}
 
 impl App {
     pub(crate) fn handle_agent_event(
@@ -161,7 +131,8 @@ impl App {
                         .get("background")
                         .and_then(|value| value.as_bool())
                         .unwrap_or(false);
-                    let initial_session_messages = initial_subagent_session_messages(&description);
+                    let initial_session_messages =
+                        initial_subagent_session_messages(&description, background);
 
                     // Fire SubagentStart hook
                     {
@@ -300,7 +271,7 @@ impl App {
                         .sub_agents
                         .iter_mut()
                         .rev()
-                        .find(|s| s.is_running)
+                        .find(|s| s.call_id == result.call_id)
                     {
                         let completed = !sa.background;
                         if completed {
@@ -336,20 +307,6 @@ impl App {
                         }
                     }
                 } else {
-                    // Mark most recent running sub-agent as completed (non-task tool results)
-                    if let Some(sa) = self
-                        .state
-                        .agent
-                        .sub_agents
-                        .iter_mut()
-                        .rev()
-                        .find(|s| s.is_running && !s.background)
-                    {
-                        sa.is_running = false;
-                        sa.elapsed = Some(sa.started_at.elapsed());
-                        sa.current_tool = None;
-                    }
-
                     self.state
                         .messages
                         .push(UiMessage::new(MessageKind::ToolResult, result.content));
@@ -424,8 +381,7 @@ impl App {
 
                 // Update the SubAgentInfo in agent state
                 if let Some(sa) = self.state.agent.sub_agents.iter_mut().rev().find(|s| {
-                    (!call_id.is_empty() && s.call_id == call_id)
-                        || subagent_descriptions_match(&s.description, &description)
+                    subagent_matches_completion(&s.call_id, &s.description, &call_id, &description)
                 }) {
                     sa.is_running = false;
                     sa.elapsed = Some(sa.started_at.elapsed());
@@ -444,8 +400,12 @@ impl App {
                 if let Some(msg) = self.state.messages.messages.iter_mut().rev().find(|m| {
                     matches!(m.kind, MessageKind::SubAgent)
                         && m.sub_agent.as_ref().is_some_and(|d| {
-                            (!call_id.is_empty() && d.call_id == call_id)
-                                || subagent_descriptions_match(&d.description, &description)
+                            subagent_matches_completion(
+                                &d.call_id,
+                                &d.description,
+                                &call_id,
+                                &description,
+                            )
                         })
                 }) {
                     let final_summary = ui_messages

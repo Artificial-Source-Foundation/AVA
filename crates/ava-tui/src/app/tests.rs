@@ -5,9 +5,14 @@ use ava_agent::control_plane::events::{required_backend_event_kinds, CanonicalEv
 use ava_agent::control_plane::interactive::InteractiveRequestKind;
 use ava_agent::stack::AgentRunResult;
 use ava_permissions::tags::RiskLevel;
+use clap::Parser;
 use std::time::Duration;
 use tempfile::tempdir;
 use tokio::sync::{mpsc, oneshot};
+
+fn parse_cli(args: &[&str]) -> crate::config::cli::CliArgs {
+    crate::config::cli::CliArgs::parse_from(args)
+}
 
 fn sample_plan(summary: &str) -> ava_types::Plan {
     ava_types::Plan {
@@ -33,16 +38,16 @@ fn resume_restore_uses_session_metadata_without_cli_agent_override() {
         "primaryAgentPrompt": "You are the architect profile"
     });
 
-    let (primary_agent_id, primary_agent_prompt, restore_model) =
-        resume_restore_from_metadata(&metadata, None);
+    let restore_plan = resume_restore_from_metadata(&metadata, None, false);
 
-    assert_eq!(primary_agent_id.as_deref(), Some("architect"));
+    assert!(restore_plan.apply_primary_agent);
+    assert_eq!(restore_plan.primary_agent_id.as_deref(), Some("architect"));
     assert_eq!(
-        primary_agent_prompt.as_deref(),
+        restore_plan.primary_agent_prompt.as_deref(),
         Some("You are the architect profile")
     );
     assert_eq!(
-        restore_model,
+        restore_plan.restore_model,
         Some((
             "openrouter".to_string(),
             "anthropic/claude-sonnet-4".to_string()
@@ -59,12 +64,32 @@ fn resume_restore_skips_session_metadata_when_cli_agent_override_present() {
         "primaryAgentPrompt": "You are the architect profile"
     });
 
-    let (primary_agent_id, primary_agent_prompt, restore_model) =
-        resume_restore_from_metadata(&metadata, Some("coder"));
+    let restore_plan = resume_restore_from_metadata(&metadata, Some("coder"), false);
 
-    assert!(primary_agent_id.is_none());
-    assert!(primary_agent_prompt.is_none());
-    assert!(restore_model.is_none());
+    assert!(!restore_plan.apply_primary_agent);
+    assert!(restore_plan.primary_agent_id.is_none());
+    assert!(restore_plan.primary_agent_prompt.is_none());
+    assert!(restore_plan.restore_model.is_none());
+}
+
+#[test]
+fn resume_restore_skips_session_model_when_cli_provider_or_model_override_present() {
+    let metadata = serde_json::json!({
+        "provider": "openrouter",
+        "model": "anthropic/claude-sonnet-4",
+        "primaryAgentId": "architect",
+        "primaryAgentPrompt": "You are the architect profile"
+    });
+
+    let restore_plan = resume_restore_from_metadata(&metadata, None, true);
+
+    assert!(restore_plan.apply_primary_agent);
+    assert_eq!(restore_plan.primary_agent_id.as_deref(), Some("architect"));
+    assert_eq!(
+        restore_plan.primary_agent_prompt.as_deref(),
+        Some("You are the architect profile")
+    );
+    assert!(restore_plan.restore_model.is_none());
 }
 
 #[test]
@@ -97,26 +122,154 @@ fn persisted_primary_agent_prompt_round_trips_and_cli_agent_override_wins() {
         .next()
         .expect("saved session");
 
-    let (id_from_metadata, prompt_from_metadata, model_from_metadata) =
-        resume_restore_from_metadata(&saved.metadata, None);
-    assert_eq!(id_from_metadata.as_deref(), Some("architect"));
+    let restore_plan = resume_restore_from_metadata(&saved.metadata, None, false);
+    assert!(restore_plan.apply_primary_agent);
+    assert_eq!(restore_plan.primary_agent_id.as_deref(), Some("architect"));
     assert_eq!(
-        prompt_from_metadata.as_deref(),
+        restore_plan.primary_agent_prompt.as_deref(),
         Some("You are the architect profile")
     );
     assert_eq!(
-        model_from_metadata,
+        restore_plan.restore_model,
         Some((
             "openrouter".to_string(),
             "anthropic/claude-sonnet-4".to_string()
         ))
     );
 
-    let (id_with_override, prompt_with_override, model_with_override) =
-        resume_restore_from_metadata(&saved.metadata, Some("coder"));
-    assert!(id_with_override.is_none());
-    assert!(prompt_with_override.is_none());
-    assert!(model_with_override.is_none());
+    let restore_override = resume_restore_from_metadata(&saved.metadata, Some("coder"), false);
+    assert!(!restore_override.apply_primary_agent);
+    assert!(restore_override.primary_agent_id.is_none());
+    assert!(restore_override.primary_agent_prompt.is_none());
+    assert!(restore_override.restore_model.is_none());
+}
+
+#[tokio::test]
+async fn resumed_app_path_keeps_cli_agent_profile_active() {
+    let temp = tempdir().expect("tempdir");
+    let db_path = temp.path().join("data.db");
+    let mut app = App::test_new(&db_path);
+    app.cli_agent_override = Some("coder".to_string());
+    app.state.agent.primary_agent_id = Some("coder".to_string());
+    app.state.agent.primary_agent_prompt = Some("You are coder".to_string());
+
+    let mut session = ava_types::Session::new();
+    session.metadata = serde_json::json!({
+        "provider": "openrouter",
+        "model": "anthropic/claude-sonnet-4",
+        "primaryAgentId": "architect",
+        "primaryAgentPrompt": "You are the architect profile"
+    });
+
+    app.apply_resume_state(&session).await;
+
+    assert_eq!(app.state.agent.primary_agent_id.as_deref(), Some("coder"));
+    assert_eq!(
+        app.state.agent.primary_agent_prompt.as_deref(),
+        Some("You are coder")
+    );
+}
+
+#[tokio::test]
+async fn resumed_app_path_applies_session_primary_agent_profile_without_override() {
+    let temp = tempdir().expect("tempdir");
+    let db_path = temp.path().join("data.db");
+    let mut app = App::test_new(&db_path);
+    app.state.agent.primary_agent_id = Some("coder".to_string());
+    app.state.agent.primary_agent_prompt = Some("You are coder".to_string());
+
+    let mut session = ava_types::Session::new();
+    session.metadata = serde_json::json!({
+        "provider": "openrouter",
+        "model": "anthropic/claude-sonnet-4",
+        "primaryAgentId": "architect",
+        "primaryAgentPrompt": "You are the architect profile"
+    });
+
+    app.apply_resume_state(&session).await;
+
+    assert_eq!(
+        app.state.agent.primary_agent_id.as_deref(),
+        Some("architect")
+    );
+    assert_eq!(
+        app.state.agent.primary_agent_prompt.as_deref(),
+        Some("You are the architect profile")
+    );
+}
+
+#[tokio::test]
+async fn resumed_app_path_rehydrates_legacy_primary_agent_prompt_when_metadata_missing() {
+    let temp = tempdir().expect("tempdir");
+    let db_path = temp.path().join("data.db");
+    let mut app = App::test_new(&db_path);
+    app.state.agent.primary_agent_id = Some("architect".to_string());
+    app.state.agent.primary_agent_prompt = Some("You are the architect profile".to_string());
+
+    let mut session = ava_types::Session::new();
+    session.metadata = serde_json::json!({
+        "provider": "openrouter",
+        "model": "anthropic/claude-sonnet-4",
+        "primaryAgentId": "architect"
+    });
+
+    app.apply_resume_state(&session).await;
+
+    assert_eq!(
+        app.state.agent.primary_agent_id.as_deref(),
+        Some("architect")
+    );
+    assert_eq!(
+        app.state.agent.primary_agent_prompt.as_deref(),
+        Some("You are the architect profile")
+    );
+}
+
+#[tokio::test]
+async fn resumed_app_path_surfaces_model_restore_failures() {
+    let temp = tempdir().expect("tempdir");
+    let db_path = temp.path().join("data.db");
+    let mut app = App::test_new(&db_path);
+
+    let mut session = ava_types::Session::new();
+    session.metadata = serde_json::json!({
+        "provider": "openrouter",
+        "model": "anthropic/claude-sonnet-4"
+    });
+
+    app.apply_resume_state(&session).await;
+
+    let has_restore_error = app.state.messages.messages.iter().any(|msg| {
+        msg.kind == MessageKind::Error
+            && msg.content.contains(
+                "Failed to restore resumed session model openrouter/anthropic/claude-sonnet-4",
+            )
+    });
+    assert!(has_restore_error, "expected restore-model error message");
+}
+
+#[tokio::test]
+async fn app_new_errors_when_continue_requested_but_no_sessions_exist() {
+    let cli = parse_cli(&["ava", "--continue"]);
+    let err = match App::new(cli).await {
+        Ok(_) => panic!("expected resume startup failure"),
+        Err(err) => err,
+    };
+    assert!(err
+        .to_string()
+        .contains("--continue was requested but no existing sessions were found"));
+}
+
+#[tokio::test]
+async fn app_new_errors_when_requested_session_is_invalid_uuid() {
+    let cli = parse_cli(&["ava", "--session", "not-a-uuid"]);
+    let err = match App::new(cli).await {
+        Ok(_) => panic!("expected invalid --session startup failure"),
+        Err(err) => err,
+    };
+    assert!(err
+        .to_string()
+        .contains("Invalid --session id 'not-a-uuid': expected UUID format"));
 }
 
 #[test]
@@ -308,6 +461,27 @@ fn background_subagent_events_follow_real_tool_sequence() {
         agent_tx.clone(),
     );
 
+    {
+        let bg = app.state.background.lock().unwrap();
+        let task = bg.tasks.iter().find(|task| task.id == 1).expect("task");
+        let sub_msg = task
+            .messages
+            .iter()
+            .find(|msg| matches!(msg.kind, MessageKind::SubAgent))
+            .expect("background subagent message should exist after tool call");
+        let sub_data = sub_msg
+            .sub_agent
+            .as_ref()
+            .expect("background subagent data should exist after tool call");
+        assert!(
+            sub_data
+                .session_messages
+                .iter()
+                .any(|msg| msg.content.contains("running in the background")),
+            "background subagent placeholder transcript should be present immediately"
+        );
+    }
+
     app.handle_event(
         AppEvent::AgentRunEvent {
             run_id: 42,
@@ -340,6 +514,13 @@ fn background_subagent_events_follow_real_tool_sequence() {
         assert!(
             sub_data.is_running,
             "background launch ack should not mark subagent done"
+        );
+        assert!(
+            sub_data
+                .session_messages
+                .iter()
+                .any(|msg| msg.content.contains("running in the background")),
+            "background transcript hint should be truthful about deferred transcript availability"
         );
     }
 
@@ -1073,6 +1254,225 @@ fn typing_is_ignored_while_viewing_subagent_transcript() {
 }
 
 #[test]
+fn esc_from_transcript_view_returns_to_main_without_cancel_or_rewind_side_effects() {
+    let temp = tempdir().expect("tempdir");
+    let db_path = temp.path().join("data.db");
+    let mut app = App::test_new(&db_path);
+    let (app_tx, _) = mpsc::unbounded_channel();
+    let (agent_tx, _) = mpsc::unbounded_channel();
+
+    app.state.agent.is_running = true;
+    app.state.view_mode = ViewMode::SubAgent {
+        agent_index: 0,
+        description: "Inspect files.".to_string(),
+    };
+
+    app.handle_event(
+        AppEvent::Key(crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Esc,
+            crossterm::event::KeyModifiers::NONE,
+        )),
+        app_tx,
+        agent_tx,
+    );
+
+    assert!(matches!(app.state.view_mode, ViewMode::Main));
+    assert!(
+        app.state.agent.is_running,
+        "Esc from transcript view should not cancel active runs"
+    );
+    assert!(
+        app.state.active_modal.is_none(),
+        "Esc from transcript view should not open rewind or other modals"
+    );
+    assert!(
+        app.last_esc_time.is_none(),
+        "Esc from transcript view should not arm double-Esc rewind tracking"
+    );
+    assert!(
+        !app.state
+            .messages
+            .messages
+            .iter()
+            .any(|msg| msg.content == "Session interrupted"),
+        "Esc from transcript view should not emit cancellation system messages"
+    );
+}
+
+#[test]
+fn subagent_transcript_left_right_cycles_siblings_and_wraps() {
+    let temp = tempdir().expect("tempdir");
+    let db_path = temp.path().join("data.db");
+    let mut app = App::test_new(&db_path);
+    let (app_tx, _) = mpsc::unbounded_channel();
+    let (agent_tx, _) = mpsc::unbounded_channel();
+
+    for idx in 0..3 {
+        app.state.agent.sub_agents.push(SubAgentInfo {
+            call_id: format!("call-{idx}"),
+            agent_type: Some("scout".to_string()),
+            description: format!("Inspect files #{idx}"),
+            background: false,
+            is_running: idx == 1,
+            tool_count: 0,
+            current_tool: if idx == 1 {
+                Some("glob".to_string())
+            } else {
+                None
+            },
+            started_at: std::time::Instant::now(),
+            elapsed: None,
+            session_id: None,
+            session_messages: Vec::new(),
+            provider: None,
+            resumed: false,
+            cost_usd: None,
+            input_tokens: None,
+            output_tokens: None,
+        });
+    }
+
+    app.state.view_mode = ViewMode::SubAgent {
+        agent_index: 0,
+        description: "Inspect files #0".to_string(),
+    };
+
+    app.handle_event(
+        AppEvent::Key(crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Right,
+            crossterm::event::KeyModifiers::NONE,
+        )),
+        app_tx.clone(),
+        agent_tx.clone(),
+    );
+    assert!(matches!(
+        app.state.view_mode,
+        ViewMode::SubAgent { agent_index: 1, .. }
+    ));
+
+    app.handle_event(
+        AppEvent::Key(crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Left,
+            crossterm::event::KeyModifiers::NONE,
+        )),
+        app_tx.clone(),
+        agent_tx.clone(),
+    );
+    assert!(matches!(
+        app.state.view_mode,
+        ViewMode::SubAgent { agent_index: 0, .. }
+    ));
+
+    app.handle_event(
+        AppEvent::Key(crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Left,
+            crossterm::event::KeyModifiers::NONE,
+        )),
+        app_tx,
+        agent_tx,
+    );
+    assert!(matches!(
+        app.state.view_mode,
+        ViewMode::SubAgent { agent_index: 2, .. }
+    ));
+}
+
+#[test]
+fn transcript_view_blocks_mode_tab_shortcut() {
+    let temp = tempdir().expect("tempdir");
+    let db_path = temp.path().join("data.db");
+    let mut app = App::test_new(&db_path);
+    let (app_tx, _) = mpsc::unbounded_channel();
+    let (agent_tx, _) = mpsc::unbounded_channel();
+
+    app.state.agent.sub_agents.push(SubAgentInfo {
+        call_id: "call-running".to_string(),
+        agent_type: Some("scout".to_string()),
+        description: "Inspect files.".to_string(),
+        background: false,
+        is_running: true,
+        tool_count: 0,
+        current_tool: Some("glob".to_string()),
+        started_at: std::time::Instant::now(),
+        elapsed: None,
+        session_id: None,
+        session_messages: Vec::new(),
+        provider: None,
+        resumed: false,
+        cost_usd: None,
+        input_tokens: None,
+        output_tokens: None,
+    });
+
+    app.state.view_mode = ViewMode::SubAgent {
+        agent_index: 0,
+        description: "Inspect files.".to_string(),
+    };
+
+    let before_mode = app.state.agent_mode;
+    app.handle_event(
+        AppEvent::Key(crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Tab,
+            crossterm::event::KeyModifiers::NONE,
+        )),
+        app_tx,
+        agent_tx,
+    );
+
+    assert_eq!(app.state.agent_mode, before_mode);
+}
+
+#[test]
+fn sidebar_subagent_click_target_opens_subagent_view() {
+    let temp = tempdir().expect("tempdir");
+    let db_path = temp.path().join("data.db");
+    let mut app = App::test_new(&db_path);
+    let (app_tx, _) = mpsc::unbounded_channel();
+    let (agent_tx, _) = mpsc::unbounded_channel();
+
+    app.state.agent.sub_agents.push(SubAgentInfo {
+        call_id: "call-sidebar-open".to_string(),
+        agent_type: Some("scout".to_string()),
+        description: "Inspect files.".to_string(),
+        background: false,
+        is_running: true,
+        tool_count: 0,
+        current_tool: Some("glob".to_string()),
+        started_at: std::time::Instant::now(),
+        elapsed: None,
+        session_id: None,
+        session_messages: Vec::new(),
+        provider: None,
+        resumed: false,
+        cost_usd: None,
+        input_tokens: None,
+        output_tokens: None,
+    });
+
+    app.state.sidebar_click_targets.push(SidebarClickTarget {
+        x: 0..20,
+        y: 0..1,
+        action: SidebarClickAction::OpenSubAgent { index: 0 },
+    });
+
+    app.handle_event(
+        AppEvent::Mouse(crossterm::event::MouseEvent {
+            kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+            column: 1,
+            row: 0,
+            modifiers: crossterm::event::KeyModifiers::NONE,
+        }),
+        app_tx,
+        agent_tx,
+    );
+
+    assert!(matches!(
+        app.state.view_mode,
+        ViewMode::SubAgent { agent_index: 0, .. }
+    ));
+}
+
+#[test]
 fn subagent_completion_uses_call_id_before_duplicate_description() {
     let temp = tempdir().expect("tempdir");
     let db_path = temp.path().join("data.db");
@@ -1134,6 +1534,233 @@ fn subagent_completion_uses_call_id_before_duplicate_description() {
         second.session_messages.last().map(|m| m.content.as_str()),
         Some("Newer result")
     );
+}
+
+#[test]
+fn subagent_completion_updates_older_duplicate_description_by_call_id() {
+    let temp = tempdir().expect("tempdir");
+    let db_path = temp.path().join("data.db");
+    let mut app = App::test_new(&db_path);
+    let (app_tx, _) = mpsc::unbounded_channel();
+    let (agent_tx, _) = mpsc::unbounded_channel();
+
+    app.state.agent.is_running = true;
+    app.foreground_run_id = Some(7);
+
+    for call_id in ["call-older", "call-newer"] {
+        app.handle_event(
+            AppEvent::AgentRunEvent {
+                run_id: 7,
+                event: ava_agent::AgentEvent::ToolCall(ava_types::ToolCall {
+                    id: call_id.to_string(),
+                    name: "subagent".to_string(),
+                    arguments: serde_json::json!({"prompt": "Inspect files.", "agent": "scout", "background": false}),
+                }),
+            },
+            app_tx.clone(),
+            agent_tx.clone(),
+        );
+    }
+
+    app.handle_event(
+        AppEvent::AgentRunEvent {
+            run_id: 7,
+            event: ava_agent::AgentEvent::SubAgentComplete {
+                call_id: "call-older".to_string(),
+                session_id: "session-call-older".to_string(),
+                messages: vec![ava_types::Message::new(
+                    ava_types::Role::Assistant,
+                    "Older result",
+                )],
+                description: "[scout] Inspect files.".to_string(),
+                input_tokens: 1,
+                output_tokens: 1,
+                cost_usd: 0.01,
+                agent_type: Some("scout".to_string()),
+                provider: Some("openai".to_string()),
+                resumed: false,
+            },
+        },
+        app_tx,
+        agent_tx,
+    );
+
+    let older = app
+        .state
+        .agent
+        .sub_agents
+        .iter()
+        .find(|subagent| subagent.call_id == "call-older")
+        .expect("older subagent should exist");
+    let newer = app
+        .state
+        .agent
+        .sub_agents
+        .iter()
+        .find(|subagent| subagent.call_id == "call-newer")
+        .expect("newer subagent should exist");
+
+    assert!(
+        !older.is_running,
+        "older matching call-id subagent should be marked completed"
+    );
+    assert_eq!(older.session_id.as_deref(), Some("session-call-older"));
+    assert_eq!(
+        older
+            .session_messages
+            .last()
+            .map(|message| message.content.as_str()),
+        Some("Older result")
+    );
+    assert!(
+        newer.is_running,
+        "newer duplicate-description subagent should remain running"
+    );
+    assert_eq!(newer.session_id, None);
+
+    let older_card = app
+        .state
+        .messages
+        .messages
+        .iter()
+        .filter(|message| matches!(message.kind, MessageKind::SubAgent))
+        .find(|message| {
+            message
+                .sub_agent
+                .as_ref()
+                .is_some_and(|subagent| subagent.call_id == "call-older")
+        })
+        .expect("older subagent card should exist");
+    let newer_card = app
+        .state
+        .messages
+        .messages
+        .iter()
+        .filter(|message| matches!(message.kind, MessageKind::SubAgent))
+        .find(|message| {
+            message
+                .sub_agent
+                .as_ref()
+                .is_some_and(|subagent| subagent.call_id == "call-newer")
+        })
+        .expect("newer subagent card should exist");
+
+    let older_card_data = older_card.sub_agent.as_ref().expect("older card data");
+    let newer_card_data = newer_card.sub_agent.as_ref().expect("newer card data");
+
+    assert!(
+        !older_card_data.is_running,
+        "older card should be completed"
+    );
+    assert_eq!(
+        older_card_data.session_id.as_deref(),
+        Some("session-call-older")
+    );
+    assert!(
+        newer_card_data.is_running,
+        "newer card should still be running"
+    );
+    assert_eq!(newer_card_data.session_id, None);
+}
+
+#[test]
+fn subagent_tool_result_updates_matching_call_id_not_latest_running_card() {
+    let temp = tempdir().expect("tempdir");
+    let db_path = temp.path().join("data.db");
+    let mut app = App::test_new(&db_path);
+    let (app_tx, _) = mpsc::unbounded_channel();
+    let (agent_tx, _) = mpsc::unbounded_channel();
+
+    app.state.agent.is_running = true;
+    app.foreground_run_id = Some(7);
+
+    for call_id in ["call-older", "call-newer"] {
+        app.handle_event(
+            AppEvent::AgentRunEvent {
+                run_id: 7,
+                event: ava_agent::AgentEvent::ToolCall(ava_types::ToolCall {
+                    id: call_id.to_string(),
+                    name: "subagent".to_string(),
+                    arguments: serde_json::json!({"prompt": "Inspect files.", "agent": "scout", "background": false}),
+                }),
+            },
+            app_tx.clone(),
+            agent_tx.clone(),
+        );
+    }
+
+    app.handle_event(
+        AppEvent::AgentRunEvent {
+            run_id: 7,
+            event: ava_agent::AgentEvent::ToolResult(ava_types::ToolResult {
+                call_id: "call-older".to_string(),
+                content: "Older sub-agent completed".to_string(),
+                is_error: false,
+            }),
+        },
+        app_tx,
+        agent_tx,
+    );
+
+    let older = app
+        .state
+        .agent
+        .sub_agents
+        .iter()
+        .find(|subagent| subagent.call_id == "call-older")
+        .expect("older subagent should exist");
+    let newer = app
+        .state
+        .agent
+        .sub_agents
+        .iter()
+        .find(|subagent| subagent.call_id == "call-newer")
+        .expect("newer subagent should exist");
+
+    assert!(
+        !older.is_running,
+        "matching call-id subagent should be marked completed"
+    );
+    assert!(
+        newer.is_running,
+        "newer running subagent should remain running"
+    );
+}
+
+#[test]
+fn new_session_from_subagent_view_resets_to_main_view() {
+    let temp = tempdir().expect("tempdir");
+    let db_path = temp.path().join("data.db");
+    let mut app = App::test_new(&db_path);
+
+    app.state.agent.sub_agents.push(SubAgentInfo {
+        call_id: "call-running".to_string(),
+        agent_type: Some("scout".to_string()),
+        description: "Inspect files.".to_string(),
+        background: false,
+        is_running: true,
+        tool_count: 0,
+        current_tool: Some("glob".to_string()),
+        started_at: std::time::Instant::now(),
+        elapsed: None,
+        session_id: None,
+        session_messages: vec![UiMessage::new(MessageKind::Thinking, "Running...")],
+        provider: None,
+        resumed: false,
+        cost_usd: None,
+        input_tokens: None,
+        output_tokens: None,
+    });
+    app.state.view_mode = ViewMode::SubAgent {
+        agent_index: 0,
+        description: "Inspect files.".to_string(),
+    };
+
+    app.execute_command_action(Action::NewSession, None);
+
+    assert!(matches!(app.state.view_mode, ViewMode::Main));
+    assert!(app.state.agent.sub_agents.is_empty());
+    assert!(app.state.messages.messages.is_empty());
 }
 
 // /bg command removed — tests removed

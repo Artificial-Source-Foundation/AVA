@@ -76,6 +76,8 @@ mod linux {
             handled_access_fs: handled_access_mask(),
         };
 
+        // SAFETY: We pass a valid pointer/size pair for `LandlockRulesetAttr`, and the
+        // syscall number/arguments follow the Linux Landlock ABI.
         let fd = unsafe {
             libc::syscall(
                 SYS_LANDLOCK_CREATE_RULESET,
@@ -86,18 +88,36 @@ mod linux {
         };
 
         if fd < 0 {
-            return Err("landlock_create_ruleset failed".to_string());
+            return Err(format!(
+                "landlock_create_ruleset failed: {}",
+                std::io::Error::last_os_error()
+            ));
         }
         Ok(fd)
     }
 
     fn open_root(path: &str) -> Result<RawFd, String> {
+        let metadata =
+            std::fs::metadata(path).map_err(|_| format!("writable root does not exist: {path}"))?;
+        if !metadata.is_dir() {
+            return Err(format!("writable root must be a directory: {path}"));
+        }
+
         let c_path = CString::new(path).map_err(|_| format!("invalid path: {path}"))?;
+        // SAFETY: `c_path` is a valid NUL-terminated C string for the duration of the call.
         let fd = unsafe { libc::open(c_path.as_ptr(), libc::O_PATH | libc::O_CLOEXEC) };
         if fd < 0 {
-            return Err(format!("failed to open writable root: {path}"));
+            return Err(format!(
+                "failed to open writable root {path}: {}",
+                std::io::Error::last_os_error()
+            ));
         }
         Ok(fd)
+    }
+
+    fn close_fd(fd: RawFd) {
+        // SAFETY: `fd` is an owned descriptor returned by a successful syscall in this module.
+        let _ = unsafe { libc::close(fd) };
     }
 
     fn add_path_rule(ruleset_fd: RawFd, root_fd: RawFd) -> Result<(), String> {
@@ -106,6 +126,7 @@ mod linux {
             parent_fd: root_fd,
         };
 
+        // SAFETY: We pass a valid pointer to `LandlockPathBeneathAttr` and required ABI args.
         let rc = unsafe {
             libc::syscall(
                 SYS_LANDLOCK_ADD_RULE,
@@ -117,21 +138,33 @@ mod linux {
         };
 
         if rc < 0 {
-            return Err("landlock_add_rule failed".to_string());
+            return Err(format!(
+                "landlock_add_rule failed: {}",
+                std::io::Error::last_os_error()
+            ));
         }
 
         Ok(())
     }
 
     fn restrict_self(ruleset_fd: RawFd) -> Result<(), String> {
+        // SAFETY: `prctl(PR_SET_NO_NEW_PRIVS, 1, ..)` is a pointer-free call that permanently
+        // disables privilege escalation for this process, which Landlock requires.
         let rc = unsafe { libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) };
         if rc != 0 {
-            return Err("failed to set PR_SET_NO_NEW_PRIVS".to_string());
+            return Err(format!(
+                "failed to set PR_SET_NO_NEW_PRIVS: {}",
+                std::io::Error::last_os_error()
+            ));
         }
 
+        // SAFETY: The syscall uses a live Landlock ruleset fd and a zero flags argument.
         let rc = unsafe { libc::syscall(SYS_LANDLOCK_RESTRICT_SELF, ruleset_fd, 0) as i32 };
         if rc < 0 {
-            return Err("landlock_restrict_self failed".to_string());
+            return Err(format!(
+                "landlock_restrict_self failed: {}",
+                std::io::Error::last_os_error()
+            ));
         }
 
         Ok(())
@@ -150,12 +183,15 @@ mod linux {
         for root in &input.writable_roots {
             let root_fd = open_root(root)?;
             let add_rule_result = add_path_rule(ruleset_fd, root_fd);
-            let _ = unsafe { libc::close(root_fd) };
+            close_fd(root_fd);
             add_rule_result?;
         }
 
-        restrict_self(ruleset_fd)?;
-        let _ = unsafe { libc::close(ruleset_fd) };
+        if let Err(error) = restrict_self(ruleset_fd) {
+            close_fd(ruleset_fd);
+            return Err(error);
+        }
+        close_fd(ruleset_fd);
 
         let network_blocked = maybe_unshare_network(input.network);
 

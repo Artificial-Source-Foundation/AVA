@@ -1,19 +1,6 @@
 use super::*;
 use crate::state::agent::SubAgentInfo;
 
-fn normalize_subagent_description(value: &str) -> &str {
-    let trimmed = value.trim();
-    if let Some(rest) = trimmed
-        .strip_prefix('[')
-        .and_then(|rest| rest.split_once(']').map(|(_, tail)| tail.trim()))
-    {
-        if !rest.is_empty() {
-            return rest;
-        }
-    }
-    trimmed
-}
-
 impl App {
     /// Move the currently running agent to the background.
     /// The agent continues running; its events are routed to a BackgroundTask.
@@ -413,6 +400,8 @@ impl App {
                         .get("background")
                         .and_then(|value| value.as_bool())
                         .unwrap_or(false);
+                    let initial_session_messages =
+                        initial_subagent_session_messages(&description, background);
                     self.state.agent.sub_agents.push(SubAgentInfo {
                         call_id: call.id.clone(),
                         agent_type: agent_type.clone(),
@@ -424,7 +413,7 @@ impl App {
                         started_at: std::time::Instant::now(),
                         elapsed: None,
                         session_id: None,
-                        session_messages: Vec::new(),
+                        session_messages: initial_session_messages.clone(),
                         provider: None,
                         resumed: false,
                         cost_usd: None,
@@ -444,7 +433,7 @@ impl App {
                         failed: false,
                         call_id: call.id.clone(),
                         session_id: None,
-                        session_messages: Vec::new(),
+                        session_messages: initial_session_messages,
                         provider: None,
                         resumed: false,
                         cost_usd: None,
@@ -505,9 +494,12 @@ impl App {
 
                     if let Some(subagent) =
                         self.state.agent.sub_agents.iter_mut().rev().find(|sa| {
-                            (!call_id.is_empty() && sa.call_id == call_id)
-                                || normalize_subagent_description(&sa.description)
-                                    == normalize_subagent_description(&description)
+                            subagent_matches_completion(
+                                &sa.call_id,
+                                &sa.description,
+                                &call_id,
+                                &description,
+                            )
                         })
                     {
                         subagent.is_running = false;
@@ -526,9 +518,12 @@ impl App {
                     if let Some(msg) = task.messages.iter_mut().rev().find(|m| {
                         matches!(m.kind, MessageKind::SubAgent)
                             && m.sub_agent.as_ref().is_some_and(|d| {
-                                (!call_id.is_empty() && d.call_id == call_id)
-                                    || normalize_subagent_description(&d.description)
-                                        == normalize_subagent_description(&description)
+                                subagent_matches_completion(
+                                    &d.call_id,
+                                    &d.description,
+                                    &call_id,
+                                    &description,
+                                )
                             })
                     }) {
                         let final_summary = ui_messages

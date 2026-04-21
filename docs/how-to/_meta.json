@@ -3,6 +3,7 @@
   "install": "Install AVA",
   "download-desktop": "Download AVA Desktop",
   "configure": "Configure AVA",
+  "agents": "Configure Primary Agents And Subagents",
   "run-locally": "Run AVA Locally",
   "ci-headless-automation": "Run AVA In CI/Headless Automation",
   "ollama-local-models": "Use Local Models With Ollama"

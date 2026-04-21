@@ -1,8 +1,11 @@
 use crate::config::cli::CliArgs;
+use crate::state::session::SessionState;
 use ava_permissions::tags::RiskLevel;
 use ava_tools::permission_middleware::{ApprovalRequest, ToolApproval};
+use ava_types::Message;
 use color_eyre::eyre::{eyre, Result};
-use tracing::instrument;
+use tracing::{instrument, warn};
+use uuid::Uuid;
 
 mod input;
 mod single;
@@ -30,6 +33,190 @@ fn headless_tool_approval(req: &ApprovalRequest) -> ToolApproval {
             req.call.name, req.inspection.reason, req.inspection.risk_level
         ))),
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct HeadlessResumeRestorePlan {
+    apply_primary_agent: bool,
+    primary_agent_id: Option<String>,
+    primary_agent_prompt: Option<String>,
+    restore_model: Option<(String, String)>,
+}
+
+fn headless_resume_restore_from_metadata(
+    metadata: &serde_json::Value,
+    cli_agent_override: Option<&str>,
+    cli_provider_model_override: bool,
+) -> HeadlessResumeRestorePlan {
+    let apply_primary_agent = cli_agent_override.is_none();
+
+    let primary_agent_id = apply_primary_agent
+        .then(|| {
+            metadata
+                .as_object()
+                .and_then(|meta| meta.get("primaryAgentId").and_then(|v| v.as_str()))
+                .map(|value| value.to_string())
+        })
+        .flatten();
+
+    let primary_agent_prompt = apply_primary_agent
+        .then(|| {
+            metadata
+                .as_object()
+                .and_then(|meta| meta.get("primaryAgentPrompt").and_then(|v| v.as_str()))
+                .map(|value| value.to_string())
+        })
+        .flatten();
+
+    let restore_model = if cli_agent_override.is_some() || cli_provider_model_override {
+        None
+    } else {
+        metadata.as_object().and_then(|meta| {
+            Some((
+                meta.get("provider")?.as_str()?.to_string(),
+                meta.get("model")?.as_str()?.to_string(),
+            ))
+        })
+    };
+
+    HeadlessResumeRestorePlan {
+        apply_primary_agent,
+        primary_agent_id,
+        primary_agent_prompt,
+        restore_model,
+    }
+}
+
+fn apply_headless_resume_metadata(
+    startup: &mut crate::config::cli::StartupSelection,
+    metadata: &serde_json::Value,
+    cli_agent_override: Option<&str>,
+    cli_provider_model_override: bool,
+) -> Option<(String, String)> {
+    let restore_plan = headless_resume_restore_from_metadata(
+        metadata,
+        cli_agent_override,
+        cli_provider_model_override,
+    );
+
+    if restore_plan.apply_primary_agent {
+        startup.primary_agent_id = restore_plan.primary_agent_id;
+        startup.primary_agent_prompt = restore_plan.primary_agent_prompt;
+    }
+
+    // Keep startup provider/model unchanged until AgentStack exists.
+    // Resume model restore should degrade safely if stale.
+    restore_plan.restore_model
+}
+
+fn headless_resume_context(
+    resume_session: Option<&ava_types::Session>,
+) -> (Option<Uuid>, Vec<Message>) {
+    let resume_session_id = resume_session.map(|session| session.id);
+    let resume_history = resume_session
+        .map(|session| session.messages.clone())
+        .unwrap_or_default();
+    (resume_session_id, resume_history)
+}
+
+fn apply_headless_legacy_primary_agent_prompt_fallback(
+    startup: &mut crate::config::cli::StartupSelection,
+    previous_primary_agent_id: Option<&str>,
+    previous_primary_agent_prompt: Option<String>,
+    resolved_prompt: Option<String>,
+) {
+    if startup.primary_agent_prompt.is_some() {
+        return;
+    }
+
+    if let Some(prompt) = resolved_prompt {
+        startup.primary_agent_prompt = Some(prompt);
+        return;
+    }
+
+    if previous_primary_agent_id == startup.primary_agent_id.as_deref() {
+        startup.primary_agent_prompt = previous_primary_agent_prompt;
+    }
+}
+
+async fn resolve_primary_agent_prompt_from_config(primary_agent_id: &str) -> Option<String> {
+    match crate::config::cli::resolve_startup_selection(None, None, Some(primary_agent_id)).await {
+        Ok(startup) => startup.primary_agent_prompt,
+        Err(err) => {
+            warn!(
+                primary_agent_id,
+                error = %err,
+                "failed to rehydrate legacy primary agent prompt during headless resume"
+            );
+            None
+        }
+    }
+}
+
+pub(super) struct HeadlessStartupSelection {
+    pub startup: crate::config::cli::StartupSelection,
+    pub resume_session_id: Option<Uuid>,
+    pub resume_history: Vec<Message>,
+    pub resume_restore_model: Option<(String, String)>,
+}
+
+fn update_headless_resume_context_from_session(
+    resume_session_id: &mut Option<Uuid>,
+    resume_history: &mut Vec<Message>,
+    session: &ava_types::Session,
+) {
+    *resume_session_id = Some(session.id);
+    *resume_history = session.messages.clone();
+}
+
+pub(super) async fn resolve_headless_startup_selection(
+    cli: &CliArgs,
+) -> Result<HeadlessStartupSelection> {
+    let data_dir = ava_config::data_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    std::fs::create_dir_all(&data_dir)?;
+    let db_path = ava_config::app_db_path().unwrap_or_else(|_| data_dir.join("data.db"));
+    let mut session_state = SessionState::new(&db_path)?;
+    let resume_session =
+        session_state.resolve_startup_session(cli.resume, cli.session.as_deref())?;
+
+    let mut startup = cli.resolve_startup_selection().await?;
+    let (resume_session_id, resume_history) = headless_resume_context(resume_session.as_ref());
+    let mut resume_restore_model = None;
+
+    if let Some(session) = resume_session.as_ref() {
+        let previous_primary_agent_id = startup.primary_agent_id.clone();
+        let previous_primary_agent_prompt = startup.primary_agent_prompt.clone();
+
+        resume_restore_model = apply_headless_resume_metadata(
+            &mut startup,
+            &session.metadata,
+            cli.agent.as_deref(),
+            cli.provider.is_some() || cli.model.is_some(),
+        );
+
+        if cli.agent.is_none()
+            && startup.primary_agent_id.is_some()
+            && startup.primary_agent_prompt.is_none()
+        {
+            if let Some(restored_primary_agent_id) = startup.primary_agent_id.as_deref() {
+                let resolved_prompt =
+                    resolve_primary_agent_prompt_from_config(restored_primary_agent_id).await;
+                apply_headless_legacy_primary_agent_prompt_fallback(
+                    &mut startup,
+                    previous_primary_agent_id.as_deref(),
+                    previous_primary_agent_prompt,
+                    resolved_prompt,
+                );
+            }
+        }
+    }
+
+    Ok(HeadlessStartupSelection {
+        startup,
+        resume_session_id,
+        resume_history,
+        resume_restore_model,
+    })
 }
 
 #[instrument(skip(cli))]
@@ -132,6 +319,211 @@ mod tests {
                 if reason.contains("Headless mode rejected dangerous action")
                     && reason.contains("risk: Critical")
         ));
+    }
+
+    #[test]
+    fn headless_resume_restore_uses_session_metadata_without_cli_overrides() {
+        let metadata = serde_json::json!({
+            "provider": "openrouter",
+            "model": "anthropic/claude-sonnet-4",
+            "primaryAgentId": "architect",
+            "primaryAgentPrompt": "You are the architect profile"
+        });
+
+        let restore_plan = headless_resume_restore_from_metadata(&metadata, None, false);
+
+        assert!(restore_plan.apply_primary_agent);
+        assert_eq!(restore_plan.primary_agent_id.as_deref(), Some("architect"));
+        assert_eq!(
+            restore_plan.primary_agent_prompt.as_deref(),
+            Some("You are the architect profile")
+        );
+        assert_eq!(
+            restore_plan.restore_model,
+            Some((
+                "openrouter".to_string(),
+                "anthropic/claude-sonnet-4".to_string()
+            ))
+        );
+    }
+
+    #[test]
+    fn headless_resume_restore_skips_session_metadata_when_cli_agent_override_present() {
+        let metadata = serde_json::json!({
+            "provider": "openrouter",
+            "model": "anthropic/claude-sonnet-4",
+            "primaryAgentId": "architect",
+            "primaryAgentPrompt": "You are the architect profile"
+        });
+
+        let restore_plan = headless_resume_restore_from_metadata(&metadata, Some("coder"), false);
+
+        assert!(!restore_plan.apply_primary_agent);
+        assert!(restore_plan.primary_agent_id.is_none());
+        assert!(restore_plan.primary_agent_prompt.is_none());
+        assert!(restore_plan.restore_model.is_none());
+    }
+
+    #[test]
+    fn headless_resume_restore_skips_session_model_when_cli_provider_or_model_override_present() {
+        let metadata = serde_json::json!({
+            "provider": "openrouter",
+            "model": "anthropic/claude-sonnet-4",
+            "primaryAgentId": "architect",
+            "primaryAgentPrompt": "You are the architect profile"
+        });
+
+        let restore_plan = headless_resume_restore_from_metadata(&metadata, None, true);
+
+        assert!(restore_plan.apply_primary_agent);
+        assert_eq!(restore_plan.primary_agent_id.as_deref(), Some("architect"));
+        assert_eq!(
+            restore_plan.primary_agent_prompt.as_deref(),
+            Some("You are the architect profile")
+        );
+        assert!(restore_plan.restore_model.is_none());
+    }
+
+    #[test]
+    fn apply_headless_resume_metadata_updates_startup_selection() {
+        let mut startup = crate::config::cli::StartupSelection {
+            provider: Some("openai".to_string()),
+            model: Some("gpt-5.3-codex".to_string()),
+            primary_agent_id: Some("coder".to_string()),
+            primary_agent_prompt: Some("You are coder".to_string()),
+        };
+        let metadata = serde_json::json!({
+            "provider": "openrouter",
+            "model": "anthropic/claude-sonnet-4",
+            "primaryAgentId": "architect",
+            "primaryAgentPrompt": "You are the architect profile"
+        });
+
+        let restore_model = apply_headless_resume_metadata(&mut startup, &metadata, None, false);
+
+        assert_eq!(startup.provider.as_deref(), Some("openai"));
+        assert_eq!(startup.model.as_deref(), Some("gpt-5.3-codex"));
+        assert_eq!(startup.primary_agent_id.as_deref(), Some("architect"));
+        assert_eq!(
+            startup.primary_agent_prompt.as_deref(),
+            Some("You are the architect profile")
+        );
+        assert_eq!(
+            restore_model,
+            Some((
+                "openrouter".to_string(),
+                "anthropic/claude-sonnet-4".to_string()
+            ))
+        );
+    }
+
+    #[test]
+    fn apply_headless_resume_metadata_respects_explicit_cli_overrides() {
+        let mut startup = crate::config::cli::StartupSelection {
+            provider: Some("openai".to_string()),
+            model: Some("gpt-5.3-codex".to_string()),
+            primary_agent_id: Some("coder".to_string()),
+            primary_agent_prompt: Some("You are coder".to_string()),
+        };
+        let metadata = serde_json::json!({
+            "provider": "openrouter",
+            "model": "anthropic/claude-sonnet-4",
+            "primaryAgentId": "architect",
+            "primaryAgentPrompt": "You are the architect profile"
+        });
+
+        let restore_model =
+            apply_headless_resume_metadata(&mut startup, &metadata, Some("coder"), true);
+
+        assert_eq!(startup.provider.as_deref(), Some("openai"));
+        assert_eq!(startup.model.as_deref(), Some("gpt-5.3-codex"));
+        assert_eq!(startup.primary_agent_id.as_deref(), Some("coder"));
+        assert_eq!(
+            startup.primary_agent_prompt.as_deref(),
+            Some("You are coder")
+        );
+        assert!(restore_model.is_none());
+    }
+
+    #[test]
+    fn apply_headless_legacy_primary_agent_prompt_fallback_uses_resolved_prompt_when_available() {
+        let mut startup = crate::config::cli::StartupSelection {
+            provider: Some("openrouter".to_string()),
+            model: Some("anthropic/claude-sonnet-4".to_string()),
+            primary_agent_id: Some("architect".to_string()),
+            primary_agent_prompt: None,
+        };
+
+        apply_headless_legacy_primary_agent_prompt_fallback(
+            &mut startup,
+            Some("architect"),
+            Some("stale prompt".to_string()),
+            Some("resolved prompt".to_string()),
+        );
+
+        assert_eq!(
+            startup.primary_agent_prompt.as_deref(),
+            Some("resolved prompt")
+        );
+    }
+
+    #[test]
+    fn apply_headless_legacy_primary_agent_prompt_fallback_reuses_previous_prompt_for_same_agent() {
+        let mut startup = crate::config::cli::StartupSelection {
+            provider: Some("openrouter".to_string()),
+            model: Some("anthropic/claude-sonnet-4".to_string()),
+            primary_agent_id: Some("architect".to_string()),
+            primary_agent_prompt: None,
+        };
+
+        apply_headless_legacy_primary_agent_prompt_fallback(
+            &mut startup,
+            Some("architect"),
+            Some("You are the architect profile".to_string()),
+            None,
+        );
+
+        assert_eq!(
+            startup.primary_agent_prompt.as_deref(),
+            Some("You are the architect profile")
+        );
+    }
+
+    #[test]
+    fn headless_resume_context_preserves_session_id_and_history() {
+        let mut session = ava_types::Session::new();
+        session.add_message(ava_types::Message::new(ava_types::Role::User, "first"));
+        session.add_message(ava_types::Message::new(
+            ava_types::Role::Assistant,
+            "second",
+        ));
+
+        let (session_id, history) = headless_resume_context(Some(&session));
+
+        assert_eq!(session_id, Some(session.id));
+        assert_eq!(history, session.messages);
+    }
+
+    #[test]
+    fn update_headless_resume_context_from_session_replaces_resume_history_and_session_id() {
+        let mut resume_session_id = None;
+        let mut resume_history = vec![ava_types::Message::new(ava_types::Role::User, "stale")];
+
+        let mut session = ava_types::Session::new();
+        session.add_message(ava_types::Message::new(ava_types::Role::User, "fresh"));
+        session.add_message(ava_types::Message::new(
+            ava_types::Role::Assistant,
+            "response",
+        ));
+
+        update_headless_resume_context_from_session(
+            &mut resume_session_id,
+            &mut resume_history,
+            &session,
+        );
+
+        assert_eq!(resume_session_id, Some(session.id));
+        assert_eq!(resume_history, session.messages);
     }
 
     #[test]

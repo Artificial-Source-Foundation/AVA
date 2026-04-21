@@ -673,10 +673,16 @@ impl UiMessage {
                 let title = format!("{} Task - {}", agent_label, prompt);
                 let desc_display = crate::text_utils::truncate_display(&title, desc_budget);
 
-                let mut result = vec![Line::from(vec![
-                    Span::styled(tree, Style::default().fg(theme.text_dimmed)),
-                    Span::styled(desc_display, title_style),
-                ])];
+                let mut title_spans =
+                    vec![Span::styled(tree, Style::default().fg(theme.text_dimmed))];
+                if is_running {
+                    title_spans.push(Span::styled(
+                        format!("{} ", inline_spinner_frame(spinner_tick)),
+                        Style::default().fg(theme.warning),
+                    ));
+                }
+                title_spans.push(Span::styled(desc_display, title_style));
+                let mut result = vec![Line::from(title_spans)];
 
                 let tool_count = data.map(|d| d.tool_count).unwrap_or(0);
                 let duration_str = data
@@ -780,13 +786,15 @@ impl UiMessage {
                 let has_conversation = data
                     .map(|d| !d.session_messages.is_empty())
                     .unwrap_or(false);
-                if has_conversation {
+                if has_conversation || is_running {
+                    let open_label = if is_running {
+                        "Click to open live transcript"
+                    } else {
+                        "Click to open transcript"
+                    };
                     result.push(Line::from(vec![
                         Span::styled("└─ ", Style::default().fg(theme.text_dimmed)),
-                        Span::styled(
-                            "Click to open transcript",
-                            Style::default().fg(theme.text_dimmed),
-                        ),
+                        Span::styled(open_label, Style::default().fg(theme.text_dimmed)),
                     ]));
                 }
 

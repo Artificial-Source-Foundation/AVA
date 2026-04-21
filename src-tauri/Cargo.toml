@@ -1,6 +1,6 @@
 [package]
 name = "ava"
-version = "0.6.0"
+version = "0.6.1"
 description = "Practical AI coding agent desktop app"
 authors = ["ASF Group"]
 edition = "2021"
@@ -14,6 +14,12 @@ default-run = "ava"
 # This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
 name = "ava_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
+
+[lints.rust]
+unsafe_code = "allow"
+
+[lints.clippy]
+undocumented_unsafe_blocks = "deny"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

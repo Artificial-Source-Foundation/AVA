@@ -12,7 +12,7 @@
     "build:cli": "echo 'CLI is now a Rust binary — use cargo build'",
     "serve": "vite preview",
     "tauri": "tauri",
-    "lint": "oxlint && eslint src/",
+    "lint": "oxlint src tests && eslint src/",
     "lint:fix": "biome check --write . && eslint src/ --fix",
     "format": "biome format --write .",
     "format:check": "biome format .",

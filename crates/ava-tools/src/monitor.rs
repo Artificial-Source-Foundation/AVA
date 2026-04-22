@@ -27,10 +27,8 @@ pub struct RepetitionPattern {
 pub enum RepetitionType {
     /// Same tool + same arguments repeated.
     ExactRepeat,
-    /// Same tool called many times regardless of arguments.
-    ToolLoop,
-    /// Two tools alternating (A → B → A → B).
-    AlternatingLoop,
+    /// A short repeated cycle of distinct call signatures.
+    CyclicLoop,
 }
 
 /// Aggregate statistics for tool usage.
@@ -92,18 +90,18 @@ impl ToolMonitor {
     }
 
     /// Detect repetition patterns in recent tool history.
-    pub fn detect_repetition(&self) -> Option<RepetitionPattern> {
+    pub fn detect_repetition(&self, detect_short_cycles: bool) -> Option<RepetitionPattern> {
         if self.history.len() < 3 {
             return None;
         }
 
+        let same_signature = |a: &ToolExecution, b: &ToolExecution| {
+            a.tool_name == b.tool_name && a.arguments_hash == b.arguments_hash
+        };
+
         // Check exact repeat: same tool + same args 3 times in a row
         let last3 = &self.history[self.history.len() - 3..];
-        if last3[0].tool_name == last3[1].tool_name
-            && last3[1].tool_name == last3[2].tool_name
-            && last3[0].arguments_hash == last3[1].arguments_hash
-            && last3[1].arguments_hash == last3[2].arguments_hash
-        {
+        if same_signature(&last3[0], &last3[1]) && same_signature(&last3[1], &last3[2]) {
             return Some(RepetitionPattern {
                 tool_name: last3[0].tool_name.clone(),
                 count: 3,
@@ -111,35 +109,38 @@ impl ToolMonitor {
             });
         }
 
-        // Check alternating loop: A-B-A-B-A-B (3 cycles = 6 entries)
-        if self.history.len() >= 6 {
-            let tail = &self.history[self.history.len() - 6..];
-            let a = &tail[0].tool_name;
-            let b = &tail[1].tool_name;
-            if a != b
-                && tail[2].tool_name == *a
-                && tail[3].tool_name == *b
-                && tail[4].tool_name == *a
-                && tail[5].tool_name == *b
-            {
-                return Some(RepetitionPattern {
-                    tool_name: a.clone(),
-                    count: 6,
-                    pattern_type: RepetitionType::AlternatingLoop,
-                });
-            }
-        }
+        if detect_short_cycles {
+            for cycle_len in [2_usize, 3] {
+                let min_repeats = if cycle_len == 2 { 3 } else { 2 };
+                let window_len = cycle_len * min_repeats;
+                if self.history.len() < window_len {
+                    continue;
+                }
 
-        // Check tool loop: same tool 5 times regardless of args
-        if self.history.len() >= 5 {
-            let last5 = &self.history[self.history.len() - 5..];
-            let name = &last5[0].tool_name;
-            if last5.iter().all(|e| e.tool_name == *name) {
-                return Some(RepetitionPattern {
-                    tool_name: name.clone(),
-                    count: 5,
-                    pattern_type: RepetitionType::ToolLoop,
+                let tail = &self.history[self.history.len() - window_len..];
+                let cycle = &tail[..cycle_len];
+
+                let distinct_signatures = cycle.iter().enumerate().all(|(index, entry)| {
+                    cycle[..index]
+                        .iter()
+                        .all(|prior| !same_signature(prior, entry))
                 });
+                if !distinct_signatures {
+                    continue;
+                }
+
+                let is_cycle = tail
+                    .iter()
+                    .enumerate()
+                    .all(|(index, entry)| same_signature(entry, &cycle[index % cycle_len]));
+
+                if is_cycle {
+                    return Some(RepetitionPattern {
+                        tool_name: cycle[0].tool_name.clone(),
+                        count: window_len,
+                        pattern_type: RepetitionType::CyclicLoop,
+                    });
+                }
             }
         }
 
@@ -253,30 +254,64 @@ mod tests {
         for _ in 0..3 {
             monitor.record(exec("read", 42, true));
         }
-        let pattern = monitor.detect_repetition().expect("should detect");
+        let pattern = monitor.detect_repetition(false).expect("should detect");
         assert_eq!(pattern.pattern_type, RepetitionType::ExactRepeat);
         assert_eq!(pattern.tool_name, "read");
     }
 
     #[test]
-    fn detects_tool_loop() {
+    fn same_tool_different_args_does_not_trigger_repetition() {
         let mut monitor = ToolMonitor::new();
         for i in 0..5 {
             monitor.record(exec("read", i, true)); // different args each time
         }
-        let pattern = monitor.detect_repetition().expect("should detect");
-        assert_eq!(pattern.pattern_type, RepetitionType::ToolLoop);
+        assert!(monitor.detect_repetition(true).is_none());
     }
 
     #[test]
-    fn detects_alternating_loop() {
+    fn detects_two_step_cycle() {
         let mut monitor = ToolMonitor::new();
-        for i in 0..3 {
-            monitor.record(exec("read", i, true));
-            monitor.record(exec("write", i + 100, true));
+        for _ in 0..3 {
+            monitor.record(exec("read", 1, true));
+            monitor.record(exec("write", 2, true));
         }
-        let pattern = monitor.detect_repetition().expect("should detect");
-        assert_eq!(pattern.pattern_type, RepetitionType::AlternatingLoop);
+        let pattern = monitor.detect_repetition(true).expect("should detect");
+        assert_eq!(pattern.pattern_type, RepetitionType::CyclicLoop);
+    }
+
+    #[test]
+    fn detects_two_step_cycle_for_same_tool_with_different_args() {
+        let mut monitor = ToolMonitor::new();
+        for _ in 0..3 {
+            monitor.record(exec("glob", 1, true));
+            monitor.record(exec("glob", 2, true));
+        }
+        let pattern = monitor.detect_repetition(true).expect("should detect");
+        assert_eq!(pattern.pattern_type, RepetitionType::CyclicLoop);
+        assert_eq!(pattern.tool_name, "glob");
+    }
+
+    #[test]
+    fn detects_three_step_cycle() {
+        let mut monitor = ToolMonitor::new();
+        for _ in 0..2 {
+            monitor.record(exec("glob", 1, true));
+            monitor.record(exec("grep", 2, true));
+            monitor.record(exec("read", 3, true));
+        }
+        let pattern = monitor.detect_repetition(true).expect("should detect");
+        assert_eq!(pattern.pattern_type, RepetitionType::CyclicLoop);
+        assert_eq!(pattern.count, 6);
+    }
+
+    #[test]
+    fn relaxed_mode_ignores_short_cycles() {
+        let mut monitor = ToolMonitor::new();
+        for _ in 0..3 {
+            monitor.record(exec("glob", 1, true));
+            monitor.record(exec("glob", 2, true));
+        }
+        assert!(monitor.detect_repetition(false).is_none());
     }
 
     #[test]
@@ -287,7 +322,7 @@ mod tests {
         monitor.record(exec("bash", 3, true));
         monitor.record(exec("glob", 4, true));
         monitor.record(exec("grep", 5, true));
-        assert!(monitor.detect_repetition().is_none());
+        assert!(monitor.detect_repetition(true).is_none());
     }
 
     #[test]
@@ -341,13 +376,13 @@ mod tests {
     }
 
     #[test]
-    fn exact_repeat_takes_priority_over_tool_loop() {
-        // 5 calls with same tool AND same args — should detect ExactRepeat (checked first)
+    fn exact_repeat_detected_for_identical_calls() {
+        // Identical repeated calls should still be treated as an exact repeat.
         let mut monitor = ToolMonitor::new();
         for _ in 0..5 {
             monitor.record(exec("read", 42, true));
         }
-        let pattern = monitor.detect_repetition().expect("should detect");
+        let pattern = monitor.detect_repetition(false).expect("should detect");
         assert_eq!(pattern.pattern_type, RepetitionType::ExactRepeat);
     }
 }

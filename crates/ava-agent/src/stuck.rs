@@ -461,28 +461,26 @@ impl StuckDetector {
             self.consecutive_errors = 0;
         }
 
-        // 6. Alternating tool pattern (from ToolMonitor)
-        if let Some(pattern) = self.tool_monitor.detect_repetition() {
+        // 6. Repeated call-signature patterns (from ToolMonitor). Broader
+        // cycle detection is reserved for loop-prone providers/models.
+        if let Some(pattern) = self
+            .tool_monitor
+            .detect_repetition(self.thresholds.enable_llm_judge)
+        {
             if !cooldown_active {
                 self.llm_judge_concern = self.llm_judge_concern.saturating_add(1);
             }
             let msg = match pattern.pattern_type {
                 ava_tools::monitor::RepetitionType::ExactRepeat => {
                     format!(
-                        "You've called '{}' with identical arguments {} times. Try a different approach.",
+                        "You've made the same '{}' call with identical arguments {} times in a row. Try a different approach.",
                         pattern.tool_name, pattern.count
                     )
                 }
-                ava_tools::monitor::RepetitionType::AlternatingLoop => {
+                ava_tools::monitor::RepetitionType::CyclicLoop => {
                     format!(
-                        "Detected alternating tool pattern involving '{}'. Break the cycle and try something new.",
+                        "Detected a repeated tool-call cycle involving '{}'. You're revisiting the same short pattern without changing course. Break the cycle and try something new.",
                         pattern.tool_name
-                    )
-                }
-                ava_tools::monitor::RepetitionType::ToolLoop => {
-                    format!(
-                        "You've called '{}' {} times in a row. Consider a different tool or approach.",
-                        pattern.tool_name, pattern.count
                     )
                 }
             };
@@ -721,7 +719,7 @@ mod tests {
     }
 
     #[test]
-    fn alternating_tool_pattern() {
+    fn aggressive_mode_detects_two_step_cycle() {
         let mut detector = StuckDetector::new();
         let config = make_config(10.0, true);
         let llm = mock_llm();
@@ -730,17 +728,17 @@ mod tests {
         use std::time::{Duration, Instant};
 
         // Record A-B-A-B-A-B in the tool monitor
-        for i in 0..3 {
+        for _ in 0..3 {
             detector.tool_monitor_mut().record(ToolExecution {
                 tool_name: "read".to_string(),
-                arguments_hash: hash_arguments(&serde_json::json!({"i": i})),
+                arguments_hash: hash_arguments(&serde_json::json!({"path": "a"})),
                 success: true,
                 duration: Duration::from_millis(1),
                 timestamp: Instant::now(),
             });
             detector.tool_monitor_mut().record(ToolExecution {
                 tool_name: "write".to_string(),
-                arguments_hash: hash_arguments(&serde_json::json!({"i": i})),
+                arguments_hash: hash_arguments(&serde_json::json!({"path": "b"})),
                 success: true,
                 duration: Duration::from_millis(1),
                 timestamp: Instant::now(),
@@ -748,9 +746,129 @@ mod tests {
         }
 
         let action = detector.check("checking", &[], &[], None, &config, llm.as_ref());
-        assert!(
-            matches!(action, StuckAction::InjectMessage(ref msg) if msg.contains("alternating"))
-        );
+        assert!(matches!(action, StuckAction::InjectMessage(ref msg) if msg.contains("cycle")));
+    }
+
+    #[test]
+    fn exploratory_same_tool_different_args_does_not_trigger_pattern_warning() {
+        let mut detector = StuckDetector::new();
+        let config = make_config(10.0, true);
+        let llm = mock_llm();
+
+        use ava_tools::monitor::{hash_arguments, ToolExecution};
+        use std::time::{Duration, Instant};
+
+        for i in 0..5 {
+            detector.tool_monitor_mut().record(ToolExecution {
+                tool_name: "glob".to_string(),
+                arguments_hash: hash_arguments(
+                    &serde_json::json!({"pattern": format!("src/{i}/**/*.rs")}),
+                ),
+                success: true,
+                duration: Duration::from_millis(1),
+                timestamp: Instant::now(),
+            });
+        }
+
+        let action = detector.check("checking", &[], &[], None, &config, llm.as_ref());
+        assert!(matches!(action, StuckAction::Continue));
+    }
+
+    #[test]
+    fn aggressive_mode_detects_two_step_same_tool_cycle() {
+        let mut detector = StuckDetector::new();
+        let config = make_config(10.0, true);
+        let llm = mock_llm();
+
+        use ava_tools::monitor::{hash_arguments, ToolExecution};
+        use std::time::{Duration, Instant};
+
+        for _ in 0..3 {
+            detector.tool_monitor_mut().record(ToolExecution {
+                tool_name: "glob".to_string(),
+                arguments_hash: hash_arguments(&serde_json::json!({"pattern": "src/**/*.rs"})),
+                success: true,
+                duration: Duration::from_millis(1),
+                timestamp: Instant::now(),
+            });
+            detector.tool_monitor_mut().record(ToolExecution {
+                tool_name: "glob".to_string(),
+                arguments_hash: hash_arguments(&serde_json::json!({"pattern": "crates/**/*.rs"})),
+                success: true,
+                duration: Duration::from_millis(1),
+                timestamp: Instant::now(),
+            });
+        }
+
+        let action = detector.check("checking", &[], &[], None, &config, llm.as_ref());
+        assert!(matches!(action, StuckAction::InjectMessage(ref msg) if msg.contains("cycle")));
+    }
+
+    #[test]
+    fn aggressive_mode_detects_three_step_cycle() {
+        let mut detector = StuckDetector::with_thresholds(LoopThresholds::aggressive());
+        let config = make_config(10.0, true);
+        let llm = mock_llm();
+
+        use ava_tools::monitor::{hash_arguments, ToolExecution};
+        use std::time::{Duration, Instant};
+
+        for _ in 0..2 {
+            detector.tool_monitor_mut().record(ToolExecution {
+                tool_name: "glob".to_string(),
+                arguments_hash: hash_arguments(&serde_json::json!({"pattern": "src/**/*.rs"})),
+                success: true,
+                duration: Duration::from_millis(1),
+                timestamp: Instant::now(),
+            });
+            detector.tool_monitor_mut().record(ToolExecution {
+                tool_name: "grep".to_string(),
+                arguments_hash: hash_arguments(&serde_json::json!({"pattern": "TODO"})),
+                success: true,
+                duration: Duration::from_millis(1),
+                timestamp: Instant::now(),
+            });
+            detector.tool_monitor_mut().record(ToolExecution {
+                tool_name: "read".to_string(),
+                arguments_hash: hash_arguments(&serde_json::json!({"path": "src/lib.rs"})),
+                success: true,
+                duration: Duration::from_millis(1),
+                timestamp: Instant::now(),
+            });
+        }
+
+        let action = detector.check("checking", &[], &[], None, &config, llm.as_ref());
+        assert!(matches!(action, StuckAction::InjectMessage(ref msg) if msg.contains("cycle")));
+    }
+
+    #[test]
+    fn relaxed_mode_ignores_short_cycles() {
+        let mut detector = StuckDetector::with_thresholds(LoopThresholds::relaxed());
+        let config = make_config(10.0, true);
+        let llm = mock_llm();
+
+        use ava_tools::monitor::{hash_arguments, ToolExecution};
+        use std::time::{Duration, Instant};
+
+        for _ in 0..3 {
+            detector.tool_monitor_mut().record(ToolExecution {
+                tool_name: "glob".to_string(),
+                arguments_hash: hash_arguments(&serde_json::json!({"pattern": "src/**/*.rs"})),
+                success: true,
+                duration: Duration::from_millis(1),
+                timestamp: Instant::now(),
+            });
+            detector.tool_monitor_mut().record(ToolExecution {
+                tool_name: "glob".to_string(),
+                arguments_hash: hash_arguments(&serde_json::json!({"pattern": "crates/**/*.rs"})),
+                success: true,
+                duration: Duration::from_millis(1),
+                timestamp: Instant::now(),
+            });
+        }
+
+        let action = detector.check("checking", &[], &[], None, &config, llm.as_ref());
+        assert!(matches!(action, StuckAction::Continue));
     }
 
     #[test]

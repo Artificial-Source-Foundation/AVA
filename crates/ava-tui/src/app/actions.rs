@@ -1,6 +1,42 @@
 use super::*;
 
+/// Collapse clipboard backend errors to one line so status rendering stays intact.
+fn single_line_status_text(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn with_cached_resource<T, R, Create, Op>(
+    resource: &mut Option<R>,
+    mut create: Create,
+    mut op: Op,
+) -> Result<T, arboard::Error>
+where
+    Create: FnMut() -> Result<R, arboard::Error>,
+    Op: FnMut(&mut R) -> Result<T, arboard::Error>,
+{
+    let had_cached_resource = resource.is_some();
+    if resource.is_none() {
+        *resource = Some(create()?);
+    }
+
+    match op(resource.as_mut().expect("resource initialized")) {
+        Ok(value) => Ok(value),
+        Err(_) if had_cached_resource => {
+            *resource = Some(create()?);
+            op(resource.as_mut().expect("resource reinitialized"))
+        }
+        Err(err) => Err(err),
+    }
+}
+
 impl App {
+    fn with_clipboard<T>(
+        &mut self,
+        op: impl FnMut(&mut arboard::Clipboard) -> Result<T, arboard::Error>,
+    ) -> Result<T, arboard::Error> {
+        with_cached_resource(&mut self.clipboard, arboard::Clipboard::new, op)
+    }
+
     pub(crate) fn copy_last_response_with_mode(&mut self, force_all: bool) {
         match self.state.messages.last_assistant_content() {
             Some(content) => {
@@ -81,17 +117,9 @@ Commands
     /// encode it as PNG, create an `ImageContent`, and push it to `pending_images`.
     /// Falls back to pasting text if the clipboard contains a file path to an image.
     pub(crate) fn paste_image_from_clipboard(&mut self) {
-        let mut clipboard = match arboard::Clipboard::new() {
-            Ok(cb) => cb,
-            Err(e) => {
-                self.set_status(format!("Clipboard unavailable: {e}"), StatusLevel::Error);
-                return;
-            }
-        };
-
         // Try to get image data directly from clipboard
-        if let Ok(img) = clipboard.get_image() {
-            match Self::encode_rgba_to_png(img.width, img.height, &img.bytes) {
+        match self.with_clipboard(|clipboard| clipboard.get_image()) {
+            Ok(img) => match Self::encode_rgba_to_png(img.width, img.height, &img.bytes) {
                 Ok(png_bytes) => {
                     use base64::Engine;
                     let data = base64::engine::general_purpose::STANDARD.encode(&png_bytes);
@@ -109,11 +137,36 @@ Commands
                     );
                     return;
                 }
+            },
+            Err(arboard::Error::ContentNotAvailable) => {}
+            Err(e) => {
+                self.set_status(
+                    format!(
+                        "Clipboard read failed: {}",
+                        single_line_status_text(&e.to_string())
+                    ),
+                    StatusLevel::Error,
+                );
+                return;
+            }
+        }
+
+        let text = self.with_clipboard(|clipboard| clipboard.get_text());
+        if let Err(e) = &text {
+            if !matches!(e, arboard::Error::ContentNotAvailable) {
+                self.set_status(
+                    format!(
+                        "Clipboard read failed: {}",
+                        single_line_status_text(&e.to_string())
+                    ),
+                    StatusLevel::Error,
+                );
+                return;
             }
         }
 
         // Fall back: check if clipboard text is a path to an image file
-        if let Ok(text) = clipboard.get_text() {
+        if let Ok(text) = text {
             let trimmed = text.trim();
             let path = std::path::Path::new(trimmed);
             if path.is_file() {
@@ -165,25 +218,26 @@ Commands
     }
 
     pub(crate) fn copy_to_clipboard(&mut self, text: &str, label: Option<String>) {
-        match arboard::Clipboard::new() {
-            Ok(mut clipboard) => match clipboard.set_text(text) {
-                Ok(_) => {
-                    let status = if let Some(lbl) = label {
-                        lbl
-                    } else {
-                        let preview_len = text.len().min(40);
-                        let preview: String = text.chars().take(preview_len).collect();
-                        let ellipsis = if text.len() > 40 { "..." } else { "" };
-                        format!("Copied to clipboard: \"{preview}{ellipsis}\"")
-                    };
-                    self.set_status(status, StatusLevel::Info);
-                }
-                Err(e) => {
-                    self.set_status(format!("Clipboard write failed: {e}"), StatusLevel::Error);
-                }
-            },
+        match self.with_clipboard(|clipboard| clipboard.set_text(text)) {
+            Ok(()) => {
+                let status = if let Some(lbl) = label {
+                    lbl
+                } else {
+                    let preview_len = text.len().min(40);
+                    let preview: String = text.chars().take(preview_len).collect();
+                    let ellipsis = if text.len() > 40 { "..." } else { "" };
+                    format!("Copied to clipboard: \"{preview}{ellipsis}\"")
+                };
+                self.set_status(status, StatusLevel::Info);
+            }
             Err(e) => {
-                self.set_status(format!("Clipboard unavailable: {e}"), StatusLevel::Error);
+                self.set_status(
+                    format!(
+                        "Clipboard write failed: {}",
+                        single_line_status_text(&e.to_string())
+                    ),
+                    StatusLevel::Error,
+                );
             }
         }
     }
@@ -519,5 +573,79 @@ Commands
         }
 
         blocks
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{single_line_status_text, with_cached_resource};
+    use std::cell::Cell;
+
+    #[test]
+    fn single_line_status_text_collapses_multiline_errors() {
+        assert_eq!(
+            single_line_status_text("first line\nsecond   line\tthird"),
+            "first line second line third"
+        );
+    }
+
+    #[test]
+    fn single_line_status_text_handles_empty_and_whitespace_only_input() {
+        assert_eq!(single_line_status_text(""), "");
+        assert_eq!(single_line_status_text("   \n\t  "), "");
+    }
+
+    #[test]
+    fn cached_resource_retries_once_when_cached_instance_fails() {
+        let create_calls = Cell::new(0);
+        let op_calls = Cell::new(0);
+        let mut resource = Some(1_u8);
+
+        let result = with_cached_resource(
+            &mut resource,
+            || {
+                create_calls.set(create_calls.get() + 1);
+                Ok(2_u8)
+            },
+            |value| {
+                op_calls.set(op_calls.get() + 1);
+                if op_calls.get() == 1 {
+                    Err(arboard::Error::ClipboardOccupied)
+                } else {
+                    Ok(*value)
+                }
+            },
+        )
+        .expect("retry should succeed");
+
+        assert_eq!(result, 2);
+        assert_eq!(create_calls.get(), 1);
+        assert_eq!(op_calls.get(), 2);
+        assert_eq!(resource, Some(2));
+    }
+
+    #[test]
+    fn cached_resource_does_not_retry_first_use_failures() {
+        let create_calls = Cell::new(0);
+        let op_calls = Cell::new(0);
+        let mut resource = None::<u8>;
+
+        let err = with_cached_resource(
+            &mut resource,
+            || {
+                create_calls.set(create_calls.get() + 1);
+                Ok(7_u8)
+            },
+            |_| -> Result<u8, arboard::Error> {
+                op_calls.set(op_calls.get() + 1);
+                Err(arboard::Error::ClipboardOccupied)
+            },
+        )
+        .expect_err("first-use failure should bubble up");
+
+        assert!(matches!(err, arboard::Error::ClipboardOccupied));
+        assert_eq!(create_calls.get(), 1);
+        assert_eq!(op_calls.get(), 1);
+        assert_eq!(resource, Some(7));
     }
 }

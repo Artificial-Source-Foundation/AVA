@@ -95,7 +95,7 @@ Credential entries can store both API-key and OAuth fields.
 4. OpenAI exposes three user-facing auth choices in the TUI: ChatGPT browser login, ChatGPT headless login, and manual API key entry.
 5. `ollama` is treated as a local endpoint and can be considered configured with only a base URL.
 6. In the TUI provider-connect modal, browser-login and device-code screens expose `C` to copy the full fallback URL; the browser-login screen also accepts `Enter` to retry opening the browser.
-7. On Linux, those TUI auth-URL copy actions now keep the clipboard handle alive after the copy so clipboard ownership is not dropped immediately during long-running auth flows, and AVA refreshes the cached clipboard handle once if a long-lived session hits a stale clipboard backend.
+7. On Linux, those TUI auth-URL copy actions now keep the clipboard handle alive after the copy so clipboard ownership is not dropped immediately during long-running auth flows, AVA refreshes the cached clipboard handle once if a long-lived session hits a stale clipboard backend, and clipboard-backed TUI flows now surface real clipboard read/write failures with single-line status text instead of breaking modal rendering or silently masking backend errors.
 
 For an Ollama-only, task-oriented setup path, use [How-to: Use local models with Ollama](../how-to/ollama-local-models.md).
 

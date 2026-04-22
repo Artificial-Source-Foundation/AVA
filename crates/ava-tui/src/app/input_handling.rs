@@ -377,10 +377,8 @@ impl App {
                     if let Some(text) = self.state.input.submit() {
                         self.send_queued_message(text, ava_types::MessageTier::Steering);
                     }
-                } else {
-                    if let Some(goal) = self.state.input.submit() {
-                        self.submit_goal(goal, app_tx, agent_tx);
-                    }
+                } else if let Some(goal) = self.state.input.submit() {
+                    self.submit_goal(goal, app_tx, agent_tx);
                 }
             }
             KeyCode::Enter => self.state.input.insert_char('\n'),

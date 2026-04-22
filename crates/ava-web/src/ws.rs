@@ -78,9 +78,8 @@ async fn handle_socket(socket: WebSocket, state: WebState) {
             };
 
             // Convert backend event to frontend-compatible format
-            let web_event = match convert_web_event(&event) {
-                Some(e) => e,
-                None => continue, // Skip events without frontend representation
+            let Some(web_event) = convert_web_event(&event) else {
+                continue;
             };
             let json = match serde_json::to_string(&web_event) {
                 Ok(j) => j,

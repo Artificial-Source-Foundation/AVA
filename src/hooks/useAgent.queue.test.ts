@@ -193,6 +193,9 @@ vi.mock('../services/rust-bridge', () => ({
   },
   rustBackend: {
     undoLastEdit: vi.fn(async () => ({ success: true, message: 'ok' })),
+    getConfig: vi.fn(async () => ({})),
+    setPrimaryAgentProfile: vi.fn(async () => {}),
+    switchModel: vi.fn(async () => {}),
   },
 }))
 

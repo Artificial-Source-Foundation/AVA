@@ -247,7 +247,7 @@ impl App {
                 KeyCode::Enter => {
                     let _ = ava_auth::browser::open_browser(auth_url);
                 }
-                KeyCode::Char('c') | KeyCode::Char('C') => {
+                KeyCode::Char('c' | 'C') => {
                     self.copy_to_clipboard(
                         auth_url,
                         Some("Copied authorization URL to clipboard".to_string()),
@@ -269,7 +269,7 @@ impl App {
                 KeyCode::Enter => {
                     let _ = ava_auth::browser::open_browser(verification_uri);
                 }
-                KeyCode::Char('c') | KeyCode::Char('C') => {
+                KeyCode::Char('c' | 'C') => {
                     self.copy_to_clipboard(
                         verification_uri,
                         Some("Copied verification URL to clipboard".to_string()),

@@ -115,7 +115,7 @@ describe('ModelBrowserDialog', () => {
       'provider-a/gamma',
     ])
 
-    input.value = 'gam'
+    input.value = 'game'
     input.dispatchEvent(new Event('input', { bubbles: true }))
     await flushMicrotasks()
 

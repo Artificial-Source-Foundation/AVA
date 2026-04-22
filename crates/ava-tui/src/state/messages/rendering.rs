@@ -36,7 +36,7 @@ fn normalize_subagent_title(description: &str, agent_type: Option<&str>) -> (Str
 
 fn format_subagent_agent_label(agent_label: &str) -> String {
     agent_label
-        .split(|ch: char| matches!(ch, '-' | '_' | ' '))
+        .split(['-', '_', ' '])
         .filter(|part| !part.is_empty())
         .map(|part| {
             let mut chars = part.chars();

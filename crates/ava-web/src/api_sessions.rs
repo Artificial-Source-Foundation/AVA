@@ -148,7 +148,7 @@ fn session_title(session: &ava_types::Session) -> String {
         .iter()
         .find(|message| message.role == ava_types::Role::User)
         .map(|message| ava_session::generate_title(&message.content))
-        .unwrap_or_else(|| default_session_name())
+        .unwrap_or_else(default_session_name)
 }
 
 pub(crate) fn session_title_needs_generation(metadata: &serde_json::Value) -> bool {

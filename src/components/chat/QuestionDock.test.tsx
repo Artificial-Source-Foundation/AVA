@@ -362,15 +362,14 @@ describe('QuestionDock - Multiple-Choice Keyboard Contract', () => {
   })
 
   describe('Semantic structure', () => {
-    it('renders with role="region" and aria-labelledby', () => {
+    it('renders as a labeled section landmark', () => {
       const onResolve = vi.fn()
       const request = makeRequest()
 
       dispose = render(() => <QuestionDock request={request} onResolve={onResolve} />, container)
 
-      const region = container.querySelector('[role="region"]')
+      const region = container.querySelector('section[data-testid="question-dock"]')
       expect(region).not.toBeNull()
-      expect(region?.getAttribute('data-testid')).toBe('question-dock')
 
       const ariaLabelledBy = region?.getAttribute('aria-labelledby')
       expect(ariaLabelledBy).toBeTruthy()

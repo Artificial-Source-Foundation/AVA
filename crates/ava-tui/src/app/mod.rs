@@ -124,7 +124,7 @@ pub struct AppState {
     // ── Agent ───────────────────────────────────────────────────────────
     pub agent: AgentState,
     pub agent_mode: AgentMode,
-    pub primary_agent_profiles: Vec<PrimaryAgentProfile>,
+    pub(crate) primary_agent_profiles: Vec<PrimaryAgentProfile>,
     /// Message index where the current agent turn started (BUG-41).
     /// Used to scope `mark_interrupted_messages` to only the current turn.
     pub turn_start_index: usize,
@@ -440,6 +440,7 @@ pub struct InfoPanelState {
 pub struct App {
     pub state: AppState,
     /// Keep the clipboard handle alive so Linux clipboard ownership survives copy operations.
+    #[allow(dead_code)]
     clipboard: Option<arboard::Clipboard>,
     should_quit: bool,
     pending_goal: Option<String>,

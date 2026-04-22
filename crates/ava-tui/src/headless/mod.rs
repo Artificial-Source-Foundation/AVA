@@ -160,15 +160,6 @@ pub(super) struct HeadlessStartupSelection {
     pub resume_restore_model: Option<(String, String)>,
 }
 
-fn update_headless_resume_context_from_session(
-    resume_session_id: &mut Option<Uuid>,
-    resume_history: &mut Vec<Message>,
-    session: &ava_types::Session,
-) {
-    *resume_session_id = Some(session.id);
-    *resume_history = session.messages.clone();
-}
-
 pub(super) async fn resolve_headless_startup_selection(
     cli: &CliArgs,
 ) -> Result<HeadlessStartupSelection> {

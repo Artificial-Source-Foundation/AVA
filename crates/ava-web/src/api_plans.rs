@@ -94,10 +94,9 @@ fn parse_plan_frontmatter(content: &str) -> (Option<String>, String, usize) {
             if !in_frontmatter {
                 in_frontmatter = true;
                 continue;
-            } else {
-                in_frontmatter = false;
-                continue;
             }
+            in_frontmatter = false;
+            continue;
         }
         if in_frontmatter {
             if let Some(val) = line.strip_prefix("codename: ") {

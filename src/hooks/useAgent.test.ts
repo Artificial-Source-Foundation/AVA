@@ -312,7 +312,12 @@ vi.mock('../services/rust-bridge', () => ({
     resolveQuestion: vi.fn(async () => {}),
     resolvePlan: vi.fn(async () => {}),
   },
-  rustBackend: { undoLastEdit: vi.fn(async () => ({ success: true, message: 'ok' })) },
+  rustBackend: {
+    undoLastEdit: vi.fn(async () => ({ success: true, message: 'ok' })),
+    getConfig: vi.fn(async () => ({})),
+    setPrimaryAgentProfile: vi.fn(async () => {}),
+    switchModel: vi.fn(async () => {}),
+  },
 }))
 
 import { _resetAgentSingleton, useAgent } from './useAgent'

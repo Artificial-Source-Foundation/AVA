@@ -729,9 +729,11 @@ impl PrimaryAgentOnlyConfig {
         &self,
         explicit_id: Option<&str>,
     ) -> std::result::Result<Option<ava_config::ResolvedPrimaryAgent>, String> {
-        let mut config = ava_config::Config::default();
-        config.primary_agent = self.primary_agent.clone();
-        config.primary_agents = self.primary_agents.clone();
+        let config = ava_config::Config {
+            primary_agent: self.primary_agent.clone(),
+            primary_agents: self.primary_agents.clone(),
+            ..Default::default()
+        };
         config.resolve_primary_agent(explicit_id)
     }
 

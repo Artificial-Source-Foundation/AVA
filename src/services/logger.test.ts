@@ -1,14 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const invokeMock = vi.fn()
-const appDataDirMock = vi.fn()
 
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: (...args: unknown[]) => invokeMock(...args),
-}))
-
-vi.mock('@tauri-apps/api/path', () => ({
-  appDataDir: () => appDataDirMock(),
 }))
 
 describe('readLatestBackendLogs', () => {
@@ -24,8 +19,10 @@ describe('readLatestBackendLogs', () => {
   })
 
   it('returns service failure sentinel when backend log reads fail', async () => {
-    appDataDirMock.mockResolvedValue('/tmp/')
     invokeMock.mockImplementation((command: string) => {
+      if (command === 'get_state_logs_dir') {
+        return Promise.resolve('/tmp/logs')
+      }
       if (command === 'read_latest_logs') {
         return Promise.reject(new Error('backend unavailable'))
       }

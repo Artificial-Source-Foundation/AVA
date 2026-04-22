@@ -20,7 +20,7 @@ Use this page when you want user docs first. Contributor, maintainer, and archit
 | Get running quickly | [Tutorial: First run](tutorials/first-run.md) |
 | Learn the first practical workflow | [Tutorial: Your first workflow](tutorials/your-first-workflow.md) |
 | Configure providers and auth | [How-to: Configure providers and local settings](how-to/configure.md) |
-| Configure primary agents and subagents | [How-to: Configure primary agents and subagents](how-to/agents.md) |
+| Configure startup agents or subagents (advanced) | [How-to: Configure primary agents and subagents](how-to/agents.md) |
 | Run AVA in CI or scripts | [How-to: Run AVA in CI/headless automation](how-to/ci-headless-automation.md) |
 | Troubleshoot common setup/runtime failures | [Troubleshooting: Common errors](troubleshooting/common-errors.md) |
 
@@ -29,7 +29,7 @@ Use this page when you want user docs first. Contributor, maintainer, and archit
 1. [How-to: Install AVA](how-to/install.md)
 2. [Tutorial: First run](tutorials/first-run.md)
 3. [How-to: Configure providers and local settings](how-to/configure.md)
-4. [How-to: Configure primary agents and subagents](how-to/agents.md)
+4. [How-to: Configure primary agents and subagents](how-to/agents.md) - advanced setup
 5. [How-to: Run AVA locally](how-to/run-locally.md)
 6. [How-to: Download AVA Desktop](how-to/download-desktop.md)
 7. [Troubleshooting: Common errors](troubleshooting/common-errors.md)
@@ -43,7 +43,7 @@ Use this page when you want user docs first. Contributor, maintainer, and archit
 4. [Troubleshooting: Ollama local models](troubleshooting/ollama-local-models.md)
 5. [Explanation: Security and trust](explanation/security-and-trust.md)
 
-The public layer is intentionally small: install, first success, configuration, normal run modes, troubleshooting, and reference.
+The public layer is intentionally small: install, first success, configuration, normal run modes, troubleshooting, and reference. Advanced customization stays available, but it should not define the default product story.
 
 Browse by docs type:
 

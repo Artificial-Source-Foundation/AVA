@@ -11,7 +11,7 @@ This page is the benchmark-section entrypoint for provider/system-prompt benchma
 
 The detailed implementation and usage documentation lives here:
 
-1. [Provider Prompt Benchmarking](../project/provider-prompt-benchmarking.md)
+1. [Provider Prompt Benchmarking](provider-prompt-benchmarking.md)
 
 Use this page when you are navigating from the benchmark docs section and want the prompt-tuning workflow specifically.
 

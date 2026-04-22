@@ -15,6 +15,7 @@ This section documents AVA's benchmark system: how suites are structured, how ru
 2. [Reports And Comparison](reports-and-comparison.md) - JSON artifacts, repeat summaries, and report comparison flow
 3. [Prompt Benchmarking](prompt-benchmarking.md) - provider/system-prompt benchmark workflow and prompt-regression usage
 4. [Benchmark Deep Dive](deep-dive.md) - schema, scoring, validation layers, and repeat semantics
+5. [Provider Prompt Benchmarking](provider-prompt-benchmarking.md) - maintainer-only provider/prompt tuning workflow
 
 ## What The Benchmark System Covers
 
@@ -33,16 +34,6 @@ Main entrypoint:
 
 ```bash
 cargo run -p ava-tui --bin ava --features benchmark -- --benchmark ...
-```
-
-### Harness Mode
-
-Runs the benchmark in harnessed pair mode using a director/worker split.
-
-Main entrypoint:
-
-```bash
-cargo run -p ava-tui --bin ava --features benchmark -- --benchmark --harness ...
 ```
 
 ### Report Comparison
@@ -99,7 +90,7 @@ Current layers:
 
 Important behavior:
 
-1. Code-task quality does not report `PASS` unless validation succeeds in the solo benchmark paths; see `deep-dive.md` for the current pair-harness caveat.
+1. Code-task quality does not report `PASS` unless validation succeeds in the benchmark run path.
 2. Benchmark workspace scoping is pinned to the benchmark fixture root, not the repo root.
 3. Equivalent correct implementations are preferred over narrow regex-only judgments wherever possible.
 

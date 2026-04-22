@@ -235,8 +235,8 @@ impl App {
                 }
                 _ => {}
             },
-            ConnectScreen::OAuthBrowser { .. } => {
-                if key.code == KeyCode::Esc {
+            ConnectScreen::OAuthBrowser { auth_url, .. } => match key.code {
+                KeyCode::Esc => {
                     let Some(state) = self.state.provider_connect.as_mut() else {
                         return false;
                     };
@@ -244,7 +244,17 @@ impl App {
                     state.screen = ConnectScreen::List;
                     state.message = Some("OAuth flow cancelled".to_string());
                 }
-            }
+                KeyCode::Enter => {
+                    let _ = ava_auth::browser::open_browser(auth_url);
+                }
+                KeyCode::Char('c') | KeyCode::Char('C') => {
+                    self.copy_to_clipboard(
+                        auth_url,
+                        Some("Copied authorization URL to clipboard".to_string()),
+                    );
+                }
+                _ => {}
+            },
             ConnectScreen::DeviceCode {
                 verification_uri, ..
             } => match key.code {
@@ -258,6 +268,12 @@ impl App {
                 }
                 KeyCode::Enter => {
                     let _ = ava_auth::browser::open_browser(verification_uri);
+                }
+                KeyCode::Char('c') | KeyCode::Char('C') => {
+                    self.copy_to_clipboard(
+                        verification_uri,
+                        Some("Copied verification URL to clipboard".to_string()),
+                    );
                 }
                 _ => {}
             },

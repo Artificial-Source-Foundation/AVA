@@ -7,7 +7,7 @@ updated: "2026-04-21"
 
 # AVA Crate Map
 
-25 Rust crates under `crates/` in the root Cargo workspace.
+24 Rust crates under `crates/` in the root Cargo workspace.
 
 > Web mode (`ava serve`) uses the same crate stack with axum via the standalone `ava-web` crate (wired from `ava-tui` behind the `web` feature).
 
@@ -23,7 +23,6 @@ Layer 3:                ava-acp (ava-types, ava-llm)
                         ava-agent (ava-types, ava-control-plane, ava-llm, ava-tools, ava-config, ava-context, ava-permissions, ava-platform, ava-session, ava-memory, ava-mcp, ava-codebase, ava-plugin, ava-acp)
 Layer 4:                ava-agent-orchestration (ava-agent runtime-core modules + orchestration composition dependencies)
                         ava-review (ava-types, ava-agent, ava-llm, ava-tools, ava-context, ava-platform)
-                        ava-hq (ava-types, ava-agent, ava-acp, ava-llm, ava-tools, ava-context, ava-platform, ava-review)
 Layer 5 (top):          ava-tui (depends on nearly everything + ava-plugin)
                          ava-web (axum web surface for `ava serve`; pure control-plane imports use ava-control-plane directly)
 ```
@@ -43,13 +42,13 @@ Layer 5 (top):          ava-tui (depends on nearly everything + ava-plugin)
 
 ### ava-agent
 - **Purpose**: Core agent execution loop with tool calling, stuck detection, and mid-stream messaging
-- **Key types**: `AgentLoop`, `AgentConfig`, `AgentEvent`, `MessageQueue` (3-tier steering/follow-up/post-complete), `ReflectionLoop`, `ErrorKind`
+- **Key types**: `AgentLoop`, `AgentConfig`, `AgentEvent`, `AgentRunContext`, `MessageQueue` (3-tier steering/follow-up/post-complete), `ReflectionLoop`, `ErrorKind`
 - **Key modules**: `agent_loop/` (tool execution, response parsing), `instructions.rs` (project instruction discovery), `control_plane/` (backend compatibility shim modules plus backend-only helpers for `AgentEvent` and `AgentRunContext`; pure shared control-plane contracts are owned by `ava-control-plane`), `run_context.rs`, `system_prompt.rs`, `stuck.rs`, `message_queue.rs`
 - **Depends on**: ava-types, ava-control-plane, ava-llm, ava-tools, ava-config, ava-context, ava-permissions, ava-platform, ava-session, ava-memory, ava-mcp, ava-codebase, ava-plugin, ava-acp
 
 ### ava-agent-orchestration
 - **Purpose**: Orchestration-heavy agent composition seam (`stack` + `subagents`) extracted from `ava-agent`
-- **Key types**: `AgentStack`, `AgentStackConfig`, `AgentRunContext`, `AgentRunResult`, `EffectiveSubagentDefinition`, `MCPServerInfo`
+- **Key types**: `AgentStack`, `AgentStackConfig`, `AgentRunResult`, `EffectiveSubagentDefinition`, `MCPServerInfo`
 - **Key modules**: `stack/` (composition/runtime wiring), `subagents/` (delegation catalog + effective definitions)
 - **Depends on**: ava-agent runtime-core modules plus the same backend composition dependencies used by stack/subagents
 
@@ -78,12 +77,6 @@ Layer 5 (top):          ava-tui (depends on nearly everything + ava-plugin)
 - **Key types**: `Config`, `Credentials`, `ModelCatalog`, `AgentsConfig`, `TrustStore`, `ThinkingBudgetConfig`, `RoutingConfig`
 - **Key modules**: `credentials.rs`, `model_catalog/` (compiled-in registry.json), `agents.rs`, `trust.rs`, `routing.rs`, `thinking.rs`
 - **Depends on**: ava-types, ava-auth
-
-### ava-hq
-- **Purpose**: Multi-agent orchestration with Director pattern, ACP, artifacts, peer communication
-- **Key types**: `Director`, `HqEvent`, `Lead`, `Worker`, `AcpServer`, `AcpClient`, `ArtifactStore`, `Mailbox`, `SpecWorkflow`, `ConflictResolver`
-- **Key modules**: `director.rs`, `lead.rs`, `worker.rs`, `plan.rs`, `workflow.rs`, `board.rs`, `memory.rs`, `roles.rs`, `role_tools.rs`, `external_worker.rs`, `review.rs`
-- **Depends on**: ava-types, ava-agent, ava-acp, ava-llm, ava-tools, ava-context, ava-platform, ava-review
 
 ### ava-review
 - **Purpose**: Shared code-review subsystem (diff collection, review prompting, review-output parsing/formatting, severity gating)
@@ -160,7 +153,7 @@ Layer 5 (top):          ava-tui (depends on nearly everything + ava-plugin)
 - **Purpose**: Terminal user interface and headless CLI runner -- the primary AVA binary
 - **Key modules**: `app/` (commands, event handling), `state/` (agent, message, permission, rewind, voice), `widgets/` (model selector, session list, tool list, token buffer), `headless/`, `rendering/`, `benchmark*` (feature-gated)
 - **Binaries**: `ava` (main), `ava-smoke` (mock smoke test)
-- **Depends on**: Nearly every other crate; `ava-hq` is benchmark-only via the `benchmark` feature and no longer part of the default runtime surface
+- **Depends on**: Nearly every other crate used by the default CLI/TUI runtime plus feature-gated benchmark modules
 
 ### ava-web
 - **Purpose**: Standalone `ava serve` web/API surface extracted from `ava-tui`

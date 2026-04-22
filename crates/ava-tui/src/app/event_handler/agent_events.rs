@@ -1,14 +1,125 @@
 use super::*;
 use crate::state::agent::SubAgentInfo;
 use crate::state::rewind::{snapshot_file, ChangeType, FileChange};
+use ava_types::{MessageTier, QueuedMessage};
 use tracing::{debug, info};
+
+fn ensure_active_child_assistant_message(messages: &mut Vec<UiMessage>) -> &mut UiMessage {
+    let needs_new_message = !matches!(
+        messages.last(),
+        Some(UiMessage {
+            kind: MessageKind::Assistant,
+            ..
+        })
+    );
+    if needs_new_message {
+        let mut msg = UiMessage::new(MessageKind::Assistant, String::new());
+        msg.is_streaming = true;
+        messages.push(msg);
+    }
+    messages
+        .last_mut()
+        .expect("assistant message should exist after ensuring child assistant")
+}
+
+fn clear_child_placeholder(messages: &mut Vec<UiMessage>) {
+    if messages.len() == 2
+        && matches!(messages[0].kind, MessageKind::System)
+        && matches!(messages[1].kind, MessageKind::Thinking)
+        && messages[0].content.starts_with("Delegated task: ")
+    {
+        messages.clear();
+    }
+}
+
+fn apply_live_subagent_event(
+    messages: &mut Vec<UiMessage>,
+    event: ava_agent::agent_loop::SubAgentLiveEvent,
+) -> Option<String> {
+    use ava_agent::agent_loop::SubAgentLiveEvent;
+
+    match event {
+        SubAgentLiveEvent::Started { .. } => None,
+        SubAgentLiveEvent::Thinking(content) => {
+            clear_child_placeholder(messages);
+            if let Some(last) = messages.last_mut() {
+                if matches!(last.kind, MessageKind::Thinking) {
+                    last.content.push_str(&content);
+                    last.is_streaming = true;
+                    return None;
+                }
+                last.is_streaming = false;
+            }
+            let mut msg = UiMessage::new(MessageKind::Thinking, content);
+            msg.is_streaming = true;
+            messages.push(msg);
+            None
+        }
+        SubAgentLiveEvent::Token(chunk) => {
+            clear_child_placeholder(messages);
+            if let Some(last) = messages.last_mut() {
+                if matches!(last.kind, MessageKind::Thinking) {
+                    last.is_streaming = false;
+                }
+            }
+            let assistant = ensure_active_child_assistant_message(messages);
+            assistant.content.push_str(&chunk);
+            assistant.is_streaming = true;
+            Some(assistant.content.clone())
+        }
+        SubAgentLiveEvent::ToolCall(call) => {
+            clear_child_placeholder(messages);
+            if let Some(last) = messages.last_mut() {
+                last.is_streaming = false;
+            }
+            let mut msg = UiMessage::new(
+                MessageKind::ToolCall,
+                format!("{} {}", call.name, call.arguments),
+            );
+            msg.tool_name = Some(call.name);
+            messages.push(msg);
+            None
+        }
+        SubAgentLiveEvent::ToolResult(result) => {
+            clear_child_placeholder(messages);
+            if let Some(last) = messages.last_mut() {
+                last.is_streaming = false;
+            }
+            messages.push(UiMessage::new(MessageKind::ToolResult, result.content));
+            None
+        }
+        SubAgentLiveEvent::Checkpoint(_) => None,
+        SubAgentLiveEvent::Error(error) => {
+            clear_child_placeholder(messages);
+            if let Some(last) = messages.last_mut() {
+                last.is_streaming = false;
+            }
+            messages.push(UiMessage::new(MessageKind::Error, error));
+            None
+        }
+    }
+}
+
+fn queue_background_completion_follow_up(
+    tx: &mpsc::UnboundedSender<QueuedMessage>,
+    description: &str,
+    summary: &str,
+) {
+    let text = format!(
+        "Background agent completed. Task: {description}\n\nSummary:\n{summary}\n\nUse this result if it is relevant and continue."
+    );
+    let _ = tx.send(QueuedMessage {
+        text,
+        tier: MessageTier::FollowUp,
+    });
+}
 
 impl App {
     pub(crate) fn handle_agent_event(
         &mut self,
         agent_event: ava_agent::AgentEvent,
         app_tx: mpsc::UnboundedSender<AppEvent>,
-        _agent_tx: mpsc::UnboundedSender<ava_agent::AgentEvent>,
+        agent_tx: mpsc::UnboundedSender<ava_agent::AgentEvent>,
     ) {
         match agent_event {
             ava_agent::AgentEvent::Thinking(content) => {
@@ -114,7 +225,7 @@ impl App {
 
                 // Track sub-agent spawns from the subagent tool.
                 // Keep `task` as a compatibility alias for older sessions/tests.
-                if matches!(call.name.as_str(), "subagent" | "task") {
+                if matches!(call.name.as_str(), "subagent" | "task" | "background_agent") {
                     let agent_type = call
                         .arguments
                         .get("agent")
@@ -130,7 +241,7 @@ impl App {
                         .arguments
                         .get("background")
                         .and_then(|value| value.as_bool())
-                        .unwrap_or(false);
+                        .unwrap_or_else(|| call.name == "background_agent");
                     let initial_session_messages =
                         initial_subagent_session_messages(&description, background);
 
@@ -376,24 +487,64 @@ impl App {
                 self.state.agent.tokens_used.cumulative_output += output_tokens;
                 self.state.agent.cost += cost_usd;
 
+                if let Ok(session_uuid) = uuid::Uuid::parse_str(&session_id) {
+                    let mut session = ava_types::Session::new().with_id(session_uuid);
+                    session.messages = messages.clone();
+                    session.metadata["is_sub_agent"] = serde_json::Value::Bool(true);
+                    session.metadata["agent_type"] = serde_json::Value::String(
+                        agent_type.clone().unwrap_or_else(|| "subagent".to_string()),
+                    );
+                    self.state.session.cache_session(&session);
+                }
+
                 // Convert agent messages to UI messages for storage
                 let ui_messages = crate::app::session_messages_to_subagent_ui_messages(&messages);
+                let exact_ui_messages =
+                    crate::app::session_messages_to_exact_child_ui_messages(&messages);
 
                 // Update the SubAgentInfo in agent state
                 if let Some(sa) = self.state.agent.sub_agents.iter_mut().rev().find(|s| {
                     subagent_matches_completion(&s.call_id, &s.description, &call_id, &description)
                 }) {
+                    let was_background = sa.background;
+                    let original_description = sa.description.clone();
                     sa.is_running = false;
                     sa.elapsed = Some(sa.started_at.elapsed());
                     sa.current_tool = None;
                     sa.agent_type = agent_type.clone();
                     sa.session_id = Some(session_id.clone());
-                    sa.session_messages = ui_messages.clone();
+                    sa.session_messages = exact_ui_messages.clone();
                     sa.provider = provider.clone();
                     sa.resumed = resumed;
                     sa.cost_usd = Some(cost_usd);
                     sa.input_tokens = Some(input_tokens);
                     sa.output_tokens = Some(output_tokens);
+
+                    if was_background {
+                        if let Some(summary) = ui_messages
+                            .iter()
+                            .rev()
+                            .find(|message| matches!(message.kind, MessageKind::Assistant))
+                            .map(|message| message.content.clone())
+                        {
+                            self.state.messages.push(UiMessage::new(
+                                MessageKind::System,
+                                format!("Background agent finished: {original_description}"),
+                            ));
+                            if let Some(ref tx) = self.state.agent.message_tx {
+                                queue_background_completion_follow_up(
+                                    tx,
+                                    &original_description,
+                                    &summary,
+                                );
+                            } else if !self.state.agent.is_running {
+                                let restart_prompt = format!(
+                                    "Background agent completed. Task: {original_description}\n\nSummary:\n{summary}\n\nContinue from this new information."
+                                );
+                                self.submit_goal(restart_prompt, app_tx.clone(), agent_tx.clone());
+                            }
+                        }
+                    }
                 }
 
                 // Update the SubAgentData in the matching UI message
@@ -421,7 +572,7 @@ impl App {
                         data.is_running = false;
                         data.agent_type = agent_type;
                         data.session_id = Some(session_id);
-                        data.session_messages = ui_messages;
+                        data.session_messages = exact_ui_messages;
                         data.current_tool = None;
                         data.provider = provider;
                         data.resumed = resumed;
@@ -466,6 +617,94 @@ impl App {
                 self.state
                     .messages
                     .push(UiMessage::new(MessageKind::ToolResult, msg));
+            }
+            ava_agent::AgentEvent::SubAgentUpdate { call_id, event } => {
+                let mut latest_summary = None;
+                let checkpoint_messages = match &event {
+                    ava_agent::agent_loop::SubAgentLiveEvent::Checkpoint(session) => {
+                        self.state.session.cache_session(session);
+                        Some(crate::app::session_messages_to_exact_child_ui_messages(
+                            &session.messages,
+                        ))
+                    }
+                    _ => None,
+                };
+
+                if let Some(subagent) = self
+                    .state
+                    .agent
+                    .sub_agents
+                    .iter_mut()
+                    .rev()
+                    .find(|subagent| subagent.call_id == call_id)
+                {
+                    if let Some(messages) = checkpoint_messages.clone() {
+                        subagent.session_messages = messages;
+                    }
+                    latest_summary =
+                        apply_live_subagent_event(&mut subagent.session_messages, event.clone());
+                    match &event {
+                        ava_agent::agent_loop::SubAgentLiveEvent::Started { session_id } => {
+                            subagent.session_id = Some(session_id.clone());
+                        }
+                        ava_agent::agent_loop::SubAgentLiveEvent::ToolCall(call) => {
+                            subagent.tool_count += 1;
+                            subagent.current_tool = Some(call.name.clone());
+                        }
+                        ava_agent::agent_loop::SubAgentLiveEvent::ToolResult(_) => {
+                            subagent.current_tool = None;
+                        }
+                        ava_agent::agent_loop::SubAgentLiveEvent::Error(_) => {
+                            subagent.current_tool = None;
+                            subagent.is_running = false;
+                            subagent.elapsed = Some(subagent.started_at.elapsed());
+                        }
+                        ava_agent::agent_loop::SubAgentLiveEvent::Token(_)
+                        | ava_agent::agent_loop::SubAgentLiveEvent::Thinking(_)
+                        | ava_agent::agent_loop::SubAgentLiveEvent::Checkpoint(_) => {}
+                    }
+                }
+
+                if let Some(msg) = self.state.messages.messages.iter_mut().rev().find(|msg| {
+                    matches!(msg.kind, MessageKind::SubAgent)
+                        && msg
+                            .sub_agent
+                            .as_ref()
+                            .is_some_and(|data| data.call_id == call_id)
+                }) {
+                    if let Some(data) = msg.sub_agent.as_mut() {
+                        if let Some(messages) = checkpoint_messages {
+                            data.session_messages = messages;
+                        }
+                        let _ =
+                            apply_live_subagent_event(&mut data.session_messages, event.clone());
+                        match &event {
+                            ava_agent::agent_loop::SubAgentLiveEvent::Started { session_id } => {
+                                data.session_id = Some(session_id.clone());
+                            }
+                            ava_agent::agent_loop::SubAgentLiveEvent::ToolCall(call) => {
+                                data.tool_count += 1;
+                                data.current_tool = Some(call.name.clone());
+                            }
+                            ava_agent::agent_loop::SubAgentLiveEvent::ToolResult(_) => {
+                                data.current_tool = None;
+                            }
+                            ava_agent::agent_loop::SubAgentLiveEvent::Error(error) => {
+                                data.current_tool = None;
+                                data.is_running = false;
+                                data.failed = true;
+                                msg.is_streaming = false;
+                                msg.content = error.clone();
+                            }
+                            ava_agent::agent_loop::SubAgentLiveEvent::Token(_)
+                            | ava_agent::agent_loop::SubAgentLiveEvent::Thinking(_)
+                            | ava_agent::agent_loop::SubAgentLiveEvent::Checkpoint(_) => {}
+                        }
+                    }
+                    if let Some(summary) = latest_summary {
+                        msg.content = summary;
+                    }
+                }
             }
             ava_agent::AgentEvent::Checkpoint(session) => {
                 // Incremental save so progress survives unexpected exits.

@@ -53,7 +53,7 @@ Use `just` for the main Rust workflow:
 ## Git Hook Policy
 
 1. `pre-commit` is staged-file-oriented only via `scripts/dev/git-hooks.sh pre-commit`: it validates the staged snapshot rather than the working-tree copy, staged Rust files get non-mutating `rustfmt --check` (`cargo fmt --check` behavior for staged `.rs` files), staged JS/TS/JSON/CSS files get non-mutating `biome check`, and staged TypeScript files also get `oxlint`.
-2. `pre-push` is path-aware via `scripts/dev/git-hooks.sh pre-push`: docs-only pushes skip heavy code gates, frontend-sensitive pushes run `pnpm typecheck` + `pnpm lint`, and Rust/general repo changes run the local Rust gate.
+2. `pre-push` is path-aware via `scripts/dev/git-hooks.sh pre-push`: docs-only pushes skip heavy code gates, frontend-sensitive pushes run `pnpm typecheck` + `pnpm lint`, and Rust/general repo changes run the local Rust gate plus targeted compile smokes for touched workspace wiring, desktop/Tauri, `ava-web`, and `ava-config` surfaces.
 3. CI remains the authoritative full gate.
 
 ## Frontend And Desktop Verification

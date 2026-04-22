@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use ava_agent::control_plane::sessions::run_context_from_session as shared_run_context_from_session;
-use ava_agent_orchestration::stack::AgentRunContext;
+use ava_agent::run_context::AgentRunContext;
 use ava_control_plane::commands::{queue_message_tier, ControlPlaneCommand};
 use ava_control_plane::interactive::InteractiveRequestKind;
 use ava_control_plane::orchestration::{

@@ -1,7 +1,7 @@
 use crate::app::{AppState, ModalType, ViewMode};
 use crate::ui::layout::build_layout;
 use crate::widgets::autocomplete::AutocompleteTrigger;
-use crate::widgets::composer::render_composer;
+use crate::widgets::composer::{render_composer, render_read_only_transcript_footer};
 use crate::widgets::mention_picker::render_mention_picker;
 use crate::widgets::message_list::render_message_list;
 use crate::widgets::safe_render::clamp_line;
@@ -44,7 +44,7 @@ pub fn render(frame: &mut Frame<'_>, state: &mut AppState) {
     } else if plan_approval_active {
         crate::widgets::plan_approval::PLAN_APPROVAL_DOCK_HEIGHT
     } else if transcript_view {
-        0
+        3
     } else {
         layout::composer_height(
             &state.input.buffer,
@@ -107,7 +107,9 @@ pub fn render(frame: &mut Frame<'_>, state: &mut AppState) {
         // covering any streaming text that overflows into the composer area.
         let composer_bg = Block::default().style(Style::default().bg(state.theme.bg_elevated));
         frame.render_widget(composer_bg, split.composer);
-        if !transcript_view {
+        if transcript_view {
+            render_read_only_transcript_footer(frame, split.composer, state);
+        } else {
             render_composer(frame, split.composer, state);
         }
     }

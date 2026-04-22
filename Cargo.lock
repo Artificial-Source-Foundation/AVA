@@ -473,32 +473,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ava-hq"
-version = "0.6.1"
-dependencies = [
- "async-trait",
- "ava-acp",
- "ava-agent",
- "ava-context",
- "ava-llm",
- "ava-platform",
- "ava-review",
- "ava-tools",
- "ava-types",
- "chrono",
- "fs2",
- "futures",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
- "tokio-util",
- "toml",
- "tracing",
- "uuid",
-]
-
-[[package]]
 name = "ava-llm"
 version = "0.6.1"
 dependencies = [
@@ -706,7 +680,6 @@ dependencies = [
  "ava-context",
  "ava-control-plane",
  "ava-db",
- "ava-hq",
  "ava-llm",
  "ava-memory",
  "ava-permissions",
@@ -2088,16 +2061,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cb4cb245038516f5f85277875cdaa4f7d2c9a0fa0468de06ed190163b1581fcf"
 dependencies = [
  "percent-encoding",
-]
-
-[[package]]
-name = "fs2"
-version = "0.4.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9564fc758e15025b46aa6643b1b77d047d1a56a1aea6e01002ac0c7026876213"
-dependencies = [
- "libc",
- "winapi",
 ]
 
 [[package]]

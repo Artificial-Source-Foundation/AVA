@@ -2,7 +2,7 @@
 title: "How-to: Run Tests And Checks"
 description: "Run the repository's Rust and frontend verification commands that AVA contributors use."
 order: 4
-updated: "2026-04-21"
+updated: "2026-04-22"
 ---
 
 # How-to: Run Tests And Checks
@@ -55,18 +55,26 @@ The equivalent check list is:
 1. `cargo fmt --all --check`
 2. `cargo clippy --workspace -- -D warnings`
 3. `cargo nextest run -p ava-agent --test agent_loop --test reflection_loop -j 4`
-4. `cargo nextest run -p ava-agent-orchestration --test stack_test --test e2e_test -j 4`
-5. `cargo nextest run -p ava-control-plane -j 4`
-6. `cargo test -p ava-web resolve_plan_route_requires_request_id_and_preserves_pending_state -- --exact`
-7. `cargo test -p ava-web clear_message_queue_rejects_unsupported_follow_up_targets -- --exact`
-8. `cargo test -p ava-web projected_backend_events_preserve_required_correlation_fields -- --exact`
-9. `cargo test -p ava-tui foreground_required_control_plane_events_are_visible_in_tui -- --exact`
-10. `cargo test -p ava-tui question_requests_use_shared_timeout_and_clear_lifecycle -- --exact`
-11. `cargo test -p ava-tui cancelling_tui_run_clears_pending_approval_via_shared_lifecycle -- --exact`
-12. `cargo test --manifest-path src-tauri/Cargo.toml desktop_control_plane_event_shapes_follow_shared_requirements -- --exact`
-13. `cargo test --manifest-path src-tauri/Cargo.toml take_matching_pending_reply_only_consumes_matching_request_ids -- --exact`
-14. `cargo check -p ava-tui --features web`
-15. `cargo nextest run -p ava-tools -p ava-review -j 4`
+4. `cargo test -p ava-agent control_plane::tests::control_plane_contract_fixture_matches_current_wire_contract -- --exact`
+5. `cargo test -p ava-agent control_plane::sessions::tests::run_context_from_session_recovers_effective_run_settings -- --exact`
+6. `cargo test -p ava-agent control_plane::sessions::tests::run_context_from_session_falls_back_to_routing_identity -- --exact`
+7. `cargo nextest run -p ava-agent-orchestration --test stack_test --test e2e_test -j 4`
+8. `cargo nextest run -p ava-control-plane -j 4`
+9. `cargo test -p ava-web resolve_plan_route_requires_request_id_and_preserves_pending_state -- --exact`
+10. `cargo test -p ava-web clear_message_queue_rejects_unsupported_follow_up_targets -- --exact`
+11. `cargo test -p ava-web projected_backend_events_preserve_required_correlation_fields -- --exact`
+12. `cargo test -p ava-web retry_route_reuses_persisted_run_context_metadata -- --exact`
+13. `cargo test -p ava-web edit_resend_route_reuses_persisted_run_context_metadata -- --exact`
+14. `cargo test -p ava-web regenerate_route_reuses_persisted_run_context_metadata -- --exact`
+15. `cargo test -p ava-tui foreground_required_control_plane_events_are_visible_in_tui -- --exact`
+16. `cargo test -p ava-tui question_requests_use_shared_timeout_and_clear_lifecycle -- --exact`
+17. `cargo test -p ava-tui cancelling_tui_run_clears_pending_approval_via_shared_lifecycle -- --exact`
+18. `cargo test --manifest-path src-tauri/Cargo.toml desktop_control_plane_event_shapes_follow_shared_requirements -- --exact`
+19. `cargo test --manifest-path src-tauri/Cargo.toml submit_goal_returns_immediate_accepted_envelope_shape -- --exact`
+20. `cargo test --manifest-path src-tauri/Cargo.toml replay_commands_share_submit_accepted_envelope_semantics -- --exact`
+21. `cargo test --manifest-path src-tauri/Cargo.toml take_matching_pending_reply_only_consumes_matching_request_ids -- --exact`
+22. `cargo check -p ava-tui --features web`
+23. `cargo nextest run -p ava-tools -p ava-review -j 4`
 
 This is the local Rust confidence gate. `just check` is just a convenience wrapper for this canonical hook path. It intentionally avoids unrelated provider/prompt-family unit-test coverage in `ava-agent`; CI remains the place where the full workspace suite is authoritative.
 
@@ -90,13 +98,14 @@ The gate has two layers:
 
 1. **Required no-secrets checks (mandatory):**
     - `cargo test -p ava-config` (focused config-seam coverage for canonical subagent config path/read-write behavior)
-    - `cargo test -p ava-agent-orchestration agent_stack_run_dispatches_subagent_when_enabled -- --exact` (delegated runtime signoff path)
     - `cargo check --manifest-path src-tauri/Cargo.toml --lib` (lightweight desktop/Tauri compile smoke for boundary-touch confidence)
     - `ava-smoke` (mock provider path, now covering both unattended approval behavior and delegated `SubAgentComplete` smoke assertions)
     - headless deterministic slash smoke: `ava -- "/help" --headless --max-turns 1 --no-update-check`
 2. **Optional live-provider smoke:** runs only when at least one key is present (`AVA_OPENAI_API_KEY`, `AVA_ANTHROPIC_API_KEY`, `AVA_OPENROUTER_API_KEY`).
    - Provider/model pairings are explicit and deterministic: `openai` with `gpt-4.1`, `anthropic` with `claude-sonnet-4`, and `openrouter` with `anthropic/claude-sonnet-4`.
    - The command must emit `BACKEND_GATE_OK`.
+
+Orchestration confidence now lives under `just check` (the local Rust gate that runs `ava-agent-orchestration` stack/e2e coverage), while `backend-gate` is intentionally the lighter backend smoke layer.
 
 This remains a local validation aid only at this stage; it is not wired into hooks or CI yet.
 
@@ -123,7 +132,7 @@ The preflight runs this required sequence in order:
 4. `cargo test -p ava-tui primary_agent` (primary-agent behavior coverage in `ava-tui`)
 5. deterministic Playwright parity coverage for `e2e/app.spec.ts` and `e2e/web-mode.spec.ts` only
 
-Scope note: this is an aggregate local gate for the currently wired checks. It is intentionally not wired into CI or git hooks and is **not** the full final V1 signoff. Full V1 signoff still requires the benchmark-backed headless proof path described in `docs/project/v1-evals.md`, which is not run by this preflight; fuller live-provider headless proof and broader desktop/TUI parity coverage remain outside this entrypoint.
+Scope note: this is an aggregate local gate for the currently wired checks. It is intentionally not wired into CI or git hooks and is **not** the full final V1 signoff. Full V1 signoff still requires the benchmark-backed headless proof path described in `docs/testing/v1-signoff-plan.md`, which is not run by this preflight; fuller live-provider headless proof and broader desktop/TUI parity coverage remain outside this entrypoint.
 
 ## Run the benchmark-backed headless V1 signoff (`signoff-v1-headless`)
 
@@ -140,7 +149,7 @@ just v1-signoff
 # equivalent: pnpm signoff:v1
 ```
 
-This path runs a minimal required-now benchmark task slice from `docs/project/v1-evals.md` and enforces fail-closed pass/fail from the saved benchmark JSON report (including `provider`/`model`/`task_filter`/`run_count` metadata checks plus per-task success).
+This path runs a minimal required-now benchmark task slice from `docs/testing/v1-signoff-plan.md` and enforces fail-closed pass/fail from the saved benchmark JSON report (including `provider`/`model`/`task_filter`/`run_count` metadata checks plus per-task success).
 
 Milestone 5 closeout note: run `verify-v1` before `signoff-v1-headless` so primary-agent `ava-tui` coverage is included alongside backend/subagent checks.
 
@@ -166,7 +175,7 @@ Terminology note: these preflight/signoff labels are from the V1-evals track and
 ## Local hook policy
 
 1. `pre-commit` only touches staged files. It runs non-mutating checks on staged Rust files (`rustfmt --check` via `scripts/dev/git-hooks.sh pre-commit`, equivalent to `cargo fmt --check` on staged `.rs` files only), non-mutating `biome check` on staged JS/TS/JSON/CSS files, and `oxlint` on staged TypeScript files.
-2. `pre-push` is path-aware: docs-only pushes skip heavy code gates, frontend-sensitive pushes run `pnpm typecheck` + `pnpm lint`, and Rust/general repo changes run the local Rust gate via `scripts/dev/git-hooks.sh pre-push`.
+2. `pre-push` is path-aware: docs-only pushes skip heavy code gates, frontend-sensitive pushes run `pnpm typecheck` + `pnpm lint`, and Rust/general repo changes run the local Rust gate via `scripts/dev/git-hooks.sh pre-push` plus targeted compile smokes for touched workspace wiring, desktop/Tauri, `ava-web`, and `ava-config` surfaces; that local Rust gate now also includes focused `ava-agent` contract/ownership unit tests, `ava-web` replay run-context metadata regressions, and desktop accepted-and-streaming run-start parity tests.
 3. `just ci` remains the broader local verification pass.
 
 ## Run the broader local CI pass

@@ -457,6 +457,57 @@ pub fn render_composer(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
     frame.render_widget(paragraph, inner_area);
 }
 
+pub fn render_read_only_transcript_footer(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
+    let pad = "";
+    let title = match state.view_mode {
+        crate::app::ViewMode::SubAgent { .. } => "Read-only child transcript",
+        crate::app::ViewMode::BackgroundTask { .. } => "Read-only background transcript",
+        crate::app::ViewMode::Main => "Read-only transcript",
+    };
+
+    let mut lines = vec![Line::from(vec![
+        Span::raw(pad),
+        Span::styled(
+            "❯ ",
+            Style::default()
+                .fg(state.theme.text_muted)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(title, Style::default().fg(state.theme.text_dimmed)),
+    ])];
+
+    let secondary = match &state.view_mode {
+        crate::app::ViewMode::SubAgent { agent_index, .. } => state
+            .agent
+            .sub_agents
+            .get(*agent_index)
+            .map(|subagent| {
+                let status = if subagent.is_running {
+                    "running"
+                } else {
+                    "done"
+                };
+                let agent_label = subagent.agent_type.as_deref().unwrap_or("subagent");
+                format!(
+                    "{agent_label} · {status} · Esc back · open from parent to review full history"
+                )
+            })
+            .unwrap_or_else(|| "Esc back".to_string()),
+        crate::app::ViewMode::BackgroundTask { .. } => {
+            "Background transcript · Esc back · PgUp/PgDn scroll".to_string()
+        }
+        crate::app::ViewMode::Main => "Esc back".to_string(),
+    };
+
+    lines.push(Line::from(vec![
+        Span::raw(pad),
+        Span::styled(secondary, Style::default().fg(state.theme.text_muted)),
+    ]));
+
+    let widget = Paragraph::new(lines).style(Style::default().bg(state.theme.bg_elevated));
+    frame.render_widget(widget, area);
+}
+
 fn wrap_prefixed_spans(
     body_spans: Vec<Span<'_>>,
     first_prefix: Vec<Span<'static>>,

@@ -10,6 +10,21 @@ use ava_acp::{
     attach_delegation_record, transport_for_builtin_agent, AgentQuery, ExternalRunDescriptor,
     ExternalSessionMapper,
 };
+use ava_agent::agent_loop::{
+    AgentConfig, AgentEvent, AgentLoop, SubAgentLiveEvent, LLM_STREAM_TIMEOUT_SECS,
+};
+use ava_agent::budget::BudgetTelemetry;
+use ava_agent::instruction_resolver;
+use ava_agent::instructions::StartupInstructionProfile;
+use ava_agent::memory_enrichment;
+use ava_agent::message_queue::MessageQueue;
+use ava_agent::routing::{
+    analyze_task, analyze_task_full_with_history, SubagentDelegationPolicy, ToolVisibilityProfile,
+    EXPLICIT_DELEGATION_REASON,
+};
+use ava_agent::run_context::AgentRunContext;
+use ava_agent::session_logger::SessionLogger;
+use ava_agent::system_prompt::BenchmarkPromptOverride;
 use ava_config::AgentsConfig;
 use ava_context::ContextManager;
 use ava_llm::provider::{LLMProvider, SharedProvider};
@@ -34,10 +49,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{info, instrument, warn};
 
 use super::stack_tools::{build_tool_registry_with_plugins, LlmSummarizer};
-use super::{AgentRunContext, AgentRunResult, AgentStack};
-use crate::agent_loop::{AgentConfig, AgentEvent, AgentLoop, LLM_STREAM_TIMEOUT_SECS};
-use crate::budget::BudgetTelemetry;
-use crate::routing::{analyze_task, analyze_task_full_with_history, EXPLICIT_DELEGATION_REASON};
+use super::{AgentRunResult, AgentStack};
 use crate::subagents::{
     apply_runtime_profile_to_registry, build_subagent_system_prompt,
     default_external_allowed_tools, external_permission_mode, parse_model_spec, runtime_guidance,
@@ -58,6 +70,35 @@ fn compose_prompt_suffix_layers(
     }
 }
 
+fn compose_subagent_system_prompt(
+    agent_type: &str,
+    specialization_prompt: Option<&str>,
+    runtime_profile: crate::subagents::SubAgentRuntimeProfile,
+) -> String {
+    let mut system_prompt = build_subagent_system_prompt(agent_type);
+    if let Some(prompt) = specialization_prompt
+        .map(str::trim)
+        .filter(|prompt| !prompt.is_empty())
+    {
+        system_prompt.push_str("\n\n## Specialization\n");
+        system_prompt.push_str(prompt);
+    }
+    system_prompt.push_str(runtime_guidance(runtime_profile));
+    system_prompt
+}
+
+fn into_live_subagent_event(event: AgentEvent) -> Option<SubAgentLiveEvent> {
+    match event {
+        AgentEvent::Checkpoint(session) => Some(SubAgentLiveEvent::Checkpoint(session)),
+        AgentEvent::Token(chunk) => Some(SubAgentLiveEvent::Token(chunk)),
+        AgentEvent::Thinking(content) => Some(SubAgentLiveEvent::Thinking(content)),
+        AgentEvent::ToolCall(call) => Some(SubAgentLiveEvent::ToolCall(call)),
+        AgentEvent::ToolResult(result) => Some(SubAgentLiveEvent::ToolResult(result)),
+        AgentEvent::Error(error) => Some(SubAgentLiveEvent::Error(error)),
+        _ => None,
+    }
+}
+
 impl AgentStack {
     pub(crate) async fn runtime_tool_access_profile(
         &self,
@@ -68,8 +109,8 @@ impl AgentStack {
     ) -> (
         ThinkingLevel,
         bool,
-        crate::routing::ToolVisibilityProfile,
-        crate::routing::SubagentDelegationPolicy,
+        ToolVisibilityProfile,
+        SubagentDelegationPolicy,
     ) {
         let thinking = match context.and_then(|ctx| ctx.thinking_level) {
             Some(level) => level,
@@ -93,8 +134,8 @@ impl AgentStack {
     async fn adapt_delegation_policy(
         &self,
         goal: &str,
-        policy: crate::routing::SubagentDelegationPolicy,
-    ) -> crate::routing::SubagentDelegationPolicy {
+        policy: SubagentDelegationPolicy,
+    ) -> SubagentDelegationPolicy {
         let Some(parent_session_id) = self.parent_session_id.read().await.clone() else {
             return policy;
         };
@@ -159,11 +200,11 @@ impl AgentStack {
     }
 
     async fn enrich_goal_with_memories(&self, goal: &str) -> String {
-        crate::memory_enrichment::enrich_goal_with_memories(&self.memory, goal).await
+        memory_enrichment::enrich_goal_with_memories(&self.memory, goal).await
     }
 
     fn learn_project_patterns_from_goal(&self, goal: &str) {
-        crate::memory_enrichment::learn_project_patterns_from_goal(&self.memory, goal);
+        memory_enrichment::learn_project_patterns_from_goal(&self.memory, goal);
     }
 
     pub async fn resolve_model_route(
@@ -247,7 +288,7 @@ impl AgentStack {
         event_tx: Option<mpsc::UnboundedSender<AgentEvent>>,
         cancel: CancellationToken,
         history: Vec<ava_types::Message>,
-        message_queue: Option<crate::message_queue::MessageQueue>,
+        message_queue: Option<MessageQueue>,
         images: Vec<ava_types::ImageContent>,
         session_id: Option<uuid::Uuid>,
         interactive_run_id: Option<String>,
@@ -279,7 +320,7 @@ impl AgentStack {
         event_tx: Option<mpsc::UnboundedSender<AgentEvent>>,
         cancel: CancellationToken,
         history: Vec<ava_types::Message>,
-        message_queue: Option<crate::message_queue::MessageQueue>,
+        message_queue: Option<MessageQueue>,
         images: Vec<ava_types::ImageContent>,
         session_id: Option<uuid::Uuid>,
         interactive_run_id: Option<String>,
@@ -387,18 +428,12 @@ impl AgentStack {
             .thinking_budgets
             .resolve(&resolved_provider_name, provider.model_name());
         let startup_instruction_profile = if !self.include_project_instructions {
-            crate::instructions::StartupInstructionProfile::None
+            StartupInstructionProfile::None
         } else {
             match tool_visibility_profile {
-                crate::routing::ToolVisibilityProfile::AnswerOnly => {
-                    crate::instructions::StartupInstructionProfile::None
-                }
-                crate::routing::ToolVisibilityProfile::ReadOnly => {
-                    crate::instructions::StartupInstructionProfile::AgentsOnly
-                }
-                crate::routing::ToolVisibilityProfile::Full => {
-                    crate::instructions::StartupInstructionProfile::Full
-                }
+                ToolVisibilityProfile::AnswerOnly => StartupInstructionProfile::None,
+                ToolVisibilityProfile::ReadOnly => StartupInstructionProfile::AgentsOnly,
+                ToolVisibilityProfile::Full => StartupInstructionProfile::Full,
             }
         };
         let run_permission_context = run_context
@@ -418,7 +453,7 @@ impl AgentStack {
         // Uses spawn_blocking internally to avoid blocking the async executor
         // on synchronous file I/O while reading instruction files.
         let prompt_suffix_start = std::time::Instant::now();
-        let prompt_suffix_fut = crate::instruction_resolver::build_system_prompt_suffix_async(
+        let prompt_suffix_fut = instruction_resolver::build_system_prompt_suffix_async(
             combined_suffix,
             provider.model_name().to_string(),
             project_root.clone(),
@@ -557,7 +592,7 @@ impl AgentStack {
             ToolRegistry,
             SharedToolSources,
             ava_tools::core::file_backup::FileBackupSession,
-        ) = if tool_visibility_profile == crate::routing::ToolVisibilityProfile::AnswerOnly {
+        ) = if tool_visibility_profile == ToolVisibilityProfile::AnswerOnly {
             (
                 ToolRegistry::new(),
                 Arc::new(std::sync::RwLock::new(HashMap::new())),
@@ -682,7 +717,7 @@ impl AgentStack {
         // Attach JSONL session logger if enabled in config
         if cfg.features.session_logging {
             let session_id = uuid::Uuid::new_v4().to_string();
-            if let Some(logger) = crate::session_logger::SessionLogger::new(&session_id) {
+            if let Some(logger) = SessionLogger::new(&session_id) {
                 agent = agent.with_session_logger(logger);
             }
         }
@@ -965,7 +1000,7 @@ struct AgentTaskSpawner {
     provider: Arc<dyn LLMProvider>,
     platform: Arc<dyn Platform>,
     model_name: String,
-    benchmark_prompt_override: Option<crate::system_prompt::BenchmarkPromptOverride>,
+    benchmark_prompt_override: Option<BenchmarkPromptOverride>,
     max_turns: usize,
     agents_config: AgentsConfig,
     /// Router for resolving per-agent model overrides from subagents.toml.
@@ -1225,11 +1260,8 @@ impl AgentTaskSpawner {
             resolved.max_turns.unwrap_or(10).min(self.max_turns)
         };
 
-        // Use configured prompt if set, otherwise fall back to default.
-        let mut system_prompt = resolved
-            .prompt
-            .unwrap_or_else(|| build_subagent_system_prompt(agent_type));
-        system_prompt.push_str(runtime_guidance(runtime_profile));
+        let system_prompt =
+            compose_subagent_system_prompt(agent_type, resolved.prompt.as_deref(), runtime_profile);
 
         let sub_agent_context_window = {
             let reg = ava_config::model_catalog::registry::registry();
@@ -1249,7 +1281,7 @@ impl AgentTaskSpawner {
             custom_system_prompt: Some(system_prompt),
             thinking_level: ThinkingLevel::Off,
             thinking_budget_tokens: None,
-            system_prompt_suffix: crate::instruction_resolver::build_sub_agent_instructions(
+            system_prompt_suffix: instruction_resolver::build_sub_agent_instructions(
                 &effective_model,
                 &std::env::current_dir().unwrap_or_default(),
             ),
@@ -1265,15 +1297,63 @@ impl AgentTaskSpawner {
             headless: false,
             is_subagent: true,
         };
+        let child_session_id = uuid::Uuid::new_v4();
+        let child_session_id_str = child_session_id.to_string();
+        let mut initial_session = Session::new().with_id(child_session_id);
+        initial_session.metadata["is_sub_agent"] = serde_json::Value::Bool(true);
+        initial_session.metadata["agent_type"] = serde_json::Value::String(agent_type.to_string());
+        if let Some(ref parent_id) = self.parent_session_id {
+            initial_session.metadata["parent_id"] = serde_json::Value::String(parent_id.clone());
+        }
+        if let Some(ref sm) = self.session_manager {
+            if let Err(error) = sm.save(&initial_session) {
+                warn!(session_id = %child_session_id_str, error = %error, "failed to persist initial sub-agent session");
+            }
+        }
+
         let mut agent = AgentLoop::new(
             Box::new(SharedProvider::new(provider)),
             registry,
             context,
             config,
         )
+        .with_session_id(child_session_id)
         .with_tool_visibility_profile(tool_visibility_profile(runtime_profile));
         let started_at = std::time::Instant::now();
-        let mut session = agent.run(prompt).await?;
+        let parent_event_tx = self.event_tx.clone();
+        let live_call_id = originating_call_id.unwrap_or_default().to_string();
+        let session_manager = self.session_manager.clone();
+        let (subagent_event_tx, mut subagent_event_rx) = mpsc::unbounded_channel();
+        if let Some(ref tx) = parent_event_tx {
+            let _ = tx.send(AgentEvent::SubAgentUpdate {
+                call_id: live_call_id.clone(),
+                event: SubAgentLiveEvent::Started {
+                    session_id: child_session_id_str,
+                },
+            });
+        }
+        let forward_events = tokio::spawn(async move {
+            while let Some(event) = subagent_event_rx.recv().await {
+                if let AgentEvent::Checkpoint(ref session) = event {
+                    if let Some(ref sm) = session_manager {
+                        if let Err(error) = sm.save(session) {
+                            warn!(session_id = %session.id, error = %error, "failed to persist sub-agent checkpoint");
+                        }
+                    }
+                }
+                let Some(ref tx) = parent_event_tx else {
+                    continue;
+                };
+                if let Some(live_event) = into_live_subagent_event(event) {
+                    let _ = tx.send(AgentEvent::SubAgentUpdate {
+                        call_id: live_call_id.clone(),
+                        event: live_event,
+                    });
+                }
+            }
+        });
+        let mut session = agent.run_with_event_tx(prompt, subagent_event_tx).await?;
+        let _ = forward_events.await;
 
         // Set parent_id metadata so the session can be linked to the parent.
         session.metadata["is_sub_agent"] = serde_json::Value::Bool(true);
@@ -1411,11 +1491,8 @@ impl AgentTaskSpawner {
         } else {
             resolved.max_turns.unwrap_or(10).min(self.max_turns)
         };
-        let mut system_prompt = resolved
-            .prompt
-            .clone()
-            .unwrap_or_else(|| build_subagent_system_prompt(agent_type));
-        system_prompt.push_str(runtime_guidance(runtime_profile));
+        let system_prompt =
+            compose_subagent_system_prompt(agent_type, resolved.prompt.as_deref(), runtime_profile);
 
         let cwd_str = cwd.to_string_lossy().to_string();
         let (resume_session_id, resume_attempted) = self
@@ -1568,9 +1645,9 @@ impl AgentTaskSpawner {
 
 fn adapt_delegation_policy_with_feedback(
     goal: &str,
-    policy: crate::routing::SubagentDelegationPolicy,
+    policy: SubagentDelegationPolicy,
     recent: &[DelegationRecord],
-) -> crate::routing::SubagentDelegationPolicy {
+) -> SubagentDelegationPolicy {
     if recent.len() < 3 || policy.reason == EXPLICIT_DELEGATION_REASON {
         return policy;
     }
@@ -1592,7 +1669,7 @@ fn adapt_delegation_policy_with_feedback(
 
     if score < 0.45 && policy.enable_subagent_tool {
         let next_max = policy.max_subagents.saturating_sub(1);
-        return crate::routing::SubagentDelegationPolicy {
+        return SubagentDelegationPolicy {
             enable_subagent_tool: next_max > 0,
             max_subagents: next_max,
             reason: format!(
@@ -1604,7 +1681,7 @@ fn adapt_delegation_policy_with_feedback(
 
     if score > 0.85 && policy.enable_subagent_tool && is_broad_goal {
         let next_max = (policy.max_subagents + 1).min(3);
-        return crate::routing::SubagentDelegationPolicy {
+        return SubagentDelegationPolicy {
             enable_subagent_tool: true,
             max_subagents: next_max,
             reason: format!(
@@ -1673,7 +1750,7 @@ mod tests {
 
     #[test]
     fn adaptive_feedback_reduces_subagents_after_weak_history() {
-        let policy = crate::routing::SubagentDelegationPolicy {
+        let policy = SubagentDelegationPolicy {
             enable_subagent_tool: true,
             max_subagents: 2,
             reason: "task looks broad enough to justify one scout or reviewer".to_string(),
@@ -1723,8 +1800,55 @@ mod tests {
     }
 
     #[test]
+    fn subagent_system_prompt_keeps_tool_contract_when_specialized() {
+        let prompt = compose_subagent_system_prompt(
+            "scout",
+            Some("You are a lightweight scout agent."),
+            crate::subagents::SubAgentRuntimeProfile::ReadOnly,
+        );
+
+        assert!(prompt.contains("Tool calls must use the tool's exact JSON parameter names"));
+        assert!(prompt.contains("`read` requires"));
+        assert!(prompt.contains("\"path\": \"...\""));
+        assert!(prompt.contains("You are a lightweight scout agent."));
+        assert!(prompt.contains("read-only specialist mode"));
+    }
+
+    #[test]
+    fn system_prompt_marks_subagent_as_default_and_background_as_explicit_only() {
+        let prompt = ava_agent::system_prompt::build_system_prompt(
+            &[
+                ava_types::Tool {
+                    name: "subagent".to_string(),
+                    description: "delegation".to_string(),
+                    parameters: serde_json::json!({}),
+                },
+                ava_types::Tool {
+                    name: "background_agent".to_string(),
+                    description: "background delegation".to_string(),
+                    parameters: serde_json::json!({}),
+                },
+            ],
+            true,
+            ava_llm::ProviderKind::OpenAI,
+            "test-model",
+            ToolVisibilityProfile::Full,
+        );
+
+        assert!(prompt
+            .static_prefix
+            .contains("`subagent` is the normal/default delegation path"));
+        assert!(prompt
+            .static_prefix
+            .contains("Use `background_agent` only when the user explicitly asks"));
+        assert!(prompt
+            .static_prefix
+            .contains("Do not choose background execution by default"));
+    }
+
+    #[test]
     fn adaptive_feedback_boosts_subagents_after_strong_history() {
-        let policy = crate::routing::SubagentDelegationPolicy {
+        let policy = SubagentDelegationPolicy {
             enable_subagent_tool: true,
             max_subagents: 1,
             reason: "task looks broad enough to justify one scout or reviewer".to_string(),

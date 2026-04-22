@@ -172,7 +172,7 @@ This is future work, not part of the current core-only push.
 
 1. Remove the last default-core HQ assumptions from frontend, config, and startup surfaces.
 2. Keep only the compatibility baggage that cannot yet be removed safely.
-3. Any still-dormant HQ runtime helpers should stay isolated inside `ava-hq` and not leak back into default-core paths.
+3. Any future HQ work should stay isolated in plugin-owned code and not leak back into default-core paths.
 
 ### 6. Settings Cleanup
 

@@ -67,7 +67,7 @@ From `package.json` scripts:
 2. `pnpm lint && pnpm typecheck` for frontend shells
 3. `ava`, `ava --headless`, and `ava serve` runtime modes
 
-`pre-commit` and `pre-push` both route through the canonical repo-owned entrypoint `scripts/dev/git-hooks.sh`. `pre-commit` is staged-file-only (Rust staged files get `rustfmt --check`; frontend staged files get `biome`/`oxlint`), and `pre-push` is path-aware rather than blindly running the Rust gate for every push.
+`pre-commit` and `pre-push` both route through the canonical repo-owned entrypoint `scripts/dev/git-hooks.sh`. `pre-commit` is staged-file-only (Rust staged files get `rustfmt --check`; frontend staged files get `biome`/`oxlint`), and `pre-push` is path-aware rather than blindly running the Rust gate for every push; touched high-risk Rust surfaces also trigger targeted compile smokes for workspace wiring, desktop/Tauri, `ava-web`, and `ava-config`.
 
 ## Resource-Throttled Variants
 

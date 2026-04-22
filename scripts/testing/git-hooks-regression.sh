@@ -184,7 +184,32 @@ fi
 exit 0
 EOF
 
-  chmod +x "$repo/bin/cargo" "$repo/bin/pnpm" "$repo/bin/rustfmt"
+  cat > "$repo/bin/lefthook" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [ -n "${AVA_TEST_HOOK_LOG:-}" ]; then
+  printf 'lefthook %s\n' "$*" >> "$AVA_TEST_HOOK_LOG"
+fi
+
+if [ "${1:-}" != 'run' ]; then
+  exit 0
+fi
+
+hook_name="${2:-}"
+shift 2 || true
+
+case "$hook_name" in
+  pre-commit|pre-push)
+    exec bash scripts/dev/git-hooks.sh "$hook_name" "$@"
+    ;;
+  *)
+    exit 0
+    ;;
+esac
+EOF
+
+  chmod +x "$repo/bin/cargo" "$repo/bin/pnpm" "$repo/bin/rustfmt" "$repo/bin/lefthook"
 }
 
 create_repo() {
@@ -199,6 +224,10 @@ create_repo() {
   git init -q "$repo"
   git -C "$repo" config user.name 'AVA Tests'
   git -C "$repo" config user.email 'ava-tests@example.com'
+  mkdir -p "$repo/.git/hooks"
+  cp "$repo_root/.git/hooks/pre-push" "$repo/.git/hooks/pre-push"
+  cp "$repo_root/.git/hooks/pre-commit" "$repo/.git/hooks/pre-commit"
+  chmod +x "$repo/.git/hooks/pre-push" "$repo/.git/hooks/pre-commit"
 
   printf '%s\n' "$repo"
 }
@@ -208,7 +237,7 @@ commit_all() {
   local message="$2"
 
   git -C "$repo" add -A
-  git -C "$repo" commit -q -m "$message"
+  LEFTHOOK=0 git -C "$repo" commit -q -m "$message"
 }
 
 assert_equal() {
@@ -249,6 +278,33 @@ EOF
   )
 }
 
+run_installed_hook() {
+  local repo="$1"
+  local stdin_payload="$2"
+  local hook_log="$repo/hook.log"
+
+  : > "$hook_log"
+
+  if [ -n "$stdin_payload" ]; then
+    (
+      cd "$repo"
+      export PATH="$repo/bin:$PATH"
+      export AVA_TEST_HOOK_LOG="$hook_log"
+      ./.git/hooks/pre-push <<EOF
+$stdin_payload
+EOF
+    )
+    return
+  fi
+
+  (
+    cd "$repo"
+    export PATH="$repo/bin:$PATH"
+    export AVA_TEST_HOOK_LOG="$hook_log"
+    ./.git/hooks/pre-push
+  )
+}
+
 test_delete_only_docs_uses_docs_policy_from_stdin() {
   local repo output base head stdin_payload
   repo="$(create_repo docs-delete)"
@@ -259,7 +315,7 @@ test_delete_only_docs_uses_docs_policy_from_stdin() {
   base="$(git -C "$repo" rev-parse HEAD)"
 
   git -C "$repo" rm -q docs/guide.md
-  git -C "$repo" commit -q -m 'delete docs file'
+  LEFTHOOK=0 git -C "$repo" commit -q -m 'delete docs file'
   head="$(git -C "$repo" rev-parse HEAD)"
   stdin_payload="refs/heads/topic $head refs/remotes/origin/topic $base"
 
@@ -281,7 +337,7 @@ test_dotgithub_contributing_changes_treated_as_docs_from_stdin() {
 
   printf '# AVA Contribution Policy\n\nUpdated contribution policy note.\n' > "$repo/.github/CONTRIBUTING.md"
   git -C "$repo" add .github/CONTRIBUTING.md
-  git -C "$repo" commit -q -m 'update .github contribution doc'
+  LEFTHOOK=0 git -C "$repo" commit -q -m 'update .github contribution doc'
   head="$(git -C "$repo" rev-parse HEAD)"
   stdin_payload="refs/heads/topic $head refs/remotes/origin/topic $base"
 
@@ -303,7 +359,7 @@ test_dotgithub_pull_request_template_changes_treated_as_docs_from_stdin() {
 
   printf '# PR template\n\nUpdated instructions.\n' > "$repo/.github/pull_request_template.md"
   git -C "$repo" add .github/pull_request_template.md
-  git -C "$repo" commit -q -m 'update PR template'
+  LEFTHOOK=0 git -C "$repo" commit -q -m 'update PR template'
   head="$(git -C "$repo" rev-parse HEAD)"
   stdin_payload="refs/heads/topic $head refs/remotes/origin/topic $base"
 
@@ -324,7 +380,7 @@ test_delete_only_frontend_runs_frontend_gate_from_stdin() {
   base="$(git -C "$repo" rev-parse HEAD)"
 
   git -C "$repo" rm -q src/app.ts
-  git -C "$repo" commit -q -m 'delete frontend file'
+  LEFTHOOK=0 git -C "$repo" commit -q -m 'delete frontend file'
   head="$(git -C "$repo" rev-parse HEAD)"
   stdin_payload="refs/heads/topic $head refs/remotes/origin/topic $base"
 
@@ -346,7 +402,7 @@ test_delete_only_rust_runs_rust_gate_from_stdin() {
   base="$(git -C "$repo" rev-parse HEAD)"
 
   git -C "$repo" rm -q crates/demo/src/lib.rs
-  git -C "$repo" commit -q -m 'delete rust file'
+  LEFTHOOK=0 git -C "$repo" commit -q -m 'delete rust file'
   head="$(git -C "$repo" rev-parse HEAD)"
   stdin_payload="refs/heads/topic $head refs/remotes/origin/topic $base"
 
@@ -370,7 +426,7 @@ test_pre_push_falls_back_to_inferred_range_without_stdin() {
   git -C "$repo" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/master
 
   git -C "$repo" rm -q src/app.ts
-  git -C "$repo" commit -q -m 'delete frontend file'
+  LEFTHOOK=0 git -C "$repo" commit -q -m 'delete frontend file'
 
   output="$(run_hook "$repo" '')"
 
@@ -421,6 +477,111 @@ test_plugin_typescript_triggers_frontend_gate() {
   assert_contains "$output" '[hooks] pnpm typecheck' 'plugin TypeScript should run frontend typecheck'
   assert_contains "$output" '[hooks] pnpm lint' 'plugin TypeScript should run frontend lint'
   assert_not_contains "$output" '[hooks] cargo fmt --all --check' 'plugin TypeScript should not trigger rust gate by itself'
+}
+
+test_workspace_manifest_triggers_workspace_compile_smoke() {
+  local repo output base head stdin_payload
+  repo="$(create_repo workspace-manifest)"
+
+  printf '[workspace]\nmembers = []\n' > "$repo/Cargo.toml"
+  commit_all "$repo" 'add workspace manifest'
+  base="$(git -C "$repo" rev-parse HEAD)"
+
+  printf '[workspace]\nmembers = []\nresolver = "2"\n' > "$repo/Cargo.toml"
+  git -C "$repo" add Cargo.toml
+  LEFTHOOK=0 git -C "$repo" commit -q -m 'update workspace manifest'
+  head="$(git -C "$repo" rev-parse HEAD)"
+  stdin_payload="refs/heads/topic $head refs/remotes/origin/topic $base"
+
+  output="$(run_hook "$repo" "$stdin_payload")"
+
+  assert_contains "$output" 'workspace wiring changes detected' 'workspace manifest should trigger workspace compile smoke'
+  assert_contains "$output" '[hooks] cargo check --workspace --all-targets' 'workspace manifest should run workspace compile smoke'
+}
+
+test_tauri_changes_trigger_tauri_compile_smoke() {
+  local repo output base head stdin_payload
+  repo="$(create_repo tauri-compile)"
+
+  mkdir -p "$repo/src-tauri/src"
+  printf 'pub fn desktop() {}\n' > "$repo/src-tauri/src/lib.rs"
+  commit_all "$repo" 'add tauri source'
+  base="$(git -C "$repo" rev-parse HEAD)"
+
+  printf 'pub fn desktop() { println!("hi"); }\n' > "$repo/src-tauri/src/lib.rs"
+  git -C "$repo" add src-tauri/src/lib.rs
+  LEFTHOOK=0 git -C "$repo" commit -q -m 'update tauri source'
+  head="$(git -C "$repo" rev-parse HEAD)"
+  stdin_payload="refs/heads/topic $head refs/remotes/origin/topic $base"
+
+  output="$(run_hook "$repo" "$stdin_payload")"
+
+  assert_contains "$output" 'desktop/Tauri changes detected' 'tauri path should trigger desktop compile smoke'
+  assert_contains "$output" '[hooks] cargo check --manifest-path src-tauri/Cargo.toml --lib' 'tauri path should run desktop compile smoke'
+}
+
+test_ava_web_changes_trigger_web_compile_smoke() {
+  local repo output base head stdin_payload
+  repo="$(create_repo ava-web-compile)"
+
+  mkdir -p "$repo/crates/ava-web/src"
+  printf 'pub fn web() {}\n' > "$repo/crates/ava-web/src/lib.rs"
+  commit_all "$repo" 'add ava-web source'
+  base="$(git -C "$repo" rev-parse HEAD)"
+
+  printf 'pub fn web() { println!("hi"); }\n' > "$repo/crates/ava-web/src/lib.rs"
+  git -C "$repo" add crates/ava-web/src/lib.rs
+  LEFTHOOK=0 git -C "$repo" commit -q -m 'update ava-web source'
+  head="$(git -C "$repo" rev-parse HEAD)"
+  stdin_payload="refs/heads/topic $head refs/remotes/origin/topic $base"
+
+  output="$(run_hook "$repo" "$stdin_payload")"
+
+  assert_contains "$output" 'ava-web changes detected' 'ava-web path should trigger web compile smoke'
+  assert_contains "$output" '[hooks] cargo check -p ava-web' 'ava-web path should run web compile smoke'
+}
+
+test_ava_config_changes_trigger_config_compile_smoke() {
+  local repo output base head stdin_payload
+  repo="$(create_repo ava-config-compile)"
+
+  mkdir -p "$repo/crates/ava-config/src"
+  printf 'pub fn config() {}\n' > "$repo/crates/ava-config/src/lib.rs"
+  commit_all "$repo" 'add ava-config source'
+  base="$(git -C "$repo" rev-parse HEAD)"
+
+  printf 'pub fn config() { println!("hi"); }\n' > "$repo/crates/ava-config/src/lib.rs"
+  git -C "$repo" add crates/ava-config/src/lib.rs
+  LEFTHOOK=0 git -C "$repo" commit -q -m 'update ava-config source'
+  head="$(git -C "$repo" rev-parse HEAD)"
+  stdin_payload="refs/heads/topic $head refs/remotes/origin/topic $base"
+
+  output="$(run_hook "$repo" "$stdin_payload")"
+
+  assert_contains "$output" 'ava-config changes detected' 'ava-config path should trigger config compile smoke'
+  assert_contains "$output" '[hooks] cargo check -p ava-config' 'ava-config path should run config compile smoke'
+}
+
+test_installed_pre_push_wrapper_invokes_lefthook_and_forwards_stdin() {
+  local repo output base head stdin_payload hook_log
+  repo="$(create_repo lefthook-wrapper)"
+  hook_log="$repo/hook.log"
+
+  mkdir -p "$repo/src"
+  printf 'export const value = 1\n' > "$repo/src/app.ts"
+  commit_all "$repo" 'add frontend file'
+  base="$(git -C "$repo" rev-parse HEAD)"
+
+  printf 'export const value = 2\n' > "$repo/src/app.ts"
+  git -C "$repo" add src/app.ts
+  LEFTHOOK=0 git -C "$repo" commit -q -m 'update frontend file'
+  head="$(git -C "$repo" rev-parse HEAD)"
+  stdin_payload="refs/heads/topic $head refs/remotes/origin/topic $base"
+
+  output="$(run_installed_hook "$repo" "$stdin_payload")"
+
+  assert_contains "$output" 'frontend-sensitive changes detected' 'installed wrapper should still reach pre-push classification'
+  assert_contains "$(<"$hook_log")" 'lefthook run pre-push' 'installed wrapper should invoke lefthook'
 }
 
 test_pre_commit_rust_is_file_scoped() {
@@ -527,22 +688,23 @@ test_pre_commit_keeps_partial_frontend_stage_intact() {
   repo="$(create_repo pre-commit-frontend-partial)"
   hook_log="$repo/hook.log"
 
-  cat > "$repo/demo.ts" <<'EOF'
+  mkdir -p "$repo/src"
+  cat > "$repo/src/demo.ts" <<'EOF'
 export const value = "base"
 EOF
   commit_all "$repo" 'add frontend file'
 
-  cat > "$repo/demo.ts" <<'EOF'
+  cat > "$repo/src/demo.ts" <<'EOF'
 export const value = "stage-me"
 
 export const helper = "keep-unstaged"
 EOF
 
   cat > "$repo/partial.patch" <<'EOF'
-diff --git a/demo.ts b/demo.ts
+diff --git a/src/demo.ts b/src/demo.ts
 index 9ca7fe3..888793f 100644
---- a/demo.ts
-+++ b/demo.ts
+--- a/src/demo.ts
++++ b/src/demo.ts
 @@ -1 +1 @@
 -export const value = "base"
 +export const value = "stage-me"
@@ -550,8 +712,8 @@ EOF
 
   git -C "$repo" apply --cached partial.patch
 
-  before_cached="$(git -C "$repo" diff --cached -- demo.ts)"
-  before_worktree="$(git -C "$repo" diff -- demo.ts)"
+  before_cached="$(git -C "$repo" diff --cached -- src/demo.ts)"
+  before_worktree="$(git -C "$repo" diff -- src/demo.ts)"
   : > "$hook_log"
   output="$(
     cd "$repo"
@@ -560,8 +722,8 @@ EOF
     export AVA_PNPM_FAIL_IF_CONTAINS='keep-unstaged'
     bash scripts/dev/git-hooks.sh pre-commit
   )"
-  after_cached="$(git -C "$repo" diff --cached -- demo.ts)"
-  after_worktree="$(git -C "$repo" diff -- demo.ts)"
+  after_cached="$(git -C "$repo" diff --cached -- src/demo.ts)"
+  after_worktree="$(git -C "$repo" diff -- src/demo.ts)"
 
   assert_contains "$output" 'biome check on 1 staged frontend file(s)' 'frontend pre-commit should use non-mutating biome check'
   assert_not_contains "$output" '--write' 'frontend pre-commit should not use write mode'
@@ -580,6 +742,11 @@ test_delete_only_rust_runs_rust_gate_from_stdin
 test_pre_push_falls_back_to_inferred_range_without_stdin
 test_runtime_markdown_inside_crate_triggers_rust_gate
 test_plugin_typescript_triggers_frontend_gate
+test_workspace_manifest_triggers_workspace_compile_smoke
+test_tauri_changes_trigger_tauri_compile_smoke
+test_ava_web_changes_trigger_web_compile_smoke
+test_ava_config_changes_trigger_config_compile_smoke
+test_installed_pre_push_wrapper_invokes_lefthook_and_forwards_stdin
 test_pre_commit_rust_is_file_scoped
 test_pre_commit_keeps_partial_rust_stage_intact
 test_pre_commit_keeps_partial_frontend_stage_intact

@@ -127,18 +127,6 @@ pub struct CliArgs {
     #[arg(long)]
     pub task_filter: Option<String>,
 
-    /// Run harnessed-pair benchmark (SOTA director + fast worker)
-    #[arg(long)]
-    pub harness: bool,
-
-    /// Director model spec for harness benchmark (e.g. "openrouter:anthropic/claude-opus-4.6")
-    #[arg(long)]
-    pub director: Option<String>,
-
-    /// Worker model spec for harness benchmark (e.g. "inception:mercury-2")
-    #[arg(long)]
-    pub worker: Option<String>,
-
     /// Import Aider Polyglot benchmark tasks from a local repo path
     #[arg(long)]
     pub import_polyglot: Option<String>,
@@ -229,7 +217,6 @@ impl CliArgs {
             || self.watch
             || self.voice
             || self.benchmark
-            || self.harness
             || !self.image.is_empty()
             || !self.follow_up.is_empty()
             || !self.later.is_empty()
@@ -326,9 +313,6 @@ mod tests {
             suite: "all".to_string(),
             language: None,
             task_filter: None,
-            harness: false,
-            director: None,
-            worker: None,
             import_polyglot: None,
             prompt_family: None,
             prompt_variant: None,

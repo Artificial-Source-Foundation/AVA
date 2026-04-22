@@ -261,6 +261,17 @@ pub struct CompactedMessagePreview {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum SubAgentLiveEvent {
+    Started { session_id: String },
+    Token(String),
+    Thinking(String),
+    ToolCall(ToolCall),
+    ToolResult(ToolResult),
+    Checkpoint(Session),
+    Error(String),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum AgentEvent {
     Token(String),
     /// Thinking/reasoning content from the model (displayed separately in UI).
@@ -318,6 +329,13 @@ pub enum AgentEvent {
         server_name: String,
         /// Number of tools now registered from that server.
         tool_count: usize,
+    },
+    /// Streaming child event for an in-flight native sub-agent.
+    SubAgentUpdate {
+        /// The parent `subagent` tool call ID for this delegated run.
+        call_id: String,
+        /// The child event payload to merge into the transcript view.
+        event: SubAgentLiveEvent,
     },
     /// A sub-agent has completed its run. Contains the full conversation for
     /// display/storage by the TUI.
@@ -1075,6 +1093,16 @@ impl AgentLoop {
     #[instrument(skip(self), fields(model = %self.config.model))]
     pub async fn run(&mut self, goal: &str) -> ava_types::Result<Session> {
         self.run_unified(goal, None).await
+    }
+
+    /// Execution with an explicit event sink supplied by the caller.
+    #[instrument(skip(self, event_tx), fields(model = %self.config.model))]
+    pub async fn run_with_event_tx(
+        &mut self,
+        goal: &str,
+        event_tx: mpsc::UnboundedSender<AgentEvent>,
+    ) -> ava_types::Result<Session> {
+        self.run_unified(goal, Some(event_tx)).await
     }
 
     /// Streaming execution. Delegates to the unified engine with an event channel,

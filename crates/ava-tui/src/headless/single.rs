@@ -390,6 +390,11 @@ pub(super) async fn run_single_agent(cli: CliArgs, goal: &str) -> Result<()> {
                 } => {
                     serde_json::json!({"type": "sub_agent_complete", "session_id": session_id, "description": description, "message_count": messages.len()})
                 }
+                AgentEvent::SubAgentUpdate { call_id, event } => serde_json::json!({
+                    "type": "sub_agent_update",
+                    "call_id": call_id,
+                    "event": event,
+                }),
                 AgentEvent::DiffPreview {
                     file,
                     diff_text,
@@ -489,6 +494,7 @@ pub(super) async fn run_single_agent(cli: CliArgs, goal: &str) -> Result<()> {
                 AgentEvent::ToolStats(_)
                 | AgentEvent::TokenUsage { .. }
                 | AgentEvent::SubAgentComplete { .. }
+                | AgentEvent::SubAgentUpdate { .. }
                 | AgentEvent::MCPToolsChanged { .. } => {}
                 AgentEvent::DiffPreview {
                     file,

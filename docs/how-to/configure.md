@@ -7,11 +7,11 @@ updated: "2026-04-21"
 
 # How-to: Configure AVA
 
-Use this page when you need to connect a model provider and understand where AVA reads local settings.
+Use this page when you need to connect a model provider and understand the few local settings most users actually need.
 
 See also: [Reference: Providers and auth](../reference/providers-and-auth.md), [Reference: Credential storage](../reference/credential-storage.md), [How-to: Use local models with Ollama](ollama-local-models.md)
 
-For startup/delegation profile setup, use [How-to: Configure primary agents and subagents](agents.md).
+For startup/delegation profile setup, use [How-to: Configure primary agents and subagents](agents.md). That is advanced setup, not required for normal AVA use.
 
 ## Choose What You Need
 
@@ -19,7 +19,7 @@ For startup/delegation profile setup, use [How-to: Configure primary agents and 
 |---|---|
 | Add a provider login | [Add credentials](#add-credentials) |
 | See what AVA currently recognizes | [Check the configured providers](#check-the-configured-providers) |
-| Understand config files under the user-global config root | [Know where AVA reads configuration](#know-where-ava-reads-configuration) |
+| Understand the main config files AVA uses | [Know where AVA reads configuration](#know-where-ava-reads-configuration) |
 | Prefer environment variables | [Use environment variables when needed](#use-environment-variables-when-needed) |
 | Understand project-local trust behavior | [Trust project-local configuration carefully](#trust-project-local-configuration-carefully) |
 
@@ -55,7 +55,7 @@ Canonical user-global config root is `$XDG_CONFIG_HOME/ava` (typically `~/.confi
 
 Legacy `~/.ava` is still read for compatibility on existing installs.
 
-The main files under that user-global root are:
+The main files most users care about under that user-global root are:
 
 ```text
 <config-root>/
@@ -67,7 +67,7 @@ The main files under that user-global root are:
 └── AGENTS.md
 ```
 
-Use [Reference: Configuration](../reference/configuration.md) if you need the exact precedence rules and path details.
+Use [Reference: Configuration](../reference/configuration.md) only if you need the exact precedence rules and full path details.
 
 ## Use environment variables when needed
 
@@ -75,7 +75,7 @@ AVA checks provider-specific environment variables before falling back to `<conf
 
 ## Trust project-local configuration carefully
 
-The `--trust` flag enables project-local surfaces such as `.ava/mcp.json`, hooks, tools, commands, skills, rules, and project instruction files. For the exact behavior, use [Reference: Commands](../reference/commands.md) and [Reference: Configuration](../reference/configuration.md).
+The `--trust` flag enables project-local surfaces such as `.ava/mcp.json`, hooks, tools, commands, skills, rules, and project instruction files. Most users can ignore this until they want repo-local customization.
 
 ## Verify the full setup
 

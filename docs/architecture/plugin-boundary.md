@@ -61,7 +61,7 @@ Relevant files:
 
 Checklist:
 
-1. Inventory all direct `ava-hq` dependencies in core crates.
+1. Inventory all direct HQ dependencies in core crates.
 2. Define the replacement plugin-facing interfaces.
 3. Remove direct HQ deps from core crates once the host seams exist.
 
@@ -72,8 +72,8 @@ Exit criteria:
 
 Progress:
 
-1. `src-tauri` no longer depends on `ava-hq` directly.
-2. `ava-tui` now gates its last direct `ava-hq` dependency behind the `benchmark` feature, so default TUI/CLI builds omit HQ.
+1. `src-tauri` no longer depends on HQ directly.
+2. The old benchmark-only HQ linkage in `ava-tui` has been removed, so core builds no longer reference HQ at all.
 
 ## Phase 3: Move HQ Contracts Out Of Core
 
@@ -113,7 +113,7 @@ Core problem:
 Relevant files:
 
 1. `crates/ava-config/src/lib.rs`
-2. `crates/ava-hq/src/roles.rs`
+2. future plugin-owned HQ role storage
 3. `crates/ava-db/src/lib.rs`
 4. `crates/ava-db/src/migrations/003_hq.sql`
 5. `crates/ava-db/src/migrations/004_hq_agent_costs.sql`
@@ -131,7 +131,7 @@ Progress:
 
 1. The dead `config.hq` section has been removed from `ava-config`, so core config no longer carries an HQ-specific top-level section.
 2. Core desktop settings sync for HQ overrides is already gone too, so core no longer pushes HQ settings back into Rust config.
-3. The old `hq_roles` module has now moved into `ava-hq`, so core config no longer owns HQ role-profile logic at all.
+3. Core config no longer owns HQ role-profile logic at all; any future return must stay plugin-owned.
 4. The dead HQ Rust model/repository layer has been removed from `ava-db`; only the historical SQL migrations remain in core for database compatibility.
 
 Exit criteria:
@@ -208,8 +208,7 @@ Exit criteria:
 Progress:
 
 1. Core CLI no longer ships `ava hq ...`, core web mode no longer registers `/api/hq/*`, and core Tauri startup no longer registers HQ IPC commands.
-2. A first development HQ plugin artifact now exists under `plugins/examples/ava-hq/`: it re-registers HQ-owned commands, routes, events, and mount metadata through the plugin host seam via the `ava-hq-plugin` binary.
-3. The remaining work in this phase is to move deeper HQ runtime/UI/storage behavior behind that plugin-owned registration path instead of only the first seam artifacts.
+2. The next HQ return, if it happens, should start from a fresh plugin-owned implementation instead of reviving old core crate wiring.
 
 ## Risks
 

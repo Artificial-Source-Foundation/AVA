@@ -1,6 +1,6 @@
 //! Backend projection helpers on top of shared event contracts.
 
-pub use ava_control_plane::events::*;
+use ava_control_plane::events::CanonicalEventKind;
 
 pub fn required_backend_event_kind(
     event: &crate::agent_loop::AgentEvent,

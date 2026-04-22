@@ -47,10 +47,10 @@ Supported v1 capability types:
 2. Python SDK: `plugins/sdk-python/`
 3. Example plugins: `plugins/examples/`
 4. Core runtime: `crates/ava-plugin/`
-5. HQ migration example: `plugins/examples/ava-hq/` backed by `crates/ava-hq/src/bin/ava-hq-plugin.rs`
+5. Future plugin migration work should live outside core runtime crates and register only through the plugin host seam
 
 ## Product Direction
 
-The plugin seam is intentionally narrow and namespaced. It is the path for moving large optional systems, such as HQ, out of core.
+The plugin seam is intentionally narrow and namespaced. It is the path for optional advanced systems that should stay outside the default core product.
 
 For the active migration checklist, see [`../architecture/plugin-boundary.md`](../architecture/plugin-boundary.md).

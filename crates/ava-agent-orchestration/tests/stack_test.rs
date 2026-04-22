@@ -5,9 +5,8 @@ use std::{env, sync::OnceLock};
 
 use async_trait::async_trait;
 use ava_agent::message_queue::MessageQueue;
-use ava_agent_orchestration::stack::{
-    AgentRunContext, AgentStack, AgentStackConfig, SubagentConfigScope,
-};
+use ava_agent::run_context::AgentRunContext;
+use ava_agent_orchestration::stack::{AgentStack, AgentStackConfig, SubagentConfigScope};
 use ava_config::{Config, CredentialStore, ProviderCredential, RoutingMode};
 use ava_llm::provider::LLMProvider;
 use ava_llm::provider::LLMResponse;
@@ -652,6 +651,33 @@ model = "openai/gpt-5.3-codex"
     let defs = stack.effective_subagents().await;
     let review = defs.iter().find(|def| def.id == "review").expect("review");
     assert_eq!(review.model.as_deref(), Some("openai/gpt-5.3-codex"));
+}
+
+#[tokio::test]
+async fn test_effective_subagents_omits_disabled_builtin_entries() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::write(
+        dir.path().join("subagents.toml"),
+        r#"
+[subagents.scout]
+enabled = false
+"#,
+    )
+    .unwrap();
+
+    let (stack, _question_rx, _approval_rx, _plan_rx) = AgentStack::new(AgentStackConfig {
+        data_dir: dir.path().to_path_buf(),
+        config_dir: Some(dir.path().to_path_buf()),
+        yolo: true,
+        injected_provider: Some(Arc::new(MockProvider::new("test", vec![]))),
+        ..Default::default()
+    })
+    .await
+    .expect("stack init should succeed");
+
+    let defs = stack.effective_subagents().await;
+    assert!(!defs.iter().any(|def| def.id == "scout"));
+    assert!(defs.iter().any(|def| def.id == "review"));
 }
 
 #[tokio::test]

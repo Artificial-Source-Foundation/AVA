@@ -2,12 +2,14 @@
 title: "Providers And Auth"
 description: "Canonical provider IDs, aliases, base URLs, and authentication behavior in AVA."
 order: 2
-updated: "2026-04-21"
+updated: "2026-04-22"
 ---
 
 # Providers And Auth
 
-This page is the retrieval-first reference for AVA provider IDs, aliases, credential lookup, and authentication surfaces.
+This page is the factual reference for AVA provider IDs, credential lookup, and authentication surfaces.
+
+For normal setup, use `ava auth login <provider>` and come here only when you need exact IDs or lookup rules.
 
 ## Canonical Providers
 
@@ -38,11 +40,15 @@ These aliases are normalized to the canonical IDs above:
 
 ## Provider Routing Notes
 
+These notes are implementation-level reference. Most users can skip this section.
+
 1. `anthropic`, `openai`, `openrouter`, `copilot`, `gemini`, `inception`, and `ollama` use native provider modules.
 2. `alibaba`, `kimi`, and `minimax` use the Anthropic-compatible adapter with provider-specific base URLs.
 3. `zai` uses the OpenAI-compatible adapter with provider-specific thinking-format handling.
 
 ## Default Base URLs
+
+These are reference values, not part of normal day-to-day setup.
 
 1. `anthropic` -> `https://api.anthropic.com`
 2. `openai` -> `https://api.openai.com`
@@ -88,6 +94,8 @@ Credential entries can store both API-key and OAuth fields.
 3. If an OAuth token is expired and a refresh token is present, AVA can attempt refresh flows before falling back.
 4. OpenAI exposes three user-facing auth choices in the TUI: ChatGPT browser login, ChatGPT headless login, and manual API key entry.
 5. `ollama` is treated as a local endpoint and can be considered configured with only a base URL.
+6. In the TUI provider-connect modal, browser-login and device-code screens expose `C` to copy the full fallback URL; the browser-login screen also accepts `Enter` to retry opening the browser.
+7. On Linux, those TUI auth-URL copy actions now keep the clipboard handle alive after the copy so clipboard ownership is not dropped immediately during long-running auth flows, and AVA refreshes the cached clipboard handle once if a long-lived session hits a stale clipboard backend.
 
 For an Ollama-only, task-oriented setup path, use [How-to: Use local models with Ollama](../how-to/ollama-local-models.md).
 
@@ -107,6 +115,8 @@ On the CLI:
 4. `ava auth test <provider>`
 
 ## Files And Code Paths
+
+This section is maintainer reference, not normal user guidance.
 
 1. Provider normalization and routing: `crates/ava-llm/src/providers/mod.rs`
 2. Credential lookup and env overrides: `crates/ava-config/src/credentials.rs`

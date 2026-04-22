@@ -23,7 +23,7 @@ Use reference pages when you want stable facts, command surfaces, config rules, 
 | Which commands and flags exist | [Commands](commands.md) |
 | How primary-agent and subagent profiles are configured | [How-to: Configure primary agents and subagents](../how-to/agents.md) |
 | How credentials are stored | [Credential storage](credential-storage.md) |
-| How the feature-gated `ava serve` backend works | [Web API surface](web-api.md) |
+| How the feature-gated `ava serve` backend works (advanced) | [Web API surface](web-api.md) |
 
 ## Documents
 
@@ -34,9 +34,9 @@ Use reference pages when you want stable facts, command surfaces, config rules, 
 5. [Install and release paths](install-and-release-paths.md) - current CLI binary/source install and release automation map
 6. [Providers and auth](providers-and-auth.md) - provider IDs, aliases, auth flows, and env vars
 7. [Commands](commands.md) - slash commands, CLI subcommands, and key flags
-8. [How-to: Configure primary agents and subagents](../how-to/agents.md) - practical setup for startup and delegated agent profiles
+8. [How-to: Configure primary agents and subagents](../how-to/agents.md) - advanced setup for startup and delegated agent profiles
 9. [Credential storage](credential-storage.md) - where credentials live and the recommended security posture
-10. [Web API surface](web-api.md) - feature-gated implementation reference for `ava serve`
+10. [Web API surface](web-api.md) - advanced implementation reference for `ava serve`
 
 ## Use This Section For
 
@@ -58,7 +58,7 @@ User-facing reference:
 
 Implementation reference:
 
-1. `web-api.md` - feature-gated `ava serve` backend surface for local web development and integration work
+1. `web-api.md` - advanced, feature-gated `ava serve` backend surface for local web development and integration work
 
 For task-driven CI/unattended execution steps, use [How-to: Run AVA in CI/headless automation](../how-to/ci-headless-automation.md).
 

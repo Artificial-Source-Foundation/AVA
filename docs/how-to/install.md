@@ -14,6 +14,8 @@ AVA has two user-facing products:
 1. `ava` CLI for terminal use: TUI by default, headless with `--headless`
 2. AVA Desktop for the native Tauri app
 
+Most users should stop there. Web mode is advanced and feature-gated.
+
 See also: [Tutorial: First run](../tutorials/first-run.md), [How-to: Download AVA Desktop](download-desktop.md), [Reference: Install and release paths](../reference/install-and-release-paths.md)
 
 ## Choose your path
@@ -25,7 +27,7 @@ See also: [Tutorial: First run](../tutorials/first-run.md), [How-to: Download AV
 | Build the CLI from source | `cargo build --manifest-path /path/to/AVA/Cargo.toml --bin ava` | Works from any directory; add `--release` for optimized builds |
 | Install the CLI from source onto your `PATH` | `cargo install --path /path/to/AVA/crates/ava-tui --bin ava` | Works from any directory and installs `ava` globally |
 | Use the desktop app | Desktop download/build path | Desktop bundles are not published on every release |
-| Use `ava serve` web mode | Web-enabled source build | Requires the `web` feature |
+| Use `ava serve` web mode (advanced) | Web-enabled source build | Requires the `web` feature |
 
 ## Fast CLI install on Linux/macOS
 
@@ -95,9 +97,11 @@ That page covers:
 2. source builds when a release does not include desktop bundles
 3. platform notes for the current desktop path
 
-## Install with web support
+## Install with web support (advanced)
 
-Web mode is not included in the default CLI build. Build or install with the `web` feature first:
+Web mode is not included in the default CLI build. Build or install with the `web` feature first.
+
+Most users do not need this path.
 
 ```bash
 CARGO_TARGET_DIR=/path/to/build cargo install --path /path/to/AVA/crates/ava-tui --bin ava --features web --force

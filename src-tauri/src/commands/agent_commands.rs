@@ -9,11 +9,11 @@
 //! 5. The permission middleware receives it and continues or blocks the tool
 
 use ava_agent::control_plane::sessions::run_context_from_session as shared_run_context_from_session;
-use ava_agent_orchestration::stack::AgentRunContext;
+use ava_agent::run_context::AgentRunContext;
 use ava_control_plane::commands::{queue_message_tier, ControlPlaneCommand};
 use ava_control_plane::interactive::{
-    InteractiveRequestKind, InteractiveRequestPhase, InteractiveRequestStore,
-    ResolveInteractiveRequestError, TerminalInteractiveRequest,
+    InteractiveRequestKind, InteractiveRequestStore, ResolveInteractiveRequestError,
+    TerminalInteractiveRequest,
 };
 use ava_control_plane::orchestration::{
     clear_preserved_deferred, is_inactive_scoped_status_lookup, restore_in_flight_deferred,
@@ -292,6 +292,51 @@ pub struct SubmitGoalResult {
     pub success: bool,
     pub turns: usize,
     pub session_id: String,
+}
+
+fn accepted_submit_goal_result(session_id: Uuid) -> SubmitGoalResult {
+    SubmitGoalResult {
+        success: true,
+        turns: 0,
+        session_id: session_id.to_string(),
+    }
+}
+
+fn accept_and_spawn_desktop_run<F>(session_id: Uuid, spawn: F) -> SubmitGoalResult
+where
+    F: FnOnce(),
+{
+    spawn();
+    accepted_submit_goal_result(session_id)
+}
+
+fn emit_post_accept_desktop_run_error_with<F>(
+    run_id: &str,
+    session_id: Uuid,
+    error: String,
+    emit: F,
+) where
+    F: FnOnce(&str, &ava_agent::agent_loop::AgentEvent),
+{
+    tracing::warn!(
+        run_id = %run_id,
+        session_id = %session_id,
+        error = %error,
+        "desktop run failed after acceptance"
+    );
+    let event = ava_agent::agent_loop::AgentEvent::Error(error);
+    emit(run_id, &event);
+}
+
+fn emit_post_accept_desktop_run_error<R: tauri::Runtime>(
+    app: &AppHandle<R>,
+    run_id: &str,
+    session_id: Uuid,
+    error: String,
+) {
+    emit_post_accept_desktop_run_error_with(run_id, session_id, error, |event_run_id, event| {
+        emit_backend_event(app, event, Some(event_run_id));
+    });
 }
 
 /// Internal helper that runs the agent, streams events, tracks edits for undo,
@@ -581,8 +626,42 @@ async fn run_agent_inner(
     run_result
 }
 
-/// Submit a goal to the agent. Streams events via `agent-event` and returns
-/// when the agent completes or is cancelled.
+fn spawn_desktop_run(
+    goal: String,
+    max_turns: usize,
+    history: Vec<ava_types::Message>,
+    images: Vec<ava_types::ImageContent>,
+    session_id: Uuid,
+    run_id: String,
+    run: std::sync::Arc<crate::bridge::DesktopRunState>,
+    app: AppHandle,
+    bridge: DesktopBridge,
+    run_context: Option<AgentRunContext>,
+) {
+    tokio::spawn(async move {
+        let run_id_for_error = run_id.clone();
+        let run_outcome = run_agent_inner(
+            &goal,
+            max_turns,
+            history,
+            images,
+            session_id,
+            run_id,
+            run,
+            &app,
+            &bridge,
+            run_context,
+        )
+        .await;
+
+        if let Err(error) = run_outcome {
+            emit_post_accept_desktop_run_error(&app, &run_id_for_error, session_id, error);
+        }
+    });
+}
+
+/// Submit a goal to the agent. Returns an accepted run envelope immediately;
+/// lifecycle completion/error remains authoritative through streamed `agent-event` messages.
 #[tauri::command]
 pub async fn submit_goal(
     args: SubmitGoalArgs,
@@ -628,19 +707,20 @@ pub async fn submit_goal(
     let run_context = desktop_run_context_with_state(run_context, &run);
     drop(_startup_guard);
 
-    run_agent_inner(
-        &args.goal,
-        args.max_turns,
-        history,
-        images,
-        run_session.session_id,
-        run_id,
-        run,
-        &app,
-        &bridge,
-        Some(run_context),
-    )
-    .await
+    Ok(accept_and_spawn_desktop_run(run_session.session_id, || {
+        spawn_desktop_run(
+            args.goal,
+            args.max_turns,
+            history,
+            images,
+            run_session.session_id,
+            run_id,
+            run,
+            app,
+            bridge.inner().clone(),
+            Some(run_context),
+        );
+    }))
 }
 
 #[derive(Deserialize, Default)]
@@ -1254,19 +1334,20 @@ pub async fn retry_last_message(
     let run_context = desktop_run_context_with_state(run_context, &run);
     drop(_startup_guard);
 
-    run_agent_inner(
-        &goal,
-        0,
-        history,
-        images,
-        session_id,
-        run_id,
-        run,
-        &app,
-        &bridge,
-        Some(run_context),
-    )
-    .await
+    Ok(accept_and_spawn_desktop_run(session_id, || {
+        spawn_desktop_run(
+            goal,
+            0,
+            history,
+            images,
+            session_id,
+            run_id,
+            run,
+            app,
+            bridge.inner().clone(),
+            Some(run_context),
+        );
+    }))
 }
 
 #[derive(Deserialize)]
@@ -1325,19 +1406,20 @@ pub async fn edit_and_resend(
     let run_context = desktop_run_context_with_state(run_context, &run);
     drop(_startup_guard);
 
-    run_agent_inner(
-        &goal,
-        0,
-        history,
-        images,
-        session_id,
-        run_id,
-        run,
-        &app,
-        &bridge,
-        Some(run_context),
-    )
-    .await
+    Ok(accept_and_spawn_desktop_run(session_id, || {
+        spawn_desktop_run(
+            goal,
+            0,
+            history,
+            images,
+            session_id,
+            run_id,
+            run,
+            app,
+            bridge.inner().clone(),
+            Some(run_context),
+        );
+    }))
 }
 
 /// Regenerate the last assistant response.
@@ -1381,19 +1463,20 @@ pub async fn regenerate_response(
     let run_context = desktop_run_context_with_state(run_context, &run);
     drop(_startup_guard);
 
-    run_agent_inner(
-        &goal,
-        0,
-        history,
-        images,
-        session_id,
-        run_id,
-        run,
-        &app,
-        &bridge,
-        Some(run_context),
-    )
-    .await
+    Ok(accept_and_spawn_desktop_run(session_id, || {
+        spawn_desktop_run(
+            goal,
+            0,
+            history,
+            images,
+            session_id,
+            run_id,
+            run,
+            app,
+            bridge.inner().clone(),
+            Some(run_context),
+        );
+    }))
 }
 
 #[derive(Serialize)]
@@ -1463,6 +1546,7 @@ pub async fn undo_last_edit(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Arc, Mutex};
 
     fn sample_image(label: &str) -> ava_types::ImageContent {
         ava_types::ImageContent::new(label, ava_types::ImageMediaType::Png)
@@ -1502,6 +1586,69 @@ mod tests {
             ensure_desktop_run_id(Some("desktop-run-existing".to_string())),
             "desktop-run-existing"
         );
+    }
+
+    #[test]
+    fn submit_goal_returns_immediate_accepted_envelope_shape() {
+        let session_id = Uuid::new_v4();
+
+        let accepted = accept_and_spawn_desktop_run(session_id, || {});
+
+        assert!(accepted.success);
+        assert_eq!(accepted.turns, 0);
+        assert_eq!(accepted.session_id, session_id.to_string());
+    }
+
+    #[test]
+    fn replay_commands_share_submit_accepted_envelope_semantics() {
+        let session_id = Uuid::new_v4();
+        let spawned = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let submit_spawned = spawned.clone();
+        let replay_spawned = spawned.clone();
+
+        // submit_goal and replay commands (retry/edit/regenerate) all use the
+        // same accepted-and-streaming envelope helper.
+        let submit_shape = accept_and_spawn_desktop_run(session_id, move || {
+            submit_spawned.fetch_add(1, Ordering::SeqCst);
+        });
+        let replay_shape = accept_and_spawn_desktop_run(session_id, move || {
+            replay_spawned.fetch_add(1, Ordering::SeqCst);
+        });
+
+        assert_eq!(submit_shape.success, replay_shape.success);
+        assert_eq!(submit_shape.turns, replay_shape.turns);
+        assert_eq!(submit_shape.session_id, replay_shape.session_id);
+        assert_eq!(spawned.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn post_accept_desktop_run_error_emits_correlated_error_event() {
+        let session_id = Uuid::new_v4();
+        let run_id = "desktop-run-correlation";
+        let error_text = "backend blew up";
+
+        let observed = Arc::new(Mutex::new(None::<(String, String)>));
+        let observed_clone = observed.clone();
+
+        emit_post_accept_desktop_run_error_with(
+            run_id,
+            session_id,
+            error_text.to_string(),
+            move |event_run_id, event| {
+                if let ava_agent::agent_loop::AgentEvent::Error(message) = event {
+                    *observed_clone.lock().expect("lock observed event") =
+                        Some((event_run_id.to_string(), message.clone()));
+                }
+            },
+        );
+
+        let captured = observed
+            .lock()
+            .expect("lock observed event")
+            .clone()
+            .expect("error emission should be captured");
+        assert_eq!(captured.0, run_id);
+        assert_eq!(captured.1, error_text);
     }
 
     fn sample_user_message(
@@ -1561,7 +1708,7 @@ mod tests {
 
         assert_eq!(
             timeout_reply.handle.phase,
-            InteractiveRequestPhase::TimedOut
+            ava_control_plane::interactive::InteractiveRequestPhase::TimedOut
         );
         assert!(store.current_request_id().await.is_none());
         match reply_rx.await.expect("timeout reply should arrive") {

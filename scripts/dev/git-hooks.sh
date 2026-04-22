@@ -32,6 +32,15 @@ run_rust_gate() {
   run_step "cargo nextest run -p ava-agent --test agent_loop --test reflection_loop -j 4 --status-level fail" \
     bash scripts/dev/run-rust-throttled.sh cargo nextest run -p ava-agent --test agent_loop --test reflection_loop -j 4 --status-level fail
 
+  run_step "cargo test -p ava-agent control_plane::tests::control_plane_contract_fixture_matches_current_wire_contract -- --exact" \
+    bash scripts/dev/run-rust-throttled.sh cargo test -p ava-agent control_plane::tests::control_plane_contract_fixture_matches_current_wire_contract -- --exact
+
+  run_step "cargo test -p ava-agent control_plane::sessions::tests::run_context_from_session_recovers_effective_run_settings -- --exact" \
+    bash scripts/dev/run-rust-throttled.sh cargo test -p ava-agent control_plane::sessions::tests::run_context_from_session_recovers_effective_run_settings -- --exact
+
+  run_step "cargo test -p ava-agent control_plane::sessions::tests::run_context_from_session_falls_back_to_routing_identity -- --exact" \
+    bash scripts/dev/run-rust-throttled.sh cargo test -p ava-agent control_plane::sessions::tests::run_context_from_session_falls_back_to_routing_identity -- --exact
+
   run_step "cargo nextest run -p ava-agent-orchestration --test stack_test --test e2e_test -j 4 --status-level fail" \
     bash scripts/dev/run-rust-throttled.sh cargo nextest run -p ava-agent-orchestration --test stack_test --test e2e_test -j 4 --status-level fail
 
@@ -47,6 +56,15 @@ run_rust_gate() {
   run_step "cargo test -p ava-web projected_backend_events_preserve_required_correlation_fields -- --exact" \
     bash scripts/dev/run-rust-throttled.sh cargo test -p ava-web projected_backend_events_preserve_required_correlation_fields -- --exact
 
+  run_step "cargo test -p ava-web retry_route_reuses_persisted_run_context_metadata -- --exact" \
+    bash scripts/dev/run-rust-throttled.sh cargo test -p ava-web retry_route_reuses_persisted_run_context_metadata -- --exact
+
+  run_step "cargo test -p ava-web edit_resend_route_reuses_persisted_run_context_metadata -- --exact" \
+    bash scripts/dev/run-rust-throttled.sh cargo test -p ava-web edit_resend_route_reuses_persisted_run_context_metadata -- --exact
+
+  run_step "cargo test -p ava-web regenerate_route_reuses_persisted_run_context_metadata -- --exact" \
+    bash scripts/dev/run-rust-throttled.sh cargo test -p ava-web regenerate_route_reuses_persisted_run_context_metadata -- --exact
+
   run_step "cargo test -p ava-tui foreground_required_control_plane_events_are_visible_in_tui -- --exact" \
     bash scripts/dev/run-rust-throttled.sh cargo test -p ava-tui foreground_required_control_plane_events_are_visible_in_tui -- --exact
 
@@ -59,6 +77,12 @@ run_rust_gate() {
   run_step "cargo test --manifest-path src-tauri/Cargo.toml desktop_control_plane_event_shapes_follow_shared_requirements -- --exact" \
     bash scripts/dev/run-rust-throttled.sh cargo test --manifest-path src-tauri/Cargo.toml desktop_control_plane_event_shapes_follow_shared_requirements -- --exact
 
+  run_step "cargo test --manifest-path src-tauri/Cargo.toml submit_goal_returns_immediate_accepted_envelope_shape -- --exact" \
+    bash scripts/dev/run-rust-throttled.sh cargo test --manifest-path src-tauri/Cargo.toml submit_goal_returns_immediate_accepted_envelope_shape -- --exact
+
+  run_step "cargo test --manifest-path src-tauri/Cargo.toml replay_commands_share_submit_accepted_envelope_semantics -- --exact" \
+    bash scripts/dev/run-rust-throttled.sh cargo test --manifest-path src-tauri/Cargo.toml replay_commands_share_submit_accepted_envelope_semantics -- --exact
+
   run_step "cargo test --manifest-path src-tauri/Cargo.toml take_matching_pending_reply_only_consumes_matching_request_ids -- --exact" \
     bash scripts/dev/run-rust-throttled.sh cargo test --manifest-path src-tauri/Cargo.toml take_matching_pending_reply_only_consumes_matching_request_ids -- --exact
 
@@ -67,6 +91,26 @@ run_rust_gate() {
 
   run_step "cargo nextest run -p ava-tools -p ava-review -j 4 --status-level fail" \
     bash scripts/dev/run-rust-throttled.sh cargo nextest run -p ava-tools -p ava-review -j 4 --status-level fail
+}
+
+run_workspace_compile_smoke() {
+  run_step "cargo check --workspace --all-targets" \
+    bash scripts/dev/run-rust-throttled.sh cargo check --workspace --all-targets
+}
+
+run_tauri_compile_smoke() {
+  run_step "cargo check --manifest-path src-tauri/Cargo.toml --lib" \
+    bash scripts/dev/run-rust-throttled.sh cargo check --manifest-path src-tauri/Cargo.toml --lib
+}
+
+run_web_compile_smoke() {
+  run_step "cargo check -p ava-web" \
+    bash scripts/dev/run-rust-throttled.sh cargo check -p ava-web
+}
+
+run_config_compile_smoke() {
+  run_step "cargo check -p ava-config" \
+    bash scripts/dev/run-rust-throttled.sh cargo check -p ava-config
 }
 
 run_frontend_gate() {
@@ -290,6 +334,46 @@ is_frontend_path() {
   return 1
 }
 
+is_workspace_rust_path() {
+  case "$1" in
+    Cargo.toml|Cargo.lock|rust-toolchain|rust-toolchain.toml|crates/*/Cargo.toml)
+      return 0
+      ;;
+  esac
+
+  return 1
+}
+
+is_tauri_path() {
+  case "$1" in
+    src-tauri/*)
+      return 0
+      ;;
+  esac
+
+  return 1
+}
+
+is_web_path() {
+  case "$1" in
+    crates/ava-web/*)
+      return 0
+      ;;
+  esac
+
+  return 1
+}
+
+is_config_path() {
+  case "$1" in
+    crates/ava-config/*)
+      return 0
+      ;;
+  esac
+
+  return 1
+}
+
 run_pre_commit() {
   collect_staged_files
 
@@ -366,6 +450,10 @@ run_pre_push() {
   docs_only=1
   needs_frontend=0
   needs_rust=0
+  needs_workspace_compile=0
+  needs_tauri_compile=0
+  needs_web_compile=0
+  needs_config_compile=0
 
   for file in "${push_files[@]}"; do
     if is_docs_path "$file"; then
@@ -380,6 +468,22 @@ run_pre_push() {
     fi
 
     needs_rust=1
+
+    if is_workspace_rust_path "$file"; then
+      needs_workspace_compile=1
+    fi
+
+    if is_tauri_path "$file"; then
+      needs_tauri_compile=1
+    fi
+
+    if is_web_path "$file"; then
+      needs_web_compile=1
+    fi
+
+    if is_config_path "$file"; then
+      needs_config_compile=1
+    fi
   done
 
   if [ "$docs_only" -eq 1 ]; then
@@ -395,6 +499,26 @@ run_pre_push() {
   if [ "$needs_rust" -eq 1 ]; then
     printf '[hooks] pre-push: Rust/general repo changes detected\n'
     run_rust_gate
+
+    if [ "$needs_workspace_compile" -eq 1 ]; then
+      printf '[hooks] pre-push: workspace wiring changes detected\n'
+      run_workspace_compile_smoke
+    fi
+
+    if [ "$needs_tauri_compile" -eq 1 ]; then
+      printf '[hooks] pre-push: desktop/Tauri changes detected\n'
+      run_tauri_compile_smoke
+    fi
+
+    if [ "$needs_web_compile" -eq 1 ]; then
+      printf '[hooks] pre-push: ava-web changes detected\n'
+      run_web_compile_smoke
+    fi
+
+    if [ "$needs_config_compile" -eq 1 ]; then
+      printf '[hooks] pre-push: ava-config changes detected\n'
+      run_config_compile_smoke
+    fi
   fi
 
   printf '[hooks] pre-push complete\n'

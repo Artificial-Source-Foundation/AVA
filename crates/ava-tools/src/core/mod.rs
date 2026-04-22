@@ -130,7 +130,8 @@ pub fn register_core_tools(registry: &mut ToolRegistry, platform: Arc<dyn Platfo
 
 /// Register the task tool with a spawner that can create sub-agent runs.
 pub fn register_task_tool(registry: &mut ToolRegistry, spawner: Arc<dyn task::TaskSpawner>) {
-    registry.register(task::TaskTool::new(spawner));
+    registry.register(task::TaskTool::new(spawner.clone()));
+    registry.register(task::BackgroundAgentTool::new(spawner));
 }
 
 /// Register todo_write and todo_read tools with shared state.

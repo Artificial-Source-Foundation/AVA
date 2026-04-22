@@ -6,7 +6,7 @@ use std::sync::Arc;
 use ava_llm::provider::LLMProvider;
 use ava_types::Session;
 
-use crate::system_prompt::BenchmarkPromptOverride;
+use ava_agent::system_prompt::BenchmarkPromptOverride;
 
 pub struct AgentStackConfig {
     pub data_dir: PathBuf,

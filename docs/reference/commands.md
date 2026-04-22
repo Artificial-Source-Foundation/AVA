@@ -9,7 +9,21 @@ updated: "2026-04-21"
 
 This page documents the user-facing command surfaces that exist today in AVA.
 
+Most users will only need a small subset: provider connect/disconnect, model switching, sessions, help, and normal CLI flags.
+
 ## Slash Commands
+
+Common everyday commands:
+
+1. `/connect [provider]`
+2. `/disconnect <provider>`
+3. `/model [provider/model]`
+4. `/providers`
+5. `/new [title]`
+6. `/sessions`
+7. `/help`
+
+Full slash-command reference:
 
 Primary slash commands exposed in the TUI and slash-aware headless paths:
 
@@ -66,9 +80,11 @@ Top-level CLI subcommands:
 2. `ava auth <login|logout|list|test>` - manage provider authentication
 3. `ava plugin <list|add|remove|info|init>` - manage power plugins
 4. `ava update` and `ava self-update` - check for and install updates
-5. `ava serve --host <host> --port <port> [--token <token>] [--insecure-open-cors]` - run the web server
+5. `ava serve --host <host> --port <port> [--token <token>] [--insecure-open-cors]` - run the advanced web server surface
 
 `ava serve` is only available in builds compiled with the `web` feature. Default `ava-tui` builds use `default = []` in `crates/ava-tui/Cargo.toml`.
+
+Most users can ignore `ava serve` entirely.
 
 Current serve defaults and hardening:
 

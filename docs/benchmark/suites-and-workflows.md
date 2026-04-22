@@ -95,17 +95,6 @@ cargo run -p ava-tui --bin ava --features benchmark -- \
   --repeat 3
 ```
 
-### Run harness mode
-
-```bash
-cargo run -p ava-tui --bin ava --features benchmark -- \
-  --benchmark \
-  --harness \
-  --director openrouter:anthropic/claude-opus-4.6 \
-  --worker openai:gpt-5.4 \
-  --suite frontier
-```
-
 ## Workflow Recommendations
 
 For normal development:

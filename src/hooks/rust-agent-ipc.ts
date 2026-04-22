@@ -53,17 +53,8 @@ interface IpcDeps {
   resetState: () => void
 }
 
-const TAURI_TERMINAL_GRACE_MS = 75
-
 interface TauriTerminalTracker {
   runId: string
-  terminalSeen: boolean
-  terminalPromise: Promise<void>
-  resolveTerminal: (() => void) | null
-}
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 /**
@@ -173,20 +164,8 @@ export function createAgentIpc(deps: IpcDeps): AgentIpc {
   }
 
   const resetTauriTerminalTracking = (runId: string): TauriTerminalTracker => {
-    let resolveTerminalPromise: (() => void) | null = null
     const tracker: TauriTerminalTracker = {
       runId,
-      terminalSeen: false,
-      terminalPromise: new Promise<void>((resolve) => {
-        resolveTerminalPromise = resolve
-      }),
-      resolveTerminal: null,
-    }
-    tracker.resolveTerminal = () => {
-      tracker.terminalSeen = true
-      resolveTerminalPromise?.()
-      resolveTerminalPromise = null
-      tracker.resolveTerminal = null
     }
     activeRunId = runId
     setCurrentRunId(runId)
@@ -202,7 +181,7 @@ export function createAgentIpc(deps: IpcDeps): AgentIpc {
       }
     }
     if (tracker) {
-      tracker.resolveTerminal = null
+      // No-op: tracker is currently run-id only.
     }
     activeTauriRun = null
     activeRunId = null
@@ -210,7 +189,6 @@ export function createAgentIpc(deps: IpcDeps): AgentIpc {
   }
 
   const shouldHandleCorrelatedEvent = (event: AgentEvent): boolean => {
-    const activeRun = activeTauriRun
     const eventRunId = getTauriEventRunId(event)
     const isTerminalEvent = event.type === 'complete' || event.type === 'error'
     const requiresRunCorrelation =
@@ -258,7 +236,7 @@ export function createAgentIpc(deps: IpcDeps): AgentIpc {
 
       log.warn('agent', 'Ignoring uncorrelated terminal event', {
         eventType: event.type,
-        activeRunId: activeRunId ?? activeRun?.runId ?? null,
+        activeRunId,
       })
       return false
     }
@@ -270,10 +248,6 @@ export function createAgentIpc(deps: IpcDeps): AgentIpc {
         activeRunId,
       })
       return false
-    }
-
-    if (isTerminalEvent) {
-      activeRun?.resolveTerminal?.()
     }
 
     return true
@@ -638,31 +612,42 @@ export function createAgentIpc(deps: IpcDeps): AgentIpc {
       activeRunId === runId || completion.resolve === completionBinding.resolve
 
     if (isTauri()) {
-      const guardedInvokePromise = invokePromise.catch((err) => {
-        if (completion.resolve !== completionBinding.resolve) {
-          log.warn('agent', 'Backend invoke rejected after terminal event', {
-            command,
-            error: err instanceof Error ? err.message : String(err),
-          })
-          return null
-        }
-        throw err
-      })
+      const acceptedPromise = invokePromise
+        .then((result) => ({ kind: 'accepted' as const, result }))
+        .catch((err) => {
+          if (completion.resolve !== completionBinding.resolve) {
+            log.warn('agent', 'Backend invoke rejected after terminal event', {
+              command,
+              error: err instanceof Error ? err.message : String(err),
+            })
+            return { kind: 'accepted' as const, result: null }
+          }
+          return { kind: 'invoke-error' as const, error: err }
+        })
 
-      const winner = await Promise.race([
-        completionPromise.then((result) => ({ source: 'terminal' as const, result })),
-        guardedInvokePromise.then((result) => ({ source: 'invoke' as const, result })),
-      ])
+      const terminalPromise = completionPromise.then((result) => ({
+        kind: 'terminal' as const,
+        result,
+      }))
 
-      let finalResult = winner.result
-      if (winner.source === 'invoke' && terminalTracker && !terminalTracker.terminalSeen) {
-        await Promise.race([terminalTracker.terminalPromise, delay(TAURI_TERMINAL_GRACE_MS)])
-        if (terminalTracker.terminalSeen) {
-          finalResult = await completionPromise
-        }
+      const firstSettled = await Promise.race([terminalPromise, acceptedPromise])
+
+      if (firstSettled.kind === 'invoke-error') {
+        throw firstSettled.error
       }
 
+      const acceptedResult = firstSettled.kind === 'accepted' ? firstSettled.result : null
+      const finalResult =
+        firstSettled.kind === 'terminal' ? firstSettled.result : await completionPromise
+
       const normalizedResult = normalizeTauriSubmitResult(finalResult)
+      const normalizedAcceptedResult = normalizeTauriSubmitResult(acceptedResult)
+      const mergedResult = normalizedResult
+        ? {
+            ...normalizedResult,
+            sessionId: normalizedResult.sessionId || normalizedAcceptedResult?.sessionId || '',
+          }
+        : null
       const shouldCommitResult = runStillBound()
       if (completion.resolve === completionBinding.resolve) {
         completion.resolve = null
@@ -671,10 +656,10 @@ export function createAgentIpc(deps: IpcDeps): AgentIpc {
       if (shouldCommitResult) {
         setTrackedSessionId(null)
       }
-      if (normalizedResult && shouldCommitResult) {
-        setLastResult(normalizedResult)
+      if (mergedResult && shouldCommitResult) {
+        setLastResult(mergedResult)
       }
-      return normalizedResult
+      return mergedResult
     }
 
     const submitResult = await invokePromise.catch((err) => {

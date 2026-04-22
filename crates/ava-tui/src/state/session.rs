@@ -1,6 +1,7 @@
 use ava_session::{Bookmark, SessionManager};
 use ava_types::Session;
 use color_eyre::eyre::{eyre, Result};
+use std::collections::HashMap;
 use std::path::Path;
 use uuid::Uuid;
 
@@ -8,6 +9,7 @@ pub struct SessionState {
     manager: SessionManager,
     pub current_session: Option<Session>,
     pub sessions: Vec<Session>,
+    cached_sessions: HashMap<Uuid, Session>,
 }
 
 impl SessionState {
@@ -17,17 +19,22 @@ impl SessionState {
             manager,
             current_session: None,
             sessions: Vec::new(),
+            cached_sessions: HashMap::new(),
         })
     }
 
     pub fn create_session(&mut self) -> Result<Session> {
         let session = self.manager.create()?;
+        self.cached_sessions.insert(session.id, session.clone());
         self.current_session = Some(session.clone());
         Ok(session)
     }
 
     pub fn switch_to(&mut self, id: Uuid) -> Result<()> {
         self.current_session = self.manager.get(id)?;
+        if let Some(session) = &self.current_session {
+            self.cached_sessions.insert(session.id, session.clone());
+        }
         Ok(())
     }
 
@@ -49,6 +56,7 @@ impl SessionState {
                 .manager
                 .get(session_id)?
                 .ok_or_else(|| eyre!("Requested --session '{raw_id}' was not found"))?;
+            self.cached_sessions.insert(session.id, session.clone());
             self.current_session = Some(session.clone());
             return Ok(Some(session));
         }
@@ -62,6 +70,7 @@ impl SessionState {
                 .ok_or_else(|| {
                     eyre!("--continue was requested but no existing sessions were found")
                 })?;
+            self.cached_sessions.insert(session.id, session.clone());
             self.current_session = Some(session.clone());
             return Ok(Some(session));
         }
@@ -98,6 +107,7 @@ impl SessionState {
         if let Err(e) = self.manager.save(session) {
             tracing::warn!("Failed to save session: {}", e);
         }
+        self.cached_sessions.insert(session.id, session.clone());
         self.current_session = Some(session.clone());
     }
 
@@ -108,7 +118,24 @@ impl SessionState {
         if let Err(e) = self.manager.add_messages(session.id, &session.messages) {
             tracing::warn!("Failed to checkpoint session: {}", e);
         }
+        self.cached_sessions.insert(session.id, session.clone());
         self.current_session = Some(session.clone());
+    }
+
+    pub fn cache_session(&mut self, session: &Session) {
+        self.cached_sessions.insert(session.id, session.clone());
+    }
+
+    pub fn get_or_load_session(&mut self, id: Uuid) -> Result<Option<Session>> {
+        if let Some(session) = self.cached_sessions.get(&id) {
+            return Ok(Some(session.clone()));
+        }
+
+        let loaded = self.manager.get(id)?;
+        if let Some(session) = &loaded {
+            self.cached_sessions.insert(session.id, session.clone());
+        }
+        Ok(loaded)
     }
 
     // ── Bookmark operations (BG-13) ──────────────────────────────────

@@ -691,7 +691,9 @@ pub fn build_system_prompt_with_override(
         static_prefix.push_str("- Keep small, single-file work in the main thread.\n");
         static_prefix.push_str("- Use `subagent` only for self-contained chunks whose result can be summarized back clearly.\n");
         static_prefix.push_str("- Prefer `scout` or `explore` for read-only reconnaissance, `plan` for design-only breakdowns, `review` for a final pass, and `worker` or `task` for isolated implementation.\n");
-        static_prefix.push_str("- Use `background: true` when the sub-agent's work is independent. Use foreground when you need the result before proceeding.\n");
+        static_prefix.push_str("- `subagent` is the normal/default delegation path. Use it unless background execution was explicitly requested.\n");
+        static_prefix.push_str("- Use `background_agent` only when the user explicitly asks for background, parallel, or non-blocking delegation, or when that requirement is otherwise explicit. Do not choose background execution by default.\n");
+        static_prefix.push_str("- The legacy `background: true` subagent flag remains available for compatibility, but prefer `background_agent` for explicit background work.\n");
         static_prefix.push_str("- After significant multi-file edits, spawn a `review` subagent. Skip review for trivial fixes.\n");
     }
 

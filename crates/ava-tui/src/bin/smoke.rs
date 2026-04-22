@@ -98,6 +98,7 @@ async fn main() -> Result<()> {
             | AgentEvent::BudgetWarning { .. }
             | AgentEvent::ToolStats(_)
             | AgentEvent::TokenUsage { .. }
+            | AgentEvent::SubAgentUpdate { .. }
             | AgentEvent::SubAgentComplete { .. }
             | AgentEvent::DiffPreview { .. }
             | AgentEvent::MCPToolsChanged { .. }

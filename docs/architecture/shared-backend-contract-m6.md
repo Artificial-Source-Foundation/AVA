@@ -2,7 +2,7 @@
 title: "Canonical Shared-Backend Contract (Milestone 6)"
 description: "Contract-definition artifact for cross-surface backend semantics, ownership seams, and conformance requirements."
 order: 9
-updated: "2026-04-21"
+updated: "2026-04-22"
 ---
 
 # Canonical Shared-Backend Contract (Milestone 6)
@@ -26,6 +26,10 @@ Current proof/adoption status (2026-04-16):
 4. Session precedence, replay payloads, queue clear semantics, and interactive request ownership now resolve through backend-owned control-plane modules instead of surface-local rule sets.
 5. Same-kind interactive FIFO behavior is now normalized across backend + frontend visibility rules, including front-only resolve/timeout semantics for queued approval/question/plan requests.
 6. Remaining gaps are no longer core contract-definition gaps; they are bounded follow-ups around adapter-shell simplification and eventual generated/shared TS schema output.
+7. Contract-follow-up Milestone 11 narrowed `ava-agent` control-plane shims to backend-owned `events`/`sessions` helpers only; pure compatibility shims were removed.
+8. Contract-follow-up Milestone 12 finalized `AgentRunContext` ownership on `ava-agent` (`ava_agent::run_context::AgentRunContext`) and removed the remaining orchestration stack re-export.
+
+Milestone namespace note: this document references both the M6/M7 contract baseline and the later contract-follow-up sequence (M10-M12); these numbers are separate from backend modularization "Track Milestone N" labels.
 
 ## 1) Contract scope and philosophy
 
@@ -64,7 +68,7 @@ Current status:
 
 1. Interactive TUI, desktop/Tauri, and web have adopted the current contract at the command/event/session/interactive/queue seams covered by this milestone program.
 2. Headless remains intentionally scoped by documented exception `EX-001` rather than full interactive parity.
-3. Desktop run-start/replay completion timing still carries documented exception `EX-002`.
+3. Desktop run-start/replay command timing now matches accepted-and-streaming contract semantics (contract-follow-up Milestone 10 resolved `EX-002`).
 
 The following paths are required contract adopters in the implementation milestone:
 
@@ -99,9 +103,9 @@ The following paths are required contract adopters in the implementation milesto
 
 | Command family | Canonical owner | Included adopters | Response envelope | Completion mode | Terminal closure signal(s) |
 |---|---|---|---|---|---|
-| `submit_goal` | `crates/ava-control-plane/src/commands.rs` | TUI, desktop, web, headless | accepted response containing session metadata; `success`/`turns` are not canonical terminal state on accepted-and-streaming adapters | accepted-and-streaming (desktop currently uses documented exception EX-002) | `complete` or `error` event closes the lifecycle |
+| `submit_goal` | `crates/ava-control-plane/src/commands.rs` | TUI, desktop, web, headless | accepted response containing session metadata; `success`/`turns` are not canonical terminal state on accepted-and-streaming adapters | accepted-and-streaming | `complete` or `error` event closes the lifecycle |
 | `cancel_agent` | `crates/ava-control-plane/src/commands.rs` | TUI, desktop, web, headless | ack | fire-and-forget | no command-level terminal event beyond ack (run interruption/error may arrive on run stream if active) |
-| `retry_last_message` / `edit_and_resend` / `regenerate_response` | `crates/ava-control-plane/src/commands.rs` | TUI, desktop, web | accepted response containing session metadata; `success`/`turns` are not canonical terminal state on accepted-and-streaming adapters | accepted-and-streaming (desktop currently uses documented exception EX-002) | `complete` or `error` event closes the lifecycle |
+| `retry_last_message` / `edit_and_resend` / `regenerate_response` | `crates/ava-control-plane/src/commands.rs` | TUI, desktop, web | accepted response containing session metadata; `success`/`turns` are not canonical terminal state on accepted-and-streaming adapters | accepted-and-streaming | `complete` or `error` event closes the lifecycle |
 | `resolve_approval` / `resolve_question` / `resolve_plan` | `crates/ava-control-plane/src/commands.rs` | TUI, desktop, web | ack or state transition result | completion-bound | direct command result (`ok`/error) plus request-correlated interactive-clear lifecycle signal on adapters that project canonical interactive events |
 | `steer_agent` / `follow_up_agent` / `post_complete_agent` | `crates/ava-control-plane/src/queue.rs` | TUI, desktop, web | ack | accepted-and-streaming | queue acceptance plus later run lifecycle events |
 | `clear_message_queue` | `crates/ava-control-plane/src/queue.rs` | TUI, desktop, web | ack or explicit unsupported error | fire-and-forget | none beyond ack/error |
@@ -128,7 +132,7 @@ Adapters MUST preserve canonical completion mode semantics even when invocation 
 
 Normative decision:
 
-- `submit_goal` family uses **accepted-and-streaming** semantics. Adapters may return immediately with run/session metadata, but terminal completion MUST arrive through canonical completion/error events rather than adapter-local completion meaning. Desktop currently retains a bounded WS1 exception (EX-002).
+- `submit_goal` family uses **accepted-and-streaming** semantics. Adapters return immediate acceptance with run/session metadata, and terminal completion MUST arrive through canonical completion/error events rather than adapter-local completion meaning.
 
 ## 5) Approval/question/plan lifecycle
 

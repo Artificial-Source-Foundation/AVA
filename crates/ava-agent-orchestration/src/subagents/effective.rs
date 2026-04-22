@@ -55,4 +55,25 @@ mod tests {
             def.id == "review" && def.runtime_profile == SubAgentRuntimeProfile::ReadOnly
         }));
     }
+
+    #[test]
+    fn effective_catalog_omits_disabled_builtins() {
+        let config = AgentsConfig {
+            agents: [(
+                "scout".to_string(),
+                ava_config::AgentOverride {
+                    enabled: Some(false),
+                    ..Default::default()
+                },
+            )]
+            .into_iter()
+            .collect(),
+            ..Default::default()
+        };
+
+        let defs = effective_subagent_definitions(&config);
+
+        assert!(!defs.iter().any(|def| def.id == "scout"));
+        assert!(defs.iter().any(|def| def.id == "review"));
+    }
 }

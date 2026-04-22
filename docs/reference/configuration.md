@@ -9,7 +9,11 @@ updated: "2026-04-21"
 
 This page documents AVA's current configuration behavior.
 
+Most users only need `config.yaml`, provider auth, and optional trusted project config. This page is for exact precedence and schema details.
+
 ## Configuration Sources And Resolution
+
+This section is exact reference behavior, not a setup guide.
 
 Provider and model selection currently resolves by source in this order:
 
@@ -94,6 +98,8 @@ For practical setup examples and the subagent TOML structure, use [How-to: Confi
 Treat project-local `.ava/state.json` as session-oriented state rather than a full replacement for user-global config.
 
 ## Project-Local State
+
+This is background reference. Most users do not need to interact with this file directly.
 
 Project-local state lives in `.ava/state.json` under the project root.
 

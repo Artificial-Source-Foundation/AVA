@@ -9,6 +9,13 @@ updated: "2026-04-21"
 
 This page summarizes filesystem locations that AVA currently reads or writes.
 
+Most users do not need the full layout. The practical defaults are:
+
+1. `$XDG_CONFIG_HOME/ava/config.yaml`
+2. `$XDG_CONFIG_HOME/ava/AGENTS.md`
+3. `$XDG_CONFIG_HOME/ava/mcp.json` only if using MCP
+4. `<repo>/.ava/` only for trusted project-local customization
+
 ## User-Global Paths (`$XDG_CONFIG_HOME/ava` canonical, `~/.ava` compatibility)
 
 Canonical user-global root: `$XDG_CONFIG_HOME/ava` (typically `~/.config/ava`).
@@ -16,7 +23,7 @@ Use this for active configuration.
 
 Legacy root: `~/.ava` remains compatibility input for existing installs while migrating.
 
-Common paths referenced in current runtime code (shown here with legacy `~/.ava` examples for compatibility clarity):
+Full reference list of paths referenced in current runtime code (shown here with legacy `~/.ava` examples for compatibility clarity):
 
 1. `~/.ava/credentials.json`
    - Default credential-store path (`crates/ava-config/src/credentials.rs`)
@@ -45,6 +52,8 @@ Common paths referenced in current runtime code (shown here with legacy `~/.ava`
 
 ## Project-Local (`<repo>/.ava`) Paths
 
+These are advanced, trust-gated customization surfaces.
+
 Project-scoped files and directories referenced in command/runtime code:
 
 1. `.ava/state.json` (project model history; `crates/ava-config/src/lib.rs`)
@@ -68,6 +77,8 @@ Project-scoped files and directories referenced in command/runtime code:
 
 ## Agent Config Notes
 
+This is advanced setup reference; see the how-to guide for practical examples.
+
 1. Primary-agent startup profiles live in `config.yaml` (`primary_agent`, `primary_agents`).
 2. Delegated subagent profiles live in `subagents.toml` (global + trusted project scopes).
 3. Subagent profile prompts can be inline (`prompt`) or loaded from external files (`prompt_file`).
@@ -78,4 +89,4 @@ For examples, see [How-to: Configure primary agents and subagents](../how-to/age
 
 1. [Configuration](configuration.md)
 2. [Credential storage](credential-storage.md)
-3. [Web API surface](web-api.md)
+3. [Web API surface](web-api.md) - advanced reference only

@@ -2,12 +2,17 @@
 title: "Architecture"
 description: "Internal structure, crate boundaries, and architecture transition docs for AVA."
 order: 1
-updated: "2026-04-21"
+updated: "2026-04-22"
 ---
 
 # Architecture Docs
 
-This section explains how AVA is organized internally and tracks important architecture transitions.
+This section explains how AVA is organized internally and keeps canonical owner docs separate from historical transition material.
+
+Milestone namespace note:
+
+1. The shared-backend contract chain uses M4-M7, plus contract-follow-up closure milestones M10-M12.
+2. The backend modularization roadmap uses separate **Track Milestone N** labels.
 
 ## Ownership Snapshot (Authoritative)
 
@@ -28,24 +33,21 @@ Use these first when deciding where code should live today:
 
 ## Active Planning
 
-These are current forward-looking planning docs that build on the canonical seams above.
+These are current forward-looking planning docs that build on the canonical seams above. They are implementation planning, not product-reading entrypoints.
 
 1. [Agent backend modularization roadmap (Track Milestone 1)](agent-backend-modularization-roadmap-m1.md) - active planning roadmap for modularization hotspots, target owner seams, phased execution order, risks, and validation gates, building on the existing M6/M7 contract baseline
+2. [Plugin boundary checklist](plugin-boundary.md) - future-track note for optional plugin migration work
 
 ## Historical Milestone Artifacts
 
-These are preserved historical planning/audit artifacts that explain why the current canonical seams exist.
+These are preserved historical planning/audit artifacts that explain why the current canonical seams exist. Most contributors should not need them unless they are touching those seams directly.
 
-## Documents
+Historical archive:
 
-1. [Plugin boundary checklist](plugin-boundary.md) - the active core-to-plugin migration plan for HQ and related seams
+1. [Architecture archive](../archive/architecture/README.md) - milestone snapshots and superseded planning/audit artifacts
 2. [Active backlog](../project/backlog.md) - current pending execution queue derived from milestone analysis and contract work
-3. [Agent backend capability audit (Milestone 1)](agent-backend-capability-audit-m1.md) - historical Milestone 1 snapshot of coding-agent backend surfaces
-4. [Agent backend capability comparison (Milestone 2)](agent-backend-capability-comparison-m2.md) - concise AVA-vs-OpenCode/Pi/Claude Code/Codex backend capability matrix and correction references
-5. [Subagent rework blueprint (Milestone 1)](subagent-rework-blueprint-m1.md) - historical Milestone 1 planning blueprint for the subagent rework sequence
-6. [Cross-surface runtime map (Milestone 4)](cross-surface-runtime-map-m4.md) - entrypoint-to-transport-to-shared-runtime map across interactive TUI, headless CLI, desktop, and web with parity-relevant divergence callouts
-7. [Cross-surface behavior audit (Milestone 5)](cross-surface-behavior-audit-m5.md) - historical Milestone 5 contract-prep drift classification snapshot
-8. [Cross-surface runtime audit (supporting M5 detail)](cross-surface-runtime-audit-m5.md) - historical supporting runtime-audit detail behind the Milestone 5 behavior audit
-9. [Canonical shared-backend contract (Milestone 6)](shared-backend-contract-m6.md) - concrete contract-definition artifact covering scope, owner seams, adopters, command/lifecycle/event/session/queue/delegation semantics, headless rules, open decisions, and required conformance tests
-10. [Backend correction implementation roadmap (Milestone 7)](backend-correction-roadmap-m7.md) - implementation-ready dependency-ordered roadmap turning M5 drift + M6 contract into prioritized workstreams, first code slices, adopter rollout, and conformance gates
-11. [Backend contract exceptions](backend-contract-exceptions.md) - versioned registry of intentional adapter-specific exceptions to the shared backend contract
+
+## Reading Rule
+
+1. Start with `entrypoints.md`, `crate-map.md`, and `shared-backend-contract-m6.md`.
+2. Treat the rest of this section as planning or historical context unless your change directly depends on it.

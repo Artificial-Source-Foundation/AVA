@@ -471,6 +471,7 @@ fn backgrounded_run_events_stay_out_of_foreground() {
     let mut app = App::test_new(&db_path);
     let (app_tx, _) = mpsc::unbounded_channel();
     let (agent_tx, _) = mpsc::unbounded_channel();
+    app.foreground_run_id = Some(0);
 
     app.state.agent.is_running = true;
     app.foreground_run_id = Some(42);
@@ -577,8 +578,11 @@ fn background_subagent_events_follow_real_tool_sequence() {
             .as_ref()
             .expect("background subagent data should exist after tool call");
         assert!(
-            sub_data.session_messages.is_empty(),
-            "background child transcript should stay empty until real transcript messages exist"
+            sub_data
+                .session_messages
+                .iter()
+                .any(|msg| msg.content.contains("Live transcript updates will appear")),
+            "background child transcript should start with a read-only placeholder before real child events arrive"
         );
     }
 
@@ -587,7 +591,7 @@ fn background_subagent_events_follow_real_tool_sequence() {
             run_id: 42,
             event: ava_agent::AgentEvent::ToolResult(ava_types::ToolResult {
                 call_id: "call_subagent_bg".to_string(),
-                content: "Background sub-agent launched. You will be notified when it completes. Continue with other work.".to_string(),
+                content: "Background agent launched. Continue with the main task; AVA will surface completion when it finishes.".to_string(),
                 is_error: false,
             }),
         },
@@ -616,8 +620,11 @@ fn background_subagent_events_follow_real_tool_sequence() {
             "background launch ack should not mark subagent done"
         );
         assert!(
-            sub_data.session_messages.is_empty(),
-            "background launch ack should not inject placeholder transcript messages"
+            sub_data
+                .session_messages
+                .iter()
+                .any(|msg| msg.content.contains("Live transcript updates will appear")),
+            "background launch ack should preserve the placeholder transcript until real child events arrive"
         );
     }
 
@@ -755,7 +762,7 @@ fn foreground_background_subagent_events_stay_running_until_complete() {
             run_id: 7,
             event: ava_agent::AgentEvent::ToolResult(ava_types::ToolResult {
                 call_id: "call_subagent_1".to_string(),
-                content: "Background sub-agent launched. You will be notified when it completes. Continue with other work.".to_string(),
+                content: "Background agent launched. Continue with the main task; AVA will surface completion when it finishes.".to_string(),
                 is_error: false,
             }),
         },
@@ -870,6 +877,131 @@ fn foreground_background_subagent_events_stay_running_until_complete() {
 }
 
 #[test]
+fn background_agent_completion_notifies_parent_and_queues_follow_up() {
+    let temp = tempdir().expect("tempdir");
+    let db_path = temp.path().join("data.db");
+    let mut app = App::test_new(&db_path);
+    let (app_tx, _) = mpsc::unbounded_channel();
+    let (agent_tx, _) = mpsc::unbounded_channel();
+    let (message_tx, mut message_rx) = mpsc::unbounded_channel();
+
+    app.state.agent.is_running = true;
+    app.foreground_run_id = Some(7);
+    app.state.agent.message_tx = Some(message_tx);
+
+    app.handle_event(
+        AppEvent::AgentRunEvent {
+            run_id: 7,
+            event: ava_agent::AgentEvent::ToolCall(ava_types::ToolCall {
+                id: "call_bg_notify".to_string(),
+                name: "background_agent".to_string(),
+                arguments: serde_json::json!({"prompt": "Inspect docs", "agent": "scout"}),
+            }),
+        },
+        app_tx.clone(),
+        agent_tx.clone(),
+    );
+
+    app.handle_event(
+        AppEvent::AgentRunEvent {
+            run_id: 7,
+            event: ava_agent::AgentEvent::SubAgentComplete {
+                call_id: "call_bg_notify".to_string(),
+                session_id: uuid::Uuid::new_v4().to_string(),
+                messages: vec![ava_types::Message::new(
+                    ava_types::Role::Assistant,
+                    "Docs summary",
+                )],
+                description: "Inspect docs".to_string(),
+                input_tokens: 1,
+                output_tokens: 1,
+                cost_usd: 0.0,
+                agent_type: Some("scout".to_string()),
+                provider: None,
+                resumed: false,
+            },
+        },
+        app_tx,
+        agent_tx,
+    );
+
+    let queued = message_rx
+        .try_recv()
+        .expect("background completion should queue follow-up");
+    assert!(matches!(queued.tier, ava_types::MessageTier::FollowUp));
+    assert!(queued
+        .text
+        .contains("Background agent completed. Task: Inspect docs"));
+    assert!(queued.text.contains("Docs summary"));
+    assert!(app.state.messages.messages.iter().any(|msg| msg
+        .content
+        .contains("Background agent finished: Inspect docs")));
+}
+
+#[test]
+fn background_agent_completion_reactivates_idle_parent() {
+    let temp = tempdir().expect("tempdir");
+    let db_path = temp.path().join("data.db");
+    let mut app = App::test_new(&db_path);
+    let (app_tx, _) = mpsc::unbounded_channel();
+    let (agent_tx, _) = mpsc::unbounded_channel();
+
+    let session = app.state.session.create_session().expect("create session");
+    app.state.session.current_session = Some(session);
+    app.foreground_run_id = None;
+    app.state.agent.is_running = false;
+    app.state.agent.message_tx = None;
+
+    app.state.agent.sub_agents.push(SubAgentInfo {
+        call_id: "call_bg_restart".to_string(),
+        agent_type: Some("scout".to_string()),
+        description: "Inspect docs".to_string(),
+        background: true,
+        is_running: true,
+        tool_count: 0,
+        current_tool: None,
+        started_at: std::time::Instant::now(),
+        elapsed: None,
+        session_id: None,
+        session_messages: initial_subagent_session_messages("Inspect docs", true),
+        provider: None,
+        resumed: false,
+        cost_usd: None,
+        input_tokens: None,
+        output_tokens: None,
+    });
+
+    app.handle_event(
+        AppEvent::AgentRunEvent {
+            run_id: 999,
+            event: ava_agent::AgentEvent::SubAgentComplete {
+                call_id: "call_bg_restart".to_string(),
+                session_id: uuid::Uuid::new_v4().to_string(),
+                messages: vec![ava_types::Message::new(
+                    ava_types::Role::Assistant,
+                    "Docs summary",
+                )],
+                description: "Inspect docs".to_string(),
+                input_tokens: 1,
+                output_tokens: 1,
+                cost_usd: 0.0,
+                agent_type: Some("scout".to_string()),
+                provider: None,
+                resumed: false,
+            },
+        },
+        app_tx,
+        agent_tx,
+    );
+
+    assert!(app.state.agent.is_running);
+    assert_eq!(app.foreground_run_id, Some(1));
+    assert!(app.state.messages.messages.iter().any(|msg| msg
+        .content
+        .contains("Background agent completed. Task: Inspect docs")));
+}
+
+#[test]
 fn subagent_completion_reconstructs_tool_history_for_child_view() {
     let temp = tempdir().expect("tempdir");
     let db_path = temp.path().join("data.db");
@@ -966,6 +1098,174 @@ fn subagent_completion_reconstructs_tool_history_for_child_view() {
         sub_data.session_messages[3].kind,
         MessageKind::Assistant
     ));
+}
+
+#[test]
+fn subagent_live_updates_stream_into_child_transcript_before_completion() {
+    let temp = tempdir().expect("tempdir");
+    let db_path = temp.path().join("data.db");
+    let mut app = App::test_new(&db_path);
+    let (app_tx, _) = mpsc::unbounded_channel();
+    let (agent_tx, _) = mpsc::unbounded_channel();
+
+    app.state.agent.is_running = true;
+    app.foreground_run_id = Some(7);
+
+    app.handle_event(
+        AppEvent::AgentRunEvent {
+            run_id: 7,
+            event: ava_agent::AgentEvent::ToolCall(ava_types::ToolCall {
+                id: "call_live_subagent".to_string(),
+                name: "subagent".to_string(),
+                arguments: serde_json::json!({"prompt": "Inspect files.", "agent": "scout", "background": false}),
+            }),
+        },
+        app_tx.clone(),
+        agent_tx.clone(),
+    );
+
+    app.handle_event(
+        AppEvent::AgentRunEvent {
+            run_id: 7,
+            event: ava_agent::AgentEvent::SubAgentUpdate {
+                call_id: "call_live_subagent".to_string(),
+                event: ava_agent::agent_loop::SubAgentLiveEvent::Started {
+                    session_id: "child-live-session".to_string(),
+                },
+            },
+        },
+        app_tx.clone(),
+        agent_tx.clone(),
+    );
+
+    app.handle_event(
+        AppEvent::AgentRunEvent {
+            run_id: 7,
+            event: ava_agent::AgentEvent::SubAgentUpdate {
+                call_id: "call_live_subagent".to_string(),
+                event: ava_agent::agent_loop::SubAgentLiveEvent::Thinking(
+                    "Scanning manifests".to_string(),
+                ),
+            },
+        },
+        app_tx.clone(),
+        agent_tx.clone(),
+    );
+
+    app.handle_event(
+        AppEvent::AgentRunEvent {
+            run_id: 7,
+            event: ava_agent::AgentEvent::SubAgentUpdate {
+                call_id: "call_live_subagent".to_string(),
+                event: ava_agent::agent_loop::SubAgentLiveEvent::ToolCall(ava_types::ToolCall {
+                    id: "tool-live-1".to_string(),
+                    name: "glob".to_string(),
+                    arguments: serde_json::json!({"pattern": "src/**/*.rs"}),
+                }),
+            },
+        },
+        app_tx.clone(),
+        agent_tx.clone(),
+    );
+
+    let subagent = &app.state.agent.sub_agents[0];
+    assert_eq!(subagent.session_id.as_deref(), Some("child-live-session"));
+    assert!(subagent
+        .session_messages
+        .iter()
+        .any(|msg| matches!(msg.kind, MessageKind::Thinking)
+            && msg.content.contains("Scanning manifests")));
+    assert!(subagent
+        .session_messages
+        .iter()
+        .any(|msg| matches!(msg.kind, MessageKind::ToolCall)
+            && msg.tool_name.as_deref() == Some("glob")));
+}
+
+#[test]
+fn enter_subagent_view_reloads_canonical_child_session_from_cache() {
+    let temp = tempdir().expect("tempdir");
+    let db_path = temp.path().join("data.db");
+    let mut app = App::test_new(&db_path);
+
+    app.state.agent.sub_agents.push(SubAgentInfo {
+        call_id: "call-checkpoint-child".to_string(),
+        agent_type: Some("scout".to_string()),
+        description: "Inspect files.".to_string(),
+        background: false,
+        is_running: true,
+        tool_count: 0,
+        current_tool: None,
+        started_at: std::time::Instant::now(),
+        elapsed: None,
+        session_id: Some(uuid::Uuid::nil().to_string()),
+        session_messages: initial_subagent_session_messages("Inspect files.", false),
+        provider: None,
+        resumed: false,
+        cost_usd: None,
+        input_tokens: None,
+        output_tokens: None,
+    });
+    let mut card = UiMessage::new(MessageKind::SubAgent, String::new());
+    card.sub_agent = Some(crate::state::messages::SubAgentData {
+        agent_type: Some("scout".to_string()),
+        description: "Inspect files.".to_string(),
+        background: false,
+        tool_count: 0,
+        current_tool: None,
+        duration: None,
+        is_running: true,
+        failed: false,
+        call_id: "call-checkpoint-child".to_string(),
+        session_id: Some(uuid::Uuid::nil().to_string()),
+        session_messages: initial_subagent_session_messages("Inspect files.", false),
+        provider: None,
+        resumed: false,
+        cost_usd: None,
+        input_tokens: None,
+        output_tokens: None,
+    });
+    app.state.messages.push(card);
+
+    let mut child_session = ava_types::Session::new();
+    child_session.metadata["parent_id"] = serde_json::json!(uuid::Uuid::new_v4().to_string());
+    child_session.metadata["is_sub_agent"] = serde_json::json!(true);
+    child_session.metadata["agent_type"] = serde_json::json!("scout");
+    child_session.add_message(ava_types::Message::new(
+        ava_types::Role::User,
+        "Inspect files.",
+    ));
+    child_session.add_message(ava_types::Message::new(
+        ava_types::Role::Assistant,
+        "Visible child output",
+    ));
+    app.state.agent.sub_agents[0].session_id = Some(child_session.id.to_string());
+    if let Some(data) = app.state.messages.messages[0].sub_agent.as_mut() {
+        data.session_id = Some(child_session.id.to_string());
+    }
+    app.state.session.cache_session(&child_session);
+
+    let loaded = app
+        .state
+        .session
+        .get_or_load_session(child_session.id)
+        .expect("session lookup should succeed")
+        .expect("child session should be cached");
+    assert_eq!(loaded.messages, child_session.messages);
+
+    assert!(app.enter_sub_agent_view(0));
+    assert!(matches!(
+        app.state.agent.sub_agents[0].session_messages[0].kind,
+        MessageKind::User
+    ));
+    assert_eq!(
+        app.state.agent.sub_agents[0].session_messages[0].content,
+        "Inspect files."
+    );
+    assert_eq!(
+        app.state.agent.sub_agents[0].session_messages[1].content,
+        "Visible child output"
+    );
 }
 
 #[test]

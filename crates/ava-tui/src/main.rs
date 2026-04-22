@@ -61,7 +61,7 @@ async fn main() -> Result<()> {
     );
     apply_cwd_override(cwd_override.as_deref())?;
 
-    let is_benchmark = cfg!(feature = "benchmark") && (cli.benchmark || cli.harness);
+    let is_benchmark = cfg!(feature = "benchmark") && cli.benchmark;
     let is_tui = cli.command.is_none()
         && !cli.headless
         && !cli.json
@@ -152,39 +152,6 @@ async fn main() -> Result<()> {
                 cli.benchmark_compare_output
                     .as_deref()
                     .map(std::path::Path::new),
-            )
-            .await?;
-            return Ok(());
-        }
-
-        // Harnessed-pair benchmark mode
-        if cli.harness {
-            let director_str = cli.director.as_deref().ok_or_else(|| {
-                color_eyre::eyre::eyre!(
-                    "Missing --director flag. Usage: ava --harness --director \"openrouter:anthropic/claude-opus-4.6\" --worker \"inception:mercury-2\""
-                )
-            })?;
-            let worker_str = cli.worker.as_deref().ok_or_else(|| {
-                color_eyre::eyre::eyre!(
-                    "Missing --worker flag. Usage: ava --harness --director \"openrouter:anthropic/claude-opus-4.6\" --worker \"inception:mercury-2\""
-                )
-            })?;
-            let director_spec = ava_tui::benchmark_harness::parse_single_model_spec(director_str)?;
-            let worker_spec = ava_tui::benchmark_harness::parse_single_model_spec(worker_str)?;
-            let suite = ava_tui::benchmark_tasks::BenchmarkSuite::parse_str(&cli.suite)
-                .unwrap_or_else(|| {
-                    eprintln!(
-                        "Warning: unknown suite '{}', defaulting to 'all'",
-                        cli.suite
-                    );
-                    ava_tui::benchmark_tasks::BenchmarkSuite::All
-                });
-            ava_tui::benchmark_harness::run_harness(
-                director_spec,
-                worker_spec,
-                cli.max_turns,
-                suite,
-                cli.task_filter.as_deref(),
             )
             .await?;
             return Ok(());

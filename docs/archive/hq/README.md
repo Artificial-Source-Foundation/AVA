@@ -1,12 +1,12 @@
 # AVA HQ
 
-> Crate: `ava-hq`
+> Crate: removed from the active workspace
 > Status: historical/core-archival document only
 > Active tracking: `../../architecture/plugin-boundary.md` and `../../project/backlog.md`
 
 ## Current Reality
 
-1. HQ is no longer part of the default AVA 3.3 core product surface.
+1. HQ is no longer part of the active AVA 0.6 core product surface.
 2. Core AVA no longer ships built-in HQ settings, sidebar, chat, desktop command, or web-route surfaces.
 3. Any future HQ return should happen through plugin-owned registration points instead of reintroducing core-owned paths.
 
@@ -27,11 +27,9 @@ That product shape is historical context, not current core guidance.
 
 ## Still-Relevant References
 
-1. `crates/ava-hq/` — remaining HQ crate code
-2. `crates/ava-hq/src/memory.rs` — surviving memory/bootstrap reference
-3. `crates/ava-db/src/migrations/003_hq.sql`
-4. `crates/ava-db/src/migrations/004_hq_agent_costs.sql`
-5. `../../architecture/plugin-boundary.md` — current core-to-plugin migration checklist
+1. `crates/ava-db/src/migrations/003_hq.sql`
+2. `crates/ava-db/src/migrations/004_hq_agent_costs.sql`
+3. `../../architecture/plugin-boundary.md` — future plugin-boundary note
 
 ## Guidance
 

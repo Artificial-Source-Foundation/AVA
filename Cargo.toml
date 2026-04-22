@@ -17,7 +17,6 @@ members = [
     "crates/ava-sandbox",
     "crates/ava-llm",
     "crates/ava-acp",
-    "crates/ava-hq",
     "crates/ava-review",
     "crates/ava-auth",
     "crates/ava-mcp",

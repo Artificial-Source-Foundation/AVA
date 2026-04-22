@@ -335,6 +335,12 @@ pub(crate) fn session_messages_to_subagent_ui_messages(
         .collect()
 }
 
+pub(crate) fn session_messages_to_exact_child_ui_messages(
+    messages: &[ava_types::Message],
+) -> Vec<UiMessage> {
+    session_messages_to_ui_messages(messages)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ResumeRestorePlan {
     apply_primary_agent: bool,
@@ -433,6 +439,8 @@ pub struct InfoPanelState {
 
 pub struct App {
     pub state: AppState,
+    /// Keep the clipboard handle alive so Linux clipboard ownership survives copy operations.
+    clipboard: Option<arboard::Clipboard>,
     should_quit: bool,
     pending_goal: Option<String>,
     cli_agent_override: Option<String>,
@@ -849,6 +857,7 @@ impl App {
 
         let mut app = Self {
             state,
+            clipboard: None,
             should_quit: false,
             pending_goal: cli.goal.clone(),
             cli_agent_override: cli.agent.clone(),
@@ -1075,6 +1084,15 @@ impl App {
 
         if let Some(task_id) = self.background_run_routes.get(&run_id).copied() {
             self.handle_background_agent_event(task_id, agent_event);
+            return;
+        }
+
+        if matches!(
+            agent_event,
+            ava_agent::AgentEvent::SubAgentUpdate { .. }
+                | ava_agent::AgentEvent::SubAgentComplete { .. }
+        ) {
+            self.handle_agent_event(agent_event, app_tx, agent_tx);
         }
     }
 
@@ -1186,7 +1204,23 @@ impl App {
     /// Switch to viewing a sub-agent's conversation by its index in
     /// `agent.sub_agents`. Returns `true` if the switch succeeded.
     pub(crate) fn enter_sub_agent_view(&mut self, index: usize) -> bool {
-        if let Some(sa) = self.state.agent.sub_agents.get(index) {
+        if let Some(sa) = self.state.agent.sub_agents.get_mut(index) {
+            if let Some(session_id) = sa
+                .session_id
+                .as_deref()
+                .and_then(|raw| uuid::Uuid::parse_str(raw).ok())
+            {
+                match self.state.session.get_or_load_session(session_id) {
+                    Ok(Some(session)) => {
+                        sa.session_messages =
+                            session_messages_to_exact_child_ui_messages(&session.messages);
+                    }
+                    Ok(None) => {}
+                    Err(error) => {
+                        warn!(session_id = %session_id, error = %error, "failed to load sub-agent session for transcript view");
+                    }
+                }
+            }
             self.state.view_mode = ViewMode::SubAgent {
                 agent_index: index,
                 description: sa.description.clone(),
@@ -1477,6 +1511,7 @@ impl App {
 
         Self {
             state,
+            clipboard: None,
             should_quit: false,
             pending_goal: None,
             cli_agent_override: None,

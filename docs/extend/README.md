@@ -11,7 +11,7 @@ AVA keeps its core surface intentionally small and pushes advanced customization
 
 ## Extension Model
 
-The default AVA 3.3 direction is:
+The default AVA 0.6 direction is:
 
 1. `MCP` for external tool integration
 2. `Commands`, `Rules`, and `Skills` for user-facing customization
@@ -33,6 +33,8 @@ The default AVA 3.3 direction is:
 3. Use `custom tools` when you need small local automations without building a plugin.
 4. Use `MCP` when the capability already exists as an external tool server.
 5. Use `plugins` when you need namespaced app features, routes, commands, or UI mounts.
+
+These are advanced paths. Normal AVA use should not require touching them.
 
 ## Related Docs
 

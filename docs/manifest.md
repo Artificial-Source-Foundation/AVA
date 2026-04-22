@@ -35,7 +35,7 @@ This manifest lists the Diataxis-facing pages in the public docs layer and why e
 | `docs/reference/README.md` | Existing stable reference index already covers commands/providers/credentials. |
 | `docs/reference/commands.md` | Canonical command surface reference used by tutorials and how-to pages. |
 | `docs/reference/providers-and-auth.md` | Canonical provider/auth behavior used by first-run tutorial. |
-| `docs/project/README.md`, `docs/architecture/README.md`, `docs/contributing/README.md`, `docs/operations/README.md` | Internal or maintainer-oriented docs preserved as-is and linked from the new index under a separate section. |
+| `docs/project/README.md`, `docs/architecture/README.md`, `docs/contributing/README.md`, `docs/operations/README.md`, `docs/testing/README.md`, `docs/benchmark/README.md`, `docs/testing/v1-signoff-plan.md`, `docs/benchmark/provider-prompt-benchmarking.md` | Internal or maintainer-oriented docs preserved as separate reading paths instead of the default product path. |
 
 ## Reference pages in the public layer
 

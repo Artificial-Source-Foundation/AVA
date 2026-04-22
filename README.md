@@ -2,7 +2,7 @@
 
 # AVA
 
-**A practical AI coding agent for terminal, desktop, and web.**
+**A practical solo-first AI coding agent for terminal and desktop.**
 
 [![Rust](https://img.shields.io/badge/Rust-100%25-dea584?style=flat-square&logo=rust)](https://www.rust-lang.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow?style=flat-square)](LICENSE)
@@ -10,11 +10,11 @@
 AVA reads code, edits files, runs commands, and helps you finish software work without leaving your repo.
 </div>
 
-AVA is a Rust-first coding agent built for real repository work.
+AVA is a Rust-first, solo-first coding agent built for real repository work.
 
 - Use the `ava` CLI for terminal work: TUI by default, headless with `--headless`
 - Use AVA Desktop for a native desktop shell on top of the same backend
-- Use web mode with `ava serve` when you build AVA with the `web` feature
+- Use web mode with `ava serve` only when you need the feature-gated advanced web surface
 
 ## Get Started
 
@@ -68,12 +68,12 @@ Web mode is available through `ava serve`, but it requires a web-enabled source 
 
 ### Products
 
-AVA ships two user-facing products:
+AVA's main products are:
 
 1. `ava` CLI for terminal use
 2. AVA Desktop for a native Tauri app
 
-If you only want the terminal app, use the CLI install path above. A full repo clone or source build also includes the desktop/web frontend files under `src/`, such as `.ts` and `.tsx`, because this repository contains both products.
+If you only want the terminal app, use the CLI install path above. A full repo clone or source build also includes desktop and optional web frontend files because this repository contains the full product tree.
 
 ### CLI Install Options
 
@@ -151,15 +151,21 @@ Security note:
 
 - Solo-first coding agent
 - 9 default built-in tools: `read`, `write`, `edit`, `bash`, `glob`, `grep`, `web_fetch`, `web_search`, `git_read`
-- Works in TUI, desktop, and web
-- MCP support
+- Works in TUI, desktop, and feature-gated web mode
+- Curated provider support with benchmark-driven prompt tuning
 - Commands and Skills support
-- Stable plugin architecture for optional advanced capability
+- Optional advanced capability through MCP and plugins
 - Session persistence and safety features for real repo work
+
+## What AVA Is Not
+
+- Not an AI dev-team product by default
+- Not a plugin-heavy platform you must configure before it becomes useful
+- Not a minimal barebones coding harness; the default product is intentionally more complete than that
 
 ## Supported Providers
 
-AVA 0.6 actively supports and tests these providers:
+AVA 0.6 actively supports and tunes these providers on purpose:
 
 1. Anthropic
 2. OpenAI
@@ -177,15 +183,17 @@ Provider variants should appear as routing or region options inside a provider, 
 
 ## Customization
 
-The main user-visible customization surface is:
+The main default customization surface is:
 
 1. MCPs
 2. Commands
 3. Skills
 
-Plugins are a core part of AVA's identity, but plugin-owned UI and settings should only appear when installed.
+Most users do not need more than these. Plugins and deeper extension paths are for advanced setups.
 
 ## Configuration
+
+Most users only need provider auth, `config.yaml`, and optional trusted project config. The rest of the extension directories are advanced surfaces.
 
 Fresh installs use the lowercase XDG paths below. Existing `~/.ava` installs are still read from the legacy location for compatibility until you migrate that data.
 
@@ -230,7 +238,7 @@ User docs:
 - [docs/troubleshooting/common-errors.md](docs/troubleshooting/common-errors.md) - common setup and runtime fixes
 - [docs/reference/README.md](docs/reference/README.md) - commands, providers, configuration, and storage reference
 
-Contributor and maintainer docs:
+Internal contributor and maintainer docs:
 
 - [docs/README.md](docs/README.md) - internal docs map
 - [AGENTS.md](AGENTS.md) - repo workflow, conventions, and architecture for contributors and AI coding agents

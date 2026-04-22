@@ -20,7 +20,7 @@ See also: [How-to: Install AVA](install.md), [How-to: Configure AVA](configure.m
 | Run non-interactively | `ava "summarize this repository" --headless` | Best for scripts and quick one-shot runs |
 | Run from a source checkout without installing | `cargo run --bin ava --` | Or use the `just` helpers below |
 | Run the desktop app from source | `pnpm tauri dev` | Requires the frontend/Tauri toolchain |
-| Run web mode | `ava serve ...` | Requires a CLI build with the `web` feature |
+| Run web mode (advanced) | `ava serve ...` | Requires a CLI build with the `web` feature |
 
 ## Run the TUI
 
@@ -70,13 +70,15 @@ pnpm tauri dev
 
 This is the normal local desktop development path.
 
-## Run the web server
+## Run the web server (advanced)
 
 If AVA was built with `--features web`, run:
 
 ```bash
 ava serve --host 127.0.0.1 --port 8080 --token dev-local-token
 ```
+
+Most users do not need this path.
 
 Notes:
 
@@ -86,4 +88,4 @@ Notes:
 4. If you run the Vite frontend against `ava serve`, set `VITE_AVA_SERVER_TOKEN=<token>` or open the frontend once with `?ava_token=<token>` so the browser can authenticate privileged routes.
 5. Default browser-origin policy is loopback-only. `--insecure-open-cors` is an explicit opt-in override if you intentionally need non-loopback browser origins during development.
 
-For the full command surface, use [Reference: Commands](../reference/commands.md) and [Reference: Web API surface](../reference/web-api.md).
+For the full command surface, use [Reference: Commands](../reference/commands.md). Use [Reference: Web API surface](../reference/web-api.md) only if you are intentionally working with the advanced web mode.

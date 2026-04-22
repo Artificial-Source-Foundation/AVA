@@ -331,6 +331,7 @@ impl AgentsConfig {
                 names.push(key.clone());
             }
         }
+        names.retain(|name| self.get_agent(name).enabled);
         names.sort();
         names
     }
@@ -380,7 +381,7 @@ pub fn default_agents() -> HashMap<String, AgentOverride> {
             description: Some("Read-first explorer for quick repo reconnaissance.".into()),
             prompt: Some(
                 "You are a fast codebase explorer. Answer questions quickly \
-                 using read, glob, and grep. Be concise and direct."
+                  using read, glob, and grep. Be concise and direct."
                     .into(),
             ),
             max_turns: Some(5),
@@ -460,7 +461,7 @@ pub fn default_agents() -> HashMap<String, AgentOverride> {
             description: Some("Low-cost scout for quick read-only investigation.".into()),
             prompt: Some(
                 "You are a lightweight scout agent. Quickly investigate the codebase \
-                 using read-only tools and produce concise summaries. Be fast and cheap."
+                  using read-only tools and produce concise summaries. Be fast and cheap."
                     .into(),
             ),
             max_turns: Some(5),
@@ -1068,6 +1069,30 @@ max_turns = 5
         assert!(agents.contains(&"scout".to_string()));
         assert!(agents.contains(&"worker".to_string()));
         assert!(agents.contains(&"custom-agent".to_string()));
+    }
+
+    #[test]
+    fn test_available_agents_omits_disabled_builtin_templates() {
+        let tmp = TempDir::new().unwrap();
+        let global = write_toml(
+            tmp.path(),
+            "global.toml",
+            r#"
+[subagents.scout]
+enabled = false
+
+[subagents.review]
+enabled = false
+"#,
+        );
+        let project = tmp.path().join("project.toml");
+
+        let config = AgentsConfig::load(&global, &project);
+        let agents = config.available_agents();
+
+        assert!(!agents.contains(&"scout".to_string()));
+        assert!(!agents.contains(&"review".to_string()));
+        assert!(agents.contains(&"build".to_string()));
     }
 
     #[test]

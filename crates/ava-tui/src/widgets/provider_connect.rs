@@ -501,6 +501,22 @@ pub fn render_provider_connect(frame: &mut Frame<'_>, area: Rect, state: &mut Ap
                 clamp_line(
                     Line::from(vec![
                         Span::styled(
+                            "[Enter] ".to_string(),
+                            Style::default().fg(state.theme.text_muted),
+                        ),
+                        Span::styled(
+                            "Open browser  ".to_string(),
+                            Style::default().fg(state.theme.text_dimmed),
+                        ),
+                        Span::styled(
+                            "[C] ".to_string(),
+                            Style::default().fg(state.theme.text_muted),
+                        ),
+                        Span::styled(
+                            "Copy URL  ".to_string(),
+                            Style::default().fg(state.theme.text_dimmed),
+                        ),
+                        Span::styled(
                             "[Esc] ".to_string(),
                             Style::default().fg(state.theme.text_muted),
                         ),
@@ -576,6 +592,14 @@ pub fn render_provider_connect(frame: &mut Frame<'_>, area: Rect, state: &mut Ap
                         ),
                         Span::styled(
                             "Open browser  ".to_string(),
+                            Style::default().fg(state.theme.text_dimmed),
+                        ),
+                        Span::styled(
+                            "[C] ".to_string(),
+                            Style::default().fg(state.theme.text_muted),
+                        ),
+                        Span::styled(
+                            "Copy URL  ".to_string(),
                             Style::default().fg(state.theme.text_dimmed),
                         ),
                         Span::styled(

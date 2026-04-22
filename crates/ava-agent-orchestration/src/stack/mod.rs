@@ -4,7 +4,6 @@ mod stack_run;
 pub(crate) mod stack_tools;
 
 pub use crate::subagents::parse_model_spec;
-pub use ava_agent::run_context::AgentRunContext;
 pub use stack_config::{AgentRunResult, AgentStackConfig};
 pub use stack_mcp::{MCPServerInfo, McpServerStatus};
 
@@ -12,6 +11,10 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use ava_agent::agent_loop::{PLAN_MODE_ALLOWED_TOOLS, READ_ONLY_TOOLS};
+use ava_agent::message_queue::{MessageQueue, MessageQueueControl};
+use ava_agent::routing::ToolVisibilityProfile;
+use ava_agent::system_prompt::BenchmarkPromptOverride;
 use ava_codebase::indexer::{index_project, index_workspace};
 use ava_codebase::CodebaseIndex;
 use ava_config::AgentsConfig;
@@ -49,7 +52,6 @@ use stack_mcp::MCPRuntime;
 use stack_tools::{build_tool_registry_with_plugins, resolve_workspace_roots};
 
 use crate::subagents::{effective_subagent_definitions, EffectiveSubagentDefinition};
-use crate::system_prompt::BenchmarkPromptOverride;
 
 const CONFIG_HOOK_TIMEOUT_MS: u64 = 150;
 
@@ -984,23 +986,18 @@ impl AgentStack {
 
     /// Create a message queue for mid-stream messaging.
     /// Returns the queue (to pass into `run()`) and the sender (for the TUI to send messages).
-    pub fn create_message_queue(
-        &self,
-    ) -> (
-        crate::message_queue::MessageQueue,
-        mpsc::UnboundedSender<QueuedMessage>,
-    ) {
-        crate::message_queue::MessageQueue::new()
+    pub fn create_message_queue(&self) -> (MessageQueue, mpsc::UnboundedSender<QueuedMessage>) {
+        MessageQueue::new()
     }
 
     pub fn create_message_queue_with_control(
         &self,
     ) -> (
-        crate::message_queue::MessageQueue,
+        MessageQueue,
         mpsc::UnboundedSender<QueuedMessage>,
-        crate::message_queue::MessageQueueControl,
+        MessageQueueControl,
     ) {
-        crate::message_queue::MessageQueue::new_with_control()
+        MessageQueue::new_with_control()
     }
 
     pub async fn current_model(&self) -> (String, String) {
@@ -1116,7 +1113,7 @@ struct IntrospectionTaskSpawner;
 fn effective_prompt_visible_tools(
     registry: &ToolRegistry,
     plan_mode: bool,
-    tool_visibility_profile: crate::routing::ToolVisibilityProfile,
+    tool_visibility_profile: ToolVisibilityProfile,
 ) -> Vec<(ava_types::Tool, ToolSource)> {
     let mut tools = registry
         .list_tools_for_tiers(&[ToolTier::Default, ToolTier::Plugin])
@@ -1130,22 +1127,20 @@ fn effective_prompt_visible_tools(
         .collect::<Vec<_>>();
 
     if plan_mode {
-        tools.retain(|(tool, _)| {
-            crate::agent_loop::PLAN_MODE_ALLOWED_TOOLS.contains(&tool.name.as_str())
-        });
+        tools.retain(|(tool, _)| PLAN_MODE_ALLOWED_TOOLS.contains(&tool.name.as_str()));
     }
 
     let subagent_visible = tools.iter().any(|(tool, _)| tool.name == "subagent");
 
     match tool_visibility_profile {
-        crate::routing::ToolVisibilityProfile::Full => {}
-        crate::routing::ToolVisibilityProfile::ReadOnly => {
+        ToolVisibilityProfile::Full => {}
+        ToolVisibilityProfile::ReadOnly => {
             tools.retain(|(tool, _)| {
-                crate::agent_loop::READ_ONLY_TOOLS.contains(&tool.name.as_str())
+                READ_ONLY_TOOLS.contains(&tool.name.as_str())
                     || (subagent_visible && tool.name == "subagent")
             });
         }
-        crate::routing::ToolVisibilityProfile::AnswerOnly => tools.clear(),
+        ToolVisibilityProfile::AnswerOnly => tools.clear(),
     }
 
     tools

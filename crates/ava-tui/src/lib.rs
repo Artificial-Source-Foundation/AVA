@@ -16,8 +16,6 @@ pub mod benchmark_compare;
 #[cfg(feature = "benchmark")]
 pub(crate) mod benchmark_format;
 #[cfg(feature = "benchmark")]
-pub mod benchmark_harness;
-#[cfg(feature = "benchmark")]
 pub mod benchmark_import;
 #[cfg(feature = "benchmark")]
 pub(crate) mod benchmark_judge;

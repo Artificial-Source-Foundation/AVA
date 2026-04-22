@@ -1,22 +1,18 @@
-//! Compatibility + backend-helper shim over the shared control-plane contract.
+//! Backend-only control-plane helpers layered over shared contracts.
 //!
 //! Pure command/event/session/interactive/queue/orchestration contracts live in
-//! `crates/ava-control-plane/src/`. This module is intentionally limited to
-//! compatibility re-exports and backend-only helpers that depend on runtime types.
+//! `crates/ava-control-plane/src/`. This module intentionally keeps only
+//! helpers that depend on runtime-owned backend types.
 
-pub mod commands;
 pub mod events;
-pub mod interactive;
-pub mod orchestration;
-pub mod queue;
 pub mod sessions;
 
 #[cfg(test)]
 mod tests {
     use serde_json::json;
 
-    use super::commands::canonical_command_specs;
-    use super::events::{canonical_event_specs, required_backend_event_kinds};
+    use ava_control_plane::commands::canonical_command_specs;
+    use ava_control_plane::events::{canonical_event_specs, required_backend_event_kinds};
 
     #[test]
     fn control_plane_contract_fixture_matches_current_wire_contract() {

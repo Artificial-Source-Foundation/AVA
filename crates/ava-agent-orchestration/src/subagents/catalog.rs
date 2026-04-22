@@ -41,10 +41,10 @@ pub fn apply_runtime_profile_to_registry(
 
 pub fn tool_visibility_profile(
     profile: SubAgentRuntimeProfile,
-) -> crate::routing::ToolVisibilityProfile {
+) -> ava_agent::routing::ToolVisibilityProfile {
     match profile {
-        SubAgentRuntimeProfile::Full => crate::routing::ToolVisibilityProfile::Full,
-        SubAgentRuntimeProfile::ReadOnly => crate::routing::ToolVisibilityProfile::ReadOnly,
+        SubAgentRuntimeProfile::Full => ava_agent::routing::ToolVisibilityProfile::Full,
+        SubAgentRuntimeProfile::ReadOnly => ava_agent::routing::ToolVisibilityProfile::ReadOnly,
     }
 }
 

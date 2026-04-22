@@ -9,6 +9,8 @@ updated: "2026-04-10"
 
 This section is for maintainer-facing operational runbooks.
 
+It is intentionally outside the normal product and contributor quick-start path.
+
 ## Documents
 
 1. [Incident Response](incident-response.md) - how to classify and respond to runtime or release issues

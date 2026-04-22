@@ -88,6 +88,17 @@ impl TaskTool {
     }
 }
 
+/// Tool that launches a background agent explicitly.
+pub struct BackgroundAgentTool {
+    spawner: Arc<dyn TaskSpawner>,
+}
+
+impl BackgroundAgentTool {
+    pub fn new(spawner: Arc<dyn TaskSpawner>) -> Self {
+        Self { spawner }
+    }
+}
+
 #[async_trait]
 impl Tool for TaskTool {
     fn name(&self) -> &str {
@@ -102,10 +113,11 @@ impl Tool for TaskTool {
           implementation slice, or a final review pass. Avoid using it for tiny single-file \
           edits. Sub-agents cannot ask the user questions, and any further delegation is bounded by backend depth and spawn-budget policy limits.\n\n\
           By default, the sub-agent runs in the foreground: the main agent waits for it to \
-          finish and receives the result. Set `background: true` to run the sub-agent in \
-          parallel — the main agent keeps working and gets notified when the background \
-          agent completes. Use foreground when you need the result before continuing; use \
-          background when the work is independent.\n\n\
+          finish and receives the result. This is the normal/default delegation path. Use the \
+          dedicated `background_agent` tool only when the user explicitly asks for background, \
+          parallel, or non-blocking delegation, or when that requirement is otherwise explicit. \
+          Do not choose background delegation by default. The legacy `background: true` flag \
+          remains supported for compatibility.\n\n\
           Optionally specify an agent type (for example `scout`, `explore`, `plan`, `review`, \
           `worker`, or `build`) to use a specialist with its own model, prompt, and turn limits \
           configured in subagents.toml."
@@ -126,7 +138,7 @@ impl Tool for TaskTool {
                 },
                 "background": {
                     "type": "boolean",
-                    "description": "Set to true to run this sub-agent in the background. The main agent continues working and gets notified when the background agent completes. Use this when the sub-agent's work is independent and you don't need the result immediately. Defaults to false (foreground, blocking)."
+                    "description": "Legacy compatibility flag. Set to true only when background/non-blocking delegation is explicitly desired. The normal/default path is foreground blocking delegation (`false`). Prefer the dedicated `background_agent` tool for new calls."
                 }
             }
         })
@@ -199,5 +211,72 @@ impl Tool for TaskTool {
                 is_error: false,
             })
         }
+    }
+}
+
+#[async_trait]
+impl Tool for BackgroundAgentTool {
+    fn name(&self) -> &str {
+        "background_agent"
+    }
+
+    fn description(&self) -> &str {
+        "Launch a background agent that works independently while the main agent keeps going. Use this only when the user explicitly asked for background, parallel, or non-blocking delegation, or when that requirement is otherwise explicit. Do not use this as the default delegation path. When it finishes, AVA surfaces completion in the UI and routes a summary back to the parent run. Prefer the blocking `subagent` tool for normal delegation."
+    }
+
+    fn parameters(&self) -> Value {
+        json!({
+            "type": "object",
+            "required": ["prompt"],
+            "properties": {
+                "prompt": {
+                    "type": "string",
+                    "description": "The task description for the background agent. Be specific and keep it independent from the parent's immediate critical path. Use this tool only for explicitly requested background/non-blocking work."
+                },
+                "agent": {
+                    "type": "string",
+                    "description": "Optional background agent type to use (e.g. 'scout', 'explore', 'review', 'worker', or 'build'). Defaults to 'subagent'."
+                }
+            }
+        })
+    }
+
+    async fn execute(&self, args: Value) -> ava_types::Result<ToolResult> {
+        let prompt = args.get("prompt").and_then(Value::as_str).ok_or_else(|| {
+            AvaError::ValidationError("missing required field: prompt".to_string())
+        })?;
+
+        if prompt.trim().is_empty() {
+            return Err(AvaError::ValidationError(
+                "prompt cannot be empty".to_string(),
+            ));
+        }
+
+        let agent_type = args
+            .get("agent")
+            .and_then(Value::as_str)
+            .unwrap_or("subagent");
+        let originating_call_id = args
+            .get(INTERNAL_TOOL_CALL_ID_ARG)
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .map(str::to_owned);
+
+        if let Some(call_id) = originating_call_id {
+            ORIGINATING_TOOL_CALL_ID
+                .scope(
+                    Some(call_id),
+                    self.spawner.spawn_background(agent_type, prompt),
+                )
+                .await?;
+        } else {
+            self.spawner.spawn_background(agent_type, prompt).await?;
+        }
+
+        Ok(ToolResult {
+            call_id: String::new(),
+            content: "Background agent launched. Continue with the main task; AVA will surface completion when it finishes.".to_string(),
+            is_error: false,
+        })
     }
 }

@@ -1,16 +1,20 @@
 ---
 title: "How-to: Configure Primary Agents and Subagents"
-description: "Set up startup primary-agent profiles and delegated subagent profiles, including trust and external prompt-file references."
+description: "Advanced setup for startup primary-agent profiles and delegated subagent profiles."
 order: 3
 updated: "2026-04-21"
 ---
 
 # How-to: Configure Primary Agents and Subagents
 
-Use this page to configure:
+This is an advanced setup page.
+
+Use it when you want to configure:
 
 1. **Primary agents** (`config.yaml`) for startup behavior
 2. **Subagents** (`subagents.toml`) for delegated specialist runs
+
+Most users do not need this page. AVA works without defining custom primary agents or subagents.
 
 ## Where these files live
 
@@ -131,12 +135,21 @@ Notes:
 
 You do not need a separate command to “enter subagent mode.” The primary agent delegates when needed.
 
+If you never touch this file, AVA still works with its built-in defaults.
+
 What you will see in practice:
 
-1. A delegated subagent run appears in the conversation with its specialist ID/status.
-2. You can open that delegated run to inspect the child session transcript.
-3. The parent conversation keeps the delegation link so you can move between parent/child context.
-4. If delegation is disabled (`[defaults].enabled = false` or per-subagent `enabled = false`), work stays on the primary agent.
+1. A blocking delegated run uses the `subagent` tool: the parent waits for the delegated result before continuing.
+2. A non-blocking delegated run uses the `background_agent` tool: the parent keeps going, AVA surfaces a completion notice in the UI, and the finished summary is queued back into the parent run as follow-up context.
+3. Native delegated runs now get a real child session immediately, so opening the delegated run shows a live child transcript as work streams in instead of waiting only for a final summary snapshot.
+4. Reopening a completed delegated run loads the canonical child-session transcript, not just a compact parent-card snapshot.
+5. If delegation is disabled (`[defaults].enabled = false` or per-subagent `enabled = false`), work stays on the primary agent.
+
+Built-in exposure note:
+
+1. AVA ships built-in subagent defaults in code.
+2. `subagents.toml` can still override any built-in.
+3. Setting `enabled = false` on a built-in subagent removes it from AVA's exposed available/effective subagent catalog, matching the current OpenCode-style behavior.
 
 ## Resume and override behavior
 

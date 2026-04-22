@@ -1,4 +1,4 @@
-<!-- Last verified: 2026-04-21 -->
+<!-- Last verified: 2026-04-22 -->
 # AI Coding Agent Instructions (v3)
 
 > Instructions for AI assistants working on AVA. This file is auto-injected into the AVA agent's system prompt.
@@ -22,7 +22,7 @@ pnpm lint && pnpm typecheck
 Git hook policy:
 
 1. `pre-commit` must stay fast, staged-file-oriented, non-mutating, file-scoped for Rust checks, and validate the staged snapshot rather than the working-tree copy.
-2. `pre-push` should be path-aware: docs-only pushes should stay light, frontend-sensitive pushes must run `pnpm typecheck` + `pnpm lint`, and Rust/general repo changes should run the pragmatic local Rust gate.
+2. `pre-push` should be path-aware: docs-only pushes should stay light, frontend-sensitive pushes must run `pnpm typecheck` + `pnpm lint`, and Rust/general repo changes should run the pragmatic local Rust gate plus targeted compile smokes for touched high-risk Rust surfaces (workspace wiring, desktop/Tauri, `ava-web`, `ava-config`). Keep focused `ava-agent` contract/ownership unit tests and desktop accepted-and-streaming run-start parity tests in that local Rust gate.
 3. CI remains the authoritative full gate.
 
 ## Local Resource Throttling
@@ -51,7 +51,7 @@ This file is the primary source of truth for repo workflow and architecture.
 
 ## What AVA Is
 
-AVA is a Rust-first AI coding assistant (CLI/TUI + Tauri desktop + web mode) with a 25-crate Rust workspace.
+AVA is a Rust-first, solo-first AI coding assistant focused on real repository work. The main product surfaces are the CLI/TUI and Desktop app; web mode exists but stays secondary and feature-gated. The active Rust workspace has 24 crates.
 
 - **CLI/TUI**: `crates/ava-tui/` (Ratatui + Crossterm + Tokio)
 - **Agent runtime core**: `crates/ava-agent/` (+ `ava-llm/`, `ava-tools/`, `ava-review/`)
@@ -66,9 +66,11 @@ Current workspace Rust baseline: `rust-version = 1.86`.
 
 ## Key Counts
 
-- 25 Rust crates in the root workspace (`src-tauri/` remains outside the workspace)
+- 24 Rust crates in the root workspace (`src-tauri/` remains outside the workspace)
 - 9 default tools: `read`, `write`, `edit`, `bash`, `glob`, `grep`, `web_fetch`, `web_search`, `git_read`
 - Additional tools load separately at runtime (for example `subagent`, `todo_*`, `question`, `plan`, MCP, and TOML custom tools)
+
+Interpretation rule: the 9 default tools define the normal product surface. Anything else should be treated as advanced unless there is a strong reason to make it part of the default story.
 
 ## Where To Put New Code
 
@@ -88,7 +90,7 @@ Current workspace Rust baseline: `rust-version = 1.86`.
 
 Keep the default set capped at 9. New tools should default to opt-in delivery (plugin, MCP, or custom-tool). Only promote to default with strong justification.
 
-Power plugins are part of the core architecture. The current 0.6 direction is to grow advanced capability behind plugin seams instead of expanding core product surfaces.
+Power plugins are part of the architecture, but they are not the default product story. The current 0.6 direction is to keep the core solo workflow small and push advanced capability behind plugin seams instead of expanding default product surfaces.
 
 ## Common Tasks
 
@@ -185,22 +187,21 @@ Docs must always reflect the current codebase. Never let them drift.
 3. `docs/project/roadmap.md` — source of truth for product direction
 4. `docs/project/backlog.md` — current backlog
 5. `CLAUDE.md` — compatibility reference that redirects back to the active docs
-6. `docs/extend/README.md` — plugin, MCP, command, skill, and custom-tool reference
+6. `docs/extend/README.md` — advanced plugin, MCP, command, skill, and custom-tool reference
 7. `docs/benchmark/README.md` — benchmark architecture, workflows, reports, and prompt tuning
 8. `docs/testing/README.md` — testing and verification concepts across Rust, frontend, and benchmark flows
 9. `docs/testing/desktop-testing.md` — practical desktop regression workflow for the desktop shell
 10. `docs/operations/README.md` — maintainer runbooks and operational guidance
-11. `docs/architecture/README.md` — architecture entrypoint, audits, and transition docs
-12. `docs/architecture/agent-backend-capability-audit-m1.md` — current coding-agent backend capability inventory
-13. `docs/architecture/agent-backend-capability-comparison-m2.md` — external comparison matrix for backend correction planning
-14. `docs/architecture/cross-surface-runtime-map-m4.md` — backend connection map across interactive TUI, headless CLI, desktop, and web
-15. `docs/architecture/cross-surface-behavior-audit-m5.md` — shared-vs-divergent runtime behavior audit across surfaces
-16. `docs/architecture/shared-backend-contract-m6.md` — canonical shared-backend contract
-17. `docs/architecture/backend-correction-roadmap-m7.md` — implementation-ready backend correction roadmap
-18. `docs/architecture/backend-contract-exceptions.md` — versioned adapter-exception registry for the shared backend contract
-19. `docs/architecture/plugin-boundary.md` — first concrete core-to-plugin migration checklist
-20. `docs/architecture/crate-map.md` — crate dependency map
-21. `CHANGELOG.md` — version history
+11. `docs/architecture/README.md` — architecture entrypoint, canonical owner docs, and historical transition notes
+12. `docs/architecture/entrypoints.md` — runtime composition roots and adapter wiring
+13. `docs/architecture/crate-map.md` — crate dependency map
+14. `docs/architecture/shared-backend-contract-m6.md` — canonical shared-backend contract
+15. `docs/architecture/backend-contract-exceptions.md` — versioned adapter-exception registry for the shared backend contract
+16. `docs/architecture/backend-correction-roadmap-m7.md` — implementation-ready backend correction roadmap
+17. `docs/architecture/agent-backend-modularization-roadmap-m1.md` — active modularization planning track
+18. `docs/architecture/plugin-boundary.md` — future-track note for optional plugin migration work
+19. `docs/archive/architecture/README.md` — historical architecture milestone artifacts
+20. `CHANGELOG.md` — version history
 
 `AGENTS.md` owns workflow, conventions, and architectural guidance. `docs/project/roadmap.md` owns product direction.
 

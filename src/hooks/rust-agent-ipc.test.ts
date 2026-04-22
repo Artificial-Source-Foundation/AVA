@@ -1515,7 +1515,7 @@ describe('createAgentIpc', () => {
     harness.dispose()
   })
 
-  it('bounds EX-002 by settling Tauri runs on terminal events before invoke returns', async () => {
+  it('settles Tauri runs from terminal events even when invoke resolves early', async () => {
     isTauriRuntime = true
     let listener: ((evt: { payload: AgentEvent }) => void) | null = null
     let releaseInvoke: ((value: SubmitGoalResult) => void) | null = null
@@ -1616,8 +1616,7 @@ describe('createAgentIpc', () => {
     harness.dispose()
   })
 
-  it('keeps the Tauri listener alive briefly when invoke resolves before the terminal event', async () => {
-    vi.useFakeTimers()
+  it('keeps the Tauri listener attached until terminal events arrive', async () => {
     isTauriRuntime = true
     let listener: ((evt: { payload: AgentEvent }) => void) | null = null
     const unlisten = vi.fn()
@@ -1628,24 +1627,14 @@ describe('createAgentIpc', () => {
         return unlisten
       }
     )
-    tauriInvokeMock.mockImplementationOnce(
-      () =>
-        new Promise<SubmitGoalResult>((resolve) => {
-          setTimeout(() => {
-            resolve({
-              success: true,
-              turns: 2,
-              sessionId: 'invoke-session',
-            })
-          }, 0)
-        })
+    tauriInvokeMock.mockImplementationOnce(() =>
+      Promise.resolve({ success: true, turns: 2, sessionId: 'invoke-session' })
     )
 
     const harness = createIpcHarness()
     const runPromise = harness.ipc.run('ship it')
 
-    await Promise.resolve()
-    await vi.advanceTimersByTimeAsync(0)
+    await waitForInvokeCall(0)
     const runId = extractInvokeRunId()
     expect(listener).not.toBeNull()
     expect(unlisten).not.toHaveBeenCalled()
@@ -1677,16 +1666,14 @@ describe('createAgentIpc', () => {
     harness.dispose()
   })
 
-  it('falls back after a bounded Tauri grace period when no terminal event arrives', async () => {
-    vi.useFakeTimers()
+  it('waits for a terminal Tauri event after accepted invoke responses', async () => {
     isTauriRuntime = true
     let listener: ((evt: { payload: AgentEvent }) => void) | null = null
-    const unlisten = vi.fn()
 
     listenMock.mockImplementationOnce(
       async (_event: string, cb: (evt: { payload: AgentEvent }) => void) => {
         listener = cb
-        return unlisten
+        return () => {}
       }
     )
     tauriInvokeMock.mockResolvedValueOnce({
@@ -1700,27 +1687,40 @@ describe('createAgentIpc', () => {
 
     await Promise.resolve()
     expect(listener).not.toBeNull()
-    expect(unlisten).not.toHaveBeenCalled()
 
-    await vi.advanceTimersByTimeAsync(250)
+    let settled = false
+    void runPromise.then(() => {
+      settled = true
+    })
+    await flushPromises()
+    expect(settled).toBe(false)
+
+    if (!listener) {
+      throw new Error('Tauri listener was not attached')
+    }
+    const runId = extractInvokeRunId()
+    const emitEvent = listener as (evt: { payload: AgentEvent }) => void
+    emitEvent({
+      payload: {
+        type: 'complete',
+        runId,
+        session: {
+          id: 'session-terminal',
+          messages: [],
+          completed: true,
+        },
+      },
+    })
 
     await expect(runPromise).resolves.toEqual({
       success: true,
       turns: 0,
-      sessionId: 'invoke-session',
+      sessionId: 'session-terminal',
     })
-    expect(harness.lastResult()).toEqual({
-      success: true,
-      turns: 0,
-      sessionId: 'invoke-session',
-    })
-    expect(harness.handledEvents).toHaveLength(0)
-    expect(unlisten).toHaveBeenCalledTimes(1)
     harness.dispose()
   })
 
   it('ignores late Tauri terminal events from an earlier run after a new listener attaches', async () => {
-    vi.useFakeTimers()
     isTauriRuntime = true
     const listeners: Array<(evt: { payload: AgentEvent }) => void> = []
 
@@ -1744,13 +1744,27 @@ describe('createAgentIpc', () => {
     const firstRunId = extractInvokeRunId(0)
 
     firstInvoke.resolve({ success: true, turns: 1, sessionId: 'invoke-a' })
-    await vi.advanceTimersByTimeAsync(250)
+    if (!listeners[0]) {
+      throw new Error('First Tauri listener was not attached')
+    }
+    listeners[0]({
+      payload: {
+        type: 'complete',
+        runId: firstRunId,
+        session: {
+          id: 'invoke-a',
+          messages: [],
+          completed: true,
+        },
+      },
+    })
 
     await expect(firstRun).resolves.toEqual({
       success: true,
       turns: 0,
       sessionId: 'invoke-a',
     })
+    harness.handledEvents.length = 0
 
     const secondRun = harness.ipc.run('second run')
     await waitForInvokeCall(1)
@@ -1898,7 +1912,6 @@ describe('createAgentIpc', () => {
   })
 
   it('drops stale Tauri streaming events from earlier runs after a new run starts', async () => {
-    vi.useFakeTimers()
     isTauriRuntime = true
     const listeners: Array<(evt: { payload: AgentEvent }) => void> = []
 
@@ -1922,12 +1935,26 @@ describe('createAgentIpc', () => {
     const firstRunId = extractInvokeRunId(0)
 
     firstInvoke.resolve({ success: true, turns: 1, sessionId: 'invoke-a' })
-    await vi.advanceTimersByTimeAsync(250)
+    if (!listeners[0]) {
+      throw new Error('First Tauri listener was not attached')
+    }
+    listeners[0]({
+      payload: {
+        type: 'complete',
+        runId: firstRunId,
+        session: {
+          id: 'invoke-a',
+          messages: [],
+          completed: true,
+        },
+      },
+    })
     await expect(firstRun).resolves.toEqual({
       success: true,
       turns: 0,
       sessionId: 'invoke-a',
     })
+    harness.handledEvents.length = 0
 
     const secondRun = harness.ipc.run('second run')
     await waitForInvokeCall(1)

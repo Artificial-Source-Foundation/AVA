@@ -36,7 +36,6 @@ ava-acp = { path = "../ava-acp" }
 ava-agent = { path = "../ava-agent" }
 ava-agent-orchestration = { path = "../ava-agent-orchestration" }
 ava-control-plane = { path = "../ava-control-plane" }
-ava-hq = { path = "../ava-hq", optional = true }
 ava-review = { path = "../ava-review" }
 ava-llm = { path = "../ava-llm" }
 ava-tools = { path = "../ava-tools" }
@@ -82,7 +81,7 @@ sysinfo = "0.30"
 
 [features]
 default = []
-benchmark = ["dep:ava-hq"]
+benchmark = []
 web = ["dep:ava-web"]
 voice = ["dep:cpal", "dep:hound", "dep:async-trait"]
 local-whisper = ["voice", "dep:whisper-rs"]

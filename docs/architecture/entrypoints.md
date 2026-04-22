@@ -46,7 +46,7 @@ Boundary note: internal workspace callers that need stack/subagent orchestration
 
 `crates/ava-control-plane/src/` is the canonical cross-surface command/event/lifecycle contract seam for shared/pure backend contracts.
 
-`crates/ava-agent/src/control_plane/` remains the backend integration shim: it re-exports shared contract modules for compatibility and keeps backend-only helpers that depend on `AgentEvent` or `AgentRunContext`.
+`crates/ava-agent/src/control_plane/` remains the backend integration shim for runtime-owned helpers only (no pure contract re-export modules).
 
 Ownership boundaries:
 

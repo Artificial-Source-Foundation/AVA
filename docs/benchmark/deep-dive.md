@@ -47,7 +47,7 @@ Reference weighting from the eval plan:
 
 The exact aggregate output is written into benchmark reports rather than being inferred from transcript text.
 
-See the current program framing in [`docs/project/v1-evals.md`](../project/v1-evals.md) for authoritative milestone-1 proof and parity requirements.
+See the current program framing in [`docs/testing/v1-signoff-plan.md`](../testing/v1-signoff-plan.md) for authoritative milestone-1 proof and parity requirements.
 
 Current implementation note:
 
@@ -100,9 +100,9 @@ Runtime-metric note:
 
 Important details:
 
-1. all solo runs, including both the main benchmark path and harness solo runs, now include sub-agent output tokens in the same output-token total before TPS is computed
+1. all benchmark runs now include sub-agent output tokens in the same output-token total before TPS is computed
 2. wall-clock time includes agent-loop overhead such as TTFT, tool execution, waiting between turns, network latency, and sub-agent coordination time
-3. compile/test validation that runs after the agent finishes is not part of the TPS denominator for solo runs; pair-harness results do not currently publish a TPS field
+3. compile/test validation that runs after the agent finishes is not part of the TPS denominator for benchmark runs
 4. `0.0` TPS is reported when elapsed time is zero to avoid divide-by-zero behavior
 5. `generation_tps` is omitted when TTFT is missing, when `ttft_ms >= total_time_ms`, or when the post-TTFT window would otherwise be zero
 
@@ -127,22 +127,8 @@ What this metric is not:
 What `generation_tps` is not:
 
 1. not a perfect active-streaming TPS sampler like a timestamped token-window tool
-2. not available for the combined HQ pair-harness result yet
+2. historical pair-harness TPS reporting is no longer relevant because that path has been removed
 3. not a pure parent-model metric when delegated sub-agents contribute output tokens to the same solo-run total: the numerator includes delegated output, but the denominator still uses the parent task's post-TTFT timing window
-
-### Harness Limits
-
-The harnessed-pair path has stricter limits than solo benchmark runs:
-
-1. HQ workers now forward real worker token and sub-agent usage, so harness artifacts retain measured worker input tokens, output tokens, and cost
-2. the pair harness still does not surface director token usage, so `director_tokens` and `director_cost` remain zero instead of using fabricated estimates
-3. because of that missing director usage, the harnessed-pair report does not currently publish a derived TPS field for the combined pair
-4. pair-harness cost totals therefore represent measured worker cost, not total real API spend for the full director-plus-worker workflow
-5. pair-harness `quality_pass` is still a regex-pattern signal today; unlike the solo benchmark paths, it does not yet require compile/test validation success for code-task PASS
-
-Interpretation rule:
-
-1. use solo benchmark TPS for throughput comparisons today; treat pair-harness token and cost fields as partial measured accounting until director usage is exposed by HQ events
 
 ## Runtime Logging
 
@@ -220,7 +206,7 @@ Current limitations:
 
 ## Related Docs
 
-1. [V1 Eval Plan](../project/v1-evals.md)
+1. [V1 Signoff Plan](../testing/v1-signoff-plan.md)
 2. [Suites And Workflows](suites-and-workflows.md)
 3. [Reports And Comparison](reports-and-comparison.md)
 4. [Prompt Benchmarking](prompt-benchmarking.md)

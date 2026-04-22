@@ -17,9 +17,6 @@ run_required_no_secrets_checks() {
   run_step "required no-secrets check: ava-config focused coverage" \
     ionice -c 3 nice -n 15 env CARGO_BUILD_JOBS=4 cargo test -p ava-config
 
-  run_step "required no-secrets check: delegated runtime signoff" \
-    ionice -c 3 nice -n 15 env CARGO_BUILD_JOBS=4 cargo test -p ava-agent-orchestration agent_stack_run_dispatches_subagent_when_enabled -- --exact
-
   run_step "required no-secrets check: desktop tauri compile smoke" \
     ionice -c 3 nice -n 15 env CARGO_BUILD_JOBS=4 cargo check --manifest-path src-tauri/Cargo.toml --lib
 

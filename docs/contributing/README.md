@@ -9,6 +9,8 @@ updated: "2026-04-20"
 
 This section holds contributor workflow material that should be easy to surface later in a docs website.
 
+If you are trying to understand the product, do not start here. Start with `README.md`, `docs/index.md`, and `docs/project/roadmap.md`.
+
 ## Documents
 
 1. [Development workflow](development-workflow.md) - day-to-day contributor commands, checks, and doc-update requirements

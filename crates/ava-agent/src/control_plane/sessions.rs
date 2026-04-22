@@ -4,8 +4,6 @@ use ava_types::{Session, ThinkingLevel};
 
 use crate::run_context::AgentRunContext;
 
-pub use ava_control_plane::sessions::*;
-
 pub fn run_context_from_session(session: &Session) -> AgentRunContext {
     let mut context = AgentRunContext::default();
     let metadata = session.metadata.get("runContext");

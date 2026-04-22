@@ -9,7 +9,7 @@ updated: "2026-04-20"
 
 This page covers frequent AVA errors that are not Linux desktop-rendering specific.
 
-Use this page for quick fixes. If you want the setup flow first, start with [How-to: Install AVA](../how-to/install.md), [How-to: Configure AVA](../how-to/configure.md), or [How-to: Run AVA Locally](../how-to/run-locally.md).
+Use this page for quick fixes. If you want the normal setup flow first, start with [How-to: Install AVA](../how-to/install.md), [How-to: Configure AVA](../how-to/configure.md), or [How-to: Run AVA Locally](../how-to/run-locally.md).
 
 For desktop/Linux-specific setup and rendering issues, use:
 
@@ -24,7 +24,7 @@ For desktop/Linux-specific setup and rendering issues, use:
 | Unknown provider during login or startup | [2) `Unknown provider: <id>` during `ava auth login`](#2-unknown-provider-id-during-ava-auth-login) or [5) `unknown provider` while creating a provider](#5-unknown-provider-while-creating-a-provider) |
 | Credentials missing or empty | [3) `<Provider> credentials are not configured` (or API key empty)](#3-provider-credentials-are-not-configured-or-api-key-empty) |
 | OpenAI OAuth expired | [4) OpenAI OAuth expired](#4-openai-oauth-expired) |
-| `ava serve` fails | [6) `ava serve` fails because web feature is missing](#6-ava-serve-fails-because-web-feature-is-missing) |
+| `ava serve` fails (advanced web mode) | [6) `ava serve` fails because web feature is missing](#6-ava-serve-fails-because-web-feature-is-missing) |
 | Ollama run fails | [7) Ollama local-model run fails (endpoint/model mismatch)](#7-ollama-local-model-run-fails-endpointmodel-mismatch) |
 
 ## 1) `No provider configured`
@@ -126,7 +126,7 @@ Web server requires the 'web' feature. Rebuild with:
 
 **Fix**
 
-If you are using a release-installed `ava` binary, treat `ava serve` as unavailable in that install unless you switch to a source-built CLI with the `web` feature enabled.
+If you are using a release-installed `ava` binary, treat `ava serve` as unavailable in that install unless you switch to a source-built CLI with the `web` feature enabled. Most users can ignore this entirely unless they intentionally need the advanced web mode.
 
 For a source checkout, reinstall or run it with the `web` feature enabled:
 

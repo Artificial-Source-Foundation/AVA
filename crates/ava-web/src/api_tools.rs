@@ -1,6 +1,6 @@
 //! HTTP API handlers for tool visibility/introspection.
 
-use ava_agent::control_plane::sessions::{load_prompt_context, SessionPromptContext};
+use ava_control_plane::sessions::{load_prompt_context, SessionPromptContext};
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;

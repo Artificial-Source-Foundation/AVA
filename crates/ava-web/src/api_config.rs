@@ -183,6 +183,33 @@ pub(crate) async fn get_config(
     Ok(Json(value))
 }
 
+#[derive(Deserialize)]
+pub struct SetPrimaryAgentProfileRequest {
+    pub prompt: Option<String>,
+}
+
+/// Apply the active startup primary-agent prompt suffix for future web runs.
+pub(crate) async fn set_primary_agent_profile(
+    State(state): State<WebState>,
+    Json(req): Json<SetPrimaryAgentProfileRequest>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ErrorResponse>)> {
+    if state.has_active_runs().await {
+        return Err(error_response(
+            StatusCode::CONFLICT,
+            "Cannot switch primary agents while web runs are active.",
+        ));
+    }
+
+    state
+        .inner
+        .stack
+        .set_startup_prompt_suffix(req.prompt)
+        .await
+        .map_err(|e| error_response(StatusCode::BAD_REQUEST, &e.to_string()))?;
+
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
 // ============================================================================
 // MCP Servers
 // ============================================================================
@@ -200,12 +227,16 @@ pub struct McpServerResponse {
     pub error: Option<String>,
 }
 
-fn map_mcp_status(status: &ava_agent::stack::McpServerStatus) -> (&'static str, Option<&str>) {
+fn map_mcp_status(
+    status: &ava_agent_orchestration::stack::McpServerStatus,
+) -> (&'static str, Option<&str>) {
     match status {
-        ava_agent::stack::McpServerStatus::Connected => ("connected", None),
-        ava_agent::stack::McpServerStatus::Disabled => ("disabled", None),
-        ava_agent::stack::McpServerStatus::Failed(error) => ("failed", Some(error.as_str())),
-        ava_agent::stack::McpServerStatus::Connecting => ("connecting", None),
+        ava_agent_orchestration::stack::McpServerStatus::Connected => ("connected", None),
+        ava_agent_orchestration::stack::McpServerStatus::Disabled => ("disabled", None),
+        ava_agent_orchestration::stack::McpServerStatus::Failed(error) => {
+            ("failed", Some(error.as_str()))
+        }
+        ava_agent_orchestration::stack::McpServerStatus::Connecting => ("connecting", None),
     }
 }
 

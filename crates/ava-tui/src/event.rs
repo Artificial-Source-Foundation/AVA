@@ -5,9 +5,9 @@ use crate::ui::status_bar::StatusLevel;
 use crate::widgets::model_selector::ModelSelectorState;
 use crate::widgets::provider_connect::ProviderConnectState;
 use crate::widgets::tool_list::ToolListItem;
-use ava_agent::control_plane::interactive::InteractiveRequestKind;
-use ava_agent::stack::MCPServerInfo;
 use ava_agent::AgentEvent;
+use ava_agent_orchestration::stack::MCPServerInfo;
+use ava_control_plane::interactive::InteractiveRequestKind;
 
 use ava_types::Session;
 use crossterm::event::{Event as CEvent, EventStream, KeyEvent, MouseEvent, MouseEventKind};
@@ -87,7 +87,7 @@ pub enum AppEvent {
     },
     AgentRunDone {
         run_id: u64,
-        result: Result<ava_agent::stack::AgentRunResult, String>,
+        result: Result<ava_agent_orchestration::stack::AgentRunResult, String>,
     },
     BackgroundCleanupResult {
         task_id: usize,

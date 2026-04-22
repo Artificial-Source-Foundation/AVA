@@ -377,11 +377,13 @@ impl App {
 
                     match ava_auth::device_code::request_device_code(cfg).await {
                         Ok(device) => {
+                            let ready_device = device.clone();
+                            let ready_provider_id = pid.clone();
                             if auth_attempt_is_current(&tracker, attempt) {
                                 let _ = tx.send(AppEvent::ProviderConnectFinished(
                                     crate::event::ProviderConnectResult::DeviceCodeReady {
-                                        provider_id: pid,
-                                        device,
+                                        provider_id: ready_provider_id,
+                                        device: ready_device,
                                         attempt,
                                     },
                                 ));
@@ -453,11 +455,13 @@ impl App {
 
                     match ava_auth::openai_headless::request_code(cfg.client_id).await {
                         Ok(device) => {
+                            let ready_device = device.clone();
+                            let ready_provider_id = pid.clone();
                             if auth_attempt_is_current(&tracker, attempt) {
                                 let _ = tx.send(AppEvent::ProviderConnectFinished(
                                     crate::event::ProviderConnectResult::DeviceCodeReady {
-                                        provider_id: pid,
-                                        device,
+                                        provider_id: ready_provider_id,
+                                        device: ready_device,
                                         attempt,
                                     },
                                 ));

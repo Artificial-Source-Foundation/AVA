@@ -47,7 +47,8 @@ If you lose the private key, you must generate a new keypair and update the pubk
 # 1) Ensure everything passes
 cargo fmt --all --check
 cargo clippy --workspace -- -D warnings
-cargo nextest run -p ava-agent --test agent_loop --test stack_test --test e2e_test --test reflection_loop -j 4
+cargo nextest run -p ava-agent --test agent_loop --test reflection_loop -j 4
+cargo nextest run -p ava-agent-orchestration --test stack_test --test e2e_test -j 4
 cargo nextest run -p ava-tools -p ava-review -j 4
 pnpm typecheck
 pnpm lint

@@ -2,7 +2,7 @@ use crate::app::{AppState, SidebarClickAction, SidebarClickTarget};
 use crate::text_utils::truncate_display;
 use crate::widgets::safe_render::{clamp_line, to_static_lines};
 use crate::widgets::todo_list;
-use ava_agent::stack::McpServerStatus;
+use ava_agent_orchestration::stack::McpServerStatus;
 use ava_types::TodoStatus;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};

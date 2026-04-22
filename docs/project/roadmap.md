@@ -2,7 +2,7 @@
 title: "Roadmap"
 description: "Product direction for AVA 0.6 and the path from the current build to V1."
 order: 2
-updated: "2026-04-18"
+updated: "2026-04-21"
 ---
 
 # AVA Roadmap
@@ -131,7 +131,7 @@ Providers leaving core:
 1. Replace stale docs with 0.6 docs.
 2. Rewrite `README.md`, `docs/README.md`, and `CLAUDE.md` product-facing sections.
 3. Delete docs that do not match the repo or the new product shape.
-4. Keep `docs/architecture/entrypoints.md`, `docs/architecture/crate-map.md`, and `docs/architecture/shared-backend-contract-m6.md` as the canonical architecture owner docs; keep milestone artifacts as historical context.
+4. Keep `docs/architecture/entrypoints.md`, `docs/architecture/crate-map.md`, and `docs/architecture/shared-backend-contract-m6.md` as the canonical architecture owner docs; keep superseded milestone artifacts as historical context, while active planning tracks stay called out separately in the architecture index.
 
 ### 2. Core/Product Boundary
 
@@ -150,7 +150,7 @@ When that is ready, the HQ follow-up can resume using the existing notes in
 `docs/project/backlog.md` and `docs/architecture/plugin-boundary.md` as groundwork.
 
 General backend contract unification work is tracked separately in the architecture milestone chain:
-`docs/architecture/cross-surface-runtime-map-m4.md` -> `docs/architecture/cross-surface-behavior-audit-m5.md` -> `docs/architecture/shared-backend-contract-m6.md` -> `docs/architecture/backend-correction-roadmap-m7.md`.
+`docs/architecture/cross-surface-runtime-map-m4.md` -> `docs/architecture/cross-surface-behavior-audit-m5.md` -> `docs/architecture/shared-backend-contract-m6.md` -> `docs/architecture/backend-correction-roadmap-m7.md` -> `docs/architecture/agent-backend-modularization-roadmap-m1.md` (the active modularization planning track built on that M6/M7 baseline).
 
 ### 3. Provider Cleanup
 

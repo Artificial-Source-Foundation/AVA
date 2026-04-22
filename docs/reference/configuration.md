@@ -62,24 +62,19 @@ ava --agent coder
 
 ## Path Notes
 
-Canonical user-global config root is `$XDG_CONFIG_HOME/ava` (typically `~/.config/ava`).
+Use `$XDG_CONFIG_HOME/ava` (typically `~/.config/ava`) for user-global config.
 
-Legacy `~/.ava` remains a compatibility root in current runtime behavior.
-
-AVA currently has **more than one config-path convention in use**:
-
-1. `ConfigManager::default_config_path()` uses `dirs::config_dir()/ava/config.yaml` (`crates/ava-config/src/lib.rs`).
-2. `resolve_provider_model` fallback reads `~/.ava/config.yaml` (`crates/ava-tui/src/config/cli.rs`).
-
-Treat this as current behavior, not a long-term compatibility guarantee.
+Treat `~/.ava` as legacy compatibility input and migrate forward when practical.
 
 ## Agent Profile Configuration
 
 Primary agents and subagents use different files:
 
 1. Startup primary-agent profiles: `config.yaml` (`primary_agent` + `primary_agents`)
-2. Global delegated subagent profiles: `$XDG_CONFIG_HOME/ava/subagents.toml` (legacy `agents.toml` fallback)
-3. Project delegated subagent overrides: `<repo>/.ava/subagents.toml` (legacy `.ava/agents.toml` fallback; trust-gated)
+2. Global delegated subagent profiles: `$XDG_CONFIG_HOME/ava/subagents.toml`
+3. Project delegated subagent overrides: `<repo>/.ava/subagents.toml` (trust-gated)
+
+Migration note: delegated-agent config in `agents.toml` is no longer loaded. Rename old files to `subagents.toml`.
 
 For practical setup examples and the subagent TOML structure, use [How-to: Configure primary agents and subagents](../how-to/agents.md).
 
@@ -91,13 +86,10 @@ For practical setup examples and the subagent TOML structure, use [How-to: Confi
 
 ## Practical Recommendation
 
-Configuration is currently split:
-
-1. `$XDG_CONFIG_HOME/ava/config.yaml` is the canonical location for current docs/users.
-2. `~/.ava/config.yaml` is still read as a legacy compatibility path.
-3. `dirs::config_dir()/ava/config.yaml` is still used by `ConfigManager` consumers in `ava-config`.
-
-In practice, keep config in `$XDG_CONFIG_HOME/ava/config.yaml` and treat `~/.ava/config.yaml` as compatibility input only.
+1. Keep user-global config in `$XDG_CONFIG_HOME/ava/config.yaml`.
+2. Keep delegated subagent config in `$XDG_CONFIG_HOME/ava/subagents.toml`.
+3. Use `<repo>/.ava/subagents.toml` only for trusted project overrides.
+4. Keep `~/.ava/*` only as temporary compatibility input during migration.
 
 Treat project-local `.ava/state.json` as session-oriented state rather than a full replacement for user-global config.
 

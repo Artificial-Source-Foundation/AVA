@@ -142,6 +142,7 @@ const COMMAND_TO_ENDPOINT: Record<string, { path: string; method: 'GET' | 'POST'
 
   // Config
   get_config: { path: '/api/config', method: 'GET' },
+  set_primary_agent_profile: { path: '/api/config/primary-agent', method: 'POST' },
 
   // Tools
   list_tools: { path: '/api/tools', method: 'GET' },

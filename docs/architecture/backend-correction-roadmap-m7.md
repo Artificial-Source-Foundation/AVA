@@ -2,7 +2,7 @@
 title: "Backend Correction Implementation Roadmap (Milestone 7)"
 description: "Implementation-ready roadmap that turns Milestone 5 drift audit and Milestone 6 contract into prioritized backend correction workstreams."
 order: 10
-updated: "2026-04-16"
+updated: "2026-04-21"
 ---
 
 # Backend Correction Implementation Roadmap (Milestone 7)
@@ -17,13 +17,13 @@ Grounding inputs:
 ## Scope and execution policy
 
 1. Execute **P0 correctness drift** first (`resolve_plan` routing and event-contract gaps).
-2. Land shared control-plane contract slices in `crates/ava-agent/src/control_plane/` before broad adapter rewiring.
+2. Land shared control-plane contract slices in `crates/ava-control-plane/src/` (with backend-only shims in `crates/ava-agent/src/control_plane/`) before broad adapter rewiring.
 3. Keep adapters transport-only: Tauri IPC and web HTTP/WS may differ mechanically, not semantically.
 4. Gate each workstream with explicit conformance tests before moving to the next dependency tier.
 
 Current status note (2026-04-15):
 
-1. WS1/WS2 now have a backend-owned combined command+event fixture matrix in `crates/ava-agent/src/control_plane/mod.rs`.
+1. WS1/WS2 now have a backend-owned combined command+event fixture matrix in `crates/ava-control-plane/src/`, with backend integration coverage in `crates/ava-agent/src/control_plane/mod.rs`.
 2. The remaining proof-first cleanup in this area is now mostly adapter simplification and later WS3/WS4/WS5 lifecycle-session-queue coverage, not another broad command/event redesign.
 
 Completion status update (2026-04-16):
@@ -39,21 +39,23 @@ Completion status update (2026-04-16):
 
 | Priority | Workstream | Depends on | Canonical owner seam | Primary adopters | First code slice (smallest shippable) |
 |---|---|---|---|---|---|
-| P0 | WS1: Command map + completion contract bootstrap | None | `crates/ava-agent/src/control_plane/commands.rs` | `src-tauri/src/commands/agent_commands.rs`, `crates/ava-tui/src/web/api_agent.rs`, `src/lib/api-client.ts`, `crates/ava-tui/src/app/`, `crates/ava-tui/src/headless/single.rs` | Add canonical command inventory + completion-mode enum, close the web `resolve_plan` mapping gap first, and align TUI/headless command-family semantics to the same contract slice. |
-| P0 | WS2: Event schema + required coverage | WS1 | `crates/ava-agent/src/control_plane/events.rs` | `src-tauri/src/events.rs`, `crates/ava-tui/src/web/api.rs`, `crates/ava-tui/src/app/event_handler/agent_events.rs`, `src/types/rust-ipc.ts`, `src/hooks/rust-agent-events.ts` | Define required event set/field requirements; wire desktop projection for missing `SubAgentComplete` and `StreamingEditProgress`, and verify TUI consumes required canonical event types/fields directly. |
-| P1 | WS3: Interactive lifecycle unification (approval/question/plan) | WS1, WS2 | `crates/ava-agent/src/control_plane/interactive.rs` + permission seams (`crates/ava-permissions/`, `crates/ava-tools/src/permission_middleware.rs`) | TUI event loop, Tauri commands, web interactive routes, headless scoped path | Introduce canonical lifecycle state transitions (`emitted -> pending -> terminal`) and shared timeout policy config used by desktop and web. |
-| P1 | WS4: Session continuity contract adoption | WS1 | `crates/ava-agent/src/control_plane/sessions.rs` + `crates/ava-session/` | TUI session state, Tauri run start path, web create/submit/session APIs | Add shared precedence helper (`requested > last > new`) and replace one adapter-local precedence branch with contract call. |
-| P2 | WS5: Queue/cancel semantics alignment | WS1, WS3 | `crates/ava-agent/src/control_plane/queue.rs` | TUI queue controls, Tauri queue commands, web queue endpoints | Make `clear_message_queue` return explicit unsupported errors for follow-up/post-complete tiers until true clear semantics exist. |
-| P2 | WS6: Delegation visibility parity closure | WS2, WS3 | `crates/ava-agent/src/routing.rs`, `crates/ava-agent/src/stack/`, `crates/ava-agent/src/control_plane/events.rs` | TUI event handlers, Tauri/web projection layers, shared TS event union | Enforce minimum delegation observability event coverage and close remaining frontend contract omissions. |
+| P0 | WS1: Command map + completion contract bootstrap | None | `crates/ava-control-plane/src/commands.rs` (+ backend shim in `crates/ava-agent/src/control_plane/commands.rs`) | `src-tauri/src/commands/agent_commands.rs`, `crates/ava-web/src/api_agent.rs`, `src/lib/api-client.ts`, `crates/ava-tui/src/app/`, `crates/ava-tui/src/headless/single.rs` | Add canonical command inventory + completion-mode enum, close the web `resolve_plan` mapping gap first, and align TUI/headless command-family semantics to the same contract slice. |
+| P0 | WS2: Event schema + required coverage | WS1 | `crates/ava-control-plane/src/events.rs` (+ backend projection in `crates/ava-agent/src/control_plane/events.rs`) | `src-tauri/src/events.rs`, `crates/ava-web/src/api.rs`, `crates/ava-tui/src/app/event_handler/agent_events.rs`, `src/types/rust-ipc.ts`, `src/hooks/rust-agent-events.ts` | Define required event set/field requirements; wire desktop projection for missing `SubAgentComplete` and `StreamingEditProgress`, and verify TUI consumes required canonical event types/fields directly. |
+| P1 | WS3: Interactive lifecycle unification (approval/question/plan) | WS1, WS2 | `crates/ava-control-plane/src/interactive.rs` + permission seams (`crates/ava-permissions/`, `crates/ava-tools/src/permission_middleware.rs`) | TUI event loop, Tauri commands, web interactive routes, headless scoped path | Introduce canonical lifecycle state transitions (`emitted -> pending -> terminal`) and shared timeout policy config used by desktop and web. |
+| P1 | WS4: Session continuity contract adoption | WS1 | `crates/ava-control-plane/src/sessions.rs` + `crates/ava-session/` (+ backend run-context helpers in `crates/ava-agent/src/control_plane/sessions.rs`) | TUI session state, Tauri run start path, web create/submit/session APIs | Add shared precedence helper (`requested > last > new`) and replace one adapter-local precedence branch with contract call. |
+| P2 | WS5: Queue/cancel semantics alignment | WS1, WS3 | `crates/ava-control-plane/src/queue.rs` | TUI queue controls, Tauri queue commands, web queue endpoints | Make `clear_message_queue` return explicit unsupported errors for follow-up/post-complete tiers until true clear semantics exist. |
+| P2 | WS6: Delegation visibility parity closure | WS2, WS3 | `crates/ava-agent/src/routing.rs`, `crates/ava-agent-orchestration/src/stack/`, `crates/ava-agent/src/control_plane/events.rs` | TUI event handlers, Tauri/web projection layers, shared TS event union | Enforce minimum delegation observability event coverage and close remaining frontend contract omissions. |
 
 ## Canonical owner seams and adopter boundaries
 
 ### Owner seams
 
-1. `ava-agent/control_plane` owns semantics (commands, lifecycle, events, sessions, queue).
-2. `ava-permissions` + `ava-tools` permission middleware own interactive policy enforcement hooks.
-3. Adapters (`ava-tui` web/headless + `src-tauri`) own translation/transport only.
-4. Frontend TS surfaces (`src/types`, `src/hooks`, `src/lib`) mirror backend contract and cannot invent adapter-only fields.
+1. `ava-control-plane` owns pure control-plane semantics (commands, lifecycle, events, sessions, queue, orchestration).
+2. `ava-agent` owns runtime core + backend-only control-plane helpers that depend on runtime types (`AgentEvent`, `AgentRunContext`).
+3. `ava-agent-orchestration` owns stack/subagent composition and delegation runtime wiring.
+4. `ava-permissions` + `ava-tools` permission middleware own interactive policy enforcement hooks.
+5. Adapters (`ava-tui` web/headless + `src-tauri` + `ava-web`) own translation/transport only.
+6. Frontend TS surfaces (`src/types`, `src/hooks`, `src/lib`) mirror backend contract and cannot invent adapter-only fields.
 
 ### Adopter rollout order
 
@@ -76,9 +78,9 @@ Completion status update (2026-04-16):
 
 | Gate | Must pass before advancing | Minimum enforcement surface |
 |---|---|---|
-| G0a: Command fixture gate | Backend-owned fixtures/examples exist for command map and completion semantics before WS1 advances. | `crates/ava-agent` tests (new `control_plane` test modules) |
-| G0b: Event fixture gate | Backend-owned fixtures/examples exist for required event fields/coverage before WS2 advances. | `crates/ava-agent` event contract tests |
-| G0c: Lifecycle/session/queue fixture gate | Backend-owned fixtures/examples exist for interactive lifecycle transitions, session precedence, and queue semantics before WS3-WS5 advance. | `crates/ava-agent` lifecycle/session/queue tests |
+| G0a: Command fixture gate | Backend-owned fixtures/examples exist for command map and completion semantics before WS1 advances. | `crates/ava-control-plane` contract tests + `crates/ava-agent` integration tests |
+| G0b: Event fixture gate | Backend-owned fixtures/examples exist for required event fields/coverage before WS2 advances. | `crates/ava-control-plane` event contract tests + `crates/ava-agent` projection tests |
+| G0c: Lifecycle/session/queue fixture gate | Backend-owned fixtures/examples exist for interactive lifecycle transitions, session precedence, and queue semantics before WS3-WS5 advance. | `crates/ava-control-plane` lifecycle/session/queue tests + backend adapter integration tests |
 | G1: P0 command correctness gate | `resolve_plan` route/command path is proven end-to-end on web adapter; completion mode assertions present for command families; TUI/headless command-family smoke coverage is green. | web API route tests + adapter command map tests + TUI/headless command tests |
 | G2: Event parity gate | Desktop/web adapters project all required canonical event types and required correlation fields; TUI consumes required canonical event types/fields directly; no silent drops. | `src-tauri` event projection tests + web projection tests + TUI event-consumption tests + TS contract tests |
 | G3: Interactive lifecycle gate | Approval/question/plan requests always reach terminal state (`resolved`, `timed_out`, or `cancelled`) with shared timeout behavior. | `ava-agent` lifecycle tests + desktop/web integration tests |
@@ -98,7 +100,7 @@ Seed this registry in Milestone 7 before implementation starts with the current 
 Milestone 7 deliverable requirements:
 
 1. Create `docs/architecture/backend-contract-exceptions.md`.
-2. Initial owner: backend contract owner for `crates/ava-agent/src/control_plane/`.
+2. Initial owner: backend contract owner for `crates/ava-control-plane/src/` plus backend-only shims in `crates/ava-agent/src/control_plane/`.
 3. Initial seeded exception entries must include the current headless non-interactive approval/question/plan behavior.
 
 Required exception fields:

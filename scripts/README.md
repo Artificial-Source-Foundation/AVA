@@ -26,4 +26,4 @@ Repository scripts are grouped by purpose instead of collecting at the root of `
 - `scripts/testing/signoff-v1-regression.sh` — focused regression coverage for signoff branch logic (provider/model auth gating plus report-enforcement pass/fail).
 - `scripts/testing/claude-code-integration.sh` — manual Claude Code integration verification.
 - `scripts/testing/rust-migration-smoke.sh` — legacy CLI smoke regression.
-- `scripts/testing/backend-automation-gate.sh` — mandatory no-secrets backend gate with focused `ava-config` + delegated-runtime signoff checks, plus optional live-provider smoke.
+- `scripts/testing/backend-automation-gate.sh` — mandatory no-secrets backend gate with focused `ava-config` + delegated-runtime signoff checks (`ava-agent-orchestration`) plus lightweight desktop/Tauri compile smoke, and optional live-provider smoke.

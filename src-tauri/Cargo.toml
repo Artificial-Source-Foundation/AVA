@@ -55,12 +55,14 @@ ava-plugin = { path = "../crates/ava-plugin" }
 ava-extensions = { path = "../crates/ava-extensions" }
 ava-validator = { path = "../crates/ava-validator" }
 ava-agent = { path = "../crates/ava-agent" }
+ava-agent-orchestration = { path = "../crates/ava-agent-orchestration" }
 ava-llm = { path = "../crates/ava-llm" }
 ava-mcp = { path = "../crates/ava-mcp" }
 ava-session = { path = "../crates/ava-session" }
 ava-codebase = { path = "../crates/ava-codebase" }
 ava-auth = { path = "../crates/ava-auth" }
 ava-config = { path = "../crates/ava-config" }
+ava-control-plane = { path = "../crates/ava-control-plane" }
 ava-types = { path = "../crates/ava-types" }
 ava-platform = { path = "../crates/ava-platform" }
 ava-context = { path = "../crates/ava-context" }

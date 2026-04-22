@@ -2,7 +2,7 @@
 title: "Backend Contract Exceptions"
 description: "Versioned registry of intentional adapter-specific exceptions to the canonical shared-backend contract."
 order: 11
-updated: "2026-04-19"
+updated: "2026-04-21"
 ---
 
 # Backend Contract Exceptions
@@ -16,7 +16,7 @@ Current status note (2026-04-16):
 
 Owner:
 
-- Backend contract owner for `crates/ava-agent/src/control_plane/`
+- Backend contract owner for `crates/ava-control-plane/src/` and backend-only shims in `crates/ava-agent/src/control_plane/`
 
 Rules:
 

@@ -294,6 +294,8 @@ export const rustBackend = {
   listProviders: (): Promise<ProviderInfo[]> => invokeCommand('list_providers'),
 
   getConfig: (): Promise<JsonValue> => invokeCommand('get_config'),
+  setPrimaryAgentProfile: (prompt: string | null): Promise<void> =>
+    invokeCommand('set_primary_agent_profile', { prompt }),
 
   listAgentTools: (context?: ToolIntrospectionContext): Promise<AgentToolInfo[]> =>
     invokeCommand('list_agent_tools', { context }),

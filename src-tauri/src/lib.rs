@@ -24,9 +24,10 @@ use commands::{
     regenerate_response, reload_mcp_servers, rename_session, resolve_approval, resolve_plan,
     resolve_question, retry_last_message, sandbox_apply_landlock, search_sessions,
     set_active_session, set_cwd, set_permission_level, set_plugin_enabled, set_plugins_state,
-    steer_agent, store_provider_auth, submit_goal, switch_model, sync_credentials,
-    toggle_permission_level, undo_last_edit, uninstall_plugin, update_feature_flags,
-    update_llm_config, validation_validate_edit, validation_validate_with_retry,
+    set_primary_agent_profile, steer_agent, store_provider_auth, submit_goal, switch_model,
+    sync_credentials, toggle_permission_level, undo_last_edit, uninstall_plugin,
+    update_feature_flags, update_llm_config, validation_validate_edit,
+    validation_validate_with_retry,
 };
 use pty::PtyManager;
 use tauri::Manager;
@@ -154,6 +155,7 @@ pub fn run() {
             list_providers,
             discover_cli_agents,
             get_config,
+            set_primary_agent_profile,
             store_provider_auth,
             delete_provider_auth,
             sync_credentials,

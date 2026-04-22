@@ -27,6 +27,7 @@ import { log } from '../lib/logger'
 import { applyCompactionResult } from '../services/context-compaction'
 import { getCoreBudget } from '../services/core-bridge'
 import { getMessages } from '../services/database'
+import { rustBackend } from '../services/rust-bridge'
 import { useSession } from '../stores/session'
 import { useSettings } from '../stores/settings'
 import type { ToolCall } from '../types'
@@ -86,6 +87,53 @@ interface AgentUiRuntimeSnapshot {
   streamingContentOffset: number
   toolCallsOffset: number
   thinkingSegmentsOffset: number
+}
+
+export interface PrimaryAgentProfile {
+  id: string
+  provider: string | null
+  model: string | null
+  prompt: string | null
+  description: string | null
+}
+
+interface PrimaryAgentConfigValue {
+  provider?: string
+  model?: string
+  prompt?: string
+  description?: string
+}
+
+function parsePrimaryAgentProfiles(config: unknown): {
+  profiles: PrimaryAgentProfile[]
+  defaultAgentId: string | null
+} {
+  if (!config || typeof config !== 'object') {
+    return { profiles: [], defaultAgentId: null }
+  }
+
+  const configRecord = config as Record<string, unknown>
+  const primaryAgents = configRecord.primary_agents
+  const defaultAgentId =
+    typeof configRecord.primary_agent === 'string' && configRecord.primary_agent.trim().length > 0
+      ? configRecord.primary_agent.trim()
+      : null
+
+  if (!primaryAgents || typeof primaryAgents !== 'object') {
+    return { profiles: [], defaultAgentId: null }
+  }
+
+  const profiles = Object.entries(primaryAgents as Record<string, PrimaryAgentConfigValue>).map(
+    ([id, value]) => ({
+      id,
+      provider: typeof value?.provider === 'string' ? value.provider : null,
+      model: typeof value?.model === 'string' ? value.model : null,
+      prompt: typeof value?.prompt === 'string' ? value.prompt : null,
+      description: typeof value?.description === 'string' ? value.description : null,
+    })
+  )
+
+  return { profiles, defaultAgentId }
 }
 
 interface CachedSessionRuntime {
@@ -211,6 +259,8 @@ function createAgentStore() {
   const [queuedPendingPlans, setQueuedPendingPlans] = createSignal<PlanData[]>([])
   const [doomLoopDetected, setDoomLoopDetected] = createSignal(false)
   const [currentAgentId, _setCurrentAgentId] = createSignal<string | null>(null)
+  const [primaryAgentProfiles, setPrimaryAgentProfiles] = createSignal<PrimaryAgentProfile[]>([])
+  const [currentPrimaryAgentId, setCurrentPrimaryAgentId] = createSignal<string | null>(null)
   const [streamingTokenEstimate, setStreamingTokenEstimate] = createSignal(0)
   const [streamingStartedAt, setStreamingStartedAt] = createSignal<number | null>(null)
   const [messageQueue, setMessageQueue] = createSignal<QueuedMessage[]>([])
@@ -224,6 +274,39 @@ function createAgentStore() {
   const sessionRuntimeCache = createBoundedSessionCache<CachedSessionRuntime>(
     RECENT_SESSION_RUNTIME_CACHE_LIMIT
   )
+  const startupSelectedModel = session.selectedModel()
+  const startupSelectedProvider = session.selectedProvider() ?? null
+
+  void rustBackend
+    .getConfig()
+    .then(async (config) => {
+      const { profiles, defaultAgentId } = parsePrimaryAgentProfiles(config)
+      const defaultProfile = profiles.find((profile) => profile.id === defaultAgentId) ?? null
+
+      batch(() => {
+        setPrimaryAgentProfiles(profiles)
+        setCurrentPrimaryAgentId(defaultAgentId)
+        _setCurrentAgentId(defaultAgentId)
+      })
+
+      if (!defaultProfile) {
+        return
+      }
+
+      await rustBackend.setPrimaryAgentProfile(defaultProfile.prompt)
+      const selectionStillUnchanged =
+        session.selectedModel() === startupSelectedModel &&
+        (session.selectedProvider() ?? null) === startupSelectedProvider
+      if (selectionStillUnchanged && defaultProfile.provider && defaultProfile.model) {
+        await rustBackend.switchModel(defaultProfile.provider, defaultProfile.model)
+        session.setSelectedModel(defaultProfile.model, defaultProfile.provider)
+      }
+    })
+    .catch((error) => {
+      log.warn('agent', 'Failed to load primary-agent profiles from core config', {
+        error: String(error),
+      })
+    })
 
   // ── Streaming state (offsets + derived signals) ─────────────────────
   const streamingState = createAgentStreaming(rustAgent)
@@ -790,6 +873,9 @@ function createAgentStore() {
     settingsRef,
     sessionHasActiveRun,
     onSessionRuntimeSettled: discardSessionRuntime,
+    primaryAgentProfiles,
+    currentPrimaryAgentId,
+    setCurrentPrimaryAgentId,
     isPlanMode,
     setIsPlanMode,
     currentTurn,
@@ -807,6 +893,7 @@ function createAgentStore() {
     clearPendingInteractiveRequests,
     doomLoopDetected,
     setDoomLoopDetected,
+    setCurrentAgentId: _setCurrentAgentId,
     streamingTokenEstimate,
     setStreamingTokenEstimate,
     streamingStartedAt,
@@ -941,6 +1028,9 @@ function createAgentStore() {
 
     // ── Agent-specific ──────────────────────────────────────────────
     togglePlanMode: actions.togglePlanMode,
+    cyclePrimaryAgentProfile: actions.cyclePrimaryAgentProfile,
+    hasPrimaryAgentProfiles: () => primaryAgentProfiles().length > 0,
+    currentPrimaryAgentId,
     checkAutoApproval: actions.checkAutoApproval,
     resolveApproval: actions.resolveApproval,
     resolveQuestion: actions.resolveQuestion,

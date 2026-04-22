@@ -1,5 +1,5 @@
 use super::*;
-use ava_agent::control_plane::commands::{queue_command_from_tier, queue_command_label};
+use ava_control_plane::commands::{queue_command_from_tier, queue_command_label};
 use ava_types::{MessageTier, QueuedMessage};
 use tracing::info;
 

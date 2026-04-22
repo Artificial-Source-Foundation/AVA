@@ -321,10 +321,12 @@ version = "0.6.1"
 dependencies = [
  "async-trait",
  "ava-agent",
+ "ava-agent-orchestration",
  "ava-auth",
  "ava-codebase",
  "ava-config",
  "ava-context",
+ "ava-control-plane",
  "ava-db",
  "ava-extensions",
  "ava-llm",
@@ -391,6 +393,42 @@ dependencies = [
  "async-stream",
  "async-trait",
  "ava-acp",
+ "ava-codebase",
+ "ava-config",
+ "ava-context",
+ "ava-control-plane",
+ "ava-llm",
+ "ava-mcp",
+ "ava-memory",
+ "ava-permissions",
+ "ava-platform",
+ "ava-plugin",
+ "ava-session",
+ "ava-tools",
+ "ava-types",
+ "chrono",
+ "dirs 5.0.1",
+ "futures",
+ "glob",
+ "serde",
+ "serde_json",
+ "similar",
+ "thiserror 1.0.69",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "uuid",
+ "which",
+]
+
+[[package]]
+name = "ava-agent-orchestration"
+version = "0.6.1"
+dependencies = [
+ "async-stream",
+ "async-trait",
+ "ava-acp",
+ "ava-agent",
  "ava-codebase",
  "ava-config",
  "ava-context",
@@ -481,6 +519,17 @@ dependencies = [
  "thiserror 1.0.69",
  "tiktoken-rs",
  "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "ava-control-plane"
+version = "0.6.1"
+dependencies = [
+ "ava-types",
+ "serde",
+ "serde_json",
+ "tokio",
  "uuid",
 ]
 

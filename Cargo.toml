@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "crates/ava-control-plane",
     "crates/ava-types",
     "crates/ava-platform",
     "crates/ava-config",
@@ -10,6 +11,7 @@ members = [
     "crates/ava-extensions",
     "crates/ava-validator",
     "crates/ava-agent",
+    "crates/ava-agent-orchestration",
     "crates/ava-codebase",
     "crates/ava-context",
     "crates/ava-sandbox",
@@ -22,6 +24,7 @@ members = [
     "crates/ava-session",
     "crates/ava-plugin",
     "crates/ava-tui",
+    "crates/ava-web",
 ]
 exclude = ["src-tauri"]
 resolver = "2"

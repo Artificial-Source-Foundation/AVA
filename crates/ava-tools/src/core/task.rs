@@ -47,7 +47,7 @@ pub trait TaskSpawner: Send + Sync {
     async fn spawn(&self, prompt: &str) -> ava_types::Result<TaskResult>;
 
     /// Spawn a named sub-agent with the given prompt. The `agent_type` is
-    /// looked up in `subagents.toml` (legacy `agents.toml` compatible) to
+    /// looked up in `subagents.toml` to
     /// resolve model overrides, custom prompts,
     /// and max turns. Falls back to `spawn()` if the agent type has no special
     /// configuration.
@@ -108,7 +108,7 @@ impl Tool for TaskTool {
           background when the work is independent.\n\n\
           Optionally specify an agent type (for example `scout`, `explore`, `plan`, `review`, \
           `worker`, or `build`) to use a specialist with its own model, prompt, and turn limits \
-          configured in subagents.toml (legacy agents.toml is still accepted as compatibility input)."
+          configured in subagents.toml."
     }
 
     fn parameters(&self) -> Value {
@@ -122,7 +122,7 @@ impl Tool for TaskTool {
                 },
                 "agent": {
                     "type": "string",
-                    "description": "Optional agent type to use (e.g. 'scout', 'explore', 'plan', 'review', 'worker', or 'build'). Each agent type can have its own model, system prompt, and turn limits configured in subagents.toml (legacy agents.toml is still accepted as compatibility input). Defaults to 'subagent'."
+                    "description": "Optional agent type to use (e.g. 'scout', 'explore', 'plan', 'review', 'worker', or 'build'). Each agent type can have its own model, system prompt, and turn limits configured in subagents.toml. Defaults to 'subagent'."
                 },
                 "background": {
                     "type": "boolean",

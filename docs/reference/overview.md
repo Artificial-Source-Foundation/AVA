@@ -16,7 +16,7 @@ It is intentionally factual.
 Use these pages as **implementation reference**, not as a long-term API guarantee, unless a page explicitly says otherwise.
 
 1. CLI flags and slash commands are user-facing and comparatively stable, but still evolve.
-2. Web routes under `crates/ava-tui/src/web/` exist and are used today, but are primarily the current frontend/backend integration seam.
+2. Web routes under `crates/ava-web/src/` exist and are used today, but are primarily the current frontend/backend integration seam.
 3. Some routes are debug-only or stubbed; those are called out explicitly in [Web API surface](web-api.md).
 
 ## Related Reference Pages

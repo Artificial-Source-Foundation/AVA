@@ -968,8 +968,7 @@ struct AgentTaskSpawner {
     benchmark_prompt_override: Option<crate::system_prompt::BenchmarkPromptOverride>,
     max_turns: usize,
     agents_config: AgentsConfig,
-    /// Router for resolving per-agent model overrides from subagents.toml
-    /// (with legacy agents.toml compatibility input).
+    /// Router for resolving per-agent model overrides from subagents.toml.
     router: Arc<ModelRouter>,
     /// Optional event sender to emit `SubAgentComplete` events for TUI consumption.
     event_tx: Option<mpsc::UnboundedSender<AgentEvent>>,
@@ -1017,7 +1016,7 @@ impl TaskSpawner for AgentTaskSpawner {
         let resolved = self.agents_config.get_agent(agent_type);
         if !resolved.enabled {
             return Err(AvaError::ToolError(format!(
-                "Sub-agent '{agent_type}' is disabled in subagents.toml (legacy agents.toml is also supported as compatibility input)"
+                "Sub-agent '{agent_type}' is disabled in subagents.toml"
             )));
         }
 
@@ -1148,7 +1147,7 @@ impl AgentTaskSpawner {
 
         if !resolved.enabled {
             return Err(AvaError::ToolError(format!(
-                "Sub-agent '{agent_type}' is disabled in subagents.toml (legacy agents.toml is also supported as compatibility input)"
+                "Sub-agent '{agent_type}' is disabled in subagents.toml"
             )));
         }
 
@@ -1178,7 +1177,7 @@ impl AgentTaskSpawner {
         }
 
         // Resolve per-agent model override. If the agent has a model configured
-        // in subagents.toml (legacy agents.toml also accepted as compatibility input),
+        // in subagents.toml,
         // create a provider for that model. Otherwise, use the parent's provider.
         let (provider, effective_model) = if let Some(ref model_spec) = resolved.model {
             match self.resolve_agent_provider(model_spec).await {

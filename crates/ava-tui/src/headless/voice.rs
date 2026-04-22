@@ -4,8 +4,8 @@ use super::{
 };
 use crate::config::cli::CliArgs;
 use crate::event::AppEvent;
-use ava_agent::stack::{AgentStack, AgentStackConfig};
 use ava_agent::AgentEvent;
+use ava_agent_orchestration::stack::{AgentStack, AgentStackConfig};
 use color_eyre::eyre::{eyre, Result};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;

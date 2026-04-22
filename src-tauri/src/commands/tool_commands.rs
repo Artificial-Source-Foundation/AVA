@@ -1,6 +1,6 @@
 //! Tauri commands for querying registered tools.
 
-use ava_agent::control_plane::sessions::{load_prompt_context, SessionPromptContext};
+use ava_control_plane::sessions::{load_prompt_context, SessionPromptContext};
 use serde::Deserialize;
 use serde::Serialize;
 use tauri::State;

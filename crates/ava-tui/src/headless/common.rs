@@ -1,4 +1,4 @@
-use ava_agent::stack::AgentStack;
+use ava_agent_orchestration::stack::AgentStack;
 use ava_llm::provider::LLMProvider;
 use color_eyre::eyre::Result;
 use std::sync::Arc;

@@ -2,7 +2,7 @@
 title: "Canonical Shared-Backend Contract (Milestone 6)"
 description: "Contract-definition artifact for cross-surface backend semantics, ownership seams, and conformance requirements."
 order: 9
-updated: "2026-04-16"
+updated: "2026-04-21"
 ---
 
 # Canonical Shared-Backend Contract (Milestone 6)
@@ -16,11 +16,11 @@ This document is grounded on:
 
 All contract language below is normative for upcoming implementation milestones unless an explicit open decision says otherwise.
 
-The first backend-owned implementation slice now exists under `crates/ava-agent/src/control_plane/{commands,interactive,events,sessions,queue}.rs`; this document remains the normative contract source for further adopter rewiring.
+The shared control-plane implementation slice now lives in `crates/ava-control-plane/src/{commands,interactive,events,sessions,queue,orchestration}.rs`, while `crates/ava-agent/src/control_plane/` remains the backend integration shim for `AgentEvent`/`AgentRunContext`-dependent helpers.
 
 Current proof/adoption status (2026-04-16):
 
-1. Backend-owned command + event fixture matrices now lock the canonical wire contract in `crates/ava-agent/src/control_plane/mod.rs`.
+1. Backend-owned command + event fixture matrices now lock the canonical wire contract in `crates/ava-control-plane/src/`, with backend integration coverage in `crates/ava-agent/src/control_plane/mod.rs`.
 2. Desktop/web/TUI adapter tests already prove required event projection/consumption against that backend contract.
 3. Frontend control-plane event consumers now prefer canonical snake_case correlation fields instead of keeping parallel camelCase fallbacks for approval/interactive-clear/delegation/edit-progress paths.
 4. Session precedence, replay payloads, queue clear semantics, and interactive request ownership now resolve through backend-owned control-plane modules instead of surface-local rule sets.
@@ -51,12 +51,12 @@ The canonical shared-backend contract covers behavior that must remain semantica
 
 | Contract area | Canonical owner seam | Notes |
 |---|---|---|
-| Command capabilities + completion semantics | New shared control-plane contract module under `crates/ava-agent/src/control_plane/commands.rs` | Transport adapters consume; do not redefine completion meaning. |
-| Approval/question/plan lifecycle | New shared interactive lifecycle contract module under `crates/ava-agent/src/control_plane/interactive.rs`, backed by `crates/ava-permissions/` and `crates/ava-tools/src/permission_middleware.rs` | Interactive request state machine is backend-owned. |
-| Event schema + coverage | Backend event contract module under `crates/ava-agent/src/control_plane/events.rs` | Adapter projections must map from the canonical schema. |
-| Session continuity | Shared session contract module under `crates/ava-agent/src/control_plane/sessions.rs`, implemented against `crates/ava-session/` | One precedence model for requested/last/new session IDs plus canonical prompt-context/history loading and replay-payload builders for retry/edit/regenerate flows. |
-| Queue/cancel semantics | Shared queue/cancel contract module under `crates/ava-agent/src/control_plane/queue.rs` | Tier behavior must be explicit and testable. |
-| Delegation visibility | Shared routing/runtime seam (`crates/ava-agent/src/routing.rs`, `crates/ava-agent/src/stack/`) plus projection rules in `crates/ava-agent/src/control_plane/events.rs` | Required delegation events are part of contract coverage. |
+| Command capabilities + completion semantics | Shared control-plane contract module under `crates/ava-control-plane/src/commands.rs` | Transport adapters consume; do not redefine completion meaning. |
+| Approval/question/plan lifecycle | Shared interactive lifecycle contract module under `crates/ava-control-plane/src/interactive.rs`, backed by `crates/ava-permissions/` and `crates/ava-tools/src/permission_middleware.rs` | Interactive request state machine is backend-owned. |
+| Event schema + coverage | Shared event taxonomy in `crates/ava-control-plane/src/events.rs`; backend projection helpers in `crates/ava-agent/src/control_plane/events.rs` | Adapter projections must map from the canonical schema. |
+| Session continuity | Shared session contract module under `crates/ava-control-plane/src/sessions.rs`, implemented against `crates/ava-session/`; backend run-context reconstruction in `crates/ava-agent/src/control_plane/sessions.rs` | One precedence model for requested/last/new session IDs plus canonical prompt-context/history loading and replay-payload builders for retry/edit/regenerate flows. |
+| Queue/cancel semantics | Shared queue/cancel contract module under `crates/ava-control-plane/src/queue.rs` | Tier behavior must be explicit and testable. |
+| Delegation visibility | Shared routing/runtime seam (`crates/ava-agent/src/routing.rs`, `crates/ava-agent-orchestration/src/stack/`) plus backend projection rules in `crates/ava-agent/src/control_plane/events.rs` | Required delegation events are part of contract coverage. |
 
 ## 3) Required adopters
 
@@ -81,11 +81,11 @@ The following paths are required contract adopters in the implementation milesto
     - `src/services/rust-bridge.ts`
     - `src/hooks/rust-agent-ipc.ts`
 4. **Web adapter**
-    - `crates/ava-tui/src/web/api_agent.rs`
-    - `crates/ava-tui/src/web/api_interactive.rs`
-    - `crates/ava-tui/src/web/api.rs`
-    - `crates/ava-tui/src/web/state.rs`
-    - `crates/ava-tui/src/web/ws.rs`
+    - `crates/ava-web/src/api_agent.rs`
+    - `crates/ava-web/src/api_interactive.rs`
+    - `crates/ava-web/src/api.rs`
+    - `crates/ava-web/src/state.rs`
+    - `crates/ava-web/src/ws.rs`
 5. **Shared frontend contract consumers**
     - `src/lib/api-client.ts`
     - `src/types/rust-ipc.ts`
@@ -99,14 +99,14 @@ The following paths are required contract adopters in the implementation milesto
 
 | Command family | Canonical owner | Included adopters | Response envelope | Completion mode | Terminal closure signal(s) |
 |---|---|---|---|---|---|
-| `submit_goal` | `crates/ava-agent/src/control_plane/commands.rs` | TUI, desktop, web, headless | accepted response containing session metadata; `success`/`turns` are not canonical terminal state on accepted-and-streaming adapters | accepted-and-streaming (desktop currently uses documented exception EX-002) | `complete` or `error` event closes the lifecycle |
-| `cancel_agent` | `crates/ava-agent/src/control_plane/commands.rs` | TUI, desktop, web, headless | ack | fire-and-forget | no command-level terminal event beyond ack (run interruption/error may arrive on run stream if active) |
-| `retry_last_message` / `edit_and_resend` / `regenerate_response` | `crates/ava-agent/src/control_plane/commands.rs` | TUI, desktop, web | accepted response containing session metadata; `success`/`turns` are not canonical terminal state on accepted-and-streaming adapters | accepted-and-streaming (desktop currently uses documented exception EX-002) | `complete` or `error` event closes the lifecycle |
-| `resolve_approval` / `resolve_question` / `resolve_plan` | `crates/ava-agent/src/control_plane/commands.rs` | TUI, desktop, web | ack or state transition result | completion-bound | direct command result (`ok`/error) plus request-correlated interactive-clear lifecycle signal on adapters that project canonical interactive events |
-| `steer_agent` / `follow_up_agent` / `post_complete_agent` | `crates/ava-agent/src/control_plane/queue.rs` | TUI, desktop, web | ack | accepted-and-streaming | queue acceptance plus later run lifecycle events |
-| `clear_message_queue` | `crates/ava-agent/src/control_plane/queue.rs` | TUI, desktop, web | ack or explicit unsupported error | fire-and-forget | none beyond ack/error |
-| Tool introspection (`list_agent_tools` / `/tools`) | `crates/ava-agent/src/control_plane/commands.rs` | TUI, desktop, web | tool list payload | completion-bound | direct result |
-| Session continuity helpers | `crates/ava-agent/src/control_plane/sessions.rs` | TUI, desktop, web, headless where applicable | session payload | completion-bound | direct result |
+| `submit_goal` | `crates/ava-control-plane/src/commands.rs` | TUI, desktop, web, headless | accepted response containing session metadata; `success`/`turns` are not canonical terminal state on accepted-and-streaming adapters | accepted-and-streaming (desktop currently uses documented exception EX-002) | `complete` or `error` event closes the lifecycle |
+| `cancel_agent` | `crates/ava-control-plane/src/commands.rs` | TUI, desktop, web, headless | ack | fire-and-forget | no command-level terminal event beyond ack (run interruption/error may arrive on run stream if active) |
+| `retry_last_message` / `edit_and_resend` / `regenerate_response` | `crates/ava-control-plane/src/commands.rs` | TUI, desktop, web | accepted response containing session metadata; `success`/`turns` are not canonical terminal state on accepted-and-streaming adapters | accepted-and-streaming (desktop currently uses documented exception EX-002) | `complete` or `error` event closes the lifecycle |
+| `resolve_approval` / `resolve_question` / `resolve_plan` | `crates/ava-control-plane/src/commands.rs` | TUI, desktop, web | ack or state transition result | completion-bound | direct command result (`ok`/error) plus request-correlated interactive-clear lifecycle signal on adapters that project canonical interactive events |
+| `steer_agent` / `follow_up_agent` / `post_complete_agent` | `crates/ava-control-plane/src/queue.rs` | TUI, desktop, web | ack | accepted-and-streaming | queue acceptance plus later run lifecycle events |
+| `clear_message_queue` | `crates/ava-control-plane/src/queue.rs` | TUI, desktop, web | ack or explicit unsupported error | fire-and-forget | none beyond ack/error |
+| Tool introspection (`list_agent_tools` / `/tools`) | `crates/ava-control-plane/src/commands.rs` | TUI, desktop, web | tool list payload | completion-bound | direct result |
+| Session continuity helpers | `crates/ava-control-plane/src/sessions.rs` (+ backend `run_context_from_session` in `crates/ava-agent/src/control_plane/sessions.rs`) | TUI, desktop, web, headless where applicable | session payload | completion-bound | direct result |
 
 Each command in the canonical map MUST define:
 

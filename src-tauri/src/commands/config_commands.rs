@@ -14,6 +14,29 @@ pub async fn get_config(bridge: State<'_, DesktopBridge>) -> Result<serde_json::
     serde_json::to_value(&cfg).map_err(|e| e.to_string())
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetPrimaryAgentProfileArgs {
+    pub prompt: Option<String>,
+}
+
+/// Apply the active startup primary-agent prompt suffix for future runs.
+#[tauri::command]
+pub async fn set_primary_agent_profile(
+    args: SetPrimaryAgentProfileArgs,
+    bridge: State<'_, DesktopBridge>,
+) -> Result<(), String> {
+    if bridge.has_active_runs().await {
+        return Err("Cannot switch primary agents while desktop runs are active.".to_string());
+    }
+
+    bridge
+        .stack
+        .set_startup_prompt_suffix(args.prompt)
+        .await
+        .map_err(|e| e.to_string())
+}
+
 /// Update LLM settings (provider, model, temperature, max_tokens) in config.yaml.
 ///
 /// Only provided (non-null) fields are updated; omitted fields are left unchanged.

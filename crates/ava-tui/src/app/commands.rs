@@ -1,7 +1,7 @@
 use base64::Engine as _;
 
-use ava_agent::stack::MCPServerInfo;
 use ava_agent::{discover_runtime_skills, RuntimeSkillDiscovery};
+use ava_agent_orchestration::stack::MCPServerInfo;
 
 use super::*;
 

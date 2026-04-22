@@ -112,7 +112,7 @@ async fn main() -> Result<()> {
             token,
             insecure_open_cors,
         }) => {
-            return ava_tui::web::run_server(&host, port, token, insecure_open_cors).await;
+            return ava_web::run_server(&host, port, token, insecure_open_cors).await;
         }
         #[cfg(not(feature = "web"))]
         Some(Command::Serve { .. }) => {

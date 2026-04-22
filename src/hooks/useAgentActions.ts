@@ -42,7 +42,7 @@ import type { Message } from '../types'
 import type { PlanData, PlanResponse } from '../types/rust-ipc'
 import type { AgentState, ApprovalRequest, ToolActivity } from './agent'
 import type { QueuedMessage } from './chat/types'
-import type { QuestionRequest } from './useAgent'
+import type { PrimaryAgentProfile, QuestionRequest } from './useAgent'
 import type { StreamingOffsets } from './useAgentStreaming'
 
 // ── Deps: signals and stores the actions need to read/write ─────────
@@ -53,6 +53,9 @@ export interface ActionDeps {
   settingsRef: ReturnType<typeof import('../stores/settings').useSettings>
   sessionHasActiveRun?: (sessionId?: string | null) => boolean
   onSessionRuntimeSettled?: (sessionId: string) => void
+  primaryAgentProfiles: Accessor<PrimaryAgentProfile[]>
+  currentPrimaryAgentId: Accessor<string | null>
+  setCurrentPrimaryAgentId: Setter<string | null>
 
   // Signals
   isPlanMode: Accessor<boolean>
@@ -75,6 +78,7 @@ export interface ActionDeps {
   clearPendingInteractiveRequests?: () => void
   doomLoopDetected: Accessor<boolean>
   setDoomLoopDetected: Setter<boolean>
+  setCurrentAgentId?: Setter<string | null>
   streamingTokenEstimate: Accessor<number>
   setStreamingTokenEstimate: Setter<number>
   streamingStartedAt: Accessor<number | null>
@@ -101,6 +105,9 @@ export function createAgentActions(deps: ActionDeps) {
     settingsRef,
     sessionHasActiveRun,
     onSessionRuntimeSettled,
+    primaryAgentProfiles,
+    currentPrimaryAgentId,
+    setCurrentPrimaryAgentId,
     isPlanMode,
     setIsPlanMode,
     currentTurn,
@@ -119,6 +126,7 @@ export function createAgentActions(deps: ActionDeps) {
     clearPendingInteractiveRequests,
     doomLoopDetected,
     setDoomLoopDetected,
+    setCurrentAgentId,
     setStreamingTokenEstimate,
     setStreamingStartedAt,
     setMessageQueue,
@@ -419,6 +427,56 @@ export function createAgentActions(deps: ActionDeps) {
     const next = !isPlanMode()
     log.info('agent', 'Plan mode toggled', { planMode: next })
     setIsPlanMode(next)
+  }
+
+  async function cyclePrimaryAgentProfile(direction: 1 | -1 = 1): Promise<string | null> {
+    const profiles = primaryAgentProfiles()
+    if (profiles.length === 0) {
+      return null
+    }
+
+    if (currentSessionHasActiveRun()) {
+      throw new Error('Cannot switch primary agents while a run is active')
+    }
+
+    const currentIndex = profiles.findIndex((profile) => profile.id === currentPrimaryAgentId())
+    const nextIndex =
+      currentIndex === -1
+        ? direction === 1
+          ? 0
+          : profiles.length - 1
+        : (currentIndex + direction + profiles.length) % profiles.length
+    const profile = profiles[nextIndex]
+    if (!profile) {
+      return null
+    }
+
+    const previousProfile = profiles.find((entry) => entry.id === currentPrimaryAgentId()) ?? null
+
+    await rustBackend.setPrimaryAgentProfile(profile.prompt)
+
+    try {
+      if (profile.provider && profile.model) {
+        await rustBackend.switchModel(profile.provider, profile.model)
+        session.setSelectedModel(profile.model, profile.provider)
+      }
+    } catch (error) {
+      await rustBackend.setPrimaryAgentProfile(previousProfile?.prompt ?? null)
+      throw error
+    }
+
+    batch(() => {
+      setCurrentPrimaryAgentId(profile.id)
+      setCurrentAgentId?.(profile.id)
+    })
+
+    log.info('agent', 'Primary agent switched', {
+      primaryAgentId: profile.id,
+      provider: profile.provider,
+      model: profile.model,
+    })
+
+    return profile.id
   }
 
   function checkAutoApproval(
@@ -1207,6 +1265,7 @@ export function createAgentActions(deps: ActionDeps) {
     followUp,
     postComplete,
     togglePlanMode,
+    cyclePrimaryAgentProfile,
     checkAutoApproval,
     resolveApproval,
     resolveQuestion,

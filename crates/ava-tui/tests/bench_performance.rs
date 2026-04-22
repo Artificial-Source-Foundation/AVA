@@ -8,7 +8,7 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use ava_agent::stack::{AgentStack, AgentStackConfig};
+use ava_agent_orchestration::stack::{AgentStack, AgentStackConfig};
 use ava_codebase::indexer::index_project;
 use ava_context::{create_condenser, create_hybrid_condenser, CondenserConfig};
 use ava_llm::providers::mock::MockProvider;

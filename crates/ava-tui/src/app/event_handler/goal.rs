@@ -1,5 +1,5 @@
 use super::*;
-use ava_agent::control_plane::sessions::resolve_session_precedence;
+use ava_control_plane::sessions::resolve_session_precedence;
 use uuid::Uuid;
 
 impl App {

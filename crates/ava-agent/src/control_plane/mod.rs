@@ -1,7 +1,8 @@
-//! Canonical cross-surface control-plane contract seam.
+//! Compatibility + backend-helper shim over the shared control-plane contract.
 //!
-//! This module owns backend-shared command/event/session/interactive/queue contract
-//! primitives that desktop, web, TUI, and headless adapters reuse.
+//! Pure command/event/session/interactive/queue/orchestration contracts live in
+//! `crates/ava-control-plane/src/`. This module is intentionally limited to
+//! compatibility re-exports and backend-only helpers that depend on runtime types.
 
 pub mod commands;
 pub mod events;

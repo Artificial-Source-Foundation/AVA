@@ -3,8 +3,8 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use ava_agent::control_plane::sessions::resolve_existing_session;
 use ava_context::{estimate_tokens_for_message, CondenserConfig, HybridCondenser};
+use ava_control_plane::sessions::resolve_existing_session;
 use ava_llm::provider::LLMProvider;
 use ava_types::{Message, Role, Session};
 use chrono::Utc;

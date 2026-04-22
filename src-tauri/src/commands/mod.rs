@@ -64,8 +64,9 @@ pub use agent_commands::{
     resolve_question, retry_last_message, steer_agent, submit_goal, undo_last_edit,
 };
 pub use config_commands::{
-    delete_provider_auth, get_config, get_feature_flags, load_credentials, store_provider_auth,
-    sync_credentials, update_feature_flags, update_llm_config,
+    delete_provider_auth, get_config, get_feature_flags, load_credentials,
+    set_primary_agent_profile, store_provider_auth, sync_credentials, update_feature_flags,
+    update_llm_config,
 };
 pub use context_commands::compact_context;
 pub use mcp_commands::{

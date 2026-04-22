@@ -38,7 +38,8 @@ pub(crate) use super::api_agent::{
 pub(crate) use super::api_config::{
     disable_mcp_server, enable_mcp_server, get_config, get_current_model, get_permission_level,
     ingest_frontend_log, list_cli_agents, list_mcp_servers, list_models, list_plugins,
-    list_providers, reload_mcp, set_permission_level, switch_model, toggle_permission_level,
+    list_providers, reload_mcp, set_permission_level, set_primary_agent_profile, switch_model,
+    toggle_permission_level,
 };
 #[cfg(debug_assertions)]
 pub(crate) use super::api_interactive::{
@@ -486,9 +487,9 @@ pub(crate) fn error_response(
 
 #[cfg(test)]
 mod tests {
-    use crate::web::state::WebEvent;
+    use crate::state::WebEvent;
     use ava_agent::agent_loop::AgentEvent as BackendEvent;
-    use ava_agent::canonical_event_spec;
+    use ava_control_plane::events::canonical_event_spec;
     use ava_types::Session;
     use ava_types::{ToolCall, ToolResult};
     use serde_json::json;

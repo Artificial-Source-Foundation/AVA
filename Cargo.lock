@@ -295,6 +295,7 @@ dependencies = [
  "ava-codebase",
  "ava-config",
  "ava-context",
+ "ava-control-plane",
  "ava-llm",
  "ava-mcp",
  "ava-memory",
@@ -308,6 +309,42 @@ dependencies = [
  "criterion",
  "dirs",
  "filetime",
+ "futures",
+ "glob",
+ "serde",
+ "serde_json",
+ "similar",
+ "tempfile",
+ "thiserror 1.0.69",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "uuid",
+ "which 7.0.3",
+]
+
+[[package]]
+name = "ava-agent-orchestration"
+version = "0.6.1"
+dependencies = [
+ "async-stream",
+ "async-trait",
+ "ava-acp",
+ "ava-agent",
+ "ava-codebase",
+ "ava-config",
+ "ava-context",
+ "ava-llm",
+ "ava-mcp",
+ "ava-memory",
+ "ava-permissions",
+ "ava-platform",
+ "ava-plugin",
+ "ava-session",
+ "ava-tools",
+ "ava-types",
+ "chrono",
+ "dirs",
  "futures",
  "glob",
  "serde",
@@ -390,6 +427,17 @@ dependencies = [
  "tiktoken-rs",
  "tokio",
  "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "ava-control-plane"
+version = "0.6.1"
+dependencies = [
+ "ava-types",
+ "serde",
+ "serde_json",
+ "tokio",
  "uuid",
 ]
 
@@ -651,10 +699,12 @@ dependencies = [
  "async-trait",
  "ava-acp",
  "ava-agent",
+ "ava-agent-orchestration",
  "ava-auth",
  "ava-codebase",
  "ava-config",
  "ava-context",
+ "ava-control-plane",
  "ava-db",
  "ava-hq",
  "ava-llm",
@@ -666,7 +716,7 @@ dependencies = [
  "ava-session",
  "ava-tools",
  "ava-types",
- "axum",
+ "ava-web",
  "base64",
  "chrono",
  "clap",
@@ -699,7 +749,6 @@ dependencies = [
  "tokio-util",
  "toml",
  "tower",
- "tower-http",
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
@@ -729,6 +778,39 @@ version = "0.6.1"
 dependencies = [
  "criterion",
  "tracing",
+]
+
+[[package]]
+name = "ava-web"
+version = "0.6.1"
+dependencies = [
+ "async-trait",
+ "ava-acp",
+ "ava-agent",
+ "ava-agent-orchestration",
+ "ava-config",
+ "ava-context",
+ "ava-control-plane",
+ "ava-db",
+ "ava-llm",
+ "ava-plugin",
+ "ava-session",
+ "ava-tools",
+ "ava-types",
+ "axum",
+ "chrono",
+ "color-eyre",
+ "futures",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+ "tower",
+ "tower-http",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -2422,12 +2504,6 @@ dependencies = [
  "http-body",
  "pin-project-lite",
 ]
-
-[[package]]
-name = "http-range-header"
-version = "0.4.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9171a2ea8a68358193d15dd5d70c1c10a2afc3e7e4c5bc92bc9f025cebd7359c"
 
 [[package]]
 name = "httparse"
@@ -5724,20 +5800,11 @@ checksum = "d4e6559d53cc268e5031cd8429d05415bc4cb4aefc4aa5d6cc35fbf5b924a1f8"
 dependencies = [
  "bitflags 2.11.0",
  "bytes",
- "futures-core",
  "futures-util",
  "http",
  "http-body",
- "http-body-util",
- "http-range-header",
- "httpdate",
  "iri-string",
- "mime",
- "mime_guess",
- "percent-encoding",
  "pin-project-lite",
- "tokio",
- "tokio-util",
  "tower",
  "tower-layer",
  "tower-service",

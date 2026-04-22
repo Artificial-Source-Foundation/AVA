@@ -5,7 +5,9 @@ use std::{env, sync::OnceLock};
 
 use async_trait::async_trait;
 use ava_agent::message_queue::MessageQueue;
-use ava_agent::stack::{AgentRunContext, AgentStack, AgentStackConfig, SubagentConfigScope};
+use ava_agent_orchestration::stack::{
+    AgentRunContext, AgentStack, AgentStackConfig, SubagentConfigScope,
+};
 use ava_config::{Config, CredentialStore, ProviderCredential, RoutingMode};
 use ava_llm::provider::LLMProvider;
 use ava_llm::provider::LLMResponse;
@@ -506,7 +508,7 @@ prompt = "Custom task prompt."
 async fn test_agents_config_defaults_without_file() {
     let dir = tempfile::tempdir().expect("tempdir");
 
-    // No subagents.toml / agents.toml files — should use defaults
+    // No subagents.toml files — should use defaults
     let (stack, _question_rx, _approval_rx, _plan_rx) = AgentStack::new(AgentStackConfig {
         data_dir: dir.path().to_path_buf(),
         config_dir: Some(dir.path().to_path_buf()),
@@ -517,7 +519,7 @@ async fn test_agents_config_defaults_without_file() {
     .await
     .expect("stack init should succeed without subagent config files");
 
-    // Stack should initialize fine even without agents.toml
+    // Stack should initialize fine with only built-in defaults
     assert!(!stack.tools.read().await.list_tools().is_empty());
 }
 
@@ -573,57 +575,6 @@ max_turns = 2
 }
 
 #[tokio::test]
-async fn test_untrusted_project_ignores_project_legacy_agents_toml() {
-    let _guard = env_lock().lock().unwrap_or_else(|e| e.into_inner());
-    let old_home = env::var_os("HOME");
-
-    let home = tempfile::tempdir().expect("temp home");
-    env::set_var("HOME", home.path());
-
-    let data_dir = tempfile::tempdir().expect("data dir");
-    let project = tempfile::tempdir().expect("project dir");
-    let project_ava = project.path().join(".ava");
-    std::fs::create_dir_all(&project_ava).unwrap();
-
-    std::fs::write(
-        data_dir.path().join("subagents.toml"),
-        r#"
-[subagents.review]
-max_turns = 7
-"#,
-    )
-    .unwrap();
-    std::fs::write(
-        project_ava.join("agents.toml"),
-        r#"
-[agents.review]
-max_turns = 2
-"#,
-    )
-    .unwrap();
-
-    let stack_result = AgentStack::new(AgentStackConfig {
-        data_dir: data_dir.path().to_path_buf(),
-        config_dir: Some(data_dir.path().to_path_buf()),
-        working_dir: Some(project.path().to_path_buf()),
-        yolo: true,
-        injected_provider: Some(Arc::new(MockProvider::new("test", vec![]))),
-        ..Default::default()
-    })
-    .await;
-
-    match old_home {
-        Some(value) => env::set_var("HOME", value),
-        None => env::remove_var("HOME"),
-    }
-
-    let (stack, _question_rx, _approval_rx, _plan_rx) =
-        stack_result.expect("stack init should succeed");
-    let review = stack.agents_config().await.get_agent("review");
-    assert_eq!(review.max_turns, Some(7));
-}
-
-#[tokio::test]
 async fn test_trusted_project_applies_project_subagents_toml_overrides() {
     let _guard = env_lock().lock().unwrap_or_else(|e| e.into_inner());
     let old_home = env::var_os("HOME");
@@ -648,59 +599,6 @@ max_turns = 7
         project_ava.join("subagents.toml"),
         r#"
 [subagents.review]
-max_turns = 2
-"#,
-    )
-    .unwrap();
-
-    ava_config::trust_project(project.path()).expect("trust project");
-
-    let stack_result = AgentStack::new(AgentStackConfig {
-        data_dir: data_dir.path().to_path_buf(),
-        config_dir: Some(data_dir.path().to_path_buf()),
-        working_dir: Some(project.path().to_path_buf()),
-        yolo: true,
-        injected_provider: Some(Arc::new(MockProvider::new("test", vec![]))),
-        ..Default::default()
-    })
-    .await;
-
-    match old_home {
-        Some(value) => env::set_var("HOME", value),
-        None => env::remove_var("HOME"),
-    }
-
-    let (stack, _question_rx, _approval_rx, _plan_rx) =
-        stack_result.expect("stack init should succeed");
-    let review = stack.agents_config().await.get_agent("review");
-    assert_eq!(review.max_turns, Some(2));
-}
-
-#[tokio::test]
-async fn test_trusted_project_uses_project_legacy_when_project_subagents_missing() {
-    let _guard = env_lock().lock().unwrap_or_else(|e| e.into_inner());
-    let old_home = env::var_os("HOME");
-
-    let home = tempfile::tempdir().expect("temp home");
-    env::set_var("HOME", home.path());
-
-    let data_dir = tempfile::tempdir().expect("data dir");
-    let project = tempfile::tempdir().expect("project dir");
-    let project_ava = project.path().join(".ava");
-    std::fs::create_dir_all(&project_ava).unwrap();
-
-    std::fs::write(
-        data_dir.path().join("subagents.toml"),
-        r#"
-[subagents.review]
-max_turns = 7
-"#,
-    )
-    .unwrap();
-    std::fs::write(
-        project_ava.join("agents.toml"),
-        r#"
-[agents.review]
 max_turns = 2
 "#,
     )
@@ -788,7 +686,6 @@ max_turns = 4
         .await
         .expect("read should succeed")
         .expect("document should exist");
-    assert!(!doc.legacy);
     assert!(doc.path.ends_with("subagents.toml"));
     assert!(doc.content.contains("[subagents.review]"));
 

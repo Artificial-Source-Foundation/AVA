@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use ava_agent::agent_loop::AgentEvent;
-use ava_agent::stack::{AgentStack, AgentStackConfig};
+use ava_agent_orchestration::stack::{AgentStack, AgentStackConfig};
 use ava_llm::provider::LLMProvider;
 use ava_llm::providers::mock::MockProvider;
 use ava_permissions::tags::RiskLevel;

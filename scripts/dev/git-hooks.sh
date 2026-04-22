@@ -29,8 +29,41 @@ run_rust_gate() {
   run_step "cargo clippy --workspace -- -D warnings" \
     bash scripts/dev/run-rust-throttled.sh cargo clippy --workspace -- -D warnings
 
-  run_step "cargo nextest run -p ava-agent --test agent_loop --test stack_test --test e2e_test --test reflection_loop -j 4 --status-level fail" \
-    bash scripts/dev/run-rust-throttled.sh cargo nextest run -p ava-agent --test agent_loop --test stack_test --test e2e_test --test reflection_loop -j 4 --status-level fail
+  run_step "cargo nextest run -p ava-agent --test agent_loop --test reflection_loop -j 4 --status-level fail" \
+    bash scripts/dev/run-rust-throttled.sh cargo nextest run -p ava-agent --test agent_loop --test reflection_loop -j 4 --status-level fail
+
+  run_step "cargo nextest run -p ava-agent-orchestration --test stack_test --test e2e_test -j 4 --status-level fail" \
+    bash scripts/dev/run-rust-throttled.sh cargo nextest run -p ava-agent-orchestration --test stack_test --test e2e_test -j 4 --status-level fail
+
+  run_step "cargo nextest run -p ava-control-plane -j 4 --status-level fail" \
+    bash scripts/dev/run-rust-throttled.sh cargo nextest run -p ava-control-plane -j 4 --status-level fail
+
+  run_step "cargo test -p ava-web resolve_plan_route_requires_request_id_and_preserves_pending_state -- --exact" \
+    bash scripts/dev/run-rust-throttled.sh cargo test -p ava-web resolve_plan_route_requires_request_id_and_preserves_pending_state -- --exact
+
+  run_step "cargo test -p ava-web clear_message_queue_rejects_unsupported_follow_up_targets -- --exact" \
+    bash scripts/dev/run-rust-throttled.sh cargo test -p ava-web clear_message_queue_rejects_unsupported_follow_up_targets -- --exact
+
+  run_step "cargo test -p ava-web projected_backend_events_preserve_required_correlation_fields -- --exact" \
+    bash scripts/dev/run-rust-throttled.sh cargo test -p ava-web projected_backend_events_preserve_required_correlation_fields -- --exact
+
+  run_step "cargo test -p ava-tui foreground_required_control_plane_events_are_visible_in_tui -- --exact" \
+    bash scripts/dev/run-rust-throttled.sh cargo test -p ava-tui foreground_required_control_plane_events_are_visible_in_tui -- --exact
+
+  run_step "cargo test -p ava-tui question_requests_use_shared_timeout_and_clear_lifecycle -- --exact" \
+    bash scripts/dev/run-rust-throttled.sh cargo test -p ava-tui question_requests_use_shared_timeout_and_clear_lifecycle -- --exact
+
+  run_step "cargo test -p ava-tui cancelling_tui_run_clears_pending_approval_via_shared_lifecycle -- --exact" \
+    bash scripts/dev/run-rust-throttled.sh cargo test -p ava-tui cancelling_tui_run_clears_pending_approval_via_shared_lifecycle -- --exact
+
+  run_step "cargo test --manifest-path src-tauri/Cargo.toml desktop_control_plane_event_shapes_follow_shared_requirements -- --exact" \
+    bash scripts/dev/run-rust-throttled.sh cargo test --manifest-path src-tauri/Cargo.toml desktop_control_plane_event_shapes_follow_shared_requirements -- --exact
+
+  run_step "cargo test --manifest-path src-tauri/Cargo.toml take_matching_pending_reply_only_consumes_matching_request_ids -- --exact" \
+    bash scripts/dev/run-rust-throttled.sh cargo test --manifest-path src-tauri/Cargo.toml take_matching_pending_reply_only_consumes_matching_request_ids -- --exact
+
+  run_step "cargo check -p ava-tui --features web" \
+    bash scripts/dev/run-rust-throttled.sh cargo check -p ava-tui --features web
 
   run_step "cargo nextest run -p ava-tools -p ava-review -j 4 --status-level fail" \
     bash scripts/dev/run-rust-throttled.sh cargo nextest run -p ava-tools -p ava-review -j 4 --status-level fail

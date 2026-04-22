@@ -2,28 +2,30 @@
 title: "Crate Map"
 description: "Dependency layers and responsibilities across AVA's Rust workspace."
 order: 2
-updated: "2026-04-18"
+updated: "2026-04-21"
 ---
 
 # AVA Crate Map
 
-22 Rust crates under `crates/` in the root Cargo workspace.
+25 Rust crates under `crates/` in the root Cargo workspace.
 
-> Web mode (`ava serve`) uses the same crate stack with axum (feature-gated `web` in `ava-tui`).
+> Web mode (`ava serve`) uses the same crate stack with axum via the standalone `ava-web` crate (wired from `ava-tui` behind the `web` feature).
 
 ## Dependency Layers
 
 ```
-Layer 0 (leaf crates):  ava-types, ava-memory, ava-sandbox, ava-extensions, ava-codebase, ava-auth, ava-validator
+Layer 0 (leaf crates):  ava-types, ava-control-plane, ava-memory, ava-sandbox, ava-extensions, ava-codebase, ava-auth, ava-validator
 Layer 1:                ava-plugin, ava-permissions, ava-platform, ava-db, ava-context, ava-session, ava-config
 Layer 2:                ava-llm (ava-types, ava-auth, ava-config, ava-context, ava-plugin)
                         ava-tools (ava-types, ava-config, ava-platform, ava-sandbox, ava-permissions, ava-codebase, ava-plugin)
                         ava-mcp (ava-types, ava-tools)
 Layer 3:                ava-acp (ava-types, ava-llm)
-                        ava-agent (ava-types, ava-llm, ava-tools, ava-config, ava-context, ava-permissions, ava-platform, ava-session, ava-memory, ava-mcp, ava-codebase, ava-plugin, ava-acp)
-Layer 4:                ava-review (ava-types, ava-agent, ava-llm, ava-tools, ava-context, ava-platform)
+                        ava-agent (ava-types, ava-control-plane, ava-llm, ava-tools, ava-config, ava-context, ava-permissions, ava-platform, ava-session, ava-memory, ava-mcp, ava-codebase, ava-plugin, ava-acp)
+Layer 4:                ava-agent-orchestration (ava-agent runtime-core modules + orchestration composition dependencies)
+                        ava-review (ava-types, ava-agent, ava-llm, ava-tools, ava-context, ava-platform)
                         ava-hq (ava-types, ava-agent, ava-acp, ava-llm, ava-tools, ava-context, ava-platform, ava-review)
 Layer 5 (top):          ava-tui (depends on nearly everything + ava-plugin)
+                         ava-web (axum web surface for `ava serve`; pure control-plane imports use ava-control-plane directly)
 ```
 
 ## Crate Details
@@ -34,11 +36,22 @@ Layer 5 (top):          ava-tui (depends on nearly everything + ava-plugin)
 - **Depended on by**: Nearly every other crate
 - **Stats**: 7 files, 1,755 LOC
 
+### ava-control-plane
+- **Purpose**: Shared backend control-plane contracts and orchestration seams
+- **Key modules**: `commands.rs`, `events.rs` (pure taxonomy + field specs), `interactive.rs`, `sessions.rs` (pure precedence/replay helpers), `queue.rs`, `orchestration.rs`
+- **Depends on**: ava-types
+
 ### ava-agent
 - **Purpose**: Core agent execution loop with tool calling, stuck detection, and mid-stream messaging
-- **Key types**: `AgentLoop`, `AgentConfig`, `AgentEvent`, `AgentStack` (unified entrypoint), `MessageQueue` (3-tier steering/follow-up/post-complete), `ReflectionLoop`, `ErrorKind`
-- **Key modules**: `agent_loop/` (tool execution, response parsing), `instructions.rs` (project instruction discovery), `stack.rs` + `stack/stack_mcp.rs` (shared runtime composition and MCP lifecycle), `control_plane/` (canonical cross-surface command/event/session/interactive/queue contract seam), `system_prompt.rs`, `stuck.rs`, `message_queue.rs`
-- **Depends on**: ava-types, ava-llm, ava-tools, ava-config, ava-context, ava-permissions, ava-platform, ava-session, ava-memory, ava-mcp, ava-codebase, ava-plugin, ava-acp
+- **Key types**: `AgentLoop`, `AgentConfig`, `AgentEvent`, `MessageQueue` (3-tier steering/follow-up/post-complete), `ReflectionLoop`, `ErrorKind`
+- **Key modules**: `agent_loop/` (tool execution, response parsing), `instructions.rs` (project instruction discovery), `control_plane/` (backend compatibility shim modules plus backend-only helpers for `AgentEvent` and `AgentRunContext`; pure shared control-plane contracts are owned by `ava-control-plane`), `run_context.rs`, `system_prompt.rs`, `stuck.rs`, `message_queue.rs`
+- **Depends on**: ava-types, ava-control-plane, ava-llm, ava-tools, ava-config, ava-context, ava-permissions, ava-platform, ava-session, ava-memory, ava-mcp, ava-codebase, ava-plugin, ava-acp
+
+### ava-agent-orchestration
+- **Purpose**: Orchestration-heavy agent composition seam (`stack` + `subagents`) extracted from `ava-agent`
+- **Key types**: `AgentStack`, `AgentStackConfig`, `AgentRunContext`, `AgentRunResult`, `EffectiveSubagentDefinition`, `MCPServerInfo`
+- **Key modules**: `stack/` (composition/runtime wiring), `subagents/` (delegation catalog + effective definitions)
+- **Depends on**: ava-agent runtime-core modules plus the same backend composition dependencies used by stack/subagents
 
 ### ava-llm
 - **Purpose**: Unified LLM provider interface with routing, circuit breaking, and connection pooling
@@ -104,7 +117,7 @@ Layer 5 (top):          ava-tui (depends on nearly everything + ava-plugin)
 - **Depends on**: ava-types, ava-llm
 
 ### ava-auth
-- **Purpose**: OAuth authentication (PKCE, device code), Copilot token exchange, API key management
+- **Purpose**: OAuth authentication (PKCE, OpenAI headless login, device code), Copilot token exchange, API key management
 - **Key types**: `AuthResult`, `AuthError`, `OAuthTokens`, `DeviceCodeResponse`, `AuthFlow`
 - **No ava-* dependencies** (leaf crate)
 
@@ -148,3 +161,8 @@ Layer 5 (top):          ava-tui (depends on nearly everything + ava-plugin)
 - **Key modules**: `app/` (commands, event handling), `state/` (agent, message, permission, rewind, voice), `widgets/` (model selector, session list, tool list, token buffer), `headless/`, `rendering/`, `benchmark*` (feature-gated)
 - **Binaries**: `ava` (main), `ava-smoke` (mock smoke test)
 - **Depends on**: Nearly every other crate; `ava-hq` is benchmark-only via the `benchmark` feature and no longer part of the default runtime surface
+
+### ava-web
+- **Purpose**: Standalone `ava serve` web/API surface extracted from `ava-tui`
+- **Key modules**: `api*` (HTTP handlers), `ws.rs` (WebSocket stream), `state.rs` (web runtime coordination), `security.rs` (token/CORS middleware)
+- **Depends on**: `ava-control-plane` (pure command/event/interactive/queue/session/orchestration contracts), `ava-agent` (backend-only compatibility helpers + runtime event/message-queue types), `ava-agent-orchestration`, `ava-acp`, `ava-config`, `ava-db`, `ava-llm`, `ava-plugin`, `ava-tools`, `ava-types`, plus `axum`/`tower-http`

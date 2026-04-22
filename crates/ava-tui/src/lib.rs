@@ -43,6 +43,4 @@ pub mod text_utils;
 pub mod transcribe;
 pub mod ui;
 pub mod updater;
-#[cfg(feature = "web")]
-pub mod web;
 pub mod widgets;

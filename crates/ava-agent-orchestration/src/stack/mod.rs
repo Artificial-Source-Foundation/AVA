@@ -4,6 +4,7 @@ mod stack_run;
 pub(crate) mod stack_tools;
 
 pub use crate::subagents::parse_model_spec;
+pub use ava_agent::run_context::AgentRunContext;
 pub use stack_config::{AgentRunResult, AgentStackConfig};
 pub use stack_mcp::{MCPServerInfo, McpServerStatus};
 
@@ -64,17 +65,27 @@ fn env_var_enabled(name: &str) -> bool {
         .unwrap_or(false)
 }
 
-#[derive(Debug, Clone, Default)]
-pub struct AgentRunContext {
-    pub provider: Option<String>,
-    pub model: Option<String>,
-    pub thinking_level: Option<ThinkingLevel>,
-    pub auto_compact: Option<bool>,
-    pub compaction_threshold: Option<u8>,
-    pub compaction_provider: Option<String>,
-    pub compaction_model: Option<String>,
-    pub todo_state: Option<TodoState>,
-    pub permission_context: Option<Arc<RwLock<InspectionContext>>>,
+fn legacy_global_agents_paths(config_root: &Path) -> Vec<PathBuf> {
+    let mut paths = vec![config_root.join("agents.toml")];
+
+    if let Some(home_dir) = dirs::home_dir() {
+        let legacy_home_path = home_dir.join(".ava").join("agents.toml");
+        if !paths.iter().any(|path| path == &legacy_home_path) {
+            paths.push(legacy_home_path);
+        }
+    }
+
+    paths
+}
+
+fn warn_if_legacy_agents_file(legacy_path: &Path, replacement_path: &Path) {
+    if legacy_path.exists() {
+        tracing::warn!(
+            ignored = %legacy_path.display(),
+            migrate_to = %replacement_path.display(),
+            "Detected removed delegated-agent config filename 'agents.toml'; rename to 'subagents.toml'"
+        );
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -87,24 +98,7 @@ pub enum SubagentConfigScope {
 pub struct SubagentConfigDocument {
     pub scope: SubagentConfigScope,
     pub path: PathBuf,
-    pub legacy: bool,
     pub content: String,
-}
-
-impl AgentRunContext {
-    pub fn resolved_model_override(&self) -> Option<(String, String)> {
-        match (&self.provider, &self.model) {
-            (Some(provider), Some(model)) => Some((provider.clone(), model.clone())),
-            _ => None,
-        }
-    }
-
-    pub fn compaction_model_override(&self) -> Option<(String, String)> {
-        match (&self.compaction_provider, &self.compaction_model) {
-            (Some(provider), Some(model)) => Some((provider.clone(), model.clone())),
-            _ => None,
-        }
-    }
 }
 
 pub struct AgentStack {
@@ -146,9 +140,9 @@ pub struct AgentStack {
     /// Updated whenever tools are registered (init, MCP reconnect, custom reload).
     #[allow(dead_code)] // Stored for future dynamic-registration updates
     shared_tool_sources: SharedToolSources,
-    /// Sub-agent configuration loaded from subagents.toml with legacy agents.toml compatibility.
+    /// Sub-agent configuration loaded from canonical subagents.toml files.
     agents_config: RwLock<AgentsConfig>,
-    subagent_config_paths: ava_config::SubagentConfigCompatPaths,
+    subagent_config_paths: ava_config::SubagentConfigPaths,
     subagent_config_root: PathBuf,
     subagent_project_root: PathBuf,
     subagent_project_trusted: bool,
@@ -344,19 +338,13 @@ impl AgentStack {
             }]
         };
 
-        let subagent_paths = ava_config::SubagentConfigCompatPaths {
+        let subagent_paths = ava_config::SubagentConfigPaths {
             global_subagents: if config.config_dir.is_some() {
                 ava_config::global_subagents_config_path_from(&config_dir)
             } else {
                 ava_config::global_subagents_config_path()?
             },
-            global_legacy_agents: if config.config_dir.is_some() {
-                ava_config::global_agents_config_path_from(&config_dir)
-            } else {
-                ava_config::global_agents_config_path()?
-            },
             project_subagents: ava_config::project_subagents_config_path(&effective_cwd),
-            project_legacy_agents: ava_config::project_legacy_agents_config_path(&effective_cwd),
         };
         let agents_config =
             Self::load_subagent_config(&subagent_paths, project_trusted, &config_dir);
@@ -587,46 +575,52 @@ impl AgentStack {
     }
 
     fn load_subagent_config(
-        paths: &ava_config::SubagentConfigCompatPaths,
+        paths: &ava_config::SubagentConfigPaths,
         project_trusted: bool,
         config_root: &Path,
     ) -> AgentsConfig {
+        for legacy_path in legacy_global_agents_paths(config_root) {
+            warn_if_legacy_agents_file(&legacy_path, &paths.global_subagents);
+        }
+
+        let project_legacy_path = paths
+            .project_subagents
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join("agents.toml");
+
         if project_trusted {
-            return AgentsConfig::load_with_compat(
-                &paths.global_subagents,
-                &paths.global_legacy_agents,
-                &paths.project_subagents,
-                &paths.project_legacy_agents,
+            warn_if_legacy_agents_file(&project_legacy_path, &paths.project_subagents);
+            return AgentsConfig::load(&paths.global_subagents, &paths.project_subagents);
+        }
+
+        if project_legacy_path.exists() {
+            tracing::warn!(
+                ignored = %project_legacy_path.display(),
+                migrate_to = %paths.project_subagents.display(),
+                "Skipping project-local legacy delegated-agent config (.ava/agents.toml): project is not trusted and filename is removed. Run with --trust after migrating to .ava/subagents.toml"
             );
         }
 
-        if paths.project_subagents.exists() || paths.project_legacy_agents.exists() {
+        if paths.project_subagents.exists() {
             tracing::warn!(
-                "Skipping project-local subagent config (.ava/subagents.toml and legacy .ava/agents.toml) — project not trusted. \
+                "Skipping project-local subagent config (.ava/subagents.toml) — project not trusted. \
                  Run with --trust to approve."
             );
         }
 
-        // Only load global subagent config (new + legacy fallback).
-        AgentsConfig::load_with_compat(
+        // Only load global subagent config.
+        AgentsConfig::load(
             &paths.global_subagents,
-            &paths.global_legacy_agents,
-            // Use non-existent paths so project config is skipped.
+            // Use non-existent path so project config is skipped.
             &config_root.join(".subagents-project-skipped.toml"),
-            &config_root.join(".agents-project-skipped.toml"),
         )
     }
 
-    fn scoped_subagent_paths(&self, scope: SubagentConfigScope) -> (&PathBuf, &PathBuf) {
+    fn scoped_subagent_path(&self, scope: SubagentConfigScope) -> &PathBuf {
         match scope {
-            SubagentConfigScope::Global => (
-                &self.subagent_config_paths.global_subagents,
-                &self.subagent_config_paths.global_legacy_agents,
-            ),
-            SubagentConfigScope::Project => (
-                &self.subagent_config_paths.project_subagents,
-                &self.subagent_config_paths.project_legacy_agents,
-            ),
+            SubagentConfigScope::Global => &self.subagent_config_paths.global_subagents,
+            SubagentConfigScope::Project => &self.subagent_config_paths.project_subagents,
         }
     }
 
@@ -822,7 +816,7 @@ impl AgentStack {
         &self.cli_agents
     }
 
-    /// Get the sub-agent configuration loaded from subagents.toml (legacy agents.toml compatible).
+    /// Get the sub-agent configuration loaded from subagents.toml.
     pub async fn agents_config(&self) -> AgentsConfig {
         self.agents_config.read().await.clone()
     }
@@ -833,7 +827,7 @@ impl AgentStack {
         effective_subagent_definitions(&config)
     }
 
-    /// Backend-owned read seam for subagent config files (canonical + legacy fallback).
+    /// Backend-owned read seam for canonical subagent config files.
     pub async fn read_subagent_config_document(
         &self,
         scope: SubagentConfigScope,
@@ -842,7 +836,7 @@ impl AgentStack {
             return Ok(None);
         }
 
-        let (subagents_path, legacy_path) = self.scoped_subagent_paths(scope);
+        let subagents_path = self.scoped_subagent_path(scope);
 
         if tokio::fs::try_exists(subagents_path)
             .await
@@ -854,22 +848,6 @@ impl AgentStack {
             return Ok(Some(SubagentConfigDocument {
                 scope,
                 path: subagents_path.clone(),
-                legacy: false,
-                content,
-            }));
-        }
-
-        if tokio::fs::try_exists(legacy_path)
-            .await
-            .map_err(|e| AvaError::IoError(e.to_string()))?
-        {
-            let content = tokio::fs::read_to_string(legacy_path)
-                .await
-                .map_err(|e| AvaError::IoError(e.to_string()))?;
-            return Ok(Some(SubagentConfigDocument {
-                scope,
-                path: legacy_path.clone(),
-                legacy: true,
                 content,
             }));
         }
@@ -1306,6 +1284,22 @@ mod tests {
         assert!(roots.contains(&cwd));
         assert!(roots.contains(&temp.path().to_path_buf()));
         assert!(!roots.contains(&missing));
+    }
+
+    #[test]
+    fn legacy_global_agents_paths_includes_home_ava_path_when_distinct() {
+        let temp = tempfile::tempdir().expect("temp");
+        let config_root = temp.path().join("config");
+        let paths = legacy_global_agents_paths(&config_root);
+
+        assert!(paths
+            .iter()
+            .any(|path| path == &config_root.join("agents.toml")));
+        if let Some(home_dir) = dirs::home_dir() {
+            assert!(paths
+                .iter()
+                .any(|path| path == &home_dir.join(".ava").join("agents.toml")));
+        }
     }
 
     #[tokio::test]

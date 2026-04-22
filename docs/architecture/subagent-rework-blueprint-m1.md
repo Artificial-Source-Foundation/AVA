@@ -31,7 +31,7 @@ Established findings to preserve:
 | `crates/ava-agent::subagents` (**new dedicated module**) | Built-in catalog + resolved effective subagent definitions + introspection DTOs | UI presentation details | new `crates/ava-agent/src/subagents/{mod.rs,catalog.rs,config.rs}` |
 | `crates/ava-agent::stack` + `routing` | Spawn/depth/budget lifecycle and routing decisions | Config file parsing and preset ownership | `crates/ava-agent/src/stack/{mod.rs,stack_run.rs}`, `crates/ava-agent/src/routing.rs` |
 | `crates/ava-tools` | Tool transport contract (`task`/`subagent`) | Built-in subagent defaults | `crates/ava-tools/src/core/task.rs` |
-| TUI/Desktop/Web | Navigation and rendering of backend-provided child sessions/status | Source-of-truth presets | `crates/ava-tui/src/app/event_handler/agent_events.rs`, `crates/ava-tui/src/web/api.rs`, `src-tauri/src/events.rs`, `src/types/rust-ipc.ts`, `src/hooks/rust-agent-events.ts` |
+| TUI/Desktop/Web | Navigation and rendering of backend-provided child sessions/status | Source-of-truth presets | `crates/ava-tui/src/app/event_handler/agent_events.rs`, `crates/ava-web/src/api.rs`, `src-tauri/src/events.rs`, `src/types/rust-ipc.ts`, `src/hooks/rust-agent-events.ts` |
 
 **Boundary decision:** introduce a dedicated `ava-agent::subagents` module now (pragmatic modularization), but avoid a new crate in this milestone.
 
@@ -166,7 +166,7 @@ TUI/UI follow-up:
 1. `crates/ava-tui/src/app/event_handler/agent_events.rs`
 2. `crates/ava-tui/src/ui/{sidebar.rs,status_bar.rs,layout.rs}` (navigation/status rendering)
 3. `src-tauri/src/events.rs` (desktop event projection for canonical delegation payload)
-4. `crates/ava-tui/src/web/api.rs` (web projection alignment)
+4. `crates/ava-web/src/api.rs` (web projection alignment)
 5. `src/types/rust-ipc.ts` and `src/hooks/rust-agent-events.ts` (shared frontend event contract handling)
 6. `src/components/settings/tabs/AgentsTab.tsx` and `src/components/settings/tabs/agents-tab-{list,detail}.tsx` (settings UI)
 

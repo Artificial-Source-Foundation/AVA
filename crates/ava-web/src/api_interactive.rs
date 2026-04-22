@@ -1,6 +1,6 @@
 //! Interactive agent resolution endpoints: approval, question, plan, and undo.
 
-use ava_agent::control_plane::interactive::ResolveInteractiveRequestError;
+use ava_control_plane::interactive::ResolveInteractiveRequestError;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
@@ -201,7 +201,7 @@ pub(crate) async fn inject_approval_request(
     State(state): State<WebState>,
     Json(req): Json<InjectApprovalRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ErrorResponse>)> {
-    use ava_agent::control_plane::interactive::InteractiveRequestKind;
+    use ava_control_plane::interactive::InteractiveRequestKind;
     use ava_tools::permission_middleware::ToolApproval;
     use tokio::sync::oneshot;
 
@@ -301,7 +301,7 @@ pub(crate) async fn inject_question_request(
     State(state): State<WebState>,
     Json(req): Json<InjectQuestionRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ErrorResponse>)> {
-    use ava_agent::control_plane::interactive::InteractiveRequestKind;
+    use ava_control_plane::interactive::InteractiveRequestKind;
     use tokio::sync::oneshot;
 
     let session_id = uuid::Uuid::parse_str(&req.session_id)

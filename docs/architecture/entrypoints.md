@@ -2,7 +2,7 @@
 title: "Entrypoints"
 description: "Map of AVA's CLI, desktop, web, and shared runtime entrypoints."
 order: 3
-updated: "2026-04-18"
+updated: "2026-04-21"
 ---
 
 # Entrypoints
@@ -26,7 +26,7 @@ It decides between:
 
 ### Shared Agent Runtime
 
-`crates/ava-agent/src/stack/mod.rs` builds the `AgentStack` used across product surfaces.
+`crates/ava-agent-orchestration/src/stack/mod.rs` now owns `AgentStack` composition used across product surfaces.
 
 It owns:
 
@@ -38,26 +38,32 @@ It owns:
 6. Trust-gated project-local config loading
 7. Codebase indexing startup behavior
 
-The stack now keeps MCP lifecycle/state behind the adjacent `crates/ava-agent/src/stack/stack_mcp.rs` service module, while `AgentStack` remains the shared surface-level composition root used by CLI/TUI, desktop, and web.
+The stack keeps MCP lifecycle/state behind the adjacent `crates/ava-agent-orchestration/src/stack/stack_mcp.rs` service module, while `AgentStack` remains the shared surface-level composition root used by CLI/TUI, desktop, and web.
+
+Boundary note: internal workspace callers that need stack/subagent orchestration now depend on `ava-agent-orchestration` directly (`ava_agent_orchestration::stack::*`), while `ava-agent` remains runtime-core ownership.
 
 ### Shared Control-Plane Contract Seam
 
-`crates/ava-agent/src/control_plane/` is the canonical cross-surface command/event/lifecycle contract seam established across Milestones 1-4.
+`crates/ava-control-plane/src/` is the canonical cross-surface command/event/lifecycle contract seam for shared/pure backend contracts.
+
+`crates/ava-agent/src/control_plane/` remains the backend integration shim: it re-exports shared contract modules for compatibility and keeps backend-only helpers that depend on `AgentEvent` or `AgentRunContext`.
 
 Ownership boundaries:
 
-1. `commands.rs` -- canonical command families, completion semantics, terminal signals, and correlation requirements.
-2. `events.rs` -- canonical event kinds, required fields, and required backend emission coverage.
-3. `interactive.rs` -- approval/question/plan request lifecycle, request IDs, and timeout policy.
-4. `sessions.rs` -- session selection precedence and retry/edit/regenerate replay payload rules.
-5. `queue.rs` and `orchestration.rs` -- queue-clear semantics plus deferred follow-up/post-complete orchestration helpers.
+1. `ava-control-plane::commands` -- canonical command families, completion semantics, terminal signals, and correlation requirements.
+2. `ava-control-plane::events` -- canonical event kinds, required fields, and required backend event-kind inventory.
+3. `ava-control-plane::interactive` -- approval/question/plan request lifecycle, request IDs, and timeout policy.
+4. `ava-control-plane::sessions` -- session selection precedence and retry/edit/regenerate replay payload rules.
+5. `ava-control-plane::queue` and `ava-control-plane::orchestration` -- queue-clear semantics plus deferred follow-up/post-complete orchestration helpers.
+6. `ava-agent::control_plane::events` + `ava-agent::control_plane::sessions` -- backend-only projection/reconstruction helpers.
 
 Primary adopters:
 
 1. `src-tauri/` desktop bridge + command handlers
-2. `crates/ava-tui/src/web/` web routes and websocket projections
-3. `crates/ava-tui/src/app/` interactive TUI handlers
-4. `crates/ava-tui/src/headless/` headless command and event flows
+   - pure command/event/interactive/session/queue/orchestration contract imports should come from `ava-control-plane`; keep `ava-agent::control_plane::*` only for backend-only helpers (for example `run_context_from_session`, `backend_event_requires_interactive_projection`)
+2. `crates/ava-web/src/` web routes and websocket projections (wired from `ava-tui` `Command::Serve`) — pure control-plane contracts should import from `ava-control-plane` directly; backend-only helpers still come from `ava-agent::control_plane::*`.
+3. `crates/ava-tui/src/app/` interactive TUI handlers — prefer direct `ava-control-plane` imports for pure command/event/interactive/session/queue/orchestration contracts.
+4. `crates/ava-tui/src/headless/` headless command and event flows — same direct `ava-control-plane` guidance for pure contracts.
 
 ### Desktop App
 
@@ -74,7 +80,7 @@ Desktop command modules are grouped in `src-tauri/src/commands/mod.rs`.
 
 ### Web Server
 
-The browser-facing server lives in `crates/ava-tui/src/web/mod.rs`.
+The browser-facing server lives in `crates/ava-web/src/lib.rs`.
 
 It exposes:
 
@@ -93,7 +99,7 @@ This applies to:
 2. `.ava/tools/`
 3. `.ava/commands/`
 4. `.ava/hooks/`
-5. `.ava/agents.toml`
+5. `.ava/subagents.toml`
 6. `.ava/skills/`
 7. `.ava/rules/`
 
@@ -106,10 +112,10 @@ Use `ava --trust` to approve the current project.
 3. New slash command: `crates/ava-tui/src/app/commands.rs`
 4. New custom command behavior: `crates/ava-tui/src/state/custom_commands.rs`
 5. New hook event or behavior: `crates/ava-tui/src/hooks/`
-6. New web endpoint: `crates/ava-tui/src/web/`
+6. New web endpoint: `crates/ava-web/src/`
 7. New desktop IPC command: `src-tauri/src/commands/`
 8. New plugin capability: `crates/ava-plugin/` and `plugins/sdk/`
-9. Shared control-plane command/event/session contract changes: `crates/ava-agent/src/control_plane/`
+9. Shared control-plane command/event/session contract changes: `crates/ava-control-plane/src/` (plus backend-only wiring in `crates/ava-agent/src/control_plane/`)
 
 ## Related Docs
 

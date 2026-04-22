@@ -21,7 +21,7 @@ This section explains how AVA verifies code and product changes across Rust, fro
 
 Milestone 2 implementation includes a repo-owned backend automation gate at `scripts/testing/backend-automation-gate.sh`.
 
-- **Required (no-secrets)** checks: focused `ava-config` coverage (`cargo test -p ava-config`), delegated runtime signoff (`cargo test -p ava-agent agent_stack_run_dispatches_subagent_when_enabled -- --exact`), mock-stack unattended-approval + delegated-subagent smoke (`cargo run --bin ava-smoke`), and deterministic headless slash smoke (`cargo run --bin ava -- "/help" --headless --max-turns 1 --no-update-check`).
+- **Required (no-secrets)** checks: focused `ava-config` coverage (`cargo test -p ava-config`), delegated runtime signoff (`cargo test -p ava-agent-orchestration agent_stack_run_dispatches_subagent_when_enabled -- --exact`), lightweight desktop/Tauri compile smoke (`cargo check --manifest-path src-tauri/Cargo.toml --lib`), mock-stack unattended-approval + delegated-subagent smoke (`cargo run --bin ava-smoke`), and deterministic headless slash smoke (`cargo run --bin ava -- "/help" --headless --max-turns 1 --no-update-check`).
 - **Optional live-provider** smoke:
   - Runs only when at least one API key is present.
   - Uses `AVA_OPENAI_API_KEY`, `AVA_ANTHROPIC_API_KEY`, or `AVA_OPENROUTER_API_KEY` in precedence order.

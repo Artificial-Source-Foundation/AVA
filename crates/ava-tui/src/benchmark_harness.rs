@@ -353,7 +353,7 @@ async fn run_solo_task(
     max_turns: usize,
     workspace_dir: &Path,
 ) -> Result<BenchmarkResult> {
-    use ava_agent::stack::{AgentStack, AgentStackConfig};
+    use ava_agent_orchestration::stack::{AgentStack, AgentStackConfig};
 
     let data_dir = ava_config::data_dir().unwrap_or_default();
     let effective_turns = if task.needs_tools { max_turns } else { 3 };

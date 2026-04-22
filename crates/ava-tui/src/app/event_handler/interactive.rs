@@ -1,5 +1,5 @@
 use super::*;
-use ava_agent::control_plane::interactive::InteractiveRequestKind;
+use ava_control_plane::interactive::InteractiveRequestKind;
 use ava_tools::core::plan::PlanRequest;
 use ava_tools::core::question::QuestionRequest;
 use ava_tools::permission_middleware::{ApprovalRequest, ToolApproval};

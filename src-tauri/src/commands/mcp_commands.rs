@@ -1,6 +1,6 @@
 //! Tauri commands for MCP server management.
 
-use ava_agent::stack::McpServerStatus;
+use ava_agent_orchestration::stack::McpServerStatus;
 use serde::Serialize;
 use tauri::State;
 
@@ -101,7 +101,7 @@ pub async fn reload_mcp_servers(
 #[cfg(test)]
 mod tests {
     use super::map_mcp_status;
-    use ava_agent::stack::McpServerStatus;
+    use ava_agent_orchestration::stack::McpServerStatus;
 
     #[test]
     fn maps_runtime_statuses_to_frontend_strings() {

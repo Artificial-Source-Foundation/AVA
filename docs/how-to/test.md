@@ -54,8 +54,19 @@ The equivalent check list is:
 
 1. `cargo fmt --all --check`
 2. `cargo clippy --workspace -- -D warnings`
-3. `cargo nextest run -p ava-agent --test agent_loop --test stack_test --test e2e_test --test reflection_loop -j 4`
-4. `cargo nextest run -p ava-tools -p ava-review -j 4`
+3. `cargo nextest run -p ava-agent --test agent_loop --test reflection_loop -j 4`
+4. `cargo nextest run -p ava-agent-orchestration --test stack_test --test e2e_test -j 4`
+5. `cargo nextest run -p ava-control-plane -j 4`
+6. `cargo test -p ava-web resolve_plan_route_requires_request_id_and_preserves_pending_state -- --exact`
+7. `cargo test -p ava-web clear_message_queue_rejects_unsupported_follow_up_targets -- --exact`
+8. `cargo test -p ava-web projected_backend_events_preserve_required_correlation_fields -- --exact`
+9. `cargo test -p ava-tui foreground_required_control_plane_events_are_visible_in_tui -- --exact`
+10. `cargo test -p ava-tui question_requests_use_shared_timeout_and_clear_lifecycle -- --exact`
+11. `cargo test -p ava-tui cancelling_tui_run_clears_pending_approval_via_shared_lifecycle -- --exact`
+12. `cargo test --manifest-path src-tauri/Cargo.toml desktop_control_plane_event_shapes_follow_shared_requirements -- --exact`
+13. `cargo test --manifest-path src-tauri/Cargo.toml take_matching_pending_reply_only_consumes_matching_request_ids -- --exact`
+14. `cargo check -p ava-tui --features web`
+15. `cargo nextest run -p ava-tools -p ava-review -j 4`
 
 This is the local Rust confidence gate. `just check` is just a convenience wrapper for this canonical hook path. It intentionally avoids unrelated provider/prompt-family unit-test coverage in `ava-agent`; CI remains the place where the full workspace suite is authoritative.
 
@@ -79,7 +90,8 @@ The gate has two layers:
 
 1. **Required no-secrets checks (mandatory):**
     - `cargo test -p ava-config` (focused config-seam coverage for canonical subagent config path/read-write behavior)
-    - `cargo test -p ava-agent agent_stack_run_dispatches_subagent_when_enabled -- --exact` (delegated runtime signoff path)
+    - `cargo test -p ava-agent-orchestration agent_stack_run_dispatches_subagent_when_enabled -- --exact` (delegated runtime signoff path)
+    - `cargo check --manifest-path src-tauri/Cargo.toml --lib` (lightweight desktop/Tauri compile smoke for boundary-touch confidence)
     - `ava-smoke` (mock provider path, now covering both unattended approval behavior and delegated `SubAgentComplete` smoke assertions)
     - headless deterministic slash smoke: `ava -- "/help" --headless --max-turns 1 --no-update-check`
 2. **Optional live-provider smoke:** runs only when at least one key is present (`AVA_OPENAI_API_KEY`, `AVA_ANTHROPIC_API_KEY`, `AVA_OPENROUTER_API_KEY`).

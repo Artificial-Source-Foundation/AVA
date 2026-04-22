@@ -6,7 +6,7 @@
 //! - Detects stuck states and terminates gracefully
 
 pub mod agent_loop;
-pub(crate) mod budget;
+pub mod budget;
 pub mod cache_sharing;
 pub mod continuation;
 pub mod control_plane;
@@ -15,15 +15,14 @@ pub mod error_hints;
 pub mod instruction_resolver;
 pub mod instructions;
 pub mod llm_trait;
-pub(crate) mod memory_enrichment;
+pub mod memory_enrichment;
 pub mod message_queue;
 pub mod reflection;
 pub mod routing;
+pub mod run_context;
 pub mod session_logger;
-pub mod stack;
 pub mod streaming_diff;
 pub mod stuck;
-pub mod subagents;
 pub mod system_prompt;
 pub mod trace;
 pub mod turn_diff;
@@ -38,32 +37,8 @@ pub use instructions::{
 pub use reflection::{ErrorKind, ReflectionAgent, ReflectionLoop, ToolExecutor, ToolResult};
 pub use {
     agent_loop::*,
-    control_plane::commands::{
-        canonical_command_specs, command_spec, command_spec_by_name, queue_command_from_alias,
-        queue_command_from_tier, queue_command_label, queue_message_tier, CommandFamily,
-        CommandSpec, CompletionMode, ControlPlaneCommand, CorrelationIdKey,
-        CorrelationIdRequirements, ResponseEnvelope, TerminalClosureSignal,
-    },
-    control_plane::events::{
-        backend_event_requires_interactive_projection, canonical_event_spec, canonical_event_specs,
-        required_backend_event_kind, required_backend_event_kinds, CanonicalEventField,
-        CanonicalEventKind, CanonicalEventSpec,
-    },
-    control_plane::interactive::{
-        canonical_interactive_timeout_policy, InteractiveRequestHandle, InteractiveRequestKind,
-        InteractiveRequestPhase, InteractiveRequestStore, InteractiveTimeoutPolicy,
-        ResolveInteractiveRequestError, TerminalInteractiveRequest,
-        DEFAULT_INTERACTIVE_REQUEST_TIMEOUT,
-    },
-    control_plane::queue::{
-        clear_queue_semantics, parse_clear_queue_target, ClearQueueTarget, QueueClearSemantics,
-        UNSUPPORTED_QUEUE_CLEAR_ERROR,
-    },
-    control_plane::sessions::{
-        resolve_existing_session, resolve_session_precedence, SessionSelection,
-        SessionSelectionSource,
-    },
     llm_trait::{LLMProvider, LLMResponse},
+    run_context::AgentRunContext,
 };
 
 #[cfg(test)]

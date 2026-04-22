@@ -1,6 +1,6 @@
 use crate::event::{AppEvent, CommandMessageResult};
 use crate::ui::status_bar::StatusLevel;
-use ava_agent::stack::{AgentRunResult, AgentStack, AgentStackConfig};
+use ava_agent_orchestration::stack::{AgentRunResult, AgentStack, AgentStackConfig};
 use ava_types::{QueuedMessage, Session, ThinkingLevel};
 use color_eyre::Result;
 use std::path::PathBuf;
@@ -509,7 +509,7 @@ impl AgentState {
     /// Get MCP server info for display.
     pub async fn mcp_server_info(
         &self,
-    ) -> std::result::Result<Vec<ava_agent::stack::MCPServerInfo>, String> {
+    ) -> std::result::Result<Vec<ava_agent_orchestration::stack::MCPServerInfo>, String> {
         Ok(self.stack()?.mcp_server_info().await)
     }
 

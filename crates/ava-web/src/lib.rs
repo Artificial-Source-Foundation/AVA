@@ -116,6 +116,10 @@ fn build_router_with_security(state: WebState, security: WebSecurityConfig) -> R
         .route("/api/agent/queue", get(api::get_message_queue))
         .route("/api/agent/queue/clear", post(api::clear_message_queue))
         .route("/api/context/compact", post(api::compact_context))
+        .route(
+            "/api/config/primary-agent",
+            post(api::set_primary_agent_profile),
+        )
         .route("/api/sessions", get(api::list_sessions))
         .route("/api/sessions/create", post(api::create_session))
         .route("/api/sessions/search", post(api::search_sessions))

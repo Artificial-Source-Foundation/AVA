@@ -1,4 +1,4 @@
-<!-- Last verified: 2026-04-18 -->
+<!-- Last verified: 2026-04-21 -->
 # AI Coding Agent Instructions (v3)
 
 > Instructions for AI assistants working on AVA. This file is auto-injected into the AVA agent's system prompt.
@@ -51,12 +51,14 @@ This file is the primary source of truth for repo workflow and architecture.
 
 ## What AVA Is
 
-AVA is a Rust-first AI coding assistant (CLI/TUI + Tauri desktop + web mode) with a 22-crate Rust workspace.
+AVA is a Rust-first AI coding assistant (CLI/TUI + Tauri desktop + web mode) with a 25-crate Rust workspace.
 
 - **CLI/TUI**: `crates/ava-tui/` (Ratatui + Crossterm + Tokio)
-- **Agent runtime**: `crates/ava-agent/`, `ava-llm/`, `ava-tools/`, `ava-review/`
+- **Agent runtime core**: `crates/ava-agent/` (+ `ava-llm/`, `ava-tools/`, `ava-review/`)
+- **Orchestration seam**: `crates/ava-agent-orchestration/` (stack/subagent composition)
+- **Shared control-plane contracts**: `crates/ava-control-plane/`
 - **Desktop**: Tauri 2 -- SolidJS frontend calls Rust via Tauri IPC (`src-tauri/src/commands/`)
-- **Web**: `ava serve` from `crates/ava-tui/`
+- **Web**: `ava serve` entrypoint in `crates/ava-tui/`, implemented by `crates/ava-web/`
 
 **All new features MUST be Rust.** No TypeScript backend logic.
 
@@ -64,7 +66,7 @@ Current workspace Rust baseline: `rust-version = 1.86`.
 
 ## Key Counts
 
-- 22 Rust crates in the root workspace (`src-tauri/` remains outside the workspace)
+- 25 Rust crates in the root workspace (`src-tauri/` remains outside the workspace)
 - 9 default tools: `read`, `write`, `edit`, `bash`, `glob`, `grep`, `web_fetch`, `web_search`, `git_read`
 - Additional tools load separately at runtime (for example `subagent`, `todo_*`, `question`, `plan`, MCP, and TOML custom tools)
 
@@ -72,7 +74,11 @@ Current workspace Rust baseline: `rust-version = 1.86`.
 
 - New tools: `crates/ava-tools/src/core/` (implement `Tool` trait)
 - New providers: `crates/ava-llm/src/providers/`
-- New agent features: `crates/ava-agent/` or `crates/ava-review/`
+- Pure command/event/interactive/session/queue/orchestration contracts: `crates/ava-control-plane/`
+- Runtime-core agent behavior and backend-only helpers: `crates/ava-agent/`
+- Stack/subagent orchestration composition: `crates/ava-agent-orchestration/`
+- Web API/websocket surface behavior: `crates/ava-web/`
+- Review subsystem changes: `crates/ava-review/`
 - External agent integration: `crates/ava-acp/` (Agent Client Protocol)
 - TUI features: `crates/ava-tui/`
 - Desktop commands: `src-tauri/src/commands/`

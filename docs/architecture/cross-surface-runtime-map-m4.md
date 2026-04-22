@@ -2,7 +2,7 @@
 title: "Cross-Surface Runtime Map (Milestone 4)"
 description: "Concrete map of how CLI/TUI, desktop/Tauri, and web route into AVA's shared backend runtime seam."
 order: 7
-updated: "2026-04-14"
+updated: "2026-04-21"
 ---
 
 # Cross-Surface Runtime Map (Milestone 4)
@@ -13,13 +13,13 @@ Milestone 4 is mapping-only. This artifact traces each surface from entrypoint t
 
 Shared backend is two connected seams:
 
-1. **Runtime execution seam** in `AgentStack` (`crates/ava-agent/src/stack/`)
-   - `AgentStack::new(...)` (`crates/ava-agent/src/stack/mod.rs`)
-   - `AgentStack::run(...)` (`crates/ava-agent/src/stack/stack_run.rs`)
-   - `AgentStack::effective_tools_for_interactive_run(...)` (`crates/ava-agent/src/stack/mod.rs`)
+1. **Runtime execution seam** in `AgentStack` (`crates/ava-agent-orchestration/src/stack/`)
+   - `AgentStack::new(...)` (`crates/ava-agent-orchestration/src/stack/mod.rs`)
+   - `AgentStack::run(...)` (`crates/ava-agent-orchestration/src/stack/stack_run.rs`)
+   - `AgentStack::effective_tools_for_interactive_run(...)` (`crates/ava-agent-orchestration/src/stack/mod.rs`)
 2. **Interactive control-plane seam** adjacent to the stack
-   - approval/question/plan channels returned from `AgentStack::new(...)` (`crates/ava-agent/src/stack/mod.rs`)
-   - cancellation, message queue, pending interactive replies, and session handoff owned today in surface adapters (`crates/ava-tui/src/state/agent.rs`, `src-tauri/src/bridge.rs`, `crates/ava-tui/src/web/state.rs`)
+   - approval/question/plan channels returned from `AgentStack::new(...)` (`crates/ava-agent-orchestration/src/stack/mod.rs`)
+   - cancellation, message queue, pending interactive replies, and session handoff owned today in surface adapters (`crates/ava-tui/src/state/agent.rs`, `src-tauri/src/bridge.rs`, `crates/ava-web/src/state.rs`)
 
 All surfaces should treat these as the backend seams and keep adapters thin.
 
@@ -30,7 +30,7 @@ All surfaces should treat these as the backend seams and keep adapters thin.
 | Interactive TUI | `crates/ava-tui/src/main.rs` → `App::new` / `App::run` (`crates/ava-tui/src/app/mod.rs`) | Terminal UI command/event handling in `crates/ava-tui/src/app/` | Internal Tokio channels/events (`crates/ava-tui/src/event.rs`, `crates/ava-tui/src/app/mod.rs`) | `AgentState::new` / `start` → `AgentStack::new` / `run` (`crates/ava-tui/src/state/agent.rs`) |
 | Headless CLI | `crates/ava-tui/src/main.rs` → `run_headless` / `run_single_agent` (`crates/ava-tui/src/headless/mod.rs`, `crates/ava-tui/src/headless/single.rs`) | CLI args and headless request assembly in `crates/ava-tui/src/headless/` | In-process async tasks plus headless-specific approval handling | `AgentStack::new` / `run` called directly from headless path (`crates/ava-tui/src/headless/single.rs`) |
 | Desktop/Tauri | `src-tauri/src/lib.rs` (`run`, `invoke_handler`) | Solid frontend invoke/listener layer (`src/services/rust-bridge.ts`, `src/hooks/rust-agent-ipc.ts`) | Tauri IPC + command routing + event conversion (`src-tauri/src/commands/*.rs`, `src-tauri/src/bridge.rs`, `src-tauri/src/events.rs`) | `DesktopBridge` owns `Arc<AgentStack>` (`src-tauri/src/bridge.rs`), handlers invoke `stack.run(...)` (`src-tauri/src/commands/agent_commands.rs`) |
-| Web | `crates/ava-tui/src/main.rs` → `Command::Serve` → `crates/ava-tui/src/web/mod.rs::run_server` | Frontend API adapter in `src/lib/api-client.ts` | Axum REST `/api/*` and WebSocket `/ws` (`crates/ava-tui/src/web/mod.rs`, `crates/ava-tui/src/web/ws.rs`) | `WebState::init` owns `Arc<AgentStack>` (`crates/ava-tui/src/web/state.rs`), handlers invoke `stack.run(...)` (`crates/ava-tui/src/web/api_agent.rs`) |
+| Web | `crates/ava-tui/src/main.rs` → `Command::Serve` → `crates/ava-web/src/lib.rs::run_server` | Frontend API adapter in `src/lib/api-client.ts` | Axum REST `/api/*` and WebSocket `/ws` (`crates/ava-web/src/lib.rs`, `crates/ava-web/src/ws.rs`) | `WebState::init` owns `Arc<AgentStack>` (`crates/ava-web/src/state.rs`), handlers invoke `stack.run(...)` (`crates/ava-web/src/api_agent.rs`) |
 
 ## 2) Per-surface flow summary (events, approvals, commands, sessions, tool introspection)
 
@@ -38,18 +38,18 @@ All surfaces should treat these as the backend seams and keep adapters thin.
 
 - **Event flow**
   - `AgentState::start` spawns run tasks and relays to UI events (`crates/ava-tui/src/state/agent.rs`).
-  - `App::run` owns the main loop and dispatches `AppEvent::{AgentRunEvent,AgentRunDone,...}` (`crates/ava-tui/src/app/mod.rs`, `crates/ava-tui/src/app/event_dispatch.rs`).
+  - `App::run` owns the main loop and dispatches `AppEvent::{AgentRunEvent,AgentRunDone,...}` (`crates/ava-tui/src/app/mod.rs`, `crates/ava-tui/src/app/event_dispatch.rs`, `crates/ava-tui/src/app/runtime_event_dispatch.rs`).
 - **Approvals**
   - Interactive mode consumes `question_rx`, `approval_rx`, `plan_rx` and maps to UI events (`crates/ava-tui/src/event.rs`, `crates/ava-tui/src/app/mod.rs`).
-  - UI handoff occurs in event dispatch (`crates/ava-tui/src/app/event_dispatch.rs`).
+  - UI handoff occurs in event dispatch (`crates/ava-tui/src/app/event_dispatch.rs` for terminal/UI input, `crates/ava-tui/src/app/runtime_event_dispatch.rs` for runtime-driven events).
 - **Commands**
   - CLI command dispatch in `crates/ava-tui/src/main.rs` and schema in `crates/ava-tui/src/config/cli.rs`.
   - Slash/custom command handling: `crates/ava-tui/src/app/commands.rs`, `crates/ava-tui/src/state/custom_commands.rs`.
 - **Session loading**
   - Startup/session bootstrap in `App::new` (`crates/ava-tui/src/app/mod.rs`).
-  - Session list/load workers in `crates/ava-tui/src/app/spawners.rs` → `AppEvent::SessionLoaded` (`crates/ava-tui/src/app/event_dispatch.rs`).
+  - Session list/load workers in `crates/ava-tui/src/app/spawners.rs` → `AppEvent::SessionLoaded` (`crates/ava-tui/src/app/runtime_event_dispatch.rs`).
 - **Tool introspection**
-  - `AgentState::list_tools_with_source(...)` then calls `effective_tools_for_interactive_run(...)` (`crates/ava-tui/src/state/agent.rs`, `crates/ava-agent/src/stack/mod.rs`).
+  - `AgentState::list_tools_with_source(...)` then calls `effective_tools_for_interactive_run(...)` (`crates/ava-tui/src/state/agent.rs`, `crates/ava-agent-orchestration/src/stack/mod.rs`).
 
 ### Headless CLI
 
@@ -87,37 +87,37 @@ Headless note: include headless in the next audit only as a scoped non-interacti
 ### Web
 
 - **Event flow**
-  - `submit_goal` starts async backend work and pushes event updates into a broadcast sender (`crates/ava-tui/src/web/api_agent.rs`, `crates/ava-tui/src/web/state.rs`).
-  - `/ws` consumers receive adapter-mapped payloads from `crates/ava-tui/src/web/api.rs` and `crates/ava-tui/src/web/ws.rs`.
+  - `submit_goal` starts async backend work and pushes event updates into a broadcast sender (`crates/ava-web/src/api_agent.rs`, `crates/ava-web/src/state.rs`).
+  - `/ws` consumers receive adapter-mapped payloads from `crates/ava-web/src/api.rs` and `crates/ava-web/src/ws.rs`.
 - **Approvals**
-  - Interactive prompts are emitted from API handlers (`crates/ava-tui/src/web/api_agent.rs`).
-  - User responses are resolved in `crates/ava-tui/src/web/api_interactive.rs`.
+  - Interactive prompts are emitted from API handlers (`crates/ava-web/src/api_agent.rs`).
+  - User responses are resolved in `crates/ava-web/src/api_interactive.rs`.
 - **Commands**
-  - API route registration and auth/command routing in `crates/ava-tui/src/web/mod.rs`; frontend API mapping lives in `src/lib/api-client.ts`.
+  - API route registration and auth/command routing in `crates/ava-web/src/lib.rs`; frontend API mapping lives in `src/lib/api-client.ts`.
 - **Session loading**
-  - CRUD + session fetch APIs in `crates/ava-tui/src/web/api_sessions.rs`.
-  - `submit_goal` accepts and uses `session_id` (`crates/ava-tui/src/web/api_agent.rs`).
+  - CRUD + session fetch APIs in `crates/ava-web/src/api_sessions.rs`.
+  - `submit_goal` accepts and uses `session_id` (`crates/ava-web/src/api_agent.rs`).
 - **Tool introspection**
-  - Endpoint `POST /api/tools/agent` in `crates/ava-tui/src/web/api_tools.rs` funnels into `effective_tools_for_interactive_run(...)`.
+  - Endpoint `POST /api/tools/agent` in `crates/ava-web/src/api_tools.rs` funnels into `effective_tools_for_interactive_run(...)`.
 
 ## 3) Main divergence points that matter for parity work
 
 1. **Transport completion behavior differs**
-   - Tauri `submit_goal` invocation is completion-bound on the command call, while web `submit_goal` returns immediately and completion events stream on `/ws` (`src/services/rust-bridge.ts`, `src/hooks/rust-agent-ipc.ts`, `crates/ava-tui/src/web/api_agent.rs`).
+   - Tauri `submit_goal` invocation is completion-bound on the command call, while web `submit_goal` returns immediately and completion events stream on `/ws` (`src/services/rust-bridge.ts`, `src/hooks/rust-agent-ipc.ts`, `crates/ava-web/src/api_agent.rs`).
 2. **Unattended approval mode differs**
    - Headless CLI auto-resolves approvals in some paths (`crates/ava-tui/src/headless/mod.rs`); interactive TUI, desktop, and web run explicit interactive resolution paths.
 3. **Watchdog policy diverges by adapter**
-   - Desktop command handlers include time-based auto-resolution for approvals/questions; web currently forwards request events without equivalent timeout handling in the same API path (`src-tauri/src/commands/agent_commands.rs`, `crates/ava-tui/src/web/api_agent.rs`).
+   - Desktop command handlers include time-based auto-resolution for approvals/questions; web currently forwards request events without equivalent timeout handling in the same API path (`src-tauri/src/commands/agent_commands.rs`, `crates/ava-web/src/api_agent.rs`).
 4. **Session lifecycle and persistence semantics differ by surface**
-   - Desktop and web use different session-ID precedence, checkpoint, and continuity logic (`requested_session_id` / `last_session_id` in desktop, request `session_id`/new IDs in web, local app state in interactive TUI, headless request-local continuity) (`src-tauri/src/commands/agent_commands.rs`, `crates/ava-tui/src/web/api_agent.rs`, `crates/ava-tui/src/app/mod.rs`, `crates/ava-tui/src/app/spawners.rs`, `crates/ava-tui/src/headless/single.rs`).
+   - Desktop and web use different session-ID precedence, checkpoint, and continuity logic (`requested_session_id` / `last_session_id` in desktop, request `session_id`/new IDs in web, local app state in interactive TUI, headless request-local continuity) (`src-tauri/src/commands/agent_commands.rs`, `crates/ava-web/src/api_agent.rs`, `crates/ava-tui/src/app/mod.rs`, `crates/ava-tui/src/app/spawners.rs`, `crates/ava-tui/src/headless/single.rs`).
 5. **Tool-introspection availability shape differs**
-   - Desktop/web have explicit user-facing tool-introspection command routes (`src-tauri/src/commands/tool_commands.rs`, `crates/ava-tui/src/web/api_tools.rs`); TUI exposes this through runtime helper flow (`crates/ava-tui/src/state/agent.rs`).
+   - Desktop/web have explicit user-facing tool-introspection command routes (`src-tauri/src/commands/tool_commands.rs`, `crates/ava-web/src/api_tools.rs`); TUI exposes this through runtime helper flow (`crates/ava-tui/src/state/agent.rs`).
 6. **Control-plane contract drift exists across adapters**
-   - Request DTOs, event schemas, and session/runtime contract shapes are not fully unified across TUI, Tauri, web, and frontend adapters (`src-tauri/src/commands/agent_commands.rs`, `src-tauri/src/events.rs`, `crates/ava-tui/src/web/api_agent.rs`, `crates/ava-tui/src/web/api.rs`, `src/lib/api-client.ts`, `src/types/rust-ipc.ts`).
+   - Request DTOs, event schemas, and session/runtime contract shapes are not fully unified across TUI, Tauri, web, and frontend adapters (`src-tauri/src/commands/agent_commands.rs`, `src-tauri/src/events.rs`, `crates/ava-web/src/api_agent.rs`, `crates/ava-web/src/api.rs`, `src/lib/api-client.ts`, `src/types/rust-ipc.ts`).
 7. **Event payload shaping and delivery semantics remain adapter-local**
-   - `src-tauri/src/events.rs` and `crates/ava-tui/src/web/api.rs` map backend event data differently, and web delivery uses broadcast/WebSocket semantics that can diverge from desktop listener behavior.
+   - `src-tauri/src/events.rs` and `crates/ava-web/src/api.rs` map backend event data differently, and web delivery uses broadcast/WebSocket semantics that can diverge from desktop listener behavior.
 8. **Queue and cancel semantics remain adapter-local**
-   - Mid-stream message queues, cancel handling, and follow-up/steer/post-complete control flow are coordinated differently in desktop and web adapters (`src-tauri/src/commands/agent_commands.rs`, `crates/ava-tui/src/web/api_agent.rs`).
+   - Mid-stream message queues, cancel handling, and follow-up/steer/post-complete control flow are coordinated differently in desktop and web adapters (`src-tauri/src/commands/agent_commands.rs`, `crates/ava-web/src/api_agent.rs`).
 
 ## 4) How to use this artifact
 

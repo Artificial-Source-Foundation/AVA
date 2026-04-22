@@ -9,8 +9,8 @@
 
 use std::path::Path;
 
-use ava_agent::stack::{AgentRunResult, AgentStack, AgentStackConfig};
 use ava_agent::AgentEvent;
+use ava_agent_orchestration::stack::{AgentRunResult, AgentStack, AgentStackConfig};
 use serde_json::json;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;

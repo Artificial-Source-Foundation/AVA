@@ -466,7 +466,7 @@ pub fn emit_backend_event<R: tauri::Runtime>(
 
 #[cfg(test)]
 mod tests {
-    use ava_agent::control_plane::events::{
+    use ava_control_plane::events::{
         canonical_event_spec, required_backend_event_kinds, CanonicalEventKind,
     };
     use serde_json::json;

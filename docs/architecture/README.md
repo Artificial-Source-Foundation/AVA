@@ -2,12 +2,19 @@
 title: "Architecture"
 description: "Internal structure, crate boundaries, and architecture transition docs for AVA."
 order: 1
-updated: "2026-04-20"
+updated: "2026-04-21"
 ---
 
 # Architecture Docs
 
 This section explains how AVA is organized internally and tracks important architecture transitions.
+
+## Ownership Snapshot (Authoritative)
+
+1. `ava-control-plane` owns pure cross-surface contracts (`commands`, `events`, `interactive`, `sessions`, `queue`, `orchestration`).
+2. `ava-agent` owns runtime core plus backend-only helpers that depend on runtime types.
+3. `ava-agent-orchestration` owns stack/subagent composition and delegation runtime wiring.
+4. `ava-web` owns the web API/WebSocket surface for `ava serve`.
 
 ## Canonical Architecture Owners (Current)
 
@@ -18,6 +25,12 @@ Use these first when deciding where code should live today:
 3. [Canonical shared-backend contract (Milestone 6)](shared-backend-contract-m6.md) - normative command/event/session/queue/delegation contract for cross-surface behavior
 4. [Backend contract exceptions](backend-contract-exceptions.md) - versioned registry of intentional adapter-level contract exceptions
 5. [Backend correction implementation roadmap (Milestone 7)](backend-correction-roadmap-m7.md) - implementation sequencing and adoption order against the canonical contract
+
+## Active Planning
+
+These are current forward-looking planning docs that build on the canonical seams above.
+
+1. [Agent backend modularization roadmap (Track Milestone 1)](agent-backend-modularization-roadmap-m1.md) - active planning roadmap for modularization hotspots, target owner seams, phased execution order, risks, and validation gates, building on the existing M6/M7 contract baseline
 
 ## Historical Milestone Artifacts
 

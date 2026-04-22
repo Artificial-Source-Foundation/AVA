@@ -1,0 +1,46 @@
+[package]
+name = "ava-agent-orchestration"
+description = "Orchestration-heavy agent composition seam for AgentStack and subagents"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+async-stream = "0.3"
+async-trait.workspace = true
+futures.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+uuid.workspace = true
+ava-agent = { path = "../ava-agent" }
+ava-acp = { path = "../ava-acp" }
+ava-codebase = { path = "../ava-codebase" }
+ava-context = { path = "../ava-context" }
+ava-config = { path = "../ava-config" }
+ava-llm = { path = "../ava-llm" }
+ava-memory = { path = "../ava-memory" }
+ava-permissions = { path = "../ava-permissions" }
+ava-platform = { path = "../ava-platform" }
+ava-session = { path = "../ava-session" }
+ava-mcp = { path = "../ava-mcp" }
+ava-plugin = { path = "../ava-plugin" }
+ava-tools = { path = "../ava-tools" }
+ava-types = { path = "../ava-types" }
+similar = "2"
+chrono.workspace = true
+dirs.workspace = true
+glob = "0.3"
+which = "7"
+thiserror.workspace = true
+tracing.workspace = true
+tokio-util = { version = "0.7", features = ["rt"] }
+
+[dev-dependencies]
+tempfile.workspace = true

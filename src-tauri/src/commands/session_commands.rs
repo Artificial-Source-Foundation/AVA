@@ -395,7 +395,7 @@ pub async fn search_sessions(
 
 #[cfg(test)]
 mod tests {
-    use ava_agent::control_plane::sessions::build_retry_replay_payload;
+    use ava_control_plane::sessions::build_retry_replay_payload;
     use ava_types::{repair_conversation, Role, ToolCall};
     use serde_json::json;
     use serde_json::Value;

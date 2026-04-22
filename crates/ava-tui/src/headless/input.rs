@@ -1,5 +1,5 @@
 use crate::config::cli::CliArgs;
-use ava_agent::control_plane::commands::{
+use ava_control_plane::commands::{
     queue_command_from_alias, queue_message_tier, ControlPlaneCommand,
 };
 use ava_types::QueuedMessage;

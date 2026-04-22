@@ -10,7 +10,7 @@ use crate::agent_loop::AgentEvent;
 /// Tracks cumulative token usage and cost during an agent run,
 /// emitting warnings when configurable spend thresholds are crossed.
 #[derive(Debug, Default)]
-pub(crate) struct BudgetTelemetry {
+pub struct BudgetTelemetry {
     pub input_tokens: usize,
     pub output_tokens: usize,
     pub total_cost_usd: f64,

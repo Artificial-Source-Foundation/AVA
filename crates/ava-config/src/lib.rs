@@ -23,8 +23,7 @@ pub mod thinking;
 pub mod trust;
 
 pub use agents::{
-    default_agents, AgentOverride, AgentsConfig, ResolvedAgent, LEGACY_AGENTS_CONFIG_FILE,
-    SUBAGENTS_CONFIG_FILE,
+    default_agents, AgentOverride, AgentsConfig, ResolvedAgent, SUBAGENTS_CONFIG_FILE,
 };
 pub use ava_auth;
 
@@ -181,44 +180,18 @@ pub fn project_subagents_config_path(project_root: &Path) -> PathBuf {
     project_root.join(".ava").join(SUBAGENTS_CONFIG_FILE)
 }
 
-/// Legacy compatibility path. New writes should target [`global_subagents_config_path`].
-pub fn global_agents_config_path() -> Result<PathBuf> {
-    Ok(prefer_existing(
-        global_agents_config_path_from(&config_dir()?),
-        LEGACY_AGENTS_CONFIG_FILE,
-    ))
-}
-
-/// Legacy compatibility global agents path for an explicit config root.
-pub fn global_agents_config_path_from(config_root: &Path) -> PathBuf {
-    config_root.join(LEGACY_AGENTS_CONFIG_FILE)
-}
-
-/// Legacy project-local compatibility input path. New writes should target
-/// [`project_subagents_config_path`].
-pub fn project_legacy_agents_config_path(project_root: &Path) -> PathBuf {
-    project_root.join(".ava").join(LEGACY_AGENTS_CONFIG_FILE)
-}
-
-/// Canonical compatibility load paths for layered subagent configuration.
+/// Canonical layered load paths for delegated subagent configuration.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SubagentConfigCompatPaths {
+pub struct SubagentConfigPaths {
     pub global_subagents: PathBuf,
-    pub global_legacy_agents: PathBuf,
     pub project_subagents: PathBuf,
-    pub project_legacy_agents: PathBuf,
 }
 
 /// Build canonical layered load paths for subagent config resolution.
-pub fn subagent_config_compat_paths(
-    config_root: &Path,
-    project_root: &Path,
-) -> SubagentConfigCompatPaths {
-    SubagentConfigCompatPaths {
+pub fn subagent_config_paths(config_root: &Path, project_root: &Path) -> SubagentConfigPaths {
+    SubagentConfigPaths {
         global_subagents: global_subagents_config_path_from(config_root),
-        global_legacy_agents: global_agents_config_path_from(config_root),
         project_subagents: project_subagents_config_path(project_root),
-        project_legacy_agents: project_legacy_agents_config_path(project_root),
     }
 }
 
@@ -1203,13 +1176,6 @@ primary_agents:
     }
 
     #[test]
-    fn test_project_legacy_agents_config_path_kept_for_read_compat() {
-        let root = std::path::Path::new("/tmp/example-project");
-        let path = project_legacy_agents_config_path(root);
-        assert_eq!(path, root.join(".ava").join("agents.toml"));
-    }
-
-    #[test]
     fn test_global_subagents_config_path_from_uses_config_root() {
         let config_root = std::path::Path::new("/tmp/example-config");
         assert_eq!(
@@ -1219,20 +1185,15 @@ primary_agents:
     }
 
     #[test]
-    fn test_subagent_config_compat_paths_are_canonical() {
+    fn test_subagent_config_paths_are_canonical() {
         let config_root = std::path::Path::new("/tmp/example-config");
         let project_root = std::path::Path::new("/tmp/example-project");
-        let paths = subagent_config_compat_paths(config_root, project_root);
+        let paths = subagent_config_paths(config_root, project_root);
 
         assert_eq!(paths.global_subagents, config_root.join("subagents.toml"));
-        assert_eq!(paths.global_legacy_agents, config_root.join("agents.toml"));
         assert_eq!(
             paths.project_subagents,
             project_root.join(".ava").join("subagents.toml")
-        );
-        assert_eq!(
-            paths.project_legacy_agents,
-            project_root.join(".ava").join("agents.toml")
         );
     }
 

@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use ava_agent::stack::{AgentStack, AgentStackConfig};
+use ava_agent_orchestration::stack::{AgentStack, AgentStackConfig};
 use ava_platform::StandardPlatform;
 use ava_review::DiffMode;
 use ava_review::{

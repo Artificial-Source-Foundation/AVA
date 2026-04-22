@@ -37,7 +37,10 @@ pub use tool_execution::READ_ONLY_TOOLS;
 
 /// Tools allowed in Plan mode. The LLM only sees these — write/edit are hidden.
 /// Bash is included but restricted at execution time to read-only commands.
-pub(crate) const PLAN_MODE_ALLOWED_TOOLS: &[&str] = &[
+///
+/// This is intentionally public because the extracted `ava-agent-orchestration`
+/// seam reuses the same canonical plan-mode tool-visibility policy.
+pub const PLAN_MODE_ALLOWED_TOOLS: &[&str] = &[
     "read",
     "glob",
     "grep",

@@ -24,11 +24,11 @@ Priority order is by risk (P0 highest).
 
 | Priority | Area | Finding | Why high | Evidence |
 |---|---|---|---|---|
-| P0 | Commands + completion | **`resolve_plan` adapter mapping is missing in the desktop/web frontend command API client** | Browser plan-completion flows can fail even when backend route exists; this blocks interactive planning UX. | `src/lib/api-client.ts` (no `resolve_plan` mapping) vs web route `POST /api/agent/resolve-plan` in `crates/ava-tui/src/web/mod.rs` |
-| P0 | Event projection and delivery | **Sub-agent and stream-edit events are not consistently projected across surfaces** (`SubAgentComplete`, `StreamingEditProgress` drop or partial coverage). | Delegation visibility and tool-edit streaming cannot be trusted as equivalent across surfaces. | `src-tauri/src/events.rs::from_backend_event` drops events vs `crates/ava-tui/src/web/api.rs` mapping includes them |
-| P1 | Approvals / questions / plans | **No timeout policy parity for web interactive requests** | Desktop auto-resolves stale approval/question paths after 5 minutes; web currently leaves equivalent requests pending indefinitely. | `src-tauri/src/commands/agent_commands.rs` vs `crates/ava-tui/src/web/api_agent.rs` |
-| P1 | Queue / cancel semantics | **`clear_message_queue` follow-up/post-complete is a no-op despite user-facing clear endpoint** | Users can expect queued items cleared but currently receive success without an effective cancel/clear for these targets. | `src-tauri/src/commands/agent_commands.rs` + `crates/ava-tui/src/web/api_agent.rs` |
-| P2 | Event projection schema parity | **Payload and field-shape divergence for comparable approval/question/plan events** | Shared frontend handling code becomes surface-specific and fragile. | `src-tauri/src/events.rs` vs `crates/ava-tui/src/web/api.rs` |
+| P0 | Commands + completion | **`resolve_plan` adapter mapping is missing in the desktop/web frontend command API client** | Browser plan-completion flows can fail even when backend route exists; this blocks interactive planning UX. | `src/lib/api-client.ts` (no `resolve_plan` mapping) vs web route `POST /api/agent/resolve-plan` in `crates/ava-web/src/lib.rs` |
+| P0 | Event projection and delivery | **Sub-agent and stream-edit events are not consistently projected across surfaces** (`SubAgentComplete`, `StreamingEditProgress` drop or partial coverage). | Delegation visibility and tool-edit streaming cannot be trusted as equivalent across surfaces. | `src-tauri/src/events.rs::from_backend_event` drops events vs `crates/ava-web/src/api.rs` mapping includes them |
+| P1 | Approvals / questions / plans | **No timeout policy parity for web interactive requests** | Desktop auto-resolves stale approval/question paths after 5 minutes; web currently leaves equivalent requests pending indefinitely. | `src-tauri/src/commands/agent_commands.rs` vs `crates/ava-web/src/api_agent.rs` |
+| P1 | Queue / cancel semantics | **`clear_message_queue` follow-up/post-complete is a no-op despite user-facing clear endpoint** | Users can expect queued items cleared but currently receive success without an effective cancel/clear for these targets. | `src-tauri/src/commands/agent_commands.rs` + `crates/ava-web/src/api_agent.rs` |
+| P2 | Event projection schema parity | **Payload and field-shape divergence for comparable approval/question/plan events** | Shared frontend handling code becomes surface-specific and fragile. | `src-tauri/src/events.rs` vs `crates/ava-web/src/api.rs` |
 
 ## 1) Commands
 
@@ -42,10 +42,10 @@ Priority order is by risk (P0 highest).
 
 ### Current drift / bug
 - **P0** `resolve_plan` endpoint does not have a frontend adapter mapping, while desktop/web backends expect it.
-  - `src/lib/api-client.ts` misses `resolve_plan` route mapping, though `crates/ava-tui/src/web/api_interactive.rs` and `crates/ava-tui/src/web/mod.rs` define the backend path.
+  - `src/lib/api-client.ts` misses `resolve_plan` route mapping, though `crates/ava-web/src/api_interactive.rs` and `crates/ava-web/src/lib.rs` define the backend path.
 - **P1** `submit_goal` completion semantics differ:
   - Web returns immediately after scheduling (`accepted`) and relies on stream/WS for completion, while desktop command currently waits for completion before returning in its invoke handler.
-  - Evidence: `src-tauri/src/commands/agent_commands.rs` vs `crates/ava-tui/src/web/api_agent.rs`.
+  - Evidence: `src-tauri/src/commands/agent_commands.rs` vs `crates/ava-web/src/api_agent.rs`.
 - Lower risk: command DTO naming/casing normalization is implemented in both adapters but duplicated (`session_id` vs `sessionId`, args shape variants).
 
 ## 2) Approvals / questions / plans

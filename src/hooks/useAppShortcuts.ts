@@ -37,7 +37,7 @@ export function registerAppShortcuts(
   const { messages, undoFileChange, redoFileChange, createNewSession } = useSession()
   const { registerAction, setupShortcutListener } = useShortcuts()
   const { settings, updateSettings } = useSettings()
-  const { info } = useNotification()
+  const { error: notifyError, info } = useNotification()
   const agent = useAgent()
 
   registerAction('toggle-sidebar', toggleSidebar)
@@ -120,10 +120,40 @@ export function registerAppShortcuts(
     window.dispatchEvent(new CustomEvent('ava:voice-toggle'))
   })
   registerAction('mode-cycle', () => {
+    if (agent.hasPrimaryAgentProfiles()) {
+      void agent
+        .cyclePrimaryAgentProfile(1)
+        .then((primaryAgentId) => {
+          if (primaryAgentId) {
+            info('Primary Agent', primaryAgentId)
+          }
+        })
+        .catch((error) => {
+          const message = error instanceof Error ? error.message : String(error)
+          notifyError('Primary Agent', message)
+        })
+      return
+    }
+
     agent.togglePlanMode()
     info('Mode', agent.isPlanMode() ? 'Plan mode' : 'Act mode')
   })
   registerAction('mode-cycle-reverse', () => {
+    if (agent.hasPrimaryAgentProfiles()) {
+      void agent
+        .cyclePrimaryAgentProfile(-1)
+        .then((primaryAgentId) => {
+          if (primaryAgentId) {
+            info('Primary Agent', primaryAgentId)
+          }
+        })
+        .catch((error) => {
+          const message = error instanceof Error ? error.message : String(error)
+          notifyError('Primary Agent', message)
+        })
+      return
+    }
+
     agent.togglePlanMode()
     info('Mode', agent.isPlanMode() ? 'Plan mode' : 'Act mode')
   })

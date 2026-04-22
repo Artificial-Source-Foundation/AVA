@@ -31,7 +31,7 @@ Relevant files:
 2. `crates/ava-plugin/src/manager.rs`
 3. `docs/extend/plugins.md`
 4. `src-tauri/src/lib.rs`
-5. `crates/ava-tui/src/web/mod.rs`
+5. `crates/ava-web/src/lib.rs`
 
 Checklist:
 
@@ -188,7 +188,7 @@ Core problem:
 Relevant files:
 
 1. `crates/ava-tui/src/config/cli.rs`
-2. `crates/ava-tui/src/web/mod.rs`
+2. `crates/ava-web/src/lib.rs`
 3. `src-tauri/src/commands/mod.rs`
 4. `src-tauri/src/lib.rs`
 5. `src-tauri/src/commands/plugin_host.rs`

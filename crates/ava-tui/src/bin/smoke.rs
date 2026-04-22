@@ -1,5 +1,5 @@
-use ava_agent::stack::{AgentStack, AgentStackConfig};
 use ava_agent::AgentEvent;
+use ava_agent_orchestration::stack::{AgentStack, AgentStackConfig};
 use ava_llm::providers::mock::MockProvider;
 use ava_permissions::tags::RiskLevel;
 use ava_tools::permission_middleware::ToolApproval;

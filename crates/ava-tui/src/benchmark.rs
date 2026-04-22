@@ -22,9 +22,9 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use ava_agent::stack::{AgentStack, AgentStackConfig};
 use ava_agent::system_prompt::{resolved_prompt_family, BenchmarkPromptOverride};
 use ava_agent::AgentEvent;
+use ava_agent_orchestration::stack::{AgentStack, AgentStackConfig};
 use color_eyre::eyre::{eyre, Result};
 use regex::Regex;
 use serde::{Deserialize, Serialize};

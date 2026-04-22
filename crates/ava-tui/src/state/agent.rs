@@ -202,7 +202,7 @@ impl AgentState {
         model: Option<String>,
         max_turns: usize,
         max_budget_usd: f64,
-        yolo: bool,
+        auto_approve: bool,
         include_project_instructions: bool,
         eager_codebase_indexing: bool,
     ) -> Result<(
@@ -220,7 +220,7 @@ impl AgentState {
             model,
             max_turns,
             max_budget_usd,
-            yolo,
+            auto_approve,
             include_project_instructions,
             eager_codebase_indexing,
         );

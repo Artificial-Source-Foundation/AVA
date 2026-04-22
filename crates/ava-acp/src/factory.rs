@@ -20,19 +20,22 @@ use crate::provider::AcpAgentProvider;
 /// No eager discovery — agents are spawned only when requested.
 pub struct AcpProviderFactory {
     configs: HashMap<String, AgentConfig>,
-    yolo: bool,
+    auto_approve: bool,
 }
 
 impl AcpProviderFactory {
     /// Create a factory with the given agent configs.
-    pub fn new(configs: Vec<AgentConfig>, yolo: bool) -> Self {
+    pub fn new(configs: Vec<AgentConfig>, auto_approve: bool) -> Self {
         let map = configs.into_iter().map(|c| (c.name.clone(), c)).collect();
-        Self { configs: map, yolo }
+        Self {
+            configs: map,
+            auto_approve,
+        }
     }
 
     /// Create a factory with the built-in agent configs.
-    pub fn with_builtins(yolo: bool) -> Self {
-        Self::new(crate::adapters::config::builtin_agents(), yolo)
+    pub fn with_builtins(auto_approve: bool) -> Self {
+        Self::new(crate::adapters::config::builtin_agents(), auto_approve)
     }
 
     /// List available agent names.
@@ -110,7 +113,7 @@ impl ProviderFactory for AcpProviderFactory {
             transport,
             config.name.clone(),
             upstream_model,
-            self.yolo,
+            self.auto_approve,
         )))
     }
 }

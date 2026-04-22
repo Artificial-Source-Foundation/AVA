@@ -187,7 +187,7 @@ pub struct WebStateInner {
 impl WebState {
     /// Initialise the web state with a fresh `AgentStack`.
     pub async fn init(data_dir: PathBuf) -> Result<Self> {
-        let db_path = ava_config::app_db_path().unwrap_or_else(|_| data_dir.join("data.db"));
+        let db_path = data_dir.join("ava.db");
         let db = ava_db::Database::create_at(db_path).await?;
         db.run_migrations().await?;
         let config = AgentStackConfig::for_web(data_dir);

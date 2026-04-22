@@ -526,7 +526,7 @@ export const settingsSearchIndex: SettingsSearchEntry[] = [
   // Permissions & Trust
   {
     label: 'Permission mode',
-    description: 'Ask, auto, strict, balanced, YOLO',
+    description: 'Ask or auto-approve',
     tab: 'permissions-trust',
     tabLabel: 'Permissions & Trust',
   },

@@ -66,39 +66,37 @@ impl App {
 
     pub(crate) fn show_shortcuts_overlay(&mut self) {
         let shortcuts = "\
-Navigation
+Essential
   Tab / Shift+Tab          Cycle mode (Code/Plan)
   Ctrl+K / Ctrl+/          Command palette
   Ctrl+M                   Switch model
   Ctrl+L                   Session picker
   Ctrl+N                   New session
-  Ctrl+B                   Background current agent
   Ctrl+S                   Toggle sidebar
 
 Input
   Enter                    Submit message (or steer running agent)
   Shift+Enter              New line
-  Alt+Enter                Submit follow-up (while agent running)
-  Ctrl+Alt+Enter           Submit post-complete (while agent running)
   Ctrl+V                   Paste image from clipboard
   Ctrl+Y                   Copy last response to clipboard
   Ctrl+C                   Cancel / clear input / quit
-  Ctrl+Z                   End /btw branch (restore conversation)
   Esc                      Cancel / close modal
-  Esc Esc                  Open rewind (undo) picker
-
-Thinking
-  Ctrl+T                   Cycle thinking level
-  Ctrl+E                   Expand/collapse thinking blocks
-
-Voice
-  Ctrl+R                   Voice input (requires --features voice)
 
 Commands
-  /help                    Show all commands
-  /shortcuts               Show this overlay
+  /help                    Show command help
   /model                   Switch model
   /new                     New session
+  /shortcuts               Show this overlay (Ctrl+Shift+?)
+
+Advanced
+  Ctrl+T                   Cycle thinking level
+  Ctrl+E                   Expand/collapse thinking blocks
+  Ctrl+B                   Background current agent
+  Ctrl+Z                   End /btw branch (restore conversation)
+  Alt+Enter                Submit follow-up (while agent running)
+  Ctrl+Alt+Enter           Submit post-complete (while agent running)
+  Esc Esc                  Open rewind (undo) picker
+  Ctrl+R                   Voice input (requires --features voice)
   /btw                     Start side conversation
   /compact                 Compress context
   /commit                  Git commit helper

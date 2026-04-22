@@ -3,6 +3,10 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use tracing::debug;
 
+pub fn advanced_help_text() -> &'static str {
+    "AVA Advanced Help\n\nCommon usage:\n  ava --help\n\nAdvanced runtime flags:\n  --auto-approve           Auto-approve all tools (except Critical)\n  --thinking <level>       Force reasoning effort level\n  --watch                  Watch files for ava: directives\n  --watch-path <path>      Additional watch paths\n  --acp-server             Run as ACP server on stdio\n  --voice                  Enable continuous voice input\n  --follow-up <message>    Queue follow-up messages after the main task\n  --later <message>        Queue post-complete messages\n  --later-group <n> <msg>  Queue post-complete messages by explicit group\n\nAdvanced benchmark flags:\n  --benchmark\n  --models <specs>\n  --judges <specs>\n  --suite <name>\n  --language <langs>\n  --task-filter <filter>\n  --import-polyglot <path>\n  --prompt-family <name>\n  --prompt-variant <name>\n  --prompt-file <path>\n  --prompt-version <value>\n  --prompt-hash <value>\n  --repeat <n>\n  --seed <u64>\n  --benchmark-output <path>\n  --benchmark-compare-left-report <path>\n  --benchmark-compare-right-report <path>\n  --benchmark-compare-output <path>\n\nThese flags are still supported, but they are not part of the normal AVA workflow."
+}
+
 #[derive(Debug, Clone, Parser)]
 #[command(name = "ava", about = "AVA - AI coding assistant")]
 pub struct CliArgs {
@@ -43,7 +47,7 @@ pub struct CliArgs {
     pub max_budget_usd: f64,
 
     /// Auto-approve all tools (except Critical)
-    #[arg(long, alias = "yolo")]
+    #[arg(long, hide = true)]
     pub auto_approve: bool,
 
     /// Theme name
@@ -58,6 +62,10 @@ pub struct CliArgs {
     #[arg(long)]
     pub headless: bool,
 
+    /// Show advanced CLI help for specialized runtime and benchmark flags
+    #[arg(long = "help-advanced")]
+    pub help_advanced: bool,
+
     /// Reduce startup overhead by skipping project instructions and eager codebase indexing
     #[arg(long)]
     pub fast: bool,
@@ -67,11 +75,11 @@ pub struct CliArgs {
     pub json: bool,
 
     /// Watch files and trigger on `ava:` comment directives
-    #[arg(long)]
+    #[arg(long, hide = true)]
     pub watch: bool,
 
     /// Additional paths to watch (repeatable, defaults to current directory)
-    #[arg(long = "watch-path")]
+    #[arg(long = "watch-path", hide = true)]
     pub watch_path: Vec<String>,
 
     /// Trust the current project (allows loading all project-local config: .ava/mcp.json, .ava/hooks/, .ava/tools/, .ava/commands/, .ava/subagents.toml, .ava/skills/, AGENTS.md, .ava/rules/)
@@ -79,7 +87,7 @@ pub struct CliArgs {
     pub trust: bool,
 
     /// Thinking/reasoning effort level: off, low, medium, high, xhigh
-    #[arg(long, default_value = "off")]
+    #[arg(long, default_value = "off", hide = true)]
     pub thinking: String,
 
     /// Disable automatic update checks on startup
@@ -87,7 +95,7 @@ pub struct CliArgs {
     pub no_update_check: bool,
 
     /// Run as ACP (Agent Client Protocol) server on stdio for IDE integration
-    #[arg(long)]
+    #[arg(long, hide = true)]
     pub acp_server: bool,
 
     /// Attach image files to the prompt (repeatable). Supported: png, jpg, jpeg, gif, webp
@@ -100,71 +108,72 @@ pub struct CliArgs {
     pub review: bool,
 
     /// Enable continuous voice input (requires --features voice)
-    #[arg(long)]
+    #[arg(long, hide = true)]
     pub voice: bool,
 
     /// Run model benchmarks instead of normal operation
-    #[arg(long)]
+    #[arg(long, hide = true)]
     pub benchmark: bool,
 
     /// Models to benchmark in "provider:model,provider:model" format
-    #[arg(long)]
+    #[arg(long, hide = true)]
     pub models: Option<String>,
 
     /// LLM judge models for benchmark evaluation in "provider:model,provider:model" format
-    #[arg(long)]
+    #[arg(long, hide = true)]
     pub judges: Option<String>,
 
     /// Benchmark suite filter: speed, standard, frontier, prompt_regression, all (default: all)
-    #[arg(long, default_value = "all")]
+    #[arg(long, default_value = "all", hide = true)]
     pub suite: String,
 
     /// Benchmark language filter: rust, python, js, go (comma-separated, default: all)
-    #[arg(long)]
+    #[arg(long, hide = true)]
     pub language: Option<String>,
 
     /// Benchmark task filter: comma-separated task names or substrings
-    #[arg(long)]
+    #[arg(long, hide = true)]
     pub task_filter: Option<String>,
 
     /// Import Aider Polyglot benchmark tasks from a local repo path
-    #[arg(long)]
+    #[arg(long, hide = true)]
     pub import_polyglot: Option<String>,
 
     /// Force a prompt family for benchmark prompt assembly (e.g. gpt, claude, gemini, generic)
-    #[arg(long)]
+    #[arg(long, hide = true)]
     pub prompt_family: Option<String>,
 
-    #[arg(long)]
+    #[arg(long, hide = true)]
     pub prompt_variant: Option<String>,
 
     /// Load benchmark prompt note overrides from a local file
-    #[arg(long)]
+    #[arg(long, hide = true)]
     pub prompt_file: Option<String>,
 
-    #[arg(long)]
+    #[arg(long, hide = true)]
     pub prompt_version: Option<String>,
 
-    #[arg(long)]
+    #[arg(long, hide = true)]
     pub prompt_hash: Option<String>,
 
     /// Repeat benchmark runs N times and emit an aggregate summary
-    #[arg(long, default_value_t = 1)]
+    #[arg(long, default_value_t = 1, hide = true)]
     pub repeat: usize,
 
     /// Optional benchmark seed recorded in report metadata
-    #[arg(long)]
+    #[arg(long, hide = true)]
     pub seed: Option<u64>,
 
     /// Optional output path for benchmark JSON artifact
-    #[arg(long)]
+    #[arg(long, hide = true)]
     pub benchmark_output: Option<String>,
 
     /// Compare two benchmark JSON reports (left side path)
     #[arg(
         long = "benchmark-compare-left-report",
         alias = "benchmark-compare-ava-report",
-        alias = "benchmark-compare-prompt-a-report"
+        alias = "benchmark-compare-prompt-a-report",
+        hide = true
     )]
     pub benchmark_compare_left_report: Option<String>,
 
@@ -172,24 +181,25 @@ pub struct CliArgs {
     #[arg(
         long = "benchmark-compare-right-report",
         alias = "benchmark-compare-opencode-report",
-        alias = "benchmark-compare-prompt-b-report"
+        alias = "benchmark-compare-prompt-b-report",
+        hide = true
     )]
     pub benchmark_compare_right_report: Option<String>,
 
     /// Optional output path for comparison JSON artifact
-    #[arg(long)]
+    #[arg(long, hide = true)]
     pub benchmark_compare_output: Option<String>,
 
     /// Follow-up messages to run after the main task completes (Tier 2, repeatable)
-    #[arg(long = "follow-up")]
+    #[arg(long = "follow-up", hide = true)]
     pub follow_up: Vec<String>,
 
     /// Post-complete messages to run after everything (Tier 3, auto-assigns groups)
-    #[arg(long)]
+    #[arg(long, hide = true)]
     pub later: Vec<String>,
 
     /// Post-complete messages with explicit group numbers: --later-group 1 "review code"
-    #[arg(long = "later-group", num_args = 2, value_names = ["GROUP", "MESSAGE"])]
+    #[arg(long = "later-group", num_args = 2, value_names = ["GROUP", "MESSAGE"], hide = true)]
     pub later_group: Vec<String>,
 
     #[command(subcommand)]
@@ -296,6 +306,7 @@ mod tests {
             theme: "default".to_string(),
             verbose: 0,
             headless: true,
+            help_advanced: false,
             fast: false,
             json: false,
             watch: false,

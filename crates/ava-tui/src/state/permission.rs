@@ -49,7 +49,7 @@ impl PermissionLevel {
         }
     }
 
-    /// Whether this level acts like the old "yolo" mode (auto-approve non-critical).
+    /// Whether this level auto-approves tool requests except Critical ones.
     pub fn is_auto_approve(&self) -> bool {
         matches!(self, Self::AutoApprove)
     }

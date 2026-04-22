@@ -169,7 +169,7 @@ vi.mock('../stores/settings', () => ({
       behavior: { sessionAutoTitle: false },
       agentLimits: { agentMaxTurns: 20, agentMaxTimeMinutes: 10, autoFixLint: false },
       notifications: {},
-      permissionMode: 'normal',
+      permissionMode: 'ask',
     }),
     isToolAutoApproved: () => false,
   }),

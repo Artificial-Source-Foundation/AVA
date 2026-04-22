@@ -1129,6 +1129,7 @@ fn subagent_live_updates_stream_into_child_transcript_before_completion() {
             run_id: 7,
             event: ava_agent::AgentEvent::SubAgentUpdate {
                 call_id: "call_live_subagent".to_string(),
+                description: "[scout] Inspect files.".to_string(),
                 event: ava_agent::agent_loop::SubAgentLiveEvent::Started {
                     session_id: "child-live-session".to_string(),
                 },
@@ -1143,6 +1144,7 @@ fn subagent_live_updates_stream_into_child_transcript_before_completion() {
             run_id: 7,
             event: ava_agent::AgentEvent::SubAgentUpdate {
                 call_id: "call_live_subagent".to_string(),
+                description: "[scout] Inspect files.".to_string(),
                 event: ava_agent::agent_loop::SubAgentLiveEvent::Thinking(
                     "Scanning manifests".to_string(),
                 ),
@@ -1157,6 +1159,7 @@ fn subagent_live_updates_stream_into_child_transcript_before_completion() {
             run_id: 7,
             event: ava_agent::AgentEvent::SubAgentUpdate {
                 call_id: "call_live_subagent".to_string(),
+                description: "[scout] Inspect files.".to_string(),
                 event: ava_agent::agent_loop::SubAgentLiveEvent::ToolCall(ava_types::ToolCall {
                     id: "tool-live-1".to_string(),
                     name: "glob".to_string(),
@@ -1180,6 +1183,74 @@ fn subagent_live_updates_stream_into_child_transcript_before_completion() {
         .iter()
         .any(|msg| matches!(msg.kind, MessageKind::ToolCall)
             && msg.tool_name.as_deref() == Some("glob")));
+}
+
+#[test]
+fn subagent_live_updates_with_empty_call_id_fall_back_to_description_matching() {
+    let temp = tempdir().expect("tempdir");
+    let db_path = temp.path().join("data.db");
+    let mut app = App::test_new(&db_path);
+    let (app_tx, _) = mpsc::unbounded_channel();
+    let (agent_tx, _) = mpsc::unbounded_channel();
+
+    app.state.agent.sub_agents.push(SubAgentInfo {
+        call_id: String::new(),
+        agent_type: Some("scout".to_string()),
+        description: "Inspect files.".to_string(),
+        background: false,
+        is_running: true,
+        tool_count: 0,
+        current_tool: None,
+        started_at: std::time::Instant::now(),
+        elapsed: None,
+        session_id: None,
+        session_messages: initial_subagent_session_messages("Inspect files.", false),
+        provider: None,
+        resumed: false,
+        cost_usd: None,
+        input_tokens: None,
+        output_tokens: None,
+    });
+
+    app.handle_event(
+        AppEvent::AgentRunEvent {
+            run_id: 0,
+            event: ava_agent::AgentEvent::SubAgentUpdate {
+                call_id: String::new(),
+                description: "[scout] Inspect files.".to_string(),
+                event: ava_agent::agent_loop::SubAgentLiveEvent::Thinking(
+                    "Scanning repo".to_string(),
+                ),
+            },
+        },
+        app_tx.clone(),
+        agent_tx.clone(),
+    );
+
+    app.handle_event(
+        AppEvent::AgentRunEvent {
+            run_id: 0,
+            event: ava_agent::AgentEvent::SubAgentComplete {
+                call_id: String::new(),
+                session_id: uuid::Uuid::new_v4().to_string(),
+                messages: vec![ava_types::Message::new(ava_types::Role::Assistant, "Done")],
+                description: "[scout] Inspect files.".to_string(),
+                input_tokens: 0,
+                output_tokens: 0,
+                cost_usd: 0.0,
+                agent_type: Some("scout".to_string()),
+                provider: None,
+                resumed: false,
+            },
+        },
+        app_tx,
+        agent_tx,
+    );
+
+    assert!(app.state.agent.sub_agents[0]
+        .session_messages
+        .iter()
+        .any(|msg| msg.content.contains("Done")));
 }
 
 #[test]

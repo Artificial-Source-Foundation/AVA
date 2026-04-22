@@ -63,7 +63,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc;
 use tracing::{debug, warn};
 
-pub(crate) use commands::format_skill_list;
+pub(crate) use commands::{format_skill_list, slash_help_text};
 use subagent::{
     initial_subagent_session_messages, subagent_descriptions_match, subagent_matches_completion,
 };

@@ -21,7 +21,7 @@ async fn main() -> Result<()> {
 
     let (stack, _question_rx, mut approval_rx, _plan_rx) = AgentStack::new(AgentStackConfig {
         data_dir: temp_dir.path().to_path_buf(),
-        yolo: true,
+        auto_approve: true,
         non_interactive_approvals: true,
         injected_provider: Some(Arc::new(MockProvider::new(
             "mock-model",
@@ -90,7 +90,7 @@ async fn main() -> Result<()> {
                 {
                     saw_dangerous_rejection = true;
                 }
-                eprintln!("[result: {}]", tr.content)
+                eprintln!("[result: {}]", tr.content);
             }
             AgentEvent::Progress(p) => eprintln!("[{p}]"),
             AgentEvent::Complete(_) => break,

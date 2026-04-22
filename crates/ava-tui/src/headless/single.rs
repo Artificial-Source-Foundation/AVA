@@ -1,6 +1,6 @@
 use super::input::{populate_queue_from_cli, spawn_stdin_reader};
 use super::{resolve_headless_startup_selection, spawn_auto_approve_requests};
-use crate::app::{format_skill_list, App, ModalType};
+use crate::app::{format_skill_list, slash_help_text, App, ModalType};
 use crate::config::cli::CliArgs;
 use crate::state::messages::MessageKind;
 use crate::state::session::SessionState;
@@ -99,46 +99,11 @@ fn dispatch_lightweight_slash(goal: &str) -> Option<HeadlessSlashOutcome> {
     let (cmd, arg) = trimmed.split_once(' ').unwrap_or((trimmed, ""));
     match cmd {
         "/help" => {
-            // Duplicated from App::handle_slash_command to avoid 2s startup.
-            let help = "\
-Help — Available Commands\n\
-\n\
-/model [provider/model]  — show or switch model (alias: /models)\n\
-/think [show|hide]       — toggle thinking block visibility\n\
-/theme [name]            — cycle or switch theme (default/dracula/nord)\n\
-/permissions [list]      — toggle level or list glob rules\n\
-/connect [provider]      — add provider credentials\n\
-/providers               — show provider status\n\
-/disconnect <provider>   — remove provider credentials\n\
-/mcp [list]              — show MCP servers (scope + status)\n\
-/mcp reload              — reload MCP config\n\
-/mcp enable <name>       — enable a disabled MCP server\n\
-/mcp disable <name>      — disable an MCP server (session-scoped)\n\
-/skills [list]           — list discovered runtime skills\n\
-/new [title]             — start a new session (optional title)\n\
-/sessions                — session picker\n\
-/bookmark [label]        — bookmark current point (list/clear/remove)\n\
-/plan [view]              — show plan status or open in browser\n\
-/review                  — run code review on working directory changes\n\
-/commit                  — inspect commit readiness and suggest a message\n\
-/export [filename]       — export conversation to file (.md or .json)\n\
-/copy [all]              — copy last response (picks code block if multiple)\n\
-/plugin                  — list installed plugins\n\
-/hooks [list|reload|dry-run <event>] — manage lifecycle hooks\n\
-/init                    — create example project templates\n\
-/btw [question]          — start a side conversation branch\n\
-/btw end                 — restore original conversation\n\
-/tasks                   — show background task list\n\
-/later <message>         — queue a post-complete message\n\
-/queue                   — show queued messages\n\
-/shortcuts               — show keyboard shortcuts (Ctrl+?)\n\
-/clear                   — clear chat\n\
-/compact [focus]         — compact conversation to save context window\n\
-/help                    — show this help";
-            Some(HeadlessSlashOutcome::Message(
-                MessageKind::System,
-                help.to_string(),
-            ))
+            let help = format!(
+                "Help — Available Commands\n\n{}",
+                slash_help_text(Some(arg))
+            );
+            Some(HeadlessSlashOutcome::Message(MessageKind::System, help))
         }
         "/skills" => match arg.trim() {
             "" | "list" => Some(HeadlessSlashOutcome::Message(
@@ -390,9 +355,14 @@ pub(super) async fn run_single_agent(cli: CliArgs, goal: &str) -> Result<()> {
                 } => {
                     serde_json::json!({"type": "sub_agent_complete", "session_id": session_id, "description": description, "message_count": messages.len()})
                 }
-                AgentEvent::SubAgentUpdate { call_id, event } => serde_json::json!({
+                AgentEvent::SubAgentUpdate {
+                    call_id,
+                    description,
+                    event,
+                } => serde_json::json!({
                     "type": "sub_agent_update",
                     "call_id": call_id,
+                    "description": description,
                     "event": event,
                 }),
                 AgentEvent::DiffPreview {

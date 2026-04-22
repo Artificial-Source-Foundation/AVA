@@ -52,7 +52,7 @@ async fn create_test_stack(temp_dir: &Path, api_key: &str) -> AgentStack {
         provider: Some("openrouter".to_string()),
         model: Some(MODEL.to_string()),
         max_turns: MAX_TURNS,
-        yolo: true,
+        auto_approve: true,
         ..Default::default()
     })
     .await

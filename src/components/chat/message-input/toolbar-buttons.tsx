@@ -7,7 +7,7 @@
  * - PermissionBadge — styled pill cycling through permission modes
  */
 
-import { Brain, Shield, ShieldAlert, ShieldOff } from 'lucide-solid'
+import { Brain, Shield, ShieldAlert } from 'lucide-solid'
 import type { Accessor, Component } from 'solid-js'
 import type { PermissionMode } from '../../../stores/settings'
 import type { ReasoningEffort } from '../../../stores/settings/settings-types'
@@ -20,7 +20,6 @@ import type { PermissionConfigEntry } from './types'
 export const PERMISSION_CONFIG: Record<PermissionMode, PermissionConfigEntry> = {
   ask: { icon: Shield, color: 'var(--text-muted)', label: 'Ask' },
   'auto-approve': { icon: ShieldAlert, color: 'var(--warning)', label: 'Auto' },
-  bypass: { icon: ShieldOff, color: 'var(--error)', label: 'Bypass' },
 }
 
 // ---------------------------------------------------------------------------

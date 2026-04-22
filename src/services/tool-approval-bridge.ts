@@ -56,11 +56,11 @@ export function resolveApproval(approved: boolean): void {
 
 // ─── Permission Mode ─────────────────────────────────────────────────────────
 
-let _permissionMode: 'ask' | 'auto-approve' | 'bypass' = 'ask'
+let _permissionMode: 'ask' | 'auto-approve' = 'ask'
 
 /** Set the current permission mode (called from settings sync).
  *  Also syncs to the Rust backend's permission context. */
-export function setPermissionMode(mode: 'ask' | 'auto-approve' | 'bypass'): void {
+export function setPermissionMode(mode: 'ask' | 'auto-approve'): void {
   _permissionMode = mode
 
   // Sync to Rust backend — map desktop modes to backend levels
@@ -94,9 +94,6 @@ export function createApprovalMiddleware(): ToolMiddleware {
     name: 'desktop-approval',
     priority: 5,
     async before(ctx: ToolMiddlewareContext): Promise<ToolMiddlewareResult | undefined> {
-      // Bypass mode skips ALL approval checks
-      if (_permissionMode === 'bypass') return undefined
-
       // Auto-approve mode: allow reads + writes + known tools, only prompt for bash
       if (_permissionMode === 'auto-approve') {
         if (ctx.toolName !== 'bash') return undefined

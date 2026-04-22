@@ -36,13 +36,7 @@ impl CommandPaletteState {
                 CommandExec::Action(Action::ModelSwitch),
             ),
             make_item(
-                "Toggle Permissions",
-                "",
-                "Agent",
-                CommandExec::Action(Action::PermissionToggle),
-            ),
-            make_item(
-                "Compact Context",
+                "Compact Conversation",
                 "",
                 "Agent",
                 CommandExec::Action(Action::ForceCompact),
@@ -80,25 +74,6 @@ impl CommandPaletteState {
                 "Provider",
                 CommandExec::Slash("/providers".to_string()),
             ),
-            // MCP
-            make_item(
-                "List MCP Servers",
-                "",
-                "MCP",
-                CommandExec::Slash("/mcp".to_string()),
-            ),
-            make_item(
-                "Reload MCP Config",
-                "",
-                "MCP",
-                CommandExec::Slash("/mcp reload".to_string()),
-            ),
-            make_item(
-                "List Skills",
-                "",
-                "Info",
-                CommandExec::Slash("/skills".to_string()),
-            ),
             // Info
             make_item("Help", "", "Info", CommandExec::Slash("/help".to_string())),
             // UI
@@ -109,7 +84,7 @@ impl CommandPaletteState {
                 CommandExec::Action(Action::ToggleSidebar),
             ),
             // App
-            make_item("Quit", "Ctrl+D", "App", CommandExec::Action(Action::Quit)),
+            make_item("Quit", "Ctrl+C", "App", CommandExec::Action(Action::Quit)),
         ];
 
         Self {

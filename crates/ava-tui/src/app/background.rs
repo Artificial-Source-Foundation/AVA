@@ -660,7 +660,11 @@ impl App {
                     }
                 }
             }
-            ava_agent::AgentEvent::SubAgentUpdate { call_id, event } => {
+            ava_agent::AgentEvent::SubAgentUpdate {
+                call_id,
+                description,
+                event,
+            } => {
                 if let Some(task) = bg.tasks.iter_mut().find(|t| t.id == task_id) {
                     let mut latest_summary = None;
                     let checkpoint_messages = match &event {
@@ -673,13 +677,20 @@ impl App {
                         _ => None,
                     };
 
-                    if let Some(subagent) = self
-                        .state
-                        .agent
-                        .sub_agents
-                        .iter_mut()
-                        .rev()
-                        .find(|subagent| subagent.call_id == call_id)
+                    if let Some(subagent) =
+                        self.state
+                            .agent
+                            .sub_agents
+                            .iter_mut()
+                            .rev()
+                            .find(|subagent| {
+                                subagent_matches_completion(
+                                    &subagent.call_id,
+                                    &subagent.description,
+                                    &call_id,
+                                    &description,
+                                )
+                            })
                     {
                         if let Some(messages) = checkpoint_messages.clone() {
                             subagent.session_messages = messages;
@@ -712,10 +723,14 @@ impl App {
 
                     if let Some(msg) = task.messages.iter_mut().rev().find(|msg| {
                         matches!(msg.kind, MessageKind::SubAgent)
-                            && msg
-                                .sub_agent
-                                .as_ref()
-                                .is_some_and(|data| data.call_id == call_id)
+                            && msg.sub_agent.as_ref().is_some_and(|data| {
+                                subagent_matches_completion(
+                                    &data.call_id,
+                                    &data.description,
+                                    &call_id,
+                                    &description,
+                                )
+                            })
                     }) {
                         if let Some(data) = msg.sub_agent.as_mut() {
                             if let Some(messages) = checkpoint_messages {

@@ -22,6 +22,7 @@ Common everyday commands:
 5. `/new [title]`
 6. `/sessions`
 7. `/help`
+8. `/help advanced`
 
 Full slash-command reference:
 
@@ -64,6 +65,7 @@ Primary slash commands exposed in the TUI and slash-aware headless paths:
 35. `/clear` - clear chat
 36. `/compact [focus]` - compact the conversation
 37. `/help` - show command help
+38. `/help advanced` - focus on the advanced slash commands only
 
 ## Headless Notes
 
@@ -101,10 +103,14 @@ Current serve defaults and hardening:
 3. `--fast` - skip project instructions and eager codebase indexing
 4. `--json` - emit JSON events for scripting
 5. `--review` - force a post-run code review pass; in headless mode this can also trigger an automatic follow-up fix pass when the review finds issues after a successful run
-6. `--acp-server` - run as an ACP server on stdio
-7. `--provider` and `--model` - override routing for a run
-8. `--agent <id>` - choose a startup primary-agent profile from `primary_agents.<id>` in `config.yaml`
-9. `--continue` / `--session <id>` - resume the previous or specific session; restored session primary-agent metadata applies unless `--agent` is explicitly provided
+6. `--provider` and `--model` - override routing for a run
+7. `--agent <id>` - choose a startup primary-agent profile from `primary_agents.<id>` in `config.yaml`
+8. `--continue` / `--session <id>` - resume the previous or specific session; restored session primary-agent metadata applies unless `--agent` is explicitly provided
+
+Advanced CLI help:
+
+1. `ava --help` shows the normal product-facing CLI surface
+2. `ava --help-advanced` shows advanced runtime and benchmark flags such as `--auto-approve`, `--thinking`, `--watch`, `--voice`, `--acp-server`, `--follow-up`, `--later`, and benchmark-specific flags
 
 For startup/delegation profile setup and trust/compatibility details, see [How-to: Configure primary agents and subagents](../how-to/agents.md).
 

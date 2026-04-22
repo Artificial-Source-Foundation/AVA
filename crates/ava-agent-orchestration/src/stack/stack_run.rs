@@ -1140,11 +1140,15 @@ impl TaskSpawner for AgentTaskSpawner {
                         error = %e,
                         "background sub-agent failed"
                     );
-                    // Emit an error event so the TUI knows the background agent failed.
+                    // Emit a child-scoped error so UIs can mark the specific background agent as failed.
                     if let Some(ref tx) = event_tx {
-                        let _ = tx.send(AgentEvent::Error(format!(
-                            "Background sub-agent [{agent_type}] failed: {e}"
-                        )));
+                        let _ = tx.send(AgentEvent::SubAgentUpdate {
+                            call_id: originating_call_id.clone().unwrap_or_default(),
+                            description: format!("[{agent_type}] {prompt}"),
+                            event: SubAgentLiveEvent::Error(format!(
+                                "Background agent [{agent_type}] failed: {e}"
+                            )),
+                        });
                     }
                 }
             }
@@ -1322,11 +1326,13 @@ impl AgentTaskSpawner {
         let started_at = std::time::Instant::now();
         let parent_event_tx = self.event_tx.clone();
         let live_call_id = originating_call_id.unwrap_or_default().to_string();
+        let live_description = format!("[{agent_type}] {prompt}");
         let session_manager = self.session_manager.clone();
         let (subagent_event_tx, mut subagent_event_rx) = mpsc::unbounded_channel();
         if let Some(ref tx) = parent_event_tx {
             let _ = tx.send(AgentEvent::SubAgentUpdate {
                 call_id: live_call_id.clone(),
+                description: live_description.clone(),
                 event: SubAgentLiveEvent::Started {
                     session_id: child_session_id_str,
                 },
@@ -1347,6 +1353,7 @@ impl AgentTaskSpawner {
                 if let Some(live_event) = into_live_subagent_event(event) {
                     let _ = tx.send(AgentEvent::SubAgentUpdate {
                         call_id: live_call_id.clone(),
+                        description: live_description.clone(),
                         event: live_event,
                     });
                 }

@@ -420,10 +420,11 @@ export function removeAutoApprovedTool(toolName: string): void {
 }
 
 export function cyclePermissionMode(): void {
-  const modes: Array<'ask' | 'auto-approve' | 'bypass'> = ['ask', 'auto-approve', 'bypass']
+  const modes: Array<'ask' | 'auto-approve'> = ['ask', 'auto-approve']
   commitSettings((prev) => {
     const idx = modes.indexOf(prev.permissionMode)
-    const next = { ...prev, permissionMode: modes[(idx + 1) % modes.length] }
+    const nextMode = idx >= 0 ? modes[(idx + 1) % modes.length] : modes[0]
+    const next = { ...prev, permissionMode: nextMode }
     return next
   })
 }

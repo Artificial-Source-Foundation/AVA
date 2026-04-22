@@ -24,7 +24,7 @@ export interface MCPServerConfig {
   trust?: 'full' | 'sandbox' | 'none'
 }
 
-export type PermissionMode = 'ask' | 'auto-approve' | 'bypass'
+export type PermissionMode = 'ask' | 'auto-approve'
 
 export type ToolResponseStyle = 'concise' | 'detailed'
 

@@ -174,7 +174,7 @@ async fn agent_stack_new_initializes_components() {
     let (stack, _question_rx, _approval_rx, _plan_rx) = AgentStack::new(AgentStackConfig {
         data_dir: dir.path().to_path_buf(),
         config_dir: Some(dir.path().to_path_buf()),
-        yolo: true,
+        auto_approve: true,
         injected_provider: Some(Arc::new(MockProvider::new("test", vec![]))),
         ..Default::default()
     })
@@ -490,7 +490,7 @@ prompt = "Custom task prompt."
     let (stack, _question_rx, _approval_rx, _plan_rx) = AgentStack::new(AgentStackConfig {
         data_dir: dir.path().to_path_buf(),
         config_dir: Some(dir.path().to_path_buf()),
-        yolo: true,
+        auto_approve: true,
         injected_provider: Some(Arc::new(MockProvider::new("test", vec![]))),
         ..Default::default()
     })
@@ -511,7 +511,7 @@ async fn test_agents_config_defaults_without_file() {
     let (stack, _question_rx, _approval_rx, _plan_rx) = AgentStack::new(AgentStackConfig {
         data_dir: dir.path().to_path_buf(),
         config_dir: Some(dir.path().to_path_buf()),
-        yolo: true,
+        auto_approve: true,
         injected_provider: Some(Arc::new(MockProvider::new("test", vec![]))),
         ..Default::default()
     })
@@ -556,7 +556,7 @@ max_turns = 2
         data_dir: data_dir.path().to_path_buf(),
         config_dir: Some(data_dir.path().to_path_buf()),
         working_dir: Some(project.path().to_path_buf()),
-        yolo: true,
+        auto_approve: true,
         injected_provider: Some(Arc::new(MockProvider::new("test", vec![]))),
         ..Default::default()
     })
@@ -609,7 +609,7 @@ max_turns = 2
         data_dir: data_dir.path().to_path_buf(),
         config_dir: Some(data_dir.path().to_path_buf()),
         working_dir: Some(project.path().to_path_buf()),
-        yolo: true,
+        auto_approve: true,
         injected_provider: Some(Arc::new(MockProvider::new("test", vec![]))),
         ..Default::default()
     })
@@ -641,7 +641,7 @@ model = "openai/gpt-5.3-codex"
     let (stack, _question_rx, _approval_rx, _plan_rx) = AgentStack::new(AgentStackConfig {
         data_dir: dir.path().to_path_buf(),
         config_dir: Some(dir.path().to_path_buf()),
-        yolo: true,
+        auto_approve: true,
         injected_provider: Some(Arc::new(MockProvider::new("test", vec![]))),
         ..Default::default()
     })
@@ -668,7 +668,7 @@ enabled = false
     let (stack, _question_rx, _approval_rx, _plan_rx) = AgentStack::new(AgentStackConfig {
         data_dir: dir.path().to_path_buf(),
         config_dir: Some(dir.path().to_path_buf()),
-        yolo: true,
+        auto_approve: true,
         injected_provider: Some(Arc::new(MockProvider::new("test", vec![]))),
         ..Default::default()
     })
@@ -687,7 +687,7 @@ async fn test_backend_subagent_config_read_write_surface_reloads_runtime() {
     let (stack, _question_rx, _approval_rx, _plan_rx) = AgentStack::new(AgentStackConfig {
         data_dir: dir.path().to_path_buf(),
         config_dir: Some(dir.path().to_path_buf()),
-        yolo: true,
+        auto_approve: true,
         injected_provider: Some(Arc::new(MockProvider::new("test", vec![]))),
         ..Default::default()
     })
@@ -1373,7 +1373,7 @@ async fn agent_stack_initializes_with_plugin_manager() {
     let dir = tempfile::tempdir().expect("tempdir");
     let (stack, _question_rx, _approval_rx, _plan_rx) = AgentStack::new(AgentStackConfig {
         data_dir: dir.path().to_path_buf(),
-        yolo: true,
+        auto_approve: true,
         injected_provider: Some(Arc::new(MockProvider::new("test", vec![]))),
         ..Default::default()
     })
@@ -1406,7 +1406,7 @@ async fn agent_stack_skips_all_plugins_for_truthy_ava_pure_values() {
         let (stack, _question_rx, _approval_rx, _plan_rx) = AgentStack::new(AgentStackConfig {
             data_dir: data_dir.path().to_path_buf(),
             working_dir: Some(dir.path().to_path_buf()),
-            yolo: true,
+            auto_approve: true,
             injected_provider: Some(Arc::new(MockProvider::new("test", vec![]))),
             ..Default::default()
         })
@@ -1507,7 +1507,7 @@ async fn agent_stack_skips_project_local_plugins_when_project_is_untrusted() {
     let (stack, _question_rx, _approval_rx, _plan_rx) = AgentStack::new(AgentStackConfig {
         data_dir: data_dir.path().to_path_buf(),
         working_dir: Some(dir.path().to_path_buf()),
-        yolo: true,
+        auto_approve: true,
         injected_provider: Some(Arc::new(MockProvider::new("test", vec![]))),
         ..Default::default()
     })
@@ -1562,7 +1562,7 @@ async fn plugin_manager_shutdown() {
     let dir = tempfile::tempdir().expect("tempdir");
     let (stack, _question_rx, _approval_rx, _plan_rx) = AgentStack::new(AgentStackConfig {
         data_dir: dir.path().to_path_buf(),
-        yolo: true,
+        auto_approve: true,
         injected_provider: Some(Arc::new(MockProvider::new("test", vec![]))),
         ..Default::default()
     })

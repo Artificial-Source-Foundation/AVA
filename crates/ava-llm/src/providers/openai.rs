@@ -602,6 +602,78 @@ impl OpenAIProvider {
         )
         .await
     }
+
+    async fn generate_stream_internal(
+        &self,
+        messages: &[Message],
+        tools: &[ava_types::Tool],
+        thinking: ThinkingLevel,
+        use_tool_request: bool,
+    ) -> Result<Pin<Box<dyn Stream<Item = StreamChunk> + Send>>> {
+        let provider_label = self.provider_label();
+        let thinking_enabled = self.supports_reasoning() && thinking != ThinkingLevel::Off;
+        let mut body = if self.use_responses_api {
+            if thinking_enabled {
+                self.build_responses_request_body_with_thinking(messages, tools, true, thinking)
+            } else {
+                self.build_responses_request_body(messages, tools, true)
+            }
+        } else if thinking_enabled {
+            self.build_request_body_with_thinking(messages, tools, true, thinking)
+        } else if use_tool_request {
+            self.build_request_body_with_tools(messages, tools, true)
+        } else {
+            self.build_request_body(messages, true)
+        };
+
+        if use_tool_request && !self.use_responses_api {
+            // Request usage in the final streaming chunk (Chat Completions only).
+            body["stream_options"] = json!({"include_usage": true});
+        }
+
+        let client = self.client().await?;
+        let request = client.post(self.completions_url()).json(&body);
+        let request = self.auth_request(request);
+
+        let response = self.send_request(request).await?;
+        let response =
+            common::validate_status_for_model(response, &provider_label, Some(&self.model)).await?;
+        let use_responses = self.use_responses_api;
+        let mut sse_parser = common::SseParser::new();
+        let mut utf8 = common::Utf8Accumulator::new();
+        let mut reasoning_timer = ReasoningTimer::new();
+        let stream = response.bytes_stream().flat_map(move |chunk| {
+            let chunks = common::decode_stream_chunk(&mut utf8, chunk, provider_label.as_str())
+                .map(|text| {
+                    sse_parser
+                        .feed(&text)
+                        .into_iter()
+                        .filter_map(|line| {
+                            common::parse_json_stream_payload(&line, provider_label.as_str())
+                        })
+                        .filter_map(|payload| {
+                            if use_responses {
+                                common::parse_responses_api_stream_chunk(&payload)
+                            } else {
+                                common::parse_openai_stream_chunk(&payload)
+                            }
+                        })
+                        .flat_map(|c| {
+                            if use_responses {
+                                reasoning_timer.process(c)
+                            } else {
+                                vec![c]
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+
+            futures::stream::iter(chunks)
+        });
+
+        Ok(Box::pin(stream))
+    }
 }
 
 fn merge_json_values(target: &mut Value, source: &Value) {
@@ -650,54 +722,8 @@ impl LLMProvider for OpenAIProvider {
         &self,
         messages: &[Message],
     ) -> Result<Pin<Box<dyn Stream<Item = StreamChunk> + Send>>> {
-        let provider_label = self.provider_label();
-        let client = self.client().await?;
-        let body = if self.use_responses_api {
-            self.build_responses_request_body(messages, &[], true)
-        } else {
-            self.build_request_body(messages, true)
-        };
-        let request = client.post(self.completions_url()).json(&body);
-        let request = self.auth_request(request);
-
-        let response = self.send_request(request).await?;
-        let response =
-            common::validate_status_for_model(response, &provider_label, Some(&self.model)).await?;
-        let use_responses = self.use_responses_api;
-        let mut sse_parser = common::SseParser::new();
-        let mut utf8 = common::Utf8Accumulator::new();
-        let mut reasoning_timer = ReasoningTimer::new();
-        let stream = response.bytes_stream().flat_map(move |chunk| {
-            let chunks = common::decode_stream_chunk(&mut utf8, chunk, provider_label.as_str())
-                .map(|text| {
-                    sse_parser
-                        .feed(&text)
-                        .into_iter()
-                        .filter_map(|line| {
-                            common::parse_json_stream_payload(&line, provider_label.as_str())
-                        })
-                        .filter_map(|payload| {
-                            if use_responses {
-                                common::parse_responses_api_stream_chunk(&payload)
-                            } else {
-                                common::parse_openai_stream_chunk(&payload)
-                            }
-                        })
-                        .flat_map(|c| {
-                            if use_responses {
-                                reasoning_timer.process(c)
-                            } else {
-                                vec![c]
-                            }
-                        })
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or_default();
-
-            futures::stream::iter(chunks)
-        });
-
-        Ok(Box::pin(stream))
+        self.generate_stream_internal(messages, &[], ThinkingLevel::Off, false)
+            .await
     }
 
     fn estimate_tokens(&self, input: &str) -> usize {
@@ -813,58 +839,8 @@ impl LLMProvider for OpenAIProvider {
         messages: &[Message],
         tools: &[ava_types::Tool],
     ) -> Result<Pin<Box<dyn Stream<Item = StreamChunk> + Send>>> {
-        let provider_label = self.provider_label();
-        let mut body = if self.use_responses_api {
-            self.build_responses_request_body(messages, tools, true)
-        } else {
-            self.build_request_body_with_tools(messages, tools, true)
-        };
-        if !self.use_responses_api {
-            // Request usage in the final streaming chunk (Chat Completions only)
-            body["stream_options"] = json!({"include_usage": true});
-        }
-        let client = self.client().await?;
-        let request = client.post(self.completions_url()).json(&body);
-        let request = self.auth_request(request);
-
-        let response = self.send_request(request).await?;
-        let response =
-            common::validate_status_for_model(response, &provider_label, Some(&self.model)).await?;
-        let use_responses = self.use_responses_api;
-        let mut sse_parser = common::SseParser::new();
-        let mut utf8 = common::Utf8Accumulator::new();
-        let mut reasoning_timer = ReasoningTimer::new();
-        let stream = response.bytes_stream().flat_map(move |chunk| {
-            let chunks = common::decode_stream_chunk(&mut utf8, chunk, provider_label.as_str())
-                .map(|text| {
-                    sse_parser
-                        .feed(&text)
-                        .into_iter()
-                        .filter_map(|line| {
-                            common::parse_json_stream_payload(&line, provider_label.as_str())
-                        })
-                        .filter_map(|payload| {
-                            if use_responses {
-                                common::parse_responses_api_stream_chunk(&payload)
-                            } else {
-                                common::parse_openai_stream_chunk(&payload)
-                            }
-                        })
-                        .flat_map(|c| {
-                            if use_responses {
-                                reasoning_timer.process(c)
-                            } else {
-                                vec![c]
-                            }
-                        })
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or_default();
-
-            futures::stream::iter(chunks)
-        });
-
-        Ok(Box::pin(stream))
+        self.generate_stream_internal(messages, tools, ThinkingLevel::Off, true)
+            .await
     }
 
     #[instrument(skip(self, messages, tools), fields(model = %self.model, thinking = ?thinking))]
@@ -878,57 +854,8 @@ impl LLMProvider for OpenAIProvider {
             return self.generate_stream_with_tools(messages, tools).await;
         }
 
-        let provider_label = self.provider_label();
-        let mut body = if self.use_responses_api {
-            self.build_responses_request_body_with_thinking(messages, tools, true, thinking)
-        } else {
-            self.build_request_body_with_thinking(messages, tools, true, thinking)
-        };
-        if !self.use_responses_api {
-            body["stream_options"] = json!({"include_usage": true});
-        }
-        let client = self.client().await?;
-        let request = client.post(self.completions_url()).json(&body);
-        let request = self.auth_request(request);
-
-        let response = self.send_request(request).await?;
-        let response =
-            common::validate_status_for_model(response, &provider_label, Some(&self.model)).await?;
-        let use_responses = self.use_responses_api;
-        let mut sse_parser = common::SseParser::new();
-        let mut utf8 = common::Utf8Accumulator::new();
-        let mut reasoning_timer = ReasoningTimer::new();
-        let stream = response.bytes_stream().flat_map(move |chunk| {
-            let chunks = common::decode_stream_chunk(&mut utf8, chunk, provider_label.as_str())
-                .map(|text| {
-                    sse_parser
-                        .feed(&text)
-                        .into_iter()
-                        .filter_map(|line| {
-                            common::parse_json_stream_payload(&line, provider_label.as_str())
-                        })
-                        .filter_map(|payload| {
-                            if use_responses {
-                                common::parse_responses_api_stream_chunk(&payload)
-                            } else {
-                                common::parse_openai_stream_chunk(&payload)
-                            }
-                        })
-                        .flat_map(|c| {
-                            if use_responses {
-                                reasoning_timer.process(c)
-                            } else {
-                                vec![c]
-                            }
-                        })
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or_default();
-
-            futures::stream::iter(chunks)
-        });
-
-        Ok(Box::pin(stream))
+        self.generate_stream_internal(messages, tools, thinking, true)
+            .await
     }
 
     fn supports_thinking(&self) -> bool {

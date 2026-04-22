@@ -19,11 +19,10 @@ export const PermissionsAndTrustTab: Component = () => {
   const rules = () => settings().toolRules
   const permissionMode = () => settings().permissionMode
 
-  const modes: PermissionMode[] = ['ask', 'auto-approve', 'bypass']
+  const modes: PermissionMode[] = ['ask', 'auto-approve']
   const modeLabels: Record<PermissionMode, string> = {
     ask: 'Ask',
     'auto-approve': 'Auto',
-    bypass: 'YOLO',
   }
 
   return (

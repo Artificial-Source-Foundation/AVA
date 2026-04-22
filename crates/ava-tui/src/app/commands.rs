@@ -5,6 +5,51 @@ use ava_agent_orchestration::stack::MCPServerInfo;
 
 use super::*;
 
+pub(crate) fn slash_help_text(arg: Option<&str>) -> String {
+    let common = "Common commands\n\n\
+/model [provider/model]  — show or switch model (alias: /models)\n\
+/connect [provider]      — add provider credentials\n\
+/providers               — show provider status\n\
+/disconnect <provider>   — remove provider credentials\n\
+/new [title]             — start a new session (optional title)\n\
+/sessions                — session picker\n\
+/bookmark [label]        — bookmark current point (list/clear/remove)\n\
+/theme [name]            — cycle or switch theme (default/dracula/nord)\n\
+/think [show|on|hide|off] — toggle thinking block visibility\n\
+/permissions [list]      — toggle level or list glob rules\n\
+/shortcuts               — show keyboard shortcuts (Ctrl+?)\n\
+/clear                   — clear chat\n\
+/help                    — show this help\n\
+\n\
+Use /help advanced to focus on the power-user commands.";
+
+    let advanced = "Advanced commands\n\n\
+/mcp [list]              — show MCP servers (scope + status)\n\
+/mcp reload              — reload MCP config\n\
+/mcp enable <name>       — enable a disabled MCP server\n\
+/mcp disable <name>      — disable an MCP server (session-scoped)\n\
+/skills [list]           — list discovered runtime skills\n\
+/plan [view]             — show plan status or open in browser\n\
+/review                  — run code review on working directory changes\n\
+/commit                  — inspect commit readiness and suggest a message\n\
+/export [filename]       — export conversation to file (.md or .json)\n\
+/copy [all]              — copy last response (picks code block if multiple)\n\
+/plugin                  — list installed plugins\n\
+/hooks [list|reload|dry-run <event>] — manage lifecycle hooks\n\
+/init                    — create example project templates\n\
+/btw [question]          — start a side conversation branch\n\
+/btw end                 — restore original conversation\n\
+/tasks                   — show background task list\n\
+/later <message>         — queue a post-complete message\n\
+/queue                   — show queued messages\n\
+/compact [focus]         — compact conversation to save context window";
+
+    match arg.map(str::trim) {
+        Some("advanced") => advanced.to_string(),
+        _ => format!("{common}\n\n{advanced}"),
+    }
+}
+
 /// Format MCP server list for display.
 pub(crate) fn format_mcp_server_list(servers: &[MCPServerInfo]) -> String {
     if servers.is_empty() {
@@ -622,42 +667,10 @@ impl App {
                 None
             }
             "/help" => {
-                let help = "\
-/model [provider/model]  \u{2014} show or switch model (alias: /models)
-/think [show|hide]       \u{2014} toggle thinking block visibility
-/theme [name]            \u{2014} cycle or switch theme (default/dracula/nord)
-/permissions [list]      \u{2014} toggle level or list glob rules
-/connect [provider]      \u{2014} add provider credentials
-/providers               \u{2014} show provider status
-/disconnect <provider>   \u{2014} remove provider credentials
-/mcp [list]              \u{2014} show MCP servers (scope + status)
-/mcp reload              \u{2014} reload MCP config
-/mcp enable <name>       \u{2014} enable a disabled MCP server
-/mcp disable <name>      \u{2014} disable an MCP server (session-scoped)
-/skills [list]           \u{2014} list discovered runtime skills
-/new [title]             \u{2014} start a new session (optional title)
-/sessions                \u{2014} session picker
-/bookmark [label]        \u{2014} bookmark current point (list/clear/remove)
-/plan [view]              \u{2014} show plan status or open in browser
-/review                  \u{2014} run code review on working directory changes
-/commit                  \u{2014} inspect commit readiness and suggest a message
-/export [filename]       \u{2014} export conversation to file (.md or .json)
-/copy [all]              \u{2014} copy last response (picks code block if multiple)
-/plugin                  \u{2014} list installed plugins
-/hooks [list|reload|dry-run <event>] \u{2014} manage lifecycle hooks
-/init                    \u{2014} create example project templates
-/btw [question]          \u{2014} start a side conversation branch
-/btw end                 \u{2014} restore original conversation
-/tasks                   \u{2014} show background task list
-/later <message>         \u{2014} queue a post-complete message
-/queue                   \u{2014} show queued messages
-/shortcuts               \u{2014} show keyboard shortcuts (Ctrl+?)
-/clear                   \u{2014} clear chat
-/compact [focus]         \u{2014} compact conversation to save context window
-/help                    \u{2014} show this help";
+                let help = slash_help_text(arg);
                 self.state.info_panel = Some(super::InfoPanelState {
                     title: "Help \u{2014} Available Commands".to_string(),
-                    content: help.to_string(),
+                    content: help,
                     scroll: 0,
                 });
                 self.state.active_modal = Some(super::ModalType::InfoPanel);

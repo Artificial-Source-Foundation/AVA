@@ -61,7 +61,7 @@ async fn full_agent_run_with_tool_calls() {
 
     let (stack, _question_rx, _approval_rx, _plan_rx) = AgentStack::new(AgentStackConfig {
         data_dir: dir.path().to_path_buf(),
-        yolo: true,
+        auto_approve: true,
         injected_provider: Some(Arc::new(MockProvider::new("test-model", responses))),
         ..Default::default()
     })
@@ -110,7 +110,7 @@ async fn agent_run_with_bash_tool() {
 
     let (stack, _question_rx, _approval_rx, _plan_rx) = AgentStack::new(AgentStackConfig {
         data_dir: dir.path().to_path_buf(),
-        yolo: true,
+        auto_approve: true,
         injected_provider: Some(Arc::new(MockProvider::new("test-model", responses))),
         ..Default::default()
     })
@@ -151,7 +151,7 @@ async fn non_interactive_runtime_keeps_safe_bash_unattended() {
     let seen_risks = Arc::new(tokio::sync::Mutex::new(Vec::new()));
     let (stack, _question_rx, approval_rx, _plan_rx) = AgentStack::new(AgentStackConfig {
         data_dir: dir.path().to_path_buf(),
-        yolo: true,
+        auto_approve: true,
         non_interactive_approvals: true,
         injected_provider: Some(Arc::new(MockProvider::new("test-model", responses))),
         working_dir: Some(dir.path().to_path_buf()),
@@ -202,7 +202,7 @@ async fn non_interactive_runtime_keeps_safe_bash_unattended() {
 }
 
 #[tokio::test]
-async fn non_interactive_runtime_rejects_dangerous_bash_even_with_yolo() {
+async fn non_interactive_runtime_rejects_dangerous_bash_even_with_auto_approve() {
     let dir = tempfile::tempdir().expect("tempdir");
     let responses = vec![
         r#"{"tool_calls":[{"name":"bash","arguments":{"command":"rm -rf /tmp/ava-headless-dangerous-path"}}]}"#
@@ -213,7 +213,7 @@ async fn non_interactive_runtime_rejects_dangerous_bash_even_with_yolo() {
     let seen_risks = Arc::new(tokio::sync::Mutex::new(Vec::new()));
     let (stack, _question_rx, approval_rx, _plan_rx) = AgentStack::new(AgentStackConfig {
         data_dir: dir.path().to_path_buf(),
-        yolo: true,
+        auto_approve: true,
         non_interactive_approvals: true,
         injected_provider: Some(Arc::new(MockProvider::new("test-model", responses))),
         working_dir: Some(dir.path().to_path_buf()),

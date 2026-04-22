@@ -101,9 +101,15 @@ export function mergeWithDefaults(parsed: Partial<AppSettings>): AppSettings {
     gen.reasoningEffort = gen.thinkingEnabled ? 'medium' : 'off'
   }
 
+  const permissionMode =
+    cleanParsed.permissionMode === 'ask' || cleanParsed.permissionMode === 'auto-approve'
+      ? cleanParsed.permissionMode
+      : DEFAULT_SETTINGS.permissionMode
+
   return {
     ...DEFAULT_SETTINGS,
     ...cleanParsed,
+    permissionMode,
     enabledSkills,
     customSkills,
     customRules: cleanParsed.customRules ?? [],

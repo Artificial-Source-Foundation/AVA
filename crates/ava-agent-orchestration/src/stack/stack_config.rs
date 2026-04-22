@@ -15,10 +15,10 @@ pub struct AgentStackConfig {
     pub model: Option<String>,
     pub max_turns: usize,
     pub max_budget_usd: f64,
-    pub yolo: bool,
+    pub auto_approve: bool,
     /// When true, keep non-interactive runs risk-aware by routing dangerous
     /// approval-worthy actions through the approval bridge instead of using the
-    /// interactive yolo short-circuit. Safe work still proceeds automatically.
+    /// interactive auto-approve short-circuit. Safe work still proceeds automatically.
     pub non_interactive_approvals: bool,
     pub injected_provider: Option<Arc<dyn LLMProvider>>,
     /// Override the working directory for the agent. When set, the agent uses
@@ -48,7 +48,7 @@ impl AgentStackConfig {
         model: Option<String>,
         max_turns: usize,
         max_budget_usd: f64,
-        yolo: bool,
+        auto_approve: bool,
         include_project_instructions: bool,
         eager_codebase_indexing: bool,
     ) -> Self {
@@ -59,7 +59,7 @@ impl AgentStackConfig {
             model,
             max_turns,
             max_budget_usd,
-            yolo,
+            auto_approve,
             non_interactive_approvals: false,
             include_project_instructions,
             eager_codebase_indexing,
@@ -74,7 +74,7 @@ impl AgentStackConfig {
         model: Option<String>,
         max_turns: usize,
         max_budget_usd: f64,
-        yolo: bool,
+        auto_approve: bool,
         include_project_instructions: bool,
         eager_codebase_indexing: bool,
     ) -> Self {
@@ -85,7 +85,7 @@ impl AgentStackConfig {
             model,
             max_turns,
             max_budget_usd,
-            yolo,
+            auto_approve,
             non_interactive_approvals: true,
             include_project_instructions,
             eager_codebase_indexing,
@@ -106,7 +106,7 @@ impl AgentStackConfig {
             provider,
             model,
             max_turns,
-            yolo: true,
+            auto_approve: true,
             non_interactive_approvals: false,
             include_project_instructions: false,
             eager_codebase_indexing: false,
@@ -129,7 +129,7 @@ impl AgentStackConfig {
             provider: Some(provider),
             model: Some(model),
             max_turns,
-            yolo: true,
+            auto_approve: true,
             non_interactive_approvals: true,
             working_dir: Some(working_dir),
             include_project_instructions: false,
@@ -173,7 +173,7 @@ impl AgentStackConfig {
             model,
             max_turns,
             max_budget_usd,
-            yolo: false,
+            auto_approve: false,
             non_interactive_approvals: false,
             working_dir: Some(working_dir),
             include_project_instructions: true,
@@ -200,7 +200,7 @@ impl Default for AgentStackConfig {
             model: None,
             max_turns: 0,
             max_budget_usd: 0.0,
-            yolo: false,
+            auto_approve: false,
             non_interactive_approvals: false,
             injected_provider: None,
             working_dir: None,
@@ -255,14 +255,14 @@ mod tests {
     }
 
     #[test]
-    fn review_preset_is_lean_and_yolo() {
+    fn review_preset_is_lean_and_auto_approve() {
         let cfg = AgentStackConfig::for_review(
             PathBuf::from("/tmp/ava"),
             Some("openai".to_string()),
             Some("gpt-5".to_string()),
             5,
         );
-        assert!(cfg.yolo);
+        assert!(cfg.auto_approve);
         assert!(!cfg.include_project_instructions);
         assert!(!cfg.eager_codebase_indexing);
         assert!(!cfg.discover_cli_agents);
@@ -278,7 +278,7 @@ mod tests {
             PathBuf::from("/tmp/worktree"),
             None,
         );
-        assert!(cfg.yolo);
+        assert!(cfg.auto_approve);
         assert!(cfg.non_interactive_approvals);
         assert_eq!(cfg.working_dir, Some(PathBuf::from("/tmp/worktree")));
         assert!(!cfg.include_project_instructions);

@@ -397,7 +397,7 @@ impl AgentStack {
             Vec::new()
         };
         {
-            let acp_factory = ava_acp::AcpProviderFactory::with_builtins(config.yolo);
+            let acp_factory = ava_acp::AcpProviderFactory::with_builtins(config.auto_approve);
             router.register_factory_async(Arc::new(acp_factory)).await;
         }
 
@@ -437,10 +437,11 @@ impl AgentStack {
         // Headless/benchmark callers are unattended, but they still need
         // dangerous approval-worthy actions to reach the approval bridge so the
         // existing risk-aware non-interactive policy can fail closed.
-        let interactive_yolo_short_circuit = config.yolo && !config.non_interactive_approvals;
+        let interactive_auto_approve_short_circuit =
+            config.auto_approve && !config.non_interactive_approvals;
         let permission_context = Arc::new(RwLock::new(InspectionContext {
             workspace_root: effective_cwd.clone(),
-            auto_approve: interactive_yolo_short_circuit,
+            auto_approve: interactive_auto_approve_short_circuit,
             session_approved: std::collections::HashSet::new(),
             safety_profiles: core_tool_profiles(),
             persistent_rules: ava_permissions::persistent::PersistentRules::load_merged(
@@ -481,7 +482,7 @@ impl AgentStack {
         }));
         let permission_inspector: Arc<dyn PermissionInspector> = Arc::new(DefaultInspector::new(
             PermissionSystem::load(effective_cwd.clone(), vec![]),
-            if interactive_yolo_short_circuit {
+            if interactive_auto_approve_short_circuit {
                 PermissionPolicy::permissive()
             } else {
                 PermissionPolicy::standard()
@@ -974,7 +975,7 @@ impl AgentStack {
         *self.thinking_level.read().await
     }
 
-    /// Returns `true` if the agent is in auto-approve (yolo) mode.
+    /// Returns `true` if the agent is in auto-approve mode.
     pub async fn is_auto_approve(&self) -> bool {
         self.permission_context.read().await.auto_approve
     }

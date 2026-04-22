@@ -159,6 +159,13 @@ pub enum AgentEvent {
         resumed: bool,
         run_id: String,
     },
+    #[serde(rename = "subagent_update")]
+    SubagentUpdate {
+        call_id: String,
+        description: String,
+        event: Value,
+        run_id: String,
+    },
     #[serde(rename = "streaming_edit_progress")]
     StreamingEditProgress {
         call_id: String,
@@ -394,6 +401,16 @@ pub fn from_backend_event(
         BE::PlanStepComplete { step_id } => Some(AgentEvent::PlanStepComplete {
             step_id: step_id.clone(),
             run_id: run_id?.to_string(),
+        }),
+        BE::SubAgentUpdate {
+            call_id,
+            description,
+            event,
+        } => Some(AgentEvent::SubagentUpdate {
+            call_id: call_id.clone(),
+            description: description.clone(),
+            event: serde_json::to_value(event).unwrap_or(Value::Null),
+            run_id: run_id.map(str::to_string).unwrap_or_default(),
         }),
         BE::SubAgentComplete {
             call_id,

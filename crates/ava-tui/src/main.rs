@@ -2,6 +2,7 @@ use ava_tui::app::App;
 use ava_tui::auth::run_auth;
 #[cfg(feature = "benchmark")]
 use ava_tui::benchmark;
+use ava_tui::config::cli::advanced_help_text;
 use ava_tui::config::cli::{CliArgs, Command};
 use ava_tui::headless::run_headless;
 use ava_tui::plugin_commands::run_plugin;
@@ -55,6 +56,10 @@ async fn main() -> Result<()> {
     color_eyre::install()?;
 
     let cli = CliArgs::parse();
+    if cli.help_advanced {
+        println!("{}", advanced_help_text());
+        return Ok(());
+    }
     let cwd_override = resolve_cwd_override(
         cli.cwd.as_deref(),
         std::env::var_os("AVA_WORKING_DIRECTORY"),

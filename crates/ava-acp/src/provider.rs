@@ -22,7 +22,7 @@ pub struct AcpAgentProvider {
     transport: Arc<Mutex<Box<dyn AgentTransport>>>,
     agent_name: String,
     model_name: String,
-    yolo: bool,
+    auto_approve: bool,
     store_path_override: Option<std::path::PathBuf>,
 }
 
@@ -31,14 +31,14 @@ impl AcpAgentProvider {
         transport: Box<dyn AgentTransport>,
         agent_name: String,
         model: Option<String>,
-        yolo: bool,
+        auto_approve: bool,
     ) -> Self {
         let model_name = model.unwrap_or_else(|| agent_name.clone());
         Self {
             transport: Arc::new(Mutex::new(transport)),
             agent_name,
             model_name,
-            yolo,
+            auto_approve,
             store_path_override: None,
         }
     }
@@ -58,7 +58,7 @@ impl AcpAgentProvider {
         AgentQuery {
             prompt: messages_to_prompt(messages),
             working_directory: Some(cwd),
-            permission_mode: if self.yolo {
+            permission_mode: if self.auto_approve {
                 Some(PermissionMode::AcceptEdits)
             } else {
                 None

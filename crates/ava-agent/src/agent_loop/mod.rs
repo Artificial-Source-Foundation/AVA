@@ -334,6 +334,8 @@ pub enum AgentEvent {
     SubAgentUpdate {
         /// The parent `subagent` tool call ID for this delegated run.
         call_id: String,
+        /// The delegated task description/prompt.
+        description: String,
         /// The child event payload to merge into the transcript view.
         event: SubAgentLiveEvent,
     },

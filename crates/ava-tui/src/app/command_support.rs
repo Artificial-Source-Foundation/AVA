@@ -310,24 +310,14 @@ impl App {
                 );
             }
             Action::ModeNext => {
-                self.state.agent_mode = self.state.agent_mode.cycle_next();
-                self.state
-                    .agent
-                    .set_mode(self.state.agent_mode, app_tx.clone());
-                self.set_status(
-                    format!("Mode: {}", self.state.agent_mode.label()),
-                    StatusLevel::Info,
-                );
+                if !self.cycle_primary_agent_profile(1, app_tx.clone()) {
+                    self.cycle_mode(1, app_tx.clone());
+                }
             }
             Action::ModePrev => {
-                self.state.agent_mode = self.state.agent_mode.cycle_prev();
-                self.state
-                    .agent
-                    .set_mode(self.state.agent_mode, app_tx.clone());
-                self.set_status(
-                    format!("Mode: {}", self.state.agent_mode.label()),
-                    StatusLevel::Info,
-                );
+                if !self.cycle_primary_agent_profile(-1, app_tx.clone()) {
+                    self.cycle_mode(-1, app_tx.clone());
+                }
             }
             Action::ToggleSidebar => {
                 self.state.show_sidebar = !self.state.show_sidebar;

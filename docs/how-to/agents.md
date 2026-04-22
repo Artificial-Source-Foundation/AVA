@@ -1,6 +1,6 @@
 ---
 title: "How-to: Configure Primary Agents and Subagents"
-description: "Set up startup primary-agent profiles and delegated subagent profiles, including trust and compatibility behavior."
+description: "Set up startup primary-agent profiles and delegated subagent profiles, including trust and external prompt-file references."
 order: 3
 updated: "2026-04-21"
 ---
@@ -14,19 +14,23 @@ Use this page to configure:
 
 ## Where these files live
 
-Canonical user-global config root is `$XDG_CONFIG_HOME/ava` (typically `~/.config/ava`).
-
-Legacy compatibility root `~/.ava` is still read for existing installs and compatibility fallbacks.
+Use `$XDG_CONFIG_HOME/ava` (typically `~/.config/ava`) as the canonical user-global config root.
+Keep `~/.ava` only as legacy compatibility input while migrating older setups.
 
 1. Primary-agent profiles: `$XDG_CONFIG_HOME/ava/config.yaml`
 2. Global subagent profiles: `$XDG_CONFIG_HOME/ava/subagents.toml`
 3. Project subagent overrides: `<repo>/.ava/subagents.toml`
 
-Legacy compatibility:
+`subagents.toml` is the only delegated-agent config filename AVA loads.
 
-1. `$XDG_CONFIG_HOME/ava/agents.toml` and `<repo>/.ava/agents.toml` are still read as fallback input.
-2. If both `subagents.toml` and `agents.toml` exist in the same scope, AVA prefers `subagents.toml`.
-3. New writes target `subagents.toml`.
+## Migration: `agents.toml` -> `subagents.toml`
+
+If you still have delegated-agent config in either of these files, rename it:
+
+1. `~/.ava/agents.toml` -> `~/.ava/subagents.toml` (or move to `$XDG_CONFIG_HOME/ava/subagents.toml`)
+2. `<repo>/.ava/agents.toml` -> `<repo>/.ava/subagents.toml`
+
+AVA does not load `agents.toml` anymore. It emits a warning when it detects legacy files.
 
 ## Configure primary agents (startup profiles)
 
@@ -51,6 +55,12 @@ Run with an explicit profile:
 ava --agent coder
 ```
 
+TUI note:
+
+1. When `primary_agents` are configured, `Tab` / `Shift+Tab` cycle the active startup profile inside the TUI.
+2. If no primary-agent profiles are configured, those keys keep their existing Build/Plan mode-cycling behavior.
+3. Child subagent transcript views stay read-only and use `Esc` to return to the main conversation.
+
 ## Configure subagents (delegated specialists)
 
 Create `subagents.toml`:
@@ -73,9 +83,29 @@ max_turns = 5
 
 Notes:
 
-1. `subagents.<id>` is the preferred table form.
-2. `agents.<id>` is still accepted for compatibility.
-3. Subagent entries can override: `description`, `enabled`, `model`, `max_turns`, `prompt`, `temperature`, `provider`, `allowed_tools`, `max_budget_usd`.
+1. `subagents.<id>` is the canonical table form.
+2. Subagent entries can override: `description`, `enabled`, `model`, `max_turns`, `prompt`, `prompt_file`, `temperature`, `provider`, `allowed_tools`, `max_budget_usd`.
+3. `prompt_file` points to an external text/markdown file. Relative paths resolve from the directory containing that `subagents.toml` file.
+4. If `prompt_file` cannot be read, AVA logs a warning and the subagent falls back to its normal prompt resolution path (for example built-in/default prompt behavior, or no custom prompt if none is available).
+
+Example prompt-file usage:
+
+```toml
+[subagents.review]
+prompt_file = "prompts/review.md"
+```
+
+With this project layout:
+
+```text
+<repo>/
+  .ava/
+    subagents.toml
+    prompts/
+      review.md
+```
+
+`prompt_file = "prompts/review.md"` resolves to `<repo>/.ava/prompts/review.md`.
 
 ## Built-in/default subagents
 
@@ -116,7 +146,7 @@ What you will see in practice:
 
 ## Trust behavior
 
-1. Project subagent config (`<repo>/.ava/subagents.toml` and legacy `<repo>/.ava/agents.toml`) is loaded only for trusted projects.
+1. Project subagent config (`<repo>/.ava/subagents.toml`) is loaded only for trusted projects.
 2. For untrusted projects, AVA ignores project-local subagent config and uses built-ins plus global config.
 3. Use `--trust` to approve loading project-local `.ava/` config surfaces.
 

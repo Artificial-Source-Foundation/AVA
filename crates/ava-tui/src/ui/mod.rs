@@ -44,7 +44,7 @@ pub fn render(frame: &mut Frame<'_>, state: &mut AppState) {
     } else if plan_approval_active {
         crate::widgets::plan_approval::PLAN_APPROVAL_DOCK_HEIGHT
     } else if transcript_view {
-        1
+        0
     } else {
         layout::composer_height(
             &state.input.buffer,
@@ -107,33 +107,7 @@ pub fn render(frame: &mut Frame<'_>, state: &mut AppState) {
         // covering any streaming text that overflows into the composer area.
         let composer_bg = Block::default().style(Style::default().bg(state.theme.bg_elevated));
         frame.render_widget(composer_bg, split.composer);
-        if transcript_view {
-            let transcript_hint = match state.view_mode {
-                ViewMode::SubAgent { .. } => vec![
-                    Span::styled("Esc", Style::default().fg(state.theme.accent)),
-                    Span::styled(" back", Style::default().fg(state.theme.text_dimmed)),
-                    Span::styled("  ", Style::default().fg(state.theme.text_dimmed)),
-                    Span::styled("←/→", Style::default().fg(state.theme.accent)),
-                    Span::styled(" sibling", Style::default().fg(state.theme.text_dimmed)),
-                    Span::styled("  ", Style::default().fg(state.theme.text_dimmed)),
-                    Span::styled(
-                        "read-only transcript",
-                        Style::default().fg(state.theme.text_dimmed),
-                    ),
-                ],
-                ViewMode::BackgroundTask { .. } => vec![
-                    Span::styled("Esc", Style::default().fg(state.theme.accent)),
-                    Span::styled(" back", Style::default().fg(state.theme.text_dimmed)),
-                    Span::styled("  ", Style::default().fg(state.theme.text_dimmed)),
-                    Span::styled(
-                        "read-only transcript",
-                        Style::default().fg(state.theme.text_dimmed),
-                    ),
-                ],
-                ViewMode::Main => vec![],
-            };
-            frame.render_widget(Paragraph::new(Line::from(transcript_hint)), split.composer);
-        } else {
+        if !transcript_view {
             render_composer(frame, split.composer, state);
         }
     }
@@ -356,7 +330,7 @@ fn render_modal(frame: &mut Frame<'_>, state: &mut AppState, modal: ModalType) {
                         },
                         KeybindHint {
                             key: "hint".to_string(),
-                            label: "edit .ava/subagents.toml to configure (legacy .ava/agents.toml also loads)".to_string(),
+                            label: "edit .ava/subagents.toml to configure".to_string(),
                         },
                     ],
                 };

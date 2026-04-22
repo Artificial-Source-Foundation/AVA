@@ -138,15 +138,16 @@ impl App {
 
         tokio::spawn(async move {
             let stack = if let Some(isolation) = isolation {
-                let config = ava_agent::stack::AgentStackConfig::for_background_isolation(
-                    data_dir,
-                    provider_opt,
-                    model_opt,
-                    max_turns,
-                    max_budget_usd,
-                    isolation.worktree_path,
-                );
-                match ava_agent::stack::AgentStack::new(config).await {
+                let config =
+                    ava_agent_orchestration::stack::AgentStackConfig::for_background_isolation(
+                        data_dir,
+                        provider_opt,
+                        model_opt,
+                        max_turns,
+                        max_budget_usd,
+                        isolation.worktree_path,
+                    );
+                match ava_agent_orchestration::stack::AgentStack::new(config).await {
                     Ok((stack, _, _, _)) => Arc::new(stack),
                     Err(err) => {
                         let _ = app_tx_clone.send(AppEvent::AgentRunDone {
@@ -490,7 +491,8 @@ impl App {
                 ..
             } => {
                 if let Some(task) = bg.tasks.iter_mut().find(|t| t.id == task_id) {
-                    let ui_messages = crate::app::session_messages_to_ui_messages(&messages);
+                    let ui_messages =
+                        crate::app::session_messages_to_subagent_ui_messages(&messages);
 
                     if let Some(subagent) =
                         self.state.agent.sub_agents.iter_mut().rev().find(|sa| {

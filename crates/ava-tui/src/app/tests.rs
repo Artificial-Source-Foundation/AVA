@@ -1,9 +1,9 @@
 use super::*;
 use crate::state::agent::SubAgentInfo;
-use ava_agent::control_plane::commands::{queue_message_tier, ControlPlaneCommand};
-use ava_agent::control_plane::events::{required_backend_event_kinds, CanonicalEventKind};
-use ava_agent::control_plane::interactive::InteractiveRequestKind;
-use ava_agent::stack::AgentRunResult;
+use ava_agent_orchestration::stack::AgentRunResult;
+use ava_control_plane::commands::{queue_message_tier, ControlPlaneCommand};
+use ava_control_plane::events::{required_backend_event_kinds, CanonicalEventKind};
+use ava_control_plane::interactive::InteractiveRequestKind;
 use ava_permissions::tags::RiskLevel;
 use clap::Parser;
 use std::time::Duration;
@@ -248,6 +248,109 @@ async fn resumed_app_path_surfaces_model_restore_failures() {
     assert!(has_restore_error, "expected restore-model error message");
 }
 
+#[test]
+fn tab_cycles_configured_primary_agents_before_mode_switching() {
+    let temp = tempdir().expect("tempdir");
+    let db_path = temp.path().join("data.db");
+    let mut app = App::test_new(&db_path);
+    app.state.primary_agent_profiles = vec![
+        PrimaryAgentProfile {
+            id: "architect".to_string(),
+            provider: None,
+            model: None,
+            prompt: Some("Architecture-first".to_string()),
+            description: Some("Architecture profile".to_string()),
+        },
+        PrimaryAgentProfile {
+            id: "coder".to_string(),
+            provider: None,
+            model: None,
+            prompt: Some("Implementation-first".to_string()),
+            description: Some("Implementation profile".to_string()),
+        },
+    ];
+
+    app.process_key_for_test(crossterm::event::KeyEvent::from(KeyCode::Tab));
+    assert_eq!(
+        app.state.agent.primary_agent_id.as_deref(),
+        Some("architect")
+    );
+    assert_eq!(app.state.agent_mode, AgentMode::Code);
+
+    app.process_key_for_test(crossterm::event::KeyEvent::from(KeyCode::Tab));
+    assert_eq!(app.state.agent.primary_agent_id.as_deref(), Some("coder"));
+    assert_eq!(app.state.agent_mode, AgentMode::Code);
+
+    let status = app.state.status_message.as_ref().expect("status message");
+    assert_eq!(status.text, "Primary agent: coder");
+}
+
+#[test]
+fn shift_tab_cycles_primary_agents_in_reverse() {
+    let temp = tempdir().expect("tempdir");
+    let db_path = temp.path().join("data.db");
+    let mut app = App::test_new(&db_path);
+    app.state.primary_agent_profiles = vec![
+        PrimaryAgentProfile {
+            id: "architect".to_string(),
+            provider: None,
+            model: None,
+            prompt: None,
+            description: None,
+        },
+        PrimaryAgentProfile {
+            id: "coder".to_string(),
+            provider: None,
+            model: None,
+            prompt: None,
+            description: None,
+        },
+    ];
+
+    app.process_key_for_test(crossterm::event::KeyEvent::from(KeyCode::BackTab));
+
+    assert_eq!(app.state.agent.primary_agent_id.as_deref(), Some("coder"));
+    assert_eq!(app.state.agent_mode, AgentMode::Code);
+}
+
+#[test]
+fn tab_falls_back_to_mode_cycle_when_no_primary_agents_are_configured() {
+    let temp = tempdir().expect("tempdir");
+    let db_path = temp.path().join("data.db");
+    let mut app = App::test_new(&db_path);
+
+    app.process_key_for_test(crossterm::event::KeyEvent::from(KeyCode::Tab));
+
+    assert_eq!(app.state.agent_mode, AgentMode::Plan);
+    assert!(app.state.agent.primary_agent_id.is_none());
+    let status = app.state.status_message.as_ref().expect("status message");
+    assert_eq!(status.text, "Mode: Plan");
+}
+
+#[test]
+fn tab_does_not_switch_primary_agent_while_running() {
+    let temp = tempdir().expect("tempdir");
+    let db_path = temp.path().join("data.db");
+    let mut app = App::test_new(&db_path);
+    app.state.primary_agent_profiles = vec![PrimaryAgentProfile {
+        id: "architect".to_string(),
+        provider: None,
+        model: None,
+        prompt: None,
+        description: None,
+    }];
+    app.state.agent.is_running = true;
+
+    app.process_key_for_test(crossterm::event::KeyEvent::from(KeyCode::Tab));
+
+    assert!(app.state.agent.primary_agent_id.is_none());
+    let status = app.state.status_message.as_ref().expect("status message");
+    assert_eq!(
+        status.text,
+        "Cannot switch primary agent while a run is active"
+    );
+}
+
 #[tokio::test]
 async fn app_new_errors_when_continue_requested_but_no_sessions_exist() {
     let cli = parse_cli(&["ava", "--continue"]);
@@ -417,7 +520,7 @@ fn backgrounded_run_events_stay_out_of_foreground() {
     app.handle_event(
         AppEvent::AgentRunDone {
             run_id: 42,
-            result: Ok(ava_agent::stack::AgentRunResult {
+            result: Ok(ava_agent_orchestration::stack::AgentRunResult {
                 success: true,
                 turns: 1,
                 session: ava_types::Session::new(),
@@ -474,11 +577,8 @@ fn background_subagent_events_follow_real_tool_sequence() {
             .as_ref()
             .expect("background subagent data should exist after tool call");
         assert!(
-            sub_data
-                .session_messages
-                .iter()
-                .any(|msg| msg.content.contains("running in the background")),
-            "background subagent placeholder transcript should be present immediately"
+            sub_data.session_messages.is_empty(),
+            "background child transcript should stay empty until real transcript messages exist"
         );
     }
 
@@ -516,11 +616,8 @@ fn background_subagent_events_follow_real_tool_sequence() {
             "background launch ack should not mark subagent done"
         );
         assert!(
-            sub_data
-                .session_messages
-                .iter()
-                .any(|msg| msg.content.contains("running in the background")),
-            "background transcript hint should be truthful about deferred transcript availability"
+            sub_data.session_messages.is_empty(),
+            "background launch ack should not inject placeholder transcript messages"
         );
     }
 
@@ -869,6 +966,122 @@ fn subagent_completion_reconstructs_tool_history_for_child_view() {
         sub_data.session_messages[3].kind,
         MessageKind::Assistant
     ));
+}
+
+#[test]
+fn subagent_completion_filters_internal_system_messages_from_child_view() {
+    let messages = vec![
+        ava_types::Message::new(ava_types::Role::System, "internal scaffolding"),
+        ava_types::Message::new(ava_types::Role::Assistant, "Visible result"),
+    ];
+
+    let ui_messages = session_messages_to_subagent_ui_messages(&messages);
+
+    assert_eq!(ui_messages.len(), 1);
+    assert!(matches!(ui_messages[0].kind, MessageKind::Assistant));
+    assert_eq!(ui_messages[0].content, "Visible result");
+}
+
+#[test]
+fn clicking_tool_group_inside_subagent_view_toggles_child_transcript_group() {
+    let temp = tempdir().expect("tempdir");
+    let db_path = temp.path().join("data.db");
+    let mut app = App::test_new(&db_path);
+    let (app_tx, _) = mpsc::unbounded_channel();
+    let (agent_tx, _) = mpsc::unbounded_channel();
+
+    app.state.agent.sub_agents.push(SubAgentInfo {
+        call_id: "call-child-tools".to_string(),
+        agent_type: Some("scout".to_string()),
+        description: "Inspect files.".to_string(),
+        background: false,
+        is_running: false,
+        tool_count: 1,
+        current_tool: None,
+        started_at: std::time::Instant::now(),
+        elapsed: None,
+        session_id: Some("child-session".to_string()),
+        session_messages: vec![
+            UiMessage::new(MessageKind::ToolCall, "glob {\"pattern\":\"src/**/*.rs\"}"),
+            UiMessage::new(MessageKind::ToolResult, "src/main.rs"),
+        ],
+        provider: None,
+        resumed: false,
+        cost_usd: None,
+        input_tokens: None,
+        output_tokens: None,
+    });
+    app.state.view_mode = ViewMode::SubAgent {
+        agent_index: 0,
+        description: "Inspect files.".to_string(),
+    };
+    app.state.messages.messages_area = ratatui::layout::Rect::new(0, 0, 80, 10);
+    app.state.messages.message_line_ranges = vec![(0, 1), (0, 1)];
+
+    app.handle_event(
+        AppEvent::Mouse(crossterm::event::MouseEvent {
+            kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+            column: 1,
+            row: 0,
+            modifiers: crossterm::event::KeyModifiers::NONE,
+        }),
+        app_tx,
+        agent_tx,
+    );
+
+    let child_messages = &app.state.agent.sub_agents[0].session_messages;
+    assert!(child_messages[0].tool_group_expanded);
+    assert!(child_messages[1].tool_group_expanded);
+}
+
+#[test]
+fn clicking_thinking_inside_subagent_view_toggles_child_transcript_message() {
+    let temp = tempdir().expect("tempdir");
+    let db_path = temp.path().join("data.db");
+    let mut app = App::test_new(&db_path);
+    let (app_tx, _) = mpsc::unbounded_channel();
+    let (agent_tx, _) = mpsc::unbounded_channel();
+
+    app.state.agent.sub_agents.push(SubAgentInfo {
+        call_id: "call-child-thinking".to_string(),
+        agent_type: Some("scout".to_string()),
+        description: "Inspect files.".to_string(),
+        background: false,
+        is_running: false,
+        tool_count: 0,
+        current_tool: None,
+        started_at: std::time::Instant::now(),
+        elapsed: None,
+        session_id: Some("child-session".to_string()),
+        session_messages: vec![UiMessage::new(
+            MessageKind::Thinking,
+            "step 1\nstep 2\nstep 3",
+        )],
+        provider: None,
+        resumed: false,
+        cost_usd: None,
+        input_tokens: None,
+        output_tokens: None,
+    });
+    app.state.view_mode = ViewMode::SubAgent {
+        agent_index: 0,
+        description: "Inspect files.".to_string(),
+    };
+    app.state.messages.messages_area = ratatui::layout::Rect::new(0, 0, 80, 10);
+    app.state.messages.message_line_ranges = vec![(0, 1)];
+
+    app.handle_event(
+        AppEvent::Mouse(crossterm::event::MouseEvent {
+            kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+            column: 1,
+            row: 0,
+            modifiers: crossterm::event::KeyModifiers::NONE,
+        }),
+        app_tx,
+        agent_tx,
+    );
+
+    assert!(app.state.agent.sub_agents[0].session_messages[0].thinking_expanded);
 }
 
 #[test]
@@ -1229,6 +1442,16 @@ fn enter_subagent_view_allows_running_agent_without_completed_transcript() {
 }
 
 #[test]
+fn enter_subagent_view_rejects_invalid_index() {
+    let temp = tempdir().expect("tempdir");
+    let db_path = temp.path().join("data.db");
+    let mut app = App::test_new(&db_path);
+
+    assert!(!app.enter_sub_agent_view(0));
+    assert!(matches!(app.state.view_mode, ViewMode::Main));
+}
+
+#[test]
 fn typing_is_ignored_while_viewing_subagent_transcript() {
     let temp = tempdir().expect("tempdir");
     let db_path = temp.path().join("data.db");
@@ -1407,6 +1630,32 @@ fn transcript_view_blocks_mode_tab_shortcut() {
     app.state.view_mode = ViewMode::SubAgent {
         agent_index: 0,
         description: "Inspect files.".to_string(),
+    };
+
+    let before_mode = app.state.agent_mode;
+    app.handle_event(
+        AppEvent::Key(crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Tab,
+            crossterm::event::KeyModifiers::NONE,
+        )),
+        app_tx,
+        agent_tx,
+    );
+
+    assert_eq!(app.state.agent_mode, before_mode);
+}
+
+#[test]
+fn background_task_view_blocks_mode_tab_shortcut() {
+    let temp = tempdir().expect("tempdir");
+    let db_path = temp.path().join("data.db");
+    let mut app = App::test_new(&db_path);
+    let (app_tx, _) = mpsc::unbounded_channel();
+    let (agent_tx, _) = mpsc::unbounded_channel();
+
+    app.state.view_mode = ViewMode::BackgroundTask {
+        task_id: 7,
+        goal: "Inspect logs".to_string(),
     };
 
     let before_mode = app.state.agent_mode;

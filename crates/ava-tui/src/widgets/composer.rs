@@ -11,6 +11,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Paragraph};
 use ratatui::Frame;
 use unicode_width::UnicodeWidthChar;
+use unicode_width::UnicodeWidthStr;
 
 /// Split a line of text into spans, styling paste placeholders with accent color.
 fn styled_text_spans<'a>(text: &str, input: &InputState, theme: &Theme) -> Vec<Span<'a>> {
@@ -212,7 +213,14 @@ pub fn render_composer(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
         crate::state::agent::AgentMode::Code => "Build".to_string(),
         crate::state::agent::AgentMode::Plan => "Plan".to_string(),
     };
-    let prefix_len = 2 + mode_label.len() + 3;
+    let profile_label = state
+        .agent
+        .primary_agent_id
+        .as_deref()
+        .map(|id| format!(" [{id}]"))
+        .unwrap_or_default();
+    let mode_badge = format!(" {mode_label}{profile_label} ");
+    let prefix_len = UnicodeWidthStr::width(mode_badge.as_str()) + 2;
     let remaining = inner_w.saturating_sub(prefix_len);
     let prov_max = remaining / 2;
     let model_max = remaining.saturating_sub(prov_max.min(state.agent.provider_name.len()) + 2);
@@ -249,7 +257,7 @@ pub fn render_composer(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
 
     let mut left_spans = vec![
         Span::raw(pad),
-        Span::styled(format!(" {mode_label} "), mode_style),
+        Span::styled(mode_badge.clone(), mode_style),
         Span::styled("  ", Style::default()),
         Span::styled(model_display.clone(), Style::default().fg(state.theme.text)),
     ];
@@ -263,7 +271,7 @@ pub fn render_composer(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
     if compact {
         left_spans = vec![
             Span::raw(pad),
-            Span::styled(format!(" {mode_label} "), mode_style),
+            Span::styled(mode_badge, mode_style),
             Span::styled("  ", Style::default()),
             Span::styled(model_display, Style::default().fg(state.theme.text)),
         ];

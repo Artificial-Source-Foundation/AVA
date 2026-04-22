@@ -1,21 +1,11 @@
-use crate::state::messages::{MessageKind, UiMessage};
+use crate::state::messages::UiMessage;
 
 pub(super) fn initial_subagent_session_messages(
     description: &str,
     background: bool,
 ) -> Vec<UiMessage> {
-    let transcript_hint = if background {
-        "Sub-agent is running in the background. Transcript details will appear once it completes."
-    } else {
-        "Sub-agent is running. Live transcript details will appear here when available."
-    };
-    vec![
-        UiMessage::new(
-            MessageKind::System,
-            format!("Delegated task: {description}"),
-        ),
-        UiMessage::new(MessageKind::Thinking, transcript_hint),
-    ]
+    let _ = (description, background);
+    Vec::new()
 }
 
 pub(super) fn normalize_subagent_description(value: &str) -> &str {

@@ -163,24 +163,14 @@ impl App {
                 }
                 Action::ToggleSidebar => self.state.show_sidebar = !self.state.show_sidebar,
                 Action::ModeNext => {
-                    self.state.agent_mode = self.state.agent_mode.cycle_next();
-                    self.state
-                        .agent
-                        .set_mode(self.state.agent_mode, Some(app_tx.clone()));
-                    self.set_status(
-                        format!("Mode: {}", self.state.agent_mode.label()),
-                        StatusLevel::Info,
-                    );
+                    if !self.cycle_primary_agent_profile(1, Some(app_tx.clone())) {
+                        self.cycle_mode(1, Some(app_tx.clone()));
+                    }
                 }
                 Action::ModePrev => {
-                    self.state.agent_mode = self.state.agent_mode.cycle_prev();
-                    self.state
-                        .agent
-                        .set_mode(self.state.agent_mode, Some(app_tx.clone()));
-                    self.set_status(
-                        format!("Mode: {}", self.state.agent_mode.label()),
-                        StatusLevel::Info,
-                    );
+                    if !self.cycle_primary_agent_profile(-1, Some(app_tx.clone())) {
+                        self.cycle_mode(-1, Some(app_tx.clone()));
+                    }
                 }
                 Action::PermissionToggle => {
                     self.state.permission.permission_level =
@@ -369,25 +359,15 @@ impl App {
         }
 
         if key.code == KeyCode::Tab && key.modifiers == KeyModifiers::NONE {
-            self.state.agent_mode = self.state.agent_mode.cycle_next();
-            self.state
-                .agent
-                .set_mode(self.state.agent_mode, Some(app_tx.clone()));
-            self.set_status(
-                format!("Mode: {}", self.state.agent_mode.label()),
-                StatusLevel::Info,
-            );
+            if !self.cycle_primary_agent_profile(1, Some(app_tx.clone())) {
+                self.cycle_mode(1, Some(app_tx.clone()));
+            }
             return false;
         }
         if key.code == KeyCode::BackTab {
-            self.state.agent_mode = self.state.agent_mode.cycle_prev();
-            self.state
-                .agent
-                .set_mode(self.state.agent_mode, Some(app_tx.clone()));
-            self.set_status(
-                format!("Mode: {}", self.state.agent_mode.label()),
-                StatusLevel::Info,
-            );
+            if !self.cycle_primary_agent_profile(-1, Some(app_tx.clone())) {
+                self.cycle_mode(-1, Some(app_tx.clone()));
+            }
             return false;
         }
 

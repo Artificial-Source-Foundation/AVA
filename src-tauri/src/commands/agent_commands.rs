@@ -8,24 +8,24 @@
 //! 4. The resolve command sends the response through the stored oneshot channel
 //! 5. The permission middleware receives it and continues or blocks the tool
 
-use ava_agent::control_plane::commands::{queue_message_tier, ControlPlaneCommand};
-use ava_agent::control_plane::interactive::{
-    InteractiveRequestKind, InteractiveRequestStore, ResolveInteractiveRequestError,
-    TerminalInteractiveRequest,
+use ava_agent::control_plane::sessions::run_context_from_session as shared_run_context_from_session;
+use ava_agent_orchestration::stack::AgentRunContext;
+use ava_control_plane::commands::{queue_message_tier, ControlPlaneCommand};
+use ava_control_plane::interactive::{
+    InteractiveRequestKind, InteractiveRequestPhase, InteractiveRequestStore,
+    ResolveInteractiveRequestError, TerminalInteractiveRequest,
 };
-use ava_agent::control_plane::orchestration::{
+use ava_control_plane::orchestration::{
     clear_preserved_deferred, is_inactive_scoped_status_lookup, restore_in_flight_deferred,
     sync_deferred_queues_for_progress,
 };
-use ava_agent::control_plane::queue::{
+use ava_control_plane::queue::{
     clear_queue_semantics, ClearQueueTarget, QueueClearSemantics, UNSUPPORTED_QUEUE_CLEAR_ERROR,
 };
-use ava_agent::control_plane::sessions::{
+use ava_control_plane::sessions::{
     build_edit_replay_payload, build_regenerate_replay_payload, build_retry_replay_payload,
-    resolve_session_precedence, run_context_from_session as shared_run_context_from_session,
-    SessionPromptContext, SessionSelectionSource,
+    resolve_session_precedence, SessionPromptContext, SessionSelectionSource,
 };
-use ava_agent::stack::AgentRunContext;
 use ava_tools::permission_middleware::ToolApproval;
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::Ordering;
@@ -172,7 +172,7 @@ fn emit_interactive_request_cleared<R: tauri::Runtime>(
 async fn emit_promoted_desktop_interactive_request<R: tauri::Runtime>(
     app: &AppHandle<R>,
     bridge: &DesktopBridge,
-    kind: ava_agent::control_plane::interactive::InteractiveRequestKind,
+    kind: InteractiveRequestKind,
     run_id: Option<&str>,
 ) {
     let Some(event) = bridge
@@ -189,7 +189,7 @@ async fn emit_promoted_desktop_interactive_request<R: tauri::Runtime>(
 async fn emit_promoted_desktop_interactive_request_if_current_changed<R: tauri::Runtime>(
     app: &AppHandle<R>,
     bridge: &DesktopBridge,
-    kind: ava_agent::control_plane::interactive::InteractiveRequestKind,
+    kind: InteractiveRequestKind,
     removed_request_id: &str,
     previous_global_request_id: Option<&str>,
 ) {
@@ -1516,9 +1516,7 @@ mod tests {
     #[tokio::test]
     async fn take_matching_pending_reply_only_consumes_matching_request_ids() {
         let (matching_tx, _matching_rx) = tokio::sync::oneshot::channel::<String>();
-        let store = crate::bridge::PendingQuestionReply::new(
-            ava_agent::control_plane::interactive::InteractiveRequestKind::Question,
-        );
+        let store = crate::bridge::PendingQuestionReply::new(InteractiveRequestKind::Question);
         let handle = store.register(matching_tx).await;
 
         let error = match store.resolve(Some("request-2")).await {
@@ -1546,9 +1544,7 @@ mod tests {
     #[tokio::test]
     async fn plan_timeout_cleanup_consumes_pending_reply_and_auto_rejects() {
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel::<ava_types::PlanDecision>();
-        let store = crate::bridge::PendingPlanReply::new(
-            ava_agent::control_plane::interactive::InteractiveRequestKind::Plan,
-        );
+        let store = crate::bridge::PendingPlanReply::new(InteractiveRequestKind::Plan);
         let handle = store.register(reply_tx).await;
 
         let timeout_reply = store
@@ -1565,7 +1561,7 @@ mod tests {
 
         assert_eq!(
             timeout_reply.handle.phase,
-            ava_agent::control_plane::interactive::InteractiveRequestPhase::TimedOut
+            InteractiveRequestPhase::TimedOut
         );
         assert!(store.current_request_id().await.is_none());
         match reply_rx.await.expect("timeout reply should arrive") {
@@ -1578,9 +1574,7 @@ mod tests {
 
     #[tokio::test]
     async fn stale_late_plan_responses_do_not_consume_newer_pending_requests() {
-        let store = crate::bridge::PendingPlanReply::new(
-            ava_agent::control_plane::interactive::InteractiveRequestKind::Plan,
-        );
+        let store = crate::bridge::PendingPlanReply::new(InteractiveRequestKind::Plan);
         let (first_tx, _first_rx) = tokio::sync::oneshot::channel::<ava_types::PlanDecision>();
         let first = store.register(first_tx).await;
 
@@ -1614,7 +1608,7 @@ mod tests {
             desktop_interactive_resolve_error(
                 "approval",
                 ResolveInteractiveRequestError::MissingPendingRequest {
-                    kind: ava_agent::control_plane::interactive::InteractiveRequestKind::Approval,
+                    kind: InteractiveRequestKind::Approval,
                 },
             ),
             "No pending approval request to resolve"
@@ -1623,7 +1617,7 @@ mod tests {
             desktop_interactive_resolve_error(
                 "approval",
                 ResolveInteractiveRequestError::StaleRequestId {
-                    kind: ava_agent::control_plane::interactive::InteractiveRequestKind::Approval,
+                    kind: InteractiveRequestKind::Approval,
                     request_id: "approval-stale".to_string(),
                     current_request_id: "approval-current".to_string(),
                 },
@@ -1634,9 +1628,7 @@ mod tests {
 
     #[tokio::test]
     async fn missing_request_ids_are_rejected_without_consuming_pending_requests() {
-        let store = crate::bridge::PendingApprovalReply::new(
-            ava_agent::control_plane::interactive::InteractiveRequestKind::Approval,
-        );
+        let store = crate::bridge::PendingApprovalReply::new(InteractiveRequestKind::Approval);
         let (reply_tx, _reply_rx) = tokio::sync::oneshot::channel::<ToolApproval>();
         let handle = store.register(reply_tx).await;
 
@@ -1691,9 +1683,7 @@ mod tests {
     #[tokio::test]
     async fn interactive_request_cleared_event_smokes_run_id_from_registered_handle() {
         let (reply_tx, _reply_rx) = tokio::sync::oneshot::channel::<String>();
-        let store = crate::bridge::PendingQuestionReply::new(
-            ava_agent::control_plane::interactive::InteractiveRequestKind::Question,
-        );
+        let store = crate::bridge::PendingQuestionReply::new(InteractiveRequestKind::Question);
         let handle = store
             .register_with_run_id(reply_tx, Some("desktop-run-smoke".to_string()))
             .await;
@@ -1772,7 +1762,7 @@ mod tests {
 
         let promoted = bridge
             .take_promoted_interactive_request_event(
-                ava_agent::control_plane::interactive::InteractiveRequestKind::Question,
+                InteractiveRequestKind::Question,
                 reply.handle.run_id.as_deref(),
             )
             .await

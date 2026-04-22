@@ -272,6 +272,24 @@ pub fn render_context_bar(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
             ],
         };
         render_hints(&mut left_spans, &hints, state);
+    } else if matches!(
+        state.view_mode,
+        ViewMode::SubAgent { .. } | ViewMode::BackgroundTask { .. }
+    ) {
+        // Sub-agent or background task view hints take precedence over the
+        // parent run strip so child transcript views stay read-oriented.
+        let mut hints: Vec<(&str, &str)> = vec![("Esc", "back")];
+        if let ViewMode::SubAgent { .. } = state.view_mode {
+            if state.agent.sub_agents.len() > 1 {
+                hints.push(("←/→", "sibling"));
+            }
+            hints.push(("PgUp/PgDn", "scroll"));
+            hints.push(("ro", "read-only transcript"));
+        } else {
+            hints.push(("PgUp/PgDn", "scroll"));
+            hints.push(("ro", "read-only transcript"));
+        }
+        render_hints(&mut left_spans, &hints, state);
     } else if state.agent.is_running {
         // Spinner + activity + a single interrupt cue
         let (activity, style) = if let AgentActivity::ExecutingTool(ref name) = state.agent.activity
@@ -337,32 +355,22 @@ pub fn render_context_bar(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
             "esc interrupt",
             Style::default().fg(state.theme.text_dimmed),
         ));
-    } else if matches!(
-        state.view_mode,
-        ViewMode::SubAgent { .. } | ViewMode::BackgroundTask { .. }
-    ) {
-        // Sub-agent or background task view hints
-        let mut hints: Vec<(&str, &str)> = vec![("Esc", "back")];
-        if let ViewMode::SubAgent { .. } = state.view_mode {
-            if state.agent.sub_agents.len() > 1 {
-                hints.push(("←/→", "sibling"));
-            }
-            hints.push(("PgUp/PgDn", "scroll"));
-            hints.push(("ro", "read-only transcript"));
-        } else {
-            hints.push(("PgUp/PgDn", "scroll"));
-            hints.push(("ro", "read-only transcript"));
-        }
-        render_hints(&mut left_spans, &hints, state);
     } else {
         return;
     }
 
     // Right side: keep the running/status strip light.
-    let right_spans: Vec<Span<'static>> = vec![Span::styled(
-        state.agent.activity.to_string(),
-        Style::default().fg(state.theme.text_dimmed),
-    )];
+    let right_spans: Vec<Span<'static>> = if matches!(
+        state.view_mode,
+        ViewMode::SubAgent { .. } | ViewMode::BackgroundTask { .. }
+    ) {
+        Vec::new()
+    } else {
+        vec![Span::styled(
+            state.agent.activity.to_string(),
+            Style::default().fg(state.theme.text_dimmed),
+        )]
+    };
 
     // Fill gap between left and right
     let left_width: usize = left_spans

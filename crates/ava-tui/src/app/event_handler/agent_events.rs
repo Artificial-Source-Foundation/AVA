@@ -377,7 +377,7 @@ impl App {
                 self.state.agent.cost += cost_usd;
 
                 // Convert agent messages to UI messages for storage
-                let ui_messages = crate::app::session_messages_to_ui_messages(&messages);
+                let ui_messages = crate::app::session_messages_to_subagent_ui_messages(&messages);
 
                 // Update the SubAgentInfo in agent state
                 if let Some(sa) = self.state.agent.sub_agents.iter_mut().rev().find(|s| {

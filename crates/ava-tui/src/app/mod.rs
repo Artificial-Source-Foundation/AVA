@@ -8,6 +8,7 @@ mod exporting;
 mod git_commit;
 mod input_handling;
 mod modals;
+mod runtime_event_dispatch;
 mod spawners;
 mod subagent;
 
@@ -39,7 +40,7 @@ use crate::widgets::select_list::{SelectItem, SelectListState};
 use crate::widgets::session_list::SessionListState;
 use crate::widgets::token_buffer::TokenBuffer;
 use crate::widgets::tool_list::ToolListState;
-use ava_agent::control_plane::interactive::{
+use ava_control_plane::interactive::{
     InteractiveRequestKind, InteractiveRequestStore, InteractiveTimeoutPolicy,
 };
 use ava_tools::permission_middleware::ToolApproval;
@@ -66,6 +67,15 @@ pub(crate) use commands::format_skill_list;
 use subagent::{
     initial_subagent_session_messages, subagent_descriptions_match, subagent_matches_completion,
 };
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PrimaryAgentProfile {
+    pub id: String,
+    pub provider: Option<String>,
+    pub model: Option<String>,
+    pub prompt: Option<String>,
+    pub description: Option<String>,
+}
 
 #[derive(Debug, Clone)]
 pub(crate) struct PendingBackgroundGoal {
@@ -114,6 +124,7 @@ pub struct AppState {
     // ── Agent ───────────────────────────────────────────────────────────
     pub agent: AgentState,
     pub agent_mode: AgentMode,
+    pub primary_agent_profiles: Vec<PrimaryAgentProfile>,
     /// Message index where the current agent turn started (BUG-41).
     /// Used to scope `mark_interrupted_messages` to only the current turn.
     pub turn_start_index: usize,
@@ -170,7 +181,7 @@ pub struct AppState {
     /// Shared todo state handle (for async refresh).
     pub todo_state: Option<ava_types::TodoState>,
     /// Cached MCP server details for sidebar rendering.
-    pub mcp_servers: Vec<ava_agent::stack::MCPServerInfo>,
+    pub mcp_servers: Vec<ava_agent_orchestration::stack::MCPServerInfo>,
     /// Cached LSP/project-tool rows for sidebar rendering.
     pub lsp_entries: Vec<LspSidebarEntry>,
     /// Clickable sidebar targets populated during render.
@@ -315,6 +326,15 @@ pub(crate) fn session_messages_to_ui_messages(messages: &[ava_types::Message]) -
     ui_messages
 }
 
+pub(crate) fn session_messages_to_subagent_ui_messages(
+    messages: &[ava_types::Message],
+) -> Vec<UiMessage> {
+    session_messages_to_ui_messages(messages)
+        .into_iter()
+        .filter(|message| !matches!(message.kind, MessageKind::System))
+        .collect()
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ResumeRestorePlan {
     apply_primary_agent: bool,
@@ -457,6 +477,154 @@ pub struct App {
 // StatusSummary removed — /status command was removed
 
 impl App {
+    fn toggle_active_thinking_at(&mut self, message_index: usize) {
+        match self.state.view_mode {
+            ViewMode::Main => self.state.messages.toggle_thinking_at(message_index),
+            ViewMode::SubAgent { agent_index, .. } => {
+                if let Some(subagent) = self.state.agent.sub_agents.get_mut(agent_index) {
+                    crate::state::messages::MessageState::toggle_thinking_in_messages(
+                        &mut subagent.session_messages,
+                        message_index,
+                    );
+                }
+            }
+            ViewMode::BackgroundTask { task_id, .. } => {
+                let mut background = self
+                    .state
+                    .background
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner());
+                if let Some(task) = background.tasks.iter_mut().find(|task| task.id == task_id) {
+                    crate::state::messages::MessageState::toggle_thinking_in_messages(
+                        &mut task.messages,
+                        message_index,
+                    );
+                }
+            }
+        }
+    }
+
+    fn toggle_active_tool_group_at(&mut self, message_index: usize) {
+        match self.state.view_mode {
+            ViewMode::Main => self.state.messages.toggle_tool_group_at(message_index),
+            ViewMode::SubAgent { agent_index, .. } => {
+                if let Some(subagent) = self.state.agent.sub_agents.get_mut(agent_index) {
+                    crate::state::messages::MessageState::toggle_tool_group_in_messages(
+                        &mut subagent.session_messages,
+                        message_index,
+                    );
+                }
+            }
+            ViewMode::BackgroundTask { task_id, .. } => {
+                let mut background = self
+                    .state
+                    .background
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner());
+                if let Some(task) = background.tasks.iter_mut().find(|task| task.id == task_id) {
+                    crate::state::messages::MessageState::toggle_tool_group_in_messages(
+                        &mut task.messages,
+                        message_index,
+                    );
+                }
+            }
+        }
+    }
+
+    fn cycle_mode(&mut self, direction: i8, app_tx: Option<mpsc::UnboundedSender<AppEvent>>) {
+        self.state.agent_mode = if direction >= 0 {
+            self.state.agent_mode.cycle_next()
+        } else {
+            self.state.agent_mode.cycle_prev()
+        };
+        self.state
+            .agent
+            .set_mode(self.state.agent_mode, app_tx.clone());
+        self.set_status(
+            format!("Mode: {}", self.state.agent_mode.label()),
+            StatusLevel::Info,
+        );
+    }
+
+    fn cycle_primary_agent_profile(
+        &mut self,
+        direction: i8,
+        app_tx: Option<mpsc::UnboundedSender<AppEvent>>,
+    ) -> bool {
+        if self.state.primary_agent_profiles.is_empty() {
+            return false;
+        }
+
+        if self.state.agent.is_running {
+            self.set_status(
+                "Cannot switch primary agent while a run is active",
+                StatusLevel::Warn,
+            );
+            return true;
+        }
+
+        let len = self.state.primary_agent_profiles.len();
+        let current_index = self
+            .state
+            .primary_agent_profiles
+            .iter()
+            .position(|profile| {
+                Some(profile.id.as_str()) == self.state.agent.primary_agent_id.as_deref()
+            });
+        let next_index = match current_index {
+            Some(index) if direction >= 0 => (index + 1) % len,
+            Some(index) => (index + len - 1) % len,
+            None if direction >= 0 => 0,
+            None => len - 1,
+        };
+        let profile = self.state.primary_agent_profiles[next_index].clone();
+        self.apply_primary_agent_profile(profile, app_tx);
+        true
+    }
+
+    fn apply_primary_agent_profile(
+        &mut self,
+        profile: PrimaryAgentProfile,
+        app_tx: Option<mpsc::UnboundedSender<AppEvent>>,
+    ) {
+        let PrimaryAgentProfile {
+            id,
+            provider,
+            model,
+            prompt,
+            description: _,
+        } = profile;
+
+        self.state
+            .agent
+            .set_primary_agent_profile(Some(id.clone()), prompt, app_tx.clone());
+
+        let mut status = format!("Primary agent: {id}");
+        if let (Some(provider), Some(model)) = (provider, model) {
+            let display = format!("{provider}/{model}");
+            status = format!("{status} ({display})");
+
+            if let Some(tx) = app_tx {
+                self.spawn_model_switch(
+                    provider,
+                    model,
+                    display,
+                    crate::event::ModelSwitchContext::SlashCommand,
+                    tx,
+                );
+            } else {
+                warn!(
+                    primary_agent = %id,
+                    provider,
+                    model,
+                    "skipping primary-agent model switch because no app event channel was available"
+                );
+            }
+        }
+
+        self.set_status(status, StatusLevel::Info);
+    }
+
     async fn apply_resume_state(&mut self, session: &ava_types::Session) {
         self.state.agent.apply_session_summary(session);
         for ui_msg in session_messages_to_ui_messages(&session.messages) {
@@ -543,6 +711,22 @@ impl App {
         let startup_selection = cli.resolve_startup_selection().await?;
         let provider = startup_selection.provider.clone();
         let model = startup_selection.model.clone();
+        let primary_agent_profiles = match crate::config::cli::load_primary_agent_profiles().await {
+            Ok(profiles) => profiles
+                .into_iter()
+                .map(|profile| PrimaryAgentProfile {
+                    id: profile.id,
+                    provider: profile.provider,
+                    model: profile.model,
+                    prompt: profile.prompt,
+                    description: profile.description,
+                })
+                .collect(),
+            Err(err) => {
+                warn!(error = %err, "failed to load primary-agent profiles for TUI cycling");
+                Vec::new()
+            }
+        };
 
         // Load model catalog (cache-first, async fetch)
         let model_catalog = ava_config::CatalogState::load().await;
@@ -604,6 +788,7 @@ impl App {
             // Agent
             agent,
             agent_mode: AgentMode::default(),
+            primary_agent_profiles,
             turn_start_index: 0,
             // Session & Persistence
             session,
@@ -896,7 +1081,7 @@ impl App {
     pub(crate) fn finish_routed_run(
         &mut self,
         run_id: u64,
-        result: std::result::Result<ava_agent::stack::AgentRunResult, String>,
+        result: std::result::Result<ava_agent_orchestration::stack::AgentRunResult, String>,
         app_tx: mpsc::UnboundedSender<AppEvent>,
     ) {
         if self.foreground_run_id == Some(run_id) {
@@ -1135,7 +1320,7 @@ impl App {
         }
     }
 
-    fn finish_run(&mut self, mut result: ava_agent::stack::AgentRunResult) {
+    fn finish_run(&mut self, mut result: ava_agent_orchestration::stack::AgentRunResult) {
         self.is_streaming.store(false, Ordering::Relaxed);
         self.state.agent.finish(&result);
 
@@ -1241,6 +1426,7 @@ impl App {
             // Agent
             agent: AgentState::test_new("test-provider", "test-model"),
             agent_mode: AgentMode::default(),
+            primary_agent_profiles: Vec::new(),
             turn_start_index: 0,
             // Session & Persistence
             session,

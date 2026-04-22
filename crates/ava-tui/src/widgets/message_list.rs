@@ -102,6 +102,11 @@ pub fn render_message_list(frame: &mut Frame<'_>, area: Rect, state: &mut AppSta
 
     // Empty state: show the welcome screen across the full area (main view only).
     if messages_source.is_empty() {
+        state.messages.messages_area = area;
+        state.messages.message_line_ranges.clear();
+        state.messages.total_lines = 0;
+        state.messages.visible_height = usize::from(area.height);
+
         // Clear the area first to prevent ghost characters from prior renders.
         frame.render_widget(Clear, area);
         let bg_fill = Block::default().style(Style::default().bg(state.theme.bg_deep));
@@ -121,7 +126,7 @@ pub fn render_message_list(frame: &mut Frame<'_>, area: Rect, state: &mut AppSta
                     .map(|sa| sa.is_running)
                     .unwrap_or(false)
                 {
-                    "Sub-agent is running — open this view to watch live output."
+                    "Sub-agent is running. Transcript details will appear here when available."
                 } else {
                     "No messages in this sub-agent conversation."
                 }
@@ -192,67 +197,53 @@ pub fn render_message_list(frame: &mut Frame<'_>, area: Rect, state: &mut AppSta
         description,
     } = &state.view_mode
     {
-        let truncated_desc = crate::text_utils::truncate_display(description, 60);
-        let total = state.agent.sub_agents.len();
-        let index_label = if total > 0 {
-            format!("#{}/{}", *agent_index + 1, total)
-        } else {
-            "#?/?".to_string()
-        };
-        let (status_label, status_style) = state
-            .agent
-            .sub_agents
-            .get(*agent_index)
-            .map(|sa| {
-                if sa.is_running {
-                    let activity = sa
-                        .current_tool
-                        .as_deref()
-                        .map(|tool| format!("running {tool}"))
-                        .unwrap_or_else(|| "running".to_string());
-                    (
-                        activity,
-                        Style::default()
-                            .fg(state.theme.warning)
-                            .add_modifier(Modifier::BOLD),
-                    )
-                } else {
-                    (
-                        "done".to_string(),
-                        Style::default().fg(state.theme.text_muted),
-                    )
-                }
-            })
-            .unwrap_or_else(|| {
+        if let Some(subagent) = state.agent.sub_agents.get(*agent_index) {
+            let truncated_desc = crate::text_utils::truncate_display(description, 60);
+            let total = state.agent.sub_agents.len();
+            let index_label = format!("#{}/{}", *agent_index + 1, total);
+            let (status_label, status_style) = if subagent.is_running {
+                let activity = subagent
+                    .current_tool
+                    .as_deref()
+                    .map(|tool| format!("running {tool}"))
+                    .unwrap_or_else(|| "running".to_string());
                 (
-                    "detached".to_string(),
-                    Style::default().fg(state.theme.error),
+                    activity,
+                    Style::default()
+                        .fg(state.theme.warning)
+                        .add_modifier(Modifier::BOLD),
                 )
-            });
-        lines.push(Line::from(vec![
-            Span::styled(
-                "\u{2190} ",
-                Style::default()
-                    .fg(state.theme.accent)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                "Main",
-                Style::default()
-                    .fg(state.theme.primary)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(" > ", Style::default().fg(state.theme.text_dimmed)),
-            Span::styled(
-                format!("Sub-agent {index_label}: {truncated_desc}"),
-                Style::default()
-                    .fg(state.theme.accent)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(" · ", Style::default().fg(state.theme.text_dimmed)),
-            Span::styled(status_label, status_style),
-        ]));
-        lines.push(Line::raw(""));
+            } else {
+                (
+                    "done".to_string(),
+                    Style::default().fg(state.theme.text_muted),
+                )
+            };
+            lines.push(Line::from(vec![
+                Span::styled(
+                    "\u{2190} ",
+                    Style::default()
+                        .fg(state.theme.accent)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    "Main",
+                    Style::default()
+                        .fg(state.theme.primary)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(" > ", Style::default().fg(state.theme.text_dimmed)),
+                Span::styled(
+                    format!("Sub-agent {index_label}: {truncated_desc}"),
+                    Style::default()
+                        .fg(state.theme.accent)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(" · ", Style::default().fg(state.theme.text_dimmed)),
+                Span::styled(status_label, status_style),
+            ]));
+            lines.push(Line::raw(""));
+        }
     }
 
     let blocks = derive_blocks(messages_source);

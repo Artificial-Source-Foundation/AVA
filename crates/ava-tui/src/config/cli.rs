@@ -74,7 +74,7 @@ pub struct CliArgs {
     #[arg(long = "watch-path")]
     pub watch_path: Vec<String>,
 
-    /// Trust the current project (allows loading all project-local config: .ava/mcp.json, .ava/hooks/, .ava/tools/, .ava/commands/, .ava/subagents.toml, legacy .ava/agents.toml, .ava/skills/, AGENTS.md, .ava/rules/)
+    /// Trust the current project (allows loading all project-local config: .ava/mcp.json, .ava/hooks/, .ava/tools/, .ava/commands/, .ava/subagents.toml, .ava/skills/, AGENTS.md, .ava/rules/)
     #[arg(long)]
     pub trust: bool,
 
@@ -723,6 +723,15 @@ pub struct StartupSelection {
     pub primary_agent_prompt: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConfiguredPrimaryAgent {
+    pub id: String,
+    pub provider: Option<String>,
+    pub model: Option<String>,
+    pub prompt: Option<String>,
+    pub description: Option<String>,
+}
+
 #[derive(Debug, Clone, serde::Deserialize, Default)]
 struct PrimaryAgentOnlyConfig {
     #[serde(default)]
@@ -741,6 +750,39 @@ impl PrimaryAgentOnlyConfig {
         config.primary_agents = self.primary_agents.clone();
         config.resolve_primary_agent(explicit_id)
     }
+
+    fn configured_primary_agents(&self) -> Vec<ConfiguredPrimaryAgent> {
+        let mut profiles = self
+            .primary_agents
+            .iter()
+            .map(|(id, profile)| ConfiguredPrimaryAgent {
+                id: id.clone(),
+                provider: profile.provider.clone(),
+                model: profile.model.clone(),
+                prompt: profile.prompt.clone(),
+                description: profile.description.clone(),
+            })
+            .collect::<Vec<_>>();
+        profiles.sort_by(|left, right| left.id.cmp(&right.id));
+        profiles
+    }
+}
+
+pub async fn load_primary_agent_profiles() -> color_eyre::Result<Vec<ConfiguredPrimaryAgent>> {
+    let config_path =
+        ava_config::config_file_path().unwrap_or_else(|_| PathBuf::from("config.yaml"));
+    if !config_path.exists() {
+        return Ok(Vec::new());
+    }
+
+    let content = tokio::fs::read_to_string(&config_path).await?;
+    let partial = serde_yaml::from_str::<PrimaryAgentOnlyConfig>(&content).map_err(|err| {
+        color_eyre::eyre::eyre!(
+            "{} could not be parsed for primary_agents: {err}",
+            config_path.display()
+        )
+    })?;
+    Ok(partial.configured_primary_agents())
 }
 
 /// Resolve startup provider/model + primary-agent metadata from multiple

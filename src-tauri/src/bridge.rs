@@ -8,10 +8,10 @@ use std::sync::{
     Arc,
 };
 
-use ava_agent::control_plane::interactive::{InteractiveRequestKind, InteractiveRequestStore};
-use ava_agent::control_plane::queue::resolve_deferred_queue_session;
 use ava_agent::message_queue::MessageQueueControl;
-use ava_agent::stack::{AgentStack, AgentStackConfig};
+use ava_agent_orchestration::stack::{AgentStack, AgentStackConfig};
+use ava_control_plane::interactive::{InteractiveRequestKind, InteractiveRequestStore};
+use ava_control_plane::queue::resolve_deferred_queue_session;
 use ava_permissions::inspector::InspectionContext;
 use ava_tools::core::plan::PlanRequest;
 use ava_tools::core::question::QuestionRequest;

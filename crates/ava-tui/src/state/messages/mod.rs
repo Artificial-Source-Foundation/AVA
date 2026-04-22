@@ -46,6 +46,55 @@ impl Default for MessageState {
 }
 
 impl MessageState {
+    fn toggle_thinking_in(messages: &mut [UiMessage], message_index: usize) {
+        if let Some(msg) = messages.get_mut(message_index) {
+            if matches!(msg.kind, MessageKind::Thinking) {
+                msg.thinking_expanded = !msg.thinking_expanded;
+            }
+        }
+    }
+
+    fn toggle_tool_group_in(messages: &mut [UiMessage], message_index: usize) {
+        if let Some(msg) = messages.get(message_index) {
+            if !matches!(msg.kind, MessageKind::ToolCall | MessageKind::ToolResult) {
+                return;
+            }
+        } else {
+            return;
+        }
+
+        let mut start = message_index;
+        while start > 0 {
+            if matches!(
+                messages[start - 1].kind,
+                MessageKind::ToolCall | MessageKind::ToolResult
+            ) {
+                start -= 1;
+            } else {
+                break;
+            }
+        }
+
+        let mut end = message_index + 1;
+        while end < messages.len() {
+            if matches!(
+                messages[end].kind,
+                MessageKind::ToolCall | MessageKind::ToolResult
+            ) {
+                end += 1;
+            } else {
+                break;
+            }
+        }
+
+        let any_collapsed = messages[start..end]
+            .iter()
+            .any(|message| !message.tool_group_expanded);
+        for message in &mut messages[start..end] {
+            message.tool_group_expanded = any_collapsed;
+        }
+    }
+
     pub fn push(&mut self, message: UiMessage) {
         // Remove transient messages when the user sends a new message.
         if matches!(message.kind, MessageKind::User) {
@@ -90,57 +139,22 @@ impl MessageState {
 
     /// Toggle the expanded/collapsed state of a specific thinking message.
     pub fn toggle_thinking_at(&mut self, message_index: usize) {
-        if let Some(msg) = self.messages.get_mut(message_index) {
-            if matches!(msg.kind, MessageKind::Thinking) {
-                msg.thinking_expanded = !msg.thinking_expanded;
-            }
-        }
+        Self::toggle_thinking_in(&mut self.messages, message_index);
     }
 
     /// Toggle the expanded/collapsed state of a tool action group.
     /// Finds the consecutive group of ToolCall/ToolResult messages surrounding
     /// the given index and flips `tool_group_expanded` on all of them.
     pub fn toggle_tool_group_at(&mut self, message_index: usize) {
-        if let Some(msg) = self.messages.get(message_index) {
-            if !matches!(msg.kind, MessageKind::ToolCall | MessageKind::ToolResult) {
-                return;
-            }
-        } else {
-            return;
-        }
+        Self::toggle_tool_group_in(&mut self.messages, message_index);
+    }
 
-        // Walk backwards to find group start.
-        let mut start = message_index;
-        while start > 0 {
-            if matches!(
-                self.messages[start - 1].kind,
-                MessageKind::ToolCall | MessageKind::ToolResult
-            ) {
-                start -= 1;
-            } else {
-                break;
-            }
-        }
-        // Walk forwards to find group end (exclusive).
-        let mut end = message_index + 1;
-        while end < self.messages.len() {
-            if matches!(
-                self.messages[end].kind,
-                MessageKind::ToolCall | MessageKind::ToolResult
-            ) {
-                end += 1;
-            } else {
-                break;
-            }
-        }
+    pub fn toggle_thinking_in_messages(messages: &mut [UiMessage], message_index: usize) {
+        Self::toggle_thinking_in(messages, message_index);
+    }
 
-        // Determine new state: if any in the group is collapsed, expand all.
-        let any_collapsed = self.messages[start..end]
-            .iter()
-            .any(|m| !m.tool_group_expanded);
-        for msg in &mut self.messages[start..end] {
-            msg.tool_group_expanded = any_collapsed;
-        }
+    pub fn toggle_tool_group_in_messages(messages: &mut [UiMessage], message_index: usize) {
+        Self::toggle_tool_group_in(messages, message_index);
     }
 
     /// Toggle all thinking blocks between expanded and collapsed.

@@ -1,0 +1,13 @@
+#pragma once
+
+#include <string_view>
+
+namespace ava::core {
+
+inline constexpr std::string_view kCxxCompilerId = "@CMAKE_CXX_COMPILER_ID@";
+inline constexpr std::string_view kBuildType = "@AVA_BUILD_TYPE_VALUE@";
+
+inline constexpr bool kWithFtxui = @AVA_RESOLVED_WITH_FTXUI_VALUE@ != 0;
+inline constexpr bool kWithCpr = @AVA_RESOLVED_WITH_CPR_VALUE@ != 0;
+
+}  // namespace ava::core

@@ -30,6 +30,10 @@ Use these first when deciding where code should live today:
 3. [Canonical shared-backend contract (Milestone 6)](shared-backend-contract-m6.md) - normative command/event/session/queue/delegation contract for cross-surface behavior
 4. [Backend contract exceptions](backend-contract-exceptions.md) - versioned registry of intentional adapter-level contract exceptions
 5. [Backend correction implementation roadmap (Milestone 7)](backend-correction-roadmap-m7.md) - implementation sequencing and adoption order against the canonical contract
+6. [C++ backend/TUI migration plan (C++ Milestone 1)](cpp-backend-tui-migration-plan-m1.md) - staged backend/TUI rewrite plan, target CMake layout, and file-by-file migration order
+7. [C++ contract freeze (C++ Milestone 1)](cpp-contract-freeze-m1.md) - concrete Phase 0 freeze scope, existing fixture anchors, drift risks, and Phase 1 signoff gates
+8. [C++ M1 event-stream parity checklist](cpp-m1-event-stream-parity-checklist.md) - concrete headless JSON output checklist required before Phase 1 C++ work can start
+9. [C++ workspace bootstrap README (Milestone 2)](../../cpp/README.md) - implemented CMake build graph bootstrap and explicit placeholder scope for initial C++ targets
 
 ## Active Planning
 

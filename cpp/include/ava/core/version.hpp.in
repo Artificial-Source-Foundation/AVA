@@ -1,0 +1,10 @@
+#pragma once
+
+#include <string_view>
+
+namespace ava::core {
+
+inline constexpr std::string_view kVersion = "@PROJECT_VERSION@";
+inline constexpr std::string_view kProjectName = "@PROJECT_NAME@";
+
+}  // namespace ava::core

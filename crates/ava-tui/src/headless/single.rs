@@ -159,6 +159,19 @@ fn print_headless_slash_message(json_mode: bool, kind: MessageKind, message: &st
     }
 }
 
+fn subagent_complete_event_json(
+    session_id: &str,
+    description: &str,
+    message_count: usize,
+) -> serde_json::Value {
+    serde_json::json!({
+        "type": "subagent_complete",
+        "session_id": session_id,
+        "description": description,
+        "message_count": message_count,
+    })
+}
+
 pub(super) async fn run_single_agent(cli: CliArgs, goal: &str) -> Result<()> {
     let goal = match dispatch_headless_slash_command(&cli, goal).await? {
         HeadlessSlashOutcome::NotHandled => goal.to_string(),
@@ -352,9 +365,7 @@ pub(super) async fn run_single_agent(cli: CliArgs, goal: &str) -> Result<()> {
                     messages,
                     description,
                     ..
-                } => {
-                    serde_json::json!({"type": "sub_agent_complete", "session_id": session_id, "description": description, "message_count": messages.len()})
-                }
+                } => subagent_complete_event_json(session_id, description, messages.len()),
                 AgentEvent::SubAgentUpdate {
                     call_id,
                     description,
@@ -1043,5 +1054,11 @@ mod tests {
 
         assert!(session.metadata.get("primaryAgentId").is_none());
         assert!(session.metadata.get("primaryAgentPrompt").is_none());
+    }
+
+    #[test]
+    fn subagent_complete_event_uses_canonical_type_tag() {
+        let event_json = subagent_complete_event_json("session-1", "done", 2);
+        assert_eq!(event_json["type"], "subagent_complete");
     }
 }

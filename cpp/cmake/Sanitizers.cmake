@@ -1,0 +1,12 @@
+function(ava_enable_sanitizers target_name)
+  if(NOT AVA_ENABLE_SANITIZERS)
+    return()
+  endif()
+
+  if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+    target_compile_options(${target_name} PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+    target_link_options(${target_name} PRIVATE -fsanitize=address,undefined)
+  else()
+    message(WARNING "Sanitizers requested, but unsupported compiler: ${CMAKE_CXX_COMPILER_ID}")
+  endif()
+endfunction()

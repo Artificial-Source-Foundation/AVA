@@ -1,0 +1,76 @@
+add_library(ava_headless_app STATIC
+  ava/cli.cpp
+  ava/session_resolver.cpp
+  ava/agent_config.cpp
+  ava/events.cpp
+  ava/headless_run.cpp
+)
+target_include_directories(ava_headless_app
+  PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/ava"
+)
+target_link_libraries(ava_headless_app
+  PUBLIC
+    ava_runtime
+    CLI11::CLI11
+    nlohmann_json::nlohmann_json
+)
+ava_apply_warnings(ava_headless_app)
+ava_enable_sanitizers(ava_headless_app)
+
+add_executable(ava_cli
+  ava/main.cpp
+)
+target_link_libraries(ava_cli
+  PRIVATE
+    ava_headless_app
+    fmt::fmt
+    spdlog::spdlog
+)
+ava_apply_warnings(ava_cli)
+ava_enable_sanitizers(ava_cli)
+
+add_library(ava_tui_app STATIC
+  ava_tui/state.cpp
+)
+target_include_directories(ava_tui_app
+  PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/ava_tui"
+)
+target_link_libraries(ava_tui_app
+  PUBLIC
+    ava_runtime
+)
+ava_apply_warnings(ava_tui_app)
+ava_enable_sanitizers(ava_tui_app)
+
+add_executable(ava_tui
+  ava_tui/main.cpp
+)
+target_include_directories(ava_tui
+  PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/ava"
+)
+target_link_libraries(ava_tui
+  PRIVATE
+    ava_tui_app
+    ava_headless_app
+    ava_runtime
+    CLI11::CLI11
+    fmt::fmt
+)
+ava_apply_warnings(ava_tui)
+ava_enable_sanitizers(ava_tui)
+
+if(AVA_BUILD_SMOKE)
+  add_executable(ava_smoke
+    ava_smoke/main.cpp
+  )
+  target_link_libraries(ava_smoke
+    PRIVATE
+      ava_runtime
+      fmt::fmt
+  )
+  ava_apply_warnings(ava_smoke)
+  ava_enable_sanitizers(ava_smoke)
+endif()

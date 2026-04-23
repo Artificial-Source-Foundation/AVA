@@ -3,7 +3,12 @@ node_modules/
 
 # Build output
 dist/
+build/
 target/
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+compile_commands.json
 *.tsbuildinfo
 
 # pnpm

@@ -19,6 +19,7 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(Dependencies)
 include(Warnings)
 include(Sanitizers)
+include(ToolchainHygiene)
 
 if(AVA_ENABLE_LTO)
   include(CheckIPOSupported)

@@ -1,0 +1,13 @@
+function(ava_apply_toolchain_hygiene target_name)
+  if(NOT TARGET ${target_name})
+    message(FATAL_ERROR "ava_apply_toolchain_hygiene called with unknown target: ${target_name}")
+  endif()
+
+  get_target_property(ava_target_type ${target_name} TYPE)
+  if(ava_target_type STREQUAL "INTERFACE_LIBRARY")
+    target_compile_features(${target_name} INTERFACE cxx_std_20)
+  else()
+    target_compile_features(${target_name} PUBLIC cxx_std_20)
+    set_target_properties(${target_name} PROPERTIES CXX_STANDARD 20 CXX_EXTENSIONS OFF)
+  endif()
+endfunction()

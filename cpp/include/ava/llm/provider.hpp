@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -175,6 +176,13 @@ struct ResolvedThinkingConfig {
 
 class Provider {
 public:
+  using StreamChunkSink = std::function<bool(const types::StreamChunk&)>;
+
+  enum class StreamDispatchResult {
+    Unsupported,
+    Completed,
+  };
+
   virtual ~Provider() = default;
 
   [[nodiscard]] virtual std::string model_name() const = 0;
@@ -214,6 +222,21 @@ public:
       const std::vector<types::Tool>& tools,
       ThinkingConfig thinking
   ) const = 0;
+
+  [[nodiscard]] virtual StreamDispatchResult stream_generate(
+      const std::vector<ChatMessage>& messages,
+      const std::vector<types::Tool>& tools,
+      ThinkingConfig thinking,
+      const StreamChunkSink& on_chunk
+  ) const {
+    const auto chunks = generate_stream(messages, tools, thinking);
+    for(const auto& chunk : chunks) {
+      if(on_chunk && !on_chunk(chunk)) {
+        break;
+      }
+    }
+    return StreamDispatchResult::Completed;
+  }
 };
 
 using ProviderPtr = std::shared_ptr<Provider>;

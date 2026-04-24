@@ -25,6 +25,7 @@ struct AgentConfig {
 enum class AgentEventKind {
   RunStarted,
   TurnStarted,
+  AssistantResponseDelta,
   AssistantResponse,
   ToolCall,
   ToolResult,
@@ -34,6 +35,7 @@ enum class AgentEventKind {
 
 enum class AgentCompletionReason {
   Completed,
+  Cancelled,
   MaxTurns,
   Stuck,
   Error,
@@ -41,6 +43,7 @@ enum class AgentCompletionReason {
 
 struct AgentEvent {
   AgentEventKind kind{AgentEventKind::RunStarted};
+  std::optional<std::string> run_id;
   std::size_t turn{0};
   std::string message;
   std::optional<ava::types::ToolCall> tool_call;
@@ -53,6 +56,9 @@ using AgentEventSink = std::function<void(const AgentEvent&)>;
 struct AgentRunInput {
   std::string goal;
   MessageQueue* queue{nullptr};
+  std::optional<std::string> run_id;
+  std::function<bool()> is_cancelled;
+  bool stream{true};
 };
 
 struct AgentRunResult {

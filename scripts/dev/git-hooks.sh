@@ -22,6 +22,28 @@ run_low_priority() {
   nice -n 15 "$@"
 }
 
+run_exact_rust_test() {
+  local label="$1"
+  shift
+  local output_file
+
+  output_file="$(mktemp "${TMPDIR:-/tmp}/ava-exact-test.XXXXXX")"
+  printf '[hooks] %s\n' "$label"
+
+  if ! bash scripts/dev/run-rust-throttled.sh "$@" 2>&1 | tee "$output_file"; then
+    rm -f "$output_file"
+    return 1
+  fi
+
+  if ! grep -Eq 'test result: ok\. [1-9][0-9]* passed' "$output_file"; then
+    printf '[hooks] exact test matched zero tests: %s\n' "$label" >&2
+    rm -f "$output_file"
+    return 1
+  fi
+
+  rm -f "$output_file"
+}
+
 run_rust_gate() {
   run_step "cargo fmt --all --check" \
     bash scripts/dev/run-rust-throttled.sh cargo fmt --all --check
@@ -32,14 +54,14 @@ run_rust_gate() {
   run_step "cargo nextest run -p ava-agent --test agent_loop --test reflection_loop -j 4 --status-level fail" \
     bash scripts/dev/run-rust-throttled.sh cargo nextest run -p ava-agent --test agent_loop --test reflection_loop -j 4 --status-level fail
 
-  run_step "cargo test -p ava-agent control_plane::tests::control_plane_contract_fixture_matches_current_wire_contract -- --exact" \
-    bash scripts/dev/run-rust-throttled.sh cargo test -p ava-agent control_plane::tests::control_plane_contract_fixture_matches_current_wire_contract -- --exact
+  run_exact_rust_test "cargo test -p ava-agent control_plane::tests::control_plane_contract_fixture_matches_current_wire_contract -- --exact" \
+    cargo test -p ava-agent control_plane::tests::control_plane_contract_fixture_matches_current_wire_contract -- --exact
 
-  run_step "cargo test -p ava-agent control_plane::sessions::tests::run_context_from_session_recovers_effective_run_settings -- --exact" \
-    bash scripts/dev/run-rust-throttled.sh cargo test -p ava-agent control_plane::sessions::tests::run_context_from_session_recovers_effective_run_settings -- --exact
+  run_exact_rust_test "cargo test -p ava-agent control_plane::sessions::tests::run_context_from_session_recovers_effective_run_settings -- --exact" \
+    cargo test -p ava-agent control_plane::sessions::tests::run_context_from_session_recovers_effective_run_settings -- --exact
 
-  run_step "cargo test -p ava-agent control_plane::sessions::tests::run_context_from_session_falls_back_to_routing_identity -- --exact" \
-    bash scripts/dev/run-rust-throttled.sh cargo test -p ava-agent control_plane::sessions::tests::run_context_from_session_falls_back_to_routing_identity -- --exact
+  run_exact_rust_test "cargo test -p ava-agent control_plane::sessions::tests::run_context_from_session_falls_back_to_routing_identity -- --exact" \
+    cargo test -p ava-agent control_plane::sessions::tests::run_context_from_session_falls_back_to_routing_identity -- --exact
 
   run_step "cargo nextest run -p ava-agent-orchestration --test stack_test --test e2e_test -j 4 --status-level fail" \
     bash scripts/dev/run-rust-throttled.sh cargo nextest run -p ava-agent-orchestration --test stack_test --test e2e_test -j 4 --status-level fail
@@ -47,44 +69,44 @@ run_rust_gate() {
   run_step "cargo nextest run -p ava-control-plane -j 4 --status-level fail" \
     bash scripts/dev/run-rust-throttled.sh cargo nextest run -p ava-control-plane -j 4 --status-level fail
 
-  run_step "cargo test -p ava-web resolve_plan_route_requires_request_id_and_preserves_pending_state -- --exact" \
-    bash scripts/dev/run-rust-throttled.sh cargo test -p ava-web resolve_plan_route_requires_request_id_and_preserves_pending_state -- --exact
+  run_exact_rust_test "cargo test -p ava-web tests::resolve_plan_route_requires_request_id_and_preserves_pending_state -- --exact" \
+    cargo test -p ava-web tests::resolve_plan_route_requires_request_id_and_preserves_pending_state -- --exact
 
-  run_step "cargo test -p ava-web clear_message_queue_rejects_unsupported_follow_up_targets -- --exact" \
-    bash scripts/dev/run-rust-throttled.sh cargo test -p ava-web clear_message_queue_rejects_unsupported_follow_up_targets -- --exact
+  run_exact_rust_test "cargo test -p ava-web tests::clear_message_queue_rejects_unsupported_follow_up_targets -- --exact" \
+    cargo test -p ava-web tests::clear_message_queue_rejects_unsupported_follow_up_targets -- --exact
 
-  run_step "cargo test -p ava-web projected_backend_events_preserve_required_correlation_fields -- --exact" \
-    bash scripts/dev/run-rust-throttled.sh cargo test -p ava-web projected_backend_events_preserve_required_correlation_fields -- --exact
+  run_exact_rust_test "cargo test -p ava-web api::tests::projected_backend_events_preserve_required_correlation_fields -- --exact" \
+    cargo test -p ava-web api::tests::projected_backend_events_preserve_required_correlation_fields -- --exact
 
-  run_step "cargo test -p ava-web retry_route_reuses_persisted_run_context_metadata -- --exact" \
-    bash scripts/dev/run-rust-throttled.sh cargo test -p ava-web retry_route_reuses_persisted_run_context_metadata -- --exact
+  run_exact_rust_test "cargo test -p ava-web tests::retry_route_reuses_persisted_run_context_metadata -- --exact" \
+    cargo test -p ava-web tests::retry_route_reuses_persisted_run_context_metadata -- --exact
 
-  run_step "cargo test -p ava-web edit_resend_route_reuses_persisted_run_context_metadata -- --exact" \
-    bash scripts/dev/run-rust-throttled.sh cargo test -p ava-web edit_resend_route_reuses_persisted_run_context_metadata -- --exact
+  run_exact_rust_test "cargo test -p ava-web tests::edit_resend_route_reuses_persisted_run_context_metadata -- --exact" \
+    cargo test -p ava-web tests::edit_resend_route_reuses_persisted_run_context_metadata -- --exact
 
-  run_step "cargo test -p ava-web regenerate_route_reuses_persisted_run_context_metadata -- --exact" \
-    bash scripts/dev/run-rust-throttled.sh cargo test -p ava-web regenerate_route_reuses_persisted_run_context_metadata -- --exact
+  run_exact_rust_test "cargo test -p ava-web tests::regenerate_route_reuses_persisted_run_context_metadata -- --exact" \
+    cargo test -p ava-web tests::regenerate_route_reuses_persisted_run_context_metadata -- --exact
 
-  run_step "cargo test -p ava-tui foreground_required_control_plane_events_are_visible_in_tui -- --exact" \
-    bash scripts/dev/run-rust-throttled.sh cargo test -p ava-tui foreground_required_control_plane_events_are_visible_in_tui -- --exact
+  run_exact_rust_test "cargo test -p ava-tui app::tests::foreground_required_control_plane_events_are_visible_in_tui -- --exact" \
+    cargo test -p ava-tui app::tests::foreground_required_control_plane_events_are_visible_in_tui -- --exact
 
-  run_step "cargo test -p ava-tui question_requests_use_shared_timeout_and_clear_lifecycle -- --exact" \
-    bash scripts/dev/run-rust-throttled.sh cargo test -p ava-tui question_requests_use_shared_timeout_and_clear_lifecycle -- --exact
+  run_exact_rust_test "cargo test -p ava-tui app::tests::question_requests_use_shared_timeout_and_clear_lifecycle -- --exact" \
+    cargo test -p ava-tui app::tests::question_requests_use_shared_timeout_and_clear_lifecycle -- --exact
 
-  run_step "cargo test -p ava-tui cancelling_tui_run_clears_pending_approval_via_shared_lifecycle -- --exact" \
-    bash scripts/dev/run-rust-throttled.sh cargo test -p ava-tui cancelling_tui_run_clears_pending_approval_via_shared_lifecycle -- --exact
+  run_exact_rust_test "cargo test -p ava-tui app::tests::cancelling_tui_run_clears_pending_approval_via_shared_lifecycle -- --exact" \
+    cargo test -p ava-tui app::tests::cancelling_tui_run_clears_pending_approval_via_shared_lifecycle -- --exact
 
-  run_step "cargo test --manifest-path src-tauri/Cargo.toml desktop_control_plane_event_shapes_follow_shared_requirements -- --exact" \
-    bash scripts/dev/run-rust-throttled.sh cargo test --manifest-path src-tauri/Cargo.toml desktop_control_plane_event_shapes_follow_shared_requirements -- --exact
+  run_exact_rust_test "cargo test --manifest-path src-tauri/Cargo.toml events::tests::desktop_control_plane_event_shapes_follow_shared_requirements -- --exact" \
+    cargo test --manifest-path src-tauri/Cargo.toml events::tests::desktop_control_plane_event_shapes_follow_shared_requirements -- --exact
 
-  run_step "cargo test --manifest-path src-tauri/Cargo.toml submit_goal_returns_immediate_accepted_envelope_shape -- --exact" \
-    bash scripts/dev/run-rust-throttled.sh cargo test --manifest-path src-tauri/Cargo.toml submit_goal_returns_immediate_accepted_envelope_shape -- --exact
+  run_exact_rust_test "cargo test --manifest-path src-tauri/Cargo.toml commands::agent_commands::tests::submit_goal_returns_immediate_accepted_envelope_shape -- --exact" \
+    cargo test --manifest-path src-tauri/Cargo.toml commands::agent_commands::tests::submit_goal_returns_immediate_accepted_envelope_shape -- --exact
 
-  run_step "cargo test --manifest-path src-tauri/Cargo.toml replay_commands_share_submit_accepted_envelope_semantics -- --exact" \
-    bash scripts/dev/run-rust-throttled.sh cargo test --manifest-path src-tauri/Cargo.toml replay_commands_share_submit_accepted_envelope_semantics -- --exact
+  run_exact_rust_test "cargo test --manifest-path src-tauri/Cargo.toml commands::agent_commands::tests::replay_commands_share_submit_accepted_envelope_semantics -- --exact" \
+    cargo test --manifest-path src-tauri/Cargo.toml commands::agent_commands::tests::replay_commands_share_submit_accepted_envelope_semantics -- --exact
 
-  run_step "cargo test --manifest-path src-tauri/Cargo.toml take_matching_pending_reply_only_consumes_matching_request_ids -- --exact" \
-    bash scripts/dev/run-rust-throttled.sh cargo test --manifest-path src-tauri/Cargo.toml take_matching_pending_reply_only_consumes_matching_request_ids -- --exact
+  run_exact_rust_test "cargo test --manifest-path src-tauri/Cargo.toml commands::agent_commands::tests::take_matching_pending_reply_only_consumes_matching_request_ids -- --exact" \
+    cargo test --manifest-path src-tauri/Cargo.toml commands::agent_commands::tests::take_matching_pending_reply_only_consumes_matching_request_ids -- --exact
 
   run_step "cargo check -p ava-tui --features web" \
     bash scripts/dev/run-rust-throttled.sh cargo check -p ava-tui --features web

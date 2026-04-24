@@ -2,7 +2,7 @@
 title: "C++ Contract Freeze (C++ Milestone 1)"
 description: "Concrete freeze scope, fixture anchors, and signoff gates before backend/TUI C++ porting."
 order: 11
-updated: "2026-04-22"
+updated: "2026-04-23"
 ---
 
 # C++ Contract Freeze (C++ Milestone 1)
@@ -291,3 +291,21 @@ Post-signoff drift prevention:
 
 1. Any change to a frozen file requires explicit freeze-lift review/signoff before merge: mark the PR `freeze-lift`, update this checklist and the parity checklist if relevant, and get approval from the backend-ownership reviewer before merge.
 2. Existing Rust contract/fixture tests that anchor the freeze remain mandatory and must stay green for freeze-governed changes.
+
+## Freeze Authority and Enforcement Surface (Implemented)
+
+Authority:
+
+1. Backend ownership authority for C++ Milestone 1 freeze-governed files is codified in `.github/CODEOWNERS` under the **C++ Milestone 1 contract-freeze authority** section.
+2. The normative freeze source-of-truth remains this checklist plus [cpp-m1-event-stream-parity-checklist.md](cpp-m1-event-stream-parity-checklist.md).
+
+Enforcement (lightweight governance lane):
+
+1. CI now runs `.github/workflows/ci.yml` job **C++ M1 Freeze Guard** on pull requests.
+2. Guard script: `scripts/dev/verify-cpp-m1-freeze.sh`.
+3. If no freeze-governed files changed, the guard exits cleanly.
+4. If freeze-governed files changed, the guard requires both:
+   - PR label `freeze-lift` (wired via `AVA_CPP_M1_FREEZE_LIFT=1` in CI)
+   - a same-PR update to this checklist and/or the parity checklist.
+5. Direct pushes to protected branches must remain blocked by branch protection requiring pull-request CI; the freeze guard is intentionally PR-contextual because the `freeze-lift` approval signal is a PR label.
+6. Local/manual verification entrypoint: `just freeze-m1-check [<git-range>]`.

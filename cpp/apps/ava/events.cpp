@@ -11,6 +11,8 @@ namespace {
   switch(reason) {
     case ava::agent::AgentCompletionReason::Completed:
       return "completed";
+    case ava::agent::AgentCompletionReason::Cancelled:
+      return "cancelled";
     case ava::agent::AgentCompletionReason::MaxTurns:
       return "max_turns";
     case ava::agent::AgentCompletionReason::Stuck:
@@ -24,15 +26,24 @@ namespace {
 }  // namespace
 
 nlohmann::json headless_event_to_ndjson(const ava::agent::AgentEvent& event) {
+  auto with_run_id = [&](nlohmann::json payload) {
+    if(event.run_id.has_value()) {
+      payload["run_id"] = *event.run_id;
+    }
+    return payload;
+  };
+
   switch(event.kind) {
     case ava::agent::AgentEventKind::RunStarted:
-      return nlohmann::json{{"type", "run_started"}};
+      return with_run_id(nlohmann::json{{"type", "run_started"}});
     case ava::agent::AgentEventKind::TurnStarted:
-      return nlohmann::json{{"type", "turn_started"}, {"turn", event.turn}};
+      return with_run_id(nlohmann::json{{"type", "turn_started"}, {"turn", event.turn}});
+    case ava::agent::AgentEventKind::AssistantResponseDelta:
+      return with_run_id(nlohmann::json{{"type", "assistant_response_delta"}, {"turn", event.turn}, {"delta", event.message}});
     case ava::agent::AgentEventKind::AssistantResponse:
-      return nlohmann::json{{"type", "assistant_response"}, {"turn", event.turn}, {"content", event.message}};
+      return with_run_id(nlohmann::json{{"type", "assistant_response"}, {"turn", event.turn}, {"content", event.message}});
     case ava::agent::AgentEventKind::ToolCall: {
-      nlohmann::json json{{"type", "tool_call"}, {"turn", event.turn}};
+      nlohmann::json json = with_run_id(nlohmann::json{{"type", "tool_call"}, {"turn", event.turn}});
       if(event.tool_call.has_value()) {
         json["call_id"] = event.tool_call->id;
         json["tool"] = event.tool_call->name;
@@ -41,7 +52,7 @@ nlohmann::json headless_event_to_ndjson(const ava::agent::AgentEvent& event) {
       return json;
     }
     case ava::agent::AgentEventKind::ToolResult: {
-      nlohmann::json json{{"type", "tool_result"}, {"turn", event.turn}};
+      nlohmann::json json = with_run_id(nlohmann::json{{"type", "tool_result"}, {"turn", event.turn}});
       if(event.tool_result.has_value()) {
         json["call_id"] = event.tool_result->call_id;
         json["content"] = event.tool_result->content;
@@ -51,22 +62,22 @@ nlohmann::json headless_event_to_ndjson(const ava::agent::AgentEvent& event) {
     }
     case ava::agent::AgentEventKind::Completion: {
       // Preserve canonical tag spelling for overlapping lifecycle tags.
-      nlohmann::json json{{"type", std::string(ava::control_plane::canonical_event_kind_to_type_tag(
-                                         ava::control_plane::CanonicalEventKind::Complete))},
-                          {"turn", event.turn},
-                          {"message", event.message}};
+      nlohmann::json json = with_run_id(nlohmann::json{{"type", std::string(ava::control_plane::canonical_event_kind_to_type_tag(
+                                              ava::control_plane::CanonicalEventKind::Complete))},
+                                         {"turn", event.turn},
+                                         {"message", event.message}});
       if(event.completion_reason.has_value()) {
         json["reason"] = completion_reason_to_string(*event.completion_reason);
       }
       return json;
     }
     case ava::agent::AgentEventKind::Error:
-      return nlohmann::json{{"type",
-                             std::string(ava::control_plane::canonical_event_kind_to_type_tag(
-                                 ava::control_plane::CanonicalEventKind::Error
-                             ))},
-                            {"turn", event.turn},
-                            {"message", event.message}};
+      return with_run_id(nlohmann::json{{"type",
+                                         std::string(ava::control_plane::canonical_event_kind_to_type_tag(
+                                             ava::control_plane::CanonicalEventKind::Error
+                                         ))},
+                                        {"turn", event.turn},
+                                        {"message", event.message}});
   }
 
   return nlohmann::json{{"type", "error"}, {"message", "unhandled event kind"}};
@@ -85,6 +96,11 @@ void print_headless_event_text(const ava::agent::AgentEvent& event) {
         std::cout << event.message << "\n";
       }
       return;
+    case ava::agent::AgentEventKind::AssistantResponseDelta:
+      if(!event.message.empty()) {
+        std::cout << event.message;
+      }
+      return;
     case ava::agent::AgentEventKind::ToolCall:
       if(event.tool_call.has_value()) {
         std::cout << "[tool_call] " << event.tool_call->name << "\n";
@@ -96,9 +112,7 @@ void print_headless_event_text(const ava::agent::AgentEvent& event) {
       }
       return;
     case ava::agent::AgentEventKind::Completion:
-      if(!event.message.empty()) {
-        std::cout << "\n" << event.message << "\n";
-      }
+      std::cout << "\n";
       return;
     case ava::agent::AgentEventKind::Error:
       std::cerr << "[error] " << event.message << "\n";

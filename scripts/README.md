@@ -16,6 +16,8 @@ Repository scripts are grouped by purpose instead of collecting at the root of `
   - path-aware `pre-push` checks
   - local Rust gate checks used by `just check` and `pre-push` on Rust/general changes
 - `scripts/dev/run-rust-throttled.sh` — low-priority wrapper for heavy local Rust verification commands.
+- `scripts/dev/verify-cpp-m1-freeze.sh` — C++ Milestone 1 contract-freeze governance guard (checks freeze-governed file changes and requires freeze-lift + checklist updates when applicable).
+- `scripts/dev/ensure-cmake.sh` — shared CMake 3.28+ locator/bootstrap helper used by the C++ milestone `just cpp-*` commands and CI.
 - `scripts/dev/rust-coverage.sh` — workspace LCOV coverage.
 - `scripts/dev/rust-outdated.sh` — Rust dependency freshness check.
 - `scripts/benchmarks/release-benchmark.sh` — release binary benchmark checks.

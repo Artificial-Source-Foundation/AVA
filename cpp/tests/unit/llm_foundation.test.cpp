@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
 
 #include <chrono>
 #include <thread>
@@ -123,7 +124,7 @@ TEST_CASE("factory selects openai and stubs deferred providers", "[ava_llm]") {
 }
 
 TEST_CASE("mock provider pops queued responses and streams", "[ava_llm]") {
-  auto provider = ava::llm::create_mock_provider("mock-model", {"first", "second"});
+  auto provider = ava::llm::create_mock_provider("mock-model", std::vector<std::string>{"first", "second"});
 
   const auto one = provider->generate({ava::llm::ChatMessage::user("hello")}, {}, ava::llm::ThinkingConfig::disabled());
   REQUIRE(one.content == "first");
@@ -237,6 +238,25 @@ TEST_CASE("openai stream parser captures tool call deltas", "[ava_llm]") {
   REQUIRE(tool->tool_call->id == "call_1");
   REQUIRE(tool->tool_call->name == "read");
   REQUIRE(tool->tool_call->arguments_delta == "{\"path\":");
+}
+
+TEST_CASE("openai stream parser emits all tool call entries in one chunk payload", "[ava_llm]") {
+  const nlohmann::json tool_payload = {
+      {"choices",
+       {{{"delta",
+          {{"tool_calls",
+            {{{"index", 0}, {"id", "call_1"}, {"function", {{"name", "read"}, {"arguments", "{\"path\":\"a\"}"}}}},
+             {{"index", 1}, {"id", "call_2"}, {"function", {{"name", "glob"}, {"arguments", "{\"pattern\":\"*.cpp\"}"}}}}}}}}}}},
+  };
+
+  const auto tools = ava::llm::openai::parse_stream_events(tool_payload);
+  REQUIRE(tools.size() == 2);
+  REQUIRE(tools.at(0).tool_call.has_value());
+  REQUIRE(tools.at(0).tool_call->index == 0);
+  REQUIRE(tools.at(0).tool_call->id == "call_1");
+  REQUIRE(tools.at(1).tool_call.has_value());
+  REQUIRE(tools.at(1).tool_call->index == 1);
+  REQUIRE(tools.at(1).tool_call->id == "call_2");
 }
 
 TEST_CASE("provider normalization and pricing use canonical config metadata", "[ava_llm]") {

@@ -30,7 +30,7 @@ ProviderPtr create_provider(
   const auto normalized = normalize_provider_alias(provider_name);
 
   if(normalized == "mock") {
-    return create_mock_provider(model, {});
+    return create_mock_provider(model, std::vector<std::string>{});
   }
 
   auto credential = credentials.get(provider_name);

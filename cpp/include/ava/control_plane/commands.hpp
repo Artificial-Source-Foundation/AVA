@@ -90,5 +90,7 @@ struct CommandSpec {
     ControlPlaneCommand command,
     std::optional<std::uint32_t> post_complete_group = std::nullopt
 );
+[[nodiscard]] std::optional<std::string_view> queue_command_label(ControlPlaneCommand command);
+[[nodiscard]] std::optional<ControlPlaneCommand> queue_command_from_alias(std::string_view alias);
 
 }  // namespace ava::control_plane

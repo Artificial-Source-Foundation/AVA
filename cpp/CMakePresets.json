@@ -1,0 +1,62 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 28,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "cpp-debug",
+      "displayName": "AVA C++ Debug",
+      "description": "Debug bootstrap build for the C++ milestone tree",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/../build/cpp/debug",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "AVA_BUILD_TESTS": "ON",
+        "AVA_BUILD_SMOKE": "ON"
+      }
+    },
+    {
+      "name": "cpp-release",
+      "displayName": "AVA C++ Release",
+      "description": "Release bootstrap build for the C++ milestone tree",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/../build/cpp/release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "AVA_BUILD_TESTS": "ON",
+        "AVA_BUILD_SMOKE": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "cpp-debug",
+      "configurePreset": "cpp-debug"
+    },
+    {
+      "name": "cpp-release",
+      "configurePreset": "cpp-release"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "cpp-debug",
+      "configurePreset": "cpp-debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "cpp-release",
+      "configurePreset": "cpp-release",
+      "output": {
+        "outputOnFailure": true
+      }
+    }
+  ]
+}

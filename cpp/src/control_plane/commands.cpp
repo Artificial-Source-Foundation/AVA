@@ -187,4 +187,31 @@ std::optional<ava::types::MessageTier> queue_message_tier(
   }
 }
 
+std::optional<std::string_view> queue_command_label(ControlPlaneCommand command) {
+  switch(command) {
+    case ControlPlaneCommand::SteerAgent:
+      return "steering";
+    case ControlPlaneCommand::FollowUpAgent:
+      return "follow-up";
+    case ControlPlaneCommand::PostCompleteAgent:
+      return "post-complete";
+    default:
+      return std::nullopt;
+  }
+}
+
+std::optional<ControlPlaneCommand> queue_command_from_alias(std::string_view alias) {
+  if(alias == "steering" || alias == "steer_agent") {
+    return ControlPlaneCommand::SteerAgent;
+  }
+  if(alias == "follow-up" || alias == "followup" || alias == "follow_up" || alias == "follow_up_agent") {
+    return ControlPlaneCommand::FollowUpAgent;
+  }
+  if(alias == "post-complete" || alias == "postcomplete" || alias == "post_complete"
+     || alias == "post_complete_agent") {
+    return ControlPlaneCommand::PostCompleteAgent;
+  }
+  return std::nullopt;
+}
+
 }  // namespace ava::control_plane

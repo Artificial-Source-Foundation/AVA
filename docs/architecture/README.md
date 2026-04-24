@@ -2,7 +2,7 @@
 title: "Architecture"
 description: "Internal structure, crate boundaries, and architecture transition docs for AVA."
 order: 1
-updated: "2026-04-22"
+updated: "2026-04-24"
 ---
 
 # Architecture Docs
@@ -34,6 +34,7 @@ Use these first when deciding where code should live today:
 7. [C++ contract freeze (C++ Milestone 1)](cpp-contract-freeze-m1.md) - concrete Phase 0 freeze scope, existing fixture anchors, drift risks, and Phase 1 signoff gates
 8. [C++ M1 event-stream parity checklist](cpp-m1-event-stream-parity-checklist.md) - concrete headless JSON output checklist required before Phase 1 C++ work can start
 9. [C++ workspace bootstrap README (Milestone 2)](../../cpp/README.md) - implemented CMake build graph bootstrap and explicit placeholder scope for initial C++ targets
+10. [C++ Milestone 2 boundaries (green-fix pass)](../../cpp/MILESTONE2_BOUNDARIES.md) - scoped M2 bootstrap quality/documentation fixes, verification lane, and explicit deferred boundaries
 
 ## Active Planning
 
@@ -41,6 +42,8 @@ These are current forward-looking planning docs that build on the canonical seam
 
 1. [Agent backend modularization roadmap (Track Milestone 1)](agent-backend-modularization-roadmap-m1.md) - active planning roadmap for modularization hotspots, target owner seams, phased execution order, risks, and validation gates, building on the existing M6/M7 contract baseline
 2. [Plugin boundary checklist](plugin-boundary.md) - future-track note for optional plugin migration work
+3. [C++ backend/TUI migration completion gap audit (Post-M16)](cpp-backend-tui-migration-completion-gap-audit-m16.md) - planning audit of completion-critical gaps, deferred inventory, and RP evidence targets after Milestone 16
+4. [C++ backend/TUI parity contract audit (Post-M16)](cpp-backend-tui-parity-contract-audit-post-m16.md) - planning checklist of scoped backend/headless/TUI contract evidence needed before claiming migration completion
 
 ## Historical Milestone Artifacts
 

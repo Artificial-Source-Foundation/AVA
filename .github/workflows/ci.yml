@@ -15,6 +15,23 @@ concurrency:
 
 jobs:
   # ---------------------------------------------------------------------------
+  # C++ Milestone 1 contract-freeze governance guard
+  # ---------------------------------------------------------------------------
+  cpp-m1-freeze-guard:
+    name: C++ M1 Freeze Guard
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify C++ Milestone 1 freeze governance
+        env:
+          AVA_CPP_M1_FREEZE_LIFT: ${{ contains(github.event.pull_request.labels.*.name, 'freeze-lift') && '1' || '0' }}
+        run: bash scripts/dev/verify-cpp-m1-freeze.sh "${{ github.event.pull_request.base.sha }}...${{ github.sha }}"
+
+  # ---------------------------------------------------------------------------
   # Combined JS/TS checks (saves 3 separate runner startups)
   # ---------------------------------------------------------------------------
   frontend:
@@ -118,6 +135,37 @@ jobs:
         env:
           RUSTDOCFLAGS: "-D warnings"
         run: cargo doc --workspace --no-deps
+
+  # ---------------------------------------------------------------------------
+  # C++ migration tree smoke (configure + build + ctest)
+  # ---------------------------------------------------------------------------
+  cpp:
+    name: C++ (CMake + CTest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pinned CMake
+        run: |
+          cmake_path="$(AVA_BOOTSTRAP_CMAKE=1 bash scripts/dev/ensure-cmake.sh)"
+          echo "$(dirname "$cmake_path")" >> "$GITHUB_PATH"
+
+      - name: Install C++ dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build libsqlite3-dev
+
+      - name: Configure CMake
+        run: cmake --preset cpp-release
+        working-directory: cpp
+
+      - name: Build C++ targets
+        run: cmake --build --preset cpp-release
+        working-directory: cpp
+
+      - name: Run C++ tests
+        run: ctest --preset cpp-release --output-on-failure
+        working-directory: cpp
 
   # ---------------------------------------------------------------------------
   # Security (lightweight, no build needed for audit)

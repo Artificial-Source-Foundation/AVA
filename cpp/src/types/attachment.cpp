@@ -1,7 +1,7 @@
 #include "ava/types/attachment.hpp"
 
+#include <cctype>
 #include <optional>
-#include <sstream>
 
 namespace ava::types {
 namespace {
@@ -70,27 +70,32 @@ std::string_view ContextAttachment::mention_prefix() const {
 
 std::pair<std::vector<ContextAttachment>, std::string> parse_mentions(std::string_view text) {
   std::vector<ContextAttachment> attachments;
-  std::vector<std::string> cleaned_tokens;
-
-  std::istringstream stream(std::string(text));
-  std::string token;
-  while(stream >> token) {
-    if(token.starts_with('@')) {
-      auto parsed = try_parse_mention(std::string_view(token).substr(1));
-      if(parsed.has_value()) {
-        attachments.push_back(std::move(*parsed));
-        continue;
-      }
-    }
-    cleaned_tokens.push_back(token);
-  }
-
   std::string cleaned;
-  for(std::size_t index = 0; index < cleaned_tokens.size(); ++index) {
-    if(index != 0) {
-      cleaned += ' ';
+  cleaned.reserve(text.size());
+
+  std::size_t index = 0;
+  while(index < text.size()) {
+    if(text[index] != '@') {
+      cleaned.push_back(text[index]);
+      ++index;
+      continue;
     }
-    cleaned += cleaned_tokens[index];
+
+    auto end = index + 1;
+    while(end < text.size() && !std::isspace(static_cast<unsigned char>(text[end]))) {
+      ++end;
+    }
+
+    const auto token = text.substr(index + 1, end - (index + 1));
+    auto parsed = try_parse_mention(token);
+    if(parsed.has_value()) {
+      attachments.push_back(std::move(*parsed));
+      index = end;
+      continue;
+    }
+
+    cleaned.append(text.substr(index, end - index));
+    index = end;
   }
 
   return {std::move(attachments), std::move(cleaned)};

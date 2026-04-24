@@ -28,6 +28,7 @@ bool CircuitBreaker::allow_request() {
     case State::HalfOpen:
       return false;
   }
+  return false;
 }
 
 void CircuitBreaker::record_success() {

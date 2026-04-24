@@ -8,6 +8,7 @@ use ava_agent::discover_runtime_skills;
 use ava_agent::message_queue::MessageQueue;
 use ava_agent::AgentEvent;
 use ava_agent_orchestration::stack::{AgentStack, AgentStackConfig};
+use ava_control_plane::events::CanonicalEventKind;
 use ava_types::ImageContent;
 use color_eyre::eyre::{eyre, Result};
 use std::path::Path;
@@ -165,7 +166,7 @@ fn subagent_complete_event_json(
     message_count: usize,
 ) -> serde_json::Value {
     serde_json::json!({
-        "type": "subagent_complete",
+        "type": CanonicalEventKind::SubagentComplete.type_tag(),
         "session_id": session_id,
         "description": description,
         "message_count": message_count,
@@ -1059,6 +1060,9 @@ mod tests {
     #[test]
     fn subagent_complete_event_uses_canonical_type_tag() {
         let event_json = subagent_complete_event_json("session-1", "done", 2);
-        assert_eq!(event_json["type"], "subagent_complete");
+        assert_eq!(
+            event_json["type"],
+            CanonicalEventKind::SubagentComplete.type_tag()
+        );
     }
 }

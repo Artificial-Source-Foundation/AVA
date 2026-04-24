@@ -81,6 +81,12 @@ struct ScopedTempDir {
   return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
 }
 
+void prepare_isolated_app_db(const std::filesystem::path& root) {
+  const auto db_path = root / "data" / "ava" / "data.db";
+  std::filesystem::create_directories(db_path.parent_path());
+  std::ofstream touch(db_path, std::ios::app);
+}
+
 }  // namespace
 
 TEST_CASE("headless scripted tool loop executes tool and persists transcript", "[ava_app][integration]") {
@@ -94,6 +100,7 @@ TEST_CASE("headless scripted tool loop executes tool and persists transcript", "
   ScopedEnvVar xdg_state("XDG_STATE_HOME", (root / "state").string());
   ScopedEnvVar xdg_cache("XDG_CACHE_HOME", (root / "cache").string());
   ScopedCurrentPath cwd(workspace);
+  prepare_isolated_app_db(root);
 
   const auto provider = ava::llm::create_mock_provider(
       "mock-scripted",
@@ -163,6 +170,7 @@ TEST_CASE("headless rejects mutating tool call without auto approve", "[ava_app]
   ScopedEnvVar xdg_state("XDG_STATE_HOME", (root / "state").string());
   ScopedEnvVar xdg_cache("XDG_CACHE_HOME", (root / "cache").string());
   ScopedCurrentPath cwd(workspace);
+  prepare_isolated_app_db(root);
 
   const auto provider = ava::llm::create_mock_provider(
       "mock-scripted",
@@ -229,6 +237,7 @@ TEST_CASE("optional live OpenAI smoke runs through headless path", "[ava_app][in
   ScopedEnvVar xdg_state("XDG_STATE_HOME", (root / "state").string());
   ScopedEnvVar xdg_cache("XDG_CACHE_HOME", (root / "cache").string());
   ScopedCurrentPath cwd(workspace);
+  prepare_isolated_app_db(root);
 
   ava::config::CredentialStore credentials;
   credentials.set("openai", ava::config::ProviderCredential{.api_key = openai_key});

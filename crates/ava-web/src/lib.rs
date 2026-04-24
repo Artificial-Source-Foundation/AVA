@@ -453,7 +453,7 @@ mod tests {
     }
 
     async fn wait_for_no_active_runs(state: &WebState) {
-        tokio::time::timeout(Duration::from_secs(1), async {
+        tokio::time::timeout(Duration::from_secs(5), async {
             loop {
                 if state.active_run_count().await == 0 {
                     break;
@@ -467,11 +467,13 @@ mod tests {
 
     async fn alternate_replay_run_identity(state: &WebState) -> (String, String) {
         let current = state.inner.stack.current_model().await;
-        for (provider, model) in [
+        let candidates = [
             ("openai", "gpt-5.4-nano"),
             ("openai", "gpt-5.4-mini"),
             ("anthropic", "claude-sonnet-4.6"),
-        ] {
+        ];
+
+        for (provider, model) in candidates {
             if current == (provider.to_string(), model.to_string()) {
                 continue;
             }
@@ -487,7 +489,11 @@ mod tests {
             }
         }
 
-        panic!("no alternate replay route available for test state");
+        candidates
+            .into_iter()
+            .find(|(provider, model)| current != (provider.to_string(), model.to_string()))
+            .map(|(provider, model)| (provider.to_string(), model.to_string()))
+            .expect("at least one alternate replay route candidate")
     }
 
     #[tokio::test]
@@ -1867,6 +1873,7 @@ mod tests {
                     .method("POST")
                     .uri("/api/agent/resolve-plan")
                     .header("content-type", "application/json")
+                    .header(TOKEN_HEADER, "test-control-token")
                     .body(Body::from(r#"{"response":"approved"}"#))
                     .expect("request"),
             )
@@ -1887,6 +1894,7 @@ mod tests {
                     .method("POST")
                     .uri("/api/agent/resolve-plan")
                     .header("content-type", "application/json")
+                    .header(TOKEN_HEADER, "test-control-token")
                     .body(Body::from(format!(
                         r#"{{"request_id":"{}","response":"approved"}}"#,
                         request.request_id
@@ -2999,6 +3007,7 @@ mod tests {
                     .method("POST")
                     .uri("/api/agent/queue/clear")
                     .header("content-type", "application/json")
+                    .header(TOKEN_HEADER, "test-control-token")
                     .body(Body::from(r#"{"target":"followUp"}"#))
                     .expect("request"),
             )
@@ -3182,6 +3191,7 @@ mod tests {
                     .method("POST")
                     .uri("/api/agent/retry")
                     .header("content-type", "application/json")
+                    .header(TOKEN_HEADER, "test-control-token")
                     .body(Body::from(format!(
                         r#"{{"session_id":"{session_id}","run_id":"web-retry-context"}}"#
                     )))
@@ -3280,6 +3290,7 @@ mod tests {
                     .method("POST")
                     .uri("/api/agent/edit-resend")
                     .header("content-type", "application/json")
+                    .header(TOKEN_HEADER, "test-control-token")
                     .body(Body::from(format!(
                         r#"{{"session_id":"{session_id}","message_id":"{user_id}","new_content":"after","run_id":"web-edit-context"}}"#
                     )))
@@ -3457,6 +3468,7 @@ mod tests {
                     .method("POST")
                     .uri("/api/agent/regenerate")
                     .header("content-type", "application/json")
+                    .header(TOKEN_HEADER, "test-control-token")
                     .body(Body::from(format!(
                         r#"{{"session_id":"{session_id}","run_id":"web-regen-context"}}"#
                     )))

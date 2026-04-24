@@ -14,12 +14,16 @@ target_link_libraries(ava_types
   PUBLIC
     nlohmann_json::nlohmann_json
 )
+ava_apply_toolchain_hygiene(ava_types)
 ava_apply_warnings(ava_types)
 ava_enable_sanitizers(ava_types)
 
 add_library(ava_control_plane STATIC
   control_plane/commands.cpp
   control_plane/events.cpp
+  control_plane/interactive.cpp
+  control_plane/queue.cpp
+  control_plane/sessions.cpp
 )
 target_include_directories(ava_control_plane
   PUBLIC
@@ -29,6 +33,7 @@ target_link_libraries(ava_control_plane
   PUBLIC
     ava_types
 )
+ava_apply_toolchain_hygiene(ava_control_plane)
 ava_apply_warnings(ava_control_plane)
 ava_enable_sanitizers(ava_control_plane)
 
@@ -40,6 +45,7 @@ target_include_directories(ava_platform
   PUBLIC
     "${AVA_CPP_INCLUDE_DIR}"
 )
+ava_apply_toolchain_hygiene(ava_platform)
 ava_apply_warnings(ava_platform)
 ava_enable_sanitizers(ava_platform)
 
@@ -61,6 +67,7 @@ target_link_libraries(ava_config
     ava_platform
     nlohmann_json::nlohmann_json
 )
+ava_apply_toolchain_hygiene(ava_config)
 ava_apply_warnings(ava_config)
 ava_enable_sanitizers(ava_config)
 
@@ -77,6 +84,7 @@ target_link_libraries(ava_session
     nlohmann_json::nlohmann_json
     SQLite::SQLite3
 )
+ava_apply_toolchain_hygiene(ava_session)
 ava_apply_warnings(ava_session)
 ava_enable_sanitizers(ava_session)
 
@@ -103,6 +111,7 @@ target_link_libraries(ava_llm
     nlohmann_json::nlohmann_json
     ava_optional_cpr
 )
+ava_apply_toolchain_hygiene(ava_llm)
 ava_apply_warnings(ava_llm)
 ava_enable_sanitizers(ava_llm)
 
@@ -125,6 +134,7 @@ target_link_libraries(ava_tools
     ava_platform
     nlohmann_json::nlohmann_json
 )
+ava_apply_toolchain_hygiene(ava_tools)
 ava_apply_warnings(ava_tools)
 ava_enable_sanitizers(ava_tools)
 
@@ -147,11 +157,16 @@ target_link_libraries(ava_agent
     ava_tools
     nlohmann_json::nlohmann_json
 )
+ava_apply_toolchain_hygiene(ava_agent)
 ava_apply_warnings(ava_agent)
 ava_enable_sanitizers(ava_agent)
 
 add_library(ava_orchestration STATIC
+  orchestration/composition.cpp
+  orchestration/interactive.cpp
+  orchestration/run_controller.cpp
   orchestration/subagents.cpp
+  orchestration/task.cpp
 )
 target_include_directories(ava_orchestration
   PUBLIC
@@ -160,10 +175,15 @@ target_include_directories(ava_orchestration
 target_link_libraries(ava_orchestration
   PUBLIC
     ava_types
+    ava_control_plane
     ava_config
+    ava_session
+    ava_llm
     ava_tools
+    ava_agent
   PRIVATE
 )
+ava_apply_toolchain_hygiene(ava_orchestration)
 ava_apply_warnings(ava_orchestration)
 ava_enable_sanitizers(ava_orchestration)
 
@@ -188,3 +208,4 @@ target_link_libraries(ava_runtime
     ava_optional_ftxui
     ava_optional_cpr
 )
+ava_apply_toolchain_hygiene(ava_runtime)

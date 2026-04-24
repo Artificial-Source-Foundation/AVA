@@ -19,6 +19,7 @@ namespace ava::llm::openai {
 );
 
 [[nodiscard]] LlmResponse parse_chat_completion_response(const nlohmann::json& payload);
+[[nodiscard]] std::vector<types::StreamChunk> parse_stream_events(const nlohmann::json& payload);
 [[nodiscard]] std::optional<types::StreamChunk> parse_stream_event(const nlohmann::json& payload);
 
 [[nodiscard]] std::vector<nlohmann::json> tools_to_openai_format(const std::vector<types::Tool>& tools);

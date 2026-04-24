@@ -2,7 +2,13 @@
 
 #include <cstdint>
 #include <optional>
+#include <string>
 #include <string_view>
+#include <vector>
+
+#include <nlohmann/json.hpp>
+
+#include "ava/types/tool.hpp"
 
 namespace ava::types {
 
@@ -15,6 +21,37 @@ enum class Role {
 
 [[nodiscard]] std::string_view role_to_string(Role role);
 [[nodiscard]] std::optional<Role> role_from_string(std::string_view value);
+
+struct ImageContent {
+  std::string data;
+  std::string media_type;
+};
+
+struct Message {
+  std::string id;
+  Role role{Role::User};
+  std::string content;
+  std::string timestamp;
+  std::vector<ToolCall> tool_calls;
+  std::vector<ToolResult> tool_results;
+  std::optional<std::string> tool_call_id;
+  std::vector<ImageContent> images;
+  std::optional<std::string> parent_id;
+  bool agent_visible{true};
+  bool user_visible{true};
+  std::optional<std::string> original_content;
+  nlohmann::json structured_content = nlohmann::json::array();
+  nlohmann::json metadata = nlohmann::json::object();
+};
+
+void to_json(nlohmann::json& json, const ImageContent& value);
+void from_json(const nlohmann::json& json, ImageContent& value);
+
+void to_json(nlohmann::json& json, const Message& value);
+void from_json(const nlohmann::json& json, Message& value);
+
+void repair_conversation(std::vector<Message>& messages);
+void cleanup_interrupted_tools(std::vector<Message>& messages);
 
 enum class MessageTierKind {
   Steering,

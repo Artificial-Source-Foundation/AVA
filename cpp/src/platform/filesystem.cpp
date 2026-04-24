@@ -28,6 +28,9 @@ void LocalFileSystem::write_file(const std::filesystem::path& path, const std::s
   }
 
   output << content;
+  if(!output.good()) {
+    throw std::runtime_error("Failed to write file: " + path.string());
+  }
 }
 
 void LocalFileSystem::create_dir_all(const std::filesystem::path& path) const {

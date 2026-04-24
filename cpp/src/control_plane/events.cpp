@@ -21,6 +21,11 @@ constexpr std::array<CanonicalEventField, 4> kQuestionRequestFields{
     CanonicalEventField::Question,
     CanonicalEventField::Options,
 };
+constexpr std::array<CanonicalEventField, 3> kPlanRequestFields{
+    CanonicalEventField::RunId,
+    CanonicalEventField::Id,
+    CanonicalEventField::Plan,
+};
 constexpr std::array<CanonicalEventField, 3> kInteractiveRequestClearedFields{
     CanonicalEventField::RunId,
     CanonicalEventField::RequestId,
@@ -56,9 +61,10 @@ constexpr std::array<CanonicalEventField, 4> kStreamingEditProgressFields{
     CanonicalEventField::BytesReceived,
 };
 
-constexpr std::array<CanonicalEventSpec, 9> kCanonicalEventSpecs{ {
+constexpr std::array<CanonicalEventSpec, 10> kCanonicalEventSpecs{ {
     {CanonicalEventKind::ApprovalRequest, kApprovalRequestFields},
     {CanonicalEventKind::QuestionRequest, kQuestionRequestFields},
+    {CanonicalEventKind::PlanRequest, kPlanRequestFields},
     {CanonicalEventKind::InteractiveRequestCleared, kInteractiveRequestClearedFields},
     {CanonicalEventKind::PlanCreated, kPlanCreatedFields},
     {CanonicalEventKind::PlanStepComplete, kPlanStepCompleteFields},
@@ -84,6 +90,8 @@ std::string_view canonical_event_kind_to_type_tag(CanonicalEventKind kind) {
       return "approval_request";
     case CanonicalEventKind::QuestionRequest:
       return "question_request";
+    case CanonicalEventKind::PlanRequest:
+      return "plan_request";
     case CanonicalEventKind::InteractiveRequestCleared:
       return "interactive_request_cleared";
     case CanonicalEventKind::PlanCreated:

@@ -56,7 +56,7 @@ int main(int argc, char** argv) {
           ava::control_plane::completion_mode_to_string(spec->completion_mode)
       );
     }
-    fmt::print("headless_cli=m9_blocking_non_interactive\n");
+    fmt::print("headless_cli=m16_blocking_non_interactive\n");
     return 0;
   }
 

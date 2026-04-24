@@ -5,8 +5,10 @@
 #include <cctype>
 #include <ctime>
 #include <iomanip>
+#include <limits>
 #include <sstream>
 #include <stdexcept>
+#include <string_view>
 #include <utility>
 
 #include <nlohmann/json.hpp>
@@ -36,6 +38,44 @@ namespace {
   return "m7_msg_" + std::to_string(index);
 }
 
+[[nodiscard]] std::uint64_t derive_message_id_counter(const ava::types::SessionRecord& session) {
+  constexpr std::string_view kPrefix = "m7_msg_";
+  std::uint64_t max_seen = 0;
+  bool saw_generated_id = false;
+
+  for(const auto& message : session.messages) {
+    if(!message.id.starts_with(kPrefix)) {
+      continue;
+    }
+
+    const auto suffix = message.id.substr(kPrefix.size());
+    if(suffix.empty()) {
+      continue;
+    }
+
+    std::uint64_t parsed = 0;
+    bool valid = true;
+    for(const char ch : suffix) {
+      if(ch < '0' || ch > '9') {
+        valid = false;
+        break;
+      }
+      const auto digit = static_cast<std::uint64_t>(ch - '0');
+      if(parsed > (std::numeric_limits<std::uint64_t>::max() - digit) / 10U) {
+        valid = false;
+        break;
+      }
+      parsed = parsed * 10U + digit;
+    }
+    if(valid) {
+      saw_generated_id = true;
+      max_seen = std::max(max_seen, parsed);
+    }
+  }
+
+  return saw_generated_id ? max_seen : static_cast<std::uint64_t>(session.messages.size());
+}
+
 [[nodiscard]] std::string normalize_role(const std::string& role) {
   std::string out = role;
   std::transform(out.begin(), out.end(), out.begin(), [](const auto ch) {
@@ -48,7 +88,9 @@ void append_session_message(
     ava::types::SessionRecord& session,
     std::uint64_t& id_counter,
     const std::string& role,
-    std::string content
+    std::string content,
+    nlohmann::json tool_calls = nlohmann::json::array(),
+    nlohmann::json tool_results = nlohmann::json::array()
 ) {
   const auto now = now_utc_rfc3339();
   const auto parent = session.messages.empty() ? std::optional<std::string>{} : std::optional<std::string>{session.messages.back().id};
@@ -56,6 +98,8 @@ void append_session_message(
       .id = make_message_id(++id_counter),
       .role = role,
       .content = std::move(content),
+      .tool_calls = tool_calls.is_array() ? std::move(tool_calls) : nlohmann::json::array(),
+      .tool_results = tool_results.is_array() ? std::move(tool_results) : nlohmann::json::array(),
       .timestamp = now,
       .parent_id = parent,
   });
@@ -69,16 +113,36 @@ void append_session_message(
     return ava::llm::ChatMessage::system(message.content);
   }
   if(role == "assistant") {
-    return ava::llm::ChatMessage::assistant(message.content);
+    auto chat = ava::llm::ChatMessage::assistant(message.content);
+    if(message.tool_calls.is_array()) {
+      for(const auto& item : message.tool_calls) {
+        if(!item.is_object()) {
+          continue;
+        }
+        chat.tool_calls.push_back(ava::types::ToolCall{
+            .id = item.value("id", std::string{}),
+            .name = item.value("name", std::string{}),
+            .arguments = item.value("arguments", nlohmann::json::object()),
+        });
+      }
+    }
+    return chat;
   }
   if(role == "tool") {
     try {
       const auto parsed = nlohmann::json::parse(message.content);
       if(parsed.is_object() && parsed.contains("content")) {
-        return ava::llm::ChatMessage::tool(
+        auto chat = ava::llm::ChatMessage::tool(
             parsed.value("content", std::string{}),
             parsed.value("call_id", std::string{"unknown_call"})
         );
+        if(message.tool_results.is_array() && !message.tool_results.empty()) {
+          const auto& stored = message.tool_results.front();
+          if(stored.is_object()) {
+            chat.tool_call_id = stored.value("call_id", *chat.tool_call_id);
+          }
+        }
+        return chat;
       }
     } catch(const std::exception&) {
       // Fall through to content-only tool fallback.
@@ -112,8 +176,13 @@ void append_session_message(
 }
 
 void emit_event(const AgentEventSink& sink, AgentEvent event) {
-  if(sink) {
+  if(!sink) {
+    return;
+  }
+  try {
     sink(event);
+  } catch(...) {
+    // Event sinks are best-effort observers and must not break runtime result delivery.
   }
 }
 
@@ -146,12 +215,20 @@ AgentRunResult AgentRuntime::run(
     throw std::invalid_argument("agent runtime requires a goal or an existing session history");
   }
 
-  std::uint64_t id_counter = session.messages.size();
+  std::uint64_t id_counter = derive_message_id_counter(session);
   if(!input.goal.empty()) {
     append_session_message(session, id_counter, "user", input.goal);
   }
 
-  emit_event(on_event, AgentEvent{.kind = AgentEventKind::RunStarted, .turn = 0, .message = "agent run started"});
+  const auto run_id = input.run_id;
+  const auto is_cancelled = input.is_cancelled;
+
+  auto emit = [&](AgentEvent event) {
+    event.run_id = run_id;
+    emit_event(on_event, std::move(event));
+  };
+
+  emit(AgentEvent{.kind = AgentEventKind::RunStarted, .turn = 0, .message = "agent run started"});
 
   auto stuck = StuckDetector(config_.stuck);
   auto result = AgentRunResult{};
@@ -159,26 +236,33 @@ AgentRunResult AgentRuntime::run(
   const auto tool_definitions = tools_.list_tools();
 
   auto completion = [&](AgentCompletionReason reason, std::string message) {
-    result.reason = reason;
-    result.final_response = std::move(message);
-    session.metadata["agent"]["last_completion_reason"] = completion_reason_to_string(reason);
+      result.reason = reason;
+      result.final_response = std::move(message);
+      session.metadata["agent"]["last_completion_reason"] = completion_reason_to_string(reason);
+      session.metadata["agent"]["last_turns_used"] = result.turns_used;
+      emit(AgentEvent{
+          .kind = AgentEventKind::Completion,
+          .turn = result.turns_used,
+          .message = result.final_response,
+          .completion_reason = reason,
+      });
+      return result;
+  };
+
+  auto record_error_metadata = [&](std::string_view error_message) {
+    session.metadata["agent"]["last_completion_reason"] = completion_reason_to_string(AgentCompletionReason::Error);
     session.metadata["agent"]["last_turns_used"] = result.turns_used;
-    emit_event(
-        on_event,
-        AgentEvent{
-            .kind = AgentEventKind::Completion,
-            .turn = result.turns_used,
-            .message = result.final_response,
-            .completion_reason = reason,
-        }
-    );
-    return result;
+    session.metadata["agent"]["last_error"] = error_message;
   };
 
   try {
     for(std::size_t turn = 1; turn <= config_.max_turns; ++turn) {
       result.turns_used = turn;
-      emit_event(on_event, AgentEvent{.kind = AgentEventKind::TurnStarted, .turn = turn});
+      emit(AgentEvent{.kind = AgentEventKind::TurnStarted, .turn = turn});
+
+      if(is_cancelled && is_cancelled()) {
+        return completion(AgentCompletionReason::Cancelled, "agent run cancelled");
+      }
 
       if(input.queue != nullptr && input.queue->has_steering()) {
         for(auto& steering_message : input.queue->drain_steering()) {
@@ -187,13 +271,85 @@ AgentRunResult AgentRuntime::run(
       }
 
       const auto chat_messages = build_chat_messages(session, system_prompt);
-      const auto response = provider_.generate(chat_messages, tool_definitions, config_.thinking);
-      result.usage = response.usage;
 
-      auto tool_calls = response::coalesce_tool_calls(response);
-      const auto assistant_text = response.content;
+      std::string assistant_text;
+      std::vector<ava::types::ToolCall> tool_calls;
+      std::vector<ava::agent::response::ToolCallAccumulator> tool_call_accumulators;
+      bool emitted_stream_deltas = false;
+      bool cancelled_during_stream = false;
 
-      emit_event(on_event, AgentEvent{.kind = AgentEventKind::AssistantResponse, .turn = turn, .message = assistant_text});
+      if(input.stream) {
+        const auto stream_result = provider_.stream_generate(
+            chat_messages,
+            tool_definitions,
+            config_.thinking,
+            [&](const ava::types::StreamChunk& chunk) {
+              if(is_cancelled && is_cancelled()) {
+                cancelled_during_stream = true;
+                return false;
+              }
+
+              if(chunk.content.has_value() && !chunk.content->empty()) {
+                assistant_text += *chunk.content;
+                emitted_stream_deltas = true;
+                emit(AgentEvent{
+                    .kind = AgentEventKind::AssistantResponseDelta,
+                    .turn = turn,
+                    .message = *chunk.content,
+                });
+              }
+
+              if(chunk.tool_call.has_value()) {
+                response::accumulate_tool_call(tool_call_accumulators, *chunk.tool_call);
+              }
+
+              if(chunk.usage.has_value()) {
+                result.usage = chunk.usage;
+              }
+
+              if(is_cancelled && is_cancelled()) {
+                cancelled_during_stream = true;
+                return false;
+              }
+              return true;
+            }
+        );
+
+        if(stream_result == ava::llm::Provider::StreamDispatchResult::Unsupported) {
+          if(is_cancelled && is_cancelled()) {
+            if(!assistant_text.empty()) {
+              append_session_message(session, id_counter, "assistant", assistant_text);
+            }
+            return completion(AgentCompletionReason::Cancelled, "agent run cancelled");
+          }
+
+          const auto response = provider_.generate(chat_messages, tool_definitions, config_.thinking);
+          result.usage = response.usage;
+          assistant_text = response.content;
+          tool_calls = response::coalesce_tool_calls(response);
+        } else {
+          if(cancelled_during_stream) {
+            if(!assistant_text.empty()) {
+              append_session_message(session, id_counter, "assistant", assistant_text);
+            }
+            return completion(AgentCompletionReason::Cancelled, "agent run cancelled");
+          }
+
+          tool_calls = response::finalize_tool_calls(std::move(tool_call_accumulators));
+          if(tool_calls.empty()) {
+            tool_calls = response::parse_tool_calls_from_content(assistant_text);
+          }
+        }
+      } else {
+        const auto response = provider_.generate(chat_messages, tool_definitions, config_.thinking);
+        result.usage = response.usage;
+        assistant_text = response.content;
+        tool_calls = response::coalesce_tool_calls(response);
+      }
+
+      if(!emitted_stream_deltas) {
+        emit(AgentEvent{.kind = AgentEventKind::AssistantResponse, .turn = turn, .message = assistant_text});
+      }
 
       const auto stuck_action = config_.enable_stuck_detector
                                     ? stuck.check(assistant_text, tool_calls)
@@ -203,8 +359,8 @@ AgentRunResult AgentRuntime::run(
         append_session_message(session, id_counter, "user", stuck_action.message);
         continue;
       } else if(stuck_action.kind == StuckActionKind::Stop) {
-        append_session_message(session, id_counter, "assistant", assistant_text);
-        emit_event(on_event, AgentEvent{.kind = AgentEventKind::Error, .turn = turn, .message = stuck_action.message});
+        append_session_message(session, id_counter, "assistant", assistant_text, nlohmann::json(tool_calls));
+        emit(AgentEvent{.kind = AgentEventKind::Error, .turn = turn, .message = stuck_action.message});
         return completion(AgentCompletionReason::Stuck, stuck_action.message);
       }
 
@@ -213,28 +369,33 @@ AgentRunResult AgentRuntime::run(
         return completion(AgentCompletionReason::Completed, assistant_text);
       }
 
-      append_session_message(session, id_counter, "assistant", assistant_text);
+      append_session_message(session, id_counter, "assistant", assistant_text, nlohmann::json(tool_calls));
       for(const auto& tool_call : tool_calls) {
-        emit_event(
-            on_event,
-            AgentEvent{
-                .kind = AgentEventKind::ToolCall,
-                .turn = turn,
-                .tool_call = tool_call,
-            }
-        );
+        if(is_cancelled && is_cancelled()) {
+          return completion(AgentCompletionReason::Cancelled, "agent run cancelled");
+        }
+
+        emit(AgentEvent{
+            .kind = AgentEventKind::ToolCall,
+            .turn = turn,
+            .tool_call = tool_call,
+        });
 
         const auto tool_result = tools_.execute(tool_call);
-        append_session_message(session, id_counter, "tool", encode_tool_result_message(tool_result));
-
-        emit_event(
-            on_event,
-            AgentEvent{
-                .kind = AgentEventKind::ToolResult,
-                .turn = turn,
-                .tool_result = tool_result,
-            }
+        append_session_message(
+            session,
+            id_counter,
+            "tool",
+            encode_tool_result_message(tool_result),
+            nlohmann::json::array(),
+            nlohmann::json::array({tool_result})
         );
+
+        emit(AgentEvent{
+            .kind = AgentEventKind::ToolResult,
+            .turn = turn,
+            .tool_result = tool_result,
+        });
       }
     }
 
@@ -245,28 +406,24 @@ AgentRunResult AgentRuntime::run(
   } catch(const std::exception& ex) {
     result.reason = AgentCompletionReason::Error;
     result.error = ex.what();
-    emit_event(
-        on_event,
-        AgentEvent{
-            .kind = AgentEventKind::Error,
-            .turn = result.turns_used,
-            .message = ex.what(),
-        }
-    );
-    return result;
+    record_error_metadata(ex.what());
+    emit(AgentEvent{
+        .kind = AgentEventKind::Error,
+        .turn = result.turns_used,
+        .message = ex.what(),
+    });
+    return completion(AgentCompletionReason::Error, ex.what());
   } catch(...) {
     constexpr auto* kUnknownError = "agent runtime failed with a non-standard exception";
     result.reason = AgentCompletionReason::Error;
     result.error = kUnknownError;
-    emit_event(
-        on_event,
-        AgentEvent{
-            .kind = AgentEventKind::Error,
-            .turn = result.turns_used,
-            .message = kUnknownError,
-        }
-    );
-    return result;
+    record_error_metadata(kUnknownError);
+    emit(AgentEvent{
+        .kind = AgentEventKind::Error,
+        .turn = result.turns_used,
+        .message = kUnknownError,
+    });
+    return completion(AgentCompletionReason::Error, kUnknownError);
   }
 }
 
@@ -274,6 +431,8 @@ std::string AgentRuntime::completion_reason_to_string(AgentCompletionReason reas
   switch(reason) {
     case AgentCompletionReason::Completed:
       return "completed";
+    case AgentCompletionReason::Cancelled:
+      return "cancelled";
     case AgentCompletionReason::MaxTurns:
       return "max_turns";
     case AgentCompletionReason::Stuck:

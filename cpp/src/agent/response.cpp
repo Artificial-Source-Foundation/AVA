@@ -99,15 +99,22 @@ std::vector<ava::types::ToolCall> parse_tool_call_array(const nlohmann::json& ca
 }  // namespace
 
 bool ToolCallAccumulator::is_complete() const {
-  if(name.empty() || arguments_json.empty()) {
+  if(name.empty()) {
     return false;
+  }
+  if(arguments_json.empty()) {
+    return true;
   }
   return parse_json(arguments_json).has_value();
 }
 
 std::optional<ava::types::ToolCall> ToolCallAccumulator::to_tool_call() const {
-  const auto parsed_args = parse_json(arguments_json);
-  if(name.empty() || !parsed_args.has_value()) {
+  if(name.empty()) {
+    return std::nullopt;
+  }
+
+  const auto parsed_args = arguments_json.empty() ? std::optional<nlohmann::json>{nlohmann::json::object()} : parse_json(arguments_json);
+  if(!parsed_args.has_value()) {
     return std::nullopt;
   }
 

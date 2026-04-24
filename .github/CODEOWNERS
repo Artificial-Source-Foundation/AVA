@@ -5,6 +5,52 @@
 /crates/ @xndr-n
 /src-tauri/ @xndr-n
 
+# C++ Milestone 1 contract-freeze authority (explicitly listed)
+/crates/ava-control-plane/src/commands.rs @xndr-n
+/crates/ava-control-plane/src/events.rs @xndr-n
+/crates/ava-control-plane/src/interactive.rs @xndr-n
+/crates/ava-control-plane/src/sessions.rs @xndr-n
+/crates/ava-control-plane/src/queue.rs @xndr-n
+/crates/ava-control-plane/src/orchestration.rs @xndr-n
+/crates/ava-control-plane/src/lib.rs @xndr-n
+/crates/ava-types/src/lib.rs @xndr-n
+/crates/ava-types/src/message.rs @xndr-n
+/crates/ava-types/src/tool.rs @xndr-n
+/crates/ava-types/src/session.rs @xndr-n
+/crates/ava-agent/src/control_plane/mod.rs @xndr-n
+/crates/ava-agent/src/control_plane/events.rs @xndr-n
+/crates/ava-agent/src/control_plane/sessions.rs @xndr-n
+/crates/ava-agent/src/run_context.rs @xndr-n
+/crates/ava-agent-orchestration/src/stack/mod.rs @xndr-n
+/crates/ava-session/src/lib.rs @xndr-n
+/crates/ava-session/src/manager.rs @xndr-n
+/crates/ava-session/src/tree.rs @xndr-n
+/crates/ava-session/src/search.rs @xndr-n
+/crates/ava-session/src/helpers.rs @xndr-n
+/crates/ava-session/src/diff_tracking.rs @xndr-n
+/crates/ava-config/src/lib.rs @xndr-n
+/crates/ava-config/src/credentials.rs @xndr-n
+/crates/ava-config/src/keychain.rs @xndr-n
+/crates/ava-config/src/trust.rs @xndr-n
+/crates/ava-config/src/agents.rs @xndr-n
+/crates/ava-config/src/routing.rs @xndr-n
+/crates/ava-config/src/thinking.rs @xndr-n
+/crates/ava-config/src/credential_commands.rs @xndr-n
+/crates/ava-config/src/model_catalog/ @xndr-n
+/crates/ava-tui/src/lib.rs @xndr-n
+/crates/ava-tui/src/config/cli.rs @xndr-n
+/crates/ava-tui/src/headless/ @xndr-n
+/crates/ava-tui/src/main.rs @xndr-n
+/crates/ava-tools/src/registry.rs @xndr-n
+/crates/ava-tools/src/permission_middleware.rs @xndr-n
+/crates/ava-permissions/src/lib.rs @xndr-n
+/crates/ava-permissions/src/inspector.rs @xndr-n
+/crates/ava-permissions/src/policy.rs @xndr-n
+/crates/ava-permissions/src/tags.rs @xndr-n
+/docs/architecture/cpp-contract-freeze-m1.md @xndr-n
+/docs/architecture/cpp-m1-event-stream-parity-checklist.md @xndr-n
+/scripts/dev/verify-cpp-m1-freeze.sh @xndr-n
+
 # Desktop frontend
 /src/ @xndr-n
 

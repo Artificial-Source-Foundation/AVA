@@ -56,6 +56,23 @@ ava::platform::LocalFileSystem g_filesystem;
   return trusted;
 }
 
+void enforce_owner_only_permissions(const std::filesystem::path& path) {
+#if !defined(_WIN32)
+  std::error_code ec;
+  std::filesystem::permissions(
+      path,
+      std::filesystem::perms::owner_read | std::filesystem::perms::owner_write,
+      std::filesystem::perm_options::replace,
+      ec
+  );
+  if(ec) {
+    throw std::runtime_error("Failed to set secure permissions on file: " + path.string() + " (" + ec.message() + ")");
+  }
+#else
+  (void)path;
+#endif
+}
+
 }  // namespace
 
 bool is_project_trusted(const std::filesystem::path& project_root) {
@@ -100,7 +117,11 @@ void trust_project(const std::filesystem::path& project_root) {
 
   const auto temp_path = trust_path.string() + ".tmp";
   g_filesystem.write_file(temp_path, data.dump(2));
+#if !defined(_WIN32)
+  enforce_owner_only_permissions(temp_path);
+#endif
   std::filesystem::rename(temp_path, trust_path);
+  enforce_owner_only_permissions(trust_path);
 
   std::scoped_lock lock(g_trust_cache_mutex);
   g_trust_cache.reset();

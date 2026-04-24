@@ -2,6 +2,7 @@
 
 #include <sstream>
 #include <stdexcept>
+#include <vector>
 
 namespace ava::tools {
 
@@ -19,34 +20,46 @@ namespace {
   return true;
 }
 
-[[nodiscard]] std::filesystem::path canonical_existing_or_lexical(
-    const std::filesystem::path& path,
-    std::error_code& ec
-) {
-  if(std::filesystem::exists(path, ec) && !ec) {
-    auto resolved = std::filesystem::canonical(path, ec);
-    if(!ec) {
+[[nodiscard]] std::filesystem::path canonical_existing_prefix_or_throw(const std::filesystem::path& path) {
+  const auto absolute = std::filesystem::absolute(path).lexically_normal();
+  std::vector<std::filesystem::path> suffix;
+
+  for(auto current = absolute; !current.empty(); current = current.parent_path()) {
+    std::error_code exists_ec;
+    if(std::filesystem::exists(current, exists_ec) && !exists_ec) {
+      std::error_code canonical_ec;
+      auto resolved = std::filesystem::canonical(current, canonical_ec);
+      if(canonical_ec) {
+        throw std::runtime_error("Failed to resolve path: " + current.string());
+      }
+
+      for(auto it = suffix.rbegin(); it != suffix.rend(); ++it) {
+        resolved /= *it;
+      }
       return resolved.lexically_normal();
     }
+
+    const auto filename = current.filename();
+    if(filename.empty()) {
+      break;
+    }
+    suffix.push_back(filename);
   }
 
-  ec.clear();
-  auto normalized = std::filesystem::weakly_canonical(path, ec);
-  if(ec) {
-    normalized = std::filesystem::absolute(path);
-  }
-  return normalized.lexically_normal();
+  return absolute;
 }
 
 }  // namespace
 
 std::filesystem::path normalize_workspace_root(const std::filesystem::path& workspace_root) {
   std::error_code ec;
-  auto normalized = std::filesystem::weakly_canonical(workspace_root, ec);
-  if(ec) {
-    normalized = std::filesystem::absolute(workspace_root);
+  if(std::filesystem::exists(workspace_root, ec) && !ec) {
+    auto normalized = std::filesystem::canonical(workspace_root, ec);
+    if(!ec) {
+      return normalized.lexically_normal();
+    }
   }
-  return normalized.lexically_normal();
+  return std::filesystem::absolute(workspace_root).lexically_normal();
 }
 
 std::filesystem::path enforce_workspace_path(
@@ -58,8 +71,7 @@ std::filesystem::path enforce_workspace_path(
   const auto input_path = std::filesystem::path(raw_path);
   const auto joined = input_path.is_absolute() ? input_path : (root / input_path);
 
-  std::error_code ec;
-  auto normalized = canonical_existing_or_lexical(joined, ec);
+  const auto normalized = canonical_existing_prefix_or_throw(joined);
 
   if(!is_within(root, normalized)) {
     std::ostringstream oss;

@@ -1,12 +1,12 @@
-# C++ Workspace Foundation (Milestone 12)
+# C++ Workspace Foundation (Milestone 16)
 
-This `cpp/` tree is the **Milestone 12 foundational-runtime + bounded FTXUI TUI validation/cleanup slice** for the Rust-to-C++ backend/TUI migration plan.
+This `cpp/` tree is the **Milestone 14 foundational-runtime + interactive control-plane baseline slice** for the Rust-to-C++ backend/TUI migration plan.
 
 It remains intentionally scoped and honest:
 
 - It creates a real CMake workspace and dependency wiring.
 - It now includes real foundational implementations in `ava_types`, `ava_control_plane`, `ava_platform`, `ava_config`, `ava_session`, `ava_llm`, `ava_tools`, a scoped runtime-core `ava_agent`, and a smallest-honest `ava_orchestration` contracts/data slice.
-- The current `ava_runtime` aggregate includes all implemented Milestone 10 foundations, Milestone 11 adds a smallest-honest interactive terminal lane (`ava_tui`) on top of that blocking runtime stack, and Milestone 12 tightens that same lane with bounded parity-validation/cleanup work.
+- The current `ava_runtime` aggregate includes all implemented Milestone 10 foundations, Milestone 11 adds a smallest-honest interactive terminal lane (`ava_tui`) on top of that blocking runtime stack, Milestone 12 tightens that lane with bounded parity-validation/cleanup work, Milestone 13 adds a shared orchestration-owned runtime composition seam plus native blocking subagent spawning baseline, Milestone 14 adds a first narrow interactive control-plane ownership seam with orchestration bridge wiring for approval/question/plan request lifecycles, Milestone 15 adds narrow run-identity + streaming/cancellation ownership seams, and Milestone 16 adds narrow TUI workflow parity basics (slash-command basics, input history, message/status visibility, and adapter-facing interactive request visibility) while keeping orchestration/runtime ownership intact.
 - It still does **not** claim runtime parity or a production C++ backend port.
 
 ## Included Targets
@@ -41,7 +41,7 @@ Tests:
 7. `ava_app_integration_tests` (focused Milestone 10 integration tests for scripted tool loops, approval rejection, and optional env-gated live-provider smoke)
 8. `ava_tui_tests` (focused Milestone 11 + 12 tests for bounded TUI state/event/scroll behavior)
 
-## Milestone 12 Implemented Foundations
+## Milestone 13 Implemented Foundations
 
 1. **`ava_types`**
    - Build metadata (`BuildInfo`, `current_build_info()`)
@@ -55,6 +55,7 @@ Tests:
    - Canonical command table and lookup helpers aligned to frozen Rust wire strings
    - Canonical event table and lookup helpers aligned to frozen Rust wire strings
    - Queue tier/command mapping helpers
+   - Minimal interactive request lifecycle ownership seam (`InteractiveRequestStore`) for approval/question/plan with request-id + run-id + pending/resolved/cancelled/timeout state tracking
 
 3. **`ava_platform`**
    - Real blocking local filesystem primitives (`read_file`, `write_file`, `create_dir_all`, `exists`, `is_directory`, `metadata`)
@@ -100,13 +101,17 @@ Tests:
      - Practical minimal message queue and stuck detector baselines adapted from Rust intent.
       - Blocking execution model only; async/streaming/orchestration parity is deferred.
 
-9. **`ava_orchestration` (scoped Milestone 8 contracts/data slice)**
+9. **`ava_orchestration` (scoped Milestones 8 + 13 + 14 slice)**
      - Real C++ orchestration library under `cpp/include/ava/orchestration` + `cpp/src/orchestration`.
      - Runtime-profile/catalog helpers: `MAX_AGENT_DEPTH`, `SubAgentRuntimeProfile`, `runtime_profile_for(...)`, and a non-mutating profile-aware tool filtering seam via `apply_runtime_profile_to_registry(...)`.
       - Prompt and subagent-definition helpers: `build_subagent_system_prompt(...)`, `EffectiveSubagentDefinition`, and `effective_subagent_definitions(...)` over config-owned agent/default DTOs from `ava_config`.
      - Config seam parity helper: `parse_model_spec(...)` with known-provider + model-registry inference fallback.
-      - Lightweight stack/task DTO contracts only: `AgentStackConfig`, `AgentRunResult`, `TaskResult`, and `TaskSpawner` (plus `NoopTaskSpawner` for test utility).
-      - Intentionally no full `AgentStack` runtime port, no MCP/plugin runtime composition, and no async/background subagent execution ownership.
+       - Shared runtime composition seam (`compose_runtime(...)`) now owns session startup + provider/model resolution + default tool/middleware registration + `AgentRuntime` assembly used by both `ava` headless and `ava_tui`; runtime metadata is now read/written from a runtime-owned namespace first, with legacy headless metadata fallback retained for compatibility.
+       - Milestone 14 adds `InteractiveBridge` ownership in orchestration/runtime composition so approval/question/plan flows share one backend-controlled request lifecycle seam (typed kind + request-id/run-id + terminal state transitions) while keeping app adapters thin.
+      - Task contracts now include a real native blocking execution path (`NativeBlockingTaskSpawner`) with depth + spawn-budget checks, disabled-agent rejection, provider/model/max-turns resolution (including parent-ceiling turn capping), read-only runtime-profile tool filtering, and child-session lineage/completion metadata persistence.
+      - `TaskResult` now separates successful output from errors (`output` vs `error`) instead of overloading one text field.
+      - Lightweight stack DTO contracts remain in place (`AgentStackConfig`, `AgentRunResult`, `TaskResult`, `TaskSpawner`).
+       - Intentionally still no MCP/plugin-manager parity, no async/background subagent spawning in C++, and no full Rust runtime-streaming parity.
 
 ## Dependencies
 
@@ -129,15 +134,30 @@ Notes:
 - Optional dependency reporting in `ava/core/build_config.hpp` reflects **resolved linkage** (found + linked), not just requested options.
 - Catch2 discovery/fetch is only evaluated when `AVA_BUILD_TESTS=ON`.
 
-10. **`ava_tui` (scoped Milestone 11 interactive slice + Milestone 12 bounded cleanup)**
+10. **`ava_tui` (scoped Milestone 11 interactive slice + Milestone 12 bounded cleanup + Milestone 16 parity-basics seams)**
        - Real `ava_tui` executable under `cpp/apps/ava_tui/` built on FTXUI when linked.
        - Minimal app state for a scrollable message list, single-line text composer buffer, status line, and quit action.
        - Blocking event loop that accepts keyboard input, submits prompts to existing blocking `ava_agent` runtime on a worker thread, and consumes runtime events through the existing callback/event-sink seam.
        - Milestone 12 tightening pass: stronger `AppState` event/status mapping and focused edge-case coverage (empty input, backspace on empty, page scrolling clamps, multiline + trailing-newline submission behavior).
        - Integration reused from current foundations (`ava_session`, `ava_llm`, `ava_tools`, `ava_agent`) with no new runtime architecture.
-       - Intentionally narrow keyboard scope: type text, Enter submit, Up/Down/PgUp/PgDn scroll, `q` quit.
+       - Milestone 16 narrow parity-basics additions: slash-command infrastructure (`/help`, `/clear`, `/model`, graceful unsupported `/compact`), input history up/down, top/bottom message navigation seams, message-range status visibility, and adapter-facing interactive request visibility/clearing state.
+       - Intentionally narrow keyboard scope remains: type text, Enter submit, Up/Down history (with scroll fallback), PgUp/PgDn/Home/End message navigation, `q` quit.
 
 ## Build
+
+Preferred preset lane:
+
+```bash
+cd cpp
+cmake --list-presets=all
+cmake --preset cpp-debug
+cmake --build --preset cpp-debug
+ctest --preset cpp-debug --output-on-failure
+```
+
+From the repository root, the equivalent helper commands are `just cpp-presets`, `just cpp-configure`, `just cpp-build`, and `just cpp-test`. Those helpers route through `scripts/dev/ensure-cmake.sh`, which uses an existing CMake 3.28+ or bootstraps the pinned CMake used by CI.
+
+Manual lane:
 
 ```bash
 cmake -S cpp -B build/cpp -DCMAKE_BUILD_TYPE=Debug
@@ -152,17 +172,19 @@ Key bootstrap options:
 
 ## Run
 
+After the default `cpp-debug` preset, app binaries live under `build/cpp/debug`. The `cpp-release` preset uses `build/cpp/release`.
+
 ```bash
-./build/cpp/apps/ava_cli --version
-./build/cpp/apps/ava_cli --smoke
-./build/cpp/apps/ava_cli "Summarize this repository"
-./build/cpp/apps/ava_cli "Continue from latest session" --continue
-./build/cpp/apps/ava_cli "Use this exact session" --session <session-id>
-./build/cpp/apps/ava_cli "Emit NDJSON" --json
-./build/cpp/apps/ava_cli "Allow mutating tools" --auto-approve
-./build/cpp/apps/ava_tui --auto-approve
-./build/cpp/apps/ava_smoke
-ctest --test-dir build/cpp --output-on-failure
+./build/cpp/debug/apps/ava_cli --version
+./build/cpp/debug/apps/ava_cli --smoke
+./build/cpp/debug/apps/ava_cli "Summarize this repository"
+./build/cpp/debug/apps/ava_cli "Continue from latest session" --continue
+./build/cpp/debug/apps/ava_cli "Use this exact session" --session <session-id>
+./build/cpp/debug/apps/ava_cli "Emit NDJSON" --json
+./build/cpp/debug/apps/ava_cli "Allow mutating tools" --auto-approve
+./build/cpp/debug/apps/ava_tui --auto-approve
+./build/cpp/debug/apps/ava_smoke
+ctest --preset cpp-debug --output-on-failure
 ```
 
 Headless CLI flags (Milestone 9 lane retained in M10):
@@ -189,6 +211,10 @@ By default, live-provider tests skip cleanly when env gates are not set.
 
 - Milestone 11 = Milestone 10 foundations plus a smallest-honest FTXUI interactive terminal slice.
 - Milestone 12 = bounded validation/cleanup on that same TUI slice (no broad feature expansion).
-- Deferred work is tracked in `cpp/MILESTONE12_BOUNDARIES.md` (full modal/sidebar/task UX, mouse/voice/watch, subagent/background panes, autocomplete/slash UX, streaming parity, and advanced layout/theme/approval UX).
+- Milestone 13 = shared runtime composition ownership + native blocking subagent baseline (without broad parity claims).
+- Milestone 14 (first narrow pass) = interactive control-plane lifecycle baseline + orchestration bridge wiring for approval/question/plan (`cpp/MILESTONE14_BOUNDARIES.md`).
+- Milestone 15 = narrow run identity + streaming/cancellation seam pass (`cpp/MILESTONE15_BOUNDARIES.md`).
+- Milestone 16 = narrow TUI workflow parity basics pass with adapter-state seams and no runtime ownership migration (`cpp/MILESTONE16_BOUNDARIES.md`).
+- Deferred work remains tracked in milestone boundary docs (task-tool parity, MCP/plugin-manager parity, async/background spawn ownership, and broader runtime-streaming parity).
 - The current `ava_agent` slice is intentionally useful but not yet parity with the full Rust runtime behavior stack.
 - No claim of full Rust behavior parity yet for async runtime, auth-heavy surfaces, or broader backend execution stack.

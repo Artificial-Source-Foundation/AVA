@@ -2,7 +2,7 @@
 title: "Scripts And Build Commands"
 description: "Canonical repository commands for check, test, run, build, and desktop/frontend workflows."
 order: 3
-updated: "2026-04-21"
+updated: "2026-04-23"
 ---
 
 # Scripts And Build Commands
@@ -46,6 +46,18 @@ From `Justfile`:
 7. `just headless "<goal>" [ARGS...]` - run headless goal
 8. `just build-release` - release build for `ava`
 9. `just ci` - broader local verification bundle
+
+### C++ Milestone Bootstrap Commands (`just` + CMake presets)
+
+These commands target the scoped C++ milestone tree under `cpp/`.
+
+1. `just cpp-presets` - list available C++ configure/build/test presets
+2. `just cpp-configure [PRESET]` - run CMake configure (default: `cpp-debug`)
+3. `just cpp-build [PRESET]` - build via preset (default: `cpp-debug`)
+4. `just cpp-test [PRESET]` - run CTest via preset (default: `cpp-debug`)
+5. `just cpp-clean [PRESET]` - clean build outputs for a preset (default: `cpp-debug`)
+
+Current presets are declared in `cpp/CMakePresets.json` and include `cpp-debug` and `cpp-release`.
 
 ## Frontend/Desktop Scripts (`pnpm`)
 

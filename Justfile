@@ -2,6 +2,8 @@
 
 hook_entrypoint := "bash scripts/dev/git-hooks.sh"
 rust_throttle := "bash scripts/dev/run-rust-throttled.sh"
+cpp_freeze_check := "bash scripts/dev/verify-cpp-m1-freeze.sh"
+cpp_cmake := "AVA_BOOTSTRAP_CMAKE=1 bash scripts/dev/ensure-cmake.sh"
 
 default:
     @just --list
@@ -17,6 +19,30 @@ hook-pre-commit:
 # Run the path-aware pre-push gate used by lefthook
 hook-pre-push:
     {{hook_entrypoint}} pre-push
+
+# Verify C++ Milestone 1 contract-freeze governance checks
+freeze-m1-check *ARGS:
+    {{cpp_freeze_check}} {{ ARGS }}
+
+# List available C++ CMake presets
+cpp-presets:
+    CMAKE="$({{cpp_cmake}})" && cd cpp && "$CMAKE" --list-presets=all
+
+# Configure C++ workspace from preset
+cpp-configure PRESET="cpp-debug":
+    CMAKE="$({{cpp_cmake}})" && cd cpp && "$CMAKE" --preset {{ PRESET }}
+
+# Build C++ workspace from preset
+cpp-build PRESET="cpp-debug" *ARGS:
+    CMAKE="$({{cpp_cmake}})" && cd cpp && "$CMAKE" --build --preset {{ PRESET }} {{ ARGS }}
+
+# Run C++ tests from preset
+cpp-test PRESET="cpp-debug" *ARGS:
+    CMAKE="$({{cpp_cmake}})" && CTEST="$(dirname "$CMAKE")/ctest" && cd cpp && "$CTEST" --preset {{ PRESET }} --output-on-failure {{ ARGS }}
+
+# Clean C++ build artifacts for preset
+cpp-clean PRESET="cpp-debug":
+    CMAKE="$({{cpp_cmake}})" && cd cpp && "$CMAKE" --build --preset {{ PRESET }} --target clean
 
 # Run tests (per-crate to avoid OOM)
 test *ARGS:

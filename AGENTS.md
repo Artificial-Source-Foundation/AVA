@@ -1,4 +1,4 @@
-<!-- Last verified: 2026-04-22 -->
+<!-- Last verified: 2026-04-23 -->
 # AI Coding Agent Instructions (v3)
 
 > Instructions for AI assistants working on AVA. This file is auto-injected into the AVA agent's system prompt.
@@ -17,6 +17,11 @@ cargo clippy --workspace
 # Desktop
 pnpm tauri dev
 pnpm lint && pnpm typecheck
+
+# C++ milestone bootstrap lane
+just cpp-configure cpp-debug
+just cpp-build cpp-debug
+just cpp-test cpp-debug
 ```
 
 Git hook policy:

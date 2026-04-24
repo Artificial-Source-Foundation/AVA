@@ -8,6 +8,7 @@ namespace ava::control_plane {
 enum class CanonicalEventKind {
   ApprovalRequest,
   QuestionRequest,
+  PlanRequest,
   InteractiveRequestCleared,
   PlanCreated,
   PlanStepComplete,

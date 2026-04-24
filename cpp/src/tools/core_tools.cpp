@@ -179,7 +179,7 @@ class TempFileGuard {
   const auto cd_clause = "cd " + shell_single_quote(cwd.string()) + " && ";
   const auto timeout_secs = std::max<std::uint64_t>(1, (timeout_ms + 999) / 1000);
   const auto wrapped = cd_clause + "timeout --signal=TERM --kill-after=1s " + std::to_string(timeout_secs) +
-                       "s -- sh -lc " + shell_single_quote(command) + " >" + shell_single_quote(temp_file.string()) +
+                       "s sh -lc " + shell_single_quote(command) + " >" + shell_single_quote(temp_file.string()) +
                        " 2>&1";
 
   const auto full = "sh -lc " + shell_single_quote(wrapped);
@@ -451,7 +451,7 @@ ava::types::ToolResult EditTool::execute(const nlohmann::json& args) const {
   const auto strategy = replace_all ? "replace_all" : "exact_match";
   return ava::types::ToolResult{
       .call_id = "",
-      .content = "Applied " + strategy + "; replacements=" + std::to_string(replacements),
+      .content = std::string("Applied ") + strategy + "; replacements=" + std::to_string(replacements),
       .is_error = false,
   };
 }

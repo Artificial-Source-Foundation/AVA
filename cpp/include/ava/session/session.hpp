@@ -8,6 +8,14 @@
 
 namespace ava::session {
 
+struct SqlitePolicySnapshot {
+  std::string journal_mode;
+  int synchronous{0};
+  int foreign_keys{0};
+  int busy_timeout{0};
+  int cache_size{0};
+};
+
 class SessionManager {
  public:
   explicit SessionManager(std::filesystem::path db_path);
@@ -34,6 +42,7 @@ class SessionManager {
   void switch_branch(const std::string& session_id, const std::string& leaf_id);
 
   [[nodiscard]] const std::filesystem::path& db_path() const { return db_path_; }
+  [[nodiscard]] SqlitePolicySnapshot sqlite_policy_snapshot() const;
 
  private:
   std::filesystem::path db_path_;

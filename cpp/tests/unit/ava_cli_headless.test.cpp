@@ -6,11 +6,10 @@
 
 #include <nlohmann/json.hpp>
 
-#include "agent_config.hpp"
 #include "ava/config/model_spec.hpp"
+#include "ava/orchestration/composition.hpp"
 #include "cli.hpp"
 #include "events.hpp"
-#include "session_resolver.hpp"
 
 namespace {
 
@@ -94,16 +93,16 @@ TEST_CASE("session startup resolves new latest and specific", "[ava_app]") {
   second.updated_at = "2026-01-01T00:00:01Z";
   manager.save(second);
 
-  const auto latest = ava::app::resolve_startup_session(manager, true, std::nullopt);
-  REQUIRE(latest.kind == ava::app::SessionStartupKind::ContinueLatest);
+  const auto latest = ava::orchestration::resolve_startup_session(manager, true, std::nullopt);
+  REQUIRE(latest.kind == ava::orchestration::SessionStartupKind::ContinueLatest);
   REQUIRE(latest.session.id == second.id);
 
-  const auto specific = ava::app::resolve_startup_session(manager, false, std::optional<std::string>{first.id});
-  REQUIRE(specific.kind == ava::app::SessionStartupKind::ContinueById);
+  const auto specific = ava::orchestration::resolve_startup_session(manager, false, std::optional<std::string>{first.id});
+  REQUIRE(specific.kind == ava::orchestration::SessionStartupKind::ContinueById);
   REQUIRE(specific.session.id == first.id);
 
-  const auto created = ava::app::resolve_startup_session(manager, false, std::nullopt);
-  REQUIRE(created.kind == ava::app::SessionStartupKind::New);
+  const auto created = ava::orchestration::resolve_startup_session(manager, false, std::nullopt);
+  REQUIRE(created.kind == ava::orchestration::SessionStartupKind::New);
   REQUIRE(!created.session.id.empty());
 
   std::filesystem::remove_all(root);
@@ -117,13 +116,15 @@ TEST_CASE("agent selection applies cli precedence over persisted metadata", "[av
       {"max_turns", 3},
   };
 
-  ava::app::CliOptions cli;
-  cli.provider = "openai";
-  cli.model = "gpt-5.3-codex";
-  cli.max_turns = 9;
-  cli.max_turns_explicit = true;
-
-  const auto selection = ava::app::resolve_agent_selection(cli, session);
+  const auto selection = ava::orchestration::resolve_runtime_selection(
+      ava::orchestration::RuntimeSelectionOptions{
+          .provider = "openai",
+          .model = "gpt-5.3-codex",
+          .max_turns = 9,
+          .max_turns_explicit = true,
+      },
+      session
+  );
   REQUIRE(selection.provider == "openai");
   REQUIRE(selection.model == "gpt-5.3-codex");
   REQUIRE(selection.max_turns == 9);
@@ -137,13 +138,69 @@ TEST_CASE("agent selection restores persisted provider model when cli unset", "[
       {"max_turns", 4},
   };
 
-  ava::app::CliOptions cli;
-  cli.max_turns = 16;
-
-  const auto selection = ava::app::resolve_agent_selection(cli, session);
+  const auto selection = ava::orchestration::resolve_runtime_selection(
+      ava::orchestration::RuntimeSelectionOptions{
+          .provider = std::nullopt,
+          .model = std::nullopt,
+          .max_turns = 16,
+          .max_turns_explicit = false,
+      },
+      session
+  );
   REQUIRE(selection.provider == "openai");
   REQUIRE(selection.model == "gpt-5-mini");
   REQUIRE(selection.max_turns == 4);
+}
+
+TEST_CASE("runtime selection prefers orchestration runtime metadata namespace", "[ava_app]") {
+  auto session = empty_session("sess_runtime");
+  session.metadata["runtime"] = nlohmann::json{
+      {"provider", "openai"},
+      {"model", "gpt-5.3-codex"},
+      {"max_turns", 6},
+  };
+  session.metadata["headless"] = nlohmann::json{
+      {"provider", "openrouter"},
+      {"model", "fallback-model"},
+      {"max_turns", 20},
+  };
+
+  const auto selection = ava::orchestration::resolve_runtime_selection(
+      ava::orchestration::RuntimeSelectionOptions{
+          .provider = std::nullopt,
+          .model = std::nullopt,
+          .max_turns = 16,
+          .max_turns_explicit = false,
+      },
+      session
+  );
+
+  REQUIRE(selection.provider == "openai");
+  REQUIRE(selection.model == "gpt-5.3-codex");
+  REQUIRE(selection.max_turns == 6);
+}
+
+TEST_CASE("runtime selection keeps legacy headless metadata fallback", "[ava_app]") {
+  auto session = empty_session("sess_headless_compat");
+  session.metadata["headless"] = nlohmann::json{
+      {"provider", "openai"},
+      {"model", "gpt-5-mini"},
+      {"max_turns", 5},
+  };
+
+  const auto selection = ava::orchestration::resolve_runtime_selection(
+      ava::orchestration::RuntimeSelectionOptions{
+          .provider = std::nullopt,
+          .model = std::nullopt,
+          .max_turns = 16,
+          .max_turns_explicit = false,
+      },
+      session
+  );
+
+  REQUIRE(selection.provider == "openai");
+  REQUIRE(selection.model == "gpt-5-mini");
+  REQUIRE(selection.max_turns == 5);
 }
 
 TEST_CASE("ndjson event preserves canonical complete and error tags", "[ava_app]") {
@@ -161,4 +218,42 @@ TEST_CASE("ndjson event preserves canonical complete and error tags", "[ava_app]
       .message = "boom",
   });
   REQUIRE(error.at("type") == "error");
+}
+
+TEST_CASE("ndjson event carries run_id and streaming delta payload", "[ava_app]") {
+  const auto delta = ava::app::headless_event_to_ndjson(ava::agent::AgentEvent{
+      .kind = ava::agent::AgentEventKind::AssistantResponseDelta,
+      .run_id = "run-1",
+      .turn = 1,
+      .message = "hel",
+  });
+  REQUIRE(delta.at("type") == "assistant_response_delta");
+  REQUIRE(delta.at("run_id") == "run-1");
+  REQUIRE(delta.at("delta") == "hel");
+
+  const auto complete = ava::app::headless_event_to_ndjson(ava::agent::AgentEvent{
+      .kind = ava::agent::AgentEventKind::Completion,
+      .run_id = "run-1",
+      .turn = 1,
+      .message = "done",
+      .completion_reason = ava::agent::AgentCompletionReason::Cancelled,
+  });
+  REQUIRE(complete.at("run_id") == "run-1");
+  REQUIRE(complete.at("reason") == "cancelled");
+
+  const auto tool_call = ava::app::headless_event_to_ndjson(ava::agent::AgentEvent{
+      .kind = ava::agent::AgentEventKind::ToolCall,
+      .run_id = "run-1",
+      .turn = 2,
+      .tool_call = ava::types::ToolCall{.id = "call-1", .name = "read", .arguments = nlohmann::json::object()},
+  });
+  REQUIRE(tool_call.at("run_id") == "run-1");
+
+  const auto tool_result = ava::app::headless_event_to_ndjson(ava::agent::AgentEvent{
+      .kind = ava::agent::AgentEventKind::ToolResult,
+      .run_id = "run-1",
+      .turn = 2,
+      .tool_result = ava::types::ToolResult{.call_id = "call-1", .content = "ok", .is_error = false},
+  });
+  REQUIRE(tool_result.at("run_id") == "run-1");
 }

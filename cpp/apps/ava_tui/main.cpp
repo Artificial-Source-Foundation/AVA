@@ -1,22 +1,19 @@
 #include <atomic>
+#include <algorithm>
 #include <exception>
 #include <filesystem>
-#include <memory>
 #include <mutex>
 #include <optional>
-#include <stdexcept>
 #include <string>
 #include <thread>
 
 #include <CLI/CLI.hpp>
 #include <fmt/format.h>
 
-#include "agent_config.hpp"
 #include "ava/agent/agent.hpp"
 #include "ava/config/paths.hpp"
-#include "ava/session/session.hpp"
-#include "ava/tools/tools.hpp"
-#include "session_resolver.hpp"
+#include "ava/orchestration/composition.hpp"
+#include "options.hpp"
 #include "state.hpp"
 
 #if AVA_WITH_FTXUI
@@ -27,103 +24,57 @@
 
 namespace {
 
-struct TuiOptions {
-  std::optional<std::string> provider;
-  std::optional<std::string> model;
-  bool resume{false};
-  std::optional<std::string> session_id;
-  std::size_t max_turns{16};
-  bool max_turns_explicit{false};
-  bool auto_approve{false};
-};
-
-class AllowAllApprovalBridge final : public ava::tools::ApprovalBridge {
- public:
-  [[nodiscard]] ava::tools::ToolApproval request_approval(
-      const ava::types::ToolCall&,
-      const ava::tools::PermissionInspection&
-  ) const override {
-    return ava::tools::ToolApproval{.kind = ava::tools::ToolApprovalKind::Allowed};
+#if AVA_WITH_FTXUI
+[[nodiscard]] std::string interactive_request_label(
+    const std::optional<ava::control_plane::InteractiveRequestHandle>& request
+) {
+  if(!request.has_value()) {
+    return "-";
   }
-};
-
-TuiOptions parse_tui_options_or_throw(int argc, char** argv) {
-  TuiOptions options;
-
-  CLI::App app{"AVA C++ Milestone 12 bounded FTXUI TUI"};
-  app.add_option("--provider", options.provider, "Provider override");
-  app.add_option("--model", options.model, "Model override");
-  app.add_flag("-c,--continue", options.resume, "Continue latest session");
-  app.add_option("--session", options.session_id, "Continue a specific session id");
-  auto* max_turns = app.add_option("--max-turns", options.max_turns, "Maximum runtime turns");
-  max_turns->check(CLI::Range(1, 10000));
-  app.add_flag("--auto-approve", options.auto_approve, "Allow tool approvals without interaction");
-
-  try {
-    app.parse(argc, argv);
-  } catch(const CLI::CallForHelp&) {
-    throw;
-  } catch(const CLI::ParseError&) {
-    throw std::invalid_argument(std::string("invalid CLI arguments: ") + app.help());
+  if(request->request_id.empty()) {
+    return "-";
   }
-
-  options.max_turns_explicit = max_turns->count() > 0;
-  if(options.resume && options.session_id.has_value()) {
-    throw std::invalid_argument("--continue and --session cannot be used together");
-  }
-
-  return options;
+  return request->request_id;
 }
+#endif
 
 #if AVA_WITH_FTXUI
-class TuiApp : public std::enable_shared_from_this<TuiApp> {
- public:
-  explicit TuiApp(TuiOptions options)
+class TuiApp {
+  public:
+   explicit TuiApp(ava::tui::TuiOptions options)
       : options_(std::move(options)),
-        sessions_(ava::config::app_db_path()) {
-    auto startup = ava::app::resolve_startup_session(sessions_, options_.resume, options_.session_id);
-    session_ = std::move(startup.session);
-
-    ava::app::CliOptions headless_like;
-    headless_like.provider = options_.provider;
-    headless_like.model = options_.model;
-    headless_like.max_turns = options_.max_turns;
-    headless_like.max_turns_explicit = options_.max_turns_explicit;
-    selection_ = ava::app::resolve_agent_selection(headless_like, session_);
-
-    const auto credentials = ava::app::load_credentials_for_run();
-    provider_ = ava::app::build_provider_for_run(selection_, credentials);
-
-    ava::tools::register_default_tools(registry_, std::filesystem::current_path());
-    std::shared_ptr<ava::tools::ApprovalBridge> approval_bridge;
-    if(options_.auto_approve) {
-      approval_bridge = std::make_shared<AllowAllApprovalBridge>();
-    }
-    registry_.add_middleware(std::make_shared<ava::tools::PermissionMiddleware>(
-        std::make_shared<ava::tools::DefaultHeadlessPermissionInspector>(),
-        std::move(approval_bridge)
-    ));
-
-    runtime_ = std::make_unique<ava::agent::AgentRuntime>(
-        *provider_,
-        registry_,
-        ava::agent::AgentConfig{.max_turns = selection_.max_turns}
-    );
+        composition_(ava::orchestration::compose_runtime(ava::orchestration::RuntimeCompositionRequest{
+            .session_db_path = ava::config::app_db_path(),
+            .workspace_root = std::filesystem::current_path(),
+            .resume_latest = options_.resume,
+            .session_id = options_.session_id,
+            .selection = ava::orchestration::RuntimeSelectionOptions{
+                .provider = options_.provider,
+                .model = options_.model,
+                .max_turns = options_.max_turns,
+                .max_turns_explicit = options_.max_turns_explicit,
+            },
+            .auto_approve = options_.auto_approve,
+            .allowed_tools = std::nullopt,
+            .system_prompt_preamble = std::nullopt,
+            .provider_override = nullptr,
+            .provider_factory = nullptr,
+            .credentials_override = std::nullopt,
+        })) {
 
     const auto intro = fmt::format(
         "session={} provider={} model={}{}",
-        session_.id,
-        selection_.provider,
-        selection_.model,
+        composition_.session.id,
+        composition_.selection.provider,
+        composition_.selection.model,
         options_.auto_approve ? " auto_approve=on" : ""
     );
+    state_.set_model_identity(composition_.selection.provider, composition_.selection.model);
     state_.set_status_line(intro);
   }
 
   ~TuiApp() {
-    if(run_thread_.joinable()) {
-      run_thread_.detach();
-    }
+    join_run_thread();
   }
 
   int run() {
@@ -131,10 +82,18 @@ class TuiApp : public std::enable_shared_from_this<TuiApp> {
 
     ScreenInteractive screen = ScreenInteractive::Fullscreen();
     screen_.store(&screen, std::memory_order_release);
+    struct ScreenPointerReset final {
+      std::atomic<ftxui::ScreenInteractive*>& pointer;
+      ~ScreenPointerReset() {
+        pointer.store(nullptr, std::memory_order_release);
+      }
+    } screen_pointer_reset{screen_};
 
     auto renderer = Renderer([&] {
       std::lock_guard lock(state_mutex_);
-      state_.set_viewport_rows(12);
+      const auto rows = static_cast<std::size_t>(std::max(1, screen.dimy() - 10));
+      state_.set_viewport_rows(rows);
+      sync_interactive_state_locked();
 
       std::vector<Element> message_rows;
       const auto visible = state_.visible_messages();
@@ -165,16 +124,27 @@ class TuiApp : public std::enable_shared_from_this<TuiApp> {
       const auto composer_label = running ? "Composer (running)" : "Composer";
       const auto status = state_.status_line();
       const auto input = state_.input_buffer();
+      const auto navigation_line = state_.message_navigation_line();
+      const auto requests = state_.interactive_requests();
+      const auto interactive_line = fmt::format(
+          "Interactive pending: total={} approval={} question={} plan={}",
+          requests.pending_count(),
+          interactive_request_label(requests.approval),
+          interactive_request_label(requests.question),
+          interactive_request_label(requests.plan)
+      );
 
       return vbox({
-                 window(text("Messages"), vbox(std::move(message_rows)) | frame | vscroll_indicator) | flex,
-                 separator(),
-                 window(text(composer_label), text(input.empty() ? "" : input)),
-                 separator(),
-                 text(status),
-                 text("Enter=submit  Up/Down/PgUp/PgDn=scroll  q=quit"),
-             }) |
-             border;
+                  window(text("Messages"), vbox(std::move(message_rows)) | frame | vscroll_indicator) | flex,
+                  separator(),
+                  window(text(composer_label), text(input.empty() ? "" : input)),
+                  separator(),
+                  text(navigation_line),
+                  text(interactive_line),
+                  text(status),
+                  text("Enter=submit  Up/Down=history  PgUp/PgDn/Home/End=messages  q=quit"),
+              }) |
+              border;
     });
 
     auto component = CatchEvent(renderer, [&](const ftxui::Event& event) {
@@ -196,7 +166,12 @@ class TuiApp : public std::enable_shared_from_this<TuiApp> {
           }
           if(state_.running()) {
             quit_when_run_finishes_.store(true);
-            state_.set_status_line("Run in progress. Will quit when this run finishes.");
+            if(const auto cancel_handle = current_cancel_handle(); cancel_handle.has_value()) {
+              cancel_handle->cancel();
+              state_.set_status_line("Run cancellation requested. Waiting for cooperative stop...");
+            } else {
+              state_.set_status_line("Run in progress. Will quit when this run finishes.");
+            }
           } else {
             state_.request_quit();
             screen.ExitLoopClosure()();
@@ -217,12 +192,16 @@ class TuiApp : public std::enable_shared_from_this<TuiApp> {
 
       if(event == ftxui::Event::ArrowUp) {
         std::lock_guard lock(state_mutex_);
-        state_.scroll_up(1);
+        if(!state_.history_previous()) {
+          state_.scroll_up(1);
+        }
         return true;
       }
       if(event == ftxui::Event::ArrowDown) {
         std::lock_guard lock(state_mutex_);
-        state_.scroll_down(1);
+        if(!state_.history_next()) {
+          state_.scroll_down(1);
+        }
         return true;
       }
       if(event == ftxui::Event::PageUp) {
@@ -235,6 +214,16 @@ class TuiApp : public std::enable_shared_from_this<TuiApp> {
         state_.page_down();
         return true;
       }
+      if(event == ftxui::Event::Home) {
+        std::lock_guard lock(state_mutex_);
+        state_.scroll_to_top();
+        return true;
+      }
+      if(event == ftxui::Event::End) {
+        std::lock_guard lock(state_mutex_);
+        state_.scroll_to_bottom();
+        return true;
+      }
 
       if(event == ftxui::Event::Return) {
         submit_from_ui();
@@ -244,18 +233,30 @@ class TuiApp : public std::enable_shared_from_this<TuiApp> {
       return false;
     });
 
-    screen.Loop(component);
-    screen_.store(nullptr, std::memory_order_release);
-
-    if(run_thread_.joinable()) {
-      run_thread_.join();
+    try {
+      screen.Loop(component);
+      join_run_thread();
+      composition_.save_session();
+    } catch(...) {
+      join_run_thread();
+      try {
+        composition_.save_session();
+      } catch(...) {
+        // Preserve the original UI/runtime exception; save-on-error is best-effort.
+      }
+      throw;
     }
-
-    sessions_.save(session_);
     return 0;
   }
 
   private:
+  void join_run_thread() {
+    if(!run_thread_.joinable()) {
+      return;
+    }
+    run_thread_.join();
+  }
+
   void post_custom_event() {
     if(auto* screen = screen_.load(std::memory_order_acquire); screen != nullptr) {
       screen->PostEvent(ftxui::Event::Custom);
@@ -272,58 +273,98 @@ class TuiApp : public std::enable_shared_from_this<TuiApp> {
       return;
     }
 
-    if(run_thread_.joinable()) {
-      run_thread_.join();
-    }
+    join_run_thread();
+    quit_when_run_finishes_.store(false);
 
-    auto self = shared_from_this();
-    run_thread_ = std::thread([self = std::move(self), prompt = *prompt] {
-      const auto result = self->runtime_->run(
-          self->session_,
-          ava::agent::AgentRunInput{.goal = prompt, .queue = &self->queue_},
+    run_thread_ = std::thread([this, prompt = *prompt] {
+      const auto run_lease = composition_.run_controller->begin_run();
+      composition_.interactive_bridge->set_run_id(run_lease.run_id);
+      set_current_cancel_handle(run_lease.handle);
+
+      const auto result = composition_.runtime->run(
+          composition_.session,
+          ava::agent::AgentRunInput{
+              .goal = prompt,
+              .queue = &composition_.queue,
+              .run_id = run_lease.run_id,
+              .is_cancelled = [&] {
+                return run_lease.token.is_cancelled();
+              },
+              .stream = true,
+          },
           [&](const ava::agent::AgentEvent& event) {
             {
-              std::lock_guard lock(self->state_mutex_);
-              self->state_.apply_agent_event(event);
+              std::lock_guard lock(state_mutex_);
+              state_.apply_agent_event(event);
+              sync_interactive_state_locked();
             }
-            self->post_custom_event();
+            post_custom_event();
           }
       );
 
       {
-        std::lock_guard lock(self->state_mutex_);
+        std::lock_guard lock(state_mutex_);
         if(result.error.has_value()) {
-          self->state_.set_running(false);
-          self->state_.set_status_line("Run failed: " + *result.error);
+          state_.set_running(false);
+          state_.set_status_line("Run failed: " + *result.error);
         }
       }
 
-      self->post_custom_event();
+      composition_.interactive_bridge->set_run_id(std::nullopt);
+      clear_current_cancel_handle();
 
-      if(self->quit_when_run_finishes_.load()) {
+      post_custom_event();
+
+      if(quit_when_run_finishes_.load()) {
         {
-          std::lock_guard lock(self->state_mutex_);
-          self->state_.request_quit();
+          std::lock_guard lock(state_mutex_);
+          state_.request_quit();
         }
-        if(auto* screen = self->screen_.load(std::memory_order_acquire); screen != nullptr) {
+        if(auto* screen = screen_.load(std::memory_order_acquire); screen != nullptr) {
           screen->PostEvent(ftxui::Event::Custom);
         }
       }
     });
   }
 
-  TuiOptions options_;
-  ava::session::SessionManager sessions_;
-  ava::types::SessionRecord session_;
-  ava::app::ResolvedAgentSelection selection_;
-  ava::llm::ProviderPtr provider_;
-  ava::tools::ToolRegistry registry_;
-  ava::agent::MessageQueue queue_;
-  std::unique_ptr<ava::agent::AgentRuntime> runtime_;
+  [[nodiscard]] std::optional<ava::orchestration::RunCancellationHandle> current_cancel_handle() const {
+    const std::lock_guard<std::mutex> lock(run_control_mutex_);
+    return current_cancel_handle_;
+  }
+
+  void set_current_cancel_handle(ava::orchestration::RunCancellationHandle handle) {
+    const std::lock_guard<std::mutex> lock(run_control_mutex_);
+    current_cancel_handle_ = std::move(handle);
+  }
+
+  void clear_current_cancel_handle() {
+    const std::lock_guard<std::mutex> lock(run_control_mutex_);
+    current_cancel_handle_.reset();
+  }
+
+  void sync_interactive_state_locked() {
+    state_.set_interactive_request(
+        ava::control_plane::InteractiveRequestKind::Approval,
+        composition_.interactive_bridge->approval_requests().current_pending()
+    );
+    state_.set_interactive_request(
+        ava::control_plane::InteractiveRequestKind::Question,
+        composition_.interactive_bridge->question_requests().current_pending()
+    );
+    state_.set_interactive_request(
+        ava::control_plane::InteractiveRequestKind::Plan,
+        composition_.interactive_bridge->plan_requests().current_pending()
+    );
+  }
+
+  ava::tui::TuiOptions options_;
+  ava::orchestration::RuntimeComposition composition_;
 
   ava::tui::AppState state_;
   std::mutex state_mutex_;
+  mutable std::mutex run_control_mutex_;
   std::thread run_thread_;
+  std::optional<ava::orchestration::RunCancellationHandle> current_cancel_handle_;
   std::atomic<bool> quit_when_run_finishes_{false};
 
   std::atomic<ftxui::ScreenInteractive*> screen_{nullptr};
@@ -333,9 +374,9 @@ class TuiApp : public std::enable_shared_from_this<TuiApp> {
 }  // namespace
 
 int main(int argc, char** argv) {
-  TuiOptions options;
+  ava::tui::TuiOptions options;
   try {
-    options = parse_tui_options_or_throw(argc, argv);
+    options = ava::tui::parse_tui_options_or_throw(argc, argv);
   } catch(const CLI::CallForHelp& e) {
     fmt::print("{}\n", e.what());
     return 0;
@@ -346,8 +387,8 @@ int main(int argc, char** argv) {
 
 #if AVA_WITH_FTXUI
   try {
-    auto app = std::make_shared<TuiApp>(std::move(options));
-    return app->run();
+    TuiApp app(std::move(options));
+    return app.run();
   } catch(const std::exception& ex) {
     fmt::print(stderr, "error: {}\n", ex.what());
     return 2;

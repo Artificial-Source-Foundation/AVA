@@ -80,6 +80,23 @@ ava::platform::LocalFileSystem g_filesystem;
   return std::nullopt;
 }
 
+void enforce_owner_only_permissions(const std::filesystem::path& path) {
+#if !defined(_WIN32)
+  std::error_code ec;
+  std::filesystem::permissions(
+      path,
+      std::filesystem::perms::owner_read | std::filesystem::perms::owner_write,
+      std::filesystem::perm_options::replace,
+      ec
+  );
+  if(ec) {
+    throw std::runtime_error("Failed to set secure permissions on file: " + path.string() + " (" + ec.message() + ")");
+  }
+#else
+  (void)path;
+#endif
+}
+
 }  // namespace
 
 bool ProviderCredential::is_oauth_configured() const {
@@ -132,7 +149,11 @@ void CredentialStore::save(const std::filesystem::path& path) const {
 
   const auto temp_path = path.string() + ".tmp";
   g_filesystem.write_file(temp_path, nlohmann::json(*this).dump(2));
+#if !defined(_WIN32)
+  enforce_owner_only_permissions(temp_path);
+#endif
   std::filesystem::rename(temp_path, path);
+  enforce_owner_only_permissions(path);
 }
 
 std::optional<ProviderCredential> CredentialStore::get(const std::string& provider) const {

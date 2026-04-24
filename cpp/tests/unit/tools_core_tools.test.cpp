@@ -83,6 +83,38 @@ TEST_CASE("read/write/edit operate within workspace", "[ava_tools]") {
   std::filesystem::remove_all(root);
 }
 
+TEST_CASE("read/write/edit reject symlink escapes outside workspace", "[ava_tools]") {
+  const auto root = temp_root_for_test();
+  const auto outside = temp_root_for_test() / "outside";
+  std::filesystem::create_directories(root);
+  std::filesystem::create_directories(outside);
+  std::ofstream(outside / "secret.txt") << "secret";
+
+  const auto link_path = root / "escape";
+  std::error_code ec;
+  std::filesystem::create_directory_symlink(outside, link_path, ec);
+  if(ec) {
+    std::filesystem::remove_all(root);
+    std::filesystem::remove_all(outside.parent_path());
+    SKIP("filesystem does not permit symlink creation in this environment");
+  }
+
+  auto backup = std::make_shared<ava::tools::FileBackupSession>(root);
+  ava::tools::ReadTool read_tool(root);
+  ava::tools::WriteTool write_tool(root, backup);
+  ava::tools::EditTool edit_tool(root, backup);
+
+  REQUIRE_THROWS(read_tool.execute(nlohmann::json{{"path", "escape/secret.txt"}}));
+  REQUIRE_THROWS(write_tool.execute(nlohmann::json{{"path", "escape/new.txt"}, {"content", "nope"}}));
+  REQUIRE_THROWS(edit_tool.execute(nlohmann::json{{"path", "escape/secret.txt"}, {"old_text", "secret"}, {"new_text", "nope"}}));
+
+  REQUIRE(read_text_file(outside / "secret.txt") == "secret");
+  REQUIRE_FALSE(std::filesystem::exists(outside / "new.txt"));
+
+  std::filesystem::remove_all(root);
+  std::filesystem::remove_all(outside.parent_path());
+}
+
 TEST_CASE("edit replace_all updates all occurrences", "[ava_tools]") {
   const auto root = temp_root_for_test();
   std::filesystem::create_directories(root);

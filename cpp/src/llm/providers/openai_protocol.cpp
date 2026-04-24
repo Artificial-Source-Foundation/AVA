@@ -157,30 +157,42 @@ LlmResponse parse_chat_completion_response(const nlohmann::json& payload) {
 }
 
 std::optional<types::StreamChunk> parse_stream_event(const nlohmann::json& payload) {
+  const auto chunks = parse_stream_events(payload);
+  if(chunks.empty()) {
+    return std::nullopt;
+  }
+  return chunks.front();
+}
+
+std::vector<types::StreamChunk> parse_stream_events(const nlohmann::json& payload) {
+  std::vector<types::StreamChunk> chunks;
+
   if(const auto usage = parse_usage(payload); usage.has_value()) {
     types::StreamChunk usage_chunk;
     usage_chunk.usage = usage;
     usage_chunk.done = true;
-    return usage_chunk;
+    chunks.push_back(std::move(usage_chunk));
+    return chunks;
   }
 
   if(!payload.contains("choices") || !payload.at("choices").is_array() || payload.at("choices").empty()) {
-    return std::nullopt;
+    return chunks;
   }
 
   const auto& choice = payload.at("choices").at(0);
   if(!choice.contains("delta") || !choice.at("delta").is_object()) {
-    return std::nullopt;
+    return chunks;
   }
 
   const auto& delta = choice.at("delta");
-  types::StreamChunk chunk;
   bool has_data = false;
 
   if(delta.contains("content") && delta.at("content").is_string()) {
     const auto content = delta.at("content").get<std::string>();
     if(!content.empty()) {
+      types::StreamChunk chunk;
       chunk.content = content;
+      chunks.push_back(std::move(chunk));
       has_data = true;
     }
   }
@@ -188,43 +200,55 @@ std::optional<types::StreamChunk> parse_stream_event(const nlohmann::json& paylo
   if(delta.contains("reasoning_content") && delta.at("reasoning_content").is_string()) {
     const auto thinking = delta.at("reasoning_content").get<std::string>();
     if(!thinking.empty()) {
+      types::StreamChunk chunk;
       chunk.thinking = thinking;
+      chunks.push_back(std::move(chunk));
       has_data = true;
     }
   }
 
   if(delta.contains("tool_calls") && delta.at("tool_calls").is_array() && !delta.at("tool_calls").empty()) {
-    const auto& tc = delta.at("tool_calls").at(0);
-    types::StreamToolCall stream_tool_call;
-    stream_tool_call.index = tc.value("index", 0U);
-    if(tc.contains("id") && tc.at("id").is_string()) {
-      stream_tool_call.id = tc.at("id").get<std::string>();
-    }
-    if(tc.contains("function") && tc.at("function").is_object()) {
-      const auto& fn = tc.at("function");
-      if(fn.contains("name") && fn.at("name").is_string()) {
-        stream_tool_call.name = fn.at("name").get<std::string>();
+    for(const auto& tc : delta.at("tool_calls")) {
+      if(!tc.is_object()) {
+        continue;
       }
-      if(fn.contains("arguments") && fn.at("arguments").is_string()) {
-        stream_tool_call.arguments_delta = fn.at("arguments").get<std::string>();
+
+      types::StreamToolCall stream_tool_call;
+      stream_tool_call.index = tc.value("index", 0U);
+      if(tc.contains("id") && tc.at("id").is_string()) {
+        stream_tool_call.id = tc.at("id").get<std::string>();
       }
+      if(tc.contains("function") && tc.at("function").is_object()) {
+        const auto& fn = tc.at("function");
+        if(fn.contains("name") && fn.at("name").is_string()) {
+          stream_tool_call.name = fn.at("name").get<std::string>();
+        }
+        if(fn.contains("arguments") && fn.at("arguments").is_string()) {
+          stream_tool_call.arguments_delta = fn.at("arguments").get<std::string>();
+        }
+      }
+
+      types::StreamChunk chunk;
+      chunk.tool_call = std::move(stream_tool_call);
+      chunks.push_back(std::move(chunk));
+      has_data = true;
     }
-    chunk.tool_call = stream_tool_call;
-    has_data = true;
   }
 
   if(choice.contains("finish_reason") && choice.at("finish_reason").is_string()) {
     const auto reason = choice.at("finish_reason").get<std::string>();
     if(reason == "stop" || reason == "tool_calls") {
+      types::StreamChunk chunk;
       chunk.done = true;
+      chunks.push_back(std::move(chunk));
       has_data = true;
     }
   }
 
   if(!has_data) {
-    return std::nullopt;
+    return {};
   }
-  return chunk;
+  return chunks;
 }
 
 std::vector<nlohmann::json> tools_to_openai_format(const std::vector<types::Tool>& tools) {

@@ -18,11 +18,19 @@ struct ToolCall {
   nlohmann::json arguments;
 };
 
+inline bool operator==(const ToolCall& lhs, const ToolCall& rhs) {
+  return lhs.id == rhs.id && lhs.name == rhs.name && lhs.arguments == rhs.arguments;
+}
+
 struct ToolResult {
   std::string call_id;
   std::string content;
   bool is_error{false};
 };
+
+inline bool operator==(const ToolResult& lhs, const ToolResult& rhs) {
+  return lhs.call_id == rhs.call_id && lhs.content == rhs.content && lhs.is_error == rhs.is_error;
+}
 
 inline void to_json(nlohmann::json& json, const Tool& value) {
   json = nlohmann::json{{"name", value.name}, {"description", value.description}, {"parameters", value.parameters}};

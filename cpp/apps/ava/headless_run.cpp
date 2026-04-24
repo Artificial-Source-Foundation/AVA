@@ -2,45 +2,31 @@
 
 #include <filesystem>
 #include <iostream>
-#include <memory>
 #include <stdexcept>
 #include <string>
 
 #include <nlohmann/json.hpp>
 
-#include "agent_config.hpp"
 #include "ava/agent/agent.hpp"
 #include "ava/config/paths.hpp"
-#include "ava/session/session.hpp"
-#include "ava/tools/tools.hpp"
+#include "ava/orchestration/composition.hpp"
 #include "events.hpp"
-#include "session_resolver.hpp"
 
 namespace ava::app {
 namespace {
-
-class HeadlessApprovalBridge final : public ava::tools::ApprovalBridge {
- public:
-  [[nodiscard]] ava::tools::ToolApproval request_approval(
-      const ava::types::ToolCall&,
-      const ava::tools::PermissionInspection&
-  ) const override {
-    return ava::tools::ToolApproval{.kind = ava::tools::ToolApprovalKind::Allowed};
-  }
-};
 
 void populate_queue_from_cli_inputs(const CliOptions&, ava::agent::MessageQueue&) {
   // Milestone 9 intentionally does not expose follow-up/later CLI queue flags yet.
   // Queue parity is deferred to a later milestone.
 }
 
-[[nodiscard]] std::string startup_kind_to_string(SessionStartupKind kind) {
+[[nodiscard]] std::string startup_kind_to_string(ava::orchestration::SessionStartupKind kind) {
   switch(kind) {
-    case SessionStartupKind::New:
+    case ava::orchestration::SessionStartupKind::New:
       return "new";
-    case SessionStartupKind::ContinueLatest:
+    case ava::orchestration::SessionStartupKind::ContinueLatest:
       return "continue_latest";
-    case SessionStartupKind::ContinueById:
+    case ava::orchestration::SessionStartupKind::ContinueById:
       return "continue_by_id";
   }
   return "new";
@@ -50,6 +36,8 @@ void populate_queue_from_cli_inputs(const CliOptions&, ava::agent::MessageQueue&
   switch(reason) {
     case ava::agent::AgentCompletionReason::Completed:
       return "completed";
+    case ava::agent::AgentCompletionReason::Cancelled:
+      return "cancelled";
     case ava::agent::AgentCompletionReason::MaxTurns:
       return "max_turns";
     case ava::agent::AgentCompletionReason::Stuck:
@@ -62,10 +50,10 @@ void populate_queue_from_cli_inputs(const CliOptions&, ava::agent::MessageQueue&
 
 void persist_headless_metadata(
     ava::types::SessionRecord& session,
-    const ResolvedAgentSelection& selection,
+    const ava::orchestration::ResolvedRuntimeSelection& selection,
     const CliOptions& cli,
     const ava::agent::AgentRunResult& result,
-    SessionStartupKind startup_kind
+    ava::orchestration::SessionStartupKind startup_kind
 ) {
   session.metadata["headless"]["provider"] = selection.provider;
   session.metadata["headless"]["model"] = selection.model;
@@ -91,48 +79,55 @@ int run_headless_blocking(const CliOptions& cli, ava::llm::ProviderPtr provider_
     throw std::invalid_argument("No goal provided. Usage: ava \"your goal here\"");
   }
 
-  ava::session::SessionManager sessions(ava::config::app_db_path());
-  auto startup = resolve_startup_session(sessions, cli.resume, cli.session_id);
+  auto composition = ava::orchestration::compose_runtime(ava::orchestration::RuntimeCompositionRequest{
+      .session_db_path = ava::config::app_db_path(),
+      .workspace_root = std::filesystem::current_path(),
+      .resume_latest = cli.resume,
+      .session_id = cli.session_id,
+      .selection = ava::orchestration::RuntimeSelectionOptions{
+          .provider = cli.provider,
+          .model = cli.model,
+          .max_turns = cli.max_turns,
+          .max_turns_explicit = cli.max_turns_explicit,
+      },
+      .auto_approve = cli.auto_approve,
+      .allowed_tools = std::nullopt,
+      .system_prompt_preamble = std::nullopt,
+      .provider_override = std::move(provider_override),
+      .provider_factory = nullptr,
+      .credentials_override = std::nullopt,
+  });
 
-  const auto selection = resolve_agent_selection(cli, startup.session);
-  auto provider = std::move(provider_override);
-  if(!provider) {
-    const auto credentials = load_credentials_for_run();
-    provider = build_provider_for_run(selection, credentials);
-  }
-
-  ava::tools::ToolRegistry registry;
-  ava::tools::register_default_tools(registry, std::filesystem::current_path());
-  std::shared_ptr<ava::tools::ApprovalBridge> approval_bridge;
-  if(cli.auto_approve) {
-    approval_bridge = std::make_shared<HeadlessApprovalBridge>();
-  }
-  registry.add_middleware(std::make_shared<ava::tools::PermissionMiddleware>(
-      std::make_shared<ava::tools::DefaultHeadlessPermissionInspector>(),
-      std::move(approval_bridge)
-  ));
-
-  ava::agent::MessageQueue queue;
-  populate_queue_from_cli_inputs(cli, queue);
-
-  ava::agent::AgentRuntime runtime(*provider, registry, ava::agent::AgentConfig{.max_turns = selection.max_turns});
+  populate_queue_from_cli_inputs(cli, composition.queue);
 
   if(cli.json) {
     std::cout << nlohmann::json{
-                     {"type", "session_context"},
-                     {"session_id", startup.session.id},
-                     {"provider", selection.provider},
-                     {"model", selection.model},
-                 }
-                     .dump()
-              << "\n";
+                      {"type", "session_context"},
+                      {"session_id", composition.session.id},
+                      {"provider", composition.selection.provider},
+                      {"model", composition.selection.model},
+                  }
+                      .dump()
+               << "\n";
   } else {
-    std::cout << "session=" << startup.session.id << " provider=" << selection.provider << " model=" << selection.model << "\n";
+    std::cout << "session=" << composition.session.id << " provider=" << composition.selection.provider
+              << " model=" << composition.selection.model << "\n";
   }
 
-  auto result = runtime.run(
-      startup.session,
-      ava::agent::AgentRunInput{.goal = *cli.goal, .queue = &queue},
+  const auto run_lease = composition.run_controller->begin_run();
+  composition.interactive_bridge->set_run_id(run_lease.run_id);
+
+  auto result = composition.runtime->run(
+      composition.session,
+      ava::agent::AgentRunInput{
+          .goal = *cli.goal,
+          .queue = &composition.queue,
+          .run_id = run_lease.run_id,
+          .is_cancelled = [&] {
+            return run_lease.token.is_cancelled();
+          },
+          .stream = true,
+      },
       [&](const ava::agent::AgentEvent& event) {
         if(cli.json) {
           std::cout << headless_event_to_ndjson(event).dump() << "\n";
@@ -141,21 +136,23 @@ int run_headless_blocking(const CliOptions& cli, ava::llm::ProviderPtr provider_
         print_headless_event_text(event);
       }
   );
+  composition.interactive_bridge->set_run_id(std::nullopt);
 
   if(result.error.has_value() && result.error->find("requires approval") != std::string::npos) {
     const std::string message =
-        *result.error + " (non-interactive headless mode cannot prompt; rerun with --auto-approve for this M9 lane)";
+        *result.error + " (non-interactive headless mode cannot prompt; rerun with --auto-approve if this action is trusted)";
     if(!cli.json) {
       std::cerr << message << "\n";
     }
   }
 
-  persist_headless_metadata(startup.session, selection, cli, result, startup.kind);
-  sessions.save(startup.session);
+  persist_headless_metadata(composition.session, composition.selection, cli, result, composition.startup_kind);
+  composition.save_session();
 
   switch(result.reason) {
     case ava::agent::AgentCompletionReason::Completed:
       return 0;
+    case ava::agent::AgentCompletionReason::Cancelled:
     case ava::agent::AgentCompletionReason::MaxTurns:
     case ava::agent::AgentCompletionReason::Stuck:
     case ava::agent::AgentCompletionReason::Error:

@@ -40,6 +40,13 @@ public:
       ThinkingConfig thinking
   ) const override;
 
+  [[nodiscard]] StreamDispatchResult stream_generate(
+      const std::vector<ChatMessage>& messages,
+      const std::vector<types::Tool>& tools,
+      ThinkingConfig thinking,
+      const StreamChunkSink& on_chunk
+  ) const override;
+
 private:
   [[nodiscard]] std::string chat_completions_url() const;
 

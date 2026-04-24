@@ -14,8 +14,17 @@ struct SessionMessage {
   std::string id;
   std::string role;
   std::string content;
+  nlohmann::json tool_calls = nlohmann::json::array();
+  nlohmann::json tool_results = nlohmann::json::array();
+  std::optional<std::string> tool_call_id;
+  nlohmann::json images = nlohmann::json::array();
   std::string timestamp;
   std::optional<std::string> parent_id;
+  bool agent_visible{true};
+  bool user_visible{true};
+  std::optional<std::string> original_content;
+  nlohmann::json structured_content = nlohmann::json::array();
+  nlohmann::json metadata = nlohmann::json::object();
 };
 
 struct SessionRecord {
@@ -23,6 +32,7 @@ struct SessionRecord {
   std::string created_at;
   std::string updated_at;
   nlohmann::json metadata;
+  nlohmann::json token_usage = nlohmann::json::object();
   std::vector<SessionMessage> messages;
   std::optional<std::string> branch_head;
 };

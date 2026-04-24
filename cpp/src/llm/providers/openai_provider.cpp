@@ -195,6 +195,20 @@ std::vector<types::StreamChunk> OpenAiProvider::generate_stream(
     const std::vector<types::Tool>& tools,
     ThinkingConfig thinking
 ) const {
+  std::vector<types::StreamChunk> chunks;
+  (void)stream_generate(messages, tools, thinking, [&](const types::StreamChunk& chunk) {
+    chunks.push_back(chunk);
+    return true;
+  });
+  return chunks;
+}
+
+Provider::StreamDispatchResult OpenAiProvider::stream_generate(
+    const std::vector<ChatMessage>& messages,
+    const std::vector<types::Tool>& tools,
+    ThinkingConfig thinking,
+    const StreamChunkSink& on_chunk
+) const {
 #if AVA_WITH_CPR
   const auto resolved_thinking = resolve_thinking_config(thinking);
   const auto request_body = openai::build_chat_completions_request(
@@ -210,11 +224,13 @@ std::vector<types::StreamChunk> OpenAiProvider::generate_stream(
     headers["OpenAI-Organization"] = *org_id_;
   }
 
-  std::vector<types::StreamChunk> chunks;
+  bool emitted_done = false;
+  bool stop_requested = false;
+  std::optional<std::string> parse_failure;
   std::string pending;
 
   auto write_callback = cpr::WriteCallback{
-      [&chunks, &pending](std::string data, intptr_t /*userdata*/) {
+      [&](std::string data, intptr_t /*userdata*/) {
         try {
           pending += data;
           std::size_t cursor = 0;
@@ -243,17 +259,27 @@ std::vector<types::StreamChunk> OpenAiProvider::generate_stream(
             }
 
             if(payload == "[DONE]") {
-              chunks.push_back(types::StreamChunk::finished());
+              emitted_done = true;
+              if(on_chunk && !on_chunk(types::StreamChunk::finished())) {
+                stop_requested = true;
+                return false;
+              }
               continue;
             }
 
             try {
               const auto event = nlohmann::json::parse(payload);
-              if(const auto parsed = openai::parse_stream_event(event); parsed.has_value()) {
-                chunks.push_back(*parsed);
+              const auto parsed_chunks = openai::parse_stream_events(event);
+              for(const auto& parsed : parsed_chunks) {
+                emitted_done = emitted_done || parsed.done;
+                if(on_chunk && !on_chunk(parsed)) {
+                  stop_requested = true;
+                  return false;
+                }
               }
-            } catch(const std::exception&) {
-              // Ignore malformed chunk and continue.
+            } catch(const std::exception& ex) {
+              parse_failure = ex.what();
+              return false;
             }
           }
         } catch(...) {
@@ -273,6 +299,14 @@ std::vector<types::StreamChunk> OpenAiProvider::generate_stream(
       write_callback
   );
 
+  if(parse_failure.has_value()) {
+    throw ProviderException(ProviderError{
+        .kind = ProviderErrorKind::Unknown,
+        .provider = "openai",
+        .message = "failed to parse stream event: " + *parse_failure,
+    });
+  }
+
   if(response.error.code != cpr::ErrorCode::OK) {
     throw ProviderException(classify_provider_error("openai", std::nullopt, response.error.message));
   }
@@ -280,19 +314,20 @@ std::vector<types::StreamChunk> OpenAiProvider::generate_stream(
     throw ProviderException(classify_openai_error(response.status_code, response.text));
   }
 
-  if(chunks.empty() || !chunks.back().done) {
-    chunks.push_back(types::StreamChunk::finished());
+  if(stop_requested) {
+    return StreamDispatchResult::Completed;
   }
-  return chunks;
+
+  if(!emitted_done && on_chunk) {
+    (void)on_chunk(types::StreamChunk::finished());
+  }
+  return StreamDispatchResult::Completed;
 #else
   (void)messages;
   (void)tools;
   (void)thinking;
-  throw ProviderException(ProviderError{
-      .kind = ProviderErrorKind::Unknown,
-      .provider = "openai",
-      .message = "OpenAI provider requires AVA_WITH_CPR=ON",
-  });
+  (void)on_chunk;
+  return StreamDispatchResult::Unsupported;
 #endif
 }
 

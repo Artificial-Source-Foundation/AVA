@@ -119,6 +119,16 @@ fn headless_resume_context(
     (resume_session_id, resume_history)
 }
 
+#[allow(dead_code)] // Used by the optional `voice` feature module.
+fn update_headless_resume_context_from_session(
+    resume_session_id: &mut Option<Uuid>,
+    resume_history: &mut Vec<Message>,
+    session: &ava_types::Session,
+) {
+    *resume_session_id = Some(session.id);
+    *resume_history = session.messages.clone();
+}
+
 fn apply_headless_legacy_primary_agent_prompt_fallback(
     startup: &mut crate::config::cli::StartupSelection,
     previous_primary_agent_id: Option<&str>,

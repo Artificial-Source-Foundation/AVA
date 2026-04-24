@@ -3,6 +3,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <map>
+#include <memory>
+#include <mutex>
 #include <string>
 #include <tuple>
 #include <vector>
@@ -18,6 +20,12 @@ struct QueuedMessage {
 
 class MessageQueue {
 public:
+  MessageQueue() = default;
+  MessageQueue(const MessageQueue&) = delete;
+  MessageQueue& operator=(const MessageQueue&) = delete;
+  MessageQueue(MessageQueue&& other) noexcept;
+  MessageQueue& operator=(MessageQueue&& other) noexcept;
+
   void enqueue(QueuedMessage message);
 
   [[nodiscard]] std::vector<std::string> drain_steering();
@@ -39,6 +47,7 @@ private:
   std::vector<std::string> steering_;
   std::vector<std::string> follow_up_;
   std::map<std::uint32_t, std::vector<std::string>> post_complete_;
+  std::unique_ptr<std::mutex> mutex_{std::make_unique<std::mutex>()};
 
   std::uint32_t current_post_group_{1};
   bool group_running_{false};

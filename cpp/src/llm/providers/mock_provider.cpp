@@ -61,17 +61,34 @@ std::vector<types::StreamChunk> MockProvider::generate_stream(
     const std::vector<types::Tool>& tools,
     ThinkingConfig thinking
 ) const {
-  const auto response = generate(messages, tools, thinking);
   std::vector<types::StreamChunk> chunks;
+  (void)stream_generate(messages, tools, thinking, [&](const types::StreamChunk& chunk) {
+    chunks.push_back(chunk);
+    return true;
+  });
+  return chunks;
+}
+
+Provider::StreamDispatchResult MockProvider::stream_generate(
+    const std::vector<ChatMessage>& messages,
+    const std::vector<types::Tool>& tools,
+    ThinkingConfig thinking,
+    const StreamChunkSink& on_chunk
+) const {
+  const auto response = generate(messages, tools, thinking);
 
   if(!response.content.empty()) {
-    chunks.push_back(types::StreamChunk::text(response.content));
+    if(on_chunk && !on_chunk(types::StreamChunk::text(response.content))) {
+      return StreamDispatchResult::Completed;
+    }
   }
 
   if(response.thinking.has_value() && !response.thinking->empty()) {
     types::StreamChunk thinking_chunk;
     thinking_chunk.thinking = response.thinking;
-    chunks.push_back(std::move(thinking_chunk));
+    if(on_chunk && !on_chunk(thinking_chunk)) {
+      return StreamDispatchResult::Completed;
+    }
   }
 
   for(std::size_t index = 0; index < response.tool_calls.size(); ++index) {
@@ -83,16 +100,22 @@ std::vector<types::StreamChunk> MockProvider::generate_stream(
         .name = tool_call.name,
         .arguments_delta = tool_call.arguments.dump(),
     };
-    chunks.push_back(std::move(tool_chunk));
+    if(on_chunk && !on_chunk(tool_chunk)) {
+      return StreamDispatchResult::Completed;
+    }
   }
 
   if(response.usage.has_value()) {
-    chunks.push_back(types::StreamChunk::with_usage(*response.usage));
+    if(on_chunk && !on_chunk(types::StreamChunk::with_usage(*response.usage))) {
+      return StreamDispatchResult::Completed;
+    }
   } else {
-    chunks.push_back(types::StreamChunk::finished());
+    if(on_chunk && !on_chunk(types::StreamChunk::finished())) {
+      return StreamDispatchResult::Completed;
+    }
   }
 
-  return chunks;
+  return StreamDispatchResult::Completed;
 }
 
 }  // namespace ava::llm

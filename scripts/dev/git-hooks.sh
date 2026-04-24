@@ -25,24 +25,22 @@ run_low_priority() {
 run_exact_rust_test() {
   local label="$1"
   shift
-  local output_file
   local list_args=("$@" --list)
+  local list_output
 
-  output_file="$(mktemp "${TMPDIR:-/tmp}/ava-exact-test.XXXXXX")"
   printf '[hooks] %s\n' "$label"
 
-  if ! bash scripts/dev/run-rust-throttled.sh "${list_args[@]}" 2>&1 | tee "$output_file"; then
-    rm -f "$output_file"
+  if ! list_output="$(bash scripts/dev/run-rust-throttled.sh "${list_args[@]}" 2>&1)"; then
+    printf '%s\n' "$list_output"
     return 1
   fi
 
-  if ! grep -Eq '[1-9][0-9]* tests?, 0 benchmarks' "$output_file"; then
+  if ! grep -Eq '[1-9][0-9]* tests?, 0 benchmarks' <<<"$list_output"; then
     printf '[hooks] exact test matched zero tests: %s\n' "$label" >&2
-    rm -f "$output_file"
+    printf '%s\n' "$list_output" >&2
     return 1
   fi
 
-  rm -f "$output_file"
   bash scripts/dev/run-rust-throttled.sh "$@"
 }
 

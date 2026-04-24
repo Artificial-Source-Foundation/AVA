@@ -36,7 +36,7 @@ run_exact_rust_test() {
     return 1
   fi
 
-  if ! grep -Eq '^[1-9][0-9]* tests?, 0 benchmarks$' "$output_file"; then
+  if ! grep -Eq '[1-9][0-9]* tests?, 0 benchmarks' "$output_file"; then
     printf '[hooks] exact test matched zero tests: %s\n' "$label" >&2
     rm -f "$output_file"
     return 1

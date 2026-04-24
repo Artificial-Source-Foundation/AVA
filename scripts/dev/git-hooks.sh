@@ -35,7 +35,7 @@ run_exact_rust_test() {
     return 1
   fi
 
-  if ! grep -Eq 'test result: ok\. [1-9][0-9]* passed' "$output_file"; then
+  if ! grep -Eq '^running [1-9][0-9]* tests?$' "$output_file"; then
     printf '[hooks] exact test matched zero tests: %s\n' "$label" >&2
     rm -f "$output_file"
     return 1

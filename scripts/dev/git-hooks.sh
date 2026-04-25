@@ -31,15 +31,10 @@ run_exact_rust_test() {
   printf '[hooks] %s\n' "$label"
 
   output_file="$(mktemp "${TMPDIR:-/tmp}/ava-exact-test.XXXXXX")"
-  if command -v script >/dev/null 2>&1; then
-    local command_string
-    printf -v command_string '%q ' bash scripts/dev/run-rust-throttled.sh "${list_args[@]}"
-    if ! script -q -e -c "$command_string" "$output_file" >/dev/null; then
-      cat "$output_file"
-      rm -f "$output_file"
-      return 1
-    fi
-  elif ! bash scripts/dev/run-rust-throttled.sh "${list_args[@]}" >"$output_file" 2>&1; then
+  # Capture exact-test discovery without the low-priority wrapper: in some
+  # non-interactive shells, ionice/nice can leave Cargo's --list output empty
+  # even when the command exits successfully, which makes this guard flaky.
+  if ! "${list_args[@]}" >"$output_file" 2>&1; then
     cat "$output_file"
     rm -f "$output_file"
     return 1
